@@ -1,3 +1,27 @@
+## 2026-10-27 -- pre322: int() of an out-of-int64 float through a container alias (job-pre322-10271547)
+
+Reconstructed the first still-differing pre-existing item from the rbrbrbpre39 review, `r26`
+(alias-list).  Both builds compiled `items = [1e300]; alias = items; print(int(alias[0]))`
+and then stopped with `integer overflow`, while CPython prints the exact big integer.  The
+int()/float checker now keeps an alias-aware constant map for the module and each function:
+a flat list/tuple/dict literal (or an alias of one) is folded while the name is only read by a
+load-only subscript, an alias assignment or a pure builtin call.  A store through the name, a
+mutation method, a call, a return, iteration or any other use marks the container and its
+aliases as dynamic, so a list changed before the call still matches CPython.  In-range values,
+nested/mutable containers and run-time-only values are unchanged.  The same safe map also
+resolves the flat-literal dict spelling of `r33`; r27 (attribute-held value), r28 (tuple
+multi-assign) and a dict built by item stores still hit the run-time int64 trap.
+
+Probes in `/tmp/probes/pre322_final` on both builds: `p322_alias_list_module`,
+`p322_alias_list_function`, `p322_alias_chain`, `p322_alias_negative`, `p322_alias_index`,
+`p322_alias_wrapper`, `p322_alias_tuple` and `p322_alias_dict_var` are refused by name;
+`p322_alias_inrange`, `p322_alias_mutated`, `p322_alias_mutated_module`, `p322_alias_rebound`,
+`p322_alias_append_inrange`, `p322_alias_empty`, `p322_alias_dict_inrange` and
+`p322_alias_printed` match CPython.  Added `AIL_CURRENT/test_ail_pre322.py` and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Final required modules on this commit:
+`test_ail_pre322`, `test_ail_pre39`, `test_ail_pre290`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3`; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an

@@ -618,6 +618,133 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
     return functions
 
 
+def _all_bound_names(root):
+    """Every name the program (or subtree) binds, for deciding whether a call is a builtin."""
+    bound = set()
+    for node in ast.walk(root):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, ast.alias):
+            bound.add(node.asname or node.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+    return bound
+
+
+def _flat_constant_container(value):
+    """Whether a literal list/tuple/dict holds only immutable scalar constants.
+
+    Nested mutable values are not folded: an alias could later see a mutation through the inner
+    container, and the scalar-only shape is all the int() check needs.
+    """
+    scalar = (bool, int, float, str, bytes, type(None))
+    if type(value) in (list, tuple):
+        return all(type(item) in scalar for item in value)
+    if type(value) is dict:
+        return all(type(key) in scalar and type(item) in scalar for key, item in value.items())
+    return False
+
+
+def _escaped_constant_names(root):
+    """Names read in a way that may mutate or expose a container, propagated through aliases.
+
+    A container stays foldable only when every read is a load-only subscript, an alias
+    assignment, or an argument to a pure builtin.  A store through the name, a call, a return,
+    iteration or any other use marks it (and every alias) as dynamic.
+    """
+    pure_calls = {'len', 'print', 'str', 'repr'} - _all_bound_names(root)
+    parents = {child: parent for parent in ast.walk(root) for child in ast.iter_child_nodes(parent)}
+    escaped = set()
+    for node in ast.walk(root):
+        if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
+            continue
+        parent = parents.get(node)
+        if (isinstance(parent, ast.Subscript) and isinstance(parent.ctx, ast.Load)
+                and (parent.value is node or parent.slice is node)):
+            continue
+        if (isinstance(parent, ast.Assign) and parent.value is node
+                and len(parent.targets) == 1 and isinstance(parent.targets[0], ast.Name)):
+            continue
+        if (isinstance(parent, ast.AnnAssign) and parent.value is node
+                and isinstance(parent.target, ast.Name)):
+            continue
+        if (isinstance(parent, ast.Call) and node in parent.args
+                and isinstance(parent.func, ast.Name) and parent.func.id in pure_calls):
+            continue
+        escaped.add(node.id)
+    aliases = {}
+    for node in ast.walk(root):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name) and isinstance(node.value, ast.Name)):
+            aliases.setdefault(node.targets[0].id, set()).add(node.value.id)
+        elif (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                and isinstance(node.value, ast.Name)):
+            aliases.setdefault(node.target.id, set()).add(node.value.id)
+    changed = bool(aliases)
+    while changed:
+        changed = False
+        for target, sources in aliases.items():
+            for source in sources:
+                if target in escaped and source not in escaped:
+                    escaped.add(source)
+                    changed = True
+                if source in escaped and target not in escaped:
+                    escaped.add(target)
+                    changed = True
+    return escaped
+
+
+def _scope_constant_map(body, root, base, stores, bound, parameters, declared):
+    """Constant values a scope's top-level names bind, including safe container aliases.
+
+    Scalars are followed exactly as before.  A flat list/tuple/dict literal (or an alias of
+    one) is kept only when the name never escapes: a mutation, call, return or other use makes
+    the value dynamic, so a later alias read is left to the run-time int64 trap.
+    """
+    local = {name: value for name, value in base.items() if name not in bound}
+
+    def candidate(statement):
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            target = statement.targets[0]
+            if isinstance(target, ast.Name):
+                return target.id, statement.value
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            if isinstance(statement.target, ast.Name):
+                return statement.target.id, statement.value
+        return None, None
+
+    def add_scalars():
+        for statement in body:
+            name, value_node = candidate(statement)
+            if (name is None or stores.get(name) != 1
+                    or name in parameters or name in declared):
+                continue
+            value = _constant_value(value_node, lambda item: local.get(item, _UNKNOWN),
+                                    lambda unused: True, {})
+            if type(value) in (bool, int, float, str, bytes, type(None)):
+                local[name] = value
+
+    add_scalars()
+    escaped = _escaped_constant_names(root)
+    for statement in body:
+        name, value_node = candidate(statement)
+        if (name is None or stores.get(name) != 1
+                or name in parameters or name in declared or name in escaped):
+            continue
+        value = _constant_value(value_node, lambda item: local.get(item, _UNKNOWN),
+                                lambda unused: True, {})
+        if _flat_constant_container(value):
+            local[name] = value
+    add_scalars()
+    return local
+
+
 class _Int64CallChecker(ast.NodeVisitor):
     def __init__(self, known, passthrough, int_params, int_shadowed):
         self.known = known
@@ -625,14 +752,13 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.int_params = int_params
         self.int_shadowed = int_shadowed
         self.shadow = []
+        self.value_scopes = [known]
 
     def _global_name(self, name):
         return not any(name in scope for scope in self.shadow)
 
     def _lookup(self, name):
-        if not self._global_name(name):
-            return _UNKNOWN
-        return self.known.get(name, _UNKNOWN)
+        return self.value_scopes[-1].get(name, _UNKNOWN)
 
     def _value(self, node):
         return _constant_value(node, self._lookup, self._global_name, self.passthrough)
@@ -672,9 +798,14 @@ class _Int64CallChecker(ast.NodeVisitor):
         self._visit_outer_arguments(node.args)
         if node.returns is not None:
             self.visit(node.returns)
+        local = _scope_constant_map(node.body, node, self.value_scopes[-1],
+                                    _binding_counts(node.body), _function_bindings(node),
+                                    _scope_parameters(node), _scope_declared(node))
         self.shadow.append(_function_bindings(node))
+        self.value_scopes.append(local)
         for statement in node.body:
             self.visit(statement)
+        self.value_scopes.pop()
         self.shadow.pop()
 
     def visit_FunctionDef(self, node):
@@ -690,8 +821,13 @@ class _Int64CallChecker(ast.NodeVisitor):
             names.append(node.args.vararg.arg)
         if node.args.kwarg is not None:
             names.append(node.args.kwarg.arg)
-        self.shadow.append(set(names) | set(_binding_counts([node.body])))
+        bindings = set(names) | set(_binding_counts([node.body]))
+        local = {name: value for name, value in self.value_scopes[-1].items()
+                 if name not in bindings}
+        self.shadow.append(bindings)
+        self.value_scopes.append(local)
         self.visit(node.body)
+        self.value_scopes.pop()
         self.shadow.pop()
 
     def visit_ClassDef(self, node):
@@ -701,17 +837,26 @@ class _Int64CallChecker(ast.NodeVisitor):
             self.visit(base)
         for keyword in node.keywords:
             self.visit(keyword)
-        self.shadow.append(set(_binding_counts(node.body)))
+        bindings = set(_binding_counts(node.body))
+        local = {name: value for name, value in self.value_scopes[-1].items()
+                 if name not in bindings}
+        self.shadow.append(bindings)
+        self.value_scopes.append(local)
         for statement in node.body:
             self.visit(statement)
+        self.value_scopes.pop()
         self.shadow.pop()
 
     def _visit_comprehension(self, node):
         names = set()
         for generator in node.generators:
             names |= set(_binding_counts([generator.target]))
+        local = {name: value for name, value in self.value_scopes[-1].items()
+                 if name not in names}
         self.shadow.append(names)
+        self.value_scopes.append(local)
         self.generic_visit(node)
+        self.value_scopes.pop()
         self.shadow.pop()
 
     def visit_ListComp(self, node):
@@ -795,17 +940,8 @@ def _check_int64_literals(tree):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             global_names.update(node.names)
     module_counts = _binding_counts(tree.body)
-    known = {}
-    for node in tree.body:
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)):
-            name = node.targets[0].id
-            if module_counts.get(name) != 1 or name in global_names:
-                continue
-            value = _constant_value(node.value, lambda name: known.get(name, _UNKNOWN),
-                                    lambda unused: True, {})
-            if type(value) in (int, float):
-                known[name] = value
+    known = _scope_constant_map(tree.body, tree, {}, module_counts, set(module_counts),
+                                set(), global_names)
     int_shadowed = any((isinstance(node, ast.FunctionDef) and node.name == 'int')
                        or (isinstance(node, ast.arg) and node.arg == 'int')
                        or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
