@@ -395,7 +395,8 @@
   "test_json_pointer_batch": 6.1,
   "test_json_pointer_scan": 20.3,
   "test_json_query_cli": 51.5,
-  "test_json_query_file": 30.8
+  "test_json_query_file": 30.8,
+  "test_ail_pre316": 30.0
  },
  "assignment": [
   [
@@ -610,7 +611,8 @@
    "test_ail_pre296",
    "test_ail_refusal_messages",
    "test_ail_stdlib_batch1",
-   "test_ail_try_hoist"
+   "test_ail_try_hoist",
+   "test_ail_pre316"
   ],
   [
    "test_ail_borrowed_owner",

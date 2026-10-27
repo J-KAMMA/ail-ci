@@ -1,3 +1,23 @@
+## 2026-10-27 -- pre316: an attribute-assigned partial is called as the field (job-pre316-10271448)
+
+The rbrbpre61 review recorded `c.f = partial(add, 3); c.f(4)` as a pre-existing named refusal.
+The general path dispatched `.f()` as a class method and only consulted the instance table when
+some class also defined `f`; CPython finds the plain callable field first and calls it without
+the receiver. The instance-table lookup now also runs when the class has no method of that name,
+for a statically known receiver and for one that arrives through an argument or another field.
+Aliasing, re-assignment, a plain function or lambda field, a field that shadows a method, and
+the missing/non-callable errors match CPython on both builds; keyword and starred calls stay
+refused by name. Added `AIL_CURRENT/test_ail_pre316.py` and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes in `/tmp/probes`: `pre316_inst_attr_plain`, `pre316_attr_partial_basic`,
+`pre316_attr_routes`, `pre316_attr_alias`, `pre316_attr_plain_func`, `pre316_attr_errors`,
+`pre316_attr_shadow_method`, `pre316_attr_receiver_arg`, `pre316_attr_receiver_routes` and
+`pre316_attr_builtin_names` match CPython on both builds; `pre316_attr_kwargs`,
+`pre316_attr_star`, `pre316_attr_bound_method`, `pre316_cls_bound_method` and
+`pre316_class_attr_partial` are refused by name on both builds. Final-state tests:
+`test_ail_pre316`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+`tools/update_manifest.py --check` passes.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's

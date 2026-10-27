@@ -8912,6 +8912,37 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.indent -= 1
                 ctx.emit('}')
                 return res
+            if (info0 is None and f.attr in self.assigned_attrs
+                    and getattr(self, '_m_' + f.attr, None) is None):
+                # The class has no method of this name, but the program assigns the attribute
+                # somewhere: CPython looks the instance table up before raising AttributeError.
+                # An attribute-assigned partial/lambda is a plain callable field called without
+                # the receiver, exactly like a field that shadows a method (pre260).
+                if kwargs or any(isinstance(a, ast.Starred) for a in args):
+                    raise Unsupported('calling .%s() with keyword or starred arguments when an '
+                                      'instance attribute of the same name may hold the callable' % f.attr)
+                self.attr_names.add(f.attr)
+                self._need_inst_findattr()
+                res, fld = ctx.tmp(), ctx.tmp()
+                ctx.emit('if (ail_inst_findattr(%s, g_attr_%s, &%s)) {' %
+                         (recv_c, f.attr, fld))
+                ctx.indent += 1
+                r = self._call_field_value(fld, args, ctx)
+                ctx.emit('%s = %s;' % (res, r))
+                ctx.indent -= 1
+                ctx.emit('} else {')
+                ctx.indent += 1
+                r = self._emit_inst_method(cname, recv_c, f, args, kwargs, ctx)
+                if r is not None:
+                    ctx.emit('%s = %s;' % (res, r))
+                else:
+                    self.needs_noattr = True
+                    ctx.emit('st = ail2_no_attr(cx, %s, "%s"); goto %s;' %
+                             (recv_c, f.attr, ctx.cur_err_target()))
+                    ctx.uses_st = True
+                ctx.indent -= 1
+                ctx.emit('}')
+                return res
             r = self._emit_inst_method(cname, recv_c, f, args, kwargs, ctx)
             if r is not None:
                 return r
@@ -9225,6 +9256,31 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.indent += 1
             r = self._dynamic_user_method_dispatch(recv_c, f, args, kwargs, ctx, builtin)
             ctx.emit('%s = %s;' % (res, r))
+            ctx.indent -= 1
+            ctx.emit('}')
+            return res
+        if not owners and f.attr in self.assigned_attrs and builtin is None:
+            # No class of the program has this method, but an attribute of that name is assigned
+            # somewhere: on an instance the field (a partial/lambda/function value) is the
+            # callable CPython finds before raising AttributeError.
+            if kwargs or any(isinstance(a, ast.Starred) for a in args):
+                raise Unsupported('calling .%s() with keyword or starred arguments when an '
+                                  'instance attribute of the same name may hold the callable' % f.attr)
+            self.attr_names.add(f.attr)
+            self._need_inst_findattr()
+            res, fld = ctx.tmp(), ctx.tmp()
+            ctx.emit('if (ail_inst_findattr(%s, g_attr_%s, &%s)) {' %
+                     (recv_c, f.attr, fld))
+            ctx.indent += 1
+            r = self._call_field_value(fld, args, ctx)
+            ctx.emit('%s = %s;' % (res, r))
+            ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
+            self.needs_noattr = True
+            ctx.emit('st = ail2_no_attr(cx, %s, "%s"); goto %s;' %
+                     (recv_c, f.attr, ctx.cur_err_target()))
+            ctx.uses_st = True
             ctx.indent -= 1
             ctx.emit('}')
             return res
