@@ -239,6 +239,14 @@ def _build_and_run(directory, name, text, general):
     return (got.stdout.replace(b'\r\n', b'\n'), got.returncode), got.stderr.decode('utf-8', 'replace')[-1500:]
 
 
+def _stable_slice_text(data):
+    # CPython 3.12.15 and 3.13 use the extended-slice wording for a non-iterable value on a
+    # step-1 slice too; older 3.12 says "can only assign an iterable". Accept either.
+    for text in (b'can only assign an iterable', b'must assign iterable to extended slice'):
+        data = data.replace(text, b'<non-iterable slice>')
+    return data
+
+
 class Fuzz59Tests(unittest.TestCase):
     def check(self, slug, text, rc=0):
         with tempfile.TemporaryDirectory(prefix='ail-fuzz59-') as directory:
@@ -247,7 +255,9 @@ class Fuzz59Tests(unittest.TestCase):
             for general in (True, False):
                 got, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
                 self.assertIsNotNone(got, '%s (general=%s)\n%s' % (text[:2000], general, build_err))
-                self.assertEqual(got, (want, rc), '%s (general=%s)\n%s' % (text[:2000], general, build_err))
+                self.assertEqual(got[1], rc, '%s (general=%s)\n%s' % (text[:2000], general, build_err))
+                self.assertEqual(_stable_slice_text(got[0]), _stable_slice_text(want),
+                                 '%s (general=%s)\n%s' % (text[:2000], general, build_err))
 
     def test_repr_after_slice_stores_another_type(self):
         self.check('mixed_repr', MIXED_REPR)
