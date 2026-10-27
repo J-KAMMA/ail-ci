@@ -1,3 +1,24 @@
+## 2026-10-27 -- re-apply pre7: out-of-int64 delete index is refused by name (job-rbrbrbpre7-10271151)
+
+Re-applying the accepted pre7 change on the current integration tree. The behaviour is already
+present: `ail_chatgpt.py`'s `_check_index_expression` refuses a constant subscript index outside
+int64 before either emitter, so `del a[2**63]`, `del a[2**64]`, `del a[-2**63 - 1]` and a nested
+receiver (`del a[0][2**63]`) fail at compile time with `int64 index out of range: ...` on both
+builds instead of trapping `integer overflow` while computing the index, where CPython's
+unbounded int raises `IndexError`. No compiler code change was needed, keeping both sides'
+fixes. Added the accepted `AIL_CURRENT/test_ail_pre7.py` (it accepts this tree's wording),
+registered it in `ail_check.MODULES` and `ci_shards.json`, and recorded the row. In-range
+constant indexes (`1 + 1`, `-1`, `True`, slices, str and dict keys, and the INT64_MIN/INT64_MAX
+dict-key boundaries) still delete normally and match CPython. `tools/diff_ids.py` is not
+present on this tree; `tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes`: `pre7_inrange`, `pre7_routes`, `pre7_dict_bounds`, `pre7_slice`,
+`pre7_str_key` and `pre7_empty` match CPython on both builds; `pre7_list_pow`, `pre7_shift`,
+`pre7_negative`, `pre7_prod`, `pre7_nested`, `pre7_dict_key` and `pre7_pow64` are refused by
+name on both builds (`int64 index out of range`). Tests on the final commit: `test_ail_pre7`,
+`test_ail_pre246`, `test_ail_pre269`, `test_ail_pre177`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
