@@ -488,12 +488,13 @@ def _bind_constructor_arguments(info, node, resolve):
     positional = info['constructor']['positional']
     kwonly = info['constructor']['kwonly']
     bound = {}
-    if len(node.args) > len(positional):
+    if len(node.args) > len(positional) and not info['constructor']['vararg']:
         return None
     for name, argument in zip(positional, node.args):
         bound[name] = resolve(argument)
     for keyword in node.keywords:
-        if keyword.arg not in positional and keyword.arg not in kwonly:
+        if (keyword.arg not in positional and keyword.arg not in kwonly
+                or keyword.arg in bound):
             return None
         bound[keyword.arg] = resolve(keyword.value)
     for name in positional:
