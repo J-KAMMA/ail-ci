@@ -547,7 +547,8 @@ static int ail_exc_kind_of(const char *w) {
         return AIL_EXC_VALUE;
     if (!strcmp(w, "division by zero") || !strcmp(w, "integer division by zero")
         || !strcmp(w, "integer modulo by zero")) return AIL_EXC_ZERODIV;
-    if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")
+    if (!strcmp(w, "list index out of range") || !strcmp(w, "list assignment index out of range")
+        || !strcmp(w, "pop index out of range")
         || !strcmp(w, "pop from empty list") || !strcmp(w, "grid row index out of range")
         || !strcmp(w, "grid column index out of range") || !strcmp(w, "bytes index out of range")
         || !strcmp(w, "string index out of range"))
@@ -10251,7 +10252,9 @@ static inline void ail_list_setitem(ail_obj lst, int64_t i, ail_obj x) {
     i = ail__norm_index(i, lst.v->n, "list"); lst.v->p[i] = x;
 }
 static inline void ail_list_delitem(ail_obj lst, int64_t i) {
-    ail_vec *v = lst.v; i = ail__norm_index(i, v->n, "list");
+    ail_vec *v = lst.v;
+    if (i < 0) i += v->n;
+    if (i < 0 || i >= v->n) { ail_raise_c(AIL_ERR_INDEX, "list assignment index out of range"); return; }
     for (int64_t k = i; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
     v->n--;
 }
@@ -15132,8 +15135,9 @@ static inline ail_st ail_list_setitem(ail_ctx *cx, ail_obj lst, int64_t i, ail_o
 }
 static inline ail_st ail_list_delitem(ail_ctx *cx, ail_obj lst, int64_t i) {
     ail_vecobj *v = (ail_vecobj *)lst.o;
-    int64_t ni; ail_st st = ail__norm_index(cx, &ni, i, v->n, "list"); if (st != AIL_OK) return st;
-    for (int64_t k = ni; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
+    if (i < 0) i += v->n;
+    if (i < 0 || i >= v->n) return ail_raise_c(cx, AIL_B_INDEXERROR, "list assignment index out of range");
+    for (int64_t k = i; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
     v->n--; return AIL_OK;
 }
 /* stable merge sort, used both for the plain (keyless) form and as the engine for

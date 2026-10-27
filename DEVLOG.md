@@ -1,3 +1,28 @@
+## 2026-10-27 -- pre307: out-of-range list deletion uses CPython's assignment message (job-pre307-10271311)
+
+The one pre-existing difference recorded by the rbrbpre19 review was
+`del a[-9223372036854775808]`: both builds exited 1 with matching stdout, but stderr said
+`IndexError: list index out of range` (the current tree) or `pop index out of range` (the typed
+path) where CPython says `IndexError: list assignment index out of range`.  The base tree
+(`eedf548`) shows the same, so the difference predates this job.
+
+`ail_list_delitem` in cruntime.py now normalizes the index and raises the assignment wording,
+both for the unified/context entry point and for the object-level helper used by the typed path;
+the index-kind mapping learned the new text and exctext.py's redundant DIE edit is gone.  Typed
+`del` of an int list emits an explicit `_dk >= n || _dk < -n` check before `ail_list_pop`, so it
+no longer borrows `.pop()`'s message.  `.pop()` itself is unchanged (`pop index out of range` /
+`pop from empty list`).
+
+Probes in `/tmp/probes` (`pre307_*`) match CPython on both builds for ordinary, negative,
+INT64_MIN/MAX, empty, float and str lists; the argument/list-item/attribute/dict-value routes and
+aliases; caught `IndexError` with and without `str(e)`; valid negative and slice deletes; dict
+deletes; and unchanged `.pop()`/reads.  An uncaught typed trap still prints the bare message text
+without the `IndexError: ` prefix, a pre-existing limitation already recorded for typed traps.
+
+Added `AIL_CURRENT/test_ail_pre307.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`; `tools/update_manifest.py --check` passes.
+Final-state tests: test_ail_pre307, test_ail_pre269, test_ail_pre246, test_ail_pre298,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3 (7 modules, 290 s, 0 failed).
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
