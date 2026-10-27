@@ -1,3 +1,20 @@
+## 2026-10-27 -- fuzz59 apply on an integ that already has the first change (job-rbrbfuzz59-10272331)
+
+The culprit gate applied this job alone on an integ tree that already contained the first fuzz59
+change (its `lrepr` used `repr_expr` for a `list[str]` slot), so the second change's hunk in
+`tuplegen.lrepr` conflicted; `git apply --3way` left conflict markers in the source and both
+`test_ail_fuzz59` and `test_ail_safetynet` failed to compile.  The branch's diff now keeps that
+`lrepr` hunk byte-for-byte identical to the first change, so it merges cleanly there, and puts the
+later half in `_ail_srepr`: a value whose runtime type is not a str (an int, bool, float or None
+that a failed `heappush` left in a `list[str]`) falls back to `"%r"` and shows its own repr, while
+a real str keeps the existing quoting/escaping.  Simulated the culprit steps on integ `894a446`
+with the first change already applied, then this diff: only `DEVLOG.md` needed the union merge,
+`update_manifest.py --check` passed, and `test_ail_fuzz59`, `test_ail_fuzz65` and
+`test_ail_safetynet` all passed (132 s, 0 failed).  Probes `f59_slot_foreign` (int/negative/bool/
+float/None through an argument, empty list), `f59_slot_routes` (through a list item, a dict value
+and an attribute) and `f59_str_repr` (quotes, escapes, non-ASCII, empty, nested lists and tuples)
+match CPython on the general and default builds.
+
 ## 2026-10-27 -- fuzz59 regression: a `list[str]` repr uses the value's `%r` (job-rbrbfuzz59-10272028)
 
 The re-applied fuzz59 change gave a `list[str]` slot the generated str-repr helper
