@@ -12,7 +12,7 @@ S3  C41: str.format evaluates its arguments left to right, once each, before any
 S4  C42: on the general path `==` / `!=` call the user's __eq__ / __ne__ whatever the other operand is (None
     included), `!=` inverts __eq__ when there is no __ne__, an exception raised by __eq__ propagates out of `==`,
     `!=` and `in`, sets and dicts keyed by instances with __hash__ / __eq__ work, and a slice through __getitem__
-    is refused by name.
+    passes a slice object (even when the receiver's kind is unknown).
 S5  corpus3 t426: `except ParseError` no longer catches RangeError (user exception codes 30 and 31 were taken for
     URLError and HTTPError, with the urllib classes absent).
 """
@@ -473,16 +473,15 @@ class GeneralPathTests(Base):
         self.same(GETITEM)
         self.same(GETITEM.replace('    print(v[1:2])\n', ''))
 
-    def test_slice_of_an_unresolved_receiver_raises_by_name(self):
+    def test_slice_of_an_unresolved_receiver_reaches_getitem(self):
         source = ('class V:\n    def __init__(self, xs: list) -> None:\n        self.xs = xs\n\n'
                   '    def __getitem__(self, i):\n        return self.xs[i]\n\n'
                   'def first(v, k):\n    return v[0:k]\n\n'
-                  'def main() -> None:\n    print(first([5, 6, 7], 2))\n    try:\n        print(first(V([1, 2]), 1))\n'
-                  '    except NotImplementedError as e:\n        print("not supported")\n\nmain()\n')
+                  'def main() -> None:\n    print(first([5, 6, 7], 2))\n    print(first(V([1, 2]), 1))\n\nmain()\n')
         built, exe = self.build(source, '0')
         self.assertEqual(built.returncode, 0, built.stderr)
         ran = subprocess.run([str(exe)], capture_output=True, timeout=60)
-        self.assertEqual(ran.stdout.decode(), '[5, 6]\nnot supported\n')
+        self.assertEqual(ran.stdout.decode(), '[5, 6]\n[1]\n')
 
 
 T426 = '''import sys
