@@ -243,6 +243,29 @@ registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state te
 `test_ail_pre311`, `test_ail_pre290`, `test_ail_safetynet`, `test_ail_files`,
 `test_ail_corpus_findings3` (5 modules, 229 s, 0 failed).  `tools/update_manifest.py` run and
 `--check` exits 0; DIFFERENCES row `C?-job-pre311-10271335-1`.
+## 2026-10-27 -- re-apply pre299: builtin pow() outside int64 is refused by name (job-rbpre299-10270953)
+
+Re-applied the accepted pre299 change on top of this integration tree, keeping the newer
+front-end work (pre273's `**` rule, pre285 local cancellation, pre290 int() wrappers) unchanged.
+Extended the existing `_check_int64_pow_constants`, called after `_check_int64_int_base_constants`: a
+two-argument builtin `pow()` with statically known int arguments (module and function-local
+constants, expressions and aliases included) is folded exactly, and a result outside int64 is
+refused with `int64 constant expression out of range`; when the base is a constant int with
+|base| >= 2 and the exponent is not statically known, the construct is refused at compile time,
+following pre273's rule for `**`. Bases 0/1/-1 with computed exponents, constant in-range powers,
+float and bool powers, `pow(base, exp, mod)`, and a program that binds its own `pow` are
+unchanged.
+
+Probes in `/tmp/probes` and `/tmp/rprobes` on both builds: the safe/aliased/shadowed/zero-base
+forms match CPython; constant out-of-int64 forms are refused as `int64 constant expression out
+of range`; computed-exponent forms are refused by name, including calls in a class body and a
+lambda body. Final-state tests: `test_ail_pre299`, `test_ail_pre294`, `test_ail_pre273`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (0 failed).
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and
+`--check` passes. `tools/ci_shards.py --check` reports only the pre-existing duplicated
+`test_ail_fuzz4`, `test_ail_pre126` and `test_ail_pre61`; this change adds only
+`test_ail_pre299` to one shard.
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an
