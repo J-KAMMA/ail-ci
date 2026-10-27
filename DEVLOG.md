@@ -1,3 +1,27 @@
+## 2026-10-27 -- re-apply pre293: instance fields shadow methods (job-rbpre293-10270942)
+
+Re-applying the accepted pre293 change on the current tree.  Its base (`cc5133a`) had no
+instance-table lookup for a method/field collision, so it refused `obj.f(...)` by name.  The
+current tree already carries the later pre279 fix, which models that lookup on both builds and
+matches CPython for the callable, non-callable, lambda, unpacked, inherited and routed fields;
+keeping both sides' fixes therefore means keeping the model, not the refusal.  The one accepted
+form still wrong here was `setattr(self, 'f', ...)`: `compile` collected only `Attribute` stores
+into `assigned_attrs`, so the call dispatched to the method (`101` where CPython calls the field
+and prints `11`).  `pyboxed2.Compiler.compile` now also records the literal name of a
+`setattr(obj, 'name', ...)` call in the same set, using the existing field-call path; no refusal
+was added and `test_ail_pre279` behaviour is unchanged.  Added `test_ail_pre293.py` (11 tests,
+both builds, CPython parity for all the accepted programs plus setattr routes, negative values
+and aliases) and registered it in `ail_check.MODULES`; DIFFERENCES row
+`C?-job-rbpre293-10270942-1`.  `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes/pre293`, all matching CPython on both builds with `tools/cmp.sh`:
+`p1_callable_instance`, `p2_noncallable_instance`, `p3_bytes_field`, `p4_int_field`,
+`p5_lambda_field`, `p6_setattr`, `p7_unpack`, `p8_inherited`, `p9_routes`,
+`p10_super_unbound`, `p11_ordinary`, `p12_unrelated_classes`, `p13_unrelated_builtin`,
+`p14_nested_scope`, `p15_typed_callable`, `p16_setattr_routes`, `p17_setattr_unpack` and
+`p18_negative_alias`.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's

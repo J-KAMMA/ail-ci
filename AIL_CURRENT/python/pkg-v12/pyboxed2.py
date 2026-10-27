@@ -2173,9 +2173,17 @@ class Compiler(boxclosure.ClosureMixin):
         # non-data descriptor), wherever the assignment is written: in a method, at module scope,
         # through an alias, a loop target or a `with ... as`.  Remember the names so a call through
         # an instance can check the instance table first (p02 of the pre260 review).
-        self.assigned_attrs = frozenset(
-            n.attr for n in ast.walk(tree)
-            if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store))
+        assigned_attrs = {n.attr for n in ast.walk(tree)
+                          if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store)}
+        # `setattr(obj, 'name', value)` assigns the same instance field, but has no Attribute
+        # store node: remember the literal name so a call through the instance checks the
+        # instance table first, exactly as for `obj.name = ...`.
+        assigned_attrs.update(
+            n.args[1].value for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'setattr'
+            and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
+            and isinstance(n.args[1].value, str))
+        self.assigned_attrs = frozenset(assigned_attrs)
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
