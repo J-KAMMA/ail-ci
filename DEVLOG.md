@@ -13,12 +13,15 @@ reads still lower to columns.  Deletions of lists of int, float, bool, string, m
 tuples, empty lists, out-of-range and uncaught indexes, indexes arriving through a list item,
 attribute or dict value, aliases and function arguments match CPython on both builds.
 
-The other pre-existing items remain open and untouched: an uncaught typed list delete without an open
-`try` omits the `IndexError:` prefix, `del xs[9][0]` prints a bare `IndexError` on the default build,
-and the uncaught trap wordings (`KeyError`, `ZeroDivisionError`, bytes `IndexError`) still differ.
-Probes in `/tmp/probes/pre341` (41 programs): the i2 module-tuple probes match on both builds; the
-i3/i4/i5 probes reproduce the open items above.  Added `AIL_CURRENT/test_ail_pre341.py` (13 programs,
-both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+Only the first reported item was in scope and is fixed.  Spot-check probes for the others were not
+exhaustive: a no-try typed int-list delete (`del xs[9]`, also `-9`) already printed the `IndexError:`
+prefix on this tree, the typed nested shapes did not build on the default path in the probe shape,
+and the uncaught trap wordings (`KeyError`, `ZeroDivisionError`, bytes `IndexError`) still differ on
+the default build.  None of them was changed here.
+Probes in `/tmp/probes/pre341` (46 programs): all 33 i2 module-tuple probes match CPython on both
+builds; the i3/i4/i5 probes cover the other items.  Added `AIL_CURRENT/test_ail_pre341.py` (13
+programs, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Final-state tests:
 test_ail_pre341, test_ail_safetynet, test_ail_tuples, test_ail_files and test_ail_corpus_findings3
 (5 modules, 434 s, 0 failed).  `tools/update_manifest.py` was run and `--check` passes.
 
