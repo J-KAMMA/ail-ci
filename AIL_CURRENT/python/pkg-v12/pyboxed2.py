@@ -5706,6 +5706,7 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Subscript(self, node, ctx):
         c = self.expr(node.value, ctx)
         if isinstance(node.slice, ast.Slice):
+            kind = self.infer_kind(node.value, ctx)
             sliced = self._inst_class(node.value, ctx)
             if sliced and self._resolve_method(sliced, '__getitem__'):
                 # the slice object goes to __getitem__ (safetyrt.SLICE_PRELUDE)
@@ -5713,13 +5714,26 @@ class Compiler(boxclosure.ClosureMixin):
                     raise NeedSlice()
                 key = self._slice_obj(node.slice, ctx)
                 return self._subscript_with_key(node, c, key, ctx)
-            if self.infer_kind(node.value, ctx) not in ('str', 'list', 'tuple') \
-                    and self._any_class_defines('__getitem__'):
-                # a value of unknown kind: an instance takes a slice object, anything else is sliced
+            if kind == 'dict' or kind == 'counter' or (kind is not None and kind.startswith('defaultdict:')):
+                # CPython 3.12's slice is hashable: a dict subscription uses it as a key.
+                if not self.want_slice:
+                    raise NeedSlice()
+                key = self._slice_obj(node.slice, ctx)
+                return self._subscript_with_key(node, c, key, ctx)
+            if kind not in ('str', 'list', 'tuple') \
+                    and (kind is None or self._any_class_defines('__getitem__')):
+                # a value of unknown kind: an instance or a dict takes a slice object (a dict
+                # uses it as the key, as CPython 3.12 does), anything else is sliced
                 if not self.want_slice:
                     raise NeedSlice()
                 t = ctx.tmp()
                 ctx.emit('if (%s.tag == AIL_T_INST) {' % c)
+                ctx.indent += 1
+                key = self._slice_obj(node.slice, ctx)
+                ctx.emit('st = ail_op_getitem(cx, &%s, %s, %s);' % (t, c, key))
+                ctx.check()
+                ctx.indent -= 1
+                ctx.emit('} else if (%s.tag == AIL_T_DICT) {' % c)
                 ctx.indent += 1
                 key = self._slice_obj(node.slice, ctx)
                 ctx.emit('st = ail_op_getitem(cx, &%s, %s, %s);' % (t, c, key))
@@ -11220,32 +11234,62 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _store_slice(self, target, c, value_c, ctx, delete):
         """`c[a:b:k] = value` / `del c[a:b:k]`: a list in place (safetyrt.SLICE); an instance that defines
-        __setitem__ / __delitem__ gets a slice object."""
+        __setitem__ / __delitem__ gets a slice object, and a dict uses it as the key (CPython 3.12)."""
         mname = '__delitem__' if delete else '__setitem__'
         kind = self.infer_kind(target.value, ctx)
         inst = kind is None or kind.startswith('instance:')
+        is_dict = kind == 'dict' or kind == 'counter' or (kind is not None and kind.startswith('defaultdict:'))
         self.rt_needs.add('slice')
-        if inst and self._any_class_defines(mname):
-            if not self.want_slice:
-                raise NeedSlice()
-            ctx.emit('if (%s.tag == AIL_T_INST) {' % c)
-            ctx.indent += 1
+
+        def emit_item():
             key = self._slice_obj(target.slice, ctx)
             if delete:
                 ctx.emit('st = ail_op_delitem(cx, %s, %s);' % (c, key))
             else:
                 ctx.emit('st = ail_op_setitem(cx, %s, %s, %s);' % (c, key, value_c))
             ctx.check()
-            ctx.indent -= 1
-            ctx.emit('} else {')
-            ctx.indent += 1
-        lo, hi, step = self._slice_bounds(target.slice, ctx)
-        ctx.emit('st = ail2s_setslice(cx, %s, %s, %s, %s, %s, %d);'
-                 % (c, lo, hi, step, value_c or 'ail_box_none()', 1 if delete else 0))
-        ctx.check()
-        if inst and self._any_class_defines(mname):
-            ctx.indent -= 1
-            ctx.emit('}')
+
+        def emit_bounds():
+            lo, hi, step = self._slice_bounds(target.slice, ctx)
+            ctx.emit('st = ail2s_setslice(cx, %s, %s, %s, %s, %s, %d);'
+                     % (c, lo, hi, step, value_c or 'ail_box_none()', 1 if delete else 0))
+            ctx.check()
+
+        if is_dict:
+            if not self.want_slice:
+                raise NeedSlice()
+            emit_item()
+            return
+        instance_slice = inst and self._any_class_defines(mname)
+        if inst:
+            if not self.want_slice:
+                raise NeedSlice()
+            if instance_slice:
+                ctx.emit('if (%s.tag == AIL_T_INST) {' % c)
+                ctx.indent += 1
+                emit_item()
+                ctx.indent -= 1
+                ctx.emit('} else if (%s.tag == AIL_T_DICT) {' % c)
+                ctx.indent += 1
+                emit_item()
+                ctx.indent -= 1
+                ctx.emit('} else {')
+                ctx.indent += 1
+                emit_bounds()
+                ctx.indent -= 1
+                ctx.emit('}')
+            else:
+                ctx.emit('if (%s.tag == AIL_T_DICT) {' % c)
+                ctx.indent += 1
+                emit_item()
+                ctx.indent -= 1
+                ctx.emit('} else {')
+                ctx.indent += 1
+                emit_bounds()
+                ctx.indent -= 1
+                ctx.emit('}')
+            return
+        emit_bounds()
 
     def stmt_With(self, node, ctx):
         raise Unsupported('a with statement (context managers are not modelled by the general '
