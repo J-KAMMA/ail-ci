@@ -1,3 +1,22 @@
+## 2026-10-27 -- pre346: duplicate test-module entries assigned to two CI shards (job-pre346-10272306)
+
+The pre334 review's only recorded pre-existing item was `tools/ci_shards.py --check` failing on
+duplicate `test_ail_fuzz4`, `test_ail_pre126`, `test_ail_pre59` and `test_ail_pre61` placements,
+identically on its base.  Reproduced on this tree: `--check` exited 1 with those four names.  The
+cause was four duplicate entries in `ail_check.MODULES`; `build()` materialised the unplaced names
+before placing them, so a duplicated name was placed once per occurrence.  The module list is now
+unique, and `build()` keeps only the first placement of a name in a stale assignment file, so
+`--update` cannot reintroduce a duplicate.  `tools/ci_shards.py --update` rewrote
+`tools/ci_shards.json` (four extra placements removed, `test_ail_pre346` added) and `--check`
+now exits 0.
+
+The referenced review listed no CPython behaviour difference for this job, so there was no
+`cmp.sh` case to reproduce; the changed behaviour is the shard assignment.  `test_ail_pre346.py`
+checks the module list is unique, every module is assigned once, `--check` passes, and `build()`
+drops duplicates from a stale assignment.  Final-state tests: test_ail_pre346, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function
