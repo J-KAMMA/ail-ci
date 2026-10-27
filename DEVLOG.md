@@ -16,8 +16,11 @@ The reviewer of this job found two defects in the previous commit.
    `_class_attr_value`: when the class's own attributes are being compiled higher in the same
    expression and the code is deferred, the slot is read directly instead of compiling the
    value again, which is what re-entered `_call_class` forever. Immediately evaluated
-   self-construction (`class D: fs = [(lambda: [D][0]().v)()]`) keeps the old behaviour
-   (compile succeeds, runtime error), a pre-existing mismatch with CPython's `NameError`.
+   self-construction (`class D: fs = [(lambda: [D][0]().v)()]`) used to exit 1 with a runtime
+   `TypeError`; it now compiles and prints the value (exit 0). CPython raises `NameError`
+   there, so this stays a pre-existing mismatch of the same family as `class C: y =
+   (lambda: C)()` (unchanged, exit 0); the direct-name form `class A: x = A()` still crashes
+   with the pre-existing `RecursionError` on both commits.
 
 Probes in `/tmp/probes` (both builds, general forced and default): p01 self-call through a
 lambda, p02 argument, p03 list item, p05 dict value, p17 attribute route (`b.get()()`), p19
@@ -25,8 +28,10 @@ alias, p20 negative index and tuple, p21 two lambdas, p22 function plus class, p
 listcomp, p24 dict attribute, p06 `__init__` argument, p08 other class, p09 inherited
 attributes, p10 nested lambda, p11 method, p12 module lambda all match CPython. p14 (the
 review program) is still the named refusal, p15/p16 unchanged, p18 remains refused by name
-(`a generator expression used as a value`). Final-state tests: test_ail_pre362,
-test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+(`a generator expression used as a value`). p25/p26/p28 keep the old exit 0 and p27 the old
+`RecursionError` (pre-existing); p13 is the immediate-invocation mismatch described above.
+Final-state tests: test_ail_pre362, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 
 ## 2026-10-27 -- pre362: a lambda in a comprehension keeps its variable (job-pre362-10280246)
 
