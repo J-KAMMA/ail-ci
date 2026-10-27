@@ -201,6 +201,48 @@ this tree, so it was not run.  Probes re-run for this job in `/tmp/probes/pre328
 range`).  Final-state tests on this commit: `test_ail_pre328`, `test_ail_silent5`,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (48 tests, OK, 696 s,
 1 skipped); `tools/update_manifest.py --check` passes.
+## 2026-10-27 -- pre349 review fixes: wrapper-local, global and nested-def pow constants (job-pre349-10272331)
+
+The pre349 review found three regressions in the wrapper pass.  The wrapper's own top-level
+assignments now resolve before the caller/module values (scalar, list and dict, including a
+single reassignment of a parameter before the `pow` call), a module constant changed through
+`global` before the call is no longer folded from its original value, and a nested `def` binds
+its name in the enclosing function scope, so it shadows a module wrapper instead of extending
+the wrapper chain.  The new cases are covered by `AIL_CURRENT/test_ail_pre349.py` and the
+existing target row in `DIFFERENCES.md` now records the wrapper-local, global and nested-def
+behaviour.
+
+Probes in `/tmp/probes` on both builds: `t07` (global reset), `t15`/`t16` (local scalar
+shadow), `t20`/`t21` (nested `def` shadow), `t22`/`t23` (local list/dict shadow) and `t26`-`t28`
+(parameter reassignment before/after the call) match CPython; `t24` (local wide shadow) and
+`t25`/`t29` (parameter reassigned to a wide exponent) are refused by name.
+`tools/update_manifest.py` was run and `--check` passes.  Final-state tests: test_ail_pre349,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
+## 2026-10-27 -- pre349: a wide constant exponent passed through a pow() wrapper is refused (job-pre349-10272331)
+
+The pre330 review's first pre-existing item was a wide constant exponent reaching `pow()` through
+a user function's arguments: `def power(b, e): return pow(b, e)` called with `2` and
+`(3**100) >> 150` compiled on both builds and then stopped with `integer overflow`, where CPython
+prints the bignum.  The `pow` check now follows constant call arguments into module-level wrappers
+(including a keyword call, a default value, a `pow` alias and a chain of wrappers) and refuses the
+out-of-int64 result by name with the existing `int64 constant expression out of range` wording.
+Arguments may come from a module list or dict item, a list literal item, or a class attribute;
+in-range and safe powers, negative exponents, bool and float operands, a shadowed wrapper name and
+an unused wrapper still match CPython.  The review's later items are unchanged: a class-body pow
+and a lambda-body pow still trap at run time, while the reassigned module constant, the exponent
+passed only to a constant-base wrapper and the class-attribute exponent are already refused by
+name on this tree.
+
+Probes in `/tmp/probes/pre349` on both builds: `p09_power_args` (and its `p09_base_arg` variant)
+are now refused by name; `b01`-`b20` cover in-range, int64 boundaries, safe bases, negative
+exponents, bool/float operands, keyword/default/alias/chain calls, list/dict/attribute arguments,
+shadowing, an unused wrapper and the unchanged later items.  Added
+`AIL_CURRENT/test_ail_pre349.py` (12 refused and 9 CPython-parity programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+test_ail_pre349, test_ail_pre294, test_ail_pre299, test_ail_pre305, test_ail_pre273,
+test_ail_pre310, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
