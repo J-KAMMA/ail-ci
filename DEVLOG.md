@@ -23,7 +23,7 @@ negative/empty counts, a non-int `__index__` result, no-`__index__` errors and t
 reaching the code through an argument, a list item, an attribute and a dict value; `p12`-`p24`
 cover a bool result, an exception from `__index__`, aliasing, non-inplace routes, inherited
 and overridden `__index__`, `__mul__`/`__rmul__` precedence and cross-sequence error wording.
-All 22 operator probes match CPython on both builds; `p11` (direct `__mul__`/`__imul__`
+All 23 operator probes match CPython on both builds; `p11` (direct `__mul__`/`__imul__`
 method calls) still differs and is the separate pre-existing route noted above.
 
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
