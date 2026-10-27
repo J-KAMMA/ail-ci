@@ -153,6 +153,32 @@ matches CPython either way. Added `AIL_CURRENT/test_ail_pre327.py` (8 programs, 
 matches CPython or is refused by name) and registered it in `ail_check.MODULES` and
 `tools/ci_shards.json`.
 
+## 2026-10-27 -- pre334: a store into an outer e.args[i] from a nested handler is refused by name (job-pre334-10272100)
+
+The first pre-existing item from the pre317 review still reproduced on this tree: a store into the
+outer caught exception's `e.args[i]` from a nested handler (`except ... as inner: e.args[0] = 5`)
+ran on both builds and matched CPython's stdout, exit status and last stderr line, but AIL's
+stderr traceback was only one line where CPython prints the full chain.  `_scope_nodes` treated an
+`ExceptHandler` as a scope boundary, so the outer handler's scan never reached the nested handler
+body; `ast.ExceptHandler` is no longer in `_SCOPES`, and the walk now enters the nested body in
+source order, forgetting the nested handler's own name through the existing `_forget_binding` (so
+a same-named inner `e` still refers to the inner exception, and a nested handler with its own name
+is still refused by that handler's own scan).  The construct is therefore refused by name at
+compile time on both builds for a literal, negative or computed index, `+=`, an annotated store,
+`del`, a destructuring target, a `for` or `with` target, a value reaching it through an argument, a
+list item, an attribute or a dict value, an alias of the outer exception through a name, list item,
+attribute or dict value, a deeper nested handler, and an empty `args`; rebinding the outer name
+inside the nested handler, an unrelated object's `args` list and reads of `e.args[i]`/`e.args` are
+unchanged.  Added `AIL_CURRENT/test_ail_pre334.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`; added DIFFERENCES row `C?-job-pre334-10272100-1`.
+
+Probes in `/tmp/probes/pre334` on both builds (27 programs): the 23 stores are refused by name
+(`p6`, `p6_neg`, `p6_comp`, `p6_aug`, `p6_del`, `p6_ann`, `p6_dest`, `p6_for`, `p6_with`,
+`p6_value_arg`, `p6_value_list`, `p6_value_attr`, `p6_value_dict`, `p6_alias_name`,
+`p6_alias_list`, `p6_alias_attr`, `p6_alias_dict`, `p6_alias_after`, `p6_shadow`,
+`p6_inner_name`, `p6_nested2`, `p6_empty`, `p6_typed`); `p6_read`, `p6_read_typed`, `p6_rebind`
+and `p6_unrelated` match CPython on both builds.  `test_ail_pre334` (6 tests, 49 s) passes; the
+final-state required modules are run on the commit.
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound
