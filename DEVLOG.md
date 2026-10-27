@@ -1,3 +1,24 @@
+## 2026-10-27 -- pre365: Counter missing-key deletion is ignored (job-pre365-10280341)
+
+The first still-differing item from the pre353 review was `Counter.__delitem__` on a missing
+key: `del c['missing']` raised `KeyError` on both builds, where CPython only removes a key that
+is present.  It reproduced through an unannotated function parameter (the general path); a
+directly known local Counter was already lowered by collib to `pop(k, 0)`.  The v2 runtime's
+`ail_dict_del` now skips the KeyError when the dict carries the Counter flag.  Plain dicts and
+defaultdicts still raise `KeyError`, and a present key (including one whose count is zero) is
+removed as before.
+
+Added `AIL_CURRENT/test_ail_pre365.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`; added DIFFERENCES row `C?-job-pre365-10280341-1`.  Probes in
+`/tmp/probes/pre365` on both builds: `p05`, `p10`, `p11`, `p12` and `p13` match CPython,
+covering empty/present/repeated-missing/zero-count keys, string/int/negative keys, an alias,
+an argument, a list item, a dict value, a return value, a loop key and an attribute, with plain
+dict and defaultdict controls.  An exploratory `p01`/`p04` showed a separate pre-existing
+`Counter(dict)` constructor count difference (`Counter({'a': 1, 'b': 2})` prints `a: 1, b: 1`);
+it is not the recorded deletion item and was left unchanged.  Final-state tests on this commit:
+test_ail_pre365, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (results in
+the job report).
+
 ## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
 
 The rbrbrbrbrbpre33 review's first pre-existing difference was `x = 10; print(x**40)`, a

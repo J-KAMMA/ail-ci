@@ -15570,7 +15570,8 @@ static inline ail_st ail_dict_pop(ail_ctx *cx, ail_obj *out, ail_obj d, ail_obj 
 }
 static inline ail_st ail_dict_del(ail_ctx *cx, ail_obj d, ail_obj key) {
     int found; ail_st st = ail_map_del(cx, &found, (ail_mapobj *)d.o, key); if (st != AIL_OK) return st;
-    if (!found) return ail_raise_key_arg(cx, key);
+    /* Counter.__delitem__ ignores a missing key (collections.Counter, CPython 3.12). */
+    if (!found && !ail__is_counter(d)) return ail_raise_key_arg(cx, key);
     return AIL_OK;
 }
 static inline int64_t ail_dict_len(ail_obj d) { return ((ail_mapobj *)d.o)->n; }
