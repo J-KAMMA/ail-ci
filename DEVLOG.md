@@ -1,3 +1,25 @@
+## 2026-10-27 -- pre385 review fix: a stored parameter does not carry its call argument (job-pre385-10280736)
+
+The pre385 review found false refusals: `_check_int64_routed_power` bound every call argument to
+its parameter, so `def power(b, e): b = 1; return b ** e` called with `(2, 100)` was refused with
+`int64 constant expression out of range` although the reported value never executes (CPython and
+base print `1`).  A `for` target, an augmented assignment and a conditional store did the same.
+`scan` now drops a parameter from the call environment for a node when a store to it can run
+first: a store lexically before the node, or any store in the same function while the node is
+inside a loop (a loop may repeat).  A parameter with no binding for a node resolves as unknown
+instead of falling back to a same-named module constant, so a rebinding wrapper that forwards to
+another function cannot leak the shadowed module value.  A store after the power does not
+invalidate it, so `v = b ** e; b = 1` is still refused by name.
+
+Probes in `/tmp/probes` (14 programs, both builds via `cmp.sh`): p1-p6 and p9-p14 match CPython
+(`1`, `1`, `0`, `1`, a rebinding wrapper, a parameter shadowing a module constant, an unknown
+argument, an in-range rebinding, a loop store before the power, a loop power with a later store,
+and a store in a later block); p7 (`u1_nested_call`), p8 (`v1_mixed_sites`) and p11 (store after
+the power) are refused by name on both builds.  `test_ail_pre385.py` gained `REBOUND` (7 matching
+values) and the `store_after_power` refused case.  Tests on this commit: `test_ail_pre385`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-27 -- pre385: refuse a power whose constant operands are routed through calls (job-pre385-10280736)
 
 The pre364 review's first still-differing pre-existing item was `u1_nested_call`: both

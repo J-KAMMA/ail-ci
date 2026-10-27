@@ -43,6 +43,8 @@ REFUSED = (
     ('exponent_63', 'def power(b, e):\n    return b ** e\n\n\nprint(power(2, 63))\n'),
     ('huge_exponent', 'def power(b, e):\n    return b ** e\n\n\n'
                       'print(power(2, 1 << 20))\n'),
+    ('store_after_power', 'def power(b, e):\n    v = b ** e\n    b = 1\n    return v\n\n\n'
+                          'print(power(2, 100))\n'),
 )
 
 SAFE = r'''def power(b, e):
@@ -66,6 +68,58 @@ def main():
 
 
 main()
+'''
+
+# A parameter the callee stores to does not carry its call argument into the power: the
+# reported value is one the callee overwrites, so binding it would refuse a valid program.
+REBOUND = r'''def power(b, e):
+    return b ** e
+
+
+def assign(b, e):
+    b = 1
+    return b ** e
+
+
+def loop(b, e):
+    for b in (1,):
+        pass
+    return b ** e
+
+
+def augment(b, e):
+    b *= 0
+    return b ** e
+
+
+def conditional(b, e):
+    if b > 1:
+        b = 1
+    return b ** e
+
+
+def outer(b, e):
+    b = 1
+    return power(b, e)
+
+
+def loop_store(b, e):
+    total = 0
+    for x in (1, 2):
+        total = total + b ** e
+        b = 1
+    return total
+
+
+base = 2
+
+
+def shadowed(base, e):
+    return power(base, e)
+
+
+print(assign(2, 100), loop(2, 100), augment(2, 100), conditional(2, 100))
+print(outer(2, 100), shadowed(1, 100), loop_store(2, 10))
 '''
 
 
@@ -116,6 +170,15 @@ class Pre385(unittest.TestCase):
             for general in (False, True):
                 with self.subTest(general=general):
                     got = build_run(directory, SAFE, 'safe', general)
+                    self.assertEqual((got[1].decode('utf-8'), got[0]), want, got[2])
+
+    def test_rebound_parameters_match_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre385-') as directory:
+            want = run_cpython(directory, REBOUND, 'rebound')
+            self.assertEqual(want, ('1 1 0 1\n1 1 1025\n', 0))
+            for general in (False, True):
+                with self.subTest(general=general):
+                    got = build_run(directory, REBOUND, 'rebound', general)
                     self.assertEqual((got[1].decode('utf-8'), got[0]), want, got[2])
 
 
