@@ -1,3 +1,22 @@
+## 2026-10-27 -- pre378 review follow-up: long class names print whole (job-pre378-10280656)
+
+The pre378 review found the new fallbacks still formatted into ``char buf[64]``: the message is
+the name plus 31 bytes, so names longer than 33 characters were cut off (a 34- or 40-character
+class printed ``... object is not subscriptabl``).  Both sites now raise through
+``ail__raise_not_subscriptable``, which sizes its buffer from the class name the way
+``ail__tname_c`` grows its own and frees it after ``ail_raise_c`` copies the text;
+``dunderrt``'s two string-matched patches (getitem default, getslice fallback) were updated to
+the new text.  The v1 emitter (``AIL_GENERAL=v1``, outside the two ``cmp.sh`` builds) still
+says ``'instance'``.
+
+Probes in ``/tmp/probes`` (9 programs, both builds): ``p_long_int``, ``p_long_slice``,
+``p_long_routes`` (argument, alias, attribute, dict value, list item), ``p_boundary`` (1, 33
+and 34 characters), ``p_subclass_long``, ``p_builtins``, ``p_dunder_slice``, ``p_dunder_ops``
+and the uncaught ``p_long_uncaught`` (exit 1, identical stderr) all match CPython.
+``test_ail_pre378.py`` gained the long-name int/slice cases, the 33/34 boundary, long
+route/subclass programs and a long-name uncaught run.  Final-state tests: test_ail_pre378,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3; ``tools/update_manifest.py``
+was run and ``--check`` passes.
 ## 2026-10-27 -- pre378: a subscript of an instance names its class (job-pre378-10280656)
 
 The pre354 review's first still-differing item reproduced on both builds: ``A()[1]`` (a class

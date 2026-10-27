@@ -142,12 +142,122 @@ print(C()[-1])
 ''',
 }
 
+# A class name longer than the fixed buffers the fallbacks used to format into must still
+# be printed whole; 33 fits the old char[64], 34 is the first that was truncated.
+CASES['long_name_int'] = '''
+class %(n)s:
+    pass
+
+try:
+    %(n)s()[1]
+except TypeError as e:
+    print(e)
+''' % {'n': 'B' * 40}
+
+CASES['long_name_slice'] = '''
+class %(n)s:
+    pass
+
+try:
+    %(n)s()[1:2]
+except TypeError as e:
+    print(e)
+''' % {'n': 'C' * 40}
+
+CASES['name_lengths'] = '''
+class A:
+    pass
+
+
+class %(f33)s:
+    pass
+
+
+class %(g34)s:
+    pass
+
+
+for value in (A(), %(f33)s(), %(g34)s()):
+    try:
+        value[1]
+    except TypeError as e:
+        print(e)
+''' % {'f33': 'F' * 33, 'g34': 'G' * 34}
+
+CASES['long_name_routes'] = '''
+class %(n)s:
+    pass
+
+
+class Holder:
+    pass
+
+
+def take(x):
+    try:
+        x[1]
+    except TypeError as e:
+        print(e)
+
+
+def take_slice(x):
+    try:
+        x[1:2]
+    except TypeError as e:
+        print(e)
+
+
+v = %(n)s()
+alias = v
+h = Holder()
+h.a = v
+box = {'a': v}
+items = [v]
+take(v)
+take(alias)
+take(h.a)
+take(box['a'])
+take(items[0])
+take_slice(v)
+take_slice(h.a)
+take_slice(box['a'])
+take_slice(items[0])
+''' % {'n': 'D' * 40}
+
+CASES['long_name_subclass'] = '''
+class %(b)s:
+    pass
+
+
+class %(s)s(%(b)s):
+    pass
+
+
+for value in (%(b)s(), %(s)s()):
+    try:
+        value[1]
+    except TypeError as e:
+        print(e)
+    try:
+        value[1:2]
+    except TypeError as e:
+        print(e)
+''' % {'b': 'H' * 40, 's': 'I' * 40}
+
+
 UNCAUGHT = '''
 class Widget:
     pass
 
 print(Widget()[1])
 '''
+
+LONG_UNCAUGHT = '''
+class %(n)s:
+    pass
+
+print(%(n)s()[1])
+''' % {'n': 'E' * 40}
 
 
 def compile_source(directory, name, source, general):
@@ -195,18 +305,19 @@ class Pre378(unittest.TestCase):
                                      ran.stdout + ran.stderr)
 
     def test_uncaught_names_class(self):
-        with tempfile.TemporaryDirectory(prefix='ail-pre378-') as directory:
-            expected, cpython_err, status = run_cpython(directory, 'pre378_uncaught', UNCAUGHT)
-        for general in (False, True):
-            with self.subTest(general=general), \
-                    tempfile.TemporaryDirectory(prefix='ail-pre378-') as directory:
-                built, exe = compile_source(directory, 'pre378_uncaught', UNCAUGHT, general)
-                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
-                ran = subprocess.run([str(exe)], cwd=directory, capture_output=True,
-                                     text=True, timeout=120)
-                self.assertEqual(ran.returncode, status, ran.stdout + ran.stderr)
-                self.assertEqual(ran.stdout.replace('\r\n', '\n'), expected, ran.stdout + ran.stderr)
-                self.assertEqual(last_line(ran.stderr), last_line(cpython_err), ran.stderr)
+        for slug, source in (('uncaught', UNCAUGHT), ('uncaught_long', LONG_UNCAUGHT)):
+            with tempfile.TemporaryDirectory(prefix='ail-pre378-') as directory:
+                expected, cpython_err, status = run_cpython(directory, 'pre378_' + slug, source)
+            for general in (False, True):
+                with self.subTest(slug=slug, general=general), \
+                        tempfile.TemporaryDirectory(prefix='ail-pre378-') as directory:
+                    built, exe = compile_source(directory, 'pre378_' + slug, source, general)
+                    self.assertEqual(built.returncode, 0, (slug, general, built.stdout + built.stderr))
+                    ran = subprocess.run([str(exe)], cwd=directory, capture_output=True,
+                                         text=True, timeout=120)
+                    self.assertEqual(ran.returncode, status, ran.stdout + ran.stderr)
+                    self.assertEqual(ran.stdout.replace('\r\n', '\n'), expected, ran.stdout + ran.stderr)
+                    self.assertEqual(last_line(ran.stderr), last_line(cpython_err), ran.stderr)
 
 
 if __name__ == '__main__':

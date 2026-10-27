@@ -355,12 +355,12 @@ def _edits(inplace=False):
               '            ail_st e = ail__eq_err; ail__eq_scope = sv_scope; ail__eq_err = sv_err; if (e) return e;\n'
               '            *out = found; return AIL_OK;\n'))
     # a slice of an instance: there are no slice objects, so __getitem__ cannot be given one (named, not "not subscriptable")
-    e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", ail__tname_c(c));\n'
-              '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n}\n\n/* ====',
+    e.append(('    return ail__raise_not_subscriptable(cx, c);\n'
+              '}\n\n/* ====',
               '    if (c.tag == AIL_T_INST && ail_dun2(c, AIL_D2_GETITEM))\n'
               '        return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, "slicing an instance through __getitem__ is not supported: this path has no slice objects");\n'
-              '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable", ail__tname_c(c));\n'
-              '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n}\n\n/* ===='))
+              '    return ail__raise_not_subscriptable(cx, c);\n'
+              '}\n\n/* ===='))
     # hashing
     genexpr_hash_refusal = (
         '            /* A materialised generator expression is a LIST here; CPython hashes the generator\n'
@@ -558,9 +558,9 @@ def _edits(inplace=False):
     e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object doesn\'t support item deletion", ail_type_name(c.tag));',
               '    if (c.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(c, AIL_D2_DELITEM); if (f) { ail_obj r; return f(cx, &r, c, key); } }\n'
               '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object doesn\'t support item deletion", ail_type_name(c.tag));'))
-    e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"',
+    e.append(('        default: { return ail__raise_not_subscriptable(cx, c); }',
               '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
-              '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"'))
+              '        default: { return ail__raise_not_subscriptable(cx, c); }'))
     return e
 
 

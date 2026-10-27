@@ -14840,6 +14840,17 @@ static inline const char *ail__tname_c(ail_obj x) {
     if (x.tag == AIL_T_LIST && ((ail_gcobj *)x.o)->aux) return ((ail_gcobj *)x.o)->aux == 1 ? "dict_keys" : ((ail_gcobj *)x.o)->aux == 2 ? "dict_values" : "dict_items";
     return ail_type_name(x.tag);
 }
+/* a class name has no length limit: build the message to size rather than truncate it in a fixed buffer */
+static inline ail_st ail__raise_not_subscriptable(ail_ctx *cx, ail_obj c) {
+    const char *tn = ail__tname_c(c);
+    size_t n = strlen(tn) + 40;
+    char *buf = (char *)malloc(n);
+    if (!buf) ail_die("out of memory");
+    snprintf(buf, n, "'%s' object is not subscriptable", tn);
+    ail_st st = ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    free(buf);
+    return st;
+}
 static inline ail_st ail_deque_concat(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_counter_binop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op);
 static inline ail_st ail_counter_unary(ail_ctx *cx, ail_obj *out, ail_obj a, int neg);
@@ -16091,7 +16102,7 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
             if (i >= 0 ? ord >= n : (uint64_t)(~i) >= n) return ail_raise_c(cx, AIL_B_INDEXERROR, "range object index out of range");
             *out = ail_box_int(ail__range_at(r->start, r->step, ord)); return AIL_OK;
         }
-        default: { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail__tname_c(c)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+        default: { return ail__raise_not_subscriptable(cx, c); }
     }
 }
 static inline ail_st ail_op_setitem(ail_ctx *cx, ail_obj c, ail_obj key, ail_obj val) {
@@ -16151,8 +16162,7 @@ static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int h
         *out = ail_range_new(cx, (int64_t)ns, (int64_t)ne, (int64_t)nd);
         return AIL_OK;
     }
-    char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail__tname_c(c));
-    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    return ail__raise_not_subscriptable(cx, c);
 }
 
 /* ===================================================================================
