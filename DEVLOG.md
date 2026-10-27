@@ -3277,6 +3277,9 @@ helper and rendered the dict as its keys. Incompatible non-numeric element types
 tuple rewrite, leaving the source as written so the generic path prints the real objects. The
 numeric family still falls back as in job-rbfuzz54, and `bool` mixed with `int` types as `int`.
 Added `test_ail_fuzz54.py` and registered it.
+## 2026-10-24 - job-rbfuzz63-10241240
+
+- Re-applied the accepted fuzz63 change on this tree. The sign-of-zero float remainder fix is already present here through the CPython `float_divmod` helpers (`ail_obj_ffloormod` / `ail_obj2_ffloormod` use `copysign(0.0, divisor)` for a zero remainder), so both sides' fixes are kept: `-0.0 % 1.0` is `0.0` and `0.0 % -1.0` is `-0.0` on the general, unified and boxed paths. Added `AIL_CURRENT/test_ail_fuzz63.py` (literal, argument, list, dict, attribute, augmented-assignment, chained and nonzero boundary cases on both builds) and registered it in `ail_check.py`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
