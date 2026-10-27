@@ -138,6 +138,63 @@ class _Handler(ast.NodeTransformer):
             return self.call('_ail_exc_arg', [ast.Name(self.name, ast.Load()), index], node)
         return self.generic_visit(node)
 
+    # -- aliases: e.args[i] is kept as its text on this path, so a value stored in a name, a container,
+    #    an attribute or a user function would print differently when repr() reads it later.  Refuse
+    #    that by name; the default build then takes the general path, which keeps the argument object.
+    def args_element(self, node):
+        return (isinstance(node, ast.Subscript) and self.is_args(node.value)
+                and not isinstance(node.slice, ast.Slice))
+
+    def mentions_args(self, node):
+        return any(self.args_element(n) for n in ast.walk(node))
+
+    def leaked_alias(self, node):
+        if self.args_element(node):
+            return 'direct'
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return 'container' if any(self.leaked_alias(e) for e in node.elts) else None
+        if isinstance(node, ast.Dict):
+            for e in list(node.keys) + list(node.values):
+                if e is not None and self.leaked_alias(e):
+                    return 'container'
+        return None
+
+    def refuse_alias(self, node):
+        from pyfront import Unsupported
+        raise Unsupported('storing an exception argument e.args[i] in a variable, a list, a tuple, a dict, '
+                          'an attribute or a function argument (the typed path keeps e.args[i] as text, so '
+                          'repr() of the stored value would differ from CPython)')
+
+    def visit_Assign(self, node):
+        if self.mentions_args(node.value):
+            self.refuse_alias(node)
+        return self.generic_visit(node)
+
+    def visit_AnnAssign(self, node):
+        if node.value is not None and self.mentions_args(node.value):
+            self.refuse_alias(node)
+        return self.generic_visit(node)
+
+    def visit_AugAssign(self, node):
+        if self.mentions_args(node.value):
+            self.refuse_alias(node)
+        return self.generic_visit(node)
+
+    _TEXT_CALLS = frozenset(('print', 'str', 'repr', 'int', 'float', 'len', 'isinstance', 'type', 'bool', 'format'))
+
+    def stored_alias_in_call(self, node):
+        if isinstance(node.func, ast.Name):
+            text_call = node.func.id in self._TEXT_CALLS
+        elif isinstance(node.func, ast.Attribute):
+            text_call = node.func.attr == 'format'
+        else:
+            text_call = False
+        for arg in list(node.args) + [kw.value for kw in node.keywords]:
+            leak = self.leaked_alias(arg)
+            if leak == 'container' or (leak == 'direct' and not text_call):
+                return True
+        return False
+
     # -- text contexts
     def arg_repr(self, node):
         """`repr(e.args[i])` keeps the argument's kind: a numeric argument is not its textual form."""
@@ -155,6 +212,8 @@ class _Handler(ast.NodeTransformer):
         return self.generic_visit(node)
 
     def visit_Call(self, node):
+        if self.stored_alias_in_call(node):
+            self.refuse_alias(node)
         func = node.func
         if isinstance(func, ast.Name):
             if func.id == 'print':
