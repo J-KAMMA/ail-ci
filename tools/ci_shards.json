@@ -388,6 +388,7 @@
   "test_ail_pre36": 28.6,
   "test_ail_pre361": 38.8,
   "test_ail_pre365": 38.8,
+  "test_ail_pre375": 38.8,
   "test_ail_pre39": 197.4,
   "test_ail_pre41": 49.9,
   "test_ail_pre42": 52.9,
@@ -919,6 +920,7 @@
    "test_ail_pre307",
    "test_ail_pre311",
    "test_ail_pre365",
+   "test_ail_pre375",
    "test_ail_slow_patterns",
    "test_ail_source_check",
    "test_ail_string_repeat_fusion"

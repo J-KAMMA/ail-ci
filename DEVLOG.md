@@ -1,3 +1,27 @@
+## 2026-10-27 -- pre375: walrus and `for`-target class receivers are refused by name (job-pre375-10280558)
+
+Reproduced the first still-differing pre-existing item from the pre361 review on this tree.  Its
+p6 shape (``y = C; y().f()``) is already refused by name after pre361; the p15/p16 walrus and
+``for`` target shapes still compiled on both builds and stopped with ``AttributeError: 'C'
+object has no attribute 'g'`` where CPython prints 55.  ``refuse_field_method_call`` now puts a
+walrus target and each value a ``for`` iterable is seen to hold into its assignment table: a
+list/tuple/set literal, a name bound to one, an instance field, a subscript of one and an
+argument list (including a method argument and a keyword argument), with the same scope rules as
+the existing assignment pass.  A ``for`` target that rebinds a parameter is resolved through a
+separate walrus/loop rebinding table, so a plain reassignment still does not refactor the
+parameter's call-site resolution.  A comprehension target is deliberately left alone (adding it
+to the enclosing scope would make an unrelated later name look like a possible class), and the
+existing unrelated-class, direct-call and no-feature routes are unchanged.
+
+Probes in ``/tmp/probes/pre375`` on both builds via ``cmp.sh``: ``p06_alias``, ``p06_gcall``,
+``p15_walrus``, ``p15_walrus_g``, ``p16_for``, ``p16_for_tuple``, ``b01``-``b05``,
+``b08``, ``b11``, ``b12``, ``b13``, ``b14``, ``c01``-``c05``, ``c10``, ``c11``, ``c13``,
+``c17`` and ``c19`` are refused by name (``also stores an instance field named f``); ``b06``
+(empty iterable), ``b07``/``c06``-``c08``/``c14``/``c18`` (unrelated class), ``b09``, ``b10``,
+``b15``, ``c09``, ``c12``, ``c15`` (plain parameter reassignment), ``c16`` (other function) and
+``c18`` match CPython.  Final-state tests: test_ail_pre375, test_ail_pre361, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (5 modules, 255 s, 0 failed).
+``tools/update_manifest.py`` was run and ``--check`` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
