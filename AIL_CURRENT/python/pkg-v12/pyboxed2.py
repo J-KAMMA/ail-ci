@@ -2278,6 +2278,8 @@ class Compiler(boxclosure.ClosureMixin):
         self.mix_guard_checks = {}
         self.class_values = []     # classes used as values (a call through a value may construct one)
         self.evaluating_class_attrs = set()   # slots whose value is being compiled (re-entrancy guard)
+        self.class_init_index = {}  # class name -> index in g_class_init_arr (CPython binds the name after the body)
+        self.class_init_active = set()  # class names whose body is being evaluated at compile time
         self.user_method_names = frozenset()   # every method name a class of the program defines
         self.uses_argv = False     # sys.argv: main takes argc / argv
         self.bytes_prelude = False # bytes / bytearray are the classes of prelude_bytes.py
@@ -2407,6 +2409,7 @@ class Compiler(boxclosure.ClosureMixin):
                 self._register_function(n)
             elif isinstance(n, ast.ClassDef):
                 self._register_class(n)
+        self.class_init_index = {name: index for index, name in enumerate(self.class_order)}
         self.rebound_functions = _rebound_function_names(tree, self.functions)
 
         self.user_method_names = frozenset(m for c in self.classes.values() for m in c['methods'])
@@ -2564,6 +2567,7 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append('static int64_t g_attr_%s;\n' % a)
         parts.append('\n/* ---- module-lifetime GC root: classes + module globals ---- */\n')
         parts.append('static ail_obj g_slots_arr[%d];\n' % max(ng, 1))
+        parts.append('static int g_class_init_arr[%d];\n' % max(len(self.class_order), 1))
         parts.append('static ail_frame g_frame;\n')
         parts.append('\n/* ---- forward declarations ---- */\n')
         parts.extend(self.top_decls)
@@ -5031,6 +5035,43 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('a bytes literal (b"...") -- not modelled by the general path')
         raise Unsupported('a constant of type %s' % type(v).__name__)
 
+    def _check_class_name_bound(self, name, ctx):
+        """CPython binds a class name only after its body runs, so a read of the class's own
+        name while its body is being evaluated is a NameError.  The class objects here are all
+        created at startup, so an explicit per-class flag carries the not-yet-bound state."""
+        index = self.class_init_index.get(name)
+        if index is None:
+            return
+        ctx.emit('if (g_class_init_arr[%d]) { st = ail_raise_c(cx, AIL_B_NAMEERROR, '
+                 '"name \'%s\' is not defined"); goto %s; }'
+                 % (index, name, ctx.cur_err_target()))
+        ctx.uses_st = True
+
+    def _refuse_class_name_genexp(self, value):
+        """A generator expression is materialised eagerly here, so one in a class body that reads
+        the class's own name cannot keep CPython's late binding; refuse it by name instead."""
+        active = self.class_init_active
+        if not active:
+            return
+
+        def walk(node):
+            if isinstance(node, ast.Lambda):
+                return
+            if isinstance(node, ast.GeneratorExp):
+                names = {inner.id for inner in ast.walk(node)
+                         if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load)}
+                if names & active:
+                    name = sorted(names & active)[0]
+                    raise Unsupported(
+                        'a generator expression in the class body reads the '
+                        'class name %s, which CPython binds only after the body; write instead: '
+                        'build the generator after the class definition' % name)
+                return
+            for child in ast.iter_child_nodes(node):
+                walk(child)
+
+        walk(value)
+
     def expr_Name(self, node, ctx):
         if node.id in ('True', 'False'):
             return 'ail_box_bool(%d)' % (1 if node.id == 'True' else 0)
@@ -5059,6 +5100,7 @@ class Compiler(boxclosure.ClosureMixin):
             # only the "class used as a plain value" shape is covered here.
             # A local/parameter of the same name shadows the class, and a module-level assignment
             # to the name rebinds it: those go through the ordinary name lookup below.
+            self._check_class_name_bound(node.id, ctx)
             return 'g_slots_arr[%d]' % self.global_slots['class:' + node.id]
         if node.id in ctx.nested_funcs:
             raise Unsupported('using function %s as a first-class value' % node.id)
@@ -5856,6 +5898,8 @@ class Compiler(boxclosure.ClosureMixin):
                   and node.value.id not in ctx.slot_of and node.value.id not in self.module_names)
         value_kind = self.infer_kind(node.value, ctx)
         cname = node.value.id if direct else (value_kind[6:] if value_kind and value_kind.startswith('class:') else None)
+        if direct:
+            self._check_class_name_bound(cname, ctx)
         if cname is not None:
             owner, hit = self._class_chain_definition(cname, node.attr)
             if hit is not None and (direct or hit[0] in ('m', 'p')):
@@ -6891,12 +6935,17 @@ class Compiler(boxclosure.ClosureMixin):
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
         saved = ctx.class_locals
+        index = self.class_init_index.get(name)
+        if index is not None:
+            ctx.emit('g_class_init_arr[%d] = 1;' % index)
+            self.class_init_active.add(name)
         try:
             for _aname, aval, slot in self.classes[name].get('class_attrs', []):
                 # The class body runs in its own namespace: an earlier attribute is visible to a
                 # later one (and, for a comprehension, to its outermost iterable only).  Bind the
                 # name after evaluating the value, as CPython does, so `x = x + 1` reads the outer x.
                 ctx.class_locals = self._class_attr_locals(name, slot)
+                self._refuse_class_name_genexp(aval)
                 self.evaluating_class_attrs.add(slot)
                 try:
                     v = self.expr(aval, ctx)
@@ -6912,6 +6961,9 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
         finally:
             ctx.class_locals = saved
+            if index is not None:
+                self.class_init_active.discard(name)
+                ctx.emit('g_class_init_arr[%d] = 0;' % index)
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
             # `global` declaration) rebinds the module slot: do that binding HERE, at the
@@ -6933,12 +6985,21 @@ class Compiler(boxclosure.ClosureMixin):
             saved = ctx.class_locals
             if cname is not None:
                 ctx.class_locals = self._class_attr_locals(cname, slot)
+            index = self.class_init_index.get(cname) if cname is not None else None
+            own_init = index is not None and cname not in self.class_init_active
+            if own_init:
+                ctx.emit('g_class_init_arr[%d] = 1;' % index)
+                self.class_init_active.add(cname)
             self.evaluating_class_attrs.add(slot)
             try:
+                self._refuse_class_name_genexp(value)
                 v = self.expr(value, ctx)
             finally:
                 self.evaluating_class_attrs.discard(slot)
                 ctx.class_locals = saved
+                if own_init:
+                    self.class_init_active.discard(cname)
+                    ctx.emit('g_class_init_arr[%d] = 0;' % index)
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
             ctx.indent -= 1
             ctx.emit('}')
@@ -6953,6 +7014,7 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _call_class(self, name, args, kwargs, ctx):
         cls = self.classes[name]
+        self._check_class_name_bound(name, ctx)
         info = self._resolve_method(name, '__init__')
         t = ctx.tmp()
         ctx.emit('%s = ail_inst_new(cx, g_slots_arr[%d]);' %
@@ -7807,6 +7869,8 @@ class Compiler(boxclosure.ClosureMixin):
             if not isinstance(tnode, ast.Name):
                 raise Unsupported('isinstance() with a non-name type argument')
             tname = tnode.id
+            if tname in self.classes:
+                self._check_class_name_bound(tname, ctx)
             if tname == 'int':
                 checks.append('(%s.tag==AIL_T_INT||%s.tag==AIL_T_BOOL)' % (v, v))
             elif tname in TYPE_TAG:
@@ -9073,6 +9137,7 @@ class Compiler(boxclosure.ClosureMixin):
         if (isinstance(recv, ast.Name) and recv.id in self.classes and recv.id not in ctx.slot_of
                 and recv.id not in self.module_names):
             # `C.f(...)` of a @staticmethod: the function itself, with the arguments as written; of a @classmethod: C first
+            self._check_class_name_bound(recv.id, ctx)
             info = self._resolve_method(recv.id, f.attr)
             if info is not None and info.get('is_classmethod'):
                 argcs = ['g_slots_arr[%d]' % self.global_slots['class:' + recv.id]] + \
@@ -9090,6 +9155,7 @@ class Compiler(boxclosure.ClosureMixin):
         if (isinstance(recv, ast.Name) and recv.id in self.classes and recv.id not in ctx.slot_of
                 and recv.id not in self.module_names and args and not isinstance(args[0], ast.Starred)):
             # `Base.m(self, x)`: the method as Base resolves it, called on the object passed first
+            self._check_class_name_bound(recv.id, ctx)
             info = self._resolve_method(recv.id, f.attr)
             if info is not None and info.get('is_method') and not info.get('is_static'):
                 first = self.expr(args[0], ctx)
@@ -11423,6 +11489,7 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.uses_st = True
                 return
             if tname in self.classes:
+                self._check_class_name_bound(tname, ctx)
                 ctx.emit('st = ail_raise(cx, g_slots_arr[%d], %s); goto %s;' %
                         (self.global_slots['class:' + tname], msg_c, ctx.cur_err_target()))
                 ctx.uses_st = True
@@ -11553,6 +11620,7 @@ class Compiler(boxclosure.ClosureMixin):
                     if t.id in EXC_IDS:
                         conds.append('ail_exc_matches_b(cx, %s)' % EXC_IDS[t.id])
                     else:
+                        self._check_class_name_bound(t.id, ctx)
                         conds.append('ail_exc_matches(cx, g_slots_arr[%d])' %
                                      self.global_slots['class:' + t.id])
             kw = 'if' if first else 'else if'

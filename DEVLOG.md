@@ -1,3 +1,32 @@
+## 2026-10-27 -- pre381: a class body cannot read its own name (job-pre381-10280717)
+
+The pre362 review's first still-differing pre-existing item reproduced on this tree: rp28
+(`class C: y = C`), rp22 (`class C: y = (lambda: C)()`) and rp27 (the comprehension form) all
+printed `<class '__main__.C'>` with exit 0 on both builds, where CPython raises `NameError`
+because the class name is bound only after its body runs.  The cause was that every class object
+is created and rooted in `g_slots_arr` during startup, so `expr_Name` handed out a class name
+whose binding did not exist yet in CPython.
+
+`pyboxed2.Compiler` now gives each class an index into a `g_class_init_arr` flag.  `_init_class_attrs`
+(and the lazy `_class_attr_value` fallback) sets it while the body is evaluated and clears it
+afterwards; `expr_Name`, `_call_class`, `_b_isinstance`, the `C.attr`/static/classmethod receiver
+paths and `raise`/`except` class names emit a `NameError` check against it.  A class body
+generator expression that reads its own name is refused by name, since the general path
+materialises generator expressions eagerly rather than deferring them.  A module binding made
+before the class, and any read after the class body (method body, stored instance), are unchanged.
+
+Probes in `/tmp/probes` (28 programs, both builds via `cmp.sh`): 24 match CPython, including
+direct, lambda call, list/set/dict comprehension, `C.__name__`, `C.attr`, list item, dict value,
+argument, lambda argument, nested lambda, `isinstance`, classmethod, raise/except from a called
+function, prior `C = 5`, an unrelated earlier class, a later class value, a deferred method, a
+deferred instance, plus a plain class and a class-free program.  4 are refused by name: a default
+using the class, `class A: x = A()`, and the stored/consumed generator expressions.
+
+Tests run on the final tree: `test_ail_pre381.py` (new), `test_ail_pre304`, `test_ail_pre319`,
+`test_ail_pre324`, `test_ail_pre347`, `test_ail_pre363`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3`; all pass (8 modules in 587s with `-j 2` for the existing ones).
+`test_ail_pre381.py` is registered in `tools/ci_shards.json` with weight 38.8, and
+`tools/update_manifest.py` was run.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
