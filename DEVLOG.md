@@ -1,3 +1,19 @@
+## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbpre322-10272241)
+
+Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
+only conflict was in `_check_int64_literals`: this tree already had `_safe_module_containers` and
+`_known_class_attributes`, so both were kept, while the new `_all_bound_names` /
+`_scope_constant_map` map supplies scalars and safe aliased containers and its `program_bound` is
+passed to `_Int64CallChecker`.  `test_ail_pre322.py` is registered next to `test_ail_pre321`, and
+`tools/ci_shards.json` gained its weight (10.0).  `tools/diff_ids.py` is not present on this tree.
+
+Probes in `/tmp/probes` (26 programs, both builds via `cmp.sh`): `p01`-`p10` are refused by name
+(`int() of a float outside int64 ... big integer`) for module/function/chain/tuple/dict/
+negative/computed-index/wrapper/boundary/builtin-`len` aliases; `m01`-`m17` match CPython
+(in-range list/tuple/dict aliases, mutated/rebound/empty/printed aliases, module and enclosing
+`len`/`repr`/`print` shadows, plus values through an argument, a list item, an attribute and a
+dict value).
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function
