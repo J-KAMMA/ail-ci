@@ -1,3 +1,18 @@
+## 2026-10-27 -- pre323: clamp constant slice bounds outside int64 (job-pre323-10271554)
+
+The first still-differing rbrbrbpre7 item was `del a[2**63:]`: both builds refused it with
+`int64 constant out of range` where CPython clamps the slice bound to the sequence length.  A
+constant lower/upper bound whose exact value leaves int64 is now rewritten to INT64_MAX/INT64_MIN
+in `pyfront.fold_int_constants` (before both builds) and in `ail_chatgpt._clamp_slice_bounds`
+(before the front-end constant checks), so reads, assignments and deletes on list, tuple, str,
+bytes and bytearray match CPython.  A constant step or index outside int64 is still refused by
+name.  `test_ail_pre19.py` now expects the slice-bound case to match (its index/step refusals are
+kept), and `test_ail_pre323.py` covers the del/read/assign forms, types, negative extremes,
+empty/aliased containers, int64 boundaries, cancellation and the argument/list-item/attribute/
+dict-value routes on both builds.  Probes in `/tmp/probes/pre323` (14 programs) all match CPython
+or are refused by name; `test_ail_pre323`, `test_ail_pre19` and `test_ail_pre7` pass.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an

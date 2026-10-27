@@ -244,7 +244,10 @@ def fold_int_constants(source):
             return keyword.arg == 'maxsplit'
         return node in call.args[1:2]
 
-    def visit(node, parent=None, grandparent=None):
+    def visit(node, parent=None, grandparent=None, slice_bound=False):
+        if isinstance(parent, ast.Slice) and any(
+                node is part for part in (parent.lower, parent.upper) if part is not None):
+            slice_bound = True
         if isinstance(node, ast.JoinedStr):
             # An f-string's source text is observable in a debug field (`f"{expr=}"`), so leave
             # its expressions exactly as written; the emitters' own constant folders still run.
@@ -258,7 +261,13 @@ def fold_int_constants(source):
                 refuse(node)
             if value is not None:
                 if not _INT64_MIN <= value <= _INT64_MAX:
-                    refuse(node)
+                    if not slice_bound:
+                        refuse(node)
+                    start = starts[node.lineno - 1] + node.col_offset
+                    end = starts[node.end_lineno - 1] + node.end_col_offset
+                    clamp = _INT64_MAX if value > 0 else _INT64_MIN
+                    edits.append((start, end, str(clamp).encode('ascii')))
+                    return
                 # Fold only when the arithmetic would overflow an int64 intermediate (as in
                 # `2**63 - 1`) or when the value itself does not fit (refused above). Ordinary
                 # in-range constants are left as written so the typed/general path choice and
@@ -270,7 +279,7 @@ def fold_int_constants(source):
                 edits.append((start, end, str(value).encode('ascii')))
                 return
         for child in ast.iter_child_nodes(node):
-            visit(child, node, parent)
+            visit(child, node, parent, slice_bound)
 
     def identifier_byte(byte):
         return (48 <= byte <= 57 or 65 <= byte <= 90 or 97 <= byte <= 122

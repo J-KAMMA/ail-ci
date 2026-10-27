@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 """pre19: `del` with a constant bound whose *exact final value* leaves int64 is refused by name.
 
-CPython's int is unbounded, so a constant `del` index or slice bound can pass through an
+CPython's int is unbounded, so a constant `del` index or slice step can pass through an
 out-of-int64 intermediate and still name a valid element, e.g. `del a[2**63 * 0]` or
 `del a[(10**20) // (10**19)]`.  The pre269 constant-index pass folds the whole expression and
-range-checks only the final value; this helper follows the same rule.  A final value outside
-int64 (or a constant too large to fold) is refused at compile time on both paths.  Representable
+range-checks only the final value; this helper follows the same rule.  A final index or step
+value outside int64 (or a constant too large to fold) is refused at compile time on both paths.
+A constant slice lower/upper bound outside int64 is clamped to the nearest int64 bound, exactly
+what CPython's slice.indices() does after clamping to the sequence length (pre323).  Representable
 boundaries such as `2**63 - 1` and `-2**63` still build and then behave like CPython (here an
 IndexError at run time).
 """
@@ -25,7 +27,6 @@ REFUSED = (
     'a = [1, 2, 3]\nprint(a)\ndel a[2**63]\nprint(a)\n',
     'a = [1, 2, 3]\nprint(a)\ndel a[-2**63 - 1]\nprint(a)\n',
     'a = [1, 2, 3]\nprint(a)\ndel a[2**100000]\nprint(a)\n',
-    'a = [1, 2, 3]\nprint(a)\ndel a[2**100:2**101]\nprint(a)\n',
     'a = list(range(8))\nprint(a)\ndel a[::2**100]\nprint(a)\n',
     'a = [[1, 2], [3]]\nprint(a)\ndel a[0][2**63]\nprint(a)\n',
 )
@@ -44,6 +45,9 @@ print("del-add", a)
 a = [0, 1, 2, 3, 4]
 del a[-(1 << 63) >> 62]
 print("del-negative", a)
+a = [1, 2, 3]
+del a[2**100:2**101]
+print("del-slice", a)
 a = list(range(6))
 print(a)
 del a[1 + 1]

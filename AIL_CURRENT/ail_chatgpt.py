@@ -2006,6 +2006,27 @@ def _constant_int_exact(node, _limit=_CONST_INT_BITS):
     return True, value
 
 
+def _clamp_slice_bounds(tree):
+    """Rewrite a constant slice lower/upper bound that int64 cannot hold to the nearest int64
+    bound. CPython's slice.indices() clamps a bound to the sequence length (or to -1/len for a
+    negative step), so `a[2**63:]`, `del a[:-(2**63) - 1]` and their assignments select exactly
+    what the extreme int64 bound selects. A step is left alone: a huge step is still the
+    construct the constant checks refuse by name."""
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Slice):
+            continue
+        for name in ('lower', 'upper'):
+            bound = getattr(node, name)
+            if bound is None:
+                continue
+            ok, value = _constant_int_exact(bound)
+            if not ok or value is _CONST_INT_TOO_BIG or _INT64_MIN <= value <= _INT64_MAX:
+                continue
+            replacement = ast.copy_location(
+                ast.Constant(value=_INT64_MAX if value > 0 else _INT64_MIN), bound)
+            setattr(node, name, replacement)
+
+
 def _check_int64_constants(tree):
     """Refuse a constant integer expression outside int64 in a module/class assignment or a
     default argument, where the construct used to compile and trap at run time. Function and
@@ -2461,6 +2482,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 if local_imports:
                     _check_importable(tree)
             if not declarations_only:
+                _clamp_slice_bounds(tree)
                 _check_int64_constants(tree)
                 _check_int64_literals(tree)
                 _check_int64_constant_positions(tree)
