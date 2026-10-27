@@ -1,3 +1,15 @@
+## 2026-10-27 -- pre349 follow-up: keep module class aliases refused (job-pre349-10280302)
+
+`_function_scope_stores` now counts a `class` statement as binding the class name (pre349), so
+`_scope_class_aliases` (pre283) treated every module-level `B = Box` as shadowing and stopped
+refusing `B.v = ...`, which made `test_ail_pre283` fail on both builds.  The alias check now
+accepts the class definition itself as the expected single binding: an alias is recorded when the
+class name is bound once, and still skipped when it is rebound or shadowed by an assignment, a
+parameter, a loop target or a closure cell.  Direct and container class stores, local aliases and
+the typed path are unchanged.  test_ail_pre283, test_ail_pre349, test_ail_typed_inherit and the
+required modules pass; 14 probes under `/tmp/probes/p283_*.py` match CPython or are refused by
+name on both builds.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C

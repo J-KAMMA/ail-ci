@@ -1369,8 +1369,16 @@ def _scope_class_aliases(scope, classes, stores, parameters, declared):
         name, value = target.id, statement.value.id
         if name in classes or name in parameters or name in declared or stores.get(name) != 1:
             continue
-        if value in stores or value in parameters or value in declared:
+        if value in parameters or value in declared:
             continue
+        if value in stores:
+            # A class statement binds the class name too, so the definition itself is the
+            # expected single binding; any other binding means the class name is shadowed.
+            by_definition = (value in classes and stores.get(value) == 1
+                             and any(isinstance(other, ast.ClassDef) and other.name == value
+                                     for other in scope.body))
+            if not by_definition:
+                continue
         if value in classes:
             aliases[name] = value
     return aliases
