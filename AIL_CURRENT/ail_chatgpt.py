@@ -1137,11 +1137,41 @@ def _flow_names(node):
     return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
 
 
+def _flow_containers(value, seen):
+    """Add every container reachable from `value` by identity to `seen`."""
+    if not isinstance(value, (list, tuple, dict)) or id(value) in seen:
+        return
+    seen.add(id(value))
+    members = value.values() if isinstance(value, dict) else value
+    for member in members:
+        _flow_containers(member, seen)
+
+
 def _invalidate_flow(state, node):
-    for name in _flow_names(node):
+    """Drop the names in `node` and every tracked name sharing a container with them.
+
+    A statement the walk cannot apply (a method call, `del`, an unsupported subscript store)
+    may mutate a container through one alias.  Any name denoting that same object, or
+    containing it, then no longer denotes its tracked value either, so a read through it must
+    not be refused on the old value.  The same statement also rebinds or mutates whatever it
+    names directly, which is the plain syntactic case.
+    """
+    names = _flow_names(node)
+    mutated = set()
+    for name in names:
+        tracked = state.get(name)
+        if tracked is not None and tracked.valid:
+            _flow_containers(tracked.value, mutated)
+    for name in names:
         tracked = state.get(name)
         if tracked is not None:
             tracked.valid = False
+    for tracked in state.values():
+        if tracked.valid:
+            seen = set()
+            _flow_containers(tracked.value, seen)
+            if seen & mutated:
+                tracked.valid = False
 
 
 def _flow_trackable(value):
@@ -1181,16 +1211,55 @@ def _check_flow_int_calls(node, lookup, int_params, int_shadowed):
                     _refuse_int64_conversion(sub, value)
 
 
+def _flow_tracked(base, state):
+    return any(tracked.valid and tracked.value is base for tracked in state.values())
+
+
+def _flow_bound(node, lookup):
+    if node is None:
+        return None
+    value = _constant_value(node, lookup, lambda unused: True, {})
+    return value if type(value) in (int, bool) else _UNKNOWN
+
+
+def _flow_slice(node, lookup):
+    return (_flow_bound(node.lower, lookup), _flow_bound(node.upper, lookup),
+            _flow_bound(node.step, lookup))
+
+
+def _flow_apply_slice(base, key, value_node, lookup, delete):
+    if not isinstance(base, list) or _UNKNOWN in key:
+        return False
+    value = None
+    if not delete:
+        value = _constant_value(value_node, lookup, lambda unused: True, {})
+        if not isinstance(value, (list, tuple, str, bytes)):
+            return False
+    trial = list(base)
+    try:
+        if delete:
+            del trial[slice(*key)]
+        else:
+            trial[slice(*key)] = value
+    except (ValueError, TypeError):
+        return False
+    base[:] = trial
+    return True
+
+
 def _apply_flow_store(target, value_node, lookup, state):
     """Apply `base[key] = value` to the tracked object; False when it is not statically known."""
     base = _constant_value(target.value, lookup, lambda unused: True, {})
+    if not _flow_tracked(base, state):
+        return False
+    if isinstance(target.slice, ast.Slice):
+        return _flow_apply_slice(base, _flow_slice(target.slice, lookup), value_node,
+                                 lookup, False)
     key = _constant_value(target.slice, lookup, lambda unused: True, {})
     if key is _UNKNOWN:
         return False
-    if not any(tracked.valid and tracked.value is base for tracked in state.values()):
-        return False
     if isinstance(base, list):
-        if type(key) is not int or not -len(base) <= key < len(base):
+        if type(key) not in (int, bool) or not -len(base) <= key < len(base):
             return False
         if key < 0:
             key += len(base)
@@ -1208,6 +1277,83 @@ def _apply_flow_store(target, value_node, lookup, state):
         except TypeError:
             return False
         return True
+    return False
+
+
+def _apply_flow_delete(statement, lookup, state):
+    """Apply `del base[key]` to the tracked object; False when it is not statically known."""
+    if len(statement.targets) != 1 or not isinstance(statement.targets[0], ast.Subscript):
+        return False
+    target = statement.targets[0]
+    base = _constant_value(target.value, lookup, lambda unused: True, {})
+    if not _flow_tracked(base, state) or not isinstance(base, (list, dict)):
+        return False
+    if isinstance(target.slice, ast.Slice):
+        return _flow_apply_slice(base, _flow_slice(target.slice, lookup), None, lookup, True)
+    key = _constant_value(target.slice, lookup, lambda unused: True, {})
+    if key is _UNKNOWN:
+        return False
+    try:
+        del base[key]
+    except (IndexError, KeyError, TypeError):
+        return False
+    return True
+
+
+def _apply_flow_call(call, lookup, state):
+    """Apply a mutation method on the tracked object; False when it is not statically known."""
+    if not isinstance(call.func, ast.Attribute) or call.keywords:
+        return False
+    base = _constant_value(call.func.value, lookup, lambda unused: True, {})
+    if not _flow_tracked(base, state):
+        return False
+    attribute = call.func.attr
+    if isinstance(base, list):
+        if attribute == 'append' and len(call.args) == 1:
+            value = _constant_value(call.args[0], lookup, lambda unused: True, {})
+            if value is _UNKNOWN:
+                return False
+            base.append(value)
+            return True
+        if attribute == 'pop' and len(call.args) <= 1:
+            key = -1
+            if call.args:
+                key = _constant_value(call.args[0], lookup, lambda unused: True, {})
+                if type(key) not in (int, bool):
+                    return False
+            if not -len(base) <= key < len(base):
+                return False
+            base.pop(key)
+            return True
+        if attribute == 'clear' and not call.args:
+            base.clear()
+            return True
+        return False
+    if isinstance(base, dict):
+        if attribute == 'clear' and not call.args:
+            base.clear()
+            return True
+        if attribute == 'pop' and len(call.args) == 1:
+            key = _constant_value(call.args[0], lookup, lambda unused: True, {})
+            if key is _UNKNOWN:
+                return False
+            try:
+                base.pop(key)
+            except (KeyError, TypeError):
+                return False
+            return True
+        return False
+    return False
+
+
+def _flow_mutating_use(node, functions):
+    """Whether an expression contains a call that could mutate something it names."""
+    for sub in ast.walk(node):
+        if isinstance(sub, ast.Call):
+            if isinstance(sub.func, ast.Attribute):
+                return True
+            if isinstance(sub.func, ast.Name) and sub.func.id in functions:
+                return True
     return False
 
 
@@ -1234,14 +1380,17 @@ def _check_flow_int64_containers(tree, global_names, int_params, int_shadowed):
     static pass would refuse when no mutation followed.  A mutation before the read updates the
     tracked value instead, so `a[0]=1.5; int(a[0])` still prints 1.  Any use that could observe
     or cause an untracked value (a call, a loop, a name read inside a function or class) drops
-    the name, and only straight-line module statements are checked, so a value is refused only
-    when the program definitely reads it.
+    the name, and every other name sharing or containing that container, since a mutation
+    through one alias changes what the others denote.  Only straight-line module statements
+    are checked, so a value is refused only when the program definitely reads it.
     """
     sealed = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             sealed |= _flow_names(node)
     bindable = _flow_bindable(tree)
+    functions = {node.name for node in tree.body
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
     state = {}
 
     def lookup(name):
@@ -1259,11 +1408,18 @@ def _check_flow_int64_containers(tree, global_names, int_params, int_shadowed):
                     continue
             if isinstance(statement, _FLOW_STATEMENTS):
                 _check_flow_int_calls(statement, lookup, int_params, int_shadowed)
+            if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Call):
+                if _apply_flow_call(statement.value, lookup, state):
+                    continue
+            if isinstance(statement, ast.Delete) and _apply_flow_delete(statement, lookup, state):
+                continue
             if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
                 target = statement.targets[0]
                 if isinstance(target, ast.Name):
                     name = target.id
                     value = _constant_value(statement.value, lookup, lambda unused: True, {})
+                    if _flow_mutating_use(statement.value, functions):
+                        _invalidate_flow(state, statement)
                     if (name not in sealed and name not in global_names
                             and name in bindable and _flow_trackable(value)):
                         state[name] = _FlowValue(value)

@@ -1,3 +1,33 @@
+## 2026-10-27 -- pre355 review: a mutation through one alias now invalidates the others (job-pre355-10280140)
+
+The pre355 review's defect 1: a mutation the walk could not apply (`a.pop()`, `del a[0]`,
+`a.clear()`, a slice or bool-key store, a store of a non-constant value, or a method call in an
+assignment RHS) invalidated only the names written in that statement, so another name aliasing
+the same list/dict kept the pre-mutation value and a later in-range read through it was refused
+where base and CPython print 1.  `_invalidate_flow` now also drops every tracked name whose
+container graph shares or contains the mutated object, so no alias stays stale; a name inside a
+list, tuple or dict that holds the mutated container is dropped too.
+
+The mutations the reviewer probes are now applied exactly instead of dropped: `list.append`,
+`list.pop`, `dict.pop`, `clear`, `del`, and a constant slice store update the tracked container
+in place (tried on a copy and committed), and a bool is accepted as an index.  `x = a.pop()`
+also drops the container because the assignment RHS contains a call on a name or a module
+function; a pure builtin call (`x = len(a)`) does not, so the later refusal survives.
+`_apply_flow_*` return False for anything not statically known (`append` of an unknown value,
+an out-of-range index, a step slice whose length does not match) and the fallback is the alias
+invalidation above.
+
+Probes `/tmp/probes/q01-q30` (30 programs, both builds): 26 match CPython (including every
+case in the review: `pop`+`append`, `del`, `clear`, slice store, bool key, `float("1.5")`
+store, through a list/tuple/dict holding the alias, a second alias, and `x = a.pop()`), and 4
+are refused by name (`q14` read before the mutation; `q19` a `pop` that leaves 1e300 at index
+0; `q20` an `append` that keeps 1e300 at index 0; `q25` a pure `len` call keeps the read
+tracked) with `int() of a float outside int64`.  No probe is an `integer overflow`.
+
+Added the review cases and the boundaries to `AIL_CURRENT/test_ail_pre355.py` (3 tests, 46
+programs, both builds): `test_ail_pre355` ran 125.7 s, OK.  Required modules run on the final
+commit: test_ail_pre355, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3.
+
 ## 2026-10-27 -- pre355: int() before a later container mutation is refused (job-pre355-10280140)
 
 The rbrbpre322 reviewer's first pre-existing item reproduced on both builds: `items=[1e300];

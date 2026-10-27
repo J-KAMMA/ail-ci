@@ -9,8 +9,11 @@ A forward walk over the module statements now tracks the value each name denotes
 the read by name (`int() of a float outside int64`, or `int64 constant expression out of range`
 for out-of-range text) when it happens before the mutation.  A mutation before the read updates
 the tracked value instead, so the same program still prints CPython's 1, and a call, loop or
-function-body use keeps the name unfolded.  Programs are built with the general path forced and
-with the default build; stdout and the exit status must match CPython.
+function-body use keeps the name unfolded.  List and dict mutations whose operands are known
+(`append`, `pop`, `clear`, `del`, a slice store) are applied to the tracked container; any
+other statement that names it also drops every alias and every tracked container holding it,
+so a mutation through one name is never missed through another.  Programs are built with the
+general path forced and with the default build; stdout and the exit status must match CPython.
 """
 import os
 import shutil
@@ -176,6 +179,24 @@ int(a[0][0])
 a[0][0] = 1.5
 print(int(rows[0][0]))
 ''',
+    'pop_alias_leaves_value': '''
+items = [1e300, 2.5]
+a = items
+a.pop()
+print(int(items[0]))
+''',
+    'append_alias_keeps_value': '''
+items = [1e300]
+a = items
+a.append(1.5)
+print(int(items[0]))
+''',
+    'pure_call_read': '''
+items = [1e300]
+a = items
+x = len(a)
+print(int(items[0]))
+''',
 }
 
 REFUSED_TEXT = {
@@ -268,6 +289,119 @@ items = [1.9]
 a = items
 a.append(2.5)
 print(int(items[0]))
+''',
+    'pop_append_alias': '''
+items = [1e300]
+a = items
+a.pop()
+a.append(1.5)
+print(int(items[0]))
+''',
+    'del_append_alias': '''
+items = [1e300]
+a = items
+del a[0]
+a.append(1.5)
+print(int(items[0]))
+''',
+    'clear_append_alias': '''
+items = [1e300]
+a = items
+a.clear()
+a.append(1.5)
+print(int(items[0]))
+''',
+    'slice_store_alias': '''
+items = [1e300]
+a = items
+a[0:1] = [1.5]
+print(int(items[0]))
+''',
+    'bool_key_store_alias': '''
+items = [1e300]
+a = items
+a[False] = 1.5
+print(int(items[0]))
+''',
+    'call_value_store_alias': '''
+items = [1e300]
+a = items
+a[0] = float("1.5")
+print(int(items[0]))
+''',
+    'list_containing_alias': '''
+items = [1e300]
+rows = [items]
+a = items
+a.pop()
+a.append(1.5)
+print(int(rows[0][0]))
+''',
+    'dict_containing_alias': '''
+items = [1e300]
+d = {"v": items}
+a = items
+a.pop()
+a.append(1.5)
+print(int(d["v"][0]))
+''',
+    'tuple_containing_alias': '''
+items = [1e300]
+t = (items,)
+a = items
+a.pop()
+a.append(1.5)
+print(int(t[0][0]))
+''',
+    'negative_pop_alias': '''
+items = [1e300]
+a = items
+a.pop(-1)
+a.append(1.5)
+print(int(items[0]))
+''',
+    'two_aliases_clear': '''
+items = [1e300]
+a = items
+b = a
+a.clear()
+b.append(1.5)
+print(int(items[0]))
+''',
+    'alias_after_mutation': '''
+items = [1e300]
+a = items
+a.pop()
+b = items
+b.append(1.5)
+print(int(items[0]))
+''',
+    'assign_pop_alias': '''
+items = [1e300]
+a = items
+x = a.pop()
+a.append(1.5)
+print(int(items[0]))
+''',
+    'assign_pop_empty': '''
+items = [1e300]
+a = items
+x = a.pop()
+print(int(items[0]))
+''',
+    'dict_pop_alias': '''
+d = {"v": 1e300}
+a = d
+a.pop("v")
+a["v"] = 1.5
+print(int(d["v"]))
+''',
+    'dict_del_alias': '''
+d = {"v": 1e300}
+a = d
+del a["v"]
+a["v"] = 1.5
+print(int(d["v"]))
 ''',
 }
 
