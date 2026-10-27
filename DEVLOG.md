@@ -1,3 +1,16 @@
+## 2026-10-27 -- fuzz59 follow-up: keep list repr and `%r` on the typed path (job-rbfuzz59-10271222)
+
+The accepted fuzz59 re-apply broke four modules in the full suite: the generated list-repr
+helper emits `"%r" % (x,)`, and the typed path (`pyfunc._build_percent_value`) only knew
+`%s`, `%d` and the float conversions, so it refused `%r` on an int/float/bool; a `list[str]`
+helper additionally hit the typed path's refusal of `%r` on a str. `_build_percent_value` now
+lowers `%r` through the same `_repr_conv` that an f-string's `!r` and a `.format()` field's
+`!r` already use (int/float/bool spell repr and str the same, a str is quoted; a width or
+precision is still refused by name). `tuplegen.lrepr` keeps `%r` for int/float/bool and uses
+the generated str-repr helper for a `list[str]` slot. `test_ail_collections`,
+`test_ail_quirks`, `test_ail_tuples`, `test_ail_typed_blockers2`, `test_ail_fuzz59` and
+`test_ail_pre19` pass.
+
 ## 2026-10-27 -- re-apply fuzz59: built-in `%r` in list repr and pre19 delete bounds (job-rbfuzz59-10271222)
 
 Re-applied the accepted fuzz59 change on this tree. `tuplegen.lrepr` now formats scalar
