@@ -335,11 +335,13 @@ def _check_constant_power(node, parents, maxsplit):
     _check_constant_out_of_range(node, parents, maxsplit, skip_assignment=True)
 
 def _check_index_expression(slice_node):
-    """Refuse a constant subscript index that int64 cannot hold. A literal or signed literal is
-    already refused by _check_int64_literals with its own message, so only compound arithmetic is
-    read here. A step may leave int64 while the exact final index fits (`2**63 * 0`,
-    `(1 << 63) >> 62`); the whole expression is folded with the same size budget as the other
-    constant checks before the result is refused."""
+    """Refuse a constant subscript index whose exact value int64 cannot hold. A literal or signed
+    literal is already refused by _check_int64_literals with its own message, so only compound
+    arithmetic is read here. A step may leave int64 while the exact final index fits
+    (`2**63 - 2**63`, `2**63 * 0`, `(1 << 63) >> 62`); the whole expression is folded with the
+    code generator's size budget and then with the 4096-bit guarded exact fold, so a result that
+    comes back in range is kept. An inconclusive fold or an out-of-int64 result keeps the
+    per-step refusal."""
     literal = (isinstance(slice_node, ast.Constant)
                or isinstance(slice_node, ast.UnaryOp) and isinstance(slice_node.op, (ast.UAdd, ast.USub))
                and isinstance(slice_node.operand, ast.Constant))
@@ -351,6 +353,9 @@ def _check_index_expression(slice_node):
     except _Int64ConstantOverflow as overflow:
         value = _const_fold_int(slice_node)
         if value is not None and _INT64_MIN <= value <= _INT64_MAX:
+            return
+        ok, exact = _constant_int_exact(slice_node)
+        if ok and exact is not _CONST_INT_TOO_BIG and _INT64_MIN <= exact <= _INT64_MAX:
             return
         if value is None:
             value = overflow.args[0]
