@@ -1363,7 +1363,16 @@ def _flow_pure_expression(node, lookup, pure_calls, attributes):
             return False
         if isinstance(sub, ast.Call):
             if isinstance(sub.func, ast.Name):
-                if sub.func.id not in pure_calls and not sub.func.id.startswith('_AilT_'):
+                if sub.func.id.startswith('_AilT_'):
+                    # Compiler-generated tuple constructors only assign their fields.  A call
+                    # that passes a tracked container could still be a user function of the
+                    # same shape, so keep that one unmodelled.
+                    if any(isinstance(inner, ast.Name)
+                           and isinstance(lookup(inner.id), (list, tuple, dict))
+                           for argument in (*sub.args, *[k.value for k in sub.keywords])
+                           for inner in ast.walk(argument)):
+                        return False
+                elif sub.func.id not in pure_calls:
                     return False
             elif (isinstance(sub.func, ast.Attribute) and sub.func.attr == 'get'
                   and isinstance(sub.func.value, (ast.Name, ast.Subscript))):

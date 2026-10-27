@@ -13,8 +13,10 @@ integer.  ``_check_flow_int64_containers`` now walks the module statements in so
 a small read-only model (a flat or nested literal container, a simple alias, a scalar) and
 refuses the read by name.  Any statement it cannot model -- a call, loop, dead branch or
 mutation -- drops the names it mentions first, so a read after a mutation, a mutating sibling,
-a dead ``if`` expression or an escaping alias still matches CPython.  No code is generated
-differently: the pass only raises.
+a dead ``if`` expression or an escaping alias still matches CPython.  A call to a user function
+whose name has the compiler's ``_AilT_`` tuple-constructor shape is only treated as pure when
+none of its arguments is a tracked container.  No code is generated differently: the pass only
+raises.
 """
 import os
 import subprocess
@@ -201,6 +203,16 @@ items = [1e300]
 e = list((items,))[0]
 e[0] = 1.5
 print(int(items[0]))
+''',
+    'user_tuplename_mutator': '''
+def _AilT_swap(d):
+    d['k'] = 1.5
+
+
+d = {'k': 1e300}
+_AilT_swap(d)
+print(int(d.get('k')))
+print(d)
 ''',
     'scalar_get_after_update': '''
 d = {"k": 1e300}

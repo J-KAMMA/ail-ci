@@ -22,17 +22,21 @@ condition, mutation, import or def) drops every tracked name it mentions first, 
 mutation, a mutating sibling, a dead ``IfExp``/``BoolOp``, an alias escaping through a ``bool``/
 ``if`` expression, loop target, constructor or call result, and a value reaching the code through
 a list item or a dict value all still match CPython.  Class-attribute lookups use the live
-environment, so an attribute mutated through its class is not read from a stale map.  No code is
-generated differently: the pass only raises.
+environment, so an attribute mutated through its class is not read from a stale map.  A call
+whose name has the compiler's ``_AilT_`` tuple-constructor shape is pure only when none of its
+arguments is a tracked container, so a user function of that shape cannot hide a mutation.  No
+code is generated differently: the pass only raises.
 
 Probes in ``/tmp/probes/pre387`` on both builds via ``cmp.sh``: refused by name ``p01``-``p02``,
 ``p05``, ``p07``, ``p09``, ``p11``, ``p13``, ``p16``-``p17``, ``p26``, ``p32``, ``q05``-``q08``,
 ``q10``, ``q12``, ``q14`` (aliases, nested dict/list, negative index, str, empty dict default,
 scalar in a dict, tuple rebinding, read before a called mutation); match CPython ``p03``-``p04``,
 ``p06``, ``p08``, ``p10``, ``p12``, ``p14``-``p15``, ``p18``-``p25``, ``p27``-``p31``, ``q01``-
-``q04``, ``q09``, ``q11``, ``q13``.  The class-attribute read-before-store (``p33``) is refused by
+``q04``, ``q09``, ``q11``, ``q13``, ``q15`` (the last a module-level call to a user
+``_AilT_swap`` that mutates a tracked dict; without the argument guard it was refused falsely).
+The class-attribute read-before-store (``p33``) is refused by
 name as before; the attribute store-before-read (``p34``) is a pre-existing false refusal on the
-base too and is unchanged.  ``test_ail_pre387.py`` pins 12 refused and 26 matching programs on
+base too and is unchanged.  ``test_ail_pre387.py`` pins 12 refused and 27 matching programs on
 both builds.
 
 Final-state tests: test_ail_pre387, test_ail_safetynet, test_ail_files and
