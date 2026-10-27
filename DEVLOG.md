@@ -1,3 +1,26 @@
+## 2026-10-27 -- pre311: int() of an out-of-int64 float from an aliased module container (job-pre311-10271335)
+
+The rbpre293 task text named no concrete pre-existing item (its list was empty), so I reproduced the
+first still-differing item recorded as open by the pre290 review, `r26` alias-list: `a = [1e300];
+b = a; outer(b[0])` compiled and then stopped with `integer overflow`, while CPython prints the
+bignum.  `_check_int64_literals` now also folds a module name bound once to a flat literal
+list/tuple/dict, or aliased from one (alias chains included), when every use of every name in the
+alias group is a subscript read or a module-level alias.  A mutation through the name or an alias,
+a call that could mutate the object, a bare read, a nested mutable element, a local shadow or a
+non-float element stops the record, so an in-range or mutated container keeps its previous
+behaviour.  The same pass also covers `r33` dict-via-variable and the tuple spelling; `r27`
+attribute-held value and `r28` tuple multi-assign stay open (pre-existing).
+
+Probes in `/tmp/probes` on both builds: `r26_alias_list`, `r33_dict_var`, `r26_flat_list_item`,
+`r26_flat_dict_direct`, `r26_flat_tuple_alias`, `r26_flat_alias_arg`, `r26_neg` are refused by
+name; `r26_inrange`, `r26_mutate_before`, `r26_alias_mutate_before`, `r26_mutate_func`,
+`r26_used_bare_inrange`, `r26_alias_append_inrange`, `r26_local_shadow` match CPython.  `r27_attr_value`,
+`r28_tuple_multi` and `r26_nested` still differ (pre-existing, unchanged).  Added
+`AIL_CURRENT/test_ail_pre311.py` (9 refused, 13 CPython-parity programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+`test_ail_pre311`, `test_ail_pre290`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (5 modules, 229 s, 0 failed).  `tools/update_manifest.py` run and
+`--check` exits 0; DIFFERENCES row `C?-job-pre311-10271335-1`.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
