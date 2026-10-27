@@ -257,6 +257,7 @@ __attribute__((noinline)) static ail_st ail_dun_hash(ail_ctx *cx, int64_t *out, 
     ail_d1_fn hf = ail_dun1(x, AIL_D1_HASH);
     if (hf) {
         ail_obj hr; ail_st hst = hf(cx, &hr, x); if (hst != AIL_OK) return hst;
+        if (hr.tag == AIL_T_INT || hr.tag == AIL_T_BOOL) { *out = hr.i == -1 ? -2 : hr.i; return AIL_OK; }
         if (!(hr.tag == AIL_T_INST && hr.o == x.o)) return ail_obj_hash(cx, out, hr);
     } else if (ail_dun2(x, AIL_D2_EQ) || ((ail_classobj *)((ail_instobj *)x.o)->cls.o)->dc) {
         char hb[120], hn[80]; ail__dun_tname(hn, sizeof hn, x);
