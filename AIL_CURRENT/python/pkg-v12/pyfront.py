@@ -650,24 +650,53 @@ def refuse_field_method_call(tree, allow_owners=False):
 
     _mark_scope(tree, tree)
 
+    parent_of = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parent_of[id(child)] = parent
+
+    def _dominates(stmt, use):
+        child = use
+        while True:
+            parent = parent_of.get(id(child))
+            if parent is None:
+                return False
+            body = getattr(parent, 'body', None)
+            if isinstance(body, list) and child in body and stmt in body:
+                return body.index(stmt) < body.index(child)
+            child = parent
+            if child is tree:
+                return False
+
+    def _stmt_of(node):
+        child = node
+        while True:
+            parent = parent_of.get(id(child))
+            if parent is None:
+                return child
+            body = getattr(parent, 'body', None)
+            if isinstance(body, list) and child in body:
+                return child
+            child = parent
+
     assignments = {}
 
-    def _add_assign(targets, value, scope):
+    def _add_assign(targets, value, scope, stmt):
         if len(targets) == 1 and isinstance(targets[0], (ast.Tuple, ast.List)) \
                 and isinstance(value, (ast.Tuple, ast.List)) \
                 and len(targets[0].elts) == len(value.elts):
             for target, val in zip(targets[0].elts, value.elts):
-                _add_assign([target], val, scope)
+                _add_assign([target], val, scope, stmt)
             return
         for target in targets:
             if isinstance(target, ast.Name):
-                assignments.setdefault(scope, []).append((target.id, value))
+                assignments.setdefault(scope, []).append((target.id, value, stmt))
 
     for item in ast.walk(tree):
         if isinstance(item, ast.Assign):
-            _add_assign(item.targets, item.value, scope_of.get(id(item), tree))
+            _add_assign(item.targets, item.value, scope_of.get(id(item), tree), item)
         elif isinstance(item, ast.AnnAssign) and item.value is not None:
-            _add_assign([item.target], item.value, scope_of.get(id(item), tree))
+            _add_assign([item.target], item.value, scope_of.get(id(item), tree), item)
 
     def _inherited(name, key, seen):
         info = classes.get(name)
@@ -800,17 +829,25 @@ def refuse_field_method_call(tree, allow_owners=False):
         if key in seen:
             return set()
         seen = set(seen) | {key}
+        use_pos = (getattr(node, 'lineno', 0), getattr(node, 'col_offset', 0))
         lookup = scope
         while True:
             if _is_parameter(lookup, node.id) or _other_binding(lookup, node.id):
                 return set()
-            values = [value for name, value in assignments.get(lookup, ())
-                      if name == node.id]
-            if values:
-                found = set()
-                for value in values:
-                    if isinstance(value, ast.Name):
-                        found |= _unique_alias_classes(value, ctx, seen)
+            events = [(value, stmt) for name, value, stmt in assignments.get(lookup, ())
+                      if name == node.id
+                      and (getattr(stmt, 'lineno', 0), getattr(stmt, 'col_offset', 0)) < use_pos]
+            if events:
+                definite = None
+                may = set()
+                for value, stmt in events:
+                    value_classes = _classes_of(value, ctx, seen)
+                    if _dominates(stmt, node):
+                        definite = value_classes
+                        may = set()
+                    else:
+                        may |= value_classes
+                found = (definite or set()) | may
                 if len(found) == 1:
                     return found
                 return set()
@@ -870,7 +907,7 @@ def refuse_field_method_call(tree, allow_owners=False):
             found = set()
             lookup = scope
             while lookup is not tree:
-                values = [value for name, value in assignments.get(lookup, ())
+                values = [value for name, value, stmt in assignments.get(lookup, ())
                           if name == node.id]
                 if values:
                     for value in values:
@@ -880,7 +917,7 @@ def refuse_field_method_call(tree, allow_owners=False):
                 if parent is None:
                     break
                 lookup = parent
-            for name, value in assignments.get(tree, ()):
+            for name, value, stmt in assignments.get(tree, ()):
                 if name == node.id:
                     found |= _classes_of(value, ctx, seen)
             for item in ast.walk(tree):
@@ -907,20 +944,150 @@ def refuse_field_method_call(tree, allow_owners=False):
                     found |= _classes_of(value, ctx, seen | {key})
             return found
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
-            found = set()
-            for item in ast.walk(tree):
-                if not isinstance(item, ast.Assign):
-                    continue
-                if not any(isinstance(t, ast.Name) and t.id == node.value.id for t in item.targets):
-                    continue
-                if isinstance(item.value, (ast.List, ast.Tuple)):
-                    for elt in item.value.elts:
+            container = node.value.id
+            use_key = node.slice
+            use_pos = (getattr(node, 'lineno', 0), getattr(node, 'col_offset', 0))
+
+            def _element_classes(value, key):
+                if isinstance(value, (ast.List, ast.Tuple)):
+                    if isinstance(key, ast.Constant) and isinstance(key.value, int) \
+                            and not isinstance(key.value, bool):
+                        index = key.value
+                        if -len(value.elts) <= index < len(value.elts):
+                            return _classes_of(value.elts[index], ctx, seen)
+                        return set()
+                    if isinstance(key, ast.Constant):
+                        return set()
+                    found = set()
+                    for elt in value.elts:
                         found |= _classes_of(elt, ctx, seen)
-                elif isinstance(item.value, ast.Dict) and isinstance(node.slice, ast.Constant):
-                    for key, value in zip(item.value.keys, item.value.values):
-                        if isinstance(key, ast.Constant) and key.value == node.slice.value:
-                            found |= _classes_of(value, ctx, seen)
-            return found
+                    return found
+                if isinstance(value, ast.Dict):
+                    if isinstance(key, ast.Constant):
+                        found = set()
+                        for key_node, item in zip(value.keys, value.values):
+                            if isinstance(key_node, ast.Constant) and key_node.value == key.value:
+                                found |= _classes_of(item, ctx, seen)
+                        return found
+                    found = set()
+                    for item in value.values:
+                        found |= _classes_of(item, ctx, seen)
+                    return found
+                return set()
+
+            containers = {container}
+            aliases = []
+            for item in ast.walk(tree):
+                if isinstance(item, ast.Assign):
+                    targets, value = item.targets, item.value
+                elif isinstance(item, ast.AnnAssign) and item.value is not None:
+                    targets, value = [item.target], item.value
+                else:
+                    continue
+                if isinstance(value, ast.Name):
+                    for target in targets:
+                        if isinstance(target, ast.Name):
+                            aliases.append((target.id, value.id))
+            changed = True
+            while changed:
+                changed = False
+                for target, source in aliases:
+                    if (target in containers) != (source in containers):
+                        containers.add(target)
+                        containers.add(source)
+                        changed = True
+
+            def _mutations(func, param, stmt):
+                result = []
+
+                def walk(node):
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                         ast.ClassDef, ast.Lambda)):
+                        return
+                    if isinstance(node, ast.Assign):
+                        targets, value = node.targets, node.value
+                    elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                        targets, value = [node.target], node.value
+                    else:
+                        targets, value = (), None
+                    for target in targets:
+                        if isinstance(target, ast.Subscript) \
+                                and isinstance(target.value, ast.Name) \
+                                and target.value.id == param:
+                            result.append((stmt, target, value, 'item'))
+                    for child in ast.iter_child_nodes(node):
+                        walk(child)
+
+                body = [func.body] if isinstance(func, ast.Lambda) else func.body
+                for child in body:
+                    walk(child)
+                return result
+
+            functions = {}
+            for item in ast.walk(tree):
+                if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    functions.setdefault(item.name, []).append(item)
+
+            events = []
+            for item in ast.walk(tree):
+                if isinstance(item, ast.Assign):
+                    targets, value = item.targets, item.value
+                elif isinstance(item, ast.AnnAssign) and item.value is not None:
+                    targets, value = [item.target], item.value
+                else:
+                    continue
+                for target in targets:
+                    if isinstance(target, ast.Name) and target.id == container:
+                        if isinstance(value, (ast.List, ast.Tuple, ast.Dict)):
+                            events.append((item, target, value, 'container'))
+                        elif not isinstance(value, ast.Name):
+                            events.append((item, target, value, 'unknown'))
+                    elif isinstance(target, ast.Subscript) \
+                            and isinstance(target.value, ast.Name) \
+                            and target.value.id in containers:
+                        events.append((item, target, value, 'item'))
+
+            for item in ast.walk(tree):
+                if not (isinstance(item, ast.Call) and isinstance(item.func, ast.Name)):
+                    continue
+                for func in functions.get(item.func.id, ()):
+                    params = func.args.posonlyargs + func.args.args
+                    for index, arg in enumerate(item.args):
+                        if index < len(params) and isinstance(arg, ast.Name) \
+                                and arg.id in containers:
+                            events.extend(_mutations(func, params[index].arg, item))
+                    for keyword in item.keywords:
+                        if keyword.arg is None:
+                            continue
+                        for param in params:
+                            if param.arg == keyword.arg \
+                                    and isinstance(keyword.value, ast.Name) \
+                                    and keyword.value.id in containers:
+                                events.extend(_mutations(func, param.arg, item))
+
+            events = [event for event in events
+                      if (getattr(event[0], 'lineno', 0),
+                          getattr(event[0], 'col_offset', 0)) < use_pos]
+            definite = None
+            may = set()
+            for item, target, value, kind in events:
+                if kind == 'container':
+                    value_classes = _element_classes(value, use_key)
+                elif kind == 'unknown':
+                    value_classes = set()
+                else:
+                    event_key = target.slice
+                    if isinstance(use_key, ast.Constant) \
+                            and isinstance(event_key, ast.Constant) \
+                            and use_key.value != event_key.value:
+                        continue
+                    value_classes = _classes_of(value, ctx, seen)
+                if _dominates(_stmt_of(item), node):
+                    definite = value_classes
+                    may = set()
+                else:
+                    may |= value_classes
+            return (definite or set()) | may
         return set()
 
     def _field_values(name, attr, seen=frozenset()):
@@ -987,7 +1154,7 @@ def refuse_field_method_call(tree, allow_owners=False):
                 return False
             lookup = scope
             while True:
-                values = [value for name, value in assignments.get(lookup, ())
+                values = [value for name, value, stmt in assignments.get(lookup, ())
                           if name == node.id]
                 if values:
                     return any(_may_be_bound(value, seen) for value in values)
@@ -1006,7 +1173,7 @@ def refuse_field_method_call(tree, allow_owners=False):
                 return True
             lookup = scope_of.get(id(node), tree)
             while True:
-                for name, value in assignments.get(lookup, ()):
+                for name, value, stmt in assignments.get(lookup, ()):
                     if name != node.value.id:
                         continue
                     if isinstance(value, (ast.List, ast.Tuple)):

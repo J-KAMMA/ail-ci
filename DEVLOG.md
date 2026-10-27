@@ -1,3 +1,21 @@
+## 2026-10-27 -- pre352 review: alias rebinding and container mutation keep the refusal (job-pre352-10280028)
+
+The review of `b70e500` found two change-caused regressions in the new alias resolution.
+`_unique_alias_classes` ignored a non-name value when a name had several assignments, so
+`x = C; x = D()` lost the old named refusal and compiled to `AttributeError: 'D' object has no
+attribute 'g'`; it now considers every assigned value and follows the last definite assignment
+before the use, keeping conditional writes as possibilities (this also resolves an alias chain
+whose ancestor is rebound later).  List/dict element resolution also trusted a stale literal
+after a write; it now follows writes before the use, whether direct, through a container alias or
+through a called function, ignores writes after the use, and still treats a write that may not
+run as a possible colliding value.  Regression cases were added to `test_ail_pre352.py` (15
+refused and 19 matching programs, both builds).  Probes in `/tmp/probes/pre352rev`, `r01`-`r19`
+on both builds: 10 are refused by name and 9 match CPython; `r20` (a `try` body assigning `C`
+and a handler assigning another class) still shows the same pre-existing `AttributeError` on both
+builds and is unchanged.  Final-state tests: test_ail_pre352, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3 on this commit.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-27 -- pre352: a class alias assigned in a try reaches the field/method refusal (job-pre352-10280028)
 
 The pre339 review's first pre-existing item was a class alias assigned inside a `try`

@@ -6,12 +6,17 @@ the stored bound method and prints 55.  The field/method collision screen only r
 receiver written as a class name, not one reached through a class alias.
 
 Alias resolution here follows a name bound by plain assignments in its own scope, including a
-chain and an assignment inside a ``try`` with a non-class handler value.  A name with several
-class bindings (a rebinding, a conditional or a loop target) or a parameter/local shadow is not
-resolved, so those programs keep CPython's result.  The alias can reach the receiver directly,
-through a chain or tuple unpack, a function argument, a list item, an attribute or a dict value.
-The second pre-existing item from the same review (a function called before a later rebinding of
-an ancestor name) is unchanged and is not covered here.
+chain and an assignment inside a ``try`` with a non-class handler value.  All assigned values are
+considered, so rebinding the alias to a colliding instance still reaches the refusal.  A name
+with several class bindings (a rebinding, a conditional or a loop target) or a parameter/local
+shadow is not resolved, so those programs keep CPython's result.  The alias can reach the
+receiver directly, through a chain or tuple unpack, a function argument, a list item, an
+attribute or a dict value.  A container write before the use is followed: a list item or dict
+value that was overwritten by a non-colliding class keeps CPython's result, including a write
+through a container alias or a called function, while a write that may not run, or one after the
+use, still refuses.  The second pre-existing item from the same
+review (a function called before a later rebinding of an ancestor name) is unchanged and is not
+covered here.
 """
 import os
 import subprocess
@@ -90,6 +95,27 @@ print(H().k().f())
 d = {"k": Alias}
 print(d["k"]().f())
 ''',
+    'reassign_instance': D + C + '''x = D
+x = C()
+print(x.f())
+''',
+    'mutation_after_use': C + D + '''Alias = C
+ks = [Alias]
+print(ks[0]().f())
+ks[0] = D
+''',
+    'conditional_mutation': C + D + '''Alias = C
+ks = [Alias]
+flag = len([]) == 1
+if flag:
+    ks[0] = D
+print(ks[0]().f())
+''',
+    'mutation_other_index': C + D + '''Alias = C
+ks = [Alias, D]
+ks[1] = D
+print(ks[0]().f())
+''',
 }
 
 MATCH = {
@@ -152,6 +178,39 @@ print(ks[0]().f())
 ''',
     'other_dict_value': C + D + '''d = {"k": D}
 print(d["k"]().f())
+''',
+    'mutated_list': C + D + '''Alias = C
+ks = [Alias]
+ks[0] = D
+print(ks[0]().f())
+''',
+    'mutated_dict': C + D + '''Alias = C
+d = {"k": Alias}
+d["k"] = D
+print(d["k"]().f())
+''',
+    'mutated_negative_index': C + D + '''Alias = C
+ks = [D, Alias]
+ks[-1] = D
+print(ks[-1]().f())
+''',
+    'replaced_container': C + D + '''Alias = C
+ks = [Alias]
+ks = [D]
+print(ks[0]().f())
+''',
+    'mutated_via_function': C + D + '''Alias = C
+ks = [Alias]
+def setd(a):
+    a[0] = D
+setd(ks)
+print(ks[0]().f())
+''',
+    'mutated_via_container_alias': C + D + '''Alias = C
+ks = [Alias]
+k2 = ks
+k2[0] = D
+print(ks[0]().f())
 ''',
 }
 
