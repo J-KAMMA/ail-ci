@@ -1,3 +1,21 @@
+## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
+
+The pre324 reviewer's first pre-existing item was a nested class inside a function
+(`def make(): class C: ...`, including an attribute, an `__init__`, an unexecuted class, a
+conditional class, a nested function and a method body), which CPython runs.  Reproduced it on
+both builds: this tree already refuses the construct at compile time with the named
+`a nested class definition (C)` message, which the task allows, so no compiler change was
+needed.  The review's other pre-existing items are also already refused by name on both builds
+(`a class body statement other than def/assignment/pass/docstring in C`): an async method and a
+class-body `for`, `with`, `try` or `global`.  A top-level class control still matches CPython.
+Added `AIL_CURRENT/test_ail_pre326.py` (13 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre326` on both builds: `p01`-`p05` (nested class) and `p06`-`p10`
+(async method, class-body `for`/`with`/`try`/`global`) are refused by name.  Final-state tests:
+test_ail_pre326, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound
