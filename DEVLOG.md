@@ -1,3 +1,26 @@
+## 2026-10-27 - pre309 follow-up: the frozenset hash is stable and calls no `__hash__` (job-pre309-10271313)
+
+The review of the first pre309 commit found that `ail_pyhash` recomputed a frozenset's mix from
+each element on every `hash(fs)` call, so a side-effecting element `__hash__` ran again and
+`hash(fs)` was not stable (`1 / 2 / 3 False` instead of CPython's `1 / 1 / 1 True`). A set entry
+now stores the element's Python hash at insertion (the same value CPython's set table keeps), and
+`ail_pyhash` of a frozenset reads those stored hashes through `ail_frozenset_hash`; no element is
+rehashed. Set add/lookup use the same function, so membership, set operators and frozenset-key
+lookups stay consistent. Added the direct, constant-`__hash__`, tuple-wrapped and nested
+side-effect cases to `test_ail_pre309.py`.
+
+Probes in `/tmp/probes`: `pre309_fix_basic`, `pre309_fix_routes`, `pre309_fix_semantics`,
+`pre309_fix_ops`, `pre309_fix_mixed`, `pre309_fix_direct`, `pre309_fix_constant`,
+`pre309_fix_tuple` all match CPython on both builds (8/8). Previous `/tmp/rprobes` probes
+`r1_basic`, `r3_tuple`, `r4_routes`, `r6_mixed`, `r7_mixed2`, `r8_tset`, `r10_sem`, `r11_numeric`,
+`r12_nested`, `r13_routes2`, `r14_custom`, `r15_ctors`, `r16_keys`, `r17_sideeffect` and
+`r19_sideeffect3` still match on both builds; the recorded pre-existing `r2_types` (randomised
+bytes hash), `r5_set` and `r9_sethash` differences are unchanged (`r18_sideeffect2` still refuses
+a class-attribute store by name). Final-state tests: `test_ail_pre309`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` (4 modules, 241 s, 0 failed), plus
+`test_ail_sets_general`, `test_ail_int_dict_set` and `test_ail_tuples` (3 modules, 162 s, 0 failed).
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-27 - pre309: hash() of a frozenset uses CPython's element hashes (job-pre309-10271313)
 
 The only pre-existing difference recorded by the rbrbpre245 reviewer was

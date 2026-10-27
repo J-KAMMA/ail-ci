@@ -90,6 +90,36 @@ print(hash(a) == hash(a))
 print(len({a: 1}))
 print(b in {a: 1})
 ''',
+    'side_effects': '''
+class K:
+    def __init__(self):
+        self.n = 0
+    def __hash__(self):
+        self.n += 1
+        return self.n
+
+
+k = K()
+fs = frozenset([k])
+print(k.n)
+h1 = hash(fs)
+print(k.n)
+h2 = hash(fs)
+print(k.n, h1 == h2)
+k2 = K()
+ft = frozenset([(k2, 1)])
+print(k2.n)
+h3 = hash(ft)
+print(k2.n)
+h4 = hash(ft)
+print(k2.n, h3 == h4)
+k3 = K()
+fn = frozenset([frozenset([k3])])
+print(k3.n)
+hash(fn)
+hash(fn)
+print(k3.n)
+''',
 }
 
 

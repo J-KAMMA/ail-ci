@@ -14165,6 +14165,7 @@ static inline ail_st ail_setx_update_any(ail_ctx *cx, ail_setobj *so, ail_obj ot
 static inline int ail_setx_eq(ail_obj a, ail_obj b);
 static inline int ail_setx_cmp(ail_obj a, ail_obj b, int op /* 0 lt, 1 le, 2 gt, 3 ge */);
 static inline int64_t ail_frozenset_hash(const ail_setobj *so);
+static inline ail_st ail_pyhash(ail_ctx *cx, int64_t *out, ail_obj x);
 static inline ail_st ail_set_union(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_set_intersection(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_meth_set_difference(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
@@ -15449,7 +15450,9 @@ static inline void ail_setx_swap_bodies(ail_setobj *a, ail_setobj *b) {
     uint32_t sz = a->hdr.size; a->hdr.size = b->hdr.size; b->hdr.size = sz;
 }
 static inline ail_st ail_setx_add_key(ail_ctx *cx, ail_setobj *so, ail_obj key) {
-    int64_t h; ail_st st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
+    /* a set entry keeps the element's Python hash, so a frozenset can mix its stored hashes like
+       CPython does and hash(fs) never re-invokes __hash__ */
+    int64_t h; ail_st st = ail_pyhash(cx, &h, key); if (st != AIL_OK) return st;
     ail_setx_add_entry(cx, so, key, h);
     return AIL_OK;
 }
@@ -15466,13 +15469,13 @@ static inline ail_st ail_setx_key_for_lookup(ail_ctx *cx, ail_obj *key) {
 }
 static inline ail_st ail_setx_contains_key(ail_ctx *cx, int *out, ail_setobj *so, ail_obj key) {
     ail_st st = ail_setx_key_for_lookup(cx, &key); if (st != AIL_OK) return st;
-    int64_t h; st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
+    int64_t h; st = ail_pyhash(cx, &h, key); if (st != AIL_OK) return st;
     *out = ail_setx_contains_entry(so, key, h);
     return AIL_OK;
 }
 static inline ail_st ail_setx_discard_key(ail_ctx *cx, int *found, ail_setobj *so, ail_obj key) {
     ail_st st = ail_setx_key_for_lookup(cx, &key); if (st != AIL_OK) return st;
-    int64_t h; st = ail_obj_hash(cx, &h, key); if (st != AIL_OK) return st;
+    int64_t h; st = ail_pyhash(cx, &h, key); if (st != AIL_OK) return st;
     *found = ail_setx_discard_entry(so, key, h);
     return AIL_OK;
 }
@@ -17972,24 +17975,10 @@ static inline ail_st ail_pyhash(ail_ctx *cx, int64_t *out, ail_obj x) {
             if (v != v) return ail_obj_hash(cx, out, x);   /* a NaN hashes by identity in CPython */
             *out = ail_pyhash_double(v); return AIL_OK;
         }
-        case AIL_T_FROZENSET: {
-            /* CPython's own frozenset mix over the elements' Python hash values (the same
-               formula as ail_frozenset_hash), so hash() is language-fixed for int, bool,
-               None, float and tuple elements; the internal table hash is unchanged. */
-            ail_setobj *so = AIL_SETOBJ(x);
-            uint64_t hash = 0;
-            for (int64_t i = 0; i < so->n; i++) {
-                if (!ail_setx_live(&so->ent[i])) continue;
-                int64_t eh; ail_st st = ail_pyhash(cx, &eh, so->ent[i].key);
-                if (st != AIL_OK) return st;
-                uint64_t h = (uint64_t)eh;
-                hash ^= ((h ^ 89869747ULL) ^ (h << 16)) * 3644798167ULL;
-            }
-            hash ^= ((uint64_t)so->used + 1) * 1927868237ULL;
-            hash ^= (hash >> 11) ^ (hash >> 25);
-            hash = hash * 69069U + 907133923ULL;
-            *out = (int64_t)hash; return AIL_OK;
-        }
+        case AIL_T_FROZENSET:
+            /* the hashes stored when the elements were inserted, so this never calls __hash__
+               again and one immutable frozenset keeps one hash */
+            *out = ail_frozenset_hash(AIL_SETOBJ(x)); return AIL_OK;
         case AIL_T_TUPLE: {
             ail_vecobj *vt = (ail_vecobj *)x.o;
             const uint64_t P1 = 11400714785074694791ULL, P2 = 14029467366897019727ULL, P5 = 2870177450012600261ULL;

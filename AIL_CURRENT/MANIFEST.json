@@ -974,7 +974,7 @@
     "test_ail_owned_type_repair.py": "69c06613a1270419a92e7bbfbd18ded38fffcb613f5cf1f017df763974b741b6",
     "python/pkg-v12/callable_types.py": "403e4bc3a2186c803407ba1192a3551209d5b3659435d67633b49c30b256c5a3",
     "language_examples/integer_quantiles.ail": "f4fbb4396faa7f571470997a7fa1773f966f35de581da6604986411d3ba345e1",
-    "python/pkg-v12/cruntime.py": "5b1e721c01f2687698b5d3eaa0231331a83e8c46123500ff8c59f0dfe5f348a0",
+    "python/pkg-v12/cruntime.py": "fbd08483d79245e84970547a42b09ff3a07184bf756d9fde3f8ecc3824e42fea",
     "test_ail_string_field_mutation.py": "76683df6504ef82ce482a0cecef0bd5fd4c68066a7e9b349664e46d527f742c4",
     "test_ail_owned_type_details.py": "8d5c657a91b53c1e322d13686c5471f7185697d641738b26746405804286e1e5",
     "test_ail_list_expression_extend.py": "2835cffcac2a3a7c08606152c2441ad7d7c340967e94cb93b9ce9457d47e8784",
@@ -1488,7 +1488,7 @@
     "test_ail_pre54.py": "6690f665cbefb2d4c054337204bfdbeb6488e81fe3e2a4242fe1195892621acf",
     "test_ail_pre55.py": "9441435af269bdaebf0847562e01218a7ac2a07f4bad018e60441577494ce4ad",
     "test_ail_pre59.py": "ea03c6998013d3c7f358f8d8255a5cf7a56781c29f0b7ff562f62cfe698d3f6a",
-    "test_ail_pre309.py": "7535dfb6805073b9cc013e80192dd9b34d4c3dfa9a5cdf19d3ccd52c3758843e"
+    "test_ail_pre309.py": "ca0b02a2bc6d6fff900b7bd9be712c7e265f60a7838b7e157bf90652504ce0ac"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1533,7 +1533,7 @@
     "test_ail_owned_type_repair.py": "69c06613a1270419a92e7bbfbd18ded38fffcb613f5cf1f017df763974b741b6",
     "python/pkg-v12/callable_types.py": "403e4bc3a2186c803407ba1192a3551209d5b3659435d67633b49c30b256c5a3",
     "language_examples/integer_quantiles.ail": "f4fbb4396faa7f571470997a7fa1773f966f35de581da6604986411d3ba345e1",
-    "python/pkg-v12/cruntime.py": "5b1e721c01f2687698b5d3eaa0231331a83e8c46123500ff8c59f0dfe5f348a0",
+    "python/pkg-v12/cruntime.py": "fbd08483d79245e84970547a42b09ff3a07184bf756d9fde3f8ecc3824e42fea",
     "test_ail_string_field_mutation.py": "76683df6504ef82ce482a0cecef0bd5fd4c68066a7e9b349664e46d527f742c4",
     "test_ail_owned_type_details.py": "8d5c657a91b53c1e322d13686c5471f7185697d641738b26746405804286e1e5",
     "test_ail_list_expression_extend.py": "2835cffcac2a3a7c08606152c2441ad7d7c340967e94cb93b9ce9457d47e8784",
@@ -2043,6 +2043,6 @@
     "test_ail_pre54.py": "6690f665cbefb2d4c054337204bfdbeb6488e81fe3e2a4242fe1195892621acf",
     "test_ail_pre55.py": "9441435af269bdaebf0847562e01218a7ac2a07f4bad018e60441577494ce4ad",
     "test_ail_pre59.py": "ea03c6998013d3c7f358f8d8255a5cf7a56781c29f0b7ff562f62cfe698d3f6a",
-    "test_ail_pre309.py": "7535dfb6805073b9cc013e80192dd9b34d4c3dfa9a5cdf19d3ccd52c3758843e"
+    "test_ail_pre309.py": "ca0b02a2bc6d6fff900b7bd9be712c7e265f60a7838b7e157bf90652504ce0ac"
   }
 }
