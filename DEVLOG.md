@@ -1,3 +1,29 @@
+## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
+
+The rbrbrbrbrbpre33 review's first pre-existing difference was `x = 10; print(x**40)`, a
+runtime `integer overflow` on both builds where CPython prints the unbounded value.  On this
+tree the module-level local form is already folded by the constant-power pass and refused at
+compile time with `int64 constant expression out of range` on both builds, which is the
+allowed named refusal, so no compiler change was needed.  The alias, computed-exponent,
+negative-base, wide-exponent and nested-expression spellings are refused too; the four other
+recorded items (`2**63 / 2**63`, `(2**63)/2`, `2**63*1.0`, `2**63+0.0`) are refused by name
+(`int64 constant out of range`).  In-range powers, safe bases, negative and float exponents,
+a mutated local and the argument/list-item/attribute/dict-value routes for safe values match
+CPython.  A power known only at run time, or inside a function body, keeps the pre-existing
+runtime `integer overflow` stop; those routes are unchanged here.
+
+Added `AIL_CURRENT/test_ail_pre351.py` (4 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre351`: `p01`-`p05`
+(the recorded items) and `c_mod`, `c_both`, `c_neg`, `c_big_exp`, `c_safe_bound`, `d_nested`,
+`d_right`, `d_cond`, `r_alias`, `r_both`, `r_neg` are refused by name; `e_inrange` (in-range
+powers, safe bases, negative/float exponents, mutation, argument/list/attribute/dict routes)
+matches CPython, on both builds.  The route probes `r_arg`, `r_list`, `r_attr`, `r_dict`,
+`c_func`, `c_class`, `c_both_func`, `c_mut_arg`, `d_fdiv` and `d_tuple` still stop with
+`integer overflow` on both builds; that is the pre-existing run-time-only limitation noted
+above, not changed by this job.  Final-state tests (4 modules, 0 failed): test_ail_pre351,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
 The pre315 reviewer's first pre-existing item was `t01_class_attr_instance.py`:
