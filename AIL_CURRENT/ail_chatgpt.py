@@ -488,12 +488,13 @@ def _bind_constructor_arguments(info, node, resolve):
     positional = info['constructor']['positional']
     kwonly = info['constructor']['kwonly']
     bound = {}
-    if len(node.args) > len(positional):
+    if len(node.args) > len(positional) and not info['constructor']['vararg']:
         return None
     for name, argument in zip(positional, node.args):
         bound[name] = resolve(argument)
     for keyword in node.keywords:
-        if keyword.arg not in positional and keyword.arg not in kwonly:
+        if (keyword.arg not in positional and keyword.arg not in kwonly
+                or keyword.arg in bound):
             return None
         bound[keyword.arg] = resolve(keyword.value)
     for name in positional:
@@ -751,6 +752,23 @@ def _constant_value(node, lookup, global_name, passthrough, attributes=None):
                 return base[key]
         except (IndexError, KeyError, TypeError):
             return _UNKNOWN
+        return _UNKNOWN
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.ctx, ast.Load) and node.func.attr == 'get'
+            and isinstance(node.func.value, (ast.Dict, ast.Name, ast.Subscript))
+            and not node.keywords and len(node.args) in (1, 2)):
+        base = _constant_value(node.func.value, lookup, global_name, passthrough, attributes)
+        if isinstance(base, dict):
+            key = _constant_value(node.args[0], lookup, global_name, passthrough, attributes)
+            if key is not _UNKNOWN:
+                try:
+                    if key in base:
+                        return base[key]
+                except TypeError:
+                    return _UNKNOWN
+                if len(node.args) == 2:
+                    return _constant_value(node.args[1], lookup, global_name, passthrough,
+                                           attributes)
         return _UNKNOWN
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and isinstance(node.func.ctx, ast.Load) and not node.keywords
@@ -1108,6 +1126,11 @@ def _safe_module_containers(tree, module_counts, global_names, parents):
             continue
         if isinstance(parent, ast.Subscript) and parent.value is node and isinstance(parent.ctx, ast.Load):
             continue
+        if (isinstance(parent, ast.Attribute) and parent.value is node
+                and isinstance(parent.ctx, ast.Load) and parent.attr == 'get'):
+            call = parents.get(parent)
+            if isinstance(call, ast.Call) and call.func is parent:
+                continue
         if (isinstance(parent, ast.Assign) and parent.value is node
                 and id(parent) in module_assigns and len(parent.targets) == 1
                 and isinstance(parent.targets[0], ast.Name)):

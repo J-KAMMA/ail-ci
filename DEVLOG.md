@@ -90,6 +90,58 @@ Probes: assigned, plain, tuple, argument, list, attribute and dict placements ar
 on both builds; fit, float, negative-exponent and bases -1/0/1 programs match CPython. Tests on the
 final tree: `test_ail_pre33`, `test_ail_safetynet`, `test_ail_files`,
 `test_ail_corpus_findings3`.
+## 2026-10-27 -- pre357: int() of a float outside int64 through a `*args` constructor is refused (job-pre357-10280153)
+
+The pre340 reviewer's first pre-existing item was `p04_starargs.py`:
+`class Box: def __init__(self, v, *rest): self.v = v` with `int(Box(1e300, 2).v)` overflowed on both
+builds while CPython prints the exact 301-digit integer.  `_bind_constructor_arguments` returned
+`None` whenever a call had more positional arguments than named parameters, so a constructor with
+`*args` never bound its named parameters.  It now discards the surplus positional arguments when
+`__init__` has `*args`, and refuses to bind a keyword that would duplicate an already bound
+positional parameter (that call is a Python `TypeError`, so no fold).  The conversion is refused by
+name on both builds through a keyword, a default, a second positional parameter, six surplus
+arguments of mixed types, a module constant, a list item, a dict value, a class attribute, an
+instance, an alias, a list/dict item, a function argument and a wrapper; an out-of-int64 string
+parameter is refused as `int64 constant expression out of range`.  In-range int/float/string
+values (also negative and at 9e18), a starred in-range call, surplus argument types read back, a
+later field store, a dynamic value, no surplus arguments and a keyword-only parameter match
+CPython on both builds.  A duplicate-keyword call (`Box(1e300, 2, v=3)`) still fails at compile
+time as `not in the subset: ...` on both the base copy and this tree (unchanged).  The reviewer's
+other recorded items (the `self.v: float = v` annassign, `v = int(v)` rebound before the store)
+still stop with `integer overflow`; they are pre-existing and not changed here.
+
+Probes in `/tmp/probes/pre357` on both builds: 17 refusal probes (v01-v17) are refused by name;
+12 match probes (m01-m12) match CPython; m13 (duplicate keyword) fails at compile time on both the
+base copy and this tree.  A `/tmp` copy with the original binder shows v01 stopping with
+`integer overflow` on both builds, confirming the change.  Final-state tests: test_ail_pre357,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was
+run and `--check` passes.
+## 2026-10-27 -- pre358: int() of a statically known dict.get() result is refused (job-pre358-10280158)
+
+The pre338 reviewer's first pre-existing item reproduced on both builds:
+`d = {"k": "9223372036854775808"}; print(int(d.get("k")))` compiled and then stopped with
+`integer overflow`, where CPython prints the big integer (`t02_dict_get.py`).  The int64 constant
+fold now reads `dict.get(key)` and `dict.get(key, default)` when the key is constant, and a
+module-level dict literal (or alias) whose only uses are subscript reads or `.get` calls stays
+foldable; the conversion is then refused by name with `int64 constant expression out of range`
+on both builds.  Covered: an inline literal, a negative value, bytes, whitespace/underscore/plus
+text, a missing key with a big default, an empty dict, an alias, and the key arriving from a list
+item, a dict value or a class attribute; a float value or default keeps the `int() of a float
+outside int64` refusal.  In-range values and INT64 boundaries, a big default that a present key
+overrides, dicts mutated in place (subscript or `update`) to an in-range value, a dynamic value
+and invalid text match CPython.  A dict held in a class or instance attribute is not folded, so a
+dict mutated through `c.d[...]` keeps CPython's output.  The reviewer's other item, a function
+parameter's list item (`t04_arg_list_item.py`), still stops with `integer overflow` on both
+builds; it is a separate pre-existing cause and not changed here.
+
+Added `AIL_CURRENT/test_ail_pre358.py` (2 tests, 22 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre358` on both builds:
+`t02`, `t02_alias`, `t02_bytes`, `t02_empty_default`, `t02_get_default_big`, `t02_inline_get`,
+`t02_key_from_attr`, `t02_key_from_dict`, `t02_key_from_list`, `t02_negative` and
+`t02_whitespace` are refused by name; `t02_boundaries`, `t02_dynamic_ok`, `t02_in_range`,
+`t02_mutated_class_d` and `t02_mutated_in_range` match CPython; `t02_direct_subscript` was
+already refused by name.  Final-state tests: test_ail_pre358, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
