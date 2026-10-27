@@ -1,3 +1,19 @@
+## 2026-10-27 -- reapply pre33: constant integer `**` beyond int64 (job-rbrbrbrbpre33-10271808)
+
+Re-applied the accepted pre33 change on this tree, including its compiler fix: a constant integer
+power whose exact result leaves int64 is refused at compile time by name
+(`the integer power 10 ** 40 does not fit in a 64-bit signed integer (DIFFERENCES
+C?-job-rbrbrbrbpre33-10271808-1)`) on both builds and in the IR lowerer. The accepted
+`refuse_int_pow_overflow` helper is added to `pyfront.py` and called from `pyboxed.py`,
+`pyboxed2.py`, `pyfunc.py` and `ir/lower.py`; this closes the v1 general-emitter gap where an
+assigned `x = 10**40` or `b.v = 10**40` compiled and then stopped at run time with
+`integer overflow`. The reapply also adds the accepted `AIL_CURRENT/test_ail_pre33.py` (8 refused
+placements, 2 matching programs, both builds) and registers it in `ail_check.MODULES`.
+Probes: assigned, plain, tuple, argument, list, attribute and dict placements are refused by name
+on both builds; fit, float, negative-exponent and bases -1/0/1 programs match CPython. Tests on the
+final tree: `test_ail_pre33`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound
