@@ -63,6 +63,7 @@ def fallback_weight(cache, modules):
 
 
 def build(modules, cache, previous, rebalance):
+    modules = list(dict.fromkeys(modules))   # a duplicate name is still one module
     n = previous.get('shards', SHARDS)
     old_weights = {} if rebalance else previous.get('weights', {})
     default = fallback_weight(cache, modules)
@@ -70,8 +71,14 @@ def build(modules, cache, previous, rebalance):
     assignment = [[] for _ in range(n)]
     if not rebalance:
         wanted = set(modules)
+        seen = set()
         for index, members in enumerate(previous.get('assignment', [])[:n]):
-            assignment[index] = [m for m in members if m in wanted]
+            kept = []
+            for name in members:
+                if name in wanted and name not in seen:
+                    seen.add(name)
+                    kept.append(name)
+            assignment[index] = kept
     placed = {m for members in assignment for m in members}
     for name in sorted((m for m in modules if m not in placed), key=lambda m: (-weights[m], m)):
         place(weights, assignment, name)
