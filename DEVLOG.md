@@ -1,4 +1,30 @@
-## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
+## 2026-10-27 -- pre363: a lambda called in a class-body comprehension no longer recurses (job-pre363-10280258)
+
+The pre347 review's first pre-existing item was an uncaught `RecursionError` for a
+class-body comprehension whose lambda uses a default (`[(lambda v=x: v)() for x in
+range(3)]`) or a shadowing parameter (`[(lambda x: x)(i) for i in range(3)]`), where
+CPython runs the program and both builds crashed.  `call_value` expanded the
+construct-a-class branch for every call through a value; compiling that branch
+(`_call_class` -> `_class_attr_value`) evaluated the class attribute whose value was
+still being compiled, so `_init_class_attrs` recursed.  A lambda literal is never a
+class object, so `expr_Call` now skips that branch for an `ast.Lambda` callee, and
+`_class_attr_value` refuses a re-entrant read of a slot that is still being compiled
+by name instead of recursing.  Once the crash was gone, `[(lambda v=x: v)() ...]`
+still clobbered the enclosing `x` because `compscope`'s class-body guard suppressed the
+target rename for any lambda load.  The guard now counts a lambda body's names that the
+lambda does not bind itself and ignores argument defaults, which are evaluated in the
+comprehension scope and are renamed with the target, so the default and shadowing-
+parameter forms match CPython.
+
+Probes in `/tmp/probes/pre363` on both builds (`cmp.sh`): match CPython `p02`-`p08`,
+`p14`, `p15`, `p17`-`p21`; refused by name `p09`-`p12` (`not in the subset: closures
+nested too deeply to settle their shared names`) and `p13` (`not in the subset: name 'x'
+is not defined`).  `p01` (module-level `[(lambda: x)() ...]`) is the separate pre-existing
+body-read difference and is unchanged.  Final-state tests: test_ail_pre363,
+test_ail_pre347, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
+
 
 The rbrbrbrbrbpre33 review's first pre-existing difference was `x = 10; print(x**40)`, a
 runtime `integer overflow` on both builds where CPython prints the unbounded value.  On this
