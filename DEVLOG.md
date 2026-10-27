@@ -1,3 +1,38 @@
+## 2026-10-27 -- pre386: a routed-base `**` power outside int64 is refused by name (job-pre386-10280809)
+
+The pre364 review's unverified list named `test_ail_files`, `test_ail_corpus_findings3`, the
+worker's full probe log, the `**`-routed case and icount.  Both test modules pass unchanged on
+this tree (`test_ail_files` 142.5 s, `test_ail_corpus_findings3` 252.9 s, 0 failed), and a
+call-site `**kwargs` argument is already refused by name on both builds (`not in the subset: a
+**kwargs call argument`), so the first still-differing item is the `**` power whose base
+arrives through a route.  Reproduced on both builds: `def f(x): print(x ** 40)` / `f(10)`
+compiled and then stopped with `integer overflow`, where CPython prints the exact 41-digit
+integer; the base through a keyword argument, an alias, an identity wrapper, a tuple item, a
+function-local constant, a list item, a dict value, `dict.get` and a class/instance attribute
+behaved the same.
+
+`_pow_parameter_powers` and `_Int64CallChecker` in `AIL_CURRENT/ail_chatgpt.py` now resolve a
+power's base through the checker's constant environment (module/function locals, flat
+containers, safe aliases, class/instance attributes, identity passthroughs) and at direct call
+sites bind a parameter from a constant argument; when the exact `base ** exponent` leaves int64
+the construct is refused at compile time by name (`the integer power B ** E does not fit in a
+64-bit signed integer ...`).  Literal bases still go through the existing pre113/pre351 folder
+(so `2 ** 63 - 1` and `-(2 ** 63)` keep matching), an unknown base and the safe bases -1/0/1,
+negative exponents, float/bool bases, in-range powers and pre273's constant-base rule are
+unchanged.
+
+Added `AIL_CURRENT/test_ail_pre386.py` (3 tests: 14 refused programs, 11 matching programs,
+plus the pre273 control; both builds) and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.  Probes in `/tmp/probes/pre386` on both builds via `cmp.sh`: 42
+programs; 29 are refused by name (17 routed powers, 12 `**kwargs` call arguments) and 12 match
+CPython (in-range powers through argument/list/dict/attribute, safe bases, negative exponents,
+float/bool bases, zero/one exponents, dict/list unpacking, `*args`).  One route is not fixed:
+a power whose base is an earlier *class-body* local (`class C: v = 10; w = v ** 40`) still
+stops with the pre-existing run-time `integer overflow`; it is unchanged here.  icount was not
+measured: `perf_event_paranoid` is 4 here.  Final-state tests: test_ail_pre386,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The

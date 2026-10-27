@@ -975,6 +975,51 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
     return functions
 
 
+def _pow_parameter_powers(tree, module_counts, known):
+    """`param ** <constant int>` in a module-level function, keyed by the function name.
+
+    A call site can then bind that parameter to a constant argument and refuse the exact
+    power by name when it leaves int64, where the run-time int64 power would stop with
+    `integer overflow` but CPython keeps an unbounded int (the pre273 rule covers the
+    constant-base/runtime-exponent form; this is the routed-base mirror).
+    """
+    out = {}
+    for fn in tree.body:
+        if (not isinstance(fn, ast.FunctionDef) or fn.decorator_list
+                or module_counts.get(fn.name) != 1):
+            continue
+        positional = [arg.arg for arg in (*fn.args.posonlyargs, *fn.args.args)]
+        keyword_only = [arg.arg for arg in fn.args.kwonlyargs]
+        mapped = {name: index for index, name in enumerate(positional)}
+        mapped.update((name, None) for name in keyword_only)
+        if not mapped:
+            continue
+        counts = _binding_counts(fn.body)
+        rebound = {name for name in mapped if counts.get(name, 0)}
+        local = {name: value for name, value in known.items()
+                 if name not in mapped and name not in counts}
+        for statement in fn.body:
+            if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)):
+                name = statement.targets[0].id
+                if name in mapped or counts.get(name) != 1:
+                    continue
+                value = _constant_int(statement.value, local)
+                if value is not None:
+                    local[name] = value
+        entries = []
+        for sub in _shallow_walk(fn.body):
+            if (isinstance(sub, ast.BinOp) and isinstance(sub.op, ast.Pow)
+                    and isinstance(sub.left, ast.Name) and sub.left.id in mapped
+                    and sub.left.id not in rebound):
+                exponent = _constant_int(sub.right, local)
+                if type(exponent) is int and exponent >= 0:
+                    entries.append((sub.left.id, mapped[sub.left.id], exponent))
+        if entries:
+            out[fn.name] = entries
+    return out
+
+
 def _all_bound_names(root):
     """Every name the program (or subtree) binds, for deciding whether a call is a builtin."""
     bound = set()
@@ -1105,10 +1150,12 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
 
 
 class _Int64CallChecker(ast.NodeVisitor):
-    def __init__(self, known, passthrough, int_params, int_shadowed, attributes, program_bound):
+    def __init__(self, known, passthrough, int_params, pow_params, int_shadowed, attributes,
+                 program_bound):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
+        self.pow_params = pow_params
         self.int_shadowed = int_shadowed
         self.attributes = attributes
         self.program_bound = program_bound
@@ -1131,6 +1178,32 @@ class _Int64CallChecker(ast.NodeVisitor):
         error.source_column = node.col_offset
         raise error
 
+    def _check_power(self, node, base, exponent):
+        if type(base) is not int or type(exponent) is not int or exponent < 0:
+            return
+        if -1 <= base <= 1:
+            return
+        value = _exact_pow_or_too_big(base, exponent)
+        if value is None:
+            return
+        if value is not _CONST_INT_TOO_BIG and _INT64_MIN <= value <= _INT64_MAX:
+            return
+        error = ValueError(
+            'the integer power %d ** %d does not fit in a 64-bit signed integer '
+            '(int64 constant out of range): CPython computes it exactly because its int is '
+            "unbounded, while this language's int is int64; use float() when a float answer "
+            'is wanted' % (base, exponent))
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def visit_BinOp(self, node):
+        if isinstance(node.op, ast.Pow) and _const_fold_int(node.left) is None:
+            exponent = self._value(node.right)
+            if type(exponent) is int and exponent >= 0:
+                self._check_power(node, self._value(node.left), exponent)
+        self.generic_visit(node)
+
     def visit_Call(self, node):
         if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
                 and self._global_name('int') and len(node.args) == 1 and not node.keywords):
@@ -1152,6 +1225,12 @@ class _Int64CallChecker(ast.NodeVisitor):
                     value = self._value(argument)
                     if _outside_int64_float(value):
                         self._refuse(node, value)
+        if (isinstance(node.func, ast.Name) and node.func.id in self.pow_params
+                and self._global_name(node.func.id)):
+            for name, index, exponent in self.pow_params[node.func.id]:
+                argument = _bound_argument(node, name, index)
+                if argument is not None:
+                    self._check_power(node, self._value(argument), exponent)
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
@@ -1423,7 +1502,8 @@ def _check_int64_literals(tree):
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes)
-    _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
+    pow_params = _pow_parameter_powers(tree, module_counts, known)
+    _Int64CallChecker(known, passthrough, int_params, pow_params, int_shadowed, attributes,
                       program_bound).visit(tree)
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
