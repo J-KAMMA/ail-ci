@@ -19,6 +19,7 @@ import ail_sexpr
 import ail_modules
 
 sys.path.append(str(Path(__file__).resolve().parent / 'python/pkg-v12'))
+from pyfront import _bound_names, _is_builtin_sequence_value, _known_builtin_sequence_names
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every walk this process makes
 
@@ -2008,15 +2009,23 @@ def _constant_int_exact(node, _limit=_CONST_INT_BITS):
 
 def _clamp_slice_bounds(tree):
     """Rewrite a constant slice lower/upper bound that int64 cannot hold to the nearest int64
-    bound. CPython's slice.indices() clamps a bound to the sequence length (or to -1/len for a
-    negative step), so `a[2**63:]`, `del a[:-(2**63) - 1]` and their assignments select exactly
-    what the extreme int64 bound selects. A step is left alone: a huge step is still the
-    construct the constant checks refuse by name."""
+    bound, but only when the target is statically known to be a built-in sequence. CPython's
+    slice.indices() clamps a bound to the sequence length (or to -1/len for a negative step), so
+    `a[2**63:]`, `del a[:-(2**63) - 1]` and their assignments select exactly what the extreme
+    int64 bound selects. A user-defined __getitem__/__setitem__/__delitem__ receives the slice
+    unchanged, so an unknown target is left alone and the constant checks refuse it by name
+    instead of handing it a wrong bound. A step is left alone in every case: a huge step is still
+    the construct the constant checks refuse by name."""
+    shadowed = _bound_names(tree)
+    known = _known_builtin_sequence_names(tree, shadowed)
     for node in ast.walk(tree):
-        if not isinstance(node, ast.Slice):
+        if not isinstance(node, ast.Subscript) or not isinstance(node.slice, ast.Slice):
             continue
+        if not _is_builtin_sequence_value(node.value, known, shadowed):
+            continue
+        slice_node = node.slice
         for name in ('lower', 'upper'):
-            bound = getattr(node, name)
+            bound = getattr(slice_node, name)
             if bound is None:
                 continue
             ok, value = _constant_int_exact(bound)
@@ -2024,7 +2033,7 @@ def _clamp_slice_bounds(tree):
                 continue
             replacement = ast.copy_location(
                 ast.Constant(value=_INT64_MAX if value > 0 else _INT64_MIN), bound)
-            setattr(node, name, replacement)
+            setattr(slice_node, name, replacement)
 
 
 def _check_int64_constants(tree):

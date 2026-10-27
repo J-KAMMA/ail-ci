@@ -1,13 +1,16 @@
 # -*- coding: utf-8 -*-
-"""pre323: a constant slice lower/upper bound outside int64 is clamped, not refused.
+"""pre323: a constant slice lower/upper bound outside int64 is clamped for built-in sequences.
 
 The rbrbrbpre7 review recorded `del a[2**63:]` as a pre-existing difference: both builds refused
 it with `int64 constant out of range` while CPython's slice.indices() clamps the bound to the
 sequence length and deletes nothing.  A constant lower/upper bound whose exact value leaves int64
-is now rewritten to the nearest int64 bound, which selects exactly what CPython selects for a
-list, tuple, str, bytes or bytearray, on reads, assignments and deletes, and through an argument,
-a list item, an attribute and a dict value.  A step outside int64 is still refused by name, as is
-a constant index outside int64.
+is now rewritten to the nearest int64 bound when the target is statically known to be a built-in
+list, tuple, str, bytes, bytearray or range, which selects exactly what CPython selects on reads,
+assignments and deletes.  A user-defined __getitem__/__setitem__/__delitem__ receives the exact
+slice, so a target that is not statically known to be a built-in sequence (a user class, an
+argument, a list item, an attribute or a dict value) is refused by name instead of being given a
+wrong clamped bound.  A step outside int64 is still refused by name, as is a constant index
+outside int64.
 """
 import os
 import shutil
@@ -50,15 +53,14 @@ MATCHING = {
         'xs[-(2**63) - 1:2**63] = [7]\nprint(xs)\n'
         'del xs[2**63:]\nprint(xs)\n'
         'del xs[:-(2**63) - 1]\nprint(xs)\n'),
-    'routes': (
-        'def take(x):\n    return x\n'
-        'a = [1, 2, 3, 4]\n'
-        'print(take(a)[2**63:])\n'
-        'print([a][0][2**63:])\n'
-        'class C:\n    def __init__(self):\n        self.v = a\n'
-        'c = C()\nprint(c.v[2**63:])\n'
-        'print({0: a}[0][2**63:])\n'
-        'print([1, 2, 3][:-(2**63) - 1])\n'),
+    'known_literals': (
+        'print([1, 2, 3][:-(2**63) - 1])\n'
+        'print((1, 2, 3)[2**63:])\n'
+        'print("abcdef"[2**63:])\n'
+        'print(b"abcdef"[:2**63])\n'
+        'print([x for x in range(3)][2**63:])\n'
+        'print(list(range(4))[2**63:])\n'
+        'print(bytearray(b"abc")[:2**63])\n'),
     'empty_alias': (
         'xs = []\nys = xs\nprint(ys[2**63:])\n'
         'xs[2**63:] = [1]\nprint(xs, ys)\n'
@@ -80,6 +82,31 @@ MATCHING = {
 REFUSED = {
     'huge_step': 'a = list(range(8))\nprint(a)\ndel a[::2**100]\nprint(a)\n',
     'huge_index': 'a = [1, 2, 3]\nprint(a)\ndel a[2**63]\nprint(a)\n',
+    'user_getitem': (
+        'class C:\n    def __getitem__(self, i):\n'
+        '        return (i.start, i.stop, i.step)\n'
+        'print(C()[2**63:])\n'),
+    'user_setitem': (
+        'class C:\n    def __setitem__(self, i, v):\n'
+        '        print(i.start, i.stop, i.step, v)\n'
+        'c = C()\nc[2**63:] = [1]\n'),
+    'user_delitem': (
+        'class C:\n    def __delitem__(self, i):\n'
+        '        print("del", i.start, i.stop, i.step)\n'
+        'c = C()\ndel c[2**63:]\n'),
+    'argument_route': (
+        'def take(x):\n    return x\n'
+        'a = [1, 2, 3, 4]\n'
+        'print(take(a)[2**63:])\n'),
+    'list_item_route': (
+        'a = [1, 2, 3]\n'
+        'print([a][0][2**63:])\n'),
+    'attribute_route': (
+        'class C:\n    def __init__(self):\n        self.v = [1, 2, 3]\n'
+        'c = C()\nprint(c.v[2**63:])\n'),
+    'dict_value_route': (
+        'a = [1, 2, 3]\n'
+        'print({0: a}[0][2**63:])\n'),
 }
 
 
@@ -119,7 +146,7 @@ class SliceBoundsBeyondInt64(unittest.TestCase):
                 self.assertEqual(ran.returncode, expected.returncode, where + '\n' + source)
                 self.assertEqual(ran.stdout, expected.stdout, where + '\n' + source)
 
-    def test_step_and_index_outside_int64_are_refused_by_name(self):
+    def test_step_index_and_unknown_target_are_refused_by_name(self):
         for name, source in REFUSED.items():
             for general in (False, True):
                 where = '%s %s' % (name, 'general' if general else 'default')

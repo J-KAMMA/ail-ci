@@ -164,6 +164,118 @@ def _int_const_value(node):
     return int(value)
 
 
+_BUILTIN_SEQUENCE_TYPES = frozenset({'list', 'tuple', 'str', 'bytes', 'bytearray', 'range'})
+
+
+def _bound_names(tree):
+    """Every name bound anywhere in `tree`; a built-in constructor with one of these names is
+    shadowed at some point, so it is not treated as the built-in."""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+    return names
+
+
+def _nested_bound_names(tree):
+    """Names bound below module scope. A module-level name with one of these spellings is left
+    unknown: the same identifier can be a parameter or local elsewhere and mean another type."""
+    names = set()
+
+    def walk(node, nested=False):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            args = node.args
+            for argument in args.posonlyargs + args.args + args.kwonlyargs:
+                names.add(argument.arg)
+            if args.vararg is not None:
+                names.add(args.vararg.arg)
+            if args.kwarg is not None:
+                names.add(args.kwarg.arg)
+            for child in ast.iter_child_nodes(node):
+                walk(child, True)
+            return
+        if isinstance(node, ast.ClassDef):
+            for child in ast.iter_child_nodes(node):
+                walk(child, True)
+            return
+        if nested:
+            if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                names.add(node.id)
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    names.add(alias.asname or alias.name.split('.')[0])
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                names.add(node.name)
+        for child in ast.iter_child_nodes(node):
+            walk(child, nested)
+
+    for statement in tree.body:
+        walk(statement)
+    return names
+
+
+def _is_builtin_sequence_value(node, known=(), shadowed=()):
+    """True only when `node` is certainly a built-in sequence whose slice CPython clamps through
+    slice.indices(). Anything else (a user class, an attribute, a call to a user function, a
+    value from a dict or a function argument) is unknown and its out-of-int64 slice bound is
+    refused by name instead of being rewritten."""
+    if isinstance(node, (ast.List, ast.Tuple, ast.ListComp)):
+        return True
+    if isinstance(node, ast.Constant) and isinstance(node.value, (str, bytes)):
+        return True
+    if isinstance(node, ast.JoinedStr):
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in known
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return (_is_builtin_sequence_value(node.left, known, shadowed)
+                and _is_builtin_sequence_value(node.right, known, shadowed))
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+        return node.func.id in _BUILTIN_SEQUENCE_TYPES and node.func.id not in shadowed
+    return False
+
+
+def _known_builtin_sequence_names(tree, shadowed=None):
+    """Module-level names assigned only built-in sequence values, in source order. Assignments
+    below module scope are deliberately not used: keeping a name unknown only costs a by-name
+    refusal, while assuming the wrong type would clamp a bound a user __getitem__ must see."""
+    if shadowed is None:
+        shadowed = _bound_names(tree)
+    known = set()
+    direct = set()
+    for statement in tree.body:
+        value = None
+        targets = ()
+        if isinstance(statement, ast.Assign):
+            value, targets = statement.value, statement.targets
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            value, targets = statement.value, (statement.target,)
+        elif isinstance(statement, (ast.AnnAssign, ast.AugAssign)):
+            targets = (statement.target,)
+        else:
+            continue
+        for target in targets:
+            if not isinstance(target, ast.Name):
+                continue
+            direct.add(target.id)
+            if value is not None and _is_builtin_sequence_value(value, known, shadowed):
+                known.add(target.id)
+            else:
+                known.discard(target.id)
+    known -= shadowed - direct
+    known -= _nested_bound_names(tree)
+    return known
+
+
 def fold_int_constants(source):
     """Fold integer constant expressions to int64 literals and refuse out-of-range ones by name.
 
@@ -244,10 +356,16 @@ def fold_int_constants(source):
             return keyword.arg == 'maxsplit'
         return node in call.args[1:2]
 
-    def visit(node, parent=None, grandparent=None, slice_bound=False):
+    shadowed_names = _bound_names(tree)
+    builtin_names = _known_builtin_sequence_names(tree, shadowed_names)
+
+    def visit(node, parent=None, grandparent=None, slice_bound=False, builtin_slice=False):
         if isinstance(parent, ast.Slice) and any(
                 node is part for part in (parent.lower, parent.upper) if part is not None):
             slice_bound = True
+            builtin_slice = (
+                isinstance(grandparent, ast.Subscript) and grandparent.slice is parent
+                and _is_builtin_sequence_value(grandparent.value, builtin_names, shadowed_names))
         if isinstance(node, ast.JoinedStr):
             # An f-string's source text is observable in a debug field (`f"{expr=}"`), so leave
             # its expressions exactly as written; the emitters' own constant folders still run.
@@ -261,7 +379,7 @@ def fold_int_constants(source):
                 refuse(node)
             if value is not None:
                 if not _INT64_MIN <= value <= _INT64_MAX:
-                    if not slice_bound:
+                    if not (slice_bound and builtin_slice):
                         refuse(node)
                     start = starts[node.lineno - 1] + node.col_offset
                     end = starts[node.end_lineno - 1] + node.end_col_offset
@@ -279,7 +397,7 @@ def fold_int_constants(source):
                 edits.append((start, end, str(value).encode('ascii')))
                 return
         for child in ast.iter_child_nodes(node):
-            visit(child, node, parent, slice_bound)
+            visit(child, node, parent, slice_bound, builtin_slice)
 
     def identifier_byte(byte):
         return (48 <= byte <= 57 or 65 <= byte <= 90 or 97 <= byte <= 122

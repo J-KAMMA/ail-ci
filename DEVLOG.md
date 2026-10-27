@@ -1,3 +1,22 @@
+## 2026-10-27 -- pre323 review: clamp slice bounds only for known built-in sequences (job-pre323-10271554)
+
+The reviewer found that the pre323 clamp also rewrote a slice bound passed to a user-defined
+`__getitem__`/`__setitem__`/`__delitem__` (`C()[2**63:]` printed INT64_MAX for the start, where
+CPython's exact slice has 2**63 and the base refused by name).  Both clamp sites now ask a shared
+`pyfront` classification: only a target certainly known to be a built-in list, tuple, str, bytes,
+bytearray or range (a literal, a list/tuple comprehension, an unshadowed built-in constructor, or
+a module-level name/alias assigned only such a value) is clamped.  Anything else (a user class, a
+function argument, a list item, an attribute or a dict value) is left unchanged and the existing
+constant checks refuse it by name.  The classification is conservative: assignments below module
+scope keep a name unknown, which can only cost a named refusal, never a wrong bound.  The reviewer
+probes for `C()[2**63:]`, `C()[:2**63]`, `C()[-2**64:2**63:2]`, the matching assignment and
+`__delitem__` forms, plus argument/list-item/attribute/dict-value routes, now all fail their build
+with `int64 constant out of range` on both paths instead of printing a clamped value.  The built-in
+forms (list/tuple/str/bytes/bytearray literals and aliases, reads/assignments/deletes, negative
+extremes, empty aliases, int64 boundaries) still match CPython.  `test_ail_pre323.py` moves the
+user-class and unknown routes to its refused set; `test_ail_pre19.py` keeps its slice match and
+index/step refusals.  `tools/update_manifest.py --check` passes.
+
 ## 2026-10-27 -- pre323: clamp constant slice bounds outside int64 (job-pre323-10271554)
 
 The first still-differing rbrbrbpre7 item was `del a[2**63:]`: both builds refused it with
