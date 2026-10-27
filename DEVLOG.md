@@ -293,6 +293,19 @@ the difference row. Final-state tests: `test_ail_pre31`, `test_ail_safetynet`, `
 `test_ail_corpus_findings3` (4 modules, 237 s, 0 failed); probes in `/tmp/probes` cover in-range
 literals, shadowing, arithmetic/conditional values, argument, list, tuple, dict and attribute
 routes, plus refusals for literal, negative, routed and boundary values on both builds.
+## 2026-10-27 - rbpre1 re-apply: positional-only parameters (job-rbpre1-10270815)
+
+Re-applied the accepted rbpre1 change on this tree.  `def f(a, /, ...)` no longer refuses by
+name: the general path registers positional-only parameters in order (with their defaults,
+`*args`, keyword-only parameters and annotations), and both emitters refuse a call that passes
+one as a keyword.  Methods, static methods, nested defs, aliasing and values reaching a call
+through an argument, a list item, an attribute and a dict value match CPython on both builds.
+The new `AIL_CURRENT/test_ail_pre1.py` is registered in `ail_check.MODULES`, and
+`test_ail_pre141.py` now compares its nested positional-only case with CPython (its `**kwargs`
+refusal wording was updated, keeping that fix).  `tools/diff_ids.py` is not present on this
+tree; `tools/update_manifest.py` was run and `--check` passes.  Probes
+`/tmp/probes/pre1_defaults.py`, `pre1_sources.py`, `pre1_methods_nested.py` match CPython on
+both builds, and `pre1_refuse.py` is refused by name on both.
 
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
