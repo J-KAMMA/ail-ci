@@ -98,6 +98,91 @@ dd = {'v': vars(d)}
 dd['v']['g'] = 12
 print(d.g)
 ''', 'refused'),
+    'attribute_name_collision': ('''
+class D:
+    pass
+class H:
+    pass
+d = D()
+d.a = 1
+h = H()
+h.v = vars(d)
+h2 = H()
+h2.v = {'x': 1}
+h2.v['y'] = 2
+print(sorted(h2.v.items()))
+''', 'ran'),
+    'nested_attribute_collision': ('''
+class D:
+    pass
+class Box:
+    pass
+class H:
+    pass
+d = D()
+d.a = 1
+a = Box()
+b = Box()
+a.h = H()
+a.h.v = vars(d)
+b.h = H()
+b.h.v = {'x': 1}
+b.h.v['y'] = 2
+print(sorted(b.h.v.items()))
+''', 'ran'),
+    'subscript_attribute_collision': ('''
+class D:
+    pass
+class H:
+    pass
+d = D()
+d.a = 1
+xs = [H(), H()]
+xs[0].v = vars(d)
+xs[1].v = {'x': 1}
+xs[1].v['y'] = 2
+print(sorted(xs[1].v.items()))
+''', 'ran'),
+    'scope_attribute_collision': ('''
+class D:
+    pass
+class H1:
+    pass
+class H2:
+    pass
+d = D()
+d.a = 1
+def tainted():
+    h = H1()
+    h.v = vars(d)
+    return sorted(h.v.items())
+def plain():
+    h = H2()
+    h.v = {'x': 1}
+    h.v['y'] = 2
+    return sorted(h.v.items())
+print(tainted(), plain())
+''', 'ran'),
+    'rebind_plain_dict': ('''
+class D:
+    pass
+d = D()
+d.a = 1
+v = vars(d)
+v = {'x': 1}
+v['y'] = 2
+print(sorted(v.items()))
+''', 'ran'),
+    'rebind_after_mutation': ('''
+class D:
+    pass
+d = D()
+d.a = 1
+v = vars(d)
+v['a'] = 5
+v = {'x': 1}
+print(sorted(v.items()))
+''', 'refused'),
     'vars_of_list_item': ('''
 class D:
     def g(self):

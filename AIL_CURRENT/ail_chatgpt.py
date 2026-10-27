@@ -1599,6 +1599,18 @@ class _VarsMutationCheck:
         self.vars_shadowed = _binds_name(tree, 'vars')
         self.bindings = {s: _vars_bindings(s) for s in self.scopes}
 
+    def _receiver_key(self, e):
+        if isinstance(e, ast.Name):
+            return ('name', e.id)
+        if isinstance(e, ast.Attribute):
+            return ('attr', self._receiver_key(e.value), e.attr)
+        if isinstance(e, ast.Subscript):
+            return ('sub', self._receiver_key(e.value), self._receiver_key(e.slice))
+        return ('expr', ast.dump(e))
+
+    def _attr_key(self, base, attr, scope):
+        return (id(scope), self._receiver_key(base), attr)
+
     def expr(self, e, tmap, scope):
         if isinstance(e, ast.Name):
             t = _vars_copy(tmap.get(e.id, {}))
@@ -1606,7 +1618,7 @@ class _VarsMutationCheck:
                 _vars_merge(t, self.module_taint.get(e.id, {}))
             return t
         if isinstance(e, ast.Attribute):
-            return _vars_copy(self.attr_taint.get(e.attr, {}))
+            return _vars_copy(self.attr_taint.get(self._attr_key(e.value, e.attr, scope), {}))
         if isinstance(e, ast.Subscript):
             return _vars_sub(self.expr(e.value, tmap, scope))
         if isinstance(e, (ast.List, ast.Tuple, ast.Set)):
@@ -1682,22 +1694,28 @@ class _VarsMutationCheck:
         if isinstance(base, ast.Name):
             _vars_merge(tmap.setdefault(base.id, {}), t)
         elif isinstance(base, ast.Attribute):
-            _vars_merge(self.attr_taint.setdefault(base.attr, {}), t)
+            key = self._attr_key(base.value, base.attr, scope)
+            _vars_merge(self.attr_taint.setdefault(key, {}), t)
         elif isinstance(base, ast.Subscript):
             self._add_container(base.value, _vars_shift(t), tmap, scope)
 
     def assign(self, target, t, tmap, scope):
         if isinstance(target, ast.Name):
             if t:
-                _vars_merge(tmap.setdefault(target.id, {}), t)
+                tmap[target.id] = _vars_copy(t)
+            else:
+                tmap.pop(target.id, None)
         elif isinstance(target, (ast.Tuple, ast.List)):
             for e in target.elts:
                 self.assign(e, _vars_sub(t), tmap, scope)
         elif isinstance(target, ast.Starred):
             self.assign(target.value, _vars_sub(t), tmap, scope)
         elif isinstance(target, ast.Attribute):
+            key = self._attr_key(target.value, target.attr, scope)
             if t:
-                _vars_merge(self.attr_taint.setdefault(target.attr, {}), t)
+                self.attr_taint[key] = _vars_copy(t)
+            else:
+                self.attr_taint.pop(key, None)
         elif isinstance(target, ast.Subscript):
             self._add_container(target.value, _vars_shift(t), tmap, scope)
 
@@ -1730,15 +1748,19 @@ class _VarsMutationCheck:
                 if isinstance(node, ast.Assign):
                     t = self.expr(node.value, tmap, scope)
                     for target in node.targets:
+                        self._check_target(target, tmap, scope, summary)
                         self.assign(target, t, tmap, scope)
                 elif isinstance(node, ast.AnnAssign):
                     if node.value is not None:
+                        self._check_target(node.target, tmap, scope, summary)
                         self.assign(node.target, self.expr(node.value, tmap, scope), tmap, scope)
                 elif isinstance(node, ast.AugAssign):
-                    if isinstance(node.target, ast.Subscript):
-                        self.mutate(node, self.expr(node.target.value, tmap, scope), scope, summary)
+                    self._check_target(node.target, tmap, scope, summary)
                     if isinstance(node.target, ast.Name):
                         _vars_merge(tmap.setdefault(node.target.id, {}), self.expr(node.value, tmap, scope))
+                elif isinstance(node, ast.Delete):
+                    for target in node.targets:
+                        self._check_target(target, tmap, scope, summary)
                 elif isinstance(node, ast.NamedExpr):
                     self.assign(node.target, self.expr(node.value, tmap, scope), tmap, scope)
                 elif isinstance(node, (ast.For, ast.AsyncFor)):
@@ -1759,21 +1781,6 @@ class _VarsMutationCheck:
             after = repr(sorted((k, sorted((d, tuple(sorted(map(str, o)))) for d, o in v.items())) for k, v in tmap.items()))
             if after == before:
                 break
-        # final mutation checks for subscript stores/deletes and mutating methods
-        for node, parent in _vars_nodes(scope):
-            if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
-                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
-                for target in targets:
-                    for sub in ast.walk(target):
-                        if isinstance(sub, ast.Subscript) and isinstance(sub.ctx, (ast.Store, ast.Del)):
-                            self.mutate(sub, self.expr(sub.value, tmap, scope), scope, summary)
-            elif isinstance(node, ast.Delete):
-                for target in node.targets:
-                    for sub in ast.walk(target):
-                        if isinstance(sub, ast.Subscript):
-                            self.mutate(sub, self.expr(sub.value, tmap, scope), scope, summary)
-            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in _VARS_MUTATORS:
-                self.mutate(node, self.expr(node.func.value, tmap, scope), scope, summary)
         # return taint (summary only)
         if summary:
             ret = {}
@@ -1782,6 +1789,11 @@ class _VarsMutationCheck:
                     _vars_merge(ret, self.expr(node.value, tmap, scope))
             return tmap, ret
         return tmap, None
+
+    def _check_target(self, target, tmap, scope, summary):
+        for sub in ast.walk(target):
+            if isinstance(sub, ast.Subscript) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+                self.mutate(sub, self.expr(sub.value, tmap, scope), scope, summary)
 
     def _pass_args(self, call, tmap, scope, summary):
         f = call.func

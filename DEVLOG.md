@@ -1,3 +1,23 @@
+## 2026-10-27 -- pre344 review: attribute taint is per receiver; rebinding replaces taint (job-pre344-10272238)
+
+The reviewer found two false refusals in the new pass.  Attribute taint was global per attribute
+name, so `h.v = vars(d)` refused a later `h2.v['y'] = 2` on an unrelated object; it is now keyed by
+scope plus a structural receiver expression (`_receiver_key`/`_attr_key`), so `h.v`, `h2.v`,
+`a.h.v`, `xs[0].v` and same-named attributes in different functions no longer alias.  Rebinding a
+name or attribute merged the old taint instead of replacing it, so `v = vars(d); v = {'x': 1};
+v['y'] = 2` was refused; assignment now replaces the slot (dropping an empty taint).  Mutation
+checks moved into the statement walk so a write before a rebind is still refused while a write
+after the rebind is not, and a write before the `vars()` assignment is no longer misattributed.
+Added six cases to `AIL_CURRENT/test_ail_pre344.py` (38 programs) for both collisions, nested and
+subscript receivers, per-scope names, plain rebinding, and mutation before a rebind.
+
+Probes in `/tmp/probes/pre344fix` on both builds: the reviewer's `h.v`/`h2.v` and `v`-rebind
+programs now match CPython; same-object `h.v` mutation and mutation-before-rebind are refused by
+name; nested attribute, subscript attribute, scope collision, read-only, argument/list/dict and
+mutation-before-taint controls match CPython.  Final-state tests: test_ail_pre344,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was
+run and `--check` passes.
+
 ## 2026-10-27 -- pre344: mutation of the dict returned by vars() is refused by name (job-pre344-10272238)
 
 The task file was truncated, so the pre-existing item was recovered from the pre318 review:
