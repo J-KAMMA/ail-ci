@@ -1,3 +1,25 @@
+## 2026-10-27 -- re-apply fuzz59: built-in `%r` in list repr and pre19 delete bounds (job-rbfuzz59-10271222)
+
+Re-applied the accepted fuzz59 change on this tree. `tuplegen.lrepr` now formats scalar
+elements with the built-in `%r` conversion instead of the shadowable `repr` name, so a
+program-defined `repr` cannot hijack the generated list helper and a value whose runtime
+type differs from the list annotation after a slice store shows its own repr. Added
+`pyfront.refuse_unrepresentable_delete_bounds` and wired it into the typed and general
+`del` paths, so a constant index or slice bound that leaves int64 is refused by name
+instead of trapping `integer overflow` at run time; the literal `-9223372036854775808`
+and in-range bounds are unchanged. Added `test_ail_fuzz59.py` and `test_ail_pre19.py`
+(the pre41 nested-generator guard was already present and is unchanged), registered both
+in `ail_check.MODULES`, and added the DIFFERENCES row. `tools/diff_ids.py` is not present
+on this tree; `tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes` on both builds: `f59_bounds`, `f59_mixed_slice`, `f59_routes`,
+`f59_shadow_repr`, `pre19_del_inrange`, `pre19_del_literal_min_slice` and `pre19_nondel`
+match CPython; `pre19_del_computed_min`, `pre19_del_intermediate`, `pre19_del_nested`,
+`pre19_del_overflow` and `pre19_del_slice_overflow` are refused by name. Final-state tests:
+`test_ail_fuzz59`, `test_ail_pre19`, `test_ail_pre41`, `test_ail_fuzz65`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (7 modules, 376 s,
+0 failed).
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
