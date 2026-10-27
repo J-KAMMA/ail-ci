@@ -20741,6 +20741,7 @@ static inline ail_st ail_it_permutations(ail_ctx *cx, ail_obj *out, ail_obj iter
     if (has_r) { st = ail_it_r_index(cx, r_obj, &r, 1); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; } }
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n; int64_t rr = has_r ? r : n;
+    if (rr < 0) { AIL_FRAME_LEAVE(cx, fr); return ail_raise_c(cx, AIL_B_VALUEERROR, "r must be non-negative"); }
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
     if (rr > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(n > 0 ? n : 1) * sizeof(int64_t));
@@ -20781,6 +20782,7 @@ static inline ail_st ail_it_combinations(ail_ctx *cx, ail_obj *out, ail_obj iter
     st = ail_it_r_index(cx, r_obj, &r, 0); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n;
+    if (r < 0) { AIL_FRAME_LEAVE(cx, fr); return ail_raise_c(cx, AIL_B_VALUEERROR, "r must be non-negative"); }
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
     if (r > n) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(int64_t));
@@ -20809,6 +20811,7 @@ static inline ail_st ail_it_combinations_wr(ail_ctx *cx, ail_obj *out, ail_obj i
     st = ail_it_r_index(cx, r_obj, &r, 0); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
     ail_vecobj *pool = (ail_vecobj *)pr_[0].o;
     int64_t n = pool->n;
+    if (r < 0) { AIL_FRAME_LEAVE(cx, fr); return ail_raise_c(cx, AIL_B_VALUEERROR, "r must be non-negative"); }
     pr_[1] = ail_list_new(cx); ail_obj res = pr_[1];
     if (n == 0 && r > 0) { AIL_FRAME_LEAVE(cx, fr); return ail_iter(cx, out, res); }
     int64_t *indices = (int64_t *)ail_xmalloc((size_t)(r > 0 ? r : 1) * sizeof(int64_t));

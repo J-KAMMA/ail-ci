@@ -714,6 +714,15 @@ class bytearray:
         r._a = self._a * n
         return r
 
+    def __imul__(self, n):
+        if not isinstance(n, int):
+            tn = type(n).__name__
+            if tn == 'deque':
+                tn = 'collections.deque'
+            raise TypeError("can't multiply sequence by non-int of type '" + tn + "'")
+        self._a *= n
+        return self
+
     def __rmul__(self, n):
         if not isinstance(n, int):
             tn = type(n).__name__

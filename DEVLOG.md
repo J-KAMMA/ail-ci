@@ -504,6 +504,26 @@ Probes in `/tmp/probes`: `pre309_hash_frozenset`, `pre309_hash_int`, `pre309_fs_
 `pre309_fs_diag3`, `pre309_fs_seq1` and `pre309_fs_seq2` all match CPython on both builds (15/15).
 Final-state tests: test_ail_pre309, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3 (4 modules, 356 s, 0 failed). `tools/update_manifest.py --check` passes.
+## 2026-10-27 -- pre313: bytearray `*=` changes the object itself (job-pre313-10271421)
+
+The first still-differing item in the rbpre281 review was the bytearray in-place repeat:
+`ba = bytearray(b"ab"); z = ba; ba *= 2` left `z` as `b"ab"` where CPython extends the same
+bytearray in place, so the alias shows `b"abab"` (`ba is z` stays True).  The general path's
+bytearray is the `bytearray` class from `prelude_bytes.py`; it had `__mul__` but no `__imul__`,
+so the augmented assignment fell back to `__mul__` and rebound the name.  `prelude_bytes.py`
+now gives `bytearray` an `__imul__` that checks its operand like `__mul__`, repeats `self._a`
+in place, and returns `self`.  The `g` (forced general) and `d` (default) builds both use that
+fallback, and both now match CPython.  The second recorded item (a huge count on a non-empty
+outer sequence) was not touched: only the first still-differing cause was fixed.
+
+Probes in `/tmp/probes` match CPython on both builds: `pre313_ba_alias` (the recorded case),
+`pre313_aliases` (size 2, empty, zero, negative, bool, larger and a `bytes` control),
+`pre313_routes` (a function argument, a list item, an attribute and a dict value, each with an
+alias) and `pre313_types` (float/str/list/None TypeError text, bytearray(), bytearray(int),
+bytearray(list), and `False`).  Final-state tests: test_ail_pre313, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (26 tests, 513.6 s, 0 failed, 1 skipped).
+DIFFERENCES row `C?-job-pre313-10271421-1`; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
@@ -1171,6 +1191,30 @@ not be run.  `python3 tools/update_manifest.py` updated the manifest for the tou
 
 Tests on the final commit: `test_ail_fuzz4`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` (4 modules, 354 s, 0 failed).
+## 2026-10-27 - pre75 negative-r literal refusal removed for pre59 (job-rbpre75-10271421)
+
+The accepted pre75 change refused a negative `r` literal at compile time on both builds. On the
+integration tree that conflicts with `test_ail_pre59`, whose literal cases require the program to
+build and raise `ValueError: r must be non-negative` at run time like CPython. The compile-time
+refusals in `itlib.py` and `pyboxed2.py` are removed; the runtime raise in `cruntime.py` stays, so
+a literal and every dynamic route (argument, list item, attribute, dict value, keyword) now raise
+the ValueError on both builds. `test_ail_pre75.py` now checks the literal runtime result instead of
+a refusal, and the pre126/pre137 programs use direct negative literals again. `test_ail_pre59.py`
+is registered in `ail_check.MODULES`. Probes `pre59_lit`, `pre59_routes`, `pre59_gen` and the
+feature-free `pre75_unrelated` match CPython on both builds.
+
+## 2026-10-26 - pre75: itertools negative r (job-pre75-10241832)
+
+`itertools.permutations` / `combinations` / `combinations_with_replacement` on the general
+path returned `[]` for a negative `r`; CPython consumes the iterable and then raises
+`ValueError: r must be non-negative`. The runtime helpers now raise it, and the default
+build's `list(...)` collection of the same shape no longer emits invalid C: a negative `r`
+literal is refused by name at compile time on both builds, while a non-literal negative
+`r` (argument, list item, attribute, dict value) raises the ValueError on both. Added
+`AIL_CURRENT/test_ail_pre75.py`; probes are in `/tmp/probes/pre75_*.py`. The pre137 catch/order
+program now passes its direct negative `r` through a computed value, because that literal is
+refused at compile time; its runtime and pool-order checks are unchanged. The pre126 bounds
+program does the same for its empty-pool negative-`r` cases.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 

@@ -190,6 +190,7 @@ MODULES = (
     'test_ail_pre310',
     'test_ail_pre293',
     'test_ail_pre306',
+    'test_ail_pre313',
     'test_ail_pre205',
     'test_ail_pre206',
     'test_ail_pre209',
@@ -247,6 +248,8 @@ MODULES = (
     'test_ail_splitlines_utf8', 'test_ail_str_adjacent_cat', 'test_ail_str_case', 'test_ail_str_cursor', 'test_ail_struct_lifetimes',
     'test_ail_struct_list_objects', 'test_ail_tcp_json_lines', 'test_ail_tcp_json_lines_poll', 'test_ail_tcp_listener', 'test_ail_text_find_search',
     'test_ail_utf8_stream_fuzz',
+    'test_ail_pre59',
+    'test_ail_pre75',
 )
 
 
