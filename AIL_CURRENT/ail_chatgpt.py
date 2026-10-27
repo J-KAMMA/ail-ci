@@ -713,6 +713,19 @@ def _outside_int64_float(value):
             and not -(1 << 63) <= int(value) < 1 << 63)
 
 
+def _int_conversion_outside_int64(value):
+    if type(value) is int:
+        return value if not _INT64_MIN <= value <= _INT64_MAX else None
+    if isinstance(value, (str, bytes)):
+        try:
+            converted = int(value, 10)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not _INT64_MIN <= converted <= _INT64_MAX:
+            return converted
+    return None
+
+
 def _bound_argument(node, name, index):
     if index is not None and index < len(node.args):
         return node.args[index]
@@ -841,6 +854,13 @@ class _Int64CallChecker(ast.NodeVisitor):
             value = self._value(node.args[0])
             if _outside_int64_float(value):
                 self._refuse(node, value)
+            converted = _int_conversion_outside_int64(value)
+            if converted is not None:
+                error = ValueError(
+                    f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
+                error.source_line = node.lineno
+                error.source_column = node.col_offset
+                raise error
         if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
                 and self._global_name(node.func.id)):
             for name, index in self.int_params[node.func.id].items():
