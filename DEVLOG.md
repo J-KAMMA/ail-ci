@@ -1,3 +1,33 @@
+## 2026-10-27 -- pre328: user-class slicing after a compound rebinding (job-pre328-10271926)
+
+The pre323 reviewer recorded as pre-existing that slicing a user-class instance through
+`__getitem__` after a `for`, `with` or tuple-unpacking rebinding (and through an argument, a
+list item, an attribute or a dict value) compiles and then stops with
+`NotImplementedError: slicing an instance through __getitem__ is not supported: this path has
+no slice objects`, while CPython passes a real slice object.  The general path's slice branch
+for an unknown kind already knew how to dispatch on the runtime tag, but it was entered only
+when a previous `NeedSlice` retry had set `want_slice`; a program whose only instance slice was
+one of these routes therefore took the ordinary `ail2s_getslice` path.
+
+That branch is now requested whenever the target is not a known `str`/`list`/`tuple` and any
+class defines `__getitem__`, so the generated code asks the value's tag: an instance gets a
+slice object through `ail_op_getitem`, everything else keeps `ail2s_getslice`.  The bounds are
+evaluated inside the two branches, once in whichever runs, which also removes the double
+evaluation the old unknown-kind branch did for an instance.  Direct instances, `if` rebinding,
+`for`/`with`/tuple rebinding, the argument/list-item/attribute/dict-value routes, empty,
+negative and dynamic/`None` bounds and bounds with side effects match CPython on both builds;
+a constant index or step outside int64 is still refused by name.  Added
+`AIL_CURRENT/test_ail_pre328.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre328` on both builds: `p_direct_in`, `p_assign_in`, `p_if_in`,
+`p_for_in_only`, `p_with_in`, `p_tuple_in`, `p_routes_in`, `p_str_list_in`,
+`p_dynamic_bounds`, `p_negative`, `p_empty`, `p_side_effect` and `p_set_del_routes_in` match
+CPython; `p_direct`, `p_for`, `p_for_in` and the out-of-int64 routes are refused by name.
+`p_errors` (dict/unknown TypeError text) is identical on the base and this tree, so it is a
+pre-existing difference not caused by this change.  Final-state tests: `test_ail_pre328` (2
+tests, OK, 55 s), `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+`tools/update_manifest.py --check` passes.
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound

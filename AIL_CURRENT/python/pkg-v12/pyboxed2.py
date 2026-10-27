@@ -5627,10 +5627,11 @@ class Compiler(boxclosure.ClosureMixin):
                     raise NeedSlice()
                 key = self._slice_obj(node.slice, ctx)
                 return self._subscript_with_key(node, c, key, ctx)
-            if self.want_slice and self.infer_kind(node.value, ctx) not in ('str', 'list', 'tuple') \
+            if self.infer_kind(node.value, ctx) not in ('str', 'list', 'tuple') \
                     and self._any_class_defines('__getitem__'):
                 # a value of unknown kind: an instance takes a slice object, anything else is sliced
-                lo, hi, step = self._slice_bounds(node.slice, ctx)
+                if not self.want_slice:
+                    raise NeedSlice()
                 t = ctx.tmp()
                 ctx.emit('if (%s.tag == AIL_T_INST) {' % c)
                 ctx.indent += 1
@@ -5640,6 +5641,7 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.indent -= 1
                 ctx.emit('} else {')
                 ctx.indent += 1
+                lo, hi, step = self._slice_bounds(node.slice, ctx)
                 ctx.emit('st = ail2s_getslice(cx, &%s, %s, %s, %s, %s);' % (t, c, lo, hi, step))
                 ctx.check()
                 ctx.indent -= 1
