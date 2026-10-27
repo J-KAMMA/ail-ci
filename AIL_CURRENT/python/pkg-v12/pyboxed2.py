@@ -2277,6 +2277,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.mix_units = []
         self.mix_guard_checks = {}
         self.class_values = []     # classes used as values (a call through a value may construct one)
+        self.evaluating_class_attrs = set()   # slots whose value is being compiled (re-entrancy guard)
         self.user_method_names = frozenset()   # every method name a class of the program defines
         self.uses_argv = False     # sys.argv: main takes argc / argv
         self.bytes_prelude = False # bytes / bytearray are the classes of prelude_bytes.py
@@ -6283,7 +6284,12 @@ class Compiler(boxclosure.ClosureMixin):
             return self._call_name(f.id, args, kwargs, ctx)
         if isinstance(f, ast.Attribute):
             return self._call_attribute(f, args, kwargs, ctx)
-        return self.call_value(self.expr(f, ctx), args, kwargs, ctx)
+        # a lambda literal is never a class; inside a class-attribute value the class branch would
+        # re-evaluate the attribute being compiled and recurse.  Outside that value the emitted C
+        # stays as before.
+        return self.call_value(self.expr(f, ctx), args, kwargs, ctx,
+                               class_dispatch=not (isinstance(f, ast.Lambda)
+                                                   and self.evaluating_class_attrs))
 
     def _star_vec_src(self, star_val, ctx, what):
         """A starred call argument's value, cast to `ail_vecobj *` -- only safe for a genuine
@@ -6891,6 +6897,7 @@ class Compiler(boxclosure.ClosureMixin):
                 # later one (and, for a comprehension, to its outermost iterable only).  Bind the
                 # name after evaluating the value, as CPython does, so `x = x + 1` reads the outer x.
                 ctx.class_locals = self._class_attr_locals(name, slot)
+                self.evaluating_class_attrs.add(slot)
                 try:
                     v = self.expr(aval, ctx)
                 except Unsupported as exc:
@@ -6900,6 +6907,8 @@ class Compiler(boxclosure.ClosureMixin):
                             or (str(exc).startswith("name '") and str(exc).endswith("is not defined"))):
                         raise
                     raise self._class_attr_through_class_refusal(name, _aname)
+                finally:
+                    self.evaluating_class_attrs.discard(slot)
                 ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
         finally:
             ctx.class_locals = saved
@@ -6915,14 +6924,20 @@ class Compiler(boxclosure.ClosureMixin):
         """The one shared value of a class attribute, filling the slot lazily only when the module
         body did not run (the array-entry shape, where there is no executable module statement)."""
         if value is not None:
+            if slot in self.evaluating_class_attrs:
+                from pyfront import Unsupported
+                raise Unsupported('a call through a function value while the class attribute '
+                                  'value it constructs is still being compiled')
             ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) {' % slot)
             ctx.indent += 1
             saved = ctx.class_locals
             if cname is not None:
                 ctx.class_locals = self._class_attr_locals(cname, slot)
+            self.evaluating_class_attrs.add(slot)
             try:
                 v = self.expr(value, ctx)
             finally:
+                self.evaluating_class_attrs.discard(slot)
                 ctx.class_locals = saved
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
             ctx.indent -= 1
