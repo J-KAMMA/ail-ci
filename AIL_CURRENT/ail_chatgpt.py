@@ -919,6 +919,87 @@ class _Int64CallChecker(ast.NodeVisitor):
         self._visit_comprehension(node)
 
 
+def _immutable_constant(value):
+    if type(value) in (bool, int, float, str, bytes, type(None)):
+        return True
+    if isinstance(value, tuple):
+        return all(_immutable_constant(item) for item in value)
+    return False
+
+
+def _foldable_container(value):
+    if isinstance(value, (str, bytes)):
+        return True
+    if isinstance(value, (list, tuple)):
+        return all(_immutable_constant(item) for item in value)
+    if isinstance(value, dict):
+        return all(_immutable_constant(key) and _immutable_constant(item)
+                   for key, item in value.items())
+    return False
+
+
+def _safe_module_containers(tree, module_counts, global_names, parents):
+    """Module names bound once to a literal container, or aliased from one, where every use is a
+    subscript read or a module-level alias.  A mutation through the name or an alias, a call that
+    could mutate the object, or any other use drops the whole alias group, so a value folded by
+    this pass is the one the program actually reads."""
+    module_assigns = {id(statement) for statement in tree.body
+                      if isinstance(statement, ast.Assign)}
+    declarations = set()
+    roots = set()
+    aliases = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not isinstance(target, ast.Name):
+            continue
+        name = target.id
+        if isinstance(statement.value, ast.Name):
+            aliases.setdefault(name, set()).add(statement.value.id)
+        if module_counts.get(name) != 1 or name in global_names:
+            continue
+        declarations.add(id(target))
+        if isinstance(statement.value, (ast.List, ast.Tuple, ast.Dict)):
+            roots.add(name)
+    groups = {}
+    for root in roots:
+        members = {root}
+        changed = True
+        while changed:
+            changed = False
+            for name, sources in aliases.items():
+                if name not in members and sources & members:
+                    members.add(name)
+                    changed = True
+        groups[root] = members
+    unsafe = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Name):
+            continue
+        parent = parents.get(node)
+        if isinstance(node.ctx, ast.Store):
+            if (id(node) not in declarations or not isinstance(parent, ast.Assign)
+                    or parent.targets[0] is not node):
+                unsafe.add(node.id)
+            continue
+        if not isinstance(node.ctx, ast.Load):
+            unsafe.add(node.id)
+            continue
+        if isinstance(parent, ast.Subscript) and parent.value is node and isinstance(parent.ctx, ast.Load):
+            continue
+        if (isinstance(parent, ast.Assign) and parent.value is node
+                and id(parent) in module_assigns and len(parent.targets) == 1
+                and isinstance(parent.targets[0], ast.Name)):
+            continue
+        unsafe.add(node.id)
+    safe = set()
+    for members in groups.values():
+        if not members & unsafe:
+            safe |= members
+    return safe
+
+
 def _fold_float_int_text(text):
     """Rewrite `float(<an exact int constant outside int64>)` to a float literal.
 
@@ -987,6 +1068,8 @@ def _check_int64_literals(tree):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             global_names.update(node.names)
     module_counts = _binding_counts(tree.body)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    safe_containers = _safe_module_containers(tree, module_counts, global_names, parents)
     known = {}
     for node in tree.body:
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
@@ -1012,6 +1095,8 @@ def _check_int64_literals(tree):
             elif (isinstance(value, (list, tuple, dict)) and _contains_known_instance(value)
                     and _only_subscripted(tree, name, node.targets[0])):
                 known[name] = value
+            elif name in safe_containers and _foldable_container(value):
+                known[name] = value
     int_shadowed = any((isinstance(node, ast.FunctionDef) and node.name == 'int')
                        or (isinstance(node, ast.arg) and node.arg == 'int')
                        or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
@@ -1019,7 +1104,6 @@ def _check_int64_literals(tree):
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes).visit(tree)
-    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
     while nodes:
