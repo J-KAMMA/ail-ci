@@ -23,6 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 REFUSALS = ('int() of a float outside int64',
+            'does not fit in a 64-bit signed integer',
             'not in the subset: a nan/inf float literal',
             'not in the subset: AIL function',
             'not in the subset: AIL constant')

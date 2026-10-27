@@ -1,3 +1,27 @@
+## 2026-10-27 -- pre345 fix: accept the re-applied pre9 infinity refusal wording (job-pre345-10280059)
+
+Applied alone on today's integ, `test_ail_pre345` failed.  The integ "re-apply pre9" change
+(`job-rbrbrbrbpre9-10272112`) gave the infinity-literal refusal its own named wording,
+`the float literal inf converted with int() does not fit in a 64-bit signed integer ...`, where
+this branch still says `not in the subset: a nan/inf float literal`.  The test's `REFUSALS`
+list had no marker for the new text, so its first affected slug (`infinity_literal`) failed on
+both builds and, because the per-slug mode check sits outside the subTest, the assertion ended
+the loop and skipped the remaining slugs.
+
+`REFUSALS` now also accepts `does not fit in a 64-bit signed integer` (the wording integ's own
+`test_ail_pre9` accepts), keeping the previous markers so the test passes on both this branch
+and integ.  No compiler code changed.  `test_ail_safetynet` is byte-identical on this branch
+and integ; it passes on the integ worktree with the patched test and on this branch, so its
+recorded failure could not be reproduced (not observed under `par_check.py -j 2`).
+
+Probes in `/tmp/probes/pre345fix` with `cmp.sh` on both builds: `p01_inf`, `p02_ninf` are
+refused by name (`a nan/inf float literal` here); `p03_finite_pos`, `p04_boundary_hi`,
+`p07_list_item`, `p08_dict_value`, `p09_attr`, `p10_arg`, `p11_alias` are refused by name
+(`int() of a float outside int64`); `p05_boundary_inrange`, `p06_rounding` and
+`p12_inrange_flows` (argument, list item, dict value, attribute) match CPython.  Final-state
+tests: test_ail_pre345, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre345: pre9's int() float-literal and int-shadow cases are already refused by name (job-pre345-10272303)
 
 The pre9 reviewer recorded as pre-existing the pre290 finite float-literal refusals, the
