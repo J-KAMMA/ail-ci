@@ -1,3 +1,26 @@
+## 2026-10-27 -- pre340: int() of a constructor-parameter float outside int64 is refused (job-pre340-10272149)
+
+The pre333 reviewer's first pre-existing item was its p16 `int(Box(1e300).v)`, where
+`__init__(self, v)` stores the parameter directly: both builds compiled and then stopped with
+`integer overflow`, where CPython prints the exact 301-digit integer.  The class-attribute fold
+now binds a constructor call to its `__init__` parameters, so a direct `self.attr = param` store
+can be read at a call site.  That route is refused by name with the existing
+`int() of a float outside int64: ... (CPython makes a big integer)` message on both builds, also
+through a keyword argument, a default, a second positional parameter, a module constant or list
+item passed as the argument, an instance name, an alias, a list/dict item and a function argument
+or wrapper.  In-range values, dynamic constructor values, literal class attributes, a later field
+store and a non-conversion read still match CPython.
+
+The second recorded pre-existing item (the default build's dict item-overwrite failure, p12/p15)
+is unchanged; only the first still-differing item was fixed.
+
+Probes in `/tmp/probes/pre340` on both builds: `p16`, `p16b`, `p16d`-`p16m` and `p16r` are
+refused by name; `p16c`, `p16n`-`p16q`, `p16s` and `p16t` match CPython.  The baseline `p12`
+matches on the general build and keeps the pre-existing default-build failure; `p15` matches on
+both.  Final-state tests: test_ail_pre340, test_ail_pre306, test_ail_pre302, test_ail_pre311,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (7 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function
