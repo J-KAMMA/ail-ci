@@ -37,7 +37,7 @@ qoder_setup() {
 ' "$lm" | grep -io '[A-Za-z0-9._-]*deepseek[A-Za-z0-9._-]*' | grep -i flash | sort -u)   # never DeepSeek V4 Pro (owner)
   for m in $cands DeepSeek-Flash; do
     out=$(QODER_PERSONAL_ACCESS_TOKEN=$(cat "$RUNNER_TEMP/qoder.key") timeout 120 "$QBIN" -p -o json --model "$m" "Reply with the single word: pong" 2>&1)
-    printf '%s -> %s\n' "$m" "$(printf '%s' "$out" | tr '\n' ' ' | cut -c1-300)" >> "$log"
+    printf '%s -> %s\n' "$m" "$(printf '%s' "$out" | tr '\n' ' ' | tail -c 600)" >> "$log"   # the tail holds the error text (the head is only usage counters)
     if printf '%s' "$out" | grep -qi pong; then QMODEL=$m; echo "$m" > "$RUNNER_TEMP/qoder.model"; return 0; fi
   done
   touch "$RUNNER_TEMP/qoder.off"; return 1
