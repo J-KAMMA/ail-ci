@@ -1742,6 +1742,22 @@ def _pow_alias_names(tree):
     return _pow_aliases(tree.body, {'pow'}, stores, parameters)
 
 
+def _pow_body_refused_by_pre273(body):
+    """Whether pyfront's pre273 rule refuses this wrapper body at its definition.
+
+    The gate mirrors that rule exactly: only a ``base ** exponent`` BinOp whose base folds
+    with ``pyfront.int_constant`` is refused there.  A base that only the wider
+    ``_const_fold_int`` folds (a ``~`` operand, or a bool leaf) is left to the call-site
+    checks, because nothing else refuses it."""
+    if not (isinstance(body, ast.BinOp) and isinstance(body.op, ast.Pow)):
+        return False
+    from pyfront import int_constant
+    base = int_constant(body.left)
+    return (base is not None and abs(base) >= 2
+            and -(1 << 63) <= base < (1 << 63)
+            and not _pow_exponent_is_constant(body.right))
+
+
 def _pow_wrapper_functions(tree, module_counts):
     """Module functions whose body is exactly one returned power.
 
@@ -1765,7 +1781,8 @@ def _pow_wrapper_functions(tree, module_counts):
             base_node, exponent_node = value.args
         else:
             continue
-        wrappers[fn.name] = (fn, base_node, exponent_node)
+        wrappers[fn.name] = (fn, base_node, exponent_node,
+                             _pow_body_refused_by_pre273(value))
     return wrappers
 
 
@@ -1880,13 +1897,10 @@ def _check_int64_pow_constants(tree, known):
             raise error
 
     def check_wrapper(node, descriptor, scope_known, aliased):
-        function, base_node, exponent_node = descriptor
-        body_base = _const_fold_int(base_node)
-        if (body_base is not None and abs(body_base) >= 2
-                and _INT64_MIN <= body_base <= _INT64_MAX
-                and not _pow_exponent_is_constant(exponent_node)):
-            # The wrapper body itself (a constant base with a computed exponent) is already
-            # refused by the pre273 rule at any call site; keep its diagnostic.
+        function, base_node, exponent_node, body_refused = descriptor
+        if body_refused:
+            # The wrapper body is already refused by the pre273 rule at its definition;
+            # keep that diagnostic instead of the call-site one.
             return
         mapped = _pow_parameter_indices(function)
         local = {name: value for name, value in scope_known.items() if name not in mapped}

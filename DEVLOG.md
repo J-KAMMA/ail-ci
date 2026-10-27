@@ -1,3 +1,26 @@
+## 2026-10-27 -- pre366 follow-up 2: gate the pre273 skip on pyfront's own folder (job-pre366-10280649)
+
+The reviewer's `/tmp/rprobes/p3.py` showed the previous skip was too broad: it used
+`_const_fold_int`, which folds a `~` operand (`(~3) ** n`) and bool leaves, while pyfront's
+pre273 rule uses `pyfront.int_constant`, which does not.  Such wrappers then lost both the
+call-site checks and the definition refusal, so `q = w; q(40)` compiled and stopped with
+`integer overflow` where CPython prints the exact value.  `_pow_body_refused_by_pre273` now
+mirrors pre273 exactly: only a `base ** exponent` BinOp (not a `pow()` body) whose base folds
+with `pyfront.int_constant` to an int64 value of |base| >= 2 and whose exponent is not written
+as a constant is skipped.  `~const` and bool-leaf bases get the pre366 wording again
+(`int64 constant expression out of range` for a constant call, the aliased refusal for a
+run-time one), and a `pow(10, n)` body also keeps the call-site checks.  The pre160 case
+(`return 10 ** n`) still reports the pre273 wording, and `(5 * 2) ** n` / `(2 ** 62) ** n` /
+`(-4) ** n` are still refused by pre273, as before.
+
+Probes `/tmp/probes/p01`-`p22` (both builds): p09, p10, p11, p13, p19 and p22 match CPython;
+p01, p03, p07, p15, p16, p17, p18 and p21 are refused with the aliased-wrapper wording;
+p02, p08, p14 and p20 with `int64 constant expression out of range`; p04, p05, p06 and p12
+with the pre273 wording.  Every probe matches CPython or is refused by name.  No DIFFERENCES
+row.  Final tests on the committed tree: `test_ail_pre160`, `test_ail_pre366`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`python3 tools/update_manifest.py --check` passes.
+
 ## 2026-10-27 -- pre366 follow-up: keep the pre273 wording for a constant-base wrapper body (job-pre366-10280649)
 
 `test_ail_pre160` failed with the pre366 change: its `huge` wrapper (`def huge(n): return 10 ** n`)
