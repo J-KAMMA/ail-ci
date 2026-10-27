@@ -61,6 +61,32 @@ dict and defaultdict controls.  An exploratory `p01`/`p04` showed a separate pre
 it is not the recorded deletion item and was left unchanged.  Final-state tests on this commit:
 test_ail_pre365, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (results in
 the job report).
+## 2026-10-27 -- pre360: textwrap of a hyphen or a tab matches CPython (job-pre360-10280242)
+
+The pre352 review left `test_ail_files` and `test_ail_corpus_findings3` unverified.  `test_ail_files`
+passes unchanged on this tree, and the first difference reproduced from the corpus-findings area on
+both builds was textwrap: `textwrap.wrap("a-b", 2)` (also `fill`, and a literal containing a tab)
+compiled and then stopped with `RuntimeError: textwrap: text with a hyphen or a tab is not built`,
+where CPython prints `['a-', 'b']`.  The prelude helper `_ail_tw_wrap` now runs CPython 3.12's default
+TextWrapper: `expandtabs(8)` with the column reset on `\n`/`\r`, the whitespace translation, the
+`wordsep_re` whitespace / em-dash / hyphen chunking (including its two-word-char lookahead) and
+`_handle_long_word`'s rfind-hyphen break with the `space_left = 0` case; `width <= 0` keeps CPython's
+`ValueError` text.  Text without a hyphen or a tab is unchanged, and a program that does not import
+textwrap has a `program.c` byte-identical to a `work` worktree.
+
+Added `AIL_CURRENT/test_ail_pre360.py` (5 tests: hyphen/tab, boundaries, routes, widths, 60 random
+texts; both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  The helper
+was fuzzed against CPython 3.12's `textwrap` in CPython first (50,000 random texts over spaces, tabs,
+newlines, hyphens, em-dashes, digits, `e`-accent, CJK and superscript digits; 0 mismatches) before
+being spliced in.  Probes in `/tmp/probes/pre360`: `p01` (newline modes), `p02` (seek/tell), `p07`
+(`x` mode), `p08` (`a+`), `p09` (readline/readlines), `p10` (UTF-8 read), `p11` (corpus builtins) and
+`p12` (strip/dedent) match CPython on both builds; `p03`/`p04`/`p05`/`p06`/`p13` are refused by name;
+`p14` (hyphen and tab, the reproduced item), `p15` (argument, list item, class and instance attribute,
+dict value, mutation), `p16` (empty, whitespace-only, leading/trailing, widths 1/2/5/70, em-dash,
+digits, unicode) and `p17` (width 0/-1/-70) match CPython on both builds.  Instruction counts were not
+measured: `perf_event_paranoid` is 4 here.  Final-state tests (4 modules, 297 s, 0 failed):
+test_ail_pre360, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
 
