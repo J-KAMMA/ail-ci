@@ -54,6 +54,7 @@ MODULES = (
     'test_ail_fuzz3',
     'test_ail_fuzz3n',
     'test_ail_fuzz58',
+    'test_ail_fuzz49',
     'test_ail_fuzz20',
     'test_ail_c169',
     'test_ail_pre168',
@@ -184,6 +185,7 @@ MODULES = (
     'test_ail_pre172',
     'test_ail_pre116',
     'test_ail_pre199',
+    'test_ail_pre200',
     'test_ail_pre201',
     'test_ail_pre204',
     'test_ail_pre227',
@@ -193,6 +195,7 @@ MODULES = (
     'test_ail_fuzz42',
     'test_ail_pre263',
     'test_ail_pre269',
+    'test_ail_pre22',
 )
 
 

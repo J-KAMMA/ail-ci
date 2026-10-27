@@ -1519,13 +1519,14 @@ def _check_int64_int_base_constants(tree):
 
 
 _CONST_INT_TOO_BIG = object()
-_CONST_INT_BITS = 4096
+_CONST_INT_BITS = 1 << 20
 _CONST_INT_SPECIAL_BITS = 1 << 24
 
 
 def _constant_int_exact(node, _limit=_CONST_INT_BITS):
     """The exact int a constant expression denotes, with a guard against huge intermediates.
-    An absorbing zero and the pow bases 0/1/-1 are decided before the size guard, as in
+    An absorbing zero, a zero left shift and the pow bases 0/1/-1 are decided before the
+    fold-limit guard (the same 2**20-bit width as the shared int and maxsplit folders), as in
     pyfront.int_constant; the other operand of such a power is retried at the special-exponent
     limit, so a huge exponent still yields its sign and parity."""
     if isinstance(node, ast.Constant) and type(node.value) is int:
@@ -1631,7 +1632,13 @@ def _check_int64_constants(tree):
             return
         if value is not _CONST_INT_TOO_BIG and -(1 << 63) <= value < 1 << 63:
             return
-        shown = 'too large' if value is _CONST_INT_TOO_BIG else value
+        if value is _CONST_INT_TOO_BIG:
+            shown = 'too large'
+        else:
+            try:
+                shown = str(value)
+            except ValueError:
+                shown = 'too large'
         error = ValueError(f'int64 constant expression out of range: {shown}')
         error.source_line = getattr(node, 'lineno', None)
         error.source_column = getattr(node, 'col_offset', None)
