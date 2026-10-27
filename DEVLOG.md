@@ -1,3 +1,16 @@
+## 2026-10-27 -- fuzz59 regression: a `list[str]` repr uses the value's `%r` (job-rbrbfuzz59-10272028)
+
+The re-applied fuzz59 change gave a `list[str]` slot the generated str-repr helper
+(`repr_expr`), which calls `_ail_srepr(x)` and iterates its argument as a string.  fuzz65 pushes
+an int into a `list[str]` (CPython appends before its comparison raises, so the int stays there)
+and then prints the list: both builds stopped with `TypeError: argument of type 'int' is not
+iterable` where CPython prints the list with `1`.  `tuplegen.Gen.lrepr` now formats every scalar
+element with `%r`, str included; the typed path lowers `%r` of a str through `_repr_conv`, so a
+real str keeps `_ail_srepr`'s quoting and a value of another type in a `list[str]` slot shows its
+own repr.  fuzz59's `list[int]`/`repr`-shadowing cases and fuzz65 both pass on the general and
+default builds; probes over quotes, escapes, non-ASCII and int/bool/float/None elements match
+CPython.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- rbrbfuzz59 re-check: current integ already passes both target modules (job-rbrbfuzz59-10272028)
 
 The repair task reported `test_ail_fuzz59` and `test_ail_safetynet` failing when this job was

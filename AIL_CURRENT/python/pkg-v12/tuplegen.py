@@ -416,12 +416,10 @@ class Gen:
         self.out[name] = None
         elem = ann_text(t[1])
         # `repr()` as a name is shadowable (a program may define its own `repr`); `%r` is the
-        # built-in conversion and still uses the VALUE's repr if a slice store put another
-        # scalar type into a slot whose annotation says otherwise.  A list[str] slot uses the
-        # generated str-repr helper instead: the typed path has no `%r` for a str.
-        if t[1] == STR:
-            shown = self.repr_expr(STR, 'x')
-        elif t[1] in SCALARS:
+        # built-in conversion and still uses the VALUE's repr if a heap or slice store put
+        # another scalar type into a slot whose annotation says otherwise.  It includes a str
+        # slot: `_ail_srepr` takes a str and would raise on an int that reached a list[str].
+        if t[1] in SCALARS:
             shown = '("%r" % (x,))'
         else:
             shown = self.repr_expr(t[1], 'x')
