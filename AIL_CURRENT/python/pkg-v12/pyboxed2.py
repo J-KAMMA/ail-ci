@@ -5035,12 +5035,21 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('a bytes literal (b"...") -- not modelled by the general path')
         raise Unsupported('a constant of type %s' % type(v).__name__)
 
+    def _class_name_shadowed(self, name, ctx):
+        """A parameter, local, cell, closure or class-body binding of the same name is what the
+        read resolves to, not the class (expr_Name and _call_name try those bindings first), so
+        the class's own init flag does not describe it."""
+        class_locals = getattr(ctx, 'class_locals', None)
+        return (bool(class_locals) and name in class_locals) or name in ctx.slot_of \
+            or name in ctx.ptr_names or name in ctx.clo_index or name in ctx.free_names \
+            or name in ctx.cell_slots or name in self.module_names
+
     def _check_class_name_bound(self, name, ctx):
         """CPython binds a class name only after its body runs, so a read of the class's own
         name while its body is being evaluated is a NameError.  The class objects here are all
         created at startup, so an explicit per-class flag carries the not-yet-bound state."""
         index = self.class_init_index.get(name)
-        if index is None:
+        if index is None or self._class_name_shadowed(name, ctx):
             return
         ctx.emit('if (g_class_init_arr[%d]) { st = ail_raise_c(cx, AIL_B_NAMEERROR, '
                  '"name \'%s\' is not defined"); goto %s; }'

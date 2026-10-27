@@ -15,18 +15,24 @@ generator expression that reads its own name is refused by name, since the gener
 materialises generator expressions eagerly rather than deferring them.  A module binding made
 before the class, and any read after the class body (method body, stored instance), are unchanged.
 
-Probes in `/tmp/probes` (28 programs, both builds via `cmp.sh`): 24 match CPython, including
-direct, lambda call, list/set/dict comprehension, `C.__name__`, `C.attr`, list item, dict value,
-argument, lambda argument, nested lambda, `isinstance`, classmethod, raise/except from a called
-function, prior `C = 5`, an unrelated earlier class, a later class value, a deferred method, a
-deferred instance, plus a plain class and a class-free program.  4 are refused by name: a default
-using the class, `class A: x = A()`, and the stored/consumed generator expressions.
+Review fix: the check is now suppressed when a parameter, local, cell, closure or class-body
+binding of the name shadows the class, using the same bindings `expr_Name`/`_call_name` try
+first (`_class_name_shadowed`).  Before, `class C: x = (lambda C: isinstance(1, C))(D)` raised
+`NameError` instead of printing `False`, and `except C:` with a parameter `C` raised `NameError`
+instead of letting the `ValueError` propagate; both now behave as CPython and as the base build.
 
-Tests run on the final tree: `test_ail_pre381.py` (new), `test_ail_pre304`, `test_ail_pre319`,
-`test_ail_pre324`, `test_ail_pre347`, `test_ail_pre363`, `test_ail_safetynet`, `test_ail_files`
-and `test_ail_corpus_findings3`; all pass (8 modules in 587s with `-j 2` for the existing ones).
-`test_ail_pre381.py` is registered in `tools/ci_shards.json` with weight 38.8, and
-`tools/update_manifest.py` was run.
+Probes in `/tmp/probes2` (15 programs, both builds via `cmp.sh`, re-run on the final tree): 10
+match CPython exactly -- direct, lambda call, list comprehension, `isinstance`, except handler,
+argument, later method, prior `C = 5`, shadowing lambda parameter in `isinstance`, shadowing
+`except` parameter -- and 1 (`raise C("x")` with a shadowing parameter) matches too.  The rest
+are pre-existing and identical on the base build: `C = 5`/`class C` + `isinstance` (prints
+`False`, CPython `TypeError`), shadowed `isinstance` holding `D` (prints `False`, CPython
+`True`), shadowed `except C` holding `Err` (Err propagates, CPython catches), and `raise C("x")`
+of a non-Exception class name (prints `C: x`, CPython `TypeError`).
+
+Tests run on the final tree: `test_ail_pre381.py` (new), `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3`, all pass.  `test_ail_pre381.py` is registered in
+`tools/ci_shards.json` with weight 81.5, and `tools/update_manifest.py` was run.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The

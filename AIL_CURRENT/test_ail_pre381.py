@@ -148,6 +148,41 @@ class Pre381Tests(unittest.TestCase):
                         self.assertIn('NameError', build_err or '', '%s (general=%s)' %
                                       (slug, general))
 
+    def test_shadowed_class_name_is_not_a_self_read(self):
+        # A parameter or local of the same name is what the read resolves to, so the class-body
+        # check must not fire: the pre381 review found both shapes raising a false NameError.
+        cases = {
+            'shadowed_isinstance': '''
+class D:
+    pass
+class C:
+    x = (lambda C: isinstance(1, C))(D)
+print(C.x)
+''',
+            'shadowed_except': '''
+class D(Exception):
+    pass
+def f(C):
+    try:
+        raise ValueError("x")
+    except C:
+        pass
+class C(Exception):
+    x = f(D)
+print(C.x)
+''',
+        }
+        with tempfile.TemporaryDirectory(prefix='ail-pre381-') as directory:
+            for slug, text in cases.items():
+                want = _run_cpython(directory, slug, text)
+                for general in (True, False):
+                    got, build_err = _build_and_run(
+                        directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
+                    self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
+                    self.assertEqual(got, want, '%s (general=%s)\n%s' % (slug, general, build_err))
+                    self.assertNotIn('NameError', build_err or '', '%s (general=%s)' %
+                                     (slug, general))
+
     def test_unsupported_routes_are_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre381-') as directory:
             for slug, (text, wording) in REFUSALS.items():
