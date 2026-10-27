@@ -2,10 +2,10 @@
 
 The general path returned [] where CPython raises
 `ValueError: r must be non-negative`, and the default build's `list(...)` collection of
-the same shape emitted invalid C.  A negative literal r is now refused by name at compile
-time on both builds; a non-literal negative r raises the ValueError at run time on both.
-The dynamic routes (argument, list item, attribute, dict value) and the
-0 / positive / r > n / omitted-r boundaries are compared with CPython.
+the same shape emitted invalid C.  A negative r, including a literal, now raises the
+ValueError at run time on both builds.  The dynamic routes (argument, list item,
+attribute, dict value) and the 0 / positive / r > n / omitted-r boundaries are compared
+with CPython.
 """
 import os
 import subprocess
@@ -17,7 +17,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 LITERAL = '''import itertools
-list(itertools.%(func)s([1, 2], %(arg)s))
+try:
+    list(itertools.%(func)s([1, 2], %(arg)s))
+except ValueError as e:
+    print(type(e).__name__, e)
 '''
 
 DYNAMIC_ROUTES = r'''import itertools
@@ -131,18 +134,11 @@ def _cpython(directory, name, text):
 
 
 class Pre75Tests(unittest.TestCase):
-    def test_negative_literal_is_refused_by_name(self):
+    def test_negative_literal_raises(self):
         for func, arg in CASES:
             text = LITERAL % {'func': func, 'arg': arg}
-            for general in (True, False):
-                with tempfile.TemporaryDirectory(prefix='ail-pre75-') as directory:
-                    built, exe = _compile(directory, 'lit', text, general)
-                    where = 'general' if general else 'default'
-                    self.assertEqual(built.returncode, 3,
-                                     '%s %s\n%s' % (func, where, built.stdout + built.stderr))
-                    self.assertIn('%s: a negative r literal' % func, built.stderr)
-                    self.assertIn('r must be non-negative', built.stderr)
-                    self.assertFalse(exe.exists())
+            slug = 'literal_%s_%s' % (func, 'kw' if arg.startswith('r=') else 'pos')
+            self.check(slug, text)
 
     def check(self, slug, text):
         with tempfile.TemporaryDirectory(prefix='ail-pre75-') as directory:

@@ -842,11 +842,6 @@ class Streams:
         r = got.get('r')
         if isinstance(r, ast.Constant) and r.value is None:
             r = None
-        if r is not None:
-            rv = int_value(r)
-            if rv is not None and rv < 0:
-                refuse(call, 'itertools.%s: a negative r literal (CPython raises ValueError: '
-                       'r must be non-negative)' % name)
         return PoolStream(self, call, name, got['iterable'], r)
 
     _SCALAR_TYPES = ('int', 'float', 'str', 'bool', 'bytes')

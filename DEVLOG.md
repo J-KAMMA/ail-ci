@@ -1,3 +1,15 @@
+## 2026-10-27 - pre75 negative-r literal refusal removed for pre59 (job-rbpre75-10271421)
+
+The accepted pre75 change refused a negative `r` literal at compile time on both builds. On the
+integration tree that conflicts with `test_ail_pre59`, whose literal cases require the program to
+build and raise `ValueError: r must be non-negative` at run time like CPython. The compile-time
+refusals in `itlib.py` and `pyboxed2.py` are removed; the runtime raise in `cruntime.py` stays, so
+a literal and every dynamic route (argument, list item, attribute, dict value, keyword) now raise
+the ValueError on both builds. `test_ail_pre75.py` now checks the literal runtime result instead of
+a refusal, and the pre126/pre137 programs use direct negative literals again. `test_ail_pre59.py`
+is registered in `ail_check.MODULES`. Probes `pre59_lit`, `pre59_routes`, `pre59_gen` and the
+feature-free `pre75_unrelated` match CPython on both builds.
+
 ## 2026-10-26 - pre75: itertools negative r (job-pre75-10241832)
 
 `itertools.permutations` / `combinations` / `combinations_with_replacement` on the general
