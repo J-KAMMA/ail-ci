@@ -1,3 +1,28 @@
+## 2026-10-27 -- pre374 review follow-up: no int() refusal from an unreachable or already-mutated read (job-pre374-10280536)
+
+The pre374 review found five false refusals. `_check_flow_int_calls` judged every `int()` call
+in a statement on the statement's entry state, so it refused programs that compile and match
+CPython on the base: an unreachable `IfExp` branch (`int(items[0]) if False else 0`), a
+short-circuited `BoolOp` (`0 and int(items[0])`), and a read that follows an earlier-evaluated
+sibling call which mutates the container (`print(change(items), int(items[0]))`,
+`print(d.update({"k": 1.5}), int(d["k"]))`, `print(items.insert(0, 1.5), int(items[0]))`).
+
+`_flow_defer_unevaluated` now defers calls in lambda/comprehension bodies and in any `IfExp`/
+`BoolOp` side that may not run; a constant test or short-circuit still leaves the side that
+definitely runs checkable (`int(items[0]) if True else 0`, `0 or int(items[0])`,
+`int(items[0]) and 0` stay refused). A call is also skipped when a sibling call in the same
+statement could run before it and mutate something (an attribute call or a call to a module
+function, neither its ancestor nor a descendant); calls inside its own argument and its
+ancestor calls are still checked, so `print(int(d.get("k")))` stays refused. No codegen change.
+
+Added 10 matching and 4 refused cases to `AIL_CURRENT/test_ail_pre374.py`. Probes in
+`/tmp/probes/pre374_review` (20 programs, both builds via `cmp.sh`): p01-p05 (the five review
+programs) match CPython on both builds; p06-p08, p10-p13, p15 and p20 are refused by name;
+p09, p14, p16, p18 and p19 match CPython. p17 (`print(int(items[0]), change(items))`) is
+identical on base and HEAD (runtime `integer overflow`), the same pre-existing conservative gap
+as a non-mutating module-function sibling. Final-state tests on this commit: test_ail_pre374,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-27 -- pre374: a loop read before a later container mutation is refused by name (job-pre374-10280536)
 
 The pre355 review's first still-differing recorded item was its p04: `items = [1e300]` /

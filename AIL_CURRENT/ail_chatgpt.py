@@ -1419,16 +1419,74 @@ def _refuse_int64_conversion(node, value):
     raise error
 
 
-def _check_flow_int_calls(node, lookup, int_params, int_shadowed):
+def _flow_defer_calls(node, deferred):
+    deferred.update(id(inner) for inner in ast.walk(node) if isinstance(inner, ast.Call))
+
+
+def _flow_defer_unevaluated(node, deferred, lookup):
+    """Defer calls that may not run: deferred bodies and untaken short-circuit sides.
+
+    An ``int()`` call in a branch that cannot run, or to the right of a short-circuit that
+    stops first, must not be judged on the statement's entry state.  A constant condition
+    still lets the taken side be checked.
+    """
+    if isinstance(node, (ast.Lambda, ast.ListComp, ast.SetComp, ast.GeneratorExp,
+                         ast.DictComp)):
+        _flow_defer_calls(node, deferred)
+        return
+    if isinstance(node, ast.IfExp):
+        _flow_defer_unevaluated(node.test, deferred, lookup)
+        test = _constant_value(node.test, lookup, lambda unused: True, {})
+        if test is _UNKNOWN:
+            _flow_defer_calls(node.body, deferred)
+            _flow_defer_calls(node.orelse, deferred)
+        else:
+            taken, other = (node.body, node.orelse) if bool(test) else (node.orelse, node.body)
+            _flow_defer_unevaluated(taken, deferred, lookup)
+            _flow_defer_calls(other, deferred)
+        return
+    if isinstance(node, ast.BoolOp):
+        stopped = False
+        for value in node.values:
+            if stopped:
+                _flow_defer_calls(value, deferred)
+                continue
+            _flow_defer_unevaluated(value, deferred, lookup)
+            known = _constant_value(value, lookup, lambda unused: True, {})
+            if known is _UNKNOWN:
+                stopped = True
+                continue
+            truth = bool(known)
+            if (isinstance(node.op, ast.And) and not truth) or (
+                    isinstance(node.op, ast.Or) and truth):
+                stopped = True
+        return
+    for child in ast.iter_child_nodes(node):
+        _flow_defer_unevaluated(child, deferred, lookup)
+
+
+def _check_flow_int_calls(node, lookup, int_params, int_shadowed, functions):
     deferred = set()
-    for sub in ast.walk(node):
-        if isinstance(sub, (ast.Lambda, ast.ListComp, ast.SetComp, ast.GeneratorExp,
-                            ast.DictComp)):
-            deferred.update(id(inner) for inner in ast.walk(sub) if isinstance(inner, ast.Call))
+    _flow_defer_unevaluated(node, deferred, lookup)
+    parent = {}
+    for outer in ast.walk(node):
+        for inner in ast.iter_child_nodes(outer):
+            parent[id(inner)] = outer
+    siblings = [sub for sub in ast.walk(node) if isinstance(sub, ast.Call) and (
+        isinstance(sub.func, ast.Attribute)
+        or (isinstance(sub.func, ast.Name) and sub.func.id in functions))]
     for sub in ast.walk(node):
         if not isinstance(sub, ast.Call) or id(sub) in deferred:
             continue
         if not isinstance(sub.func, ast.Name):
+            continue
+        related = set()
+        current = parent.get(id(sub))
+        while current is not None:
+            related.add(id(current))
+            current = parent.get(id(current))
+        related.update(id(inner) for inner in ast.walk(sub))
+        if any(id(other) not in related for other in siblings):
             continue
         if (not int_shadowed and sub.func.id == 'int'
                 and len(sub.args) == 1 and not sub.keywords):
@@ -1533,7 +1591,8 @@ def _check_flow_int64_containers(tree, global_names, int_params, int_shadowed):
             if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
                 target = statement.targets[0]
                 if isinstance(target, ast.Name):
-                    _check_flow_int_calls(statement.value, lookup, int_params, int_shadowed)
+                    _check_flow_int_calls(statement.value, lookup, int_params, int_shadowed,
+                                          functions)
                     name = target.id
                     value = _constant_value(statement.value, lookup, lambda unused: True, {})
                     mutating = _flow_mutating_use(statement.value, functions)
@@ -1547,7 +1606,7 @@ def _check_flow_int64_containers(tree, global_names, int_params, int_shadowed):
                     continue
             if isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign,
                                       ast.Expr, ast.Delete)):
-                _check_flow_int_calls(statement, lookup, int_params, int_shadowed)
+                _check_flow_int_calls(statement, lookup, int_params, int_shadowed, functions)
             _invalidate_flow(state, statement)
         return False
 

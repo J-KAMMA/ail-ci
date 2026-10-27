@@ -177,6 +177,29 @@ C.x[0] = 1.5
 for i in range(1):
     print(int(items[0]))
 ''', FLOAT),
+    'ifexp_true_read_before_store': ('''
+items = [1e300]
+x = int(items[0]) if True else 0
+items[0] = 1.5
+print(x)
+''', FLOAT),
+    'or_evaluated_read_before_store': ('''
+items = [1e300]
+x = 0 or int(items[0])
+items[0] = 1.5
+print(x)
+''', FLOAT),
+    'and_first_read_before_store': ('''
+items = [1e300]
+x = int(items[0]) and 0
+items[0] = 1.5
+print(x)
+''', FLOAT),
+    'sibling_read_only_call': ('''
+items = [1e300]
+print(len(items), int(items[0]))
+items[0] = 1.5
+''', FLOAT),
 }
 
 MATCH = {
@@ -342,6 +365,58 @@ def change(a):
 change(items)
 for i in range(1):
     print(int(items[0]))
+''',
+    'ifexp_dead_branch': '''
+items = [1e300]
+x = int(items[0]) if False else 0
+items[0] = 1.5
+print(x)
+''',
+    'boolop_dead_branch': '''
+items = [1e300]
+x = 0 and int(items[0])
+items[0] = 1.5
+print(x)
+''',
+    'boolop_unknown_flag': '''
+items = [1e300]
+flag = 0
+x = flag and int(items[0])
+items[0] = 1.5
+print(x)
+''',
+    'ifexp_unknown_test': '''
+items = [1e300]
+c = 0
+x = int(items[0]) if c else 0
+items[0] = 1.5
+print(x)
+''',
+    'argument_mutation_before_read': '''
+items = [1e300]
+
+def change(a):
+    a[0] = 1.5
+
+print(change(items), int(items[0]))
+''',
+    'dict_update_before_read': '''
+d = {"k": 1e300}
+print(d.update({"k": 1.5}), int(d["k"]))
+''',
+    'list_insert_before_read': '''
+items = [1e300]
+print(items.insert(0, 1.5), int(items[0]))
+''',
+    'ifexp_dead_inside_call': '''
+items = [1e300]
+print(int(items[0]) if False else 0)
+items[0] = 1.5
+''',
+    'dead_branch_and_mutation': '''
+items = [1e300]
+print(0 and items.insert(0, 1.5), int(items[0]) if False else 0)
+items[0] = 1.5
 ''',
 }
 
