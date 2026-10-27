@@ -8756,6 +8756,13 @@ def _build_percent_value(node, ctx):
         if kind not in (INT, FLT, STR):
             raise Unsupported('%%-formatting a value of type %s; only int, float or str is '
                               'built' % kind)
+        if v['type'] == 'r':
+            # repr() of the value; the same conversion an f-string's `!r` and a .format()
+            # field's `!r` use. int and float spell repr and str the same, a str is quoted.
+            if v['width'] is not None or v['precision'] is not None:
+                raise Unsupported('%r with a width or precision')
+            parts_c.append(_repr_conv(argnode, kind, ctx))
+            continue
         if v['type'] == 's' and kind in (INT, FLT) and not v['zero']:
             # `"%s" % n` is `str(n)` padded as a str (CPython), so a bool shows True/False.
             argnode = ast.copy_location(ast.Call(func=ast.Name(id='str', ctx=ast.Load()),
