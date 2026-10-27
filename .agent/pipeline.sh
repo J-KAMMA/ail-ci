@@ -107,11 +107,16 @@ run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
   # The free Zen build of the model first (zero retention, not used for training); the paid Go model when it fails.
   # When the free quota is used up OpenCode does not exit, it retries silently (2026-10-24), so a watchdog reads
   # OpenCode's own log and switches at once.
-  local rc model mins pid quota
+  local rc model mins pid quota cc_tried=0
   run_qoder "$1" "$2" "$3" && return 0
   for model in opencode/deepseek-v4.1-flash-free opencode-go/deepseek-v4.1-flash; do
     [ "$model" = opencode/deepseek-v4.1-flash-free ] && [ -f "$RUNNER_TEMP/free_out" ] && continue
     [ "$model" = opencode-go/deepseek-v4.1-flash ] && wait_offpeak
+    # the paid stage tries Command Code first (owner, 2026-10-27: OpenCode Go had used half its month, Command Code
+    # nothing); OpenCode Go is the fallback. CC_FIRST_HOURS=odd|even|all picks when (all for now)
+    if [ "$model" = opencode-go/deepseek-v4.1-flash ] && [ -s "$RUNNER_TEMP/cc.key" ] &&        case "${CC_FIRST_HOURS:-all}" in all) true;; even) [ $(( $(date -u +%-H) % 2 )) = 0 ];; *) [ $(( $(date -u +%-H) % 2 )) = 1 ];; esac; then
+      cc_tried=1; run_cc "$1" "$2" "$3" && return 0
+    fi
     mins=$3; quota=0
     rm -rf "$HOME/.local/share/opencode/log"
     timeout "${mins}m" "$OC" run --format json --dir "$PWD" -m "$model" "Do the task described in the attached file, in this directory. When finished, reply with a short final report." -f "$1" > "$RUNNER_TEMP/$2.jsonl" 2> "$RUNNER_TEMP/$2.err" &
@@ -128,7 +133,7 @@ run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
     grep -qiE '"type": ?"error".*(rate|limit|quota|429|503|free)' "$RUNNER_TEMP/$2.jsonl" || break
   done
   # OpenCode gave nothing (its week used up, 2026-10-26): the same model through the Command Code GOAT plan
-  if [ -s "$RUNNER_TEMP/cc.key" ] && ! grep -qs '"type": *"text"' "$RUNNER_TEMP/$2.jsonl"; then
+  if [ $cc_tried = 0 ] && [ -s "$RUNNER_TEMP/cc.key" ] && ! grep -qs '"type": *"text"' "$RUNNER_TEMP/$2.jsonl"; then
     run_cc "$1" "$2" "$3" && return 0
   fi
   echo "[model $model]"
