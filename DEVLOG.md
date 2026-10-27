@@ -1,3 +1,17 @@
+## 2026-10-27 -- re-apply pre61: functools.partial with bound values (job-rbpre61-10271129)
+
+Re-applied the accepted pre61 change on this tree.  The accepted fix made `genlib._partial` copy the
+`partial()` call's source location onto every synthetic lambda, because the lambda scan in
+`pyboxed2.py` reads `Lambda.lineno`; this tree already carries that fix plus
+`ast.fix_missing_locations`, so no compiler change was needed and the current version is kept.
+Added the accepted `AIL_CURRENT/test_ail_pre61.py` and registered it in `ail_check.MODULES` and
+both `tools/ci_shards.json` lists.  `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.  Probes in `/tmp/probes`
+(`pre61_lambda`, `pre61_def_map`, `pre61_routes`, `pre61_types`, `pre61_empty_neg_alias`) match
+CPython on both builds; `pre61_refuse_notdef`, `_toomany`, `_kworder`, `_star`, `_nofunc`,
+`_aliasfunc` and `_lambdadefault` are refused by name on both.  Final-state tests:
+`test_ail_pre61`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(4 modules, 368 s, 0 failed).
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
