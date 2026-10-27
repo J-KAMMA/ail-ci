@@ -1,3 +1,33 @@
+## 2026-10-27 -- pre389: int() of an out-of-int64 float carried by a parameter default (job-pre389-10280836)
+
+The task's bullet list of the pre373 reviewer's pre-existing items was empty, so it was recovered from the
+fetched `job-pre373-10280524` branch report: `p03` (unnamed decorator refused by name), `p04` (module-level
+annotation refused with an unrelated message), `p12` (function-with-defaults refused) and `p14` (attribute pop
+refused).  On this tree `p04` and `p14` match CPython (`x: int = 5`, an instance-attribute `pop(0)`), `p03` is a
+by-name refusal on the general path (``not in the subset: the decorator on def g ...``) and matches on the default
+build, and a class-attribute `pop` is refused by name, so those are already in an acceptable state.  The first
+recorded item that still differed was the function-with-defaults family: `def f(a=1e300): return int(a)` /
+`print(f())` compiled on both builds and stopped with `integer overflow` where CPython prints the exact big
+integer (also `a=[1e300]` read through `a[0]`, a keyword-only default, and a call made inside another function).
+The cause was that `_wrapper_int_params` only checked the argument a call supplied, never the default the callee
+actually used when the argument is omitted.
+
+New `_never_supplied_defaults` (ail_chatgpt.py) collects module functions defined once without decorators whose
+every load is a direct call, whose name is bound in no other scope, whose calls never use `*args`/`**kwargs`, and
+whose parameter is supplied by none of them; its default is folded into the function's constant scope by
+`_scope_constant_map`, so `int()` of an out-of-int64 default is refused by name.  Defaults may name a module
+constant assigned earlier at module level; containers are kept only when the module pass would fold them (not
+mutated anywhere), and a container default escapes in the body stops the fold.  A supplied argument, a rebound
+parameter, a callee reached through an alias or `*args`/`**kwargs`, a method or nested def, and a default naming a
+module *container* keep the previous run-time `integer overflow`; none of those programs is refused.
+
+Added `AIL_CURRENT/test_ail_pre389.py` (2 tests, 11 refused and 12 matching programs, both builds) and registered
+it in `ail_check.MODULES` and `tools/ci_shards.json` (weight 38.8, the pre322 shard).  Added DIFFERENCES row
+`C?-job-pre389-10280836-1`.  Probes in `/tmp/probes/pre389` (31 programs) are listed in the job report; all are
+refused by name or match CPython on both builds, except the unchanged pre-existing routes named above.  Generated
+C for `m09_nofeature` and `m02_override` is byte-identical to a `work` worktree in both builds (compile-time
+only).  Final-state tests on this commit: test_ail_pre389, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (results in the job report).  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
