@@ -6,6 +6,12 @@ integer.  The constant folder now resolves ``.get()`` on a module-level literal 
 existing subscript route) when the dict is only read that way, so the static int() checker
 refuses this route by name too.  In-range values, defaults, INT64 boundaries, mutated or
 rebound dicts and programs that only read the dict keep CPython's behaviour.
+
+Follow-up from the pre356 review: a class or __init__ attribute holding a literal dict/list was
+still folded after ``Box.d[key] = ...``, ``Box.d.update(...)``, ``Box.d.pop(...)`` or the same
+through an instance, an alias or a function argument, because the attribute node itself is a
+load.  Those mutations now mark only the keys they may change, so a mutated key reads at run
+time while untouched keys keep the static refusal.
 """
 import os
 import subprocess
@@ -114,6 +120,51 @@ print(int(TABLE.get("k")))
 TABLE = {"k": "9223372036854775808"}
 print(int(TABLE["k"]))
 ''',
+    'class_dict_setdefault_existing': '''
+class Box:
+    d = {"k": "9223372036854775808"}
+
+Box.d.setdefault("k", "5")
+print(int(Box.d.get("k", "0")))
+''',
+    'class_dict_other_key_kept': '''
+class Box:
+    d = {"k": "9223372036854775808", "x": "1"}
+
+Box.d["x"] = "2"
+print(int(Box.d.get("k")))
+''',
+    'instance_dict_other_key_kept': '''
+class Box:
+    def __init__(self):
+        self.d = {"k": "9223372036854775808", "x": "1"}
+
+
+b = Box()
+b.d["x"] = "2"
+print(int(b.d.get("k")))
+''',
+    'class_dict_pop_other_key_kept': '''
+class Box:
+    d = {"k": "9223372036854775808", "x": "1"}
+
+Box.d.pop("x")
+print(int(Box.d.get("k")))
+''',
+    'class_list_append_kept': '''
+class Box:
+    items = ["9223372036854775808"]
+
+Box.items.append("0")
+print(int(Box.items[0]))
+''',
+    'class_string_method_kept': '''
+class Box:
+    text = " 9223372036854775808 "
+
+print(Box.text.upper())
+print(int(Box.text))
+''',
 }
 
 MATCH = {
@@ -186,6 +237,103 @@ print(read())
     'other_method': '''
 TABLE = {"k": "5"}
 print(int(TABLE.pop("k")))
+''',
+    'class_dict_mutated_get': '''
+class Box:
+    d = {"k": "9223372036854775808"}
+
+Box.d["k"] = "5"
+print(int(Box.d.get("k")))
+''',
+    'instance_dict_mutated_get': '''
+class Box:
+    def __init__(self):
+        self.d = {"k": "9223372036854775808"}
+
+
+b = Box()
+b.d["k"] = "5"
+print(int(b.d.get("k")))
+''',
+    'class_dict_update_get': '''
+class Box:
+    d = {"k": "9223372036854775808"}
+
+Box.d.update({"k": "7"})
+print(int(Box.d.get("k")))
+''',
+    'class_dict_alias_mutated_get': '''
+class Box:
+    d = {"k": "9223372036854775808"}
+
+alias = Box.d
+alias["k"] = "5"
+print(int(Box.d.get("k")))
+''',
+    'class_dict_function_mutated_get': '''
+class Box:
+    d = {"k": "9223372036854775808"}
+
+
+def bump(value):
+    value["k"] = "5"
+
+
+bump(Box.d)
+print(int(Box.d.get("k")))
+''',
+    'class_dict_getattr_mutated_get': '''
+class Box:
+    d = {"k": "9223372036854775808"}
+
+getattr(Box, "d")["k"] = "5"
+print(int(Box.d.get("k")))
+''',
+    'class_dict_nested_mutated_get': '''
+class Box:
+    d = {"a": {"k": "9223372036854775808"}}
+
+Box.d["a"]["k"] = "5"
+print(int(Box.d["a"]["k"]))
+''',
+    'class_dict_dynamic_key_mutated_get': '''
+class Box:
+    d = {"k": "9223372036854775808"}
+
+key = "k"
+Box.d[key] = "5"
+print(int(Box.d.get("k")))
+''',
+    'class_dict_pop_missing_default': '''
+class Box:
+    d = {"k": "9223372036854775808"}
+
+Box.d.pop("k")
+print(int(Box.d.get("k", "5")))
+''',
+    'class_list_item_mutated_get': '''
+class Box:
+    items = ["9223372036854775808"]
+
+Box.items[0] = "5"
+print(int(Box.items[0]))
+''',
+    'class_dict_other_key_untouched': '''
+class Box:
+    d = {"k": "9223372036854775808", "x": "1"}
+
+Box.d["x"] = "2"
+print(Box.d["x"], len(Box.d))
+''',
+    'instance_dict_other_key_untouched': '''
+class Box:
+    def __init__(self):
+        self.d = {"k": "9223372036854775808", "x": "1"}
+
+
+b = Box()
+b.d["x"] = "2"
+print(b.d["x"])
 ''',
 }
 

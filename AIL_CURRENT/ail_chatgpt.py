@@ -539,6 +539,293 @@ def _only_subscripted(tree, name, definition):
     return True
 
 
+_MUTATING_METHODS = frozenset({
+    '__delitem__', '__iadd__', '__iand__', '__imul__', '__ior__', '__isub__',
+    '__ixor__', '__setitem__', 'add', 'append', 'clear', 'difference_update',
+    'discard', 'extend', 'insert', 'intersection_update', 'pop', 'popitem',
+    'remove', 'reverse', 'setdefault', 'sort', 'symmetric_difference_update',
+    'update',
+})
+
+_READ_ONLY_CALLS = frozenset({
+    'abs', 'all', 'any', 'ascii', 'bin', 'bool', 'bytearray', 'bytes', 'callable',
+    'chr', 'dict', 'dir', 'divmod', 'enumerate', 'float', 'format', 'frozenset',
+    'hash', 'hex', 'id', 'int', 'isinstance', 'issubclass', 'iter', 'len', 'list',
+    'max', 'min', 'oct', 'ord', 'pow', 'print', 'range', 'repr', 'reversed',
+    'round', 'set', 'sorted', 'str', 'sum', 'tuple', 'type', 'zip',
+})
+
+_READ_ONLY_PARENTS = (ast.Assert, ast.BinOp, ast.BoolOp, ast.Compare, ast.Expr,
+                      ast.FormattedValue, ast.If, ast.IfExp, ast.JoinedStr,
+                      ast.UnaryOp, ast.While)
+
+
+_ALL_KEYS = object()
+_SAFE_REFERENCE = object()
+
+
+def _contains_mutable(value):
+    if isinstance(value, (list, dict)):
+        return True
+    if isinstance(value, tuple):
+        return any(_contains_mutable(item) for item in value)
+    return False
+
+
+def _read_only_call(node):
+    return isinstance(node.func, ast.Name) and node.func.id in _READ_ONLY_CALLS
+
+
+def _constant_key(node):
+    """The dict key or list index a fixed expression denotes, or ``_ALL_KEYS``."""
+    if isinstance(node, ast.Constant):
+        if type(node.value) in (bool, int, float, str, bytes, type(None)):
+            return node.value
+        return _ALL_KEYS
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _constant_key(node.operand)
+        if type(value) in (int, float):
+            return -value if isinstance(node.op, ast.USub) else value
+        return _ALL_KEYS
+    if isinstance(node, ast.Tuple):
+        items = []
+        for element in node.elts:
+            key = _constant_key(element)
+            if key is _ALL_KEYS:
+                return _ALL_KEYS
+            items.append(key)
+        try:
+            hash(tuple(items))
+        except TypeError:
+            return _ALL_KEYS
+        return tuple(items)
+    return _ALL_KEYS
+
+
+def _bottom_key(expr):
+    """Key of the subscript next to the container root, or ``_SAFE_REFERENCE`` when direct."""
+    key = _SAFE_REFERENCE
+    while isinstance(expr, (ast.Attribute, ast.Subscript)):
+        if isinstance(expr, ast.Subscript):
+            key = _constant_key(expr.slice)
+        expr = expr.value
+    return key
+
+
+def _root_attribute_names(expr, aliases):
+    found = set()
+    while True:
+        if isinstance(expr, ast.Subscript):
+            expr = expr.value
+        elif isinstance(expr, ast.Attribute):
+            found.add(expr.attr)
+            expr = expr.value
+        elif isinstance(expr, ast.Name):
+            found |= aliases.get(expr.id, set())
+            break
+        else:
+            break
+    return found
+
+
+def _method_mutation(node, call):
+    """Keys a mutating method call may change, as ``(action, key)`` pairs, or ``_ALL_KEYS``."""
+    key = _bottom_key(node)
+    if key is not _SAFE_REFERENCE:
+        return _ALL_KEYS if key is _ALL_KEYS else {('set', key)}
+    name = node.attr
+    if name == 'append':
+        # Appending changes only the index that did not exist before (and negative indexes).
+        return {('append', None)}
+    if name == 'update':
+        entries = set()
+        for argument in call.args:
+            if not isinstance(argument, ast.Dict):
+                return _ALL_KEYS
+            for key_node in argument.keys:
+                if key_node is None:
+                    return _ALL_KEYS
+                value = _constant_key(key_node)
+                if value is _ALL_KEYS:
+                    return _ALL_KEYS
+                entries.add(('set', value))
+        for keyword in call.keywords:
+            if keyword.arg is None:
+                return _ALL_KEYS
+            entries.add(('set', keyword.arg))
+        return entries
+    if name in ('setdefault', '__setitem__', 'pop', '__delitem__'):
+        if len(call.args) == 1 or (len(call.args) == 2 and name in ('setdefault', 'pop')):
+            if not any(isinstance(argument, ast.Starred) for argument in call.args):
+                value = _constant_key(call.args[0])
+                if value is not _ALL_KEYS:
+                    if name == 'setdefault':
+                        action = 'setdefault'
+                    elif name in ('pop', '__delitem__'):
+                        action = 'del'
+                    else:
+                        action = 'set'
+                    return {(action, value)}
+        return _ALL_KEYS
+    return _ALL_KEYS
+
+
+def _reference_mutation(node, parents):
+    """What a reference to a mutable container may change: safe, all keys, or key pairs."""
+    current = node
+    while True:
+        parent = parents.get(current)
+        if parent is None:
+            return _SAFE_REFERENCE
+        if isinstance(parent, ast.Subscript) and parent.value is current:
+            if isinstance(parent.ctx, ast.Load):
+                current = parent
+                continue
+            if isinstance(current, ast.Call):
+                return _ALL_KEYS
+            key = _bottom_key(parent)
+            if key is _ALL_KEYS or key is _SAFE_REFERENCE:
+                return _ALL_KEYS
+            return {('del' if isinstance(parent.ctx, ast.Del) else 'set', key)}
+        if isinstance(parent, ast.Attribute) and parent.value is current:
+            if not isinstance(parent.ctx, ast.Load):
+                return _ALL_KEYS
+            call = parents.get(parent)
+            if parent.attr in _MUTATING_METHODS and not (
+                    isinstance(call, ast.Call) and call.func is parent):
+                return _ALL_KEYS
+            current = parent
+            continue
+        if isinstance(parent, ast.Call) and parent.func is current:
+            if isinstance(current, ast.Attribute) and current.attr in _MUTATING_METHODS:
+                return _method_mutation(current, parent)
+            current = parent
+            continue
+        if isinstance(parent, ast.keyword):
+            call = parents.get(parent)
+            if not isinstance(call, ast.Call) or not _read_only_call(call):
+                return _ALL_KEYS
+            current = call
+            continue
+        if isinstance(parent, ast.Call):
+            if not any(argument is current for argument in parent.args):
+                return _ALL_KEYS
+            if not _read_only_call(parent):
+                return _ALL_KEYS
+            current = parent
+            continue
+        if isinstance(parent, ast.Assign) and parent.value is current:
+            if len(parent.targets) == 1 and isinstance(parent.targets[0], ast.Name):
+                return _SAFE_REFERENCE
+            return _ALL_KEYS
+        if isinstance(parent, ast.AnnAssign) and parent.value is current:
+            return _SAFE_REFERENCE if isinstance(parent.target, ast.Name) else _ALL_KEYS
+        if isinstance(parent, (ast.Return, ast.Yield, ast.YieldFrom)):
+            return _ALL_KEYS
+        if isinstance(parent, (ast.For, ast.comprehension)) and parent.iter is current:
+            return _SAFE_REFERENCE
+        if isinstance(parent, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            if any(generator is current for generator in parent.generators):
+                return _SAFE_REFERENCE
+            return _ALL_KEYS
+        if isinstance(parent, _READ_ONLY_PARENTS):
+            return _SAFE_REFERENCE
+        return _ALL_KEYS
+
+
+def _mark_mutation(mutated, attrs, keys):
+    for attr in attrs:
+        if attr in mutated and mutated[attr] is None:
+            continue
+        if keys is _ALL_KEYS:
+            mutated[attr] = None
+        else:
+            mutated.setdefault(attr, set()).update(keys)
+
+
+def _mutated_attribute_names(tree):
+    """Attribute names whose mutable value may change after it is stored, with the keys.
+
+    ``Box.d[key] = ...``, ``Box.d.update(...)``, ``b.d.pop(...)`` and the same calls through a
+    module-level or local alias are all stores that the plain ``Attribute`` store scan misses,
+    because the attribute node itself is a load.  A value of None means every key may change.
+    """
+    parents = {child: parent for parent in ast.walk(tree)
+               for child in ast.iter_child_nodes(parent)}
+    assignments = [node for node in ast.walk(tree)
+                   if isinstance(node, (ast.Assign, ast.AnnAssign))]
+    aliases = {}
+    mutated = {}
+    changed = True
+    while changed:
+        changed = False
+        for node in assignments:
+            if isinstance(node, ast.Assign):
+                if len(node.targets) != 1:
+                    continue
+                target = node.targets[0]
+            else:
+                target = node.target
+            if not isinstance(target, ast.Name):
+                continue
+            found = _root_attribute_names(node.value, aliases)
+            if found - aliases.get(target.id, set()):
+                aliases.setdefault(target.id, set()).update(found)
+                changed = True
+            # An alias of a nested item can only be mutated there, so the top key is unknown.
+            key = _bottom_key(node.value)
+            if found and key is not _SAFE_REFERENCE:
+                _mark_mutation(mutated, found,
+                               _ALL_KEYS if key is _ALL_KEYS else {('set', key)})
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            attrs = aliases.get(node.id)
+            if not attrs:
+                continue
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+            attrs = {node.attr}
+        else:
+            continue
+        keys = _reference_mutation(node, parents)
+        if keys is not _SAFE_REFERENCE:
+            _mark_mutation(mutated, attrs, keys)
+    return mutated
+
+
+def _mutated_container(value, keys):
+    """A copy of the folded container with the keys that may have changed marked unknown."""
+    if keys is None:
+        return _UNKNOWN
+    if isinstance(value, dict):
+        result = dict(value)
+        deleted = {key for action, key in keys if action == 'del'}
+        for action, key in keys:
+            if action == 'append':
+                continue
+            try:
+                # setdefault keeps an existing value; only an earlier delete can remove it.
+                if action == 'setdefault' and key in result and key not in deleted:
+                    continue
+                result[key] = _UNKNOWN
+            except TypeError:
+                return _UNKNOWN
+        return result
+    if isinstance(value, (list, tuple)):
+        result = list(value)
+        for action, key in keys:
+            if action == 'append':
+                result.append(_UNKNOWN)
+                continue
+            if action == 'del' or type(key) is not int:
+                return _UNKNOWN
+            try:
+                result[key] = _UNKNOWN
+            except IndexError:
+                return _UNKNOWN
+        return tuple(result) if isinstance(value, tuple) else result
+    return _UNKNOWN
+
+
 def _known_class_attributes(tree, module_known):
     """Classes whose literal class/__init__ attributes are safe to fold for int() checks.
 
@@ -584,6 +871,11 @@ def _known_class_attributes(tree, module_known):
                 setattr_names.add(node.args[1].value)
             else:
                 dynamic_setattr = True
+    mutated = _mutated_attribute_names(tree)
+    dynamic_getattr = any(
+        isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+        and node.func.id == 'getattr'
+        for node in ast.walk(tree))
     classes = {}
     for name, node in class_nodes.items():
         info = {'class': {}, 'instance': {}, 'instance_param': {}, 'unsafe': set(),
@@ -649,6 +941,27 @@ def _known_class_attributes(tree, module_known):
             if attr in setattr_names or any(id(store) not in allowed_ids
                                             for store in stores.get(attr, ())):
                 del info['class'][attr]
+            elif _contains_mutable(info['class'][attr]):
+                if dynamic_getattr:
+                    del info['class'][attr]
+                elif attr in mutated:
+                    value = _mutated_container(info['class'][attr], mutated[attr])
+                    if value is _UNKNOWN:
+                        del info['class'][attr]
+                    else:
+                        info['class'][attr] = value
+        for attr in list(info['instance']):
+            if _contains_mutable(info['instance'][attr]):
+                value = info['instance'][attr]
+                if dynamic_getattr:
+                    value = _UNKNOWN
+                elif attr in mutated:
+                    value = _mutated_container(value, mutated[attr])
+                if value is _UNKNOWN:
+                    del info['instance'][attr]
+                    info['unsafe'].add(attr)
+                else:
+                    info['instance'][attr] = value
         if dynamic_setattr:
             info['unsafe'].update(info['class'])
             info['unsafe'].update(info['instance'])

@@ -1,3 +1,38 @@
+## 2026-10-27 -- pre356 review fix: mutations through a class/instance dict attribute (job-pre356-10280148)
+
+The review found three false refusals: `Box.d["k"] = "5"` and `Box.d.update({"k": "7"})` (also
+through an instance) left the literal ``{"k": "9223372036854775808"}`` folded, so
+``int(Box.d.get("k"))`` was refused at compile time where CPython prints 5 or 7.  The cause was
+that `_known_class_attributes` only saw stores on an ``ast.Attribute`` (``Box.d = ...``); a store
+*through* the attribute (subscript store/delete, a mutating method, or the same through an alias
+or a function argument) leaves the attribute node a load and was invisible.
+
+`_mutated_attribute_names` now records, for each attribute name, the keys a mutable folded value
+may have changed: subscript stores/deletes and augmented stores, mutating methods (`update`,
+`setdefault`, `pop`, `__setitem__`, list index stores, `append`, ...), module-level and local
+aliases of the container (including an alias of a nested item, whose top key becomes unknown),
+escapes to an unknown call, and any `getattr` call.  Folding keeps every untouched key (a
+mutation of ``d["x"]`` still refuses ``int(d["k"])``), an immutable folded value (str, bytes,
+int, float, a tuple of scalars) is unaffected by any of this, a list `append` marks only the
+new/negative tail, and `setdefault` on a key present in the literal is a no-op.
+
+Probes in /tmp/probes (25 new, both builds, `~/tools/cmp.sh`): p01-p05 (direct store, instance
+store, update, alias, alias chain), p07 (other key), p08 (delete then set), p09 (`+=`), p10
+(global mutation in a function), p11 (mutation in a method), p12 (list index store), p14 (other
+list index), p15 (`getattr`), p16 (function argument), p17, p19 (dict value), p20, p21 (empty
+dict), p22 (missing key default), p23 (nested key), p25 match CPython; p06 (`setdefault` on the
+present key) and p13 (list `append`) are refused by name.  The reviewer's q01/q02/q17 now match
+CPython, q10 (mutated class dict read by subscript) also matches now (refused on base), q14 is
+the same pre-existing `integer overflow` as on base, and the rest match or are refused by name.
+p24 (a read of the key *before* the module-level mutation) still stops with `integer overflow`;
+the module-dict route has the same residual (p24b), so this is the existing flow-sensitivity
+limit of the folder, not specific to attributes.
+
+Added 18 programs to `AIL_CURRENT/test_ail_pre356.py` (6 refused, 12 matching).  Final-state
+tests on this commit: test_ail_pre356 (77.9 s), test_ail_safetynet (89.8 s), test_ail_files
+(91.5 s, 1 skipped) and test_ail_corpus_findings3 (145.2 s), 4 modules, 0 failed.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre356: int() of a module dict item read through dict.get() is refused (job-pre356-10280148)
 
 The job text's claim list contained only verification data, not a CPython difference, so the first
