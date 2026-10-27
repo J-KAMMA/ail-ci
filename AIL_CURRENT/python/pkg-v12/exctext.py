@@ -342,6 +342,127 @@ class _Repr(ast.NodeTransformer):
         return node
 
 
+def _args_item(node, names):
+    return (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+            and node.value.attr == 'args' and ast.unparse(node.value.value) in names)
+
+
+def _args_item_target(node, names):
+    if _args_item(node, names):
+        return True
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return any(_args_item_target(e, names) for e in node.elts)
+    if isinstance(node, ast.Starred):
+        return _args_item_target(node.value, names)
+    return False
+
+
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
+           ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.ExceptHandler)
+
+
+def _scope_nodes(body):
+    """The nodes of one scope in source order, without a nested function/class/comprehension/handler body."""
+    def walk(node):
+        yield node
+        if isinstance(node, _SCOPES):
+            return
+        for child in ast.iter_child_nodes(node):
+            yield from walk(child)
+    for stmt in body:
+        yield from walk(stmt)
+
+
+def _forget(names, text):
+    names.discard(text)
+    for name in list(names):
+        if name.startswith(text + '.') or name.startswith(text + '['):
+            names.discard(name)
+
+
+def _alias_target(target, value, names):
+    if isinstance(target, (ast.Tuple, ast.List)):
+        if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
+            for item, source in zip(target.elts, value.elts):
+                _alias_target(item, source, names)
+        else:
+            for item in target.elts:
+                _alias_target(item, None, names)
+        return
+    if isinstance(target, ast.Starred):
+        _alias_target(target.value, None, names)
+        return
+    text = ast.unparse(target)
+    source = ast.unparse(value) if value is not None else None
+    tainted = source in names if source is not None else False
+    _forget(names, text)
+    if tainted:
+        names.add(text)
+        return
+    if isinstance(target, ast.Name) and isinstance(value, (ast.List, ast.Tuple)):
+        for index, item in enumerate(value.elts):
+            if ast.unparse(item) in names:
+                names.add('%s[%d]' % (text, index))
+    elif isinstance(target, ast.Name) and isinstance(value, ast.Dict):
+        for key, item in zip(value.keys, value.values):
+            if key is not None and ast.unparse(item) in names:
+                names.add('%s[%s]' % (text, ast.unparse(key)))
+
+
+def _forget_binding(node, names):
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        _forget(names, node.name)
+    elif isinstance(node, ast.alias):
+        _forget(names, (node.asname or node.name).split('.')[0])
+    elif isinstance(node, ast.ExceptHandler):
+        if node.name:
+            _forget(names, node.name)
+    elif isinstance(node, (ast.MatchAs, ast.MatchStar)):
+        if node.name:
+            _forget(names, node.name)
+    elif isinstance(node, ast.MatchMapping):
+        if node.rest:
+            _forget(names, node.rest)
+    elif isinstance(node, (ast.Global, ast.Nonlocal)):
+        for name in node.names:
+            _forget(names, name)
+
+
+def refuse_args_item_store(tree, unsupported):
+    """Refuse an assignment to or deletion of e.args[i] of a caught exception by name."""
+    for handler in ast.walk(tree):
+        if not isinstance(handler, ast.ExceptHandler) or not handler.name:
+            continue
+        names = {handler.name}
+        for node in _scope_nodes(handler.body):
+            if isinstance(node, ast.Assign):
+                targets, value = node.targets, node.value
+            elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+                targets, value = [node.target], node.value
+            elif isinstance(node, ast.Delete):
+                targets, value = node.targets, None
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                targets, value = [node.target], None
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                targets = [item.optional_vars for item in node.items if item.optional_vars is not None]
+                value = None
+            elif isinstance(node, ast.NamedExpr):
+                targets, value = [node.target], node.value
+            else:
+                targets, value = (), None
+            if any(_args_item_target(target, names) for target in targets):
+                refusal = unsupported('assigning to or deleting an item of a caught exception\'s '
+                                      'e.args[i] (e.args is a tuple; CPython raises a TypeError whose '
+                                      'traceback this compiler does not build)')
+                refusal.source_line = getattr(node, 'lineno', None)
+                raise refusal
+            if isinstance(node, ast.AnnAssign) and node.value is None:
+                continue
+            for target in targets:
+                _alias_target(target, value if len(targets) == 1 else None, names)
+            _forget_binding(node, names)
+
+
 def rewrite(tree, codes_of):
     """Rewrite the handlers of `tree` in place; sets ACTIVE."""
     global ACTIVE
