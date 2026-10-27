@@ -1,3 +1,25 @@
+## 2026-10-27 -- pre345: pre9's int() float-literal and int-shadow cases are already refused by name (job-pre345-10272303)
+
+The pre9 reviewer recorded as pre-existing the pre290 finite float-literal refusals, the
+infinity literal refusal and the int-shadowing refusal.  Reproduced the first on this tree with
+`bash ~/tools/cmp.sh` on both builds: a finite out-of-int64 float literal passed directly,
+negatively, through a unary paren, a constant conditional, a module constant, a list/tuple/dict
+item, an alias, or a positional/keyword/positional-only wrapper already stops at compile time
+with the named `int() of a float outside int64` message; `int(1e400)` and `int(-1e400)` stop
+with `not in the subset: a nan/inf float literal`.  The int-shadow cases are also resolved: a
+local lambda or a parameter named `int` matches CPython, while `def int` and a module `int`
+constant are refused by name.  No compiler change was needed.  Added
+`AIL_CURRENT/test_ail_pre345.py` (22 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre345` on both builds: `p1`-`p10` and `p26`-`p28` (float literals and
+routes) are refused by name except `p9`/`p10`, which are refused as `a nan/inf float literal`;
+`p18` (in-range boundaries), `p13` (local lambda `int`) and `p17`/`p30` (parameter `int`) match
+CPython; `p14`/`p16` (`def int`, module `int` constant) and `p15` (unrelated local shadow with an
+out-of-range call) are refused by name.  Final-state tests: test_ail_pre345, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function
