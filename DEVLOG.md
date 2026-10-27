@@ -1,3 +1,25 @@
+## 2026-10-27 -- pre318: refuse a user method read as a value by name (job-pre318-10271507)
+
+The rbpre278 review recorded four pre-existing differences: `r_bound_default.py`,
+`r_bound_factory_alias.py`, `r_bound_methodarg.py` and `r_bound_globalalias.py` all compiled and
+then stopped with `AttributeError: 'D' object has no attribute 'g'` on both builds, where CPython
+makes a bound method. The general path keeps instance fields and resolves a method only for a
+call, so a method read as a value had no representation. `ail_chatgpt._check_bound_method_values`
+is now a common front-end pass: it resolves possible receiver classes through a constructor, a
+function parameter, a list item, a dict value, an instance attribute, an alias and an inherited
+base, then refuses an attribute read by name when the class defines it as a method and not as a
+field (classmethod and staticmethod too). Direct calls, properties, a field of the same name,
+`getattr(d, "g")` and `callable(d.g)` are unchanged.
+
+Probes in `/tmp/probes/pre318` on both builds: `default_arg`, `factory_alias`, `methodarg`,
+`globalalias`, `route_argument`, `route_list`, `route_dict`, `route_attribute`, `route_alias`,
+`inherited`, `classmethod_value` and `staticmethod_value` are refused by name; `control_call`,
+`control_field_same_name`, `control_property`, `control_callable`, `control_getattr`,
+`control_module_attr` and `control_class_attr` match CPython. Final-state tests:
+`test_ail_pre318`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+`tools/update_manifest.py --check` passes; the stale duplicate `test_ail_pre126` entry was removed
+from `tools/ci_shards.json` so `tools/ci_shards.py --check` also passes.
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an

@@ -1229,6 +1229,286 @@ def _check_class_attribute_assignment(tree):
                 _refuse_class_attr_target(target, aliases, containers)
 
 
+def _check_bound_method_values(tree):
+    """Refuse reading a user method as a value (a bound method), by name.
+
+    The general path keeps instance fields and looks a method up only for a call, so ``d.g`` as
+    a value (stored in a variable or field, printed, or passed on) compiled and then raised
+    ``AttributeError: 'D' object has no attribute 'g'`` where CPython makes a bound method.
+    Rather than model that object, the read is refused on both builds; a direct ``d.g(...)``
+    call, a property, a field of the same name and ``callable(d.g)`` are unchanged.
+    """
+    classes = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ClassDef):
+            continue
+        methods, fields, field_values, bases = set(), set(), {}, []
+        for base in node.bases:
+            if isinstance(base, ast.Name):
+                bases.append(base.id)
+        for item in node.body:
+            if not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            decorators = []
+            for decorator in item.decorator_list:
+                if isinstance(decorator, ast.Name):
+                    decorators.append(decorator.id)
+                elif isinstance(decorator, ast.Attribute):
+                    decorators.append(decorator.attr)
+            if any(name in ('property', 'cached_property', 'getter', 'setter', 'deleter')
+                   or name.endswith('_property') for name in decorators):
+                continue
+            methods.add(item.name)
+            args = item.args.posonlyargs + item.args.args
+            if not args:
+                continue
+            self_name = args[0].arg
+            stack = list(item.body)
+            while stack:
+                sub = stack.pop()
+                if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                    continue
+                stack.extend(ast.iter_child_nodes(sub))
+                if isinstance(sub, ast.Assign):
+                    targets, value = sub.targets, sub.value
+                elif isinstance(sub, ast.AnnAssign):
+                    targets, value = [sub.target], sub.value
+                elif isinstance(sub, ast.AugAssign):
+                    targets, value = [sub.target], None
+                else:
+                    continue
+                for target in targets:
+                    if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                            and target.value.id == self_name):
+                        fields.add(target.attr)
+                        if value is not None:
+                            field_values.setdefault(target.attr, []).append(value)
+        classes[node.name] = {'methods': methods, 'fields': fields,
+                              'field_values': field_values, 'bases': bases}
+    if not classes:
+        return
+
+    scope_of, scope_parent, func_owner, ctx_of = {}, {}, {}, {}
+
+    def _mark_scope(node, scope, cls_name, func):
+        scope_of[id(node)] = scope
+        ctx_of[id(node)] = (cls_name, func)
+        inner, inner_cls, inner_func = None, cls_name, func
+        if isinstance(node, ast.ClassDef):
+            for child in node.body:
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    func_owner[id(child)] = node.name
+            inner, inner_cls, inner_func = node, node.name, None
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            inner, inner_func = node, node
+        if inner is not None:
+            scope_parent[inner] = scope
+            scope = inner
+        for child in ast.iter_child_nodes(node):
+            _mark_scope(child, scope, inner_cls, inner_func)
+
+    _mark_scope(tree, tree, None, None)
+
+    assignments = {}
+
+    def _add_assign(targets, value, scope):
+        if len(targets) == 1 and isinstance(targets[0], (ast.Tuple, ast.List)) \
+                and isinstance(value, (ast.Tuple, ast.List)) \
+                and len(targets[0].elts) == len(value.elts):
+            for target, val in zip(targets[0].elts, value.elts):
+                _add_assign([target], val, scope)
+            return
+        for target in targets:
+            if isinstance(target, ast.Name):
+                assignments.setdefault(scope, []).append((target.id, value))
+
+    for item in ast.walk(tree):
+        if isinstance(item, ast.Assign):
+            _add_assign(item.targets, item.value, scope_of.get(id(item), tree))
+        elif isinstance(item, ast.AnnAssign) and item.value is not None:
+            _add_assign([item.target], item.value, scope_of.get(id(item), tree))
+
+    def _inherited(name, key, seen):
+        info = classes.get(name)
+        if info is None or name in seen:
+            return set()
+        found = set(info[key])
+        for base in info['bases']:
+            found |= _inherited(base, key, seen | {name})
+        return found
+
+    def _bases_of(name, seen=frozenset()):
+        info = classes.get(name)
+        if info is None or name in seen:
+            return set()
+        found = set(info['bases'])
+        for base in info['bases']:
+            found |= _bases_of(base, seen | {name})
+        return found
+
+    def _descendants(name):
+        return {other for other in classes if other == name or name in _bases_of(other)}
+
+    calls_by_name, calls_by_attr = {}, {}
+    for item in ast.walk(tree):
+        if not isinstance(item, ast.Call):
+            continue
+        if isinstance(item.func, ast.Name):
+            calls_by_name.setdefault(item.func.id, []).append(item)
+        elif isinstance(item.func, ast.Attribute):
+            calls_by_attr.setdefault(item.func.attr, []).append(item)
+
+    def _param_names(func):
+        args = func.args
+        return [arg.arg for arg in args.posonlyargs + args.args]
+
+    def _field_values(name, attr, seen=frozenset()):
+        info = classes.get(name)
+        if info is None or name in seen:
+            return []
+        values = list(info['field_values'].get(attr, ()))
+        for base in info['bases']:
+            values.extend(_field_values(base, attr, seen | {name}))
+        return values
+
+    def _classes_of(node, ctx=None, seen=frozenset()):
+        if ctx is None:
+            ctx = ctx_of.get(id(node), (None, None))
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id in classes:
+                return {node.func.id}
+            return set()
+        if isinstance(node, ast.Name):
+            cls_name, func = ctx
+            if func is not None:
+                params = _param_names(func)
+                if node.id in params:
+                    index = params.index(node.id)
+                    if index == 0 and cls_name is not None:
+                        return _descendants(cls_name)
+                    key = ('param', id(func), node.id)
+                    if key in seen:
+                        return set()
+                    if id(func) in func_owner:
+                        owner = func_owner[id(func)]
+                        static = any(isinstance(decorator, ast.Name)
+                                     and decorator.id == 'staticmethod'
+                                     for decorator in func.decorator_list)
+                        if func.name == '__init__':
+                            calls, offset = calls_by_name.get(owner, ()), 1
+                        else:
+                            calls = list(calls_by_name.get(func.name, ())) + \
+                                list(calls_by_attr.get(func.name, ()))
+                            offset = 0 if static else 1
+                    else:
+                        func_name = getattr(func, 'name', '')
+                        calls = calls_by_name.get(func_name, ()) if func_name else ()
+                        offset = 0
+                    index -= offset
+                    if index < 0:
+                        return set()
+                    found = set()
+                    for call in calls:
+                        value = None
+                        if index < len(call.args):
+                            value = call.args[index]
+                        else:
+                            for keyword in call.keywords:
+                                if keyword.arg == node.id:
+                                    value = keyword.value
+                        if value is not None:
+                            found |= _classes_of(value, ctx_of.get(id(call), (None, None)),
+                                                 seen | {key})
+                    return found
+            scope = scope_of.get(id(node), tree)
+            key = ('name', id(scope), node.id)
+            if key in seen:
+                return set()
+            seen = set(seen) | {key}
+            found = set()
+            lookup = scope
+            while lookup is not tree:
+                values = [value for name, value in assignments.get(lookup, ())
+                          if name == node.id]
+                if values:
+                    for value in values:
+                        found |= _classes_of(value, ctx, seen)
+                    return found
+                parent = scope_parent.get(lookup)
+                if parent is None:
+                    break
+                lookup = parent
+            for name, value in assignments.get(tree, ()):
+                if name == node.id:
+                    found |= _classes_of(value, ctx, seen)
+            for item in ast.walk(tree):
+                if isinstance(item, ast.arg) and item.arg == node.id \
+                        and isinstance(item.annotation, ast.Name) and item.annotation.id in classes \
+                        and scope_of.get(id(item)) is scope:
+                    found.add(item.annotation.id)
+                if isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) \
+                        and item.target.id == node.id and isinstance(item.annotation, ast.Name) \
+                        and item.annotation.id in classes \
+                        and scope_of.get(id(item)) is scope:
+                    found.add(item.annotation.id)
+            return found
+        if isinstance(node, ast.Attribute):
+            key = ('attr', id(node))
+            if key in seen:
+                return set()
+            found = set()
+            for cls_name in _classes_of(node.value, ctx, seen | {key}):
+                for value in _field_values(cls_name, node.attr, frozenset()):
+                    found |= _classes_of(value, ctx_of.get(id(value), ctx), seen | {key})
+            return found
+        if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
+            found = set()
+            for item in ast.walk(tree):
+                if not isinstance(item, ast.Assign):
+                    continue
+                if not any(isinstance(t, ast.Name) and t.id == node.value.id for t in item.targets):
+                    continue
+                if isinstance(item.value, (ast.List, ast.Tuple)):
+                    for elt in item.value.elts:
+                        found |= _classes_of(elt, ctx, seen)
+                elif isinstance(item.value, ast.Dict) and isinstance(node.slice, ast.Constant):
+                    for key, value in zip(item.value.keys, item.value.values):
+                        if isinstance(key, ast.Constant) and key.value == node.slice.value:
+                            found |= _classes_of(value, ctx, seen)
+            return found
+        return set()
+
+    parents = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[id(child)] = parent
+
+    callable_shadowed = _binds_name(tree, 'callable')
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load)):
+            continue
+        if node.attr in ('__name__', '__class__', '__dict__', '__cause__', '__context__',
+                         '__suppress_context__', '__traceback__'):
+            continue
+        parent = parents.get(id(node))
+        if isinstance(parent, ast.Call) and parent.func is node:
+            continue
+        if (not callable_shadowed and isinstance(parent, ast.Call)
+                and isinstance(parent.func, ast.Name) and parent.func.id == 'callable'
+                and node in parent.args):
+            continue
+        owners = _classes_of(node.value, ctx_of.get(id(node), (None, None)))
+        for owner in owners:
+            if node.attr in _inherited(owner, 'methods', frozenset()) \
+                    and node.attr not in _inherited(owner, 'fields', frozenset()):
+                error = ValueError('not in the subset: a bound method value (%s.%s); reading '
+                                   'a method as a value is not kept here, call it directly'
+                                   % (owner, node.attr))
+                error.source_line = node.lineno
+                error.source_column = node.col_offset
+                raise error
+
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
 
@@ -2263,6 +2543,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_int_base_constants(tree)
                 _check_int64_pow_constants(tree, _known_module_constants(tree))
                 _check_class_attribute_assignment(tree)
+                _check_bound_method_values(tree)
                 _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
