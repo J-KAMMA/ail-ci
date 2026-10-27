@@ -1,3 +1,30 @@
+## 2026-10-27 -- pre361: a try/handler class alias call is refused by name (job-pre361-10280245)
+
+The pre352 review's first still-differing pre-existing item was its r20 probe: a class alias
+assigned in a ``try`` body and rebound to another class in the handler
+(``try: x = C`` / ``except Exception: x = D`` / ``print(x().f())``) compiled on both builds and
+then stopped with ``AttributeError: 'C' object has no attribute 'g'`` where CPython prints 55.
+The field/method collision screen resolved a call target written as a class name (``C()``) but
+not one reached through a variable (``x = C; x()``), so the receiver never reached the by-name
+refusal.  ``_classes_of`` in ``AIL_CURRENT/python/pkg-v12/pyfront.py`` now resolves a call target
+name through its assignments in scope, including a bare class name, an alias chain and every
+assignment in a try body plus its handler; the same resolution follows an argument, a list item,
+an attribute and a dict value.  A call target that can only be an unrelated class keeps
+CPython's result.  A name bound by a walrus or a ``for`` target is not in the assignment table
+and keeps the pre-existing runtime ``AttributeError``; those two routes are unchanged.
+
+Added ``AIL_CURRENT/test_ail_pre361.py`` (2 tests, 10 refused and 3 matching programs, both
+builds) and registered it in ``ail_check.MODULES`` and ``tools/ci_shards.json``.  Probes in
+``/tmp/probes/pre361`` on both builds via ``cmp.sh``: ``r20``, ``r20_same``,
+``r20_nonclass``, ``chain``, ``arg_route``, ``list_route``, ``attr_route``, ``dict_route``,
+``reassigned`` and ``later_module2`` are refused by name (``also stores an instance field named
+f``); ``noncolliding``, ``param_noncolliding`` and ``no_feature`` match CPython.  ``walrus`` and
+``loop`` still stop with the pre-existing ``AttributeError`` on both builds; ``later_module``
+(call before the assignment, a CPython ``NameError``) is now refused by name.  Final-state tests:
+test_ail_pre361, test_ail_pre278, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (5 modules, 338 s, 0 failed).  ``tools/update_manifest.py`` was run and
+``--check`` passes.
+
 ## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
 
 The rbrbrbrbrbpre33 review's first pre-existing difference was `x = 10; print(x**40)`, a

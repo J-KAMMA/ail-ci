@@ -377,6 +377,7 @@
   "test_ail_pre341": 31.6,
   "test_ail_pre347": 31.6,
   "test_ail_pre351": 31.6,
+  "test_ail_pre361": 31.6,
   "test_ail_pre36": 16.6,
   "test_ail_pre39": 176.2,
   "test_ail_pre41": 25.4,
@@ -886,6 +887,7 @@
    "test_ail_pre335",
    "test_ail_pre338",
    "test_ail_pre351",
+   "test_ail_pre361",
    "test_ail_stdout_mixed_resources",
    "test_ail_type_details",
    "test_ail_typed_parallel"
