@@ -16,7 +16,8 @@ with CPython (AIL_IR=0 and 1).
 9. the libm / wrapping helpers the typed path writes (_ail_c_atan2, wrapping_add) work on the general path.
 10. itertools.combinations / permutations / zip_longest (two iterables) / combinations_with_replacement as values
     on the general path; math.fsum (list of floats), math.prod (list of ints), math.modf; textwrap.wrap / fill /
-    dedent (default options; text with a hyphen or a tab is a RuntimeError); str.strip(chars) on the general path.
+    dedent (default options; a hyphen or a tab uses CPython's wordsep / expandtabs rules); str.strip(chars) on the
+    general path.
 6. a lambda that only calls builtins (`key=lambda w: (len(w), w)`) was refused on the general path as "closing
    over a local variable (len)".
 11. a comprehension inside a lambda is a scope of its own: `filter(lambda rec: all(key in rec for key in required),
