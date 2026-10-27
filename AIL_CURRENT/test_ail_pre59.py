@@ -10,6 +10,10 @@ The programs cover negative, zero, larger-than-pool and empty-pool values; r
 reaching the call through an argument, a list item, an attribute and a dict
 value; keyword r; and the typed for-loop/unpacking path.  Each is built on both
 builds and compared with CPython.
+
+A negative ``r`` literal is refused at compile time (pre75), so the direct and
+keyword cases pass a computed ``neg`` value instead to exercise the runtime
+ValueError.  The literal refusal itself is covered by ``test_ail_pre75``.
 """
 import os
 import subprocess
@@ -21,6 +25,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 BASIC = r'''import itertools
+neg = 0 - 1
 def show(tag, fn):
     try:
         print(tag, list(fn()))
@@ -31,9 +36,9 @@ for n in (0, 1, 3):
         show("p%d %d" % (n, r), lambda n=n, r=r: itertools.permutations(range(n), r))
         show("c%d %d" % (n, r), lambda n=n, r=r: itertools.combinations(range(n), r))
         show("w%d %d" % (n, r), lambda n=n, r=r: itertools.combinations_with_replacement(range(n), r))
-show("p kw", lambda: itertools.permutations(range(3), r=-1))
-show("c kw", lambda: itertools.combinations(range(3), r=-1))
-show("w kw", lambda: itertools.combinations_with_replacement(range(3), r=-1))
+show("p kw", lambda: itertools.permutations(range(3), r=neg))
+show("c kw", lambda: itertools.combinations(range(3), r=neg))
+show("w kw", lambda: itertools.combinations_with_replacement(range(3), r=neg))
 show("p expr", lambda: itertools.permutations(range(3), 1 - 2))
 show("c expr", lambda: itertools.combinations(range(3), 1 - 2))
 show("w expr", lambda: itertools.combinations_with_replacement(range(3), 1 - 2))
@@ -77,6 +82,7 @@ show("arg ok w", lambda: getw([1, 2, 3], 2))
 '''
 
 BOUNDS = r'''from itertools import permutations, combinations, combinations_with_replacement
+neg = 0 - 1
 def show(tag, fn):
     try:
         print(tag, list(fn()))
@@ -90,9 +96,9 @@ show("c r>n", lambda: combinations(range(3), 4))
 show("c r=0", lambda: combinations(range(3), 0))
 show("w r>n", lambda: combinations_with_replacement(range(3), 4))
 show("w r=0", lambda: combinations_with_replacement(range(3), 0))
-show("p empty r=-1", lambda: permutations([], -1))
-show("c empty r=-1", lambda: combinations([], -1))
-show("w empty r=-1", lambda: combinations_with_replacement([], -1))
+show("p empty r=-1", lambda: permutations([], neg))
+show("c empty r=-1", lambda: combinations([], neg))
+show("w empty r=-1", lambda: combinations_with_replacement([], neg))
 show("p neg big", lambda: permutations(range(3), -(10 ** 6)))
 show("c neg big", lambda: combinations(range(3), -(10 ** 6)))
 show("w neg big", lambda: combinations_with_replacement(range(3), -(10 ** 6)))
