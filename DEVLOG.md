@@ -1191,6 +1191,30 @@ not be run.  `python3 tools/update_manifest.py` updated the manifest for the tou
 
 Tests on the final commit: `test_ail_fuzz4`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` (4 modules, 354 s, 0 failed).
+## 2026-10-27 - pre75 negative-r literal refusal removed for pre59 (job-rbpre75-10271421)
+
+The accepted pre75 change refused a negative `r` literal at compile time on both builds. On the
+integration tree that conflicts with `test_ail_pre59`, whose literal cases require the program to
+build and raise `ValueError: r must be non-negative` at run time like CPython. The compile-time
+refusals in `itlib.py` and `pyboxed2.py` are removed; the runtime raise in `cruntime.py` stays, so
+a literal and every dynamic route (argument, list item, attribute, dict value, keyword) now raise
+the ValueError on both builds. `test_ail_pre75.py` now checks the literal runtime result instead of
+a refusal, and the pre126/pre137 programs use direct negative literals again. `test_ail_pre59.py`
+is registered in `ail_check.MODULES`. Probes `pre59_lit`, `pre59_routes`, `pre59_gen` and the
+feature-free `pre75_unrelated` match CPython on both builds.
+
+## 2026-10-26 - pre75: itertools negative r (job-pre75-10241832)
+
+`itertools.permutations` / `combinations` / `combinations_with_replacement` on the general
+path returned `[]` for a negative `r`; CPython consumes the iterable and then raises
+`ValueError: r must be non-negative`. The runtime helpers now raise it, and the default
+build's `list(...)` collection of the same shape no longer emits invalid C: a negative `r`
+literal is refused by name at compile time on both builds, while a non-literal negative
+`r` (argument, list item, attribute, dict value) raises the ValueError on both. Added
+`AIL_CURRENT/test_ail_pre75.py`; probes are in `/tmp/probes/pre75_*.py`. The pre137 catch/order
+program now passes its direct negative `r` through a computed value, because that literal is
+refused at compile time; its runtime and pool-order checks are unchanged. The pre126 bounds
+program does the same for its empty-pool negative-`r` cases.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 

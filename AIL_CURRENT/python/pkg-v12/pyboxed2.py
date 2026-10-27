@@ -1269,7 +1269,6 @@ def _literal_default_is_mutable(d):
 
     return mutable(value)
 
-
 def _module_stmt_binds(stmt):
     """Names a module-level statement binds (def, class, assignment targets, imports)."""
     if isinstance(stmt, (ast.FunctionDef, ast.ClassDef)):
