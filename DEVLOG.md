@@ -3361,6 +3361,15 @@ the message value for `e.args` whenever the program reads it (also covering list
 messages). Uncaught output stays `AssertionError: 42`. New `test_ail_pre15.py` covers int, float
 and bool messages, int64 limits, negative/empty/str messages, and values arriving through an
 argument, a list item, an attribute and a dict value, on the typed and general paths.
+## 2026-10-24 - register the test modules missing from the full suite (job-regmods-10240915)
+
+47 `AIL_CURRENT/test_ail_*.py` modules were absent from `ail_check.MODULES` (the list
+`par_check` and the CI shards run); the task's `test_ail_modules3` does not exist in this
+export. Each was run once; 46 passed and are now registered. `test_ail_callable_values` was
+left out because two of its own tests fail in this tree: the uninitialized-callback program
+raises `UnboundLocalError` instead of printing `71`, and a Callable struct field is accepted
+where the test expects a refusal. `tools/ci_shards.py --update` adds the new modules to the
+shard map, and `tools/update_manifest.py` pins them.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
