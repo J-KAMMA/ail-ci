@@ -1,13 +1,10 @@
 """Differential round 28: a class-body comprehension read through the class.
 
-A class-body list/set/dict comprehension is a class attribute. CPython's `C.ys` reads it, but the
-general path only answered a class attribute read through the class for a constant literal; a
-comprehension (or any other computed value) fell through to an ordinary attribute lookup on the
-class object and raised `AttributeError: 'type' object has no attribute 'ys'` at run time, after
-the program had already printed nothing. The general path now refuses that read by name, pointing
-at the class attribute, instead of letting the program die with a wrong answer. An instance read
-of the same attribute, the comprehension variable shadowing the class's name, and literal class
-attributes keep behaving as CPython does.
+A class-body list/set/dict comprehension is a class attribute, and CPython's `C.ys` reads it.
+Since pre304 a class body has its own namespace, so an earlier class attribute is visible to a
+comprehension's outermost iterable and the read evaluates the comprehension on both builds. An
+instance read of the same attribute, the comprehension variable shadowing the class's name, and
+literal class attributes keep behaving as CPython does.
 """
 import os
 import subprocess
@@ -116,17 +113,8 @@ class Fuzz28Tests(unittest.TestCase):
                 self.assertIsNotNone(got, '%s (general=%s)\n%s' % (text[:2000], general, build[-3000:]))
                 self.assertEqual(got, want, '%s (general=%s)\n%s' % (text[:2000], general, build[-3000:]))
 
-    def refused(self, slug, text, word):
-        with tempfile.TemporaryDirectory(prefix='ail-fuzz28-') as directory:
-            want, err = cpython(directory, slug, text)
-            self.assertEqual(want[1], 0, err)
-            for general in (True, False):
-                got, build = build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
-                self.assertIsNone(got, '%s (general=%s)\n%s' % (text[:2000], general, build[-3000:]))
-                self.assertIn(word, build, '%s (general=%s)\n%s' % (text[:2000], general, build[-3000:]))
-
-    def test_class_comprehension_read_through_class_is_refused(self):
-        self.refused('class_read', CLASS_READ, 'reading the class attribute C.ys through the class')
+    def test_class_comprehension_read_through_class(self):
+        self.check('class_read', CLASS_READ)
 
     def test_class_comprehension_read_through_instance(self):
         self.check('class_instance', CLASS_INSTANCE)

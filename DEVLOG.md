@@ -111,6 +111,48 @@ the `IndexError:` prefix).  The full-C pins in `test_ail_numeric_bindings` and
 test_ail_pre329, test_ail_pre272, test_ail_numeric_bindings, test_ail_record_initializers,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- pre327 review fix: slice bounds evaluated once (job-pre327-10271919)
+
+The reviewer found that the unknown-kind slice branch evaluated the non-`None` bounds with
+`_slice_bounds` before the instance tag test and then again inside `_slice_obj`. An instance
+reached through an unknown value therefore ran `f():g():h()` twice (and `x[data.pop():data.pop()]`
+popped once per bound before the tag test, giving an `IndexError` instead of CPython's
+`(2, 1, None)`). `_slice_bounds` now emits only inside the non-instance `else` arm, so each
+runtime path evaluates the bounds exactly once; the instance arm keeps `_slice_obj`.
+
+Probes in `/tmp/probes/pre327fix` (both builds via `cmp.sh`): `p_eval_once` (instance through an
+argument, an attribute, a list item, a dict value and an alias; list and str non-instances),
+`p_mutating` (two and three `list.pop()` bounds on an instance, a list, a tuple and a str),
+`p_types` (empty, negative, `None`, bool and step bounds on instance, list, tuple, str, bytes,
+bytearray and range), `p_routes` (inherited `__getitem__` through argument, alias, attribute,
+dict value, list item, `for`, `with` and tuple unpacking) all match CPython. `p_literal_bounds`
+is refused by name (`int64 literal out of range`). Required tests on this final state:
+test_ail_pre327, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules,
+0 failed). `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-27 -- pre327: a slice of an instance reached through an unknown value (job-pre327-10271919)
+
+The pre323 reviewer's second pre-existing item reproduced on this tree: a user-class slice
+through a parameter, a `for` / `with` target or a tuple-unpacked item built and then stopped with
+`NotImplementedError: slicing an instance through __getitem__ is not supported: this path has no
+slice objects`, where CPython calls `__getitem__` with `slice(1, 2, None)`. The general path's
+unknown-kind branch in `expr_Subscript` was gated on `want_slice`, so when no statically known
+instance slice appeared earlier in the program the prelude was never requested. The branch now
+raises `NeedSlice` on the first attempt and, after the retry, tests the instance tag and passes a
+slice object; built-ins keep `ail2s_getslice`. Slices whose value is not an instance still match
+CPython. The first recorded item, a direct out-of-int64 literal including as a slice bound, is
+already refused by name (`int64 literal out of range`) on both builds, so it was not changed.
+
+Probes in `/tmp/probes/pre327` (both builds via `cmp.sh`): `p1_literal`, `p19_huge` and
+`p20_huge_neg` are refused by name; `p2_for_inrange` through `p15_assign`, `p17_incode` and
+`p18_nofeature` match CPython. `p16_other` / `p16b_other_only` still print `'instance' object is
+not subscriptable` where CPython names `'A'`, identical on the base (pre-existing). A program
+whose only executed slices are built-ins compiles to different C only when it also defines a
+class with `__getitem__` (the branch's gate); with no such class the C is unchanged. Its output
+matches CPython either way. Added `AIL_CURRENT/test_ail_pre327.py` (8 programs, both builds; each
+matches CPython or is refused by name) and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.
+
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound
@@ -304,6 +346,37 @@ that screen is kept unchanged for non-nested saved generators.  A generator expr
 generator expression inside it, including one holding a list/set/dict comprehension, still builds
 and matches CPython.  Added `AIL_CURRENT/test_ail_pre42.py` and registered it in `ail_check.MODULES`;
 its `any_element` case covers the generic any()/all() shape that is not an iterable nesting.
+## 2026-10-27 -- fuzz28 follows pre304's class-body namespace (job-rbpre304-10272032)
+
+The integration branch's `test_ail_fuzz28.py` still expected the general path to refuse
+`print(C.ys, C.zs, C.ws)` for a class-body comprehension by name.  That refusal was the old
+behaviour the accepted pre304 change replaced: a class body now has its own namespace, so an
+earlier class attribute is visible to a comprehension's outermost iterable and the read evaluates
+on both builds.  I reproduced the failure (`[0, 1, 2] {0: 0, 1: 1, 2: 2} {0, 1, 2}` from the
+general path), verified the same program matches CPython on both builds, and changed fuzz28 to
+assert that parity instead of the obsolete refusal.  The still-refused cases (a comprehension
+body reading the class name, and a method/property rebinding an earlier attribute) remain in
+`test_ail_pre304.py`; no compiler code was changed.  Updated the old fuzz28 DIFFERENCES row to
+point at pre304 and added `C?-job-rbpre304-10272032-1`.
+
+Probes in `/tmp/probes/pre304fix` on both builds: `p1_types` (positive/negative/bool/zero,
+list/set/dict), `p2_empty`, `p3_routes` (argument, list item, attribute, dict value, alias and
+module name), `p4_containers` (class read and instance through argument/list/attribute/dict),
+`p5_duplicate`, `p6_inherit`, `p7_shadow` and `p8_body_global` match CPython; `p9_body_refuse`
+and `p10_method_refuse` are refused by name (`name 'x' is not defined`) on both builds.
+`test_ail_fuzz28` and `test_ail_pre304` (7 tests) pass on this change.  A separate exploratory
+probe, a class-body comprehension target with the same name as a module global, showed a
+pre-existing compscope limitation (the target overwrites the module global); it does not involve
+the earlier-name map and was not changed here.
+
+## 2026-10-27 -- re-apply pre304: class-body names visible to later attributes (job-rbpre304-10271604)
+
+Re-applied the accepted pre304 change on top of this tree; its class-body name map and the
+method/property rebinding refusal are now merged with the tree's newer class-attribute refusal
+path (`_class_attr_through_class_refusal`).  The two accepted DEVLOG entries and the new rows are
+kept.  Verified with `test_ail_pre304`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` on the final commit; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an
@@ -856,6 +929,51 @@ CPython on the default build, with the multi-argument raises already refused by 
 build. Final-state tests: `test_ail_pre317`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3`.
 
+## 2026-10-26 -- pre304 review: method/property rebinding is refused by name (job-pre304-10270748)
+
+The review of the pre304 change found that it introduced a wrong answer: when a method or
+property rebinds an earlier class attribute (`class C: x = 3; def x(self): ...; y = x + 1`),
+the name map still held the old attribute slot, so `y` printed `4` (and a comprehension printed
+`[0, 1, 2]`) where CPython raises TypeError.  The map is now built from the class body's
+statement order instead of only its attributes, and a method/property binding marks its name as
+refused, so a later attribute read of that name is refused by name at compile time on both builds
+(the base behaviour).  The same applies when a module global has the same name, where the base
+printed the global's value instead of CPython's TypeError.  A method before the attribute, a
+method after the use, a later re-assignment after the method, inherited methods, and unrelated
+methods keep matching CPython.
+
+Probes in `/tmp/probes`: `pre304rev_method_plain`, `pre304rev_method_comp`,
+`pre304rev_property`, `pre304rev_static_class`, `pre304rev_global_same_name` are refused by name
+on both builds (CPython raises TypeError); `pre304rev_method_before_attr`,
+`pre304rev_rebind_after_method`, `pre304rev_method_after_use`, `pre304rev_unrelated_method` and
+`pre304rev_inherited_method` match CPython on both builds.  `test_ail_pre304.py` now has 3 tests.
+## 2026-10-26 -- pre304: class-body names are visible to later attributes (job-pre304-10270748)
+
+The first pre-existing difference in the rbrbfuzz28 review was a class-body comprehension that
+reads an earlier class attribute: `class C: x = 3; ys = [i for i in range(x)]` stopped with
+`name 'x' is not defined` when `ys` was read through an instance or through `C()`, and the
+inherited and empty-comprehension cases refused too.  pyboxed2 now keeps the class body's earlier
+assignments in a temporary name map (name -> the attribute's module slot) while it compiles each
+attribute value, including the lazy `_class_attr_value` fallback and the `C.attr` read.  Only a
+comprehension's outermost iterable sees the map, as in CPython: the comprehension body runs in
+its own scope, so a class name there still reads a module global of the same name, or is refused
+by name when there is none.  Duplicate assignments, a later class definition that uses the outer
+global first, aliases and arithmetic, sources through a list item, a dict value and an instance
+attribute, inheritance and overriding, and class/instance/method reads all match CPython.
+
+Added `AIL_CURRENT/test_ail_pre304.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`; DIFFERENCES row
+`C?-job-pre304-10270748-1`.  Probes in `/tmp/probes`: `pre304_inst`, `pre304_call`,
+`pre304_instance_read`, `pre304_inherit`, `pre304_inherit_call`, `pre304_empty`, `pre304_comps`,
+`pre304_shadow_global`, `pre304_comp_body_global`, `pre304_arith`, `pre304_dup`,
+`pre304_later`, `pre304_routes`, `pre304_args`, `pre304_negative_bool`, `pre304_nested`,
+`pre304_class_read`, `pre304_alias`, `pre304_method`, `pre304_override` and `pre304_plain` match
+CPython on both builds; `pre304_comp_body_noglobal` is refused by name on both builds.
+Final-state tests: `test_ail_pre304`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 275 s, 0 failed), plus `test_ail_pre279`,
+`test_ail_pre283`, `test_ail_fuzz29`, `test_ail_dunders`, `test_ail_typed_inherit` and
+`test_ail_virtual_dispatch` (6 modules, 191 s, 0 failed).  `tools/update_manifest.py --check`
+passes.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
