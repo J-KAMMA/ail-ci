@@ -569,6 +569,70 @@ and `pre59_loop` in `/tmp/probes` match CPython on both builds (direct/literal, 
 item, attribute, dict value, keyword/expression, empty pool, bool, r=0, r=n, r>n, huge negative,
 and the typed for-loop path). Tests on the final commit: pre59, pre137, pre126, safetynet, files,
 corpus_findings3.
+## 2026-10-26 - re-apply qtest4: bytes/bytearray fillchar wrong-type message (job-rbqtest4-10262127)
+
+Re-applied the accepted qtest4 change on this tree.  The `_ail_b_fill` type guard is already
+present from the pre182 fix (`bytes`/`bytearray` membership is checked before `_ail_bs`), so no
+prelude edit was needed and the conflict resolution keeps that fix.  Added the accepted
+`AIL_CURRENT/test_ail_qtest4.py` (the wrong-type bytes/bytearray cases at normal, narrow,
+negative and zero widths, plus a str control) and registered it in `ail_check.MODULES` after
+`test_ail_fuzz51`.  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py`
+was run and `--check` passes.  Probes `/tmp/probes/q4_direct.py`, `q4_routes.py`,
+`q4_str_control.py` and `q4_valid.py` (direct, argument/list/attribute/dict routes, valid and
+empty/multi-byte fills, bytearray receivers, str control) match CPython on both builds.  Tests:
+test_ail_qtest4, test_ail_pre182, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3.
+## 2026-10-26 - re-apply fuzz28: class-body comprehension read through the class (job-rbrbfuzz28-10262128)
+
+Re-applied the accepted fuzz28 change on the current tree. A class-body list/set/dict comprehension
+is a class attribute; CPython reads it as `C.ys`, but a comprehension that uses a class-scope name
+cannot be built here. `_init_class_attrs` now refuses that evaluation by name (`reading the class
+attribute C.ys through the class`) instead of failing with an unrelated name error, and the class
+attribute read through a class does the same when the shared slot was not filled, but only when the
+value is not a literal. The current tree's module-lifetime slots and computed values (including
+comprehensions over module-level names) are unchanged, so `test_ail_fuzz29`'s definition-time,
+shared and inherited class attributes still work. Added `test_ail_fuzz28.py` and registered it in
+`ail_check.MODULES`. Probes in `/tmp/probes`: `f28_literal`, `f28_computed`, `f28_inherit_alias`,
+`f28_shadow`, `f28_routes` and `f28_bounds` match CPython on both builds; `f28_read` is refused by
+name on both. `f28_read_method` (a read inside a method) is refused by name with `name 'x' is not
+defined` on both. Tests on the final tree: `test_ail_fuzz28`, `test_ail_fuzz29`, `test_ail_pre170`,
+`test_ail_pre227`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (7 modules,
+40 tests, 0 failed, 1 skipped for no zig).
+
+Follow-up after the full suite: the new refusal must not hide a value-specific refusal. Both catch
+sites now re-raise an `Unsupported` that already carries a `source_line` -- the int64 constant-range
+refusal that `fold_int_constant` raises -- so `class C: x = True << 64; print(C.x)` keeps
+`outside the signed 64-bit range` on both builds instead of being reported as a non-literal class
+attribute (the `test_ail_pre201` / `test_ail_pre241` attribute cases). A plain undefined-name
+failure inside a comprehension carries no source line and is still turned into the class-attribute
+refusal. Tests: `test_ail_fuzz28`, `test_ail_fuzz29`, `test_ail_pre170`, `test_ail_pre201`,
+`test_ail_pre227`, `test_ail_pre241`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (9 modules, 45 tests, 0 failed, 1 skipped for no zig).
+## 2026-10-26 - re-apply fuzz4: dict hashing and literal order (job-rbrbfuzz4-10262129)
+
+Re-applied the accepted fuzz4 change on top of this tree.  Both sides' fixes are kept: the
+accepted object-runtime hashing work and literal-order lowering were applied cleanly; the
+conflicts were only the module registry, shard list, DEVLOG and DIFFERENCES rows, where this
+tree's newer entries are kept alongside the fuzz4 rows (renamed to this branch's ids).
+
+The change makes `dict.pop`/`setdefault` hash a key once (and skip hashing on the empty-dict
+`pop` fast path), makes `copy`, `update(other_dict)`, `popitem` and `dict(d)` reuse stored
+hashes, and makes the general path's dict/set literals evaluate every key/value/element before
+hashing any of them.  `test_ail_fuzz4.py` is registered in `ail_check.MODULES` and
+`ci_shards.json`.
+
+Probes in `/tmp/probes` (`f4_hash_once`, `f4_copy_update`, `f4_literal_order`,
+`f4_collisions`, `f4_nested_containers`) cover hit/miss `pop`/`setdefault`, the empty-dict
+fast path, copy/update/dict/popitem, colliding `__hash__`, unhashable early literal keys with
+later side effects, starred set literals, and values reaching a call through an argument, a
+list item, an attribute, a dict value and an alias; all match CPython on both builds.
+A colliding `dict(d)` variant exposed the already-recorded open `__eq__`-count difference
+(`C?-job-rbrbfuzz4-10262129-4`); the retained probes avoid that known table-shape case.
+
+`python3 tools/diff_ids.py` is not present in this tree (or in the accepted job), so it could
+not be run.  `python3 tools/update_manifest.py` updated the manifest for the touched files.
+
+Tests on the final commit: `test_ail_fuzz4`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` (4 modules, 354 s, 0 failed).
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
@@ -2518,6 +2582,34 @@ column, and says to move it to the top of the file; `ModuleNotFoundError` gets t
 Other unsupported caught types are located at their `try` instead of printing no location.
 `except Exception` is unchanged. Added `AIL_CURRENT/test_ail_pre27.py` (nine refusals, both builds,
 plus the accepted `except Exception` program).
+
+## 2026-10-24 - job-rbfuzz4-10240913 (dicts, sets, comprehensions)
+
+Re-applied the accepted fuzz4 change on top of this tree, keeping both sides' fixes.
+
+Ran 240 generated programs (dict order churn, set algebra/subset churn, set range churn,
+comprehension and update/delete templates) plus ~60 hand-written edge programs and 8 probes in
+`/tmp/probes`, each with `bash ~/tools/cmp.sh` on the general path and the default build.
+
+Fixed two silent-difference causes:
+
+1. Dict operations on stored keys re-ran `__hash__`: `pop`/`setdefault` hashed twice, and
+   `update(other_dict)`, `copy`, `popitem`, `dict(d)` re-hashed.  The object runtime now uses one
+   hash for pop/setdefault, clones the entry table for `copy`, removes the last entry directly
+   for `popitem`, and reuses stored hashes for update/dict.  `dict.pop` on an empty dict also
+   takes CPython's no-hash fast path.
+2. Dict and set literals on the general path hashed each element as it was evaluated.  CPython
+   3.12's `BUILD_MAP`/`BUILD_SET` evaluate every key/value/element first, then hash/insert; the
+   general lowering now does the two phases.  The typed literal emitter still inserts per pair,
+   but its keys are scalar int/str/bytes/float values with no user `__hash__`, so no silent
+   stdout difference was observed on that path.
+
+Remaining (not fixed): same-size dict mutation during iteration still differs by path/declared
+structural-mutation rule; `reversed(dict)` and `dict | dict` are accepted then stop at run time;
+and `dict(d)` may call a user `__eq__` a different number of times than CPython when the source
+table has a particular internal shape (CPython's own count depends on key-table sharing).
+`test_ail_fuzz1` could not run locally because `difffuzz` is not in this snapshot; the required
+and targeted modules were run on the final commit.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

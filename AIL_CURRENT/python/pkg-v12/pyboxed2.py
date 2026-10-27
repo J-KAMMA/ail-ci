@@ -5546,13 +5546,22 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Set(self, node, ctx):
         t = ctx.tmp()
         ctx.emit('%s = ail_set_new(cx);' % t)
-        for e in node.elts:
-            if isinstance(e, ast.Starred):
-                src = self.expr(e.value, ctx)
-                ctx.emit('st = ail_set_update_any(cx, %s, %s);' % (t, src))
+        if any(isinstance(e, ast.Starred) for e in node.elts):
+            for e in node.elts:
+                if isinstance(e, ast.Starred):
+                    src = self.expr(e.value, ctx)
+                    ctx.emit('st = ail_set_update_any(cx, %s, %s);' % (t, src))
+                    ctx.check()
+                    continue
+                v = self.expr(e, ctx)
+                ctx.emit('st = ail_set_add(cx, %s, %s);' % (t, v))
                 ctx.check()
-                continue
-            v = self.expr(e, ctx)
+            return t
+        # CPython 3.12's BUILD_SET evaluates every element expression before it hashes
+        # any of them (an unhashable first element therefore does not hide the side
+        # effects of the later ones). Keep the same two phases.
+        vals = [self.expr(e, ctx) for e in node.elts]
+        for v in vals:
             ctx.emit('st = ail_set_add(cx, %s, %s);' % (t, v))
             ctx.check()
         return t
@@ -5560,11 +5569,16 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_Dict(self, node, ctx):
         t = ctx.tmp()
         ctx.emit('%s = ail_dict_new(cx);' % t)
+        pairs = []
         for k, v in zip(node.keys, node.values):
             if k is None:
                 raise Unsupported('a ** unpacking inside a dict literal')
             kc = self.expr(k, ctx)
             vc = self.expr(v, ctx)
+            pairs.append((kc, vc))
+        # CPython 3.12's BUILD_MAP hashes/inserts only after every key and value
+        # expression has run; `{bad_key: f(), good: g()}` still runs g().
+        for kc, vc in pairs:
             ctx.emit('st = ail_dict_set(cx, %s, %s, %s);' % (t, kc, vc))
             ctx.check()
         return t
@@ -5702,7 +5716,16 @@ class Compiler(boxclosure.ClosureMixin):
             owner, hit = self._class_chain_definition(cname, node.attr)
             if hit is not None and (direct or hit[0] in ('m', 'p')):
                 if hit[0] == 'a':
-                    return self._cached_class_attr(hit[3], hit[2], ctx)
+                    value, slot = hit[2], hit[3]
+                    if isinstance(value, ast.Constant) or (isinstance(value, ast.UnaryOp)
+                                                           and isinstance(value.operand, ast.Constant)):
+                        return self._cached_class_attr(slot, value, ctx)
+                    try:
+                        return self._cached_class_attr(slot, value, ctx)
+                    except Unsupported as exc:
+                        if getattr(exc, 'source_line', None) is not None:
+                            raise
+                        raise self._class_attr_through_class_refusal(cname, node.attr)
                 raise Unsupported("reading %s %s.%s through a class value" %
                                   ('property' if hit[0] == 'p' else 'method', owner, node.attr))
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
@@ -6675,10 +6698,25 @@ class Compiler(boxclosure.ClosureMixin):
             seen += 1
         return name in EXC_IDS
 
+    def _class_attr_through_class_refusal(self, name, attr):
+        return Unsupported('reading the class attribute %s.%s through the class: its value is '
+                           'not a constant, and the general path can only read a class attribute '
+                           'through the class when it is an int/float/str/bytes/bool literal.\n'
+                           '  write instead: read it from an instance (`%s().%s`) or store the '
+                           'value in a module-level constant'
+                           % (name, attr, name, attr))
+
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
         for _aname, aval, slot in self.classes[name].get('class_attrs', []):
-            v = self.expr(aval, ctx)
+            try:
+                v = self.expr(aval, ctx)
+            except Unsupported as exc:
+                if (isinstance(aval, ast.Constant) or (isinstance(aval, ast.UnaryOp)
+                                                        and isinstance(aval.operand, ast.Constant))
+                        or getattr(exc, 'source_line', None) is not None):
+                    raise
+                raise self._class_attr_through_class_refusal(name, _aname)
             ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
