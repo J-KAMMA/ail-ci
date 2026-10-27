@@ -1619,6 +1619,104 @@ def _constant_int_exact(node, _limit=_CONST_INT_BITS):
     return True, value
 
 
+_POW_EXPONENT_OPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
+                     ast.Pow, ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
+
+
+def _pow_exponent_is_constant(node):
+    """Whether a pow() exponent is written as a constant expression the folders decide."""
+    if isinstance(node, ast.Constant):
+        return type(node.value) in (int, float, bool)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert, ast.Not)):
+        return _pow_exponent_is_constant(node.operand)
+    if isinstance(node, ast.BinOp) and type(node.op) in _POW_EXPONENT_OPS:
+        return _pow_exponent_is_constant(node.left) and _pow_exponent_is_constant(node.right)
+    return False
+
+
+def _pow_static_int(node, known):
+    value = _constant_int(node, known, shifts=True)
+    if value is None:
+        try:
+            value = _const_expr_int(node, bounded=False)
+        except _Int64ConstantOverflow:
+            value = None
+    return value
+
+
+def _exact_pow_or_too_big(base, exponent):
+    if exponent < 0:
+        return None
+    if exponent == 0:
+        return 1
+    if base == 0:
+        return 0
+    if base == 1:
+        return 1
+    if base == -1:
+        return 1 if exponent % 2 == 0 else -1
+    if exponent > _CONST_INT_BITS or abs(base).bit_length() * exponent > _CONST_INT_BITS:
+        return _CONST_INT_TOO_BIG
+    value = base ** exponent
+    return _CONST_INT_TOO_BIG if value.bit_length() > _CONST_INT_BITS else value
+
+
+def _check_int64_pow_constants(tree):
+    """Refuse a builtin pow() whose integer result int64 cannot hold, or whose constant base has
+    an exponent computed at run time. `pow(2, 63)` used to compile and stop with `integer
+    overflow` where CPython prints the bignum; a computed exponent cannot be compared with int64
+    while compiling, so that construct is refused by name instead."""
+    if _binds_name(tree, 'pow'):
+        return
+    known = _known_module_constants(tree)
+
+    def check(node, scope_known):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'pow' and len(node.args) == 2 and not node.keywords):
+            return
+        if any(isinstance(arg, ast.Starred) for arg in node.args):
+            return
+        base_node, exponent_node = node.args
+        base = _pow_static_int(base_node, scope_known)
+        exponent = _pow_static_int(exponent_node, scope_known)
+        if base is not None and exponent is not None:
+            if exponent < 0:
+                return
+            value = _exact_pow_or_too_big(base, exponent)
+            if value is not None and (value is _CONST_INT_TOO_BIG
+                                      or not _INT64_MIN <= value <= _INT64_MAX):
+                shown = 'too large' if value is _CONST_INT_TOO_BIG else _constant_diagnostic(value)
+                error = ValueError(f'int64 constant expression out of range: {shown}')
+                error.source_line = node.lineno
+                error.source_column = node.col_offset
+                raise error
+            return
+        if (base is not None and abs(base) >= 2 and _INT64_MIN <= base <= _INT64_MAX
+                and not _pow_exponent_is_constant(exponent_node)):
+            error = ValueError(
+                'pow() with the integer constant base %d and an exponent computed at run time '
+                'can leave the signed 64-bit range of an AIL int, so it is refused by name at '
+                'compile time; CPython computes it exactly with an unbounded int. Write the '
+                "exponent as a constant, or use float(%d) ** exponent for CPython's float answer"
+                % (base, base))
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+
+    function_nodes = set()
+    functions = [node for node in ast.walk(tree)
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    for function in functions:
+        function_nodes.update(id(node) for node in _walk_own_scope(function))
+    for node in ast.walk(tree):
+        if id(node) not in function_nodes:
+            check(node, known)
+    for function in functions:
+        local = _function_local_int_constants(function, known)
+        for node in _walk_own_scope(function):
+            check(node, local)
+
+
 def _check_int64_constants(tree):
     """Refuse a constant integer expression outside int64 in a module/class assignment or a
     default argument, where the construct used to compile and trap at run time. Function and
@@ -1969,6 +2067,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_unary_constants(tree)
                 _check_int64_local_cancellations(tree)
                 _check_int64_int_base_constants(tree)
+                _check_int64_pow_constants(tree)
                 _check_class_attribute_assignment(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
