@@ -7,9 +7,10 @@ subscript, a pre-existing difference.  The compiler now refuses a constant
 subscript index whose exact value leaves int64, and a constant `**` outside
 int64 wherever it appears (an argument, a list item, an attribute and a dict
 value), with `int64 index out of range` / `int64 constant out of range` and
-exit 2.  An intermediate step may leave int64 when the final index fits
-(pre269), and in-range constant index expressions match CPython on both
-builds.
+exit 2.  An intermediate step may leave int64 while the exact result comes back
+in range (`xs[2 ** 63 - 2 ** 63]`), and such a result is folded exactly and
+matches CPython; in-range constant index expressions still match CPython on
+both builds.
 """
 import os
 import subprocess
@@ -78,6 +79,19 @@ HUGE_INDEXES = {
     'bytes': ('b"abc"[10 ** 20]', '100000000000000000000'),
     'tuple': ('(1, 2, 3)[10 ** 20]', '100000000000000000000'),
 }
+
+WIDE_INTERMEDIATE = r'''def main():
+    xs = [10, 20, 30]
+    print(xs[2 ** 63 - 2 ** 63])
+    print(xs[(1 << 63) - (1 << 63)])
+    print(xs[(10 ** 20) // (10 ** 19) - 10])
+    print(xs[2 ** 63 - 2 ** 63 - 3])
+    print((1, 2, 3)[(1 << 63) - (1 << 63)])
+    print("abc"[(2 ** 63) - (2 ** 63)])
+
+
+main()
+'''
 
 
 def _cpython(directory, name, text):
@@ -150,6 +164,7 @@ class Pre177Tests(unittest.TestCase):
 
     def test_in_range_constant_index_expressions_match_cpython(self):
         self.check('boundary', BOUNDARY)
+        self.check('wide_intermediate', WIDE_INTERMEDIATE)
 
 
 if __name__ == '__main__':

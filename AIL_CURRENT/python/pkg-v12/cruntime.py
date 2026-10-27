@@ -547,7 +547,8 @@ static int ail_exc_kind_of(const char *w) {
         return AIL_EXC_VALUE;
     if (!strcmp(w, "division by zero") || !strcmp(w, "integer division by zero")
         || !strcmp(w, "integer modulo by zero")) return AIL_EXC_ZERODIV;
-    if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")
+    if (!strcmp(w, "list index out of range") || !strcmp(w, "list assignment index out of range")
+        || !strcmp(w, "pop index out of range")
         || !strcmp(w, "pop from empty list") || !strcmp(w, "grid row index out of range")
         || !strcmp(w, "grid column index out of range") || !strcmp(w, "bytes index out of range")
         || !strcmp(w, "string index out of range"))
@@ -4353,7 +4354,11 @@ static void ail_sfield_delete(ail_pslist *L, int64_t i) {
     if (!L->wide) {
         ail_pslist_check(L);
         int64_t j = i < 0 ? i + L->n : i;
-        if (j >= 0 && j == L->n - 1) { L->n--; L->tn = L->e[L->n]; return; }
+        if (j < 0 || j >= L->n) ail_die("list assignment index out of range");
+        if (j == L->n - 1) { L->n--; L->tn = L->e[L->n]; return; }
+    } else {
+        int64_t j = i < 0 ? i + L->n : i;
+        if (j < 0 || j >= L->n) ail_die("list assignment index out of range");
     }
     ail_pslist_widen(L);
     ail_wfield_delete(&L->w, i);
@@ -4567,7 +4572,9 @@ static inline __attribute__((always_inline)) void PREFIX##set(LISTTYPE *s, int64
     i = PREFIX##index(s, i); s->p[i] = value; \
 } \
 static void PREFIX##delete(LISTTYPE *s, int64_t i) { \
-    i = PREFIX##index(s, i); \
+    PREFIX##validate(s); \
+    if (i < 0) i += s->n; \
+    if (i < 0 || i >= s->n) ail_die("list assignment index out of range"); \
     memmove(s->p + i, s->p + i + 1, (size_t)(s->n - i - 1) * sizeof(SCALAR)); --s->n; \
 } \
 static void PREFIX##set_slice(LISTTYPE *s, const LISTTYPE *source, \
@@ -8906,11 +8913,20 @@ static ail_str ail_fmt_spec_int(ail_sarena *A, int64_t v, int64_t width, int ali
    `.Nf` formatting exactly, sign on `-0.0` included. */
 static ail_str ail_fmt_spec_float(ail_sarena *A, double v, int64_t width, int align, int zero,
                                    int64_t prec, int fill) {
-    char buf[512];
-    int n = snprintf(buf, sizeof buf, "%.*f", (int)(prec < 0 ? 6 : prec), v);
+    char stackbuf[512];
+    int n = snprintf(stackbuf, sizeof stackbuf, "%.*f", (int)(prec < 0 ? 6 : prec), v);
     if (n < 0) ail_die("formatting a float failed");
-    if ((size_t)n >= sizeof buf) n = (int)sizeof buf - 1;   /* pathological width/precision */
-    return ail__fmt_pad(A, buf, n, width, align, zero, fill);
+    char *heap = NULL;
+    char *buf = stackbuf;
+    if ((size_t)n >= sizeof stackbuf) {
+        heap = (char *)malloc((size_t)n + 1);
+        if (!heap) ail_die("out of memory");
+        snprintf(heap, (size_t)n + 1, "%.*f", (int)(prec < 0 ? 6 : prec), v);
+        buf = heap;
+    }
+    ail_str r = ail__fmt_pad(A, buf, n, width, align, zero, fill);
+    if (heap) free(heap);
+    return r;
 }
 
 /* `{s:<8}` / `{s:>8}` / `{s:^8}` and `%-8s`/`%8s` -- the str half. Space fill only (any other
@@ -10164,10 +10180,17 @@ static inline ail_obj ail_obj_truediv(ail_obj a, ail_obj b) {
 static inline ail_obj ail_obj_pow(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag) && b.i >= 0) {
         int64_t base = a.i, e = b.i, r = 1;
-        for (int64_t k = 0; k < e; k++) {
+        while (e) {
             int64_t nr;
-            if (__builtin_mul_overflow(r, base, &nr)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
-            r = nr;
+            if (e & 1) {
+                if (__builtin_mul_overflow(r, base, &nr)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+                r = nr;
+            }
+            e >>= 1;
+            if (e) {
+                if (__builtin_mul_overflow(base, base, &nr)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+                base = nr;
+            }
         }
         return ail_box_int(r);
     }
@@ -10283,7 +10306,7 @@ static inline void ail_list_setitem(ail_obj lst, int64_t i, ail_obj x) {
     i = ail__norm_index(i, lst.v->n, "list"); lst.v->p[i] = x;
 }
 static inline void ail_list_delitem(ail_obj lst, int64_t i) {
-    ail_vec *v = lst.v; i = ail__norm_index(i, v->n, "list");
+    ail_vec *v = lst.v; i = ail__norm_index(i, v->n, "list assignment");
     for (int64_t k = i; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
     v->n--;
 }
@@ -10708,8 +10731,20 @@ static inline ail_str ail_obj_format(ail_obj x, ail_str spec) {
     if (type == 'f') {
         double v = ail__is_num(x.tag) ? ail__as_double(x) : (ail_raise_c(AIL_ERR_TYPE, "unsupported format string passed to non-float"), 0.0);
         int prec = f.has_prec ? f.prec : 6;
-        char buf[64]; int len = snprintf(buf, sizeof buf, "%.*f", prec, v);
-        return ail__pad(buf, len, f, 1);
+        char stackbuf[64];
+        int len = snprintf(stackbuf, sizeof stackbuf, "%.*f", prec, v);
+        if (len < 0) ail_die("formatting a float failed");
+        char *heap = NULL;
+        char *buf = stackbuf;
+        if ((size_t)len >= sizeof stackbuf) {
+            heap = (char *)malloc((size_t)len + 1);
+            if (!heap) ail_die("out of memory");
+            snprintf(heap, (size_t)len + 1, "%.*f", prec, v);
+            buf = heap;
+        }
+        ail_str r = ail__pad(buf, len, f, 1);
+        if (heap) free(heap);
+        return r;
     }
     if (type == 's') {
         ail_str content = (x.tag == AIL_STR) ? x.s : ail_obj_str(x);
@@ -14669,6 +14704,12 @@ static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
             *out = (int64_t)h; return AIL_OK;
         }
         default: {
+            /* A materialised generator expression is a LIST here; CPython hashes the generator
+               object by identity and shows its address-bearing repr, so no hash bucket or repr
+               can agree. Refuse it by name instead of calling it an unhashable list. */
+            if (x.tag == AIL_T_LIST && ((ail_vecobj *)x.o)->from_generator)
+                return ail_raise_c(cx, AIL_B_TYPEERROR,
+                    "a generator expression used as a hash key is not supported: AIL stores it as a list (no generator identity hash or repr)");
             char buf[64]; snprintf(buf, sizeof buf, "unhashable type: '%s'", ail_type_name(x.tag));
             return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
         }
@@ -14979,10 +15020,17 @@ static inline ail_st ail_op_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_ob
 static inline ail_st ail_op_pow(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag) && b.i >= 0) {
         int64_t base = a.i, e = b.i, r = 1;
-        for (int64_t k = 0; k < e; k++) {
+        while (e) {
             int64_t nr;
-            if (__builtin_mul_overflow(r, base, &nr)) return ail_hit_limit(cx, "int_overflow", "integer overflow in **");
-            r = nr;
+            if (e & 1) {
+                if (__builtin_mul_overflow(r, base, &nr)) return ail_hit_limit(cx, "int_overflow", "integer overflow in **");
+                r = nr;
+            }
+            e >>= 1;
+            if (e) {
+                if (__builtin_mul_overflow(base, base, &nr)) return ail_hit_limit(cx, "int_overflow", "integer overflow in **");
+                base = nr;
+            }
         }
         *out = ail_box_int(r); return AIL_OK;
     }
@@ -15165,7 +15213,7 @@ static inline ail_st ail_list_setitem(ail_ctx *cx, ail_obj lst, int64_t i, ail_o
 }
 static inline ail_st ail_list_delitem(ail_ctx *cx, ail_obj lst, int64_t i) {
     ail_vecobj *v = (ail_vecobj *)lst.o;
-    int64_t ni; ail_st st = ail__norm_index(cx, &ni, i, v->n, "list"); if (st != AIL_OK) return st;
+    int64_t ni; ail_st st = ail__norm_index(cx, &ni, i, v->n, "list assignment"); if (st != AIL_OK) return st;
     for (int64_t k = ni; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
     v->n--; return AIL_OK;
 }

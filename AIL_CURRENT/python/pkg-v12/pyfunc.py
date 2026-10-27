@@ -66,7 +66,7 @@ import typedinherit
 import shadowing
 import rangecheck
 from pipeline import PipelineError
-from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, int_constant, refuse_complex_pow, refuse_variable_int_pow
+from pyfront import BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Unsupported, _use, int_constant, refuse_complex_pow, refuse_variable_int_pow, refuse_unrepresentable_delete_bounds
 
 # A capability marker, not a behaviour: lets a SHARED judge (one file imported against many
 # `pkg-*` copies of this module, e.g. `test_floatparam.py`) ask "does THIS copy infer a float
@@ -22033,6 +22033,9 @@ def _stmt_inner(node, ctx, ind):
             return _discard_value(node.value, ctx, pad)
         return _discard_value(node.value, ctx, pad)
     if isinstance(node, ast.Delete):
+        for target in node.targets:
+            if isinstance(target, ast.Subscript):
+                refuse_unrepresentable_delete_bounds(target)
         if any(isinstance(target, ast.Subscript) and isinstance(target.value, ast.Attribute) and _field_kind(target.value, ctx) == SLIST for target in node.targets):
             if len(node.targets) != 1:
                 raise Unsupported('string list field deletion requires one target')
@@ -22123,9 +22126,8 @@ def _stmt_inner(node, ctx, ind):
                 ctx.has_try = True
                 if exctext.ACTIVE:
                     _exc_text_parts(ctx)
-                    return pre + ('%s{ int64_t _dk = %s; if (_dk >= %s.n || _dk < -%s.n) ail_die("list assignment index out of range"); '
-                                  '(void)ail_list_pop(&%s, _dk); }\n' % (pad, k, c, c, c))
-                return pre + '%s(void)ail_list_pop(&%s, %s);\n' % (pad, c, k)
+                return pre + ('%s{ int64_t _dk = %s; if (_dk >= %s.n || _dk < -%s.n) ail_die("list assignment index out of range"); '
+                              '(void)ail_list_pop(&%s, _dk); }\n' % (pad, k, c, c, c))
         raise Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
     if isinstance(node, ast.Assert):
         # F4 (DESIGN_FOUNDATION_20260914.md section 5): `ail_die` given a value the program

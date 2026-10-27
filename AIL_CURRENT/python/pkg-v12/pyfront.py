@@ -273,6 +273,125 @@ def int_constant(node, _limit=_CONST_INT_LIMIT):
         return None
     return result if type(result) is int and result.bit_length() <= _limit else None
 
+
+_I64_MIN = -(1 << 63)
+_I64_MAX = (1 << 63) - 1
+_CONST_BITS_LIMIT = _CONST_INT_LIMIT
+
+
+def _int_constant_with_overflow(node):
+    """The exact Python value of a constant integer expression, and whether it leaves int64.
+
+    The whole expression is folded with Python's unbounded integers, so an intermediate that is
+    outside int64 is not a reason to refuse when the final value fits (the pre269 constant-index
+    pass folds the same way).  The second item is True only for a constant expression whose exact
+    final value leaves int64 or is too large to fold; a non-constant expression returns
+    (None, False).  Bool leaves count as 0/1, as CPython uses them.
+    """
+    if isinstance(node, ast.Constant) and type(node.value) in (int, bool):
+        value = int(node.value)
+        return value, not (_I64_MIN <= value <= _I64_MAX)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value, uncomputable = _int_constant_with_overflow(node.operand)
+        if value is None:
+            return None, uncomputable
+        value = -value if isinstance(node.op, ast.USub) else value
+        return value, not (_I64_MIN <= value <= _I64_MAX)
+    if not isinstance(node, ast.BinOp):
+        return None, False
+    op = type(node.op)
+    left, left_bad = _int_constant_with_overflow(node.left)
+    right, right_bad = _int_constant_with_overflow(node.right)
+    unable = left_bad or right_bad
+    if left is None or right is None:
+        # `0 * x`, `0 & x` and `0 << x` have a decided result even when the other operand is too
+        # large to fold.  A genuinely variable operand is still left for the compiler.
+        if op in (ast.Mult, ast.BitAnd):
+            if left == 0:
+                return (0, False) if right_bad else (None, False)
+            if right == 0:
+                return (0, False) if left_bad else (None, False)
+        if op is ast.LShift and left == 0:
+            return (None, False) if not right_bad else (None, True)
+        if op is ast.Pow and left == 1:
+            return 1, False
+        return None, unable
+    try:
+        if op is ast.Add:
+            value = left + right
+        elif op is ast.Sub:
+            value = left - right
+        elif op is ast.Mult:
+            if (left and right
+                    and abs(left).bit_length() + abs(right).bit_length() > _CONST_BITS_LIMIT):
+                return None, True
+            value = left * right
+        elif op is ast.FloorDiv:
+            value = left // right
+        elif op is ast.Mod:
+            value = left % right
+        elif op is ast.Pow:
+            if right < 0:
+                return None, True
+            if right == 0:
+                value = 1
+            elif left in (0, 1):
+                value = left
+            elif left == -1:
+                value = -1 if right & 1 else 1
+            elif max(1, abs(left).bit_length()) * right > _CONST_BITS_LIMIT:
+                return None, True
+            else:
+                value = left ** right
+        elif op is ast.LShift:
+            if right < 0:
+                return None, True
+            if left == 0:
+                value = 0
+            elif max(1, abs(left).bit_length()) + right > _CONST_BITS_LIMIT:
+                return None, True
+            else:
+                value = left << right
+        elif op is ast.RShift:
+            if right < 0:
+                return None, True
+            value = left >> right
+        elif op is ast.BitAnd:
+            value = left & right
+        elif op is ast.BitOr:
+            value = left | right
+        elif op is ast.BitXor:
+            value = left ^ right
+        else:
+            return None, unable
+    except (ArithmeticError, ValueError):
+        return None, True
+    if type(value) is not int:
+        return None, True
+    return value, not (_I64_MIN <= value <= _I64_MAX)
+
+def refuse_unrepresentable_delete_bounds(target):
+    """Refuse a `del` whose constant index or slice bound cannot be evaluated as an AIL int64."""
+    if isinstance(target.slice, ast.Slice):
+        bounds = (target.slice.lower, target.slice.upper, target.slice.step)
+        what = 'slice bound'
+    else:
+        bounds = (target.slice,)
+        what = 'index'
+    for bound in bounds:
+        if bound is None:
+            continue
+        value, overflow = _int_constant_with_overflow(bound)
+        if not overflow and (value is None or _I64_MIN <= value <= _I64_MAX):
+            continue
+        refusal = Unsupported(
+            'del %s: the constant %s %s cannot be evaluated within the 64-bit signed integer range '
+            'of an AIL int, so it cannot be used here (CPython\'s int is unbounded)' % (
+                ast.unparse(target), what, ast.unparse(bound)))
+        refusal.source_line = getattr(target, 'lineno', None)
+        raise refusal
+
+
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
     language has no complex type. Constant operands are refused here, at compile time; any other

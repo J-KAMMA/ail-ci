@@ -335,11 +335,13 @@ def _check_constant_power(node, parents, maxsplit):
     _check_constant_out_of_range(node, parents, maxsplit, skip_assignment=True)
 
 def _check_index_expression(slice_node):
-    """Refuse a constant subscript index that int64 cannot hold. A literal or signed literal is
-    already refused by _check_int64_literals with its own message, so only compound arithmetic is
-    read here. A step may leave int64 while the exact final index fits (`2**63 * 0`,
-    `(1 << 63) >> 62`); the whole expression is folded with the same size budget as the other
-    constant checks before the result is refused."""
+    """Refuse a constant subscript index whose exact value int64 cannot hold. A literal or signed
+    literal is already refused by _check_int64_literals with its own message, so only compound
+    arithmetic is read here. A step may leave int64 while the exact final index fits
+    (`2**63 - 2**63`, `2**63 * 0`, `(1 << 63) >> 62`); the whole expression is folded with the
+    code generator's size budget and then with the 4096-bit guarded exact fold, so a result that
+    comes back in range is kept. An inconclusive fold or an out-of-int64 result keeps the
+    per-step refusal."""
     literal = (isinstance(slice_node, ast.Constant)
                or isinstance(slice_node, ast.UnaryOp) and isinstance(slice_node.op, (ast.UAdd, ast.USub))
                and isinstance(slice_node.operand, ast.Constant))
@@ -351,6 +353,9 @@ def _check_index_expression(slice_node):
     except _Int64ConstantOverflow as overflow:
         value = _const_fold_int(slice_node)
         if value is not None and _INT64_MIN <= value <= _INT64_MAX:
+            return
+        ok, exact = _constant_int_exact(slice_node)
+        if ok and exact is not _CONST_INT_TOO_BIG and _INT64_MIN <= exact <= _INT64_MAX:
             return
         if value is None:
             value = overflow.args[0]
@@ -720,6 +725,68 @@ class _Int64CallChecker(ast.NodeVisitor):
 
     def visit_DictComp(self, node):
         self._visit_comprehension(node)
+
+
+def _fold_float_int_text(text):
+    """Rewrite `float(<an exact int constant outside int64>)` to a float literal.
+
+    CPython converts an unbounded int to the nearest double, so `float(10 ** 40)` is
+    1e+40 even though the int itself does not fit int64.  Without this fold the int
+    constant checks and the front end refuse the valid program.  Only the direct,
+    unshadowed builtin form is folded, and only when the conversion is finite; the
+    int64 range, an overflowing conversion and a rebound `float` are left alone.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) \
+                and node.id == 'float':
+            return text
+        if isinstance(node, ast.arg) and node.arg == 'float':
+            return text
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) \
+                and node.name == 'float':
+            return text
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if (alias.asname or alias.name.split('.')[0]) == 'float':
+                    return text
+
+    lines = text.splitlines(keepends=True)
+
+    def offset(line, column):
+        return sum(len(item) for item in lines[:line - 1]) + len(
+            lines[line - 1].encode('utf-8')[:column].decode('utf-8'))
+
+    spans = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'float' and isinstance(node.func.ctx, ast.Load)
+                and len(node.args) == 1 and not node.keywords):
+            continue
+        ok, value = _constant_int_exact(node.args[0])
+        if not ok or value is _CONST_INT_TOO_BIG:
+            continue
+        if _INT64_MIN <= value <= _INT64_MAX:
+            continue
+        try:
+            converted = float(value)
+        except (OverflowError, ValueError):
+            continue
+        if not math.isfinite(converted):
+            continue
+        replacement = repr(converted)
+        if replacement.startswith('-'):
+            # The call is a primary expression, so a bare negative literal would let a
+            # following ``**`` bind tighter than the unary minus (``float(-(10**40)) ** 2``).
+            replacement = '(' + replacement + ')'
+        spans.append((offset(node.lineno, node.col_offset),
+                      offset(node.end_lineno, node.end_col_offset), replacement))
+    for begin, finish, replacement in sorted(spans, reverse=True):
+        text = text[:begin] + replacement + text[finish:]
+    return text
 
 
 def _check_int64_literals(tree):
@@ -1201,6 +1268,119 @@ def _check_int64_abs_constants(tree, known):
         local = _function_local_int_constants(function, known)
         for node in _walk_own_scope(function):
             check(node, local)
+
+
+def _pow_aliases(body, initial, stores, parameters):
+    """Add names bound once in ``body`` to the builtin ``pow`` (or to an existing alias)."""
+    names = set(initial)
+    changed = True
+    while changed:
+        changed = False
+        for statement in body:
+            if not (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and isinstance(statement.value, ast.Name)):
+                continue
+            target, source = statement.targets[0].id, statement.value.id
+            if (source in names and target not in names and stores.get(target) == 1
+                    and target not in parameters):
+                names.add(target)
+                changed = True
+    return names
+
+
+def _pow_alias_names(tree):
+    """The builtin ``pow`` and names bound once to it in the module scope (``p = pow``)."""
+    if _binds_name(tree, 'pow'):
+        return set()
+    stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            stores[node.id] = stores.get(node.id, 0) + 1
+    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    return _pow_aliases(tree.body, {'pow'}, stores, parameters)
+
+
+def _walk_module_scope(tree):
+    """Nodes at module scope, not descending into functions, classes or lambdas."""
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _check_int64_pow_constants(tree, known):
+    """Refuse ``pow(base, exp)`` on constant ints whose exact result leaves int64, by name.
+
+    AIL ints are fixed width, so ``pow(2, 63)`` compiled and then stopped with ``integer
+    overflow`` where CPython keeps the bignum.  The two-argument form is folded here (the
+    three-argument form reduces modulo its modulus and stays in range); an in-range result,
+    a negative exponent (CPython's float answer) and a program that binds its own ``pow``
+    are left alone."""
+    names = _pow_alias_names(tree)
+    if not names:
+        return
+
+    def check(node, scope_known, scope_names):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in scope_names):
+            return
+        if len(node.args) != 2 or node.keywords or any(
+                isinstance(argument, ast.Starred) for argument in node.args):
+            return
+        base = _constant_int(node.args[0], scope_known)
+        exponent = _constant_int(node.args[1], scope_known)
+        if base is None:
+            try:
+                base = _const_expr_int(node.args[0], bounded=False)
+            except _Int64ConstantOverflow:
+                base = None
+        if exponent is None:
+            try:
+                exponent = _const_expr_int(node.args[1], bounded=False)
+            except _Int64ConstantOverflow:
+                exponent = None
+        if base is None or exponent is None or exponent < 0:
+            return
+        if exponent == 0:
+            result = 1
+        elif base == 0:
+            result = 0
+        elif base == 1:
+            result = 1
+        elif base == -1:
+            result = 1 if exponent % 2 == 0 else -1
+        elif exponent > 64:
+            result = None
+        else:
+            result = base ** exponent
+        if result is not None and _INT64_MIN <= result <= _INT64_MAX:
+            return
+        shown = 'too large' if result is None else _constant_diagnostic(result)
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    for node in _walk_module_scope(tree):
+        check(node, known, names)
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local = _function_local_int_constants(function, known)
+        parameters = {argument.arg for argument in
+                      function.args.posonlyargs + function.args.args + function.args.kwonlyargs}
+        if function.args.vararg is not None:
+            parameters.add(function.args.vararg.arg)
+        if function.args.kwarg is not None:
+            parameters.add(function.args.kwarg.arg)
+        scope_names = _pow_aliases(function.body, names,
+                                   _function_scope_stores(function), parameters)
+        for node in _walk_own_scope(function):
+            check(node, local, scope_names)
 
 
 def _check_int64_unary_constants(tree):
@@ -1763,6 +1943,110 @@ def _check_int64_constant_positions(tree):
                 raise error
 
 
+_GENEXPR_HASH_REFUSAL = (
+    'a generator expression used as a hash key is not supported: '
+    'AIL stores it as a list (no generator identity hash or repr)')
+
+
+def _hashed_genexpr(node, shadowed):
+    """The generator expression in a value a set or dict must hash, or None.
+
+    A tuple is hashed element by element, and a tuple()/frozenset() call hashes the elements of a
+    collection argument; a generator-expression argument to either is consumed, not hashed. A list,
+    set or dict nested in a key is itself unhashable in CPython, so nothing beneath it is reached.
+    `shadowed` names are bound by the program, so a call of that name is not the builtin."""
+    if isinstance(node, ast.GeneratorExp):
+        return node
+    if isinstance(node, ast.Tuple):
+        for elt in node.elts:
+            found = _hashed_genexpr(elt, shadowed)
+            if found is not None:
+                return found
+    if isinstance(node, ast.IfExp):
+        return _hashed_genexpr(node.body, shadowed) or _hashed_genexpr(node.orelse, shadowed)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('tuple', 'frozenset') and node.func.id not in shadowed):
+        for arg in node.args:
+            if isinstance(arg, (ast.List, ast.Tuple, ast.Set)):
+                for elt in arg.elts:
+                    found = _hashed_genexpr(elt, shadowed)
+                    if found is not None:
+                        return found
+    return None
+
+
+def _bound_names(tree):
+    """Every name the program binds anywhere (a conservative over-approximation).
+
+    A name bound in any scope may resolve to that binding where a checked call appears, so the
+    static refusal must not treat such a call as the builtin. Over-approximating only moves a
+    genuinely-builtin case to the run-time refusal, which names the same construct."""
+    bound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.arg):
+            bound.add(node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name != '*':
+                    bound.add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.update(node.names)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bound.add(node.rest)
+    return bound
+
+
+def _check_genexpr_hash_keys(tree):
+    """Refuse a generator expression that a set or dict must hash, by name.
+
+    Both emitters materialise a generator expression as an eager list (pre166), so the object is
+    unhashable where CPython hashes the generator by identity, and showing it prints the list
+    instead of `<generator object <genexpr> at 0x...>`. A static display/`hash` form is refused
+    here on both builds; a value reaching the hash at run time is refused by the runtime."""
+    def refuse(node):
+        error = ValueError(_GENEXPR_HASH_REFUSAL)
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    shadowed = _bound_names(tree) & {'hash', 'set', 'frozenset', 'tuple'}
+
+    def check_key(key):
+        found = _hashed_genexpr(key, shadowed)
+        if found is not None:
+            refuse(found)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Set):
+            for elt in node.elts:
+                check_key(elt)
+        elif isinstance(node, ast.Dict):
+            for key in node.keys:
+                if key is not None:
+                    check_key(key)
+        elif isinstance(node, ast.SetComp):
+            check_key(node.elt)
+        elif isinstance(node, ast.DictComp):
+            check_key(node.key)
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            if node.func.id == 'hash' and node.func.id not in shadowed:
+                for arg in node.args:
+                    check_key(arg)
+            elif node.func.id in ('set', 'frozenset') and node.func.id not in shadowed:
+                for arg in node.args:
+                    if isinstance(arg, (ast.List, ast.Tuple, ast.Set)):
+                        for elt in arg.elts:
+                            check_key(elt)
+
+
 def _returns_on_every_path(statements):
     def loop_exit(body):
         pending = list(body)
@@ -1964,6 +2248,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 text = python_surface(text, None if notes is None else notes.setdefault(str(path), []),
                                      library=module_only)
             text = fold_constants(text)
+            text = _fold_float_int_text(text)
             tree = ast.parse(text, filename=str(path))
             if syntax == 'python' and entry and not module_only and not declarations_only:
                 _check_main_called(tree)
@@ -1976,7 +2261,9 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_unary_constants(tree)
                 _check_int64_local_cancellations(tree)
                 _check_int64_int_base_constants(tree)
+                _check_int64_pow_constants(tree, _known_module_constants(tree))
                 _check_class_attribute_assignment(tree)
+                _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
             if source_map is not None:
