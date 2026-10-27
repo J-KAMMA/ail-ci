@@ -1,3 +1,27 @@
+## 2026-10-27 -- pre356: int() of a module dict item read through dict.get() is refused (job-pre356-10280148)
+
+The job text's claim list contained only verification data, not a CPython difference, so the first
+still-differing pre-existing route recorded by the recent DEVLOG (pre338: `TABLE.get(...)`) was
+reproduced on this tree: `TABLE = {"k": "9223372036854775808"}; print(int(TABLE.get("k")))`
+compiled on both builds and then stopped with `integer overflow`, where CPython prints the big
+integer.  The constant folder now resolves `dict.get(key)` (and its default argument) on a
+module-level literal dict, and a module dict read only by subscript or `.get` is folded like a
+module list or tuple.  That route is refused by name at compile time with
+`int64 constant expression out of range` on both builds.
+
+Probes in /tmp/probes/pre356 on both builds: `a_dict_get`, `p03`-`p08`, `p12`, `p13`, `p18`, `p21`,
+`p23` and `p24` are refused by name; `p02`, `p04`, `p09`, `p14`-`p17`, `p20`, `p25` and `r01`-`r08`
+match CPython.  Routes that still differ are unchanged from the base (confirmed with the HEAD
+`ail_chatgpt.py`): a dict with a list or nested-dict value (`p10`, `p19`), a dict aliased from a
+class body (`p11`) and a function parameter's dict (`p22`) still stop with `integer overflow`; the
+pre338 record's other route (a function parameter's list item) is also unchanged.
+
+Added `AIL_CURRENT/test_ail_pre356.py` (2 tests, 12 refused + 13 matching programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+test_ail_pre356 (42.2 s), test_ail_safetynet (91.0 s), test_ail_files (91.7 s) and
+test_ail_corpus_findings3 (148.2 s), 4 modules, 239 s, 0 failed.  `tools/update_manifest.py` was run
+and `--check` passes.
+
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
 The pre315 reviewer's first pre-existing item was `t01_class_attr_instance.py`:

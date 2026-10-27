@@ -752,6 +752,24 @@ def _constant_value(node, lookup, global_name, passthrough, attributes=None):
         except (IndexError, KeyError, TypeError):
             return _UNKNOWN
         return _UNKNOWN
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and node.func.attr == 'get' and isinstance(node.func.ctx, ast.Load)
+            and not node.keywords and len(node.args) in (1, 2)
+            and not any(isinstance(argument, ast.Starred) for argument in node.args)):
+        base = _constant_value(node.func.value, lookup, global_name, passthrough, attributes)
+        if isinstance(base, dict):
+            key = _constant_value(node.args[0], lookup, global_name, passthrough, attributes)
+            if key is _UNKNOWN:
+                return _UNKNOWN
+            try:
+                if key in base:
+                    return base[key]
+            except TypeError:
+                return _UNKNOWN
+            if len(node.args) == 2:
+                return _constant_value(node.args[1], lookup, global_name, passthrough, attributes)
+            return None
+        return _UNKNOWN
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and isinstance(node.func.ctx, ast.Load) and not node.keywords
             and node.func.id.startswith('_AilT_')):
@@ -1108,6 +1126,13 @@ def _safe_module_containers(tree, module_counts, global_names, parents):
             continue
         if isinstance(parent, ast.Subscript) and parent.value is node and isinstance(parent.ctx, ast.Load):
             continue
+        if (isinstance(parent, ast.Attribute) and parent.value is node
+                and parent.attr == 'get' and isinstance(parent.ctx, ast.Load)):
+            call = parents.get(parent)
+            if (isinstance(call, ast.Call) and call.func is parent and not call.keywords
+                    and len(call.args) in (1, 2)
+                    and not any(isinstance(argument, ast.Starred) for argument in call.args)):
+                continue
         if (isinstance(parent, ast.Assign) and parent.value is node
                 and id(parent) in module_assigns and len(parent.targets) == 1
                 and isinstance(parent.targets[0], ast.Name)):
@@ -1199,7 +1224,8 @@ def _check_int64_literals(tree):
                 continue
             value = _constant_value(node.value, lambda name: known.get(name, _UNKNOWN),
                                     lambda unused: True, {})
-            if type(value) in (int, float):
+            if (type(value) in (int, float)
+                    or (name in safe_containers and _foldable_container(value))):
                 known[name] = value
     attributes = _known_class_attributes(tree, known)
     for node in tree.body:
