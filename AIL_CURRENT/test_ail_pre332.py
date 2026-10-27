@@ -94,6 +94,68 @@ print(2 ** -1)
 ys = [10]
 ys[0] = 2
 print(ys[0] ** 19)
+nested = [[10]]
+nested[0][0] = 2
+print(nested[0][0] ** 19)
+nested_tuple = ([10],)
+nested_tuple[0][0] = 2
+print(nested_tuple[0][0] ** 19)
+nested_dict = {"k": [10]}
+nested_dict["k"][0] = 2
+print(nested_dict["k"][0] ** 19)
+
+
+def nested_local():
+    xs = [[10]]
+    xs[0][0] = 2
+    return xs[0][0] ** 19
+
+
+def nested_local_tuple():
+    t = ([10],)
+    t[0][0] = 2
+    return t[0][0] ** 19
+
+
+print(nested_local())
+print(nested_local_tuple())
+
+
+class NestedClass:
+    xs = [[10]]
+
+
+NestedClass.xs[0][0] = 2
+print(NestedClass.xs[0][0] ** 19)
+
+
+def unused():
+    x = 10
+    return x ** 19
+
+
+def unused_nested():
+    xs = [[10]]
+    xs[0][0] = 2
+    return xs[0][0] ** 19
+
+
+class UnusedMethod:
+    def m(self):
+        x = 10
+        return x ** 19
+
+
+def outer():
+    def inner():
+        x = 10
+        return x ** 19
+
+    return 5
+
+
+print(outer())
+print("ok")
 '''
 
     def test_out_of_range_powers_are_refused_by_name(self):

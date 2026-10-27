@@ -1,3 +1,20 @@
+## 2026-10-27 -- pre332 review: nested container mutation and unused function bodies (job-pre332-10272021)
+
+The pre332 review found two regressions in the new power-route pass.  First, `_only_subscripted`
+accepted a name read through the first subscript of a nested store (`xs[0][0] = 2`), so it folded
+the old item and refused `xs[0][0] ** 19`; every subscript in the load chain now has to be a load,
+and a class/instance attribute mutated through a nested subscript is no longer folded either.
+Second, the pass scanned unused function bodies, so `def unused(): x = 10; return x ** 19` was
+newly refused; a function whose name is never read (by name or attribute) is now skipped.  Added
+nested list/tuple/dict/class-attribute mutation and unused top-level, nested, and method cases to
+`test_ail_pre332.py`.
+
+Probes in `/tmp/probes` on both builds: `n01`-`n10`, `u01`-`u05`, `a01`-`a03` match CPython
+(`n09` and `u05` are the intended named refusals).  `u06` (an unused function containing
+`pow(10, 19)`) is still refused by the pre-existing `pow` check, unchanged from base.  Final-state
+tests: `test_ail_pre332`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre332: out-of-int64 integer powers through names and containers are refused (job-pre332-10272021)
 
 The pre321 review's first pre-existing item was an out-of-int64 integer power that compiled and

@@ -459,6 +459,27 @@ def _contains_known_instance(value):
     return False
 
 
+def _subscript_load_chain(node, parent, parents):
+    """Whether ``node`` is only read through a chain of subscript loads.
+
+    A nested store such as ``xs[0][0] = 2`` reads ``xs[0]`` while replacing its item, so the
+    whole chain has to end in a load; checking only the first subscript would fold a container
+    that the program mutates.
+    """
+    if not (isinstance(node.ctx, ast.Load) and isinstance(parent, ast.Subscript)
+            and parent.value is node and isinstance(parent.ctx, ast.Load)):
+        return False
+    current = parent
+    while True:
+        ancestor = parents.get(current)
+        if (isinstance(ancestor, ast.Subscript) and ancestor.value is current):
+            if not isinstance(ancestor.ctx, ast.Load):
+                return False
+            current = ancestor
+            continue
+        return True
+
+
 def _only_subscripted(tree, name, definition):
     """Whether a module name is used only by subscript loads after its one definition.
 
@@ -472,8 +493,7 @@ def _only_subscripted(tree, name, definition):
         if node is definition:
             continue
         parent = parents.get(node)
-        if (isinstance(node.ctx, ast.Load) and isinstance(parent, ast.Subscript)
-                and parent.value is node and isinstance(parent.ctx, ast.Load)):
+        if _subscript_load_chain(node, parent, parents):
             continue
         return False
     return True
@@ -514,6 +534,13 @@ def _known_class_attributes(tree, module_known):
     for node in ast.walk(tree):
         if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
             stores.setdefault(node.attr, []).append(node)
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            value = node.value
+            while isinstance(value, (ast.Subscript, ast.Attribute)):
+                if isinstance(value, ast.Attribute):
+                    stores.setdefault(value.attr, []).append(value)
+                value = value.value
     setattr_names = set()
     dynamic_setattr = False
     for node in ast.walk(tree):
@@ -1650,13 +1677,13 @@ def _static_module_values(tree, module_known, attributes, passthrough):
 
 def _scope_only_subscripted(function, name, definition):
     nodes = list(_scope_nodes_with_parents(function))
+    parents = {node: parent for node, parent in nodes}
     for node, parent in nodes:
         if not (isinstance(node, ast.Name) and node.id == name):
             continue
         if node is definition:
             continue
-        if (isinstance(node.ctx, ast.Load) and isinstance(parent, ast.Subscript)
-                and parent.value is node and isinstance(parent.ctx, ast.Load)):
+        if _subscript_load_chain(node, parent, parents):
             continue
         return False
     return True
@@ -1783,6 +1810,17 @@ def _refuse_power_value(node, shown):
     raise error
 
 
+def _referenced_function_names(tree):
+    """Names read anywhere as a name or an attribute, used to skip unused function bodies."""
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+        elif isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+            names.add(node.attr)
+    return names
+
+
 def _check_int64_power_routes(tree):
     module_counts = _binding_counts(tree.body)
     module_known = _known_module_constants(tree)
@@ -1862,8 +1900,13 @@ def _check_int64_power_routes(tree):
         elif isinstance(node, ast.Call):
             check_call(node, module_values, module_parents, pow_names, set())
 
+    referenced = _referenced_function_names(tree)
     for function in ast.walk(tree):
         if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if function.name not in referenced:
+            # An unused function body is never executed, so a power in it is not this
+            # program's run-time behaviour; scanning it used to refuse previously accepted code.
             continue
         local = _static_function_values(function, module_values, attributes, passthrough)
         arguments = function.args
