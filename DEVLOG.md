@@ -1,3 +1,24 @@
+## 2026-10-27 -- re-apply pre9: `int(<float literal>)` outside int64 refused (job-rbrbrbpre9-10271801)
+
+Re-applied the accepted pre9 change on this tree. CPython's int is unbounded, so `int(1e300)`
+returns an exact big integer; AIL's int is 64-bit (SEMANTICS section 1). The current tree's
+pre290 front-end pass already refuses a finite direct `int(<float literal>)` outside int64 by
+name, so the accepted helper is added to all three emitters (`pyfunc.py`, `pyboxed2.py`,
+`pyboxed.py`, through `pyfront.refuse_int_float_literal`) and also covers the infinity literal
+(`int(1e400)`), which pre290's finite-only check skipped. In-range float literals, including
+`-9223372036854775808.0`, and values arriving through arguments, lists, attributes, dicts,
+aliases or variables keep the ordinary conversion.
+
+`test_ail_pre9.py` accepts either refusal wording and covers the refused literals (1e300,
+-1e300, 2**63 as a float, an infinity literal) in default/general builds on AIL_IR=0/1, and
+compares in-range literal and flow results with CPython. Probes in `/tmp/probes`
+(`pre9_inrange`, `pre9_boundary`, `pre9_flows`, `pre9_alias`, `pre9_refuse_pos/neg/two63/
+inf/ninf/unary`) match CPython or are refused by name on both builds. Final-state modules:
+`test_ail_pre9` (2 tests, 20.1 s), `test_ail_pre290` (2 tests, 25.3 s),
+`test_ail_safetynet` (5 tests, 104.8 s), `test_ail_files` (18 tests, 45.0 s, 1 skipped)
+and `test_ail_corpus_findings3` (2 tests, 85.9 s), 0 failed. `tools/diff_ids.py` is absent on
+this tree; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an

@@ -33,7 +33,7 @@ import os
 import re
 import runpy
 
-from pyfront import Unsupported, int_constant, refuse_complex_pow, refuse_variable_int_pow, refuse_unrepresentable_delete_bounds
+from pyfront import Unsupported, int_constant, refuse_complex_pow, refuse_variable_int_pow, refuse_int_float_literal, refuse_unrepresentable_delete_bounds
 import filelib
 import hashlower
 import pyfunc
@@ -7366,6 +7366,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('%s = ail_box_int(0);' % t)
             return t
         if base_node is None:
+            refuse_int_float_literal(pos[0])
             return self._conv('int', 'ail_to_int', pos, {}, ctx)
         v = self.expr(pos[0], ctx)
         b = self.expr(base_node, ctx)
