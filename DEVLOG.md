@@ -267,6 +267,37 @@ C?-job-rbpre54-10270147-1.  Probes in `/tmp/probes`: `p54_near`, `p54_two_arg`, 
 `p54_nonconstant` match CPython on both builds; `p54_refuse_direct`, `p54_refuse_argument`,
 `p54_refuse_container`, `p54_refuse_positive` and `p54_refuse_beyond` are refused by name on both
 builds (exit 3, no executable).  `python3 tools/diff_ids.py` is not present in this tree.
+## 2026-10-26 -- pre276 suite fix: a wide constant index folds to a CPython index (job-pre276-10270718)
+
+The integration candidate at job start includes pre269, which folds the whole constant index
+expression before the int64 check.  `(-2 ** 63) // (2 ** 63)` therefore now compiles to -1 and
+prints the last list/tuple/str/bytes item or the -1 dict value on both builds, where the pre276
+branch base still refused it by name.  `test_ail_pre276.py` now accepts either outcome for each
+receiver and requires both builds to agree: a named refusal (`int64 index out of range`), or a
+successful build whose stdout equals CPython's.  No compiler change was made.
+
+Probes in `/tmp/probes`: `pre276_wide`, `pre276_routes` and `pre276_boundaries` match CPython on
+the integrated tree and are refused by name on this branch base; `pre276_out_of_range` is
+refused by name on both (CPython raises IndexError); `pre276_unchanged` matches CPython on both.
+Tests: test_ail_pre276, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3.
+## 2026-10-26 -- constant index with a wide operand is already refused by name (job-pre276-10262320)
+
+The first still-differing item from the rbpre47 review was
+`[1, 2, 3][(-2 ** 63) // (2 ** 63)]`: CPython computes -1 and prints the last item, while both
+builds stop at compile time with `int64 index out of range: 9223372036854775808` because the
+positive operand `2 ** 63` leaves int64.  The task accepts a named compile-time refusal, and the
+current tree already gives one on the general and the default build, so no compiler change was
+made.  Added `test_ail_pre276.py`, which pins that refusal for list, tuple, str, bytes and dict
+receivers and for a named list, on both builds, and registered it in `ail_check.MODULES` and
+`ci_shards.json`.
+
+Probes in `/tmp/probes` (both builds): `idx1_exact` is refused by name; the wider per-route probes
+`pre276_routes`, `pre276_containers`, `pre276_boundaries`, `pre276_negatives`, `pre276_widths`,
+`pre276_assign_alias` and `pre276_empty` are also refused by name or, where the per-step folder
+already leaves them alone, match CPython.  `runtime_var` (the second rbpre47 item) is likewise
+already refused by name; `divs3` (the third) still prints `1.0` on the default build and was not
+the first item.  Tests on the final tree: test_ail_pre276, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 ## 2026-10-26 -- re-apply fuzz58: non-ASCII repr in int()/float() errors (job-rbfuzz58-10261656)
 
 Re-applying the accepted fuzz58 change on the current integration tree.  The runtime fix is
