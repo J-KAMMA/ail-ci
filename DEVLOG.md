@@ -9,7 +9,7 @@ form still wrong here was `setattr(self, 'f', ...)`: `compile` collected only `A
 into `assigned_attrs`, so the call dispatched to the method (`101` where CPython calls the field
 and prints `11`).  `pyboxed2.Compiler.compile` now also records the literal name of a
 `setattr(obj, 'name', ...)` call in the same set, using the existing field-call path; no refusal
-was added and `test_ail_pre279` behaviour is unchanged.  Added `test_ail_pre293.py` (11 tests,
+was added and `test_ail_pre279` behaviour is unchanged.  Added `test_ail_pre293.py` (10 tests,
 both builds, CPython parity for all the accepted programs plus setattr routes, negative values
 and aliases) and registered it in `ail_check.MODULES`; DIFFERENCES row
 `C?-job-rbpre293-10270942-1`.  `tools/diff_ids.py` is not present on this tree;
