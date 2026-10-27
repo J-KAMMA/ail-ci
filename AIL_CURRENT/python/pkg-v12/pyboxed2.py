@@ -1933,6 +1933,7 @@ class Ctx:
         self.qualname = ''         # CPython's __qualname__ of the function being compiled
         self.self_name = None      # set for a method: its own first parameter's name
         self.class_locals = None   # class body name -> module slot, while a class attribute expression is compiled
+        self.busy_class = None     # the class whose body is being evaluated: its name is not bound yet
 
     def emit(self, line):
         if self.where is not None:
@@ -2278,6 +2279,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.mix_guard_checks = {}
         self.class_values = []     # classes used as values (a call through a value may construct one)
         self.evaluating_class_attrs = set()   # slots whose value is being compiled (re-entrancy guard)
+        self.busy_class_flags = {} # class name -> C int that turns 1 once its body has finished
         self.user_method_names = frozenset()   # every method name a class of the program defines
         self.uses_argv = False     # sys.argv: main takes argc / argv
         self.bytes_prelude = False # bytes / bytearray are the classes of prelude_bytes.py
@@ -2564,6 +2566,8 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append('static int64_t g_attr_%s;\n' % a)
         parts.append('\n/* ---- module-lifetime GC root: classes + module globals ---- */\n')
         parts.append('static ail_obj g_slots_arr[%d];\n' % max(ng, 1))
+        for cname in sorted(self.busy_class_flags):
+            parts.append('static int %s;\n' % self.busy_class_flags[cname])
         parts.append('static ail_frame g_frame;\n')
         parts.append('\n/* ---- forward declarations ---- */\n')
         parts.extend(self.top_decls)
@@ -3416,6 +3420,14 @@ class Compiler(boxclosure.ClosureMixin):
             self.global_slots[key] = self.next_global_slot
             self.next_global_slot += 1
         return self.global_slots[key]
+
+    def _busy_class_flag(self, cname):
+        """The C int that is 0 while `cname`'s body runs and 1 afterwards (registered once)."""
+        flag = self.busy_class_flags.get(cname)
+        if flag is None:
+            flag = 'g_cls_ready_%d' % self._class_global_slot(cname)
+            self.busy_class_flags[cname] = flag
+        return flag
 
     def _module_stmt(self, node, ctx):
         self.stmt(node, ctx)
@@ -5059,6 +5071,15 @@ class Compiler(boxclosure.ClosureMixin):
             # only the "class used as a plain value" shape is covered here.
             # A local/parameter of the same name shadows the class, and a module-level assignment
             # to the name rebinds it: those go through the ordinary name lookup below.
+            if ctx.busy_class == node.id:
+                # CPython binds a class's name only after its body has run. Inside the body
+                # (including a lambda/comprehension called there) the class object exists here,
+                # but the name must still raise NameError until the body finishes.
+                flag = self._busy_class_flag(node.id)
+                ctx.emit('if (!%s) { st = ail_raise_c(cx, AIL_B_NAMEERROR, '
+                         '"name \'%s\' is not defined"); goto %s; }' %
+                         (flag, node.id, ctx.cur_err_target()))
+                ctx.uses_st = True
             return 'g_slots_arr[%d]' % self.global_slots['class:' + node.id]
         if node.id in ctx.nested_funcs:
             raise Unsupported('using function %s as a first-class value' % node.id)
@@ -6891,6 +6912,8 @@ class Compiler(boxclosure.ClosureMixin):
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
         saved = ctx.class_locals
+        saved_busy = ctx.busy_class
+        ctx.busy_class = name
         try:
             for _aname, aval, slot in self.classes[name].get('class_attrs', []):
                 # The class body runs in its own namespace: an earlier attribute is visible to a
@@ -6910,8 +6933,13 @@ class Compiler(boxclosure.ClosureMixin):
                 finally:
                     self.evaluating_class_attrs.discard(slot)
                 ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+            if name in self.busy_class_flags:
+                # CPython binds the class name once the body has finished (after the module slot
+                # binding below, which does not affect a lambda that reads it later).
+                ctx.emit('%s = 1;' % self.busy_class_flags[name])
         finally:
             ctx.class_locals = saved
+            ctx.busy_class = saved_busy
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
             # `global` declaration) rebinds the module slot: do that binding HERE, at the
@@ -7985,6 +8013,7 @@ class Compiler(boxclosure.ClosureMixin):
             self.lambda_n += 1
             cname = 'plib_%d' % self.lambda_n
             lctx = Ctx(cname)
+            lctx.busy_class = ctx.busy_class
             for p in lnames:
                 lctx.declare_local(p)
             v = self.expr(node.body, lctx)
@@ -8461,6 +8490,7 @@ class Compiler(boxclosure.ClosureMixin):
             self.lambda_n += 1
             cname = 'plam_%d' % self.lambda_n
             lctx = Ctx(cname)
+            lctx.busy_class = ctx.busy_class
             lctx.declare_local(pname)
             for nm in captured:
                 lctx.declare_local(nm)

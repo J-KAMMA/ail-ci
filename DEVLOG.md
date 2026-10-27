@@ -1,4 +1,30 @@
-## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
+## 2026-10-27 -- pre382: a class name is not bound inside its own body (job-pre382-10280718)
+
+The pre362 review recorded an immediately-invoked class-body self-construction that ran where
+CPython raises `NameError`: `class C: y = (lambda: C)()` printed the class with exit 0 on both
+builds, and `class D: v = 1; fs = [(lambda: [D][0]().v)()]` printed `[1]` (base: a compile
+`RecursionError`).  `pyboxed2` created every class object before the module body, so
+`expr_Name` returned it for a read of the class name even inside its own body, where CPython has
+not bound the name yet.
+
+A read of the class currently being defined now compiles to `NameError: name 'C' is not
+defined`, guarded by a module-lifetime `g_cls_ready_<slot>` int that `_init_class_attrs` leaves 0
+while the body runs and sets to 1 afterwards.  The busy class name is propagated into lambdas
+compiled by `boxclosure.closure_value` and by `_func_pointer_of` / `_func_pointer_lib`, so an
+immediately called lambda, a lambda default and a `map`/`sorted`/`reduce`/`groupby` callback
+raise the same `NameError`.  A lambda stored in the class body and called later (also through a
+list item or dict value), a method returning the class, an unrelated class, an earlier class-body
+attribute, an earlier module binding and a class defined before the lambda is made still match
+CPython.  Only a class with such a read gets the flag, so the generated C of other programs is
+unchanged.
+
+Observed, not fixed: an indirect read through a module-level function called while the body runs
+(`def f(): return C` used as a class attribute value) still returns the class object; and
+class-body expression statements (`class C: print("body")`) are still dropped.  Both are
+pre-existing and separate from the recorded defect.
+
+`test_ail_pre382.py` pins 8 deferred/control programs and 12 `NameError` programs on both builds.
+
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
 only conflict was in `_check_int64_literals`: this tree already carried `_safe_module_containers`,
