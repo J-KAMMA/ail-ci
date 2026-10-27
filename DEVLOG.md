@@ -420,6 +420,49 @@ and 14 refused by name (`p39_refuse_{literal,negative,boundary,keyword,positiona
 all against CPython on both builds. `python3 tools/diff_ids.py` is not present in this tree;
 `tools/update_manifest.py` was run and `--check` passes.
 
+## 2026-10-27 -- pre306 review: instance folding ignores setattr (job-pre306-10271301)
+
+The review found that the new instance-attribute folding still folded a literal `self.attr` after
+`setattr(instance, 'attr', in_range)` (literal or dynamic name), so a program CPython runs as `1`
+was falsely refused with the out-of-int64 wording.  `_known_class_attributes` now marks an
+instance attribute unsafe when any `setattr` names it, and a `setattr` with a non-constant name
+keeps every attribute read through an instance unknown (including a class attribute fallback).
+A direct class read (`int(C.v)`) is still folded and refused when an unrelated dynamic `setattr`
+targets an instance.  `AIL_CURRENT/test_ail_pre306.py` adds four matching cases (literal and
+dynamic names, instance `self.attr` and class-attribute fallback) and one named-refusal case.
+Probes in `/tmp/probes`: `pre306_attr_setattr_instance`, `pre306_attr_setattr_dynamic`,
+`pre306_attr_setattr_routes`, `pre306_attr_setattr_boundary`, `pre306_attr_setattr_alias`,
+`pre306_attr_setattr_int`, `pre306_attr_setattr_multiple`, `pre306_attr_setattr_dict_name`,
+`pre306_attr_setattr_attr_name`, `pre306_attr_setattr_class_attr_fallback_constant` and
+`..._dynamic` match CPython on both builds; `pre306_attr_setattr_class_direct_dynamic` is refused
+by name on both builds.  `setattr` on a class object and `C.v = ...` stay unsupported on both
+builds (pre-existing).  `tools/update_manifest.py --check` passes.
+
+## 2026-10-27 -- pre306: int() of an out-of-int64 float through an attribute is refused by name (job-pre306-10271301)
+
+The first still-differing pre-existing item from the rbrbpre31 review was `int(C().v)` with a class
+attribute `v = 1e300`: both builds compiled it and then stopped with `integer overflow`, where
+CPython prints the big integer.  The front end now folds literal class attributes and literal
+`self.attr` values set in `__init__`, and follows them through a class alias, a module constant or
+instance, a list/tuple/dict item, an identity/wrapper argument, a keyword argument and a class read.
+An out-of-int64 float is refused on both builds with the existing
+`int() of a float outside int64: ... (CPython makes a big integer)` wording.  Folding is
+conservative: a class is skipped when it has bases, decorators or a keyword, a class attribute when
+any other attribute store or `setattr` names it, and an instance attribute when it is assigned more
+than once or outside the class's direct `__init__` body.  Values that fit, shadowed class names and
+attributes mutated after construction are unchanged.
+
+`AIL_CURRENT/test_ail_pre306.py` covers the refused routes (class attribute direct and through
+`C()`, negative, `__init__`, module constant, alias, list and dict item, identity and wrapper
+argument, module instance) and in-range/mutated/shadowed programs against CPython on both builds.
+DIFFERENCES row `C?-job-pre306-10271301-1` added; `test_ail_pre306` is registered in
+`ail_check.MODULES` and pinned.  Probes in `/tmp/probes`: `pre306_attr_class`,
+`pre306_attr_class_direct`, `pre306_attr_neg`, `pre306_attr_init`, `pre306_attr_module_const`,
+`pre306_attr_alias`, `pre306_attr_list`, `pre306_attr_dict`, `pre306_attr_instance` (refused by name,
+both builds); `pre306_attr_fit`, `pre306_attr_mutated_instance` (match CPython, both builds).
+`pre306_attr_instance` with an out-of-range value assigned after construction still keeps the
+run-time trap.  Final tests on the committed tree: `test_ail_pre306`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`.  `tools/update_manifest.py --check` passes.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's

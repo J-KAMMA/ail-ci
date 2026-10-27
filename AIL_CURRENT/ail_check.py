@@ -184,6 +184,7 @@ MODULES = (
     'test_ail_pre305',
     'test_ail_pre310',
     'test_ail_pre293',
+    'test_ail_pre306',
     'test_ail_pre205',
     'test_ail_pre206',
     'test_ail_pre209',
