@@ -1,3 +1,20 @@
+## 2026-10-27 -- pre310: rbrbpre47's first pre-existing difference `2 ** 63` is already refused (job-pre310-10271327)
+
+The rbrbpre47 review recorded CPython's exact unbounded results where both trees refuse by name:
+`2**63`, `1<<63`, `10**40`, `2**10000`, `2**100000000`, `-(-2)**63`, `f"{2**63}"`,
+`2**63 + 0.5`, `"a".split(",", 2**63)` and `-2**63 - 1`. Reproduced the first, `2**63`, on both
+builds: it is already refused at compile time by the tree's generic constant checks (`int64
+constant out of range: 9223372036854775808`), which is the task's allowed named refusal. Every
+other recorded item, and the assignment/argument/list/dict/attribute/alias/module-constant/return
+routes for `2**63`, also refuse by name; the in-range boundaries (`2**63 - 1`, `-(2**63)`,
+`1<<62`, `2**63 - 2**63`, `(2**70)//(2**10)`, `(2**63)>>1`, an f-string and the special
+`0**200`/`1**200`/`(-1)**201` bases) match CPython on both builds. No compiler code changed;
+added `AIL_CURRENT/test_ail_pre310.py` and registered it in `ail_check.MODULES` and
+`ci_shards.json`. Probes: `/tmp/probes/pre310/p01`-`p10` are refused by name on both builds;
+`/tmp/probes/pre310b/v01`-`v16` are refused by name and `v17`-`v20` match CPython on both builds.
+`tools/update_manifest.py` was run and `--check` passes. Tests on the final commit:
+`test_ail_pre310`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(4 modules, 0 failed).
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
