@@ -2228,6 +2228,8 @@ class Compiler(boxclosure.ClosureMixin):
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        import exctext
+        exctext.refuse_args_item_store(tree, Unsupported)
         # An instance attribute assignment shadows a class method of the same name (a method is a
         # non-data descriptor), wherever the assignment is written: in a method, at module scope,
         # through an alias, a loop target or a `with ... as`.  Remember the names so a call through
