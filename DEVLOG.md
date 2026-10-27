@@ -1,3 +1,29 @@
+## 2026-10-27 - pre315: out-of-int64 int() through a variable, item or attribute (job-pre315-10271444)
+
+The first still-differing item in the rbrbpre9 review was `int()` of a statically known value
+outside int64 that reached the call through a variable, a list/dict item, an instance attribute
+or a class attribute: both builds compiled it and stopped at run time with `integer overflow`,
+where CPython prints the big integer.  `ail_chatgpt` now builds a conservative static
+environment for module and function-local names, aliases, containers, direct and `__init__`
+instance attributes, class attributes and wrapper arguments, and refuses the call by name with
+the existing `int64 constant expression out of range` / `int() of a float outside int64`
+wording.  Mutated containers and overwritten attributes are not folded; in-range, invalid and
+run-time-only conversions keep their previous behaviour.  The second recorded item (a function
+or class named `int`) is already refused by name by the shadowing rule and was left unchanged.
+
+Added `AIL_CURRENT/test_ail_pre315.py` (15 refused cases, 1 CPython-parity program, both builds)
+and registered it in `ail_check.MODULES` and `ci_shards.json`.  Probes in `/tmp/probes`:
+`p01_var_str`, `p02_list_str`, `p03_dict_str`, `p04_attr_str`, `p05_var_base16`, `p06_var_float`,
+`p07_list_float`, `p10_dict_float`, `p11_attr_float`, `p12_tuple_float`, `p13_class_attr_str`,
+`p14_init_attr_str`, `p15_local_var_str`, `p16_arg_str`, `p17_list_base16`, `p18_class_attr_float`,
+`p19_dict_base16`, `p20_local_list_str`, `p28_attr_base16`, `p29_local_float` and `p30_arg_float`
+are refused by name on both builds; `p21_mutated_list`, `p22_mutated_dict`, `p24_mutated_init_attr`,
+`p25_alias_mutated_list`, `p26_in_range_routes` and `p27_local_mutated_list` match CPython on both
+builds.  `p08_func_int` and `p09_class_int` stay refused by the shadowing rule, and `p23` is
+refused by the separate class-attribute-store rule.  Final tests: `test_ail_pre253`,
+`test_ail_pre263`, `test_ail_pre290`, `test_ail_pre315`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` (14 + 25 tests, all passing).  `tools/update_manifest.py` and
+`--check` pass.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's

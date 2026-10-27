@@ -518,6 +518,355 @@ def _outside_int64_float(value):
             and not -(1 << 63) <= int(value) < 1 << 63)
 
 
+def _static_immutable_value(value):
+    if value is _UNKNOWN:
+        return False
+    if isinstance(value, (int, float, str, bytes, bool, type(None))):
+        return True
+    if isinstance(value, (tuple, frozenset)):
+        return all(_static_immutable_value(item) for item in value)
+    return False
+
+
+def _static_value(node, lookup, attributes, passthrough):
+    """The static value an expression denotes, including names, containers and attributes.
+    Containers are only recorded for a name that is never mutated (see _static_mutation_state),
+    so a write through an alias is never folded away."""
+    if isinstance(node, ast.Constant):
+        if type(node.value) in (bool, int, float, str, bytes, type(None)):
+            return node.value
+        return _UNKNOWN
+    if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+        return lookup(node.id)
+    if isinstance(node, ast.Attribute) and isinstance(node.ctx, ast.Load):
+        if node.attr.startswith('f') and node.attr[1:].isdigit():
+            base = _static_value(node.value, lookup, attributes, passthrough)
+            if isinstance(base, tuple):
+                index = int(node.attr[1:])
+                if index < len(base):
+                    return base[index]
+            return _UNKNOWN
+        if isinstance(node.value, ast.Name):
+            return attributes.get((node.value.id, node.attr), _UNKNOWN)
+        return _UNKNOWN
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _static_value(node.operand, lookup, attributes, passthrough)
+        if type(value) in (int, float):
+            return -value if isinstance(node.op, ast.USub) else value
+        return _UNKNOWN
+    if isinstance(node, ast.BinOp):
+        left = _static_value(node.left, lookup, attributes, passthrough)
+        right = _static_value(node.right, lookup, attributes, passthrough)
+        if left is _UNKNOWN or right is _UNKNOWN:
+            return _UNKNOWN
+        if isinstance(node.op, ast.Add):
+            if type(left) is type(right) and type(left) in (str, bytes):
+                if len(left) + len(right) > (1 << 20):
+                    return _UNKNOWN
+                return left + right
+            if type(left) in (int, float) and type(right) in (int, float):
+                return left + right
+        if isinstance(node.op, ast.Sub) and type(left) in (int, float) and type(right) in (int, float):
+            return left - right
+        if isinstance(node.op, ast.Mult):
+            if type(left) in (str, bytes) and type(right) is int:
+                text, count = left, right
+            elif type(right) in (str, bytes) and type(left) is int:
+                text, count = right, left
+            else:
+                text = None
+            if text is not None:
+                if count < 0 or len(text) * count > (1 << 20):
+                    return _UNKNOWN
+                return text * count
+            if type(left) in (int, float) and type(right) in (int, float):
+                return left * right
+        if isinstance(node.op, ast.Div) and type(left) in (int, float) and type(right) in (int, float):
+            try:
+                return left / right
+            except (ArithmeticError, ValueError):
+                return _UNKNOWN
+        return _UNKNOWN
+    if isinstance(node, ast.IfExp):
+        test = _static_value(node.test, lookup, attributes, passthrough)
+        if type(test) is bool:
+            return _static_value(node.body if test else node.orelse, lookup, attributes, passthrough)
+        return _UNKNOWN
+    if isinstance(node, ast.List):
+        values = [_static_value(item, lookup, attributes, passthrough) for item in node.elts]
+        return _UNKNOWN if any(item is _UNKNOWN for item in values) else values
+    if isinstance(node, ast.Tuple):
+        values = [_static_value(item, lookup, attributes, passthrough) for item in node.elts]
+        return _UNKNOWN if any(item is _UNKNOWN for item in values) else tuple(values)
+    if isinstance(node, ast.Set):
+        values = [_static_value(item, lookup, attributes, passthrough) for item in node.elts]
+        if any(item is _UNKNOWN for item in values):
+            return _UNKNOWN
+        try:
+            return frozenset(values)
+        except TypeError:
+            return _UNKNOWN
+    if isinstance(node, ast.Dict):
+        values = {}
+        for key_node, value_node in zip(node.keys, node.values):
+            if key_node is None:
+                return _UNKNOWN
+            key = _static_value(key_node, lookup, attributes, passthrough)
+            value = _static_value(value_node, lookup, attributes, passthrough)
+            if key is _UNKNOWN or value is _UNKNOWN:
+                return _UNKNOWN
+            try:
+                values[key] = value
+            except TypeError:
+                return _UNKNOWN
+        return values
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+        base = _static_value(node.value, lookup, attributes, passthrough)
+        key = _static_value(node.slice, lookup, attributes, passthrough)
+        if base is _UNKNOWN or key is _UNKNOWN:
+            return _UNKNOWN
+        try:
+            if isinstance(base, (list, tuple, dict, str, bytes)):
+                return base[key]
+        except (IndexError, KeyError, TypeError):
+            return _UNKNOWN
+        return _UNKNOWN
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and isinstance(node.func.ctx, ast.Load) and not node.keywords
+            and node.func.id.startswith('_AilT_')):
+        values = [_static_value(item, lookup, attributes, passthrough) for item in node.args]
+        return _UNKNOWN if any(item is _UNKNOWN for item in values) else tuple(values)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and isinstance(node.func.ctx, ast.Load) and node.func.id in passthrough):
+        name, index = passthrough[node.func.id]
+        argument = _bound_argument(node, name, index)
+        if argument is not None:
+            return _static_value(argument, lookup, attributes, passthrough)
+    return _UNKNOWN
+
+
+_STATIC_MUTATING_CALLS = {
+    'append', 'extend', 'insert', 'remove', 'pop', 'clear', 'update', 'setdefault', 'popitem',
+    'sort', 'reverse', 'add', 'discard', 'difference_update', 'intersection_update',
+    'symmetric_difference_update', '__setitem__', '__delitem__', '__iadd__', '__imul__',
+}
+
+
+def _static_mutation_state(tree):
+    """Name stores, parameters, mutated names/attributes and name aliases for one program."""
+    counts = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            counts[node.id] = counts.get(node.id, 0) + 1
+    parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    mutated = set()
+    mutated_attrs = set()
+    aliases = {}
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                and isinstance(node.ctx, (ast.Store, ast.Del))):
+            mutated_attrs.add((node.value.id, node.attr))
+        elif (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
+                and isinstance(node.ctx, (ast.Store, ast.Del))):
+            mutated.add(node.value.id)
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            mutated.add(node.target.id)
+        elif isinstance(node, ast.Call):
+            if (isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name)
+                    and node.func.attr in _STATIC_MUTATING_CALLS):
+                mutated.add(node.func.value.id)
+            for argument in node.args:
+                if isinstance(argument, ast.Name):
+                    mutated.add(argument.id)
+            for keyword in node.keywords:
+                if isinstance(keyword.value, ast.Name):
+                    mutated.add(keyword.value.id)
+            if (isinstance(node.func, ast.Name) and node.func.id == 'setattr'
+                    and len(node.args) >= 2 and isinstance(node.args[0], ast.Name)
+                    and isinstance(node.args[1], ast.Constant) and isinstance(node.args[1].value, str)):
+                mutated_attrs.add((node.args[0].id, node.args[1].value))
+        target = value = None
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign):
+            target, value = node.target, node.value
+        if isinstance(target, ast.Name) and isinstance(value, ast.Name):
+            aliases.setdefault(target.id, set()).add(value.id)
+            aliases.setdefault(value.id, set()).add(target.id)
+    changed = True
+    while changed:
+        changed = False
+        for target, sources in aliases.items():
+            if target in mutated:
+                for source in sources:
+                    if source not in mutated:
+                        mutated.add(source)
+                        changed = True
+            elif sources & mutated and target not in mutated:
+                mutated.add(target)
+                changed = True
+    return counts, parameters, mutated, mutated_attrs, aliases
+
+
+def _static_scope_values(body, base, attributes, passthrough, stores, parameters, declared, mutated):
+    env = {name: value for name, value in base.items()
+           if name not in stores and name not in parameters and name not in declared}
+    for _ in range(3):
+        for statement in body:
+            if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                target, value_node = statement.targets[0], statement.value
+            elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+                target, value_node = statement.target, statement.value
+            else:
+                continue
+            if not isinstance(target, ast.Name):
+                continue
+            name = target.id
+            if stores.get(name) != 1 or name in parameters or name in declared:
+                continue
+            value = _static_value(value_node, lambda each: env.get(each, _UNKNOWN), attributes, passthrough)
+            if value is _UNKNOWN:
+                continue
+            if not _static_immutable_value(value) and name in mutated:
+                continue
+            env[name] = value
+    return env
+
+
+def _static_class_attributes(tree, module_env, attributes, passthrough, stores, mutated, mutated_attrs):
+    for cls in (node for node in ast.walk(tree) if isinstance(node, ast.ClassDef)):
+        if stores.get(cls.name, 0) > 1:
+            continue
+        env = dict(module_env)
+        found = {}
+        for statement in cls.body:
+            if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                target, value_node = statement.targets[0], statement.value
+            elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+                target, value_node = statement.target, statement.value
+            else:
+                continue
+            if not isinstance(target, ast.Name):
+                continue
+            name = target.id
+            if (cls.name, name) in mutated_attrs:
+                continue
+            value = _static_value(value_node, lambda each: env.get(each, _UNKNOWN), attributes, passthrough)
+            if value is _UNKNOWN:
+                continue
+            if not _static_immutable_value(value) and name in mutated:
+                continue
+            found[name] = value
+            env[name] = value
+        for name, value in found.items():
+            attributes[(cls.name, name)] = value
+
+
+def _static_direct_attributes(tree, module_env, attributes, passthrough, mutated_attrs):
+    seen = {}
+    for node in ast.walk(tree):
+        target = None
+        if isinstance(node, ast.Assign):
+            if len(node.targets) == 1:
+                target = node.targets[0]
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            target = node.target
+        elif isinstance(node, ast.Delete):
+            for item in node.targets:
+                if isinstance(item, ast.Attribute) and isinstance(item.value, ast.Name):
+                    key = (item.value.id, item.attr)
+                    seen[key] = seen.get(key, 0) + 1
+            continue
+        if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+            key = (target.value.id, target.attr)
+            seen[key] = seen.get(key, 0) + 1
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)):
+            continue
+        key = (target.value.id, target.attr)
+        if seen.get(key) != 1:
+            continue
+        value = _static_value(statement.value, lambda each: module_env.get(each, _UNKNOWN),
+                              attributes, passthrough)
+        if value is not _UNKNOWN:
+            attributes[key] = value
+
+
+def _static_init_attributes(tree, module_env, attributes, passthrough, stores, mutated_attrs):
+    specs = {}
+    for cls in (node for node in tree.body if isinstance(node, ast.ClassDef)):
+        if stores.get(cls.name, 0) > 1:
+            continue
+        init = next((item for item in cls.body if isinstance(item, ast.FunctionDef)
+                     and item.name == '__init__'), None)
+        if init is None:
+            continue
+        positional = [argument.arg for argument in (*init.args.posonlyargs, *init.args.args)]
+        if not positional:
+            continue
+        itself, params = positional[0], positional[1:]
+        spec = {}
+        for statement in init.body:
+            if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+                target, value_node = statement.targets[0], statement.value
+            elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+                target, value_node = statement.target, statement.value
+            else:
+                continue
+            if not (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
+                    and target.value.id == itself):
+                continue
+            if isinstance(value_node, ast.Name) and value_node.id in params:
+                spec[target.attr] = ('param', params.index(value_node.id))
+            else:
+                value = _static_value(value_node, lambda each: module_env.get(each, _UNKNOWN),
+                                      attributes, passthrough)
+                if value is not _UNKNOWN:
+                    spec[target.attr] = ('const', value)
+        if spec:
+            specs[cls.name] = spec
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target, value_node = statement.targets[0], statement.value
+        if not (isinstance(target, ast.Name) and isinstance(value_node, ast.Call)
+                and isinstance(value_node.func, ast.Name) and value_node.func.id in specs):
+            continue
+        spec = specs[value_node.func.id]
+        for attr, (kind, data) in spec.items():
+            if (target.id, attr) in mutated_attrs:
+                continue
+            if kind == 'const':
+                attributes[(target.id, attr)] = data
+            elif data < len(value_node.args):
+                value = _static_value(value_node.args[data],
+                                      lambda each: module_env.get(each, _UNKNOWN), attributes, passthrough)
+                if value is not _UNKNOWN:
+                    attributes[(target.id, attr)] = value
+
+
+def _static_int_call_environment(tree, module_counts):
+    _, _, mutated, mutated_attrs, _ = _static_mutation_state(tree)
+    global_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            global_names.update(node.names)
+    passthrough = _passthrough_functions(tree, module_counts)
+    attributes = {}
+    known = _static_scope_values(tree.body, {}, attributes, passthrough, module_counts, set(),
+                                 global_names, mutated)
+    stores = {name: count for name, count in module_counts.items()}
+    _static_class_attributes(tree, known, attributes, passthrough, stores, mutated, mutated_attrs)
+    _static_direct_attributes(tree, known, attributes, passthrough, mutated_attrs)
+    _static_init_attributes(tree, known, attributes, passthrough, stores, mutated_attrs)
+    known = _static_scope_values(tree.body, {}, attributes, passthrough, module_counts, set(),
+                                 global_names, mutated)
+    return known, attributes, mutated
+
+
 def _bound_argument(node, name, index):
     if index is not None and index < len(node.args):
         return node.args[index]
@@ -614,44 +963,105 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
 
 
 class _Int64CallChecker(ast.NodeVisitor):
-    def __init__(self, known, passthrough, int_params, int_shadowed):
+    def __init__(self, known, passthrough, int_params, int_shadowed, attributes=None, mutated=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
         self.int_shadowed = int_shadowed
+        self.attributes = attributes or {}
+        self.mutated = mutated or set()
         self.shadow = []
+        self.locals = []
 
     def _global_name(self, name):
         return not any(name in scope for scope in self.shadow)
 
     def _lookup(self, name):
+        for local in reversed(self.locals):
+            if name in local:
+                return local[name]
         if not self._global_name(name):
             return _UNKNOWN
         return self.known.get(name, _UNKNOWN)
 
-    def _value(self, node):
-        return _constant_value(node, self._lookup, self._global_name, self.passthrough)
+    def _visible_env(self):
+        shadowed = set().union(*self.shadow) if self.shadow else set()
+        env = {name: value for name, value in self.known.items() if name not in shadowed}
+        for local in self.locals:
+            env.update(local)
+        return env
 
-    def _refuse(self, node, value):
+    def _value(self, node):
+        return _static_value(node, self._lookup, self.attributes, self.passthrough)
+
+    def _refuse_float(self, node, value):
         error = ValueError(f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
         error.source_line = node.lineno
         error.source_column = node.col_offset
         raise error
 
+    def _refuse_text(self, node, value):
+        shown = value if -10 ** 99 < value < 10 ** 99 else 'too large'
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def _conversion_value(self, argument, base_node):
+        value = self._value(argument)
+        if value is _UNKNOWN:
+            return None
+        if base_node is not None:
+            base = self._value(base_node)
+            if type(base) is not int or (base != 0 and not 2 <= base <= 36):
+                return None
+        else:
+            base = 10
+        if isinstance(value, (str, bytes, bytearray)):
+            try:
+                parsed = int(value, base)
+            except (ValueError, TypeError, OverflowError, MemoryError):
+                return None
+            if not _INT64_MIN <= parsed <= _INT64_MAX:
+                return 'text', parsed
+            return None
+        if base_node is None and _outside_int64_float(value):
+            return 'float', value
+        return None
+
+    def _check_conversion(self, node, argument, base_node=None):
+        found = self._conversion_value(argument, base_node)
+        if found is None:
+            return
+        kind, value = found
+        if kind == 'float':
+            self._refuse_float(node, value)
+        self._refuse_text(node, value)
+
+    def _check_int_call(self, node):
+        if len(node.args) == 2 and not node.keywords:
+            argument, base_node = node.args
+        elif (len(node.args) == 1 and len(node.keywords) == 1
+              and node.keywords[0].arg == 'base'):
+            argument, base_node = node.args[0], node.keywords[0].value
+        elif len(node.args) == 1 and not node.keywords:
+            argument, base_node = node.args[0], None
+        else:
+            return
+        if isinstance(argument, ast.Starred):
+            return
+        self._check_conversion(node, argument, base_node)
+
     def visit_Call(self, node):
         if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
-                and self._global_name('int') and len(node.args) == 1 and not node.keywords):
-            value = self._value(node.args[0])
-            if _outside_int64_float(value):
-                self._refuse(node, value)
+                and self._global_name('int')):
+            self._check_int_call(node)
         if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
                 and self._global_name(node.func.id)):
             for name, index in self.int_params[node.func.id].items():
                 argument = _bound_argument(node, name, index)
                 if argument is not None:
-                    value = self._value(argument)
-                    if _outside_int64_float(value):
-                        self._refuse(node, value)
+                    self._check_conversion(node, argument)
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
@@ -667,9 +1077,24 @@ class _Int64CallChecker(ast.NodeVisitor):
         self._visit_outer_arguments(node.args)
         if node.returns is not None:
             self.visit(node.returns)
+        parameters = {argument.arg for argument in
+                      (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)}
+        if node.args.vararg is not None:
+            parameters.add(node.args.vararg.arg)
+        if node.args.kwarg is not None:
+            parameters.add(node.args.kwarg.arg)
+        declared = set()
+        for inner in ast.walk(node):
+            if isinstance(inner, (ast.Global, ast.Nonlocal)):
+                declared.update(inner.names)
+        local = _static_scope_values(node.body, self._visible_env(), self.attributes,
+                                     self.passthrough, _function_scope_stores(node), parameters,
+                                     declared, self.mutated)
         self.shadow.append(_function_bindings(node))
+        self.locals.append(local)
         for statement in node.body:
             self.visit(statement)
+        self.locals.pop()
         self.shadow.pop()
 
     def visit_FunctionDef(self, node):
@@ -723,29 +1148,15 @@ class _Int64CallChecker(ast.NodeVisitor):
 
 
 def _check_int64_literals(tree):
-    global_names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Global, ast.Nonlocal)):
-            global_names.update(node.names)
     module_counts = _binding_counts(tree.body)
-    known = {}
-    for node in tree.body:
-        if (isinstance(node, ast.Assign) and len(node.targets) == 1
-                and isinstance(node.targets[0], ast.Name)):
-            name = node.targets[0].id
-            if module_counts.get(name) != 1 or name in global_names:
-                continue
-            value = _constant_value(node.value, lambda name: known.get(name, _UNKNOWN),
-                                    lambda unused: True, {})
-            if type(value) in (int, float):
-                known[name] = value
-    int_shadowed = any((isinstance(node, ast.FunctionDef) and node.name == 'int')
+    known, attributes, mutated = _static_int_call_environment(tree, module_counts)
+    int_shadowed = any((isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name == 'int')
                        or (isinstance(node, ast.arg) and node.arg == 'int')
                        or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough)
-    _Int64CallChecker(known, passthrough, int_params, int_shadowed).visit(tree)
+    _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes, mutated).visit(tree)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
