@@ -2740,6 +2740,38 @@ values through an argument, a list item, a dict value and an attribute are cover
 general path already refused (a non-def/lambda callable, too many bound arguments, a non-trailing
 keyword, `*args`, no function) remain refused by name. Added `AIL_CURRENT/test_ail_pre61.py`
 (4 matching programs, 5 refused programs, both builds).
+## 2026-10-26 - fuzz71 rebase: keep the fix clear of the integer/repr `#` hunk
+
+Today's integ added `ail2f_alt_point` (alternate `#` on the type-less float repr form) next to
+the v2 float body.  Re-applying fuzz71's buffer fix as-is conflicted there, so the conflict left
+either the old 400-byte `%e` buffer or dropped the new `#` handling.  The fix now defines
+`ail2f_body_need` above `ail2f_signstr` and frees the heap `%e` body inside each of the two
+branches instead of at the shared `return`, so the fuzz71 hunks no longer touch the lines the
+`#` change added; the new test registration is likewise away from the newer module names.
+`test_ail_fuzz71` and `test_ail_safetynet` pass on a clean 3-way apply of this branch onto
+integ 8346862.
+
+## 2026-10-24 - fuzz71 review fix: v1 ail_obj_format and manifest pin
+
+Applies the remaining v1 `ail_obj_format` hunk: its fixed-point float path formatted into
+`char buf[64]` and now sizes from the would-be length (stack first, heap when it does not fit),
+mirroring the v2 path that already had that fix.  Regenerates `MANIFEST.json` so
+`test_ail_fuzz71.py` is pinned, and corrects the entry below: the "already fixed" general path is
+v2 only.
+
+## 2026-10-24 - fuzz71: fixed-point float formatting no longer truncates at a buffer
+
+The typed core's `ail_fmt_spec_float` formatted into `char buf[512]`, the general path's
+`ail_obj_format` into `char buf[64]`/`char buf[66]`, and the full runtime's
+`ail2f_float_body` into `char body[400]` after clamping a precision above 300 to 300.
+CPython prints every digit a huge value or a large precision needs, so those paths produced a
+short string; where `snprintf`'s would-be length was trusted, they also read past the stack
+buffer.  Each path now sizes its buffer from the would-be length (stack buffer first, heap
+when it does not fit) and the runtime's exponent helper does the same.  The v2 general path's
+`ail_obj_format` already had an equivalent heap fix on this tree; the v1 one was fixed in the
+review-fix entry above.
+`test_ail_fuzz71.py` builds `f"{1e308:.0f}"`, `f"{1.5:.600f}"`, `%.600f`,
+`"{:.600f}".format(...)`, negative values and widths wider than the result on both builds.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

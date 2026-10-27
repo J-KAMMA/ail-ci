@@ -8906,11 +8906,20 @@ static ail_str ail_fmt_spec_int(ail_sarena *A, int64_t v, int64_t width, int ali
    `.Nf` formatting exactly, sign on `-0.0` included. */
 static ail_str ail_fmt_spec_float(ail_sarena *A, double v, int64_t width, int align, int zero,
                                    int64_t prec, int fill) {
-    char buf[512];
-    int n = snprintf(buf, sizeof buf, "%.*f", (int)(prec < 0 ? 6 : prec), v);
+    char stackbuf[512];
+    int n = snprintf(stackbuf, sizeof stackbuf, "%.*f", (int)(prec < 0 ? 6 : prec), v);
     if (n < 0) ail_die("formatting a float failed");
-    if ((size_t)n >= sizeof buf) n = (int)sizeof buf - 1;   /* pathological width/precision */
-    return ail__fmt_pad(A, buf, n, width, align, zero, fill);
+    char *heap = NULL;
+    char *buf = stackbuf;
+    if ((size_t)n >= sizeof stackbuf) {
+        heap = (char *)malloc((size_t)n + 1);
+        if (!heap) ail_die("out of memory");
+        snprintf(heap, (size_t)n + 1, "%.*f", (int)(prec < 0 ? 6 : prec), v);
+        buf = heap;
+    }
+    ail_str r = ail__fmt_pad(A, buf, n, width, align, zero, fill);
+    if (heap) free(heap);
+    return r;
 }
 
 /* `{s:<8}` / `{s:>8}` / `{s:^8}` and `%-8s`/`%8s` -- the str half. Space fill only (any other
@@ -10715,8 +10724,20 @@ static inline ail_str ail_obj_format(ail_obj x, ail_str spec) {
     if (type == 'f') {
         double v = ail__is_num(x.tag) ? ail__as_double(x) : (ail_raise_c(AIL_ERR_TYPE, "unsupported format string passed to non-float"), 0.0);
         int prec = f.has_prec ? f.prec : 6;
-        char buf[64]; int len = snprintf(buf, sizeof buf, "%.*f", prec, v);
-        return ail__pad(buf, len, f, 1);
+        char stackbuf[64];
+        int len = snprintf(stackbuf, sizeof stackbuf, "%.*f", prec, v);
+        if (len < 0) ail_die("formatting a float failed");
+        char *heap = NULL;
+        char *buf = stackbuf;
+        if ((size_t)len >= sizeof stackbuf) {
+            heap = (char *)malloc((size_t)len + 1);
+            if (!heap) ail_die("out of memory");
+            snprintf(heap, (size_t)len + 1, "%.*f", prec, v);
+            buf = heap;
+        }
+        ail_str r = ail__pad(buf, len, f, 1);
+        if (heap) free(heap);
+        return r;
     }
     if (type == 's') {
         ail_str content = (x.tag == AIL_STR) ? x.s : ail_obj_str(x);
