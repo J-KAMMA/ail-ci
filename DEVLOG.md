@@ -70,6 +70,30 @@ programs, both builds) and registered it in `ail_check.MODULES` and `tools/ci_sh
 Final-state tests:
 test_ail_pre341, test_ail_safetynet, test_ail_tuples, test_ail_files and test_ail_corpus_findings3
 (5 modules, 434 s, 0 failed).  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- pre331: wide constant `pow()` exponent refused by name (job-rbpre331-10272258)
+
+The pre331 reviewer's first still-differing item was `pow(2, (3**100)>>150)`: both builds
+compiled it and then stopped with `integer overflow`, where CPython prints the bignum.  The
+`pow` constant check already refused `pow(2, 63)`, but its exponent folder (`_const_expr_int`)
+returned `None` for a power whose exponent is above 64, so the `>>150` result (361) was never
+static.  `_pow_static_int` now prefers the shared exact-int folder (`_const_fold_int`) and keeps
+the tree's shift-aware `_constant_int`/`_const_expr_int` fallbacks, and the module/local
+constant collectors do the same, so the direct call, a module or local name bound to the
+expression, and an alias of `pow` are refused at compile time with `int64 constant expression
+out of range`.  In-range bases/exponents, the safe bases 0/1/-1, bool and float bases, a
+negative exponent, the three-argument modular form and a program that binds its own `pow` still
+match CPython.  An exponent that reaches the call only through a list/attribute/dict item or a
+function parameter keeps the old runtime `integer overflow`; that container/parameter
+propagation gap predates this fix and is unchanged.
+
+Probes in `/tmp/probes/pre331` on both builds via `cmp.sh`: refused by name `p01_direct`,
+`p02_shift_beyond`, `p07_neg_base`, `p12_module_const`, `p13_local`, `p14_argument_call`,
+`p19_alias`, `p21_result_list`, `p22_result_attribute`, `p23_result_dict`, `p27_exp_one`,
+`p28_local_alias` and `p29_int64_min`; match CPython `p03_inrange_base`, `p04_zero_exp`,
+`p05_one_base`, `p06_negone_base`, `p08_bool_base`, `p09_float_base`, `p10_modulo`,
+`p11_negative_exp`, `p24_shadowed`, `p25_inrange_ordinary` and `p26_base_expr_zero`.  Added
+`AIL_CURRENT/test_ail_pre331.py` (3 tests, 11 refused programs and 2 matching programs, both
+builds) and registered it in `ail_check.MODULES`, `tools/ci_shards.json` and `MANIFEST.json`.
 
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
