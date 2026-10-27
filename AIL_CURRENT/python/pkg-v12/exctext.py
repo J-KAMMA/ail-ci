@@ -283,6 +283,91 @@ class _Repr(ast.NodeTransformer):
         return node
 
 
+def _args_item(node, names):
+    return (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute)
+            and node.value.attr == 'args' and isinstance(node.value.value, ast.Name)
+            and node.value.value.id in names and isinstance(node.value.value.ctx, ast.Load))
+
+
+def _args_item_target(node, names):
+    if _args_item(node, names):
+        return True
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return any(_args_item_target(e, names) for e in node.elts)
+    if isinstance(node, ast.Starred):
+        return _args_item_target(node.value, names)
+    return False
+
+
+_SCOPES = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda,
+           ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.ExceptHandler)
+
+
+def _scope_nodes(body):
+    """The nodes of one scope in source order, without a nested function/class/comprehension/handler body."""
+    def walk(node):
+        yield node
+        if isinstance(node, _SCOPES):
+            return
+        for child in ast.iter_child_nodes(node):
+            yield from walk(child)
+    for stmt in body:
+        yield from walk(stmt)
+
+
+def _binds_name(node, name):
+    if isinstance(node, ast.Name):
+        return node.id == name and isinstance(node.ctx, (ast.Store, ast.Del))
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return node.name == name
+    if isinstance(node, ast.alias):
+        return (node.asname or node.name).split('.')[0] == name
+    if isinstance(node, ast.ExceptHandler):
+        return node.name == name
+    if isinstance(node, (ast.MatchAs, ast.MatchStar)):
+        return node.name == name
+    if isinstance(node, ast.MatchMapping):
+        return node.rest == name
+    if isinstance(node, (ast.Global, ast.Nonlocal)):
+        return name in node.names
+    return False
+
+
+def refuse_args_item_store(tree, unsupported):
+    """Refuse an assignment to or deletion of e.args[i] of a caught exception by name."""
+    for handler in ast.walk(tree):
+        if not isinstance(handler, ast.ExceptHandler) or not handler.name:
+            continue
+        names = {handler.name}
+        for node in _scope_nodes(handler.body):
+            if isinstance(node, ast.Assign):
+                targets = node.targets
+            elif isinstance(node, (ast.AugAssign, ast.AnnAssign)):
+                targets = [node.target]
+            elif isinstance(node, ast.Delete):
+                targets = node.targets
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                targets = [node.target]
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                targets = [item.optional_vars for item in node.items if item.optional_vars is not None]
+            else:
+                targets = ()
+            if any(_args_item_target(target, names) for target in targets):
+                refusal = unsupported('assigning to or deleting an item of a caught exception\'s '
+                                      'e.args[i] (e.args is a tuple; CPython raises a TypeError whose '
+                                      'traceback this compiler does not build)')
+                refusal.source_line = getattr(node, 'lineno', None)
+                raise refusal
+            if isinstance(node, ast.AnnAssign) and node.value is None:
+                continue
+            for target in targets:
+                for sub in ast.walk(target):
+                    if isinstance(sub, ast.Name) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+                        names.discard(sub.id)
+            if _binds_name(node, handler.name):
+                names.discard(handler.name)
+
+
 def rewrite(tree, codes_of):
     """Rewrite the handlers of `tree` in place; sets ACTIVE."""
     global ACTIVE

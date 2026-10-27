@@ -34831,6 +34831,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     if userexc.collect(tree, {k: v for k, v in _BUILTIN_EXC_NAMES.items() if urllower.ACTIVE or k not in ('URLError', 'HTTPError')}):          # S4e: user exception classes become codes and constructor functions
         for _name, _cls in userexc.USER.items():
             EXC_NAMES[_name] = _cls.code
+    exctext.refuse_args_item_store(tree, Unsupported)
     exctext.rewrite(tree, _exc_codes_of)
     if userexc.USER:
         exctext.ACTIVE = True                  # S4e: str(e), repr(e), e.args, type(e).__name__ of a bound exception

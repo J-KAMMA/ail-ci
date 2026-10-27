@@ -1,3 +1,27 @@
+## 2026-10-27 -- pre317: a store into a caught exception's e.args[i] is refused by name (job-pre317-10271455)
+
+The first still-differing pre-existing item from the rbrbpre48 review that is not already a named refusal was
+the stderr traceback for `e.args[0] = ...`: both builds ran the statement and matched CPython's stdout, exit
+status and last stderr line, but the full traceback text differs because AIL does not model tracebacks. The
+first item, the forced-general refusal of a multi-argument `ValueError`/`OSError` raise, is already a named
+refusal on this tree. `exctext.refuse_args_item_store` now refuses an assignment to or deletion of a caught
+exception's `e.args[i]` by name at compile time, from both the typed front end (`pyfunc`) and the general
+emitter (`pyboxed2`), for a literal, negative or computed index, augmented and annotated stores, a
+destructuring target, a `for` or `with` target, and a value arriving through an argument, a list item, an
+attribute or a dict value. The scan stays in one scope, so a nested function's own `e` is not refused, and
+it stops treating the name as the exception once the handler rebinds it. Storing a whole `e.args`, a
+non-exception object's `args` list and a store inside the argument object are left unchanged. Added `AIL_CURRENT/test_ail_pre317.py` and registered it in `ail_check.MODULES`; added
+DIFFERENCES row `C?-job-pre317-10271455-1`. `python3 tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes`: `p317_args_assign1`, `p317_store_ann`, `p317_store_aug`, `p317_store_delete`,
+`p317_loop_target`, `p317_with_target`, `p317_alias_name`, `p317_alias_arg`, `p317_alias_list`,
+`p317_alias_attr`, `p317_alias_dict` are refused by name on both builds for the direct forms and keep the
+pre-existing traceback-only difference for an aliased exception object (cmp.sh matches stdout, exit and the
+last stderr line); `p317_args_read_single`, `p317_store_user_obj`, `p317_store_nested_obj`,
+`p317_rebind_handler`, `p317_multiraise_value` and `p317_multiraise_os` match CPython on the default build,
+with the multi-argument raises already refused by name on the forced general build. Final-state tests:
+`test_ail_pre317`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
