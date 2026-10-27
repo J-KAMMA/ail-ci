@@ -1,3 +1,24 @@
+## 2026-10-27 -- pre316 review: bound-method field values refused by name (job-pre316-10271448)
+
+The review of the previous pre316 commit found that the new instance-field call branch accepted
+`c.f = o.add` and `c.f = xs.append`, then failed at run time with `AttributeError: 'Other' object
+has no attribute 'add'` / `'list' object has no attribute 'append'`, where CPython calls the bound
+method.  The general path cannot build a bound-method value: `ail_inst_getattr` reads only the
+instance table, so a method read as a value was already a run-time error.  It is now refused by
+name at compile time (`reading the method .X() as a value ...`), so the branch never treats it as
+a field call.  This covers a direct assignment, an alias, a list item, a dict value, an attribute,
+a function return value and an unknown receiver; an instance field that shadows a method is still
+read normally.  Added the refusing cases and a field-shadow read to `test_ail_pre316.py` and a
+DIFFERENCES row.
+
+Probes in `/tmp/probes`: the bound-method programs `pre316_bound_user`, `pre316_bound_builtin`,
+`pre316_bound_arg`, `pre316_bound_alias`, `pre316_bound_list`, `pre316_bound_dict`,
+`pre316_bound_attr`, `pre316_bound_builtin_alias` and `pre316_bound_return` are refused by name on
+both builds; `pre316_field_shadow_read` and `pre316_partial_still_works` match CPython on both,
+and all 15 earlier `pre316_*` probes keep their recorded results.  Final-state tests:
+`test_ail_pre316`, `test_ail_pre279`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (5 modules, 206 s, 0 failed).  `tools/update_manifest.py --check`
+passes.
 ## 2026-10-27 -- pre316: an attribute-assigned partial is called as the field (job-pre316-10271448)
 
 The rbrbpre61 review recorded `c.f = partial(add, 3); c.f(4)` as a pre-existing named refusal.

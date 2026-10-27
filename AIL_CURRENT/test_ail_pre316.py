@@ -6,6 +6,11 @@ class defined `f`; CPython finds the plain callable field first (it is called wi
 receiver, exactly like a field that shadows a method).  The lookup is now also used when the
 class has no method of that name, for a statically known receiver and for one that arrives
 through an argument or another field.  Unsupported keyword/starred calls stay refused by name.
+
+A method read as a value is CPython's bound method object, which this path cannot build (reading
+one from an instance used to raise a misleading AttributeError at run time).  `c.f = o.add` and
+`c.f = xs.append` are therefore refused by name, like a partial of a bound method already was,
+instead of being accepted and failing when the field is called.
 """
 import os
 import shutil
@@ -167,6 +172,16 @@ c.f = lambda x: x * 3
 print(c.f(4), c.g(4))
 print(C().f(5), C().g(5))
 ''',
+    'field_shadow_read': '''class C:
+    def f(self, x):
+        return x + 1
+
+
+c = C()
+c.f = lambda x: x + 100
+g = c.f
+print(g(2), c.f(3))
+''',
     'receiver_routes': '''from functools import partial
 
 
@@ -200,6 +215,72 @@ REFUSED = {
                'class C:\n    pass\n\n\nc = C()\nc.f = partial(add, 10)\nprint(c.f(b=5))\n',
     'starred': 'from functools import partial\n\n\ndef add(a, b):\n    return a + b\n\n\n'
                'class C:\n    pass\n\n\nc = C()\nc.f = partial(add, 10)\nprint(c.f(*[5]))\n',
+    'bound_method': '''class Other:
+    def __init__(self, n):
+        self.n = n
+
+    def add(self, x):
+        return self.n + x
+
+
+class C:
+    pass
+
+
+o = Other(10)
+c = C()
+c.f = o.add
+print(c.f(5))
+''',
+    'bound_builtin': '''class C:
+    pass
+
+
+xs = [1, 2]
+c = C()
+c.f = xs.append
+c.f(3)
+print(xs)
+''',
+    'bound_alias': '''class Other:
+    def __init__(self, n):
+        self.n = n
+
+    def add(self, x):
+        return self.n + x
+
+
+class C:
+    pass
+
+
+o = Other(10)
+c = C()
+m = o.add
+c.f = m
+print(c.f(5))
+''',
+    'bound_return': '''class Other:
+    def __init__(self, n):
+        self.n = n
+
+    def add(self, x):
+        return self.n + x
+
+
+class C:
+    pass
+
+
+def get(o):
+    return o.add
+
+
+o = Other(10)
+c = C()
+c.f = get(o)
+print(c.f(5))
+''',
 }
 
 

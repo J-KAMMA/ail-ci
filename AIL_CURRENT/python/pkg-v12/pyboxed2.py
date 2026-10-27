@@ -5731,6 +5731,24 @@ class Compiler(boxclosure.ClosureMixin):
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
+        if node.attr != 'args' and node.attr not in self.assigned_attrs:
+            # A method read as a value is CPython's bound method object; the general path has no
+            # BOUND value (ail_inst_getattr only reads the instance table), so it used to raise a
+            # misleading AttributeError at run time.  Refuse it by name instead -- before the new
+            # instance-field call branches turn it into a field call with no receiver.
+            kind = self.infer_kind(node.value, ctx)
+            owner = kind.split(':', 1)[1] if kind and kind.startswith(('class:', 'instance:')) else None
+            builtin = getattr(self, '_m_' + node.attr, None) is not None or any(
+                k.endswith('.' + node.attr) for k in self.names_methods)
+            if owner is not None:
+                is_method = self._resolve_method(owner, node.attr) is not None
+            elif kind is None:
+                is_method = node.attr in self.user_method_names or builtin
+            else:
+                is_method = builtin
+            if is_method:
+                raise Unsupported('reading the method .%s() as a value (a bound method is not '
+                                  'modelled on the general path)' % node.attr)
         obj = self.expr(node.value, ctx)
         if node.attr == 'args' and not any('args' in c['methods'] for c in self.classes.values()):
             # e.args of an exception value (the run time's own carry their message)
