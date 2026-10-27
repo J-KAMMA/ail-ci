@@ -1,3 +1,21 @@
+## 2026-10-27 -- pre372 review fix: a call between the binding and `x **= e` clears the fold (job-pre372-10280521)
+
+The review found a new false compile-time refusal.  In `b = 10` / `def set_small(): global b`
+/ `b = 2` / `set_small()` / `b **= 40`, `_check_augmented_power_scope` still saw the
+straight-line `b -> 10` because `_scope_binding_names` does not treat a call as rebinding, so
+it refused the program with `10 ** 40` although CPython (and the base tree) print
+`1099511627776`.  Every recorded binding is now dropped when a statement can run a call
+(`_call_runs_at_runtime`, which enters decorators, defaults and annotations but not a function
+or lambda body); the base load of the augmented statement itself precedes its own
+right-hand-side call, so that statement's fold stays valid.  A function that declares
+`global b` but is never called still leaves `b **= 40` refused by name, so the new refusal is
+not disabled wholesale.
+
+Added the global-rebinding case to the matching program of `test_ail_pre372.py`.  Probes in
+`/tmp/probes` (18 programs, both builds via `cmp.sh`): p02, p03, p06-p11, p13, p15-p18 match
+CPython; p01, p04, p05, p12, p14 are refused by name on both builds.  Final-state tests:
+test_ail_pre372, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules,
+27 tests, 0 failed, 1 skipped).  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- pre372: an augmented power beyond int64 is refused by name (job-pre372-10280521)
 
 The first still-differing item from the pre33 review on this tree was `b = 10; b **= 40`: both

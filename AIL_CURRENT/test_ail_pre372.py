@@ -11,8 +11,10 @@ passthrough call, and a later rebinding does not change the recorded base.
 
 In-range powers, the safe bases 0/1/-1, a zero or negative exponent, a float or bool base,
 a base rebound before the statement, and a base or exponent known only at run time still
-match CPython.  Programs are built with the general path forced and with the default build;
-stdout and the exit status must match CPython.
+match CPython.  A module name that some function declares `global` is not folded, since a
+call between the binding and `x **= e` may have rebound it.  Programs are built with the
+general path forced and with the default build; stdout and the exit status must match
+CPython.
 """
 import os
 import subprocess
@@ -95,6 +97,17 @@ print(g)
 m = 9223372036854775807
 m **= 0
 print(m)
+
+
+def set_small():
+    global s
+    s = 2
+
+
+s = 10
+set_small()
+s **= 40
+print(s)
 
 
 def function_local():

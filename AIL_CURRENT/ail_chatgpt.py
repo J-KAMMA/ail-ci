@@ -2042,6 +2042,35 @@ def _scope_binding_names(statement):
         stack.extend(ast.iter_child_nodes(node))
 
 
+def _call_runs_at_runtime(node):
+    """Whether executing ``node`` may call something.
+
+    A function or lambda body only runs when the value is called, so neither is entered;
+    decorators, defaults and annotations of a definition are evaluated at that point."""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, ast.Call):
+            return True
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            stack.extend(current.decorator_list)
+            stack.extend(current.args.defaults)
+            stack.extend(default for default in current.args.kw_defaults if default is not None)
+            annotations = [argument.annotation for argument in
+                           current.args.posonlyargs + current.args.args + current.args.kwonlyargs]
+            annotations.append(current.args.vararg.annotation if current.args.vararg else None)
+            annotations.append(current.args.kwarg.annotation if current.args.kwarg else None)
+            annotations.append(current.returns)
+            stack.extend(annotation for annotation in annotations if annotation is not None)
+            continue
+        if isinstance(current, ast.Lambda):
+            stack.extend(current.args.defaults)
+            stack.extend(default for default in current.args.kw_defaults if default is not None)
+            continue
+        stack.extend(ast.iter_child_nodes(current))
+    return False
+
+
 def _check_augmented_power_scope(body, known, values, parameters, declared, attributes,
                                  passthrough, global_name):
     """Refuse `x **= e` in one scope body when the exact power leaves int64.
@@ -2049,7 +2078,9 @@ def _check_augmented_power_scope(body, known, values, parameters, declared, attr
     Only a direct body statement is considered: the target must have no binding at all before
     the one straight-line constant assignment, so the base the statement sees is that value.
     A target bound in a branch, a loop, an import or a nested definition, a parameter, or a
-    global/nonlocal declaration is left to the ordinary run-time stop."""
+    global/nonlocal declaration is left to the ordinary run-time stop.  A statement that can
+    run a call drops every recorded binding, since the callee may rebind a global or nonlocal
+    name between that assignment and the augmented statement."""
     assigned = {}
     for statement in body:
         if (isinstance(statement, ast.AugAssign) and isinstance(statement.op, ast.Pow)
@@ -2068,6 +2099,10 @@ def _check_augmented_power_scope(body, known, values, parameters, declared, attr
             assigned[name] = _UNKNOWN
             for other in _scope_binding_names(statement.value):
                 assigned[other] = _UNKNOWN
+            if _call_runs_at_runtime(statement):
+                # The base load precedes the call, so the fold above already used the right
+                # value; names for later statements are no longer known.
+                assigned.clear()
             if value is None or (value is not _CONST_INT_TOO_BIG
                                  and _INT64_MIN <= value <= _INT64_MAX):
                 continue
@@ -2079,13 +2114,19 @@ def _check_augmented_power_scope(body, known, values, parameters, declared, attr
         if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
                 and isinstance(statement.targets[0], ast.Name)):
             # A direct statement runs unconditionally, so it replaces whatever an earlier
-            # binding left in the map.
+            # binding left in the map.  A call in the value runs after the right-hand side
+            # is read but may still rebind other names for later statements.
+            if _call_runs_at_runtime(statement.value):
+                assigned.clear()
             for name in _scope_binding_names(statement.value):
                 assigned[name] = _UNKNOWN
             assigned[statement.targets[0].id] = statement.value
         else:
-            for name in _scope_binding_names(statement):
-                assigned[name] = _UNKNOWN
+            if _call_runs_at_runtime(statement):
+                assigned.clear()
+            else:
+                for name in _scope_binding_names(statement):
+                    assigned[name] = _UNKNOWN
 
 
 def _check_int64_augmented_powers(tree, module_known):
