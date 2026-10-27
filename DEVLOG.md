@@ -89,6 +89,28 @@ path (`_class_attr_through_class_refusal`).  The two accepted DEVLOG entries and
 kept.  Verified with `test_ail_pre304`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` on the final commit; `tools/update_manifest.py --check` passes.
 
+## 2026-10-27 -- re-apply pre281: empty sequence repeated by a huge count (job-rbrbpre281-10271623)
+
+Re-applying the accepted pre281 change on the current integration tree.  The current tree already
+has pre271's empty-list skip in `ail_op_imul` (with the bare `MemoryError` guard for an oversized
+repeat), and `ail_op_mul` already skipped an empty list/tuple with the same guard; those sites keep
+both fixes unchanged.  The remaining pre281 sites are applied: the v1 `ail__repeat_str` /
+`ail__repeat_vec` helpers and the v2 `ail_str_repeat` now skip the repeat loop when the sequence has
+no elements, so `[] * 10**18`, `() * 10**18`, `"" * 10**18` and `b"" * 10**18` return at once
+instead of looping over the huge count.  Negative, zero, bool, non-empty and aliased sequences are
+unchanged, and a huge count reaching the statement through an argument, a list item, an attribute
+or a dict value matches CPython on both builds.
+`AIL_CURRENT/test_ail_pre281.py` (4 tests, both builds) is added and registered in
+`ail_check.MODULES` and `ci_shards.json`.  `AIL_CURRENT/MANIFEST.json` was refreshed (the new
+module is pinned after `git add`); `tools/update_manifest.py --check` passes.  `tools/diff_ids.py`
+is not present on this tree.
+Probes in `/tmp/probes/pre281_*.py` on both builds: `p1_empty_literals`, `p2_nonempty`,
+`p3_routes` (argument, list item, attribute and dict value), `p4_alias`, `p5_nested`,
+`p6_boundaries` (0, -1, -10**18, 1, 2, bool, 10**18 and 2**62) and `p7_bytearray` match CPython;
+`p8_bytearray_alias` still shows the pre-existing bytearray `*=` aliasing difference recorded as
+`C?-job-rbrbpre281-10271623-2`.
+Targeted tests before the final commit: `test_ail_pre281`, `test_ail_pre271`,
+`test_ail_string_repeat_fusion` and `test_ail_local_count_repeat` (15 tests, 80.5 s, 0 failed).
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an
