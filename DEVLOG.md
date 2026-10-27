@@ -2716,6 +2716,30 @@ and `dict(d)` may call a user `__eq__` a different number of times than CPython 
 table has a particular internal shape (CPython's own count depends on key-table sharing).
 `test_ail_fuzz1` could not run locally because `difffuzz` is not in this snapshot; the required
 and targeted modules were run on the final commit.
+## 2026-10-26 - pre61 suite continuation (job-pre61-10270754)
+
+Continued job `pre61` on today's integration tree.  The integration tree independently gained
+the same `functools.partial` location fix in cov7 (`genlib._partial` copies the `partial()` call's
+location onto both synthetic lambdas and then runs `ast.fix_missing_locations`), so the retried
+`test_ail_pre61` and `test_ail_safetynet` pass there; applying the older pre61 diff would have
+rewritten those lines without `fix_missing_locations` and conflicted with cov7.  `genlib._partial`
+is now byte-identical to the integration version, so the fix and its test apply without a
+conflict and keep both sides' behaviour.  Verified `test_ail_pre61`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` on this commit.
+
+## 2026-10-24 - pre61: functools.partial with bound values (job-pre61-10241247)
+
+The first pre39 case, keyword `range(x=1e300)`, is already refused by name on this tree
+(`range() got an unexpected keyword argument 'x'`), so nothing changed there. The next case did
+reproduce: `functools.partial(f, 1)` / `partial(lambda a, b: a * b, 6)` made the general path build
+synthetic lambda closures without source locations, and the lambda scan stopped with
+`AttributeError: 'Lambda' object has no attribute 'lineno'` (pyboxed2.py). `genlib._partial` now
+copies the `partial()` call's location onto every lambda it builds, so partials of defs and lambdas
+with positional, keyword, empty and run-time bound values compile and match CPython on both builds;
+values through an argument, a list item, a dict value and an attribute are covered. The shapes the
+general path already refused (a non-def/lambda callable, too many bound arguments, a non-trailing
+keyword, `*args`, no function) remain refused by name. Added `AIL_CURRENT/test_ail_pre61.py`
+(4 matching programs, 5 refused programs, both builds).
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 
