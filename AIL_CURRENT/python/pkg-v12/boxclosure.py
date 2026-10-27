@@ -366,7 +366,7 @@ class ClosureMixin:
         return t
 
     # -- calling a value --------------------------------------------------------------------------------
-    def call_value(self, func_c, args, kwargs, ctx):
+    def call_value(self, func_c, args, kwargs, ctx, class_dispatch=True):
         from pyfront import Unsupported
         if kwargs:
             raise Unsupported('keyword arguments in a call through a function value')
@@ -380,7 +380,7 @@ class ClosureMixin:
             ctx.emit('%s = %s;' % (s, c))
         self._need_callv()
         t = ctx.tmp()
-        classes = getattr(self, 'class_values', ())
+        classes = getattr(self, 'class_values', ()) if class_dispatch else ()
         if classes:
             from pyboxed2 import _PreC
             # a class held in a variable: construct it, as calling the class by name does

@@ -99,15 +99,71 @@ class _Scope(ast.NodeVisitor):
         self.class_bodies.append(node)
 
 
+def _free_body(fn):
+    """Names a lambda's body reads from outside the lambda. Argument defaults are excluded: they
+    are evaluated in the enclosing scope, which this analysis rewrites, so they follow a rename."""
+    args = fn.args
+    own = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
+    if args.vararg:
+        own.add(args.vararg.arg)
+    if args.kwarg:
+        own.add(args.kwarg.arg)
+    found = set()
+
+    def walk(n, hidden):
+        if isinstance(n, ast.Name):
+            if isinstance(n.ctx, ast.Load) and n.id not in hidden:
+                found.add(n.id)
+            return
+        if isinstance(n, ast.NamedExpr):
+            walk(n.value, hidden)
+            for t in ast.walk(n.target):
+                if isinstance(t, ast.Name):
+                    own.add(t.id)
+            return
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            for d in n.args.defaults + [d for d in n.args.kw_defaults if d is not None]:
+                walk(d, hidden)
+            found.update(_free_body(n))
+            return
+        if isinstance(n, _COMPS):
+            inner = set(hidden)
+            for k, g in enumerate(n.generators):
+                walk(g.iter, inner if k else hidden)
+                inner |= {t.id for t in ast.walk(g.target) if isinstance(t, ast.Name)}
+                for c in g.ifs:
+                    walk(c, inner)
+            if isinstance(n, ast.DictComp):
+                walk(n.key, inner)
+                walk(n.value, inner)
+            else:
+                walk(n.elt, inner)
+            return
+        if isinstance(n, ast.ClassDef):
+            return
+        for c in ast.iter_child_nodes(n):
+            walk(c, hidden)
+
+    walk(fn.body, set())
+    return found - own
+
+
 def _lambda_loads(node):
-    """Names a lambda nested anywhere in `node` reads (its body and defaults); used only to keep a
-    class-body comprehension target unrenamed when a lambda would otherwise stop sharing its name."""
+    """Names read in the body of a lambda nested in `node` (not one nested in another lambda,
+    whose body the enclosing lambda's scan already covers).  Its defaults are evaluated in the
+    enclosing scope and rewritten there, so they do not decide this."""
     names = set()
-    for child in ast.walk(node):
-        if isinstance(child, ast.Lambda):
-            for name in ast.walk(child):
-                if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Load):
-                    names.add(name.id)
+
+    def walk(n):
+        if isinstance(n, ast.Lambda):
+            names.update(_free_body(n))
+            for d in n.args.defaults + [d for d in n.args.kw_defaults if d is not None]:
+                walk(d)
+            return
+        for c in ast.iter_child_nodes(n):
+            walk(c)
+
+    walk(node)
     return names
 
 
