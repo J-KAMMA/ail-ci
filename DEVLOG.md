@@ -1,3 +1,30 @@
+## 2026-10-27 -- pre358: int() of a statically known dict.get() result is refused (job-pre358-10280158)
+
+The pre338 reviewer's first pre-existing item reproduced on both builds:
+`d = {"k": "9223372036854775808"}; print(int(d.get("k")))` compiled and then stopped with
+`integer overflow`, where CPython prints the big integer (`t02_dict_get.py`).  The int64 constant
+fold now reads `dict.get(key)` and `dict.get(key, default)` when the key is constant, and a
+module-level dict literal (or alias) whose only uses are subscript reads or `.get` calls stays
+foldable; the conversion is then refused by name with `int64 constant expression out of range`
+on both builds.  Covered: an inline literal, a negative value, bytes, whitespace/underscore/plus
+text, a missing key with a big default, an empty dict, an alias, and the key arriving from a list
+item, a dict value or a class attribute; a float value or default keeps the `int() of a float
+outside int64` refusal.  In-range values and INT64 boundaries, a big default that a present key
+overrides, dicts mutated in place (subscript or `update`) to an in-range value, a dynamic value
+and invalid text match CPython.  A dict held in a class or instance attribute is not folded, so a
+dict mutated through `c.d[...]` keeps CPython's output.  The reviewer's other item, a function
+parameter's list item (`t04_arg_list_item.py`), still stops with `integer overflow` on both
+builds; it is a separate pre-existing cause and not changed here.
+
+Added `AIL_CURRENT/test_ail_pre358.py` (2 tests, 22 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre358` on both builds:
+`t02`, `t02_alias`, `t02_bytes`, `t02_empty_default`, `t02_get_default_big`, `t02_inline_get`,
+`t02_key_from_attr`, `t02_key_from_dict`, `t02_key_from_list`, `t02_negative` and
+`t02_whitespace` are refused by name; `t02_boundaries`, `t02_dynamic_ok`, `t02_in_range`,
+`t02_mutated_class_d` and `t02_mutated_in_range` match CPython; `t02_direct_subscript` was
+already refused by name.  Final-state tests: test_ail_pre358, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
 The pre315 reviewer's first pre-existing item was `t01_class_attr_instance.py`:
