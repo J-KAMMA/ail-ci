@@ -6,9 +6,11 @@ prints ``bytearray(b'xyxy')``.  The general-path runtime's ``ail_op_mul`` /
 ``ail_op_imul`` now convert a sequence's count through ``__index__`` before the
 list/tuple/str branches and before bytes/bytearray/deque reach their own
 ``__mul__``/``__imul__``.  A count that also defines ``__rmul__`` keeps CPython's
-precedence (the reflected method wins), and a left operand with its own
-``__mul__`` is not converted.  A plain object without ``__index__`` still raises
-the old TypeError, and a non-int result raises ``__index__ returned non-int``.
+precedence (the reflected method wins), for ``*`` and for ``*=``; an instance
+``x *= seq`` calls ``__imul__``, then ``__mul__``, but no ``__index__`` fallback
+(CPython raises the ``*=`` TypeError).  A left operand with its own ``__mul__``
+is not converted.  A plain object without ``__index__`` still raises the old
+TypeError, and a non-int result raises ``__index__ returned non-int``.
 """
 import os
 import subprocess
@@ -172,6 +174,9 @@ main()
 
     def test_index_count_precedence(self):
         self.check('precedence', '''
+from collections import deque
+
+
 class Idx:
     def __index__(self):
         return 2
@@ -203,6 +208,11 @@ class Cust:
         return 'cust'
 
 
+class IMulOnly:
+    def __imul__(self, other):
+        return 'IMUL'
+
+
 def main():
     print([1] * BothRM())
     print('ab' * BothRM())
@@ -220,6 +230,36 @@ def main():
         print(Idx() * Cust())
     except TypeError as e:
         print('TypeError', e)
+    # in-place: the count's __rmul__ wins before __index__ (PyNumber_InPlaceMultiply)
+    xs = [1]
+    alias = xs
+    xs *= BothRM()
+    print(xs, alias)
+    c = bytearray(b'xy')
+    c *= BothRM()
+    print(c)
+    s = 'ab'
+    s *= BothRM()
+    print(s)
+    tp = (1, 2)
+    tp *= BothRM()
+    print(tp)
+    q = deque([1, 2])
+    q *= BothRM()
+    print(q)
+    # an instance `x *= seq` calls __imul__, then __mul__, but has no __index__ fallback
+    try:
+        z = Idx()
+        z *= [1]
+        print(z)
+    except TypeError as e:
+        print('TypeError', e)
+    z2 = Both()
+    z2 *= [1]
+    print(z2)
+    z3 = IMulOnly()
+    z3 *= [1]
+    print(z3)
 
 
 main()

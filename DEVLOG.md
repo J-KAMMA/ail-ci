@@ -1,3 +1,22 @@
+## 2026-10-27 -- pre379 review: in-place `*=` precedence and instance-left refusal (job-pre379-10280702)
+
+The review found that the new `ail_op_imul` prologue converted the count through
+`__index__` before consulting its `__rmul__`, so `xs *= BothRM()` repeated where CPython
+(and the base build's list/tuple/str path) called `__rmul__`.  The prologue now checks
+`AIL_D2_RMUL` first, exactly like `ail_op_mul`.
+
+Probing the same boundary showed a second regression from the pre379 change: `Idx() *=
+[1, 2]` (an instance left operand) repeated, where CPython raises `unsupported operand
+type(s) for *=: 'Idx' and 'list'`; the base build raised a TypeError too (with the binary
+message).  The in-place prologue now calls the instance's `__mul__` when present and
+otherwise raises the `*=` TypeError, while `__imul__` keeps the dispatch that follows it.
+
+`test_ail_pre379.py`'s precedence program gained the in-place cases: list, tuple, str,
+bytearray and deque `*= BothRM()`, and instance-left `*=` with `__imul__`, `__mul__` and
+neither.  Probes in `/tmp/probes/pre379b` on both builds via `cmp.sh`: `j_plain`,
+`j2_seqs`, `k_routes_imul`, `q_left_imul`, `n_left`, `l_binary`, `m_values`,
+`o_alias_rmul`, `p_nofeat` and the three test programs all match CPython on both builds.
+
 ## 2026-10-27 -- pre379: a sequence repeat count goes through __index__ (job-pre379-10280702)
 
 The pre313 review's first still-differing pre-existing item was `c *= Idx()` where `Idx`

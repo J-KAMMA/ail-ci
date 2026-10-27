@@ -486,13 +486,26 @@ def _edits(inplace=False):
                       'static inline ail_st ail_op_%s(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
                       '    if (a.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(a, AIL_D2_%s); if (f) return f(cx, out, a, b); }\n'
                       % (fn, key)))
-        # after the __imul__ dispatch line, so the sequence's count is converted first
+        # the count's __rmul__ wins before __index__, as in PyNumber_InPlaceMultiply (which falls
+        # back to PyNumber_Multiply when the sequence has no nb_inplace_multiply); then convert it
+        # so the list/deque in-place repeat below runs instead of a fresh ail_op_mul result.
+        # an instance `x *= seq` calls __imul__, then __mul__, but CPython's in-place multiply has
+        # no sequence-repeat fallback: without either method it raises instead of converting x.
         e.append(('static inline ail_st ail_op_imul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n',
                   'static inline ail_st ail_op_imul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {\n'
                   '    if (b.tag == AIL_T_INST && ail__dun_seq(a)) {\n'
+                  '        ail_d2_fn rf = ail_dun2(b, AIL_D2_RMUL);\n'
+                  '        if (rf) return rf(cx, out, b, a);\n'
                   '        int found; ail_obj ib; ail_st st = ail__dun_index(cx, &ib, b, &found);\n'
                   '        if (st != AIL_OK) return st;\n'
                   '        if (found) b = ib;\n'
+                  '    } else if (a.tag == AIL_T_INST && ail__dun_seq(b) && !ail_dun2(a, AIL_D2_IMUL)) {\n'
+                  '        ail_d2_fn mf = ail_dun2(a, AIL_D2_MUL);\n'
+                  '        if (mf) return mf(cx, out, a, b);\n'
+                  '        char buf[240], na[80], nb[80];\n'
+                  '        ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b);\n'
+                  '        snprintf(buf, sizeof buf, "unsupported operand type(s) for *=: \'%s\' and \'%s\'", na, nb);\n'
+                  '        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n'
                   '    }\n'))
     # format(x, spec) / f"{x:spec}" of an instance whose class defines __format__ (an Enum / Flag member does)
     e.append(('static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
