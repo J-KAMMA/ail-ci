@@ -2176,6 +2176,14 @@ class Compiler(boxclosure.ClosureMixin):
         self.assigned_attrs = frozenset(
             n.attr for n in ast.walk(tree)
             if isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Store))
+        for gen in ast.walk(tree):
+            if isinstance(gen, ast.GeneratorExp) and \
+                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                refusal = Unsupported(
+                    'a generator expression nested inside another generator expression '
+                    '(the inner one would be materialised eagerly, not lazily)')
+                refusal.source_line = getattr(gen, 'lineno', None)
+                raise refusal
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
@@ -5781,6 +5789,9 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
+        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+            raise Unsupported('a generator expression nested inside another generator expression '
+                              '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
@@ -8074,6 +8085,9 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('next() with other than (iterator[, default])')
         if isinstance(args[0], ast.GeneratorExp):
             gen = args[0]
+            if any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                raise Unsupported('a generator expression nested inside another generator expression '
+                                  '(the inner one would be materialised eagerly, not lazily)')
             first = gen.generators[0]
             src = self._resolve_iter_src(first.iter, ctx)
             opened = ctx.tmp()
@@ -8533,6 +8547,9 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = ail_box_bool(%d);' % (res, 0 if name == 'any' else 1))
         arg = args[0]
         if isinstance(arg, ast.GeneratorExp):
+            if any(n is not arg and isinstance(n, ast.GeneratorExp) for n in ast.walk(arg)):
+                raise Unsupported('a generator expression nested inside another generator expression '
+                                  '(the inner one would be materialised eagerly, not lazily)')
             plan = self._str_scan_plan(arg, name, ctx)
             if plan is not None:
                 iternode, lo, hi = plan
