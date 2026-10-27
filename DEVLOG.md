@@ -1,3 +1,23 @@
+## 2026-10-27 -- pre366 follow-up: keep the pre273 wording for a constant-base wrapper body (job-pre366-10280649)
+
+`test_ail_pre160` failed with the pre366 change: its `huge` wrapper (`def huge(n): return 10 ** n`)
+is called from `__index__`, and the new call-site check fired first with
+`int64 constant expression out of range` where the test expects the pre273 diagnostic
+(`a power with the integer constant base 10 and an exponent computed at run time ...`).
+That body is already refused by the pre273 rule at the definition, whatever the call site, so
+`check_wrapper` now skips a wrapper whose body base is a constant int with |base| >= 2 and whose
+exponent is not written as a constant; the earlier diagnostic is used again on both builds.
+Wrappers with a parameter base and constant operands are unchanged (`q(2, 63)` and `q(3, 40)`
+still say `int64 constant expression out of range`), as is the aliased run-time-operand refusal.
+No DIFFERENCES row: both spellings remain refused by name.
+
+Probes `/tmp/probes/pre366fix/p01`-`p22`: `p06`, `p09`, `p10`, `p13`, `p19`, `p20` and `p21`
+match CPython on both builds; `p01`-`p03`, `p05`, `p07`, `p11`, `p12` and `p14`-`p17` are
+refused by name with the pre273 wording; `p04`, `p08`, `p18` and `p22` are refused by name with
+the pre366 wording. Final tests on the committed tree: `test_ail_pre160`, `test_ail_pre366`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` pass;
+`python3 tools/update_manifest.py --check` passes.
+
 ## 2026-10-27 -- pre366: a wrapper reached through an alias is followed by the constant checks (job-pre366-10280408)
 
 The pre349 reviewer's `r12` reproduced on both builds: a wrapper called through an alias

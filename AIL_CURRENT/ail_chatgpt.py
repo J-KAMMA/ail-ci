@@ -1881,6 +1881,13 @@ def _check_int64_pow_constants(tree, known):
 
     def check_wrapper(node, descriptor, scope_known, aliased):
         function, base_node, exponent_node = descriptor
+        body_base = _const_fold_int(base_node)
+        if (body_base is not None and abs(body_base) >= 2
+                and _INT64_MIN <= body_base <= _INT64_MAX
+                and not _pow_exponent_is_constant(exponent_node)):
+            # The wrapper body itself (a constant base with a computed exponent) is already
+            # refused by the pre273 rule at any call site; keep its diagnostic.
+            return
         mapped = _pow_parameter_indices(function)
         local = {name: value for name, value in scope_known.items() if name not in mapped}
         for parameter, index in mapped.items():
