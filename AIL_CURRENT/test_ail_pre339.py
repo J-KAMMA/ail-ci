@@ -7,7 +7,9 @@ prints 55).  The alias reaches the same collision directly, through an assigned 
 alias chain, tuple unpacking, a function-local alias, an argument, a list item, an attribute or a
 dict value.  Each such call is now refused by name on both builds.  An alias of a class without
 the collision, a lambda field, and a name shadowed by a parameter or local assignment keep
-CPython's result.
+CPython's result.  Rebinding follows execution order: a later assignment, an assignment in a
+dead ``if`` branch, or a ``for`` target replaces the earlier class, so the call keeps CPython's
+result instead of being refused for the class the name no longer denotes.
 """
 import os
 import subprocess
@@ -122,6 +124,21 @@ Alias = C
 d = {"k": Alias}
 print(d["k"]().f())
 ''',
+    'chain_keeps_old_source': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+class D:
+    def f(self):
+        return 7
+A = C
+B = A
+A = D
+print(B().f())
+''',
 }
 
 MATCH = {
@@ -184,6 +201,116 @@ print(call())
         return self.v * 2
 Alias = C
 print(Alias(21).twice())
+''',
+    'reassign_other': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+class D:
+    def f(self):
+        return 7
+Alias = C
+Alias = D
+print(Alias().f())
+''',
+    'conditional_dead_rebind': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+class D:
+    def f(self):
+        return 7
+Alias = D
+if False:
+    Alias = C
+print(Alias().f())
+''',
+    'for_target_rebind': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+class D:
+    def f(self):
+        return 7
+Alias = C
+for Alias in [D]:
+    print(Alias().f())
+''',
+    'for_target_after': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+class D:
+    def f(self):
+        return 7
+Alias = C
+for Alias in [D]:
+    pass
+print(Alias().f())
+''',
+    'chain_other_source': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+class D:
+    def f(self):
+        return 7
+A = D
+B = A
+A = C
+print(B().f())
+''',
+    'rebound_container_and_argument': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+class D:
+    def f(self):
+        return 7
+def call(k):
+    return k().f()
+Alias = D
+xs = [Alias]
+d = {"k": Alias}
+Alias = C
+Alias = D
+print(call(Alias), xs[0]().f(), d["k"]().f())
+''',
+    'local_dead_branch': '''class C:
+    def __init__(self):
+        self.f = self.g
+    def g(self):
+        return 55
+    def f(self):
+        return 102
+class D:
+    def f(self):
+        return 7
+def main():
+    Alias = D
+    if False:
+        Alias = C
+    for Alias in [D]:
+        print(Alias().f())
+main()
 ''',
 }
 

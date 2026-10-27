@@ -1,3 +1,23 @@
+## 2026-10-27 -- pre339 follow-up: alias resolution follows execution order (job-pre339-10272146)
+
+The review of `6f19675` found three false refusals: a straight-line reassignment (`Alias = C;
+Alias = D`), an assignment in a dead `if False` branch, and a `for Alias in [D]` target were all
+unioned with the earlier colliding class, so the program was refused where CPython prints `7` on
+both builds.  `_class_alias_classes` now resolves the name in its own scope in execution order:
+assignments overwrite, a constant-false branch is skipped, and a `for` target is bound before
+the body (also after a non-empty literal loop).  Alias chains keep the class they captured at
+their own assignment, and an ancestor scope resolves the name at the end of that scope instead
+of unioning every assignment.  Programs whose final value is the colliding class are still
+refused by name; a name no longer denoting it matches CPython.
+
+Probes in `/tmp/probes/pre339fix` on both builds: `01`-`04`, `06`-`09` and `12` match CPython
+(reassignment, dead branch, `for` target before and after the loop, chain with another source,
+tuple/local rebinding, container and argument routes, nested dead branch); `05` and `11` are
+refused by name (a chain still holding the colliding class, and a final reassignment to it).
+`test_ail_pre339.py` gained these cases.  Final-state tests: test_ail_pre339, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-27 -- pre339: a class alias to a bound-method field is refused by name (job-pre339-10272146)
 
 The pre314 review's first pre-existing item was `class_alias`: with `self.f = self.g` and a

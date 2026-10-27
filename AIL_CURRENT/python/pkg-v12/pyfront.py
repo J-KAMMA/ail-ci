@@ -713,29 +713,360 @@ def refuse_field_method_call(tree, allow_owners=False):
 
     _visit(tree, None, None)
 
+    _UNKNOWN = object()
+    _MISSING = object()
+    local_names_cache = {}
+
+    def _target_names(target):
+        if isinstance(target, ast.Name):
+            yield target.id
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                for name in _target_names(elt):
+                    yield name
+        elif isinstance(target, ast.Starred):
+            for name in _target_names(target.value):
+                yield name
+
+    def _local_names(scope):
+        """Names bound directly in a scope (not in a nested function/class/comprehension)."""
+        cached = local_names_cache.get(id(scope))
+        if cached is not None:
+            return cached
+        names = set()
+        if isinstance(scope, ast.Lambda):
+            body = [scope.body]
+        elif isinstance(getattr(scope, 'body', None), list):
+            body = scope.body
+        else:
+            body = []
+
+        def walk(node):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+                return
+            if isinstance(node, ast.Lambda):
+                return
+            if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                return
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    names.update(_target_names(target))
+            elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                names.update(_target_names(node.target))
+            elif isinstance(node, (ast.For, ast.AsyncFor)):
+                names.update(_target_names(node.target))
+            elif isinstance(node, ast.With):
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        names.update(_target_names(item.optional_vars))
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    names.add(alias.asname or alias.name.split('.')[0])
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if alias.name != '*':
+                        names.add(alias.asname or alias.name)
+            elif isinstance(node, ast.ExceptHandler) and node.name:
+                names.add(node.name)
+            elif isinstance(node, ast.NamedExpr):
+                names.update(_target_names(node.target))
+            for child in ast.iter_child_nodes(node):
+                walk(child)
+
+        for node in body:
+            walk(node)
+        local_names_cache[id(scope)] = names
+        return names
+
+    def _const_truth(node):
+        if isinstance(node, ast.Constant):
+            return bool(node.value)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            inner = _const_truth(node.operand)
+            return None if inner is None else not inner
+        return None
+
+    def _value_classes(node, env):
+        if isinstance(node, ast.Name):
+            if node.id in classes:
+                return frozenset((node.id,))
+            value = env.get(node.id, _MISSING)
+            if value is _MISSING or value is _UNKNOWN:
+                return _UNKNOWN
+            return value
+        return _UNKNOWN
+
+    def _union_values(values):
+        found = set()
+        for value in values:
+            if value is _UNKNOWN or value is _MISSING:
+                return _UNKNOWN
+            found |= value
+        return frozenset(found)
+
+    def _bind_name(target, env, value):
+        if isinstance(target, ast.Name):
+            env[target.id] = value
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                _bind_name(elt, env, _UNKNOWN)
+        elif isinstance(target, ast.Starred):
+            _bind_name(target.value, env, _UNKNOWN)
+
+    def _bind_assign(targets, value, env):
+        if (len(targets) == 1 and isinstance(targets[0], (ast.Tuple, ast.List))
+                and isinstance(value, (ast.Tuple, ast.List))
+                and len(targets[0].elts) == len(value.elts)
+                and not any(isinstance(elt, ast.Starred)
+                            for elt in targets[0].elts)):
+            for target, item in zip(targets[0].elts, value.elts):
+                _bind_assign([target], item, env)
+            return
+        value_classes = _value_classes(value, env)
+        for target in targets:
+            _bind_name(target, env, value_classes)
+
+    def _iter_value(iterable, env):
+        if isinstance(iterable, (ast.List, ast.Tuple, ast.Set)):
+            return _union_values([_value_classes(elt, env) for elt in iterable.elts])
+        return _UNKNOWN
+
+    def _bind_for_target(target, iterable, env):
+        _bind_name(target, env, _iter_value(iterable, env))
+
+    def _literal_iter_count(iterable):
+        if isinstance(iterable, (ast.List, ast.Tuple, ast.Set)):
+            return len(iterable.elts)
+        return None
+
+    def _merge_env(first, second):
+        merged = {}
+        for key in set(first) | set(second):
+            a = first.get(key, _MISSING)
+            b = second.get(key, _MISSING)
+            if a is _MISSING or b is _MISSING or a is _UNKNOWN or b is _UNKNOWN:
+                merged[key] = _UNKNOWN
+            else:
+                merged[key] = a | b
+        return merged
+
+    def _exec_block(statements, env):
+        env = dict(env)
+        for stmt in statements:
+            env = _exec_stmt(stmt, env)
+        return env
+
+    def _exec_stmt(stmt, env):
+        env = dict(env)
+        if isinstance(stmt, ast.Assign):
+            _bind_assign(stmt.targets, stmt.value, env)
+        elif isinstance(stmt, ast.AnnAssign):
+            if stmt.value is not None:
+                _bind_assign([stmt.target], stmt.value, env)
+            else:
+                _bind_name(stmt.target, env, _UNKNOWN)
+        elif isinstance(stmt, ast.AugAssign):
+            _bind_name(stmt.target, env, _UNKNOWN)
+        elif isinstance(stmt, (ast.For, ast.AsyncFor)):
+            count = _literal_iter_count(stmt.iter)
+            body_env = dict(env)
+            _bind_for_target(stmt.target, stmt.iter, body_env)
+            body_env = _exec_block(stmt.orelse, _exec_block(stmt.body, body_env))
+            if count == 0:
+                env = _exec_block(stmt.orelse, env)
+            elif count is not None:
+                env = body_env
+            else:
+                env = _merge_env(env, body_env)
+                _bind_name(stmt.target, env, _UNKNOWN)
+        elif isinstance(stmt, ast.While):
+            truth = _const_truth(stmt.test)
+            if truth is False:
+                pass
+            else:
+                body_env = _exec_block(stmt.orelse, _exec_block(stmt.body, env))
+                env = body_env if truth is True else _merge_env(env, body_env)
+        elif isinstance(stmt, ast.If):
+            truth = _const_truth(stmt.test)
+            if truth is True:
+                env = _exec_block(stmt.body, env)
+            elif truth is False:
+                env = _exec_block(stmt.orelse, env)
+            else:
+                env = _merge_env(_exec_block(stmt.body, env),
+                                 _exec_block(stmt.orelse, env))
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            env[stmt.name] = _UNKNOWN
+        elif isinstance(stmt, ast.Import):
+            for alias in stmt.names:
+                env[alias.asname or alias.name.split('.')[0]] = _UNKNOWN
+        elif isinstance(stmt, ast.ImportFrom):
+            for alias in stmt.names:
+                if alias.name != '*':
+                    env[alias.asname or alias.name] = _UNKNOWN
+        elif isinstance(stmt, ast.Delete):
+            for target in stmt.targets:
+                if isinstance(target, ast.Name):
+                    env.pop(target.id, None)
+                else:
+                    _bind_name(target, env, _UNKNOWN)
+        elif isinstance(stmt, ast.Try):
+            before = dict(env)
+            body_env = _exec_block(stmt.body, env)
+            merged = _merge_env(before, body_env)
+            for handler in stmt.handlers:
+                handler_env = dict(merged)
+                if handler.name:
+                    handler_env[handler.name] = _UNKNOWN
+                merged = _merge_env(merged, _exec_block(handler.body, handler_env))
+            merged = _exec_block(stmt.orelse, merged)
+            env = _exec_block(stmt.finalbody, merged)
+        elif isinstance(stmt, ast.With):
+            for item in stmt.items:
+                if item.optional_vars is not None:
+                    _bind_name(item.optional_vars, env, _UNKNOWN)
+            env = _exec_block(stmt.body, env)
+        return env
+
+    def _env_at_in_block(statements, env, target):
+        for stmt in statements:
+            if any(child is target for child in ast.walk(stmt)):
+                return _env_at_in_stmt(stmt, env, target)
+            env = _exec_stmt(stmt, env)
+        return env
+
+    def _env_at_in_stmt(stmt, env, target):
+        if isinstance(stmt, ast.If):
+            if any(child is target for child in ast.walk(stmt.test)):
+                return env
+            truth = _const_truth(stmt.test)
+            if truth is False:
+                return _env_at_in_block(stmt.orelse, env, target)
+            if truth is True:
+                return _env_at_in_block(stmt.body, env, target)
+            if any(any(child is target for child in ast.walk(part))
+                   for part in stmt.body):
+                return _env_at_in_block(stmt.body, env, target)
+            if any(any(child is target for child in ast.walk(part))
+                   for part in stmt.orelse):
+                return _env_at_in_block(stmt.orelse, env, target)
+            return env
+        if isinstance(stmt, (ast.For, ast.AsyncFor)):
+            if any(child is target for child in ast.walk(stmt.iter)):
+                return env
+            if any(any(child is target for child in ast.walk(part))
+                   for part in stmt.body):
+                body_env = dict(env)
+                _bind_for_target(stmt.target, stmt.iter, body_env)
+                return _env_at_in_block(stmt.body, body_env, target)
+            if any(any(child is target for child in ast.walk(part))
+                   for part in stmt.orelse):
+                return _env_at_in_block(stmt.orelse, _exec_stmt(stmt, env), target)
+            return env
+        if isinstance(stmt, ast.While):
+            if any(child is target for child in ast.walk(stmt.test)):
+                return env
+            if _const_truth(stmt.test) is False:
+                return env
+            if any(any(child is target for child in ast.walk(part))
+                   for part in stmt.body):
+                return _env_at_in_block(stmt.body, env, target)
+            if any(any(child is target for child in ast.walk(part))
+                   for part in stmt.orelse):
+                return _env_at_in_block(stmt.orelse, _exec_stmt(stmt, env), target)
+            return env
+        if isinstance(stmt, ast.Try):
+            if any(any(child is target for child in ast.walk(part))
+                   for part in stmt.body):
+                return _env_at_in_block(stmt.body, env, target)
+            for handler in stmt.handlers:
+                if any(child is target for child in ast.walk(handler)):
+                    handler_env = dict(env)
+                    if handler.name:
+                        handler_env[handler.name] = _UNKNOWN
+                    return _env_at_in_block(handler.body, handler_env, target)
+            if any(any(child is target for child in ast.walk(part))
+                   for part in stmt.orelse):
+                return _env_at_in_block(stmt.orelse, _exec_block(stmt.body, env), target)
+            if any(any(child is target for child in ast.walk(part))
+                   for part in stmt.finalbody):
+                return _env_at_in_block(stmt.finalbody, _exec_block(stmt.body, env), target)
+            return env
+        if isinstance(stmt, ast.With):
+            if any(any(child is target for child in ast.walk(item.context_expr))
+                   for item in stmt.items):
+                return env
+            body_env = dict(env)
+            for item in stmt.items:
+                if item.optional_vars is not None:
+                    _bind_name(item.optional_vars, body_env, _UNKNOWN)
+            return _env_at_in_block(stmt.body, body_env, target)
+        return env
+
+    def _flow_env_at(scope, target):
+        if isinstance(scope, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                              ast.AsyncFunctionDef)):
+            return _env_at_in_block(scope.body, {}, target)
+        return {}
+
+    flow_end_cache = {}
+
+    def _flow_env_at_end(scope):
+        cached = flow_end_cache.get(id(scope))
+        if cached is None:
+            if isinstance(scope, (ast.Module, ast.ClassDef, ast.FunctionDef,
+                                  ast.AsyncFunctionDef)):
+                cached = _exec_block(scope.body, {})
+            else:
+                cached = {}
+            flow_end_cache[id(scope)] = cached
+        return cached
+
     def _class_alias_classes(node, seen=frozenset()):
-        """Resolve a name bound to a class name (or an alias chain) in its Python scope."""
+        """Resolve a name bound to a class name (or an alias chain) in its Python scope.
+
+        The name's own scope is followed in execution order, so a later rebinding (also after a
+        dead branch or a ``for`` target) is the value the use sees.  Ancestor scopes keep the
+        old flow-insensitive union, since their binding happens at call time, not at the line of
+        a nested ``def``.
+        """
         key = ('class-alias', id(node))
         if key in seen:
             return set()
         seen = seen | {key}
         name = node.id
-        lookup = scope_of.get(id(node), tree)
+        origin = scope_of.get(id(node), tree)
+        lookup = origin
         while True:
             if isinstance(lookup, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) \
                     and name in _param_names(lookup):
                 return set()
-            values = [value for bound, value in assignments.get(lookup, ())
-                      if bound == name]
-            if values:
-                found = set()
-                for value in values:
-                    if isinstance(value, ast.Name):
-                        if value.id in classes:
-                            found.add(value.id)
-                        else:
-                            found |= _class_alias_classes(value, seen)
-                return found
+            if lookup is origin:
+                value = _flow_env_at(lookup, node).get(name, _MISSING)
+                if value is _UNKNOWN:
+                    return set()
+                if value is not _MISSING:
+                    return set(value)
+                if name in _local_names(lookup):
+                    return set()
+            else:
+                end_value = _flow_env_at_end(lookup).get(name, _MISSING)
+                if end_value is _UNKNOWN:
+                    return set()
+                if end_value is not _MISSING:
+                    return set(end_value)
+                values = [value for bound, value in assignments.get(lookup, ())
+                          if bound == name]
+                if values:
+                    found = set()
+                    for value in values:
+                        if isinstance(value, ast.Name):
+                            if value.id in classes:
+                                found.add(value.id)
+                            else:
+                                found |= _class_alias_classes(value, seen)
+                    return found
             if lookup is tree:
                 return set()
             parent = scope_parent.get(lookup)
