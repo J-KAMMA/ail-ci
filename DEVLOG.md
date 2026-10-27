@@ -1,3 +1,29 @@
+## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
+
+The rbrbrbrbrbpre33 review's first pre-existing difference was `x = 10; print(x**40)`, a
+runtime `integer overflow` on both builds where CPython prints the unbounded value.  On this
+tree the module-level local form is already folded by the constant-power pass and refused at
+compile time with `int64 constant expression out of range` on both builds, which is the
+allowed named refusal, so no compiler change was needed.  The alias, computed-exponent,
+negative-base, wide-exponent and nested-expression spellings are refused too; the four other
+recorded items (`2**63 / 2**63`, `(2**63)/2`, `2**63*1.0`, `2**63+0.0`) are refused by name
+(`int64 constant out of range`).  In-range powers, safe bases, negative and float exponents,
+a mutated local and the argument/list-item/attribute/dict-value routes for safe values match
+CPython.  A power known only at run time, or inside a function body, keeps the pre-existing
+runtime `integer overflow` stop; those routes are unchanged here.
+
+Added `AIL_CURRENT/test_ail_pre351.py` (4 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre351`: `p01`-`p05`
+(the recorded items) and `c_mod`, `c_both`, `c_neg`, `c_big_exp`, `c_safe_bound`, `d_nested`,
+`d_right`, `d_cond`, `r_alias`, `r_both`, `r_neg` are refused by name; `e_inrange` (in-range
+powers, safe bases, negative/float exponents, mutation, argument/list/attribute/dict routes)
+matches CPython, on both builds.  The route probes `r_arg`, `r_list`, `r_attr`, `r_dict`,
+`c_func`, `c_class`, `c_both_func`, `c_mut_arg`, `d_fdiv` and `d_tuple` still stop with
+`integer overflow` on both builds; that is the pre-existing run-time-only limitation noted
+above, not changed by this job.  Final-state tests (4 modules, 0 failed): test_ail_pre351,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
 The pre315 reviewer's first pre-existing item was `t01_class_attr_instance.py`:
@@ -94,6 +120,87 @@ Probes in `/tmp/probes/pre331` on both builds via `cmp.sh`: refused by name `p01
 `p11_negative_exp`, `p24_shadowed`, `p25_inrange_ordinary` and `p26_base_expr_zero`.  Added
 `AIL_CURRENT/test_ail_pre331.py` (3 tests, 11 refused programs and 2 matching programs, both
 builds) and registered it in `ail_check.MODULES`, `tools/ci_shards.json` and `MANIFEST.json`.
+## 2026-10-27 -- pre347 follow-up: a lambda reading a renamed class-body target (job-pre347-10272320)
+
+The review of this job found that `x = 99; class C: ys = [(lambda: x)() for x in range(3)];
+print(x, C.ys)` compiled on the base with the named refusal `closures nested too deeply to settle
+their shared names`, but the new class-body analysis renamed the target to `x__c1`, removing the
+shared name the closure pass saw, and both builds then stopped with an uncaught `RecursionError`
+from the class-attribute path.  `compscope` now leaves a class-body comprehension target
+unrenamed when a lambda nested anywhere in that comprehension reads it (body, nested lambda,
+condition or list item), so the construct keeps the base tree's named refusal.  Comprehensions
+without such a lambda are renamed as before.  Added four refusal programs to
+`test_ail_pre347.py`; `DIFFERENCES.md` records the refusal.
+
+Probes in `/tmp/probes` on both builds: p23 (the review case), p31 (nested lambda), p35 (lambda
+in a condition) and p32 (lambda as a list item) are refused by name with exit 1 and no
+`RecursionError`; pre347 p01 (the original class-body target case), p10 (all comprehension
+kinds), p17 (class attribute and global of the same name), p18 (conditions), p19 (multiple
+classes) and p20 (module/function controls) still match CPython.  Final-state tests:
+test_ail_pre347, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-27 -- pre347: a class-body comprehension target stays local (job-pre347-10272320)
+
+The reviewer of job rbpre304 recorded `x = 99; class C: ys = [x for x in range(3)];
+print(x, C.ys)`: both builds printed `2 [0, 1, 2]` where CPython prints `99 [0, 1, 2]`.  The
+comprehension-scope pass (`compscope.py`) analysed module and function bodies but not class
+bodies, so a class-body comprehension target kept the enclosing module's name slot and overwrote
+the global.  `visit_ClassDef` now records each class body, and the analysis runs it separately
+with the enclosing scope's names, so a target that can clash with an enclosing or class-body
+name gets the existing fresh identifier.  Module and function comprehensions keep their previous
+C.  This covers list, set, dict and generator comprehensions, nested and multiple-generator
+forms, a target equal to a class attribute, the class name or a builtin name, empty or negative
+ranges, other value types and aliases.
+
+Probes in `/tmp/probes/pre347` on both builds: `p01`-`p05` and `p07`-`p12` match CPython; `p06`
+(a nested class) and `p13` (a destructuring target over a module list, also refused on the base)
+are refused by name; `p14`-`p23` match CPython.  Final-state tests: test_ail_pre347 (1 test, 15
+programs, both builds), test_ail_pre304, test_ail_quirks Q2, test_ail_fuzz23,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+## 2026-10-27 -- pre328: user-class slicing after a compound rebinding (job-pre328-10271926)
+
+The pre323 reviewer recorded as pre-existing that slicing a user-class instance through
+`__getitem__` after a `for`, `with` or tuple-unpacking rebinding (and through an argument, a
+list item, an attribute or a dict value) compiles and then stops with
+`NotImplementedError: slicing an instance through __getitem__ is not supported: this path has
+no slice objects`, while CPython passes a real slice object.  The general path's slice branch
+for an unknown kind already knew how to dispatch on the runtime tag, but it was entered only
+when a previous `NeedSlice` retry had set `want_slice`; a program whose only instance slice was
+one of these routes therefore took the ordinary `ail2s_getslice` path.
+
+That branch is now requested whenever the target is not a known `str`/`list`/`tuple` and any
+class defines `__getitem__`, so the generated code asks the value's tag: an instance gets a
+slice object through `ail_op_getitem`, everything else keeps `ail2s_getslice`.  The bounds are
+evaluated inside the two branches, once in whichever runs, which also removes the double
+evaluation the old unknown-kind branch did for an instance.  Direct instances, `if` rebinding,
+`for`/`with`/tuple rebinding, the argument/list-item/attribute/dict-value routes, empty,
+negative and dynamic/`None` bounds and bounds with side effects match CPython on both builds;
+a constant index or step outside int64 is still refused by name.  Added
+`AIL_CURRENT/test_ail_pre328.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre328` on both builds: `p_direct_in`, `p_assign_in`, `p_if_in`,
+`p_for_in_only`, `p_with_in`, `p_tuple_in`, `p_routes_in`, `p_str_list_in`,
+`p_dynamic_bounds`, `p_negative`, `p_empty`, `p_side_effect` and `p_set_del_routes_in` match
+CPython; `p_direct`, `p_for`, `p_for_in` and the out-of-int64 routes are refused by name.
+`p_errors` (dict/unknown TypeError text) is identical on the base and this tree, so it is a
+pre-existing difference not caused by this change.  Final-state tests: `test_ail_pre328` (2
+tests, OK, 55 s), `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+`tools/update_manifest.py --check` passes.
+
+Re-applied on job-rbpre328-10272341 over a tree that already carried the same general-path tag
+dispatch (from pre327): resolving the conflicts kept both sides' fixes, so the compiler and
+`test_ail_silent5` were already at the fixed behaviour and only `test_ail_pre328.py`, its
+`ail_check.MODULES` registration and the records are new.  `tools/diff_ids.py` is not present on
+this tree, so it was not run.  Probes re-run for this job in `/tmp/probes/pre328` on both builds:
+`p_alias`, `p_direct_if`, `p_dynamic_bounds`, `p_empty_negative`, `p_for`, `p_routes`,
+`p_self_bounds`, `p_side_effect`, `p_tuple` and `p_with` match CPython; `p_huge_attr`,
+`p_huge_index`, `p_huge_slice` and `p_huge_step_route` are refused by name (`int64 ... out of
+range`).  Final-state tests on this commit: `test_ail_pre328`, `test_ail_silent5`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (48 tests, OK, 696 s,
+1 skipped); `tools/update_manifest.py --check` passes.
 
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
