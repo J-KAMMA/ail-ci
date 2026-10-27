@@ -1,3 +1,23 @@
+## 2026-10-27 -- default build: a computed negative integer exponent matches CPython (job-pre321-10271546)
+
+The pre305 review recorded two pre-existing differences.  The first was that `**` with a negative
+exponent stopped on the default build (`negative exponent on an integer; write float(x) ** n for
+Python's float answer`) while the general path printed CPython's float.  The legacy `**` type used
+`ail_ipow`, exact for int64, even when the exponent's sign was unknown at compile time; the typed
+path now leaves such a power to the general path, whose tagged value keeps the int result for a
+non-negative exponent and returns the float for a negative one.  Constant exponents keep their old
+int/float lowering, and the whole-program fallback is the existing mechanism (no output or message
+changes in programs without a computed integer power).  The review's second item, out-of-int64
+integer powers, was not changed and remains a difference.
+
+Probes in `/tmp/probes/pre321` on both builds: `p01_var_var`, `p02_local`, `p03_routes`,
+`p04_pow_compare`, `p05_const_exp`, `p06_zero`, `p07_float_base`, `p08_exp_routes`,
+`p09_nonint_exp`, `p10_positive`, `p11_positive_routes`, `p12_zero_and_underflow`, `p13_alias`,
+`p14_bool_exp_var` and `p15_nested` all match CPython.  Final-state tests: `test_ail_pre321`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (4 modules, 0 failed);
+`tools/update_manifest.py --check` passes; `ci_shards.py --check` reports only the two
+pre-existing duplicates `test_ail_pre61` and `test_ail_pre126` (both present on HEAD).
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an

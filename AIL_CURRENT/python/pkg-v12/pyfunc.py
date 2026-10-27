@@ -1574,16 +1574,19 @@ def _etype(node, ctx):
             # Python: int ** non-negative int is an int; anything else is a float. A constant
             # exponent's sign is known here, at compile time (`_int_const` sees through the
             # `-1` == UnaryOp(USub, Constant(1)) parse), so a negative one is FLT the same way
-            # Python's is. A variable exponent's sign is not known here -- but it is an int, not
-            # a float, in the case that matters: `ail_ipow` is exact where `pow()` is not, and it
-            # enforces non-negativity itself at the one point where this can no longer be checked
-            # in advance.
+            # Python's is. A variable exponent's sign is not known here, and CPython returns a
+            # float for a negative one (`2 ** -1` is `0.5`); the typed path's exact int64
+            # `ail_ipow` cannot represent that, so leave the whole program to the general path,
+            # which carries the value's type at run time and already matches CPython.
             if _etype(node.left, ctx) == INT:
                 cv = _int_const(node.right)
                 if cv is not None:
                     return INT if cv >= 0 else FLT
                 if _etype(node.right, ctx) == INT:
-                    return INT
+                    raise Unsupported(
+                        'a power whose integer exponent is not a constant may be negative at run '
+                        'time, where CPython returns a float (2 ** -1 is 0.5); the typed path '
+                        'uses exact int64 integer power, so this program is built on the general path')
             return FLT
         l, r = _etype(node.left, ctx), _etype(node.right, ctx)
         return FLT if FLT in (l, r) else INT
