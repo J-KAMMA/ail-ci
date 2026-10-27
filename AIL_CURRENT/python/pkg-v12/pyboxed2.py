@@ -6264,10 +6264,12 @@ class Compiler(boxclosure.ClosureMixin):
             return self._call_name(f.id, args, kwargs, ctx)
         if isinstance(f, ast.Attribute):
             return self._call_attribute(f, args, kwargs, ctx)
-        # a lambda literal is a function value, never a class: expanding the class-construction
-        # branch would re-evaluate the class attribute being compiled and recurse
+        # a lambda literal is never a class; inside a class-attribute value the class branch would
+        # re-evaluate the attribute being compiled and recurse.  Outside that value the emitted C
+        # stays as before.
         return self.call_value(self.expr(f, ctx), args, kwargs, ctx,
-                               class_dispatch=not isinstance(f, ast.Lambda))
+                               class_dispatch=not (isinstance(f, ast.Lambda)
+                                                   and self.evaluating_class_attrs))
 
     def _star_vec_src(self, star_val, ctx, what):
         """A starred call argument's value, cast to `ail_vecobj *` -- only safe for a genuine

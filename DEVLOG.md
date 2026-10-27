@@ -7,7 +7,8 @@ CPython runs the program and both builds crashed.  `call_value` expanded the
 construct-a-class branch for every call through a value; compiling that branch
 (`_call_class` -> `_class_attr_value`) evaluated the class attribute whose value was
 still being compiled, so `_init_class_attrs` recursed.  A lambda literal is never a
-class object, so `expr_Call` now skips that branch for an `ast.Lambda` callee, and
+class object, so while a class-attribute value is being compiled `expr_Call` now skips
+that branch for an `ast.Lambda` callee (elsewhere the emitted C is unchanged), and
 `_class_attr_value` refuses a re-entrant read of a slot that is still being compiled
 by name instead of recursing.  Once the crash was gone, `[(lambda v=x: v)() ...]`
 still clobbered the enclosing `x` because `compscope`'s class-body guard suppressed the
