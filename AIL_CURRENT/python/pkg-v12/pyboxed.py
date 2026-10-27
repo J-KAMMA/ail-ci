@@ -21,7 +21,7 @@ same exception the typed path uses) -- never a silent gap, never a bare gcc erro
 import ast
 import re
 
-from pyfront import Unsupported, int_constant, refuse_complex_pow, refuse_variable_int_pow
+from pyfront import Unsupported, int_constant, refuse_complex_pow, refuse_variable_int_pow, refuse_int_float_literal
 
 # ---------------------------------------------------------------------------------------------
 # Exception-type-name -> the runtime's AIL_ERR_* id. Only the runtime's own built-in exception
@@ -2015,6 +2015,8 @@ class Compiler:
         if name == 'int':
             if len(args) > 1 or kwargs:
                 raise Unsupported('int() with a base argument')
+            if args:
+                refuse_int_float_literal(args[0])
             v = self.expr(args[0], ctx) if args else 'ail_box_int(0)'
             return self._emit_tmp(ctx, 'ail_builtin_int_conv(%s)' % v)
         if name == 'float':
