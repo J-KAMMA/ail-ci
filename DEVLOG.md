@@ -9,9 +9,9 @@ module-level literal dict, and a module dict read only by subscript or `.get` is
 module list or tuple.  That route is refused by name at compile time with
 `int64 constant expression out of range` on both builds.
 
-Probes in /tmp/probes/pre356 on both builds: `a_dict_get`, `p03`-`p08`, `p12`, `p13`, `p18`, `p21`,
-`p23` and `p24` are refused by name; `p02`, `p04`, `p09`, `p14`-`p17`, `p20`, `p25` and `r01`-`r08`
-match CPython.  Routes that still differ are unchanged from the base (confirmed with the HEAD
+Probes in /tmp/probes/pre356 on both builds: `a_dict_get`, `p03`, `p05`-`p08`, `p12`, `p13`, `p18`,
+`p21`, `p23` and `p24` are refused by name; `p02`, `p04`, `p09`, `p14`-`p17`, `p20`, `p25` and
+`r01`-`r08` match CPython.  Routes that still differ are unchanged from the base (confirmed with the HEAD
 `ail_chatgpt.py`): a dict with a list or nested-dict value (`p10`, `p19`), a dict aliased from a
 class body (`p11`) and a function parameter's dict (`p22`) still stop with `integer overflow`; the
 pre338 record's other route (a function parameter's list item) is also unchanged.
