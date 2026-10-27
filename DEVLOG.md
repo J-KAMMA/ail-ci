@@ -1,3 +1,23 @@
+## 2026-10-27 -- pre332: out-of-int64 integer powers through names and containers are refused (job-pre332-10272021)
+
+The pre321 review's first pre-existing item was an out-of-int64 integer power that compiled and
+then stopped with `integer overflow`, where CPython prints the exact unbounded value; the operands
+reached it through a variable, an argument, a list item, an attribute or a dict value, so the
+syntactic constant checks did not fold them.  The front end now resolves statically known operands
+(module and local constants, safe list/tuple/dict literals, class and instance attributes, simple
+wrapper calls, and `pow()` aliases) and refuses the power by name with
+`int64 constant expression out of range` on both builds.  In-range powers, safe bases 0/1/-1,
+bool operands, mutated containers, dynamic values and pre273's constant-base/computed-exponent
+wording are unchanged.  Added `AIL_CURRENT/test_ail_pre332.py` and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre332` on both builds: `p01`-`p07`, `p10`-`p17`, `p22`-`p24` are refused
+by name; `p08`, `p09`, `p18`-`p21`, `p25`-`p27` match CPython (including mutated containers,
+safe bases, bool operands, in-range boundaries and dynamic values).  Final-state tests:
+test_ail_pre332, test_ail_pre305, test_ail_pre310, test_ail_pre273, test_ail_pre265,
+test_ail_pre294, test_ail_pre302, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound

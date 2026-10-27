@@ -1589,6 +1589,305 @@ def _check_int64_pow_constants(tree, known):
             check(node, local, scope_names)
 
 
+class _ResolveStaticInts(ast.NodeTransformer):
+    """Replace every subexpression whose value is a known int with that int."""
+
+    def __init__(self, lookup, attributes, passthrough):
+        self.lookup = lookup
+        self.attributes = attributes
+        self.passthrough = passthrough
+
+    def visit(self, node):
+        node = super().visit(node)
+        if isinstance(node, ast.Constant):
+            if type(node.value) is bool:
+                return ast.copy_location(ast.Constant(int(node.value)), node)
+            return node
+        value = _constant_value(node, self.lookup, lambda unused: True, self.passthrough,
+                                self.attributes)
+        if type(value) in (int, bool):
+            return ast.copy_location(ast.Constant(int(value)), node)
+        return node
+
+
+def _static_int_expression(node, known, attributes, passthrough):
+    lookup = lambda name: known.get(name, _UNKNOWN)
+    expression = _ResolveStaticInts(lookup, attributes, passthrough).visit(copy.deepcopy(node))
+    ok, value = _constant_int_exact(ast.fix_missing_locations(expression))
+    if not ok or value is _CONST_INT_TOO_BIG:
+        return None
+    return value
+
+
+def _static_module_values(tree, module_known, attributes, passthrough):
+    counts = _binding_counts(tree.body)
+    declared = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+    values = dict(module_known)
+    changed = True
+    while changed:
+        changed = False
+        for node in tree.body:
+            if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                    and isinstance(node.targets[0], ast.Name)):
+                continue
+            name = node.targets[0].id
+            if counts.get(name) != 1 or name in declared or name in values:
+                continue
+            value = _constant_value(node.value, lambda inner: values.get(inner, _UNKNOWN),
+                                    lambda unused: True, passthrough, attributes)
+            if type(value) in (int, float):
+                values[name] = value
+                changed = True
+            elif (isinstance(value, (list, tuple, dict))
+                    and _only_subscripted(tree, name, node.targets[0])):
+                values[name] = value
+                changed = True
+    return values
+
+
+def _scope_only_subscripted(function, name, definition):
+    nodes = list(_scope_nodes_with_parents(function))
+    for node, parent in nodes:
+        if not (isinstance(node, ast.Name) and node.id == name):
+            continue
+        if node is definition:
+            continue
+        if (isinstance(node.ctx, ast.Load) and isinstance(parent, ast.Subscript)
+                and parent.value is node and isinstance(parent.ctx, ast.Load)):
+            continue
+        return False
+    return True
+
+
+def _static_function_values(function, module_values, attributes, passthrough):
+    arguments = function.args
+    parameters = {argument.arg for argument in
+                  arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+    if arguments.vararg is not None:
+        parameters.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        parameters.add(arguments.kwarg.arg)
+    stores = _function_scope_stores(function)
+    declared = set()
+    for node in ast.walk(function):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            declared.update(node.names)
+    values = {name: value for name, value in module_values.items()
+              if name not in stores and name not in parameters and name not in declared}
+    int_module = {name: value for name, value in module_values.items() if type(value) is int}
+    values.update(_function_local_int_constants(function, int_module))
+    changed = True
+    while changed:
+        changed = False
+        for statement in function.body:
+            target = value_node = None
+            if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)):
+                target, value_node = statement.targets[0], statement.value
+            elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+                    and statement.value is not None):
+                target, value_node = statement.target, statement.value
+            if target is None or target.id in values:
+                continue
+            name = target.id
+            if stores.get(name) != 1 or name in parameters or name in declared:
+                continue
+            value = _constant_value(value_node, lambda inner: values.get(inner, _UNKNOWN),
+                                    lambda unused: True, passthrough, attributes)
+            if type(value) in (int, float):
+                values[name] = value
+                changed = True
+            elif (isinstance(value, (list, tuple, dict))
+                    and _scope_only_subscripted(function, name, target)):
+                values[name] = value
+                changed = True
+    return values
+
+
+def _power_operands(node, pow_builtin):
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+        return node.left, node.right
+    if (pow_builtin and isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'pow' and len(node.args) == 2 and not node.keywords
+            and not any(isinstance(argument, ast.Starred) for argument in node.args)):
+        return node.args[0], node.args[1]
+    return None
+
+
+def _power_result(base, exponent):
+    if exponent < 0:
+        return False, None
+    if exponent == 0:
+        return False, 1
+    if base == 0:
+        return False, 0
+    if base == 1:
+        return False, 1
+    if base == -1:
+        return False, 1 if exponent % 2 == 0 else -1
+    if exponent > 64:
+        return True, 'too large'
+    if (abs(base).bit_length() - 1) * exponent + 1 > 64:
+        return True, 'too large'
+    result = base ** exponent
+    return (False, result) if _INT64_MIN <= result <= _INT64_MAX else (True, result)
+
+
+def _function_defaults(function):
+    arguments = function.args
+    positional = [argument.arg for argument in arguments.posonlyargs + arguments.args]
+    defaults = dict(zip(positional[len(positional) - len(arguments.defaults):],
+                        arguments.defaults))
+    for name, default in zip([argument.arg for argument in arguments.kwonlyargs],
+                             arguments.kw_defaults):
+        if default is not None:
+            defaults[name] = default
+    return defaults
+
+
+def _simple_power_functions(tree, module_counts, pow_builtin):
+    functions = {}
+    for node in tree.body:
+        if (not isinstance(node, ast.FunctionDef) or node.decorator_list
+                or module_counts.get(node.name) != 1):
+            continue
+        if len(node.body) != 1 or not isinstance(node.body[0], ast.Return):
+            continue
+        value = node.body[0].value
+        if value is not None and _power_operands(value, pow_builtin) is not None:
+            functions[node.name] = (node, value)
+    return functions
+
+
+def _power_exponent_is_constant(node):
+    if isinstance(node, ast.Constant):
+        return type(node.value) in (int, float, bool)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub, ast.Invert, ast.Not)):
+        return _power_exponent_is_constant(node.operand)
+    if isinstance(node, ast.BinOp) and type(node.op) in (
+            ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod, ast.Pow,
+            ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor):
+        return (_power_exponent_is_constant(node.left)
+                and _power_exponent_is_constant(node.right))
+    return False
+
+
+def _refuse_power_value(node, shown):
+    text = shown if shown == 'too large' else _constant_diagnostic(shown)
+    error = ValueError(f'int64 constant expression out of range: {text}')
+    error.source_line = node.lineno
+    error.source_column = node.col_offset
+    raise error
+
+
+def _check_int64_power_routes(tree):
+    module_counts = _binding_counts(tree.body)
+    module_known = _known_module_constants(tree)
+    attributes = _known_class_attributes(tree, module_known)
+    passthrough = _passthrough_functions(tree, module_counts)
+    module_values = _static_module_values(tree, module_known, attributes, passthrough)
+    pow_names = _pow_alias_names(tree)
+    simple = _simple_power_functions(tree, module_counts, bool(pow_names))
+
+    def check_operands(node, base_node, exponent_node, known, parents):
+        base_constant = _const_fold_int(base_node)
+        if (base_constant is not None and abs(base_constant) >= 2
+                and not _power_exponent_is_constant(exponent_node)):
+            return
+        base = _static_int_expression(base_node, known, attributes, passthrough)
+        exponent = _static_int_expression(exponent_node, known, attributes, passthrough)
+        if base is None or exponent is None:
+            return
+        out, shown = _power_result(base, exponent)
+        if not out:
+            return
+        root = node
+        while parents is not None:
+            parent = parents.get(root)
+            if parent is None:
+                break
+            value = _static_int_expression(parent, known, attributes, passthrough)
+            if value is None:
+                break
+            root = parent
+        if root is not node:
+            whole = _static_int_expression(root, known, attributes, passthrough)
+            pure = all(not isinstance(inner, (ast.Name, ast.Attribute, ast.Subscript, ast.Call))
+                       for inner in ast.walk(root))
+            if pure and whole is not None and _INT64_MIN <= whole <= _INT64_MAX:
+                return
+        _refuse_power_value(node, shown)
+
+    def check_call(node, known, parents, scope_pow_names, shadowed):
+        if (isinstance(node.func, ast.Name) and node.func.id in scope_pow_names
+                and node.func.id not in shadowed and len(node.args) == 2 and not node.keywords
+                and not any(isinstance(argument, ast.Starred) for argument in node.args)):
+            check_operands(node, node.args[0], node.args[1], known, parents)
+            return
+        if not isinstance(node.func, ast.Name) or node.func.id not in simple:
+            return
+        if node.func.id in shadowed:
+            return
+        function, value = simple[node.func.id]
+        arguments = function.args
+        positional = [argument.arg for argument in arguments.posonlyargs + arguments.args]
+        keyword_only = [argument.arg for argument in arguments.kwonlyargs]
+        defaults = _function_defaults(function)
+        used = {inner.id for inner in ast.walk(value)
+                if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load)
+                and (inner.id in positional or inner.id in keyword_only)}
+        call_known = dict(known)
+        for parameter in used:
+            index = positional.index(parameter) if parameter in positional else None
+            argument = _bound_argument(node, parameter, index)
+            if argument is None:
+                argument = defaults.get(parameter)
+            if argument is None:
+                return
+            argument_value = _static_int_expression(argument, known, attributes, passthrough)
+            if argument_value is None:
+                return
+            call_known[parameter] = argument_value
+        operands = _power_operands(value, bool(pow_names))
+        if operands is not None:
+            check_operands(node, operands[0], operands[1], call_known, None)
+
+    module_parents = {node: parent for node, parent in _scope_nodes_with_parents(tree)}
+    for node, parent in _scope_nodes_with_parents(tree):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            check_operands(node, node.left, node.right, module_values, module_parents)
+        elif isinstance(node, ast.Call):
+            check_call(node, module_values, module_parents, pow_names, set())
+
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        local = _static_function_values(function, module_values, attributes, passthrough)
+        arguments = function.args
+        parameters = {argument.arg for argument in
+                      arguments.posonlyargs + arguments.args + arguments.kwonlyargs}
+        if arguments.vararg is not None:
+            parameters.add(arguments.vararg.arg)
+        if arguments.kwarg is not None:
+            parameters.add(arguments.kwarg.arg)
+        stores = _function_scope_stores(function)
+        declared = set()
+        for node in ast.walk(function):
+            if isinstance(node, (ast.Global, ast.Nonlocal)):
+                declared.update(node.names)
+        scope_pow_names = _pow_aliases(function.body, pow_names, stores, parameters)
+        shadowed = set(stores) | parameters | declared
+        parents = {node: parent for node, parent in _scope_nodes_with_parents(function)}
+        for node, parent in _scope_nodes_with_parents(function):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+                check_operands(node, node.left, node.right, local, parents)
+            elif isinstance(node, ast.Call):
+                check_call(node, local, parents, scope_pow_names, shadowed)
+
+
 def _check_int64_unary_constants(tree):
     """Refuse a statically known unary integer constant expression outside int64 by name.
     `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
@@ -2468,6 +2767,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_local_cancellations(tree)
                 _check_int64_int_base_constants(tree)
                 _check_int64_pow_constants(tree, _known_module_constants(tree))
+                _check_int64_power_routes(tree)
                 _check_class_attribute_assignment(tree)
                 _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:
