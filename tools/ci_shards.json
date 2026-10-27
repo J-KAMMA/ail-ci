@@ -492,7 +492,8 @@
   "test_json_pointer_batch": 4.8,
   "test_json_pointer_scan": 17.1,
   "test_json_query_cli": 42.7,
-  "test_json_query_file": 27.3
+  "test_json_query_file": 27.3,
+  "test_ail_pre341": 23.2
  },
  "assignment": [
   [
@@ -658,6 +659,7 @@
    "test_ail_pre326",
    "test_ail_pre327",
    "test_ail_pre329",
+   "test_ail_pre341",
    "test_ail_pre42",
    "test_ail_pre57",
    "test_ail_pre59",

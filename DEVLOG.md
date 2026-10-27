@@ -1,3 +1,27 @@
+## 2026-10-27 -- pre341: a mutated module-level list of number tuples keeps the list (job-pre341-10272226)
+
+The pre329 review's first pre-existing item reproduced on both builds: `ps = [(1, 2), (3, 4)]` at
+module level followed by `del ps[-1]` printed the unchanged list.  The tuple pass kept a module-level
+list of number tuples as two number columns and rebuilt a fresh list (`_ail_rc_ps()`) for every value
+use, so the delete (and `append`, `pop`, an item store, or a mutation through an alias or a function
+argument) changed the temporary instead of the list CPython shares.
+
+`tupcommon.rowconst_module_in_place` now checks the module-level statements too, ignoring only the
+defining assignment: anything but a for/comprehension walk, an indexed read, an `in` test or a
+read-only builtin keeps the list as written, and the normal compiler handles the mutation.  In-place
+reads still lower to columns.  Deletions of lists of int, float, bool, string, mixed and nested
+tuples, empty lists, out-of-range and uncaught indexes, indexes arriving through a list item,
+attribute or dict value, aliases and function arguments match CPython on both builds.
+
+The other pre-existing items remain open and untouched: an uncaught typed list delete without an open
+`try` omits the `IndexError:` prefix, `del xs[9][0]` prints a bare `IndexError` on the default build,
+and the uncaught trap wordings (`KeyError`, `ZeroDivisionError`, bytes `IndexError`) still differ.
+Probes in `/tmp/probes/pre341` (41 programs): the i2 module-tuple probes match on both builds; the
+i3/i4/i5 probes reproduce the open items above.  Added `AIL_CURRENT/test_ail_pre341.py` (13 programs,
+both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+test_ail_pre341, test_ail_safetynet, test_ail_tuples, test_ail_files and test_ail_corpus_findings3
+(5 modules, 434 s, 0 failed).  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function

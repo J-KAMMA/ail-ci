@@ -184,3 +184,33 @@ def rowconst_in_place(tree, nm):
                 continue
             return False
     return True
+
+
+def rowconst_module_in_place(tree, nm, definition=None):
+    """Whether every module-level mention of NAME outside its defining assignment reads it in place.
+
+    A module-level list of number tuples is rebuilt wherever it is used as a value, so a later `del`,
+    item store, mutating method call, alias or function argument would act on the copy and leave the
+    columns unchanged.  Such a use keeps the list as written instead."""
+    for top in tree.body:
+        if isinstance(top, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        parents = {c: p for p in ast.walk(top) for c in ast.iter_child_nodes(p)}
+        for n in ast.walk(top):
+            if not (isinstance(n, ast.Name) and n.id == nm):
+                continue
+            p = parents.get(n)
+            if definition is not None and p is definition and n in definition.targets:
+                continue
+            if isinstance(p, (ast.For, ast.AsyncFor, ast.comprehension)) and p.iter is n:
+                continue
+            if isinstance(p, ast.Subscript) and p.value is n and isinstance(p.ctx, ast.Load):
+                continue
+            if (isinstance(p, ast.Compare) and n in p.comparators
+                    and isinstance(p.ops[p.comparators.index(n)], (ast.In, ast.NotIn))):
+                continue
+            if (isinstance(p, ast.Call) and n in p.args and isinstance(p.func, ast.Name)
+                    and p.func.id in ROWCONST_READERS):
+                continue
+            return False
+    return True

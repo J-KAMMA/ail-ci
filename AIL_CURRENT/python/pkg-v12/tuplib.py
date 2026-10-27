@@ -294,12 +294,15 @@ class Lower(Stmts, Calls, Lams, Exprs):
                 self.errors.append((node.lineno, 'a module-level tuple constant must be numbers only, one type per '
                                     'position (DIRS = [(0, 1), (1, 0)]); build other tuples inside a function'))
                 return [node]
-            if isinstance(v, ast.List) and not rowconst_in_place(self.tree, nm):
+            if isinstance(v, ast.List) and not (rowconst_in_place(self.tree, nm)
+                                                and rowconst_module_in_place(self.tree, nm, node)):
                 # kept as columns, the list is rebuilt wherever it is used as a value: a function that
-                # changes it, or a name bound to it, would change a copy (DIFFERENCES C68)
-                self.errors.append((node.lineno, 'the module-level list %s is passed, bound or returned as a value; '
-                                    'a list of number tuples is built here only when it is read in place (for, '
-                                    '%s[i], len(%s)); build it in main() and pass it down' % (nm, nm, nm)))
+                # changes it, or a name bound to it, would change a copy (DIFFERENCES C68); a module-level
+                # del / item store / mutating call would drop the change the same way
+                self.errors.append((node.lineno, 'the module-level list %s is used in a way that is not an '
+                                    'in-place read (passed, bound, returned or mutated); a list of number tuples '
+                                    'is built here only when it is read in place (for, %s[i], len(%s)); build it '
+                                    'in main() and pass it down' % (nm, nm, nm)))
                 return [node]
             t = ('tuple', tuple(types))
             self.force()
