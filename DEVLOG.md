@@ -1,3 +1,19 @@
+## 2026-10-27 -- re-applied fuzz68: mixed-type container displays (job-rbfuzz68-10271833)
+
+Re-applied the accepted fuzz68 change on this tree.  The tree already refused a list / set /
+dict display whose known element types differ, so the general path keeps CPython's mixed text;
+that refusal and its message are unchanged.  `Exprs.seq_type` in
+`AIL_CURRENT/python/pkg-v12/tupexpr.py` now also remembers a `None` element and refuses a
+display that mixes `None` with another known type, instead of skipping the `None` and lowering
+the display with the other type (which mattered when an annotation supplied `want_elem`).  The
+tree's int + bool widening and the general-path fallback for the remaining numeric mixes are
+kept; int + float widens in either order.  Added `AIL_CURRENT/test_ail_fuzz68.py` and registered
+it in `ail_check.MODULES`; it covers the value through an argument, a list item, an attribute
+and a dict value on both builds.  `tools/diff_ids.py` is not present in this tree, so it was not
+run.  Probes in `/tmp/probes` (`p_none`, `p_numeric`, `p_mixed`, `p_homogeneous`) match CPython
+on both builds.  Final-state tests: `test_ail_fuzz68`, `test_ail_fuzz32`, `test_ail_tuples`,
+`test_ail_typed_tuples`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound

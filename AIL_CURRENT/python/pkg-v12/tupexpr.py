@@ -296,17 +296,19 @@ class Exprs:
     def seq_type(self, ts, want_elem, node=None, where='list'):
         """The element type of a display whose element types are `ts`."""
         elem = None
+        saw_none = False
         for t in ts:
             t = deep(t)
             if t is None:
                 continue
             if t == 'none':
+                saw_none = True
                 if deep(want_elem) is None:
                     return None
                 continue
             if elem is None:
                 elem = t
-            elif elem == INT and t == FLT:
+            elif {elem, t} == {INT, FLT}:
                 elem = FLT
             elif (elem == INT and t == BOOL) or (elem == BOOL and t == INT):
                 elem = INT
@@ -329,6 +331,9 @@ class Exprs:
                 self.refuse(node, 'a %s display holding elements of different types (%s and %s) '
                                   'is not built; keep one element type in the %s'
                                   % (where, ann_text(elem), ann_text(t), where))
+        if saw_none and elem is not None and known(elem):
+            self.refuse(node, 'a %s mixing None with another type is not built; '
+                              'keep one type in the %s' % (where, where))
         if elem is None and deep(want_elem) is not None:
             elem = want_elem
         return elem
