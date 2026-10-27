@@ -1,3 +1,23 @@
+## 2026-10-27 -- pre313: bytearray `*=` changes the object itself (job-pre313-10271421)
+
+The first still-differing item in the rbpre281 review was the bytearray in-place repeat:
+`ba = bytearray(b"ab"); z = ba; ba *= 2` left `z` as `b"ab"` where CPython extends the same
+bytearray in place, so the alias shows `b"abab"` (`ba is z` stays True).  The general path's
+bytearray is the `bytearray` class from `prelude_bytes.py`; it had `__mul__` but no `__imul__`,
+so the augmented assignment fell back to `__mul__` and rebound the name.  `prelude_bytes.py`
+now gives `bytearray` an `__imul__` that checks its operand like `__mul__`, repeats `self._a`
+in place, and returns `self`.  The `g` (forced general) and `d` (default) builds both use that
+fallback, and both now match CPython.  The second recorded item (a huge count on a non-empty
+outer sequence) was not touched: only the first still-differing cause was fixed.
+
+Probes in `/tmp/probes` match CPython on both builds: `pre313_ba_alias` (the recorded case),
+`pre313_aliases` (size 2, empty, zero, negative, bool, larger and a `bytes` control),
+`pre313_routes` (a function argument, a list item, an attribute and a dict value, each with an
+alias) and `pre313_types` (float/str/list/None TypeError text, bytearray(), bytearray(int),
+bytearray(list), and `False`).  Final-state tests: test_ail_pre313, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (26 tests, 513.6 s, 0 failed, 1 skipped).
+DIFFERENCES row `C?-job-pre313-10271421-1`; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
