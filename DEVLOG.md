@@ -1,3 +1,28 @@
+## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
+
+The pre315 reviewer's first pre-existing item was `t01_class_attr_instance.py`:
+`class Box: text = "9223372036854775808"; b = Box(); print(int(b.text))` compiled on both
+builds and then stopped with `integer overflow`, where CPython prints the big integer.  The
+static int() checker in `ail_chatgpt.py` now also refuses a statically known str, bytes or int
+whose conversion leaves int64, so this route is refused by name at compile time with
+`int64 constant expression out of range` on both builds.  In-range text (INT64 boundaries,
+whitespace/underscore, a plus sign), invalid and empty text, a mutated instance or alias, an
+`__init__` value that shadows the class attribute, and the existing list-item, dict-value,
+class-alias and identity-argument routes keep CPython's output; the class-attribute float route
+keeps its existing `int() of a float outside int64` refusal.  The reviewer's other two routes
+(`t02_dict_get.py` through `dict.get` and `t04_arg_list_item.py` through a function parameter's
+list item) still stop with `integer overflow` on both builds; they are pre-existing and not
+changed here.
+
+Added `AIL_CURRENT/test_ail_pre338.py` (2 tests, 17 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre338`: `t01` is refused
+by name; `p03`, `p08`, `p09`, `p12`, `p13`, `p14`, `p21` and `p20` are refused by name; `p02`,
+`p04`, `p05`, `p06`, `p07`, `p10`, `p11`, `p17`, `p18`, `p19`, `p23` and `p24` match CPython, all
+on both builds.  Final-state tests (8 modules, 448 s, 0 failed): test_ail_pre338,
+test_ail_pre263, test_ail_pre290, test_ail_pre306, test_ail_pre311, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function

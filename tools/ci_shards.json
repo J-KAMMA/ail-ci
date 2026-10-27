@@ -364,6 +364,7 @@
   "test_ail_pre321": 23.2,
   "test_ail_pre324": 23.2,
   "test_ail_pre326": 23.2,
+  "test_ail_pre338": 10.0,
   "test_ail_pre34": 32.5,
   "test_ail_pre36": 14.1,
   "test_ail_pre39": 127.1,
@@ -511,6 +512,7 @@
    "test_ail_gaps_api2"
   ],
   [
+   "test_ail_pre338",
    "test_ail_silent2"
   ],
   [
