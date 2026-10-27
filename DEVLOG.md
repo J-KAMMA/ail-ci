@@ -1,3 +1,23 @@
+## 2026-10-27 -- pre347 follow-up: a lambda reading a renamed class-body target (job-pre347-10272320)
+
+The review of this job found that `x = 99; class C: ys = [(lambda: x)() for x in range(3)];
+print(x, C.ys)` compiled on the base with the named refusal `closures nested too deeply to settle
+their shared names`, but the new class-body analysis renamed the target to `x__c1`, removing the
+shared name the closure pass saw, and both builds then stopped with an uncaught `RecursionError`
+from the class-attribute path.  `compscope` now leaves a class-body comprehension target
+unrenamed when a lambda nested anywhere in that comprehension reads it (body, nested lambda,
+condition or list item), so the construct keeps the base tree's named refusal.  Comprehensions
+without such a lambda are renamed as before.  Added four refusal programs to
+`test_ail_pre347.py`; `DIFFERENCES.md` records the refusal.
+
+Probes in `/tmp/probes` on both builds: p23 (the review case), p31 (nested lambda), p35 (lambda
+in a condition) and p32 (lambda as a list item) are refused by name with exit 1 and no
+`RecursionError`; pre347 p01 (the original class-body target case), p10 (all comprehension
+kinds), p17 (class attribute and global of the same name), p18 (conditions), p19 (multiple
+classes) and p20 (module/function controls) still match CPython.  Final-state tests:
+test_ail_pre347, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre347: a class-body comprehension target stays local (job-pre347-10272320)
 
 The reviewer of job rbpre304 recorded `x = 99; class C: ys = [x for x in range(3)];

@@ -137,6 +137,38 @@ print(x, ys, f())
 }
 
 
+# A lambda nested in a class-body comprehension reads the comprehension target, not the global of
+# the same name.  Renaming the target would remove the shared name the closure pass uses to see
+# the clash, and the class-attribute path would then recurse while compiling itself, so the target
+# is left unrenamed and the construct keeps the base tree's named closure refusal.
+LAMBDA_REFUSALS = {
+    'lambda_target': '''
+x = 99
+class C:
+    ys = [(lambda: x)() for x in range(3)]
+print(x, C.ys)
+''',
+    'nested_lambda_target': '''
+x = 99
+class C:
+    ys = [(lambda: (lambda: x)())() for x in range(3)]
+print(x, C.ys)
+''',
+    'lambda_in_condition': '''
+x = 99
+class C:
+    ys = [x for x in range(3) if (lambda: x)()]
+print(x, C.ys)
+''',
+    'lambda_as_list_item': '''
+x = 99
+class C:
+    ys = [lambda: x for x in range(3)]
+print(x, [f() for f in C.ys])
+''',
+}
+
+
 def _run_cpython(directory, name, text):
     source = Path(directory) / (name + '_cpython.py')
     source.write_text(text, encoding='utf-8')
@@ -170,6 +202,21 @@ def _build_and_run(directory, name, text, general):
 
 
 class Pre347Tests(unittest.TestCase):
+    def test_lambda_reading_a_class_target_is_refused_by_name(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre347-') as directory:
+            for slug, text in LAMBDA_REFUSALS.items():
+                self.assertEqual(_run_cpython(directory, slug, text)[1], 0, slug)
+                for general in (True, False):
+                    _, built = _build(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                      text, general)
+                    output = built.stdout + built.stderr
+                    self.assertNotEqual(built.returncode, 0, '%s (general=%s)\n%s' %
+                                        (slug, general, output))
+                    self.assertIn('not in the subset', output, '%s (general=%s)\n%s' %
+                                  (slug, general, output))
+                    self.assertNotIn('RecursionError', output, '%s (general=%s)\n%s' %
+                                     (slug, general, output))
+
     def test_class_body_comprehension_target_matches_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre347-') as directory:
             for slug, text in PROGRAMS.items():

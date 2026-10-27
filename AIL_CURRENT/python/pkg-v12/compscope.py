@@ -99,6 +99,18 @@ class _Scope(ast.NodeVisitor):
         self.class_bodies.append(node)
 
 
+def _lambda_loads(node):
+    """Names a lambda nested anywhere in `node` reads (its body and defaults); used only to keep a
+    class-body comprehension target unrenamed when a lambda would otherwise stop sharing its name."""
+    names = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Lambda):
+            for name in ast.walk(child):
+                if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Load):
+                    names.add(name.id)
+    return names
+
+
 def _scopes(tree):
     """Every scope body to analyse: the module and each (possibly nested) function."""
     yield tree.body
@@ -120,16 +132,22 @@ def rename(source):
     used = None
     counter = 0
 
-    def analyse(body, outer_names):
+    def analyse(body, outer_names, is_class=False):
         nonlocal used, counter
         scope = _Scope()
         scope.scope_names.update(outer_names)
         for statement in body:
             scope.visit(statement)
+        keep = {}               # class-body comps whose target a nested lambda reads
+        if is_class:
+            for key, comp in scope.comps.items():
+                keep[key] = _lambda_loads(comp) & scope.bound[key]
         if scope.comps:
             renames = {}        # (id(comp), name) -> fresh identifier
             for key, comp in scope.comps.items():
                 for name in sorted(scope.bound[key]):
+                    if name in keep.get(key, ()):     # leave the shared name for the closure pass
+                        continue
                     if name in scope.scope_names or key in scope.nested_clash:
                         if used is None:
                             used = set(re.findall(r'\w+', source))
@@ -144,7 +162,7 @@ def rename(source):
                 if owner is not None and (id(owner), node.id) in renames:
                     plans.append((node, renames[(id(owner), node.id)]))
         for node in scope.class_bodies:
-            analyse(node.body, scope.scope_names)
+            analyse(node.body, scope.scope_names, is_class=True)
 
     for body in _scopes(tree):
         analyse(body, ())

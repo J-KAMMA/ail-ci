@@ -1150,7 +1150,7 @@
     "python/pkg-v12/stdlib4.py": "68e10240e9630326545134d02463cbe7b6702d629d96b4670af790723cbfb83e",
     "python/pkg-v12/strt.py": "cb481acafb7b3274bf7e6d119458bb58e3988b96b1ccb13de6c481f3f7912f79",
     "test_ail_stdlib_batch4.py": "8fef9085ba20aaea22f9e771e11d147baaf4dbca18a13977075a2c442ae58279",
-    "python/pkg-v12/compscope.py": "c55a515156fdaf66135fcd3d9fc93b16e2e69b4ed512240bb702a39ed77d0f47",
+    "python/pkg-v12/compscope.py": "1d0b1afd36399c77a86952a2ff2d644ee82a5d7acdf401ea5082d2b78bbe5f9e",
     "python/pkg-v12/optlib.py": "fe2f961097b4cdf5267190e5f01e7dc490ade1ce59ef24153669e6431087f6c2",
     "test_ail_quirks.py": "f5515cca83baa27524d4b4d506a591fc1ad49f88eecf7179c7a452267bc780fb",
     "python/pkg-v12/tryhoist.py": "bce32b8036c95634753499c7f7d06ae9809784f72e729af427a36f0320b8d6ce",
@@ -1572,7 +1572,7 @@
     "test_ail_pre304.py": "9504847d99cc40c3416956a18137eff3b78ead294538f2ea2982fd5dd166c04f",
     "test_ail_pre327.py": "45e9ebe7f6d36dabe4d3859abd3b99aa3da96c81f184a62487e270f3b2aa070a",
     "test_ail_pre334.py": "5ff7c318627b812bc9e4c23892f7a5fad8c925f0b2665b13b7ba1c7d888e79a2",
-    "test_ail_pre347.py": "e9a74232bb1bd25ea85cc9db1db9d8c8ff66d01b54aa37190fc39982f35a3121"
+    "test_ail_pre347.py": "3e8603e1003f733567db28e1eacfc3b34e1a56ef5b0ec88e7779138c3972c9f1"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1789,7 +1789,7 @@
     "python/pkg-v12/stdlib4.py": "68e10240e9630326545134d02463cbe7b6702d629d96b4670af790723cbfb83e",
     "python/pkg-v12/strt.py": "cb481acafb7b3274bf7e6d119458bb58e3988b96b1ccb13de6c481f3f7912f79",
     "test_ail_stdlib_batch4.py": "8fef9085ba20aaea22f9e771e11d147baaf4dbca18a13977075a2c442ae58279",
-    "python/pkg-v12/compscope.py": "c55a515156fdaf66135fcd3d9fc93b16e2e69b4ed512240bb702a39ed77d0f47",
+    "python/pkg-v12/compscope.py": "1d0b1afd36399c77a86952a2ff2d644ee82a5d7acdf401ea5082d2b78bbe5f9e",
     "python/pkg-v12/optlib.py": "fe2f961097b4cdf5267190e5f01e7dc490ade1ce59ef24153669e6431087f6c2",
     "test_ail_quirks.py": "f5515cca83baa27524d4b4d506a591fc1ad49f88eecf7179c7a452267bc780fb",
     "python/pkg-v12/tryhoist.py": "bce32b8036c95634753499c7f7d06ae9809784f72e729af427a36f0320b8d6ce",
@@ -2211,6 +2211,6 @@
     "test_ail_pre304.py": "9504847d99cc40c3416956a18137eff3b78ead294538f2ea2982fd5dd166c04f",
     "test_ail_pre327.py": "45e9ebe7f6d36dabe4d3859abd3b99aa3da96c81f184a62487e270f3b2aa070a",
     "test_ail_pre334.py": "5ff7c318627b812bc9e4c23892f7a5fad8c925f0b2665b13b7ba1c7d888e79a2",
-    "test_ail_pre347.py": "e9a74232bb1bd25ea85cc9db1db9d8c8ff66d01b54aa37190fc39982f35a3121"
+    "test_ail_pre347.py": "3e8603e1003f733567db28e1eacfc3b34e1a56ef5b0ec88e7779138c3972c9f1"
   }
 }
