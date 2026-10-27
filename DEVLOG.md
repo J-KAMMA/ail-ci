@@ -1,3 +1,95 @@
+## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
+
+The pre324 reviewer's first pre-existing item was a nested class inside a function
+(`def make(): class C: ...`, including an attribute, an `__init__`, an unexecuted class, a
+conditional class, a nested function and a method body), which CPython runs.  Reproduced it on
+both builds: this tree already refuses the construct at compile time with the named
+`a nested class definition (C)` message, which the task allows, so no compiler change was
+needed.  The review's other pre-existing items are also already refused by name on both builds
+(`a class body statement other than def/assignment/pass/docstring in C`): an async method and a
+class-body `for`, `with`, `try` or `global`.  A top-level class control still matches CPython.
+Added `AIL_CURRENT/test_ail_pre326.py` (13 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre326` on both builds: `p01`-`p05` (nested class) and `p06`-`p10`
+(async method, class-body `for`/`with`/`try`/`global`) are refused by name.  Final-state tests:
+test_ail_pre326, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-27 -- pre307: out-of-range list deletion uses CPython's assignment message (job-pre307-10271311)
+
+The one pre-existing difference recorded by the rbrbpre19 review was
+`del a[-9223372036854775808]`: both builds exited 1 with matching stdout, but stderr said
+`IndexError: list index out of range` (the current tree) or `pop index out of range` (the typed
+path) where CPython says `IndexError: list assignment index out of range`.  The base tree
+(`eedf548`) shows the same, so the difference predates this job.
+
+`ail_list_delitem` in cruntime.py now normalizes the index and raises the assignment wording,
+both for the unified/context entry point and for the object-level helper used by the typed path;
+the index-kind mapping learned the new text and exctext.py's redundant DIE edit is gone.  Typed
+`del` of an int list emits an explicit `_dk >= n || _dk < -n` check before `ail_list_pop`, so it
+no longer borrows `.pop()`'s message.  `.pop()` itself is unchanged (`pop index out of range` /
+`pop from empty list`).
+
+Probes in `/tmp/probes` (`pre307_*`) match CPython on both builds for ordinary, negative,
+INT64_MIN/MAX, empty, float and str lists; the argument/list-item/attribute/dict-value routes and
+aliases; caught `IndexError` with and without `str(e)`; valid negative and slice deletes; dict
+deletes; and unchanged `.pop()`/reads.  An uncaught typed trap still prints the bare message text
+without the `IndexError: ` prefix, a pre-existing limitation already recorded for typed traps.
+
+Added `AIL_CURRENT/test_ail_pre307.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`; `tools/update_manifest.py --check` passes.
+Final-state tests: test_ail_pre307, test_ail_pre269, test_ail_pre246, test_ail_pre298,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3 (7 modules, 290 s, 0 failed).
+## 2026-10-27 -- re-apply pre57: CPython dict key-table shape after delete/reinsert (job-rbpre57-10271816)
+
+Re-applied the accepted pre57 change on the current integration tree, keeping both sides'
+fixes: the tree's newer `ail_map_set_hashed`, `ail_map_merge_dict`, `ail_map_clone_shape` and
+`ail_map_clone` paths are reconciled with the accepted CPython perturbed probe sequence and the
+new `nentries`/`tail_dead`/`usable`/`dirty` dummy-slot tracking, direct instance `__hash__`
+results, and the `test_ail_pre57` module. Probes are listed in the report; final-state tests are
+test_ail_pre57, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-24 - pre57 follow-up: CPython probing and dk_usable
+
+The review of the first pre57 fix found two regressions against the base tree. The dummy index
+slots were placed by AIL's linear probe, while CPython probes with `perturb >>= 5` and
+`i = i*5 + perturb + 1`; for a user `__hash__` returning 32 the old code also fed the value
+through the private int table mix instead of using it directly. Dict lookup, insertion, delete,
+rehash and resize now use CPython's probe sequence, `find_empty_slot` reuses the first dummy,
+and an instance `__hash__` result is the table hash itself (`-1` becomes `-2`). A separate
+`usable` field now models `dk_usable`: `popitem` lowers `nentries` without restoring it, so the
+next insert still resizes when CPython does. Copies clone the index including dummy slots.
+`test_ail_pre57.py` adds the reviewer's equality-order and popitem/usable probes.
+
+## 2026-10-24 - pre57: dict key-table shape after delete/reinsert
+
+The pre43 reviewer recorded as pre-existing that `update` / `dict()` after a delete+reinsert
+called a user `__eq__` a different number of times from CPython 3.12 (p14 omitted `E 20 11`), and
+that source dict construction after delete+insert could print the same calls in a different
+order. The cause was `ail_map_del` rebuilding the whole index: CPython leaves a dummy index slot
+and keeps `dk_nentries`. The runtime now tracks `nentries`, trailing dummies and dummy slots, uses
+stored hashes for dict-to-dict merge/copy, and dict equality skips `-2` slots (the pre43 fix read
+`index[-2]` there). `test_ail_pre57.py` covers p10/p14-style update/dict/copy/popitem shapes,
+dict equality with tombstones, source order, arguments/list items/attributes/dict values, and
+empty/negative/plain boundaries on both builds.
+## 2026-10-27 -- re-applied fuzz68: mixed-type container displays (job-rbfuzz68-10271833)
+
+Re-applied the accepted fuzz68 change on this tree.  The tree already refused a list / set /
+dict display whose known element types differ, so the general path keeps CPython's mixed text;
+that refusal and its message are unchanged.  `Exprs.seq_type` in
+`AIL_CURRENT/python/pkg-v12/tupexpr.py` now also remembers a `None` element and refuses a
+display that mixes `None` with another known type, instead of skipping the `None` and lowering
+the display with the other type (which mattered when an annotation supplied `want_elem`).  The
+tree's int + bool widening and the general-path fallback for the remaining numeric mixes are
+kept; int + float widens in either order.  Added `AIL_CURRENT/test_ail_fuzz68.py` and registered
+it in `ail_check.MODULES`; it covers the value through an argument, a list item, an attribute
+and a dict value on both builds.  `tools/diff_ids.py` is not present in this tree, so it was not
+run.  Probes in `/tmp/probes` (`p_none`, `p_numeric`, `p_mixed`, `p_homogeneous`) match CPython
+on both builds.  Final-state tests: `test_ail_fuzz68`, `test_ail_fuzz32`, `test_ail_tuples`,
+`test_ail_typed_tuples`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
 The pre304 reviewer's first pre-existing item was a class body that calls a function bound
@@ -104,6 +196,93 @@ Probes in `/tmp/probes/pre281_*.py` on both builds: `p1_empty_literals`, `p2_non
 `C?-job-rbrbpre281-10271623-2`.
 Targeted tests before the final commit: `test_ail_pre281`, `test_ail_pre271`,
 `test_ail_string_repeat_fusion` and `test_ail_local_count_repeat` (15 tests, 80.5 s, 0 failed).
+## 2026-10-27 -- default build: a computed negative integer exponent matches CPython (job-pre321-10271546)
+
+The pre305 review recorded two pre-existing differences.  The first was that `**` with a negative
+exponent stopped on the default build (`negative exponent on an integer; write float(x) ** n for
+Python's float answer`) while the general path printed CPython's float.  The legacy `**` type used
+`ail_ipow`, exact for int64, even when the exponent's sign was unknown at compile time; the typed
+path now leaves such a power to the general path, whose tagged value keeps the int result for a
+non-negative exponent and returns the float for a negative one.  Constant exponents keep their old
+int/float lowering, and the whole-program fallback is the existing mechanism (no output or message
+changes in programs without a computed integer power).  A function that declares `-> int` keeps the
+exact-integer path instead: its result is already committed to int64 at the ABI boundary, so a
+computed power there cannot become CPython's float, and `ail_ipow`'s existing run-time refusal for
+a negative exponent stands (this is the shape used by the `__pow__` method in `test_ail_dunders`,
+which is built on the typed path alone).  The review's second item, out-of-int64 integer powers,
+was not changed and remains a difference.
+
+Probes in `/tmp/probes/pre321` on both builds: `p01_var_var`, `p02_local`, `p03_routes`,
+`p04_pow_compare`, `p05_const_exp`, `p06_zero`, `p07_float_base`, `p08_exp_routes`,
+`p09_nonint_exp`, `p10_positive`, `p11_positive_routes`, `p12_zero_and_underflow`, `p13_alias`,
+`p14_bool_exp_var` and `p15_nested` all match CPython.  Final-state tests: `test_ail_pre321`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (4 modules, 0 failed);
+`tools/update_manifest.py --check` passes; `ci_shards.py --check` reports only the two
+pre-existing duplicates `test_ail_pre61` and `test_ail_pre126` (both present on HEAD).
+
+## 2026-10-27 -- pre311: int() of an out-of-int64 float from an aliased module container (job-pre311-10271335)
+
+The rbpre293 task text named no concrete pre-existing item (its list was empty), so I reproduced the
+first still-differing item recorded as open by the pre290 review, `r26` alias-list: `a = [1e300];
+b = a; outer(b[0])` compiled and then stopped with `integer overflow`, while CPython prints the
+bignum.  `_check_int64_literals` now also folds a module name bound once to a flat literal
+list/tuple/dict, or aliased from one (alias chains included), when every use of every name in the
+alias group is a subscript read or a module-level alias.  A mutation through the name or an alias,
+a call that could mutate the object, a bare read, a nested mutable element, a local shadow or a
+non-float element stops the record, so an in-range or mutated container keeps its previous
+behaviour.  The same pass also covers `r33` dict-via-variable and the tuple spelling; `r27`
+attribute-held value and `r28` tuple multi-assign stay open (pre-existing).
+
+Probes in `/tmp/probes` on both builds: `r26_alias_list`, `r33_dict_var`, `r26_flat_list_item`,
+`r26_flat_dict_direct`, `r26_flat_tuple_alias`, `r26_flat_alias_arg`, `r26_neg` are refused by
+name; `r26_inrange`, `r26_mutate_before`, `r26_alias_mutate_before`, `r26_mutate_func`,
+`r26_used_bare_inrange`, `r26_alias_append_inrange`, `r26_local_shadow` match CPython.  `r27_attr_value`,
+`r28_tuple_multi` and `r26_nested` still differ (pre-existing, unchanged).  Added
+`AIL_CURRENT/test_ail_pre311.py` (9 refused, 13 CPython-parity programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+`test_ail_pre311`, `test_ail_pre290`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (5 modules, 229 s, 0 failed).  `tools/update_manifest.py` run and
+`--check` exits 0; DIFFERENCES row `C?-job-pre311-10271335-1`.
+## 2026-10-27 -- re-apply pre299: builtin pow() outside int64 is refused by name (job-rbpre299-10270953)
+
+Re-applied the accepted pre299 change on top of this integration tree, keeping the newer
+front-end work (pre273's `**` rule, pre285 local cancellation, pre290 int() wrappers) unchanged.
+Extended the existing `_check_int64_pow_constants`, called after `_check_int64_int_base_constants`: a
+two-argument builtin `pow()` with statically known int arguments (module and function-local
+constants, expressions and aliases included) is folded exactly, and a result outside int64 is
+refused with `int64 constant expression out of range`; when the base is a constant int with
+|base| >= 2 and the exponent is not statically known, the construct is refused at compile time,
+following pre273's rule for `**`. Bases 0/1/-1 with computed exponents, constant in-range powers,
+float and bool powers, `pow(base, exp, mod)`, and a program that binds its own `pow` are
+unchanged.
+
+Probes in `/tmp/probes` and `/tmp/rprobes` on both builds: the safe/aliased/shadowed/zero-base
+forms match CPython; constant out-of-int64 forms are refused as `int64 constant expression out
+of range`; computed-exponent forms are refused by name, including calls in a class body and a
+lambda body. Final-state tests: `test_ail_pre299`, `test_ail_pre294`, `test_ail_pre273`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (0 failed).
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and
+`--check` passes. `tools/ci_shards.py --check` reports only the pre-existing duplicated
+`test_ail_fuzz4`, `test_ail_pre126` and `test_ail_pre61`; this change adds only
+`test_ail_pre299` to one shard.
+
+## 2026-10-27 - nested generator expressions (job-rbrbpre42-10271045)
+
+Re-applied the accepted pre42 change on top of this tree.  The general path still materialises a
+generator expression like a list comprehension, so a generator expression nested inside another
+one was evaluated when the outer object was built (CPython creates it only when its element is
+reached); the side-effect order differed and consuming the outer could end in
+`AIL internal error: ail_it_next: unknown library iterator kind`.  Both general emitters now
+refuse the nested construct by name, and the `next()` / `any()` / `all()` fused paths check the
+outer argument too.  The pre41 any()/all() screen keeps its own wording for a generator expression
+used as the iterable (`iterable is itself a generator expression`): the generic pre-scan leaves an
+any()/all() argument to that fused path, which checks the iterable first and the other nested shapes
+second.  This tree's pre116/pre166 saved-generator screen (`a generator expression
+used as a value`) would otherwise claim a nested one first, so the nested check runs before it;
+that screen is kept unchanged for non-nested saved generators.  A generator expression with no
+generator expression inside it, including one holding a list/set/dict comprehension, still builds
+and matches CPython.  Added `AIL_CURRENT/test_ail_pre42.py` and registered it in `ail_check.MODULES`;
+its `any_element` case covers the generic any()/all() shape that is not an iterable nesting.
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an
