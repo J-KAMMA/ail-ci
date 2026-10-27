@@ -1,3 +1,22 @@
+## 2026-10-27 -- pre322 review: do not treat a shadowed pure builtin as pure (job-pre322-10271547)
+
+The review's `pM_shadowed_pure` defect: a module-level `len` that mutates its argument was still
+treated as the pure builtin inside a function, because `_escaped_constant_names` subtracted only
+the current function's bound names.  The container alias was folded, and `int(alias[0])` was
+refused at compile time where CPython/base print `1`.  The pure-call set is now decided against
+`_all_bound_names(tree)` for the whole program, so a module or enclosing binding of
+`len`/`print`/`str`/`repr` makes the call an escape and the alias stays dynamic; unshadowed
+builtin calls still fold.  `test_ail_pre322.py` adds module and enclosing shadow cases for
+`len`/`print`/`repr` plus builtin `len`/`print` refusals.
+
+Probes in `/tmp/probes/pre322_review` on both builds: module `len` (1), enclosing `len` (-7),
+alias chain `len` (9), in-range `len` (tuple), variable-key dict `len` (6), module `repr` (2) and
+enclosing `print` (2) match CPython; builtin `len` and `print` alias probes are refused by name
+with `int() of a float outside int64`; a module-level `str` definition is refused by name at
+compile time (AIL forbids shadowing `str`).  Final required tests: `test_ail_pre322` (50 s),
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` (0 failed);
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-27 -- pre322: int() of an out-of-int64 float through a container alias (job-pre322-10271547)
 
 Reconstructed the first still-differing pre-existing item from the rbrbrbpre39 review, `r26`

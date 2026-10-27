@@ -117,6 +117,18 @@ def convert():
 
 print(convert())
 ''',
+    'builtin_len_alias': '''
+items = [1e300]
+alias = items
+len(alias)
+print(int(alias[0]))
+''',
+    'builtin_print_alias': '''
+items = [1e300]
+alias = items
+print(alias)
+print(int(alias[0]))
+''',
 }
 
 MATCH = {
@@ -163,6 +175,69 @@ items = [1.5]
 alias = items
 print(alias)
 print(int(alias[0]))
+''',
+    'shadowed_len_mutates': '''
+def len(seq):
+    seq[0] = 1.5
+    return 7
+
+
+def convert():
+    items = [1e300]
+    alias = items
+    len(alias)
+    return int(alias[0])
+
+
+print(convert())
+''',
+    'enclosing_shadow_len_mutates': '''
+def outer():
+    def len(seq):
+        seq[0] = 7.5
+        return 0
+
+    def convert():
+        items = [-1e300]
+        alias = items
+        len(alias)
+        return int(alias[0])
+
+    return convert()
+
+
+print(outer())
+''',
+    'shadowed_repr_mutates': '''
+def repr(seq):
+    seq[0] = 2.5
+    return "x"
+
+
+def convert():
+    items = [1e300]
+    alias = items
+    repr(alias)
+    return int(alias[0])
+
+
+print(convert())
+''',
+    'shadowed_print_mutates': '''
+def outer():
+    def print(seq):
+        seq[0] = 4.5
+
+    def convert():
+        items = [1e300]
+        alias = items
+        print(alias)
+        return int(alias[0])
+
+    return convert()
+
+
+print(outer())
 ''',
 }
 

@@ -651,14 +651,16 @@ def _flat_constant_container(value):
     return False
 
 
-def _escaped_constant_names(root):
+def _escaped_constant_names(root, program_bound):
     """Names read in a way that may mutate or expose a container, propagated through aliases.
 
     A container stays foldable only when every read is a load-only subscript, an alias
     assignment, or an argument to a pure builtin.  A store through the name, a call, a return,
-    iteration or any other use marks it (and every alias) as dynamic.
+    iteration or any other use marks it (and every alias) as dynamic.  Whether a call is a
+    pure builtin is decided against every binding in the program, not only this scope: a
+    module or enclosing binding of ``len``/``print``/``str``/``repr`` may mutate its argument.
     """
-    pure_calls = {'len', 'print', 'str', 'repr'} - _all_bound_names(root)
+    pure_calls = {'len', 'print', 'str', 'repr'} - program_bound
     parents = {child: parent for parent in ast.walk(root) for child in ast.iter_child_nodes(parent)}
     escaped = set()
     for node in ast.walk(root):
@@ -700,7 +702,7 @@ def _escaped_constant_names(root):
     return escaped
 
 
-def _scope_constant_map(body, root, base, stores, bound, parameters, declared):
+def _scope_constant_map(body, root, base, stores, bound, parameters, declared, program_bound):
     """Constant values a scope's top-level names bind, including safe container aliases.
 
     Scalars are followed exactly as before.  A flat list/tuple/dict literal (or an alias of
@@ -731,7 +733,7 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared):
                 local[name] = value
 
     add_scalars()
-    escaped = _escaped_constant_names(root)
+    escaped = _escaped_constant_names(root, program_bound)
     for statement in body:
         name, value_node = candidate(statement)
         if (name is None or stores.get(name) != 1
@@ -746,11 +748,12 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared):
 
 
 class _Int64CallChecker(ast.NodeVisitor):
-    def __init__(self, known, passthrough, int_params, int_shadowed):
+    def __init__(self, known, passthrough, int_params, int_shadowed, program_bound):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
         self.int_shadowed = int_shadowed
+        self.program_bound = program_bound
         self.shadow = []
         self.value_scopes = [known]
 
@@ -800,7 +803,8 @@ class _Int64CallChecker(ast.NodeVisitor):
             self.visit(node.returns)
         local = _scope_constant_map(node.body, node, self.value_scopes[-1],
                                     _binding_counts(node.body), _function_bindings(node),
-                                    _scope_parameters(node), _scope_declared(node))
+                                    _scope_parameters(node), _scope_declared(node),
+                                    self.program_bound)
         self.shadow.append(_function_bindings(node))
         self.value_scopes.append(local)
         for statement in node.body:
@@ -940,15 +944,16 @@ def _check_int64_literals(tree):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             global_names.update(node.names)
     module_counts = _binding_counts(tree.body)
+    program_bound = _all_bound_names(tree)
     known = _scope_constant_map(tree.body, tree, {}, module_counts, set(module_counts),
-                                set(), global_names)
+                                set(), global_names, program_bound)
     int_shadowed = any((isinstance(node, ast.FunctionDef) and node.name == 'int')
                        or (isinstance(node, ast.arg) and node.arg == 'int')
                        or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough)
-    _Int64CallChecker(known, passthrough, int_params, int_shadowed).visit(tree)
+    _Int64CallChecker(known, passthrough, int_params, int_shadowed, program_bound).visit(tree)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
