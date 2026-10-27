@@ -286,11 +286,15 @@ class ClosureMixin:
                 if isinstance(n, ast.FunctionDef) and n.name not in escaping:
                     self._register_nested(n, cctx)
         self.init_cells(cctx)
-        if body is not None:
-            self.block(body, cctx)
-        else:
-            v = self.expr(node.body, cctx)
-            cctx.emit('*out = %s;' % v)
+        self.closure_depth = getattr(self, 'closure_depth', 0) + 1
+        try:
+            if body is not None:
+                self.block(body, cctx)
+            else:
+                v = self.expr(node.body, cctx)
+                cctx.emit('*out = %s;' % v)
+        finally:
+            self.closure_depth -= 1
         pre = ['    f.slots[%d] = %s;' % (cctx.slot_of[p], cid(p)) for p in params]
         pre += self.cell_preamble(cctx)
         pre += ['    int %s = 0;' % flag for flag in cctx.def_flag_decls]
@@ -382,7 +386,10 @@ class ClosureMixin:
         t = ctx.tmp()
         classes = getattr(self, 'class_values', ())
         busy = getattr(self, 'class_attr_busy', ())
-        if busy:
+        if busy and not getattr(self, 'closure_depth', 0):
+            # A class attribute value is compiled while its class body runs: entering the class's
+            # own construction here would recompile that same value forever.  Code deferred into
+            # a lambda or nested def runs after the class is bound, so it keeps the branch.
             classes = [c for c in classes if c not in busy]
         if classes:
             from pyboxed2 import _PreC

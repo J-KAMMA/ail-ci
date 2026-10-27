@@ -6899,6 +6899,13 @@ class Compiler(boxclosure.ClosureMixin):
     def _class_attr_value(self, slot, value, ctx, cname=None):
         """The one shared value of a class attribute, filling the slot lazily only when the module
         body did not run (the array-entry shape, where there is no executable module statement)."""
+        busy = getattr(self, 'class_attr_busy', ())
+        if cname is not None and busy and cname in busy and getattr(self, 'closure_depth', 0):
+            # `cname`'s attributes are being compiled higher in this same expression (a class
+            # constructed through a value inside its own class body).  The slot is filled by that
+            # outer compile, so read it: compiling the value again would re-enter `_call_class`
+            # forever.  A deferred lambda still constructs the class after the body has run.
+            return 'g_slots_arr[%d]' % slot
         if value is not None:
             ctx.emit('if (g_slots_arr[%d].tag == AIL_T_UNBOUND) {' % slot)
             ctx.indent += 1

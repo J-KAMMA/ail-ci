@@ -1,3 +1,33 @@
+## 2026-10-27 -- pre362 review fixes: MANIFEST pin and deferred class construction (job-pre362-10280246)
+
+The reviewer of this job found two defects in the previous commit.
+
+1. `test_ail_pre362.py` was registered in `ail_check.MODULES` without a MANIFEST pin, so
+   `tools/update_manifest.py --check` exited 1 (`unpinned test_ail_pre362.py`) and
+   `par_check` preflight raised `hash mismatch`. The previous entry's claim that `--check`
+   passed was wrong. `tools/update_manifest.py` has now been run and `--check` exits 0.
+
+2. The `class_attr_busy` filter in `boxclosure.call_value` also dropped the class-construction
+   branch from code deferred into a lambda or nested def, which runs after the class is bound:
+   `class D: v = 1; fs = [lambda: [D][0]().v]; print(D.fs[0]())` printed nothing and exited 1
+   with `TypeError: 'type' object is not callable` (base: compile-time `RecursionError`).
+   The filter now applies only when `closure_depth == 0` (the value is evaluated while the
+   class body runs); a deferred body keeps the branch. The re-entry guard moved to
+   `_class_attr_value`: when the class's own attributes are being compiled higher in the same
+   expression and the code is deferred, the slot is read directly instead of compiling the
+   value again, which is what re-entered `_call_class` forever. Immediately evaluated
+   self-construction (`class D: fs = [(lambda: [D][0]().v)()]`) keeps the old behaviour
+   (compile succeeds, runtime error), a pre-existing mismatch with CPython's `NameError`.
+
+Probes in `/tmp/probes` (both builds, general forced and default): p01 self-call through a
+lambda, p02 argument, p03 list item, p05 dict value, p17 attribute route (`b.get()()`), p19
+alias, p20 negative index and tuple, p21 two lambdas, p22 function plus class, p23 lambda in a
+listcomp, p24 dict attribute, p06 `__init__` argument, p08 other class, p09 inherited
+attributes, p10 nested lambda, p11 method, p12 module lambda all match CPython. p14 (the
+review program) is still the named refusal, p15/p16 unchanged, p18 remains refused by name
+(`a generator expression used as a value`). Final-state tests: test_ail_pre362,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-27 -- pre362: a lambda in a comprehension keeps its variable (job-pre362-10280246)
 
 The pre347 reviewer's defect reproduces on this tree in a wider form than recorded. The exact

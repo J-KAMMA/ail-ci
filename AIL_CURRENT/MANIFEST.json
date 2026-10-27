@@ -727,7 +727,7 @@
     "python/pkg-v12/mix_call.h": "ec783385fd7741b83f6c76cee13b6e02f9206304cf48421c1054a8fb2e515fdc",
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
     "python/pkg-v12/pyboxed.py": "82d5b82c544f3042576d30a6da4ca2f079b41e5fdb3ff4c8c8897066c3474790",
-    "python/pkg-v12/pyboxed2.py": "b31903b883ef82108fdd9d6501e3047cba7d9378d44921be8c653b061b72f31a",
+    "python/pkg-v12/pyboxed2.py": "3bac83a79748f270ce8347a402e2e94ce23ce5ec09975e4fa0c91a87c7fc87d4",
     "python/pkg-v12/pyfront.py": "753bebc80d471c3d302a85ad62070b91b4a386760d918a61e0a172b90ba314cc",
     "language_examples/checked_float64.ail": "b1815c80687ffa4c6cd1dac58997c1df93f41237fb45bfc2894fc9b5969b4266",
     "language_examples/csv_float_group.ail": "48c53a693e6138fa227d4c0cbbb1d08de8bd33034af0292bbcaf3dff1a1f1c97",
@@ -1217,7 +1217,7 @@
     "test_ail_http.py": "960088808bb16b7e66b6f9ddaec414b03490ae5499dfbc9ff20d07f17d041a63",
     "python/pkg-v12/ailhttp_core.h": "a910f3433ff787e037103e79083ba3a16371263cade2878870628ebd5b623868",
     "python/pkg-v12/ailurl_core.h": "b0c5828d307fff6098f7fbf929c29b346b35f3ca87c9a2d0875460a09c650030",
-    "python/pkg-v12/boxclosure.py": "f2d8da0d5300ef452ab1ef3532bd0b18b4cde93889277b268ebfd148dcd403f4",
+    "python/pkg-v12/boxclosure.py": "c6c5b253078d0aac1c7d14ff874e38877bed8e38a6cdea1fc57dfb023346a0c0",
     "python/pkg-v12/matchlower.py": "1673a33acb56310da75987257dd645f4c1f5f613a573c1193ad01fe3aba6a0d7",
     "python/pkg-v12/nestfn.py": "c8979ffefb52582a1f2dba25b717aa660254c44d56888e61b88cea5f151418f5",
     "python/pkg-v12/raisefrom.py": "e56ca04bcb37196f57f00f79fdc12c794504992ecb5f24888a04082f1a89719a",
@@ -1580,13 +1580,14 @@
     "test_ail_pre331.py": "5ff5dc56754c8b598cb436e9720abd7676d6989bb299e4e0e122e8ede4e01ae8",
     "test_ail_pre328.py": "daa11bde81c1e2f2a093b714a32d0b6101482c03b0e9b458e26ded35671f1090",
     "test_ail_pre347.py": "3e8603e1003f733567db28e1eacfc3b34e1a56ef5b0ec88e7779138c3972c9f1",
-    "test_ail_pre351.py": "66d15098bfa34c38015f41bf559666451b62deedee6cadb5a4fd290a7362a99d"
+    "test_ail_pre351.py": "66d15098bfa34c38015f41bf559666451b62deedee6cadb5a4fd290a7362a99d",
+    "test_ail_pre362.py": "f0801cdc651323b09171ad44823d5a924082797152569e2dfda3144663231187"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
     "python/pkg-v12/mix_call.h": "ec783385fd7741b83f6c76cee13b6e02f9206304cf48421c1054a8fb2e515fdc",
     "python/pkg-v12/test_all.py": "d8555b134d3bf3f7d7374b02fe6130a2f345fcae1df30774cf833d8065411e7b",
-    "python/pkg-v12/pyboxed2.py": "b31903b883ef82108fdd9d6501e3047cba7d9378d44921be8c653b061b72f31a",
+    "python/pkg-v12/pyboxed2.py": "3bac83a79748f270ce8347a402e2e94ce23ce5ec09975e4fa0c91a87c7fc87d4",
     "python/pkg-v12/pyfront.py": "753bebc80d471c3d302a85ad62070b91b4a386760d918a61e0a172b90ba314cc",
     "python/pkg-v12/build_py.py": "707b59c87d4d1f5912db6d9c8777ed02ca9bb6ef03d35dd464c2a61bae541e3a",
     "python/pkg-v12/pyboxed.py": "82d5b82c544f3042576d30a6da4ca2f079b41e5fdb3ff4c8c8897066c3474790",
@@ -1864,7 +1865,7 @@
     "test_ail_http.py": "960088808bb16b7e66b6f9ddaec414b03490ae5499dfbc9ff20d07f17d041a63",
     "python/pkg-v12/ailhttp_core.h": "a910f3433ff787e037103e79083ba3a16371263cade2878870628ebd5b623868",
     "python/pkg-v12/ailurl_core.h": "b0c5828d307fff6098f7fbf929c29b346b35f3ca87c9a2d0875460a09c650030",
-    "python/pkg-v12/boxclosure.py": "f2d8da0d5300ef452ab1ef3532bd0b18b4cde93889277b268ebfd148dcd403f4",
+    "python/pkg-v12/boxclosure.py": "c6c5b253078d0aac1c7d14ff874e38877bed8e38a6cdea1fc57dfb023346a0c0",
     "python/pkg-v12/matchlower.py": "1673a33acb56310da75987257dd645f4c1f5f613a573c1193ad01fe3aba6a0d7",
     "python/pkg-v12/nestfn.py": "c8979ffefb52582a1f2dba25b717aa660254c44d56888e61b88cea5f151418f5",
     "python/pkg-v12/raisefrom.py": "e56ca04bcb37196f57f00f79fdc12c794504992ecb5f24888a04082f1a89719a",
@@ -2227,6 +2228,7 @@
     "test_ail_pre331.py": "5ff5dc56754c8b598cb436e9720abd7676d6989bb299e4e0e122e8ede4e01ae8",
     "test_ail_pre328.py": "daa11bde81c1e2f2a093b714a32d0b6101482c03b0e9b458e26ded35671f1090",
     "test_ail_pre347.py": "3e8603e1003f733567db28e1eacfc3b34e1a56ef5b0ec88e7779138c3972c9f1",
-    "test_ail_pre351.py": "66d15098bfa34c38015f41bf559666451b62deedee6cadb5a4fd290a7362a99d"
+    "test_ail_pre351.py": "66d15098bfa34c38015f41bf559666451b62deedee6cadb5a4fd290a7362a99d",
+    "test_ail_pre362.py": "f0801cdc651323b09171ad44823d5a924082797152569e2dfda3144663231187"
   }
 }

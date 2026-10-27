@@ -89,6 +89,24 @@ class B:
     ys = [(lambda: A().v)() for i in range(2)]
 print(B.ys, A.k)
 ''',
+    'class_deferred_self_call': '''
+class D:
+    v = 1
+    fs = [lambda: [D][0]().v]
+print(D.fs[0]())
+''',
+    'class_deferred_self_call_argument': '''
+class D:
+    v = 2
+    fs = [lambda k: k().v]
+print(D.fs[0](D))
+''',
+    'class_deferred_self_call_routes': '''
+class D:
+    v = 3
+    fs = [lambda xs: xs[0]().v, lambda m: m['c']().v]
+print(D.fs[0]([D]), D.fs[1]({'c': D}))
+''',
     'argument_route': '''
 def f(n):
     x = n
