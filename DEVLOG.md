@@ -197,6 +197,29 @@ compares in-range literal and flow results with CPython. Probes in `/tmp/probes`
 `pre9_refuse_two63`, `pre9_refuse_inf`, `pre9_refuse_ninf`, `pre9_refuse_unary`,
 `pre9_refuse_list`, `pre9_refuse_dict` and `pre9_refuse_attr` are refused by name on both builds.
 `tools/diff_ids.py` is absent on this tree; `tools/update_manifest.py --check` passes.
+## 2026-10-27 -- pre335: the rbrbrbrbpre33 review's first pre-existing difference is already refused (job-pre335-10272125)
+
+The review recorded `99999999999999999999 ** 0` as a pre-existing difference: CPython's
+unbounded int makes the exact result 1, while AIL refuses the 20-digit base literal.  Reproduced
+it on both builds: this tree already refuses the construct by name at compile time
+(`int64 literal out of range: 99999999999999999999`), which the task allows, so no compiler
+change was needed.  The module-assignment spelling `VALUE = 99999999999999999999 ** 0` folds
+the whole expression to 1 and matches CPython, as do `(10 ** 20) ** 0`, the int64 boundaries
+and the existing wide-intermediate bases `(1 << 5000) ** 0`, `0 ** (1 << 5000)`,
+`1 ** (1 << 5000)` and `(-1) ** (1 << 5000)`.  The other two recorded items stay named
+refusals on both builds: `float(10 ** 400)` (CPython raises OverflowError at run time) and
+huge literal powers in an f-string or a `str.split` maxsplit.  Added
+`AIL_CURRENT/test_ail_pre335.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre335` on both builds: `p02_pow_zero_expr`, `p12_bounds` and
+`p14_route_pow` match CPython; `p01_pow_zero`, `p02_absorbing`, `p03_zero_bases`, `p04_negative`,
+`p05_routes`, `p06_huge_local`, `p07_fstring`, `p08_maxsplit`, `p09_float400`, `p10_huge_literal`,
+`p11_nested`, `p13_pow_one` and the route probes `p15_route_arg`, `p16_route_list`,
+`p17_route_attr`, `p18_route_dict`, `p19_route_return` are refused by name.  The earlier
+`p03_pow_zero_routes`, `p04_float400`, `p05_fstring` and `p06_maxsplit` probes also stay
+refused by name.  Final-state tests: `test_ail_pre335`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3`.  `tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-27 -- pre319: calling an earlier function-valued class attribute is already refused by name (job-pre319-10271538)
 
