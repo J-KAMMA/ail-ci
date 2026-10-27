@@ -47,6 +47,13 @@ jobs:
           git fetch -q origin "+refs/heads/$BR:refs/remotes/origin/$BR"
           git diff "$JB" "origin/$BR" -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json' > /tmp/job.diff
           git apply --3way --whitespace=nowarn /tmp/job.diff || echo "some hunks did not apply"
+          # the same rules as the gate (ci_integ.sh): the record files every job appends to are merged by union and the
+          # shard map is kept from integ; without this a clash in ail_check.py left conflict markers and every module
+          # "failed" to import
+          for f in $(git diff --name-only --diff-filter=U); do case "$f" in
+            *DEVLOG.md|*DIFFERENCES.md|AIL_CURRENT/ail_check.py) sed -i '/^<<<<<<< /d; /^=======$/d; /^>>>>>>> /d' "$f"; git add "$f";;
+            tools/ci_shards.json) git checkout HEAD -- "$f"; git add "$f";;
+          esac; done
           # the manifest pins every source file: regenerate it, or every job "breaks" the pin-checking modules
           python3 tools/update_manifest.py >/dev/null 2>&1 || true
           cd AIL_CURRENT
