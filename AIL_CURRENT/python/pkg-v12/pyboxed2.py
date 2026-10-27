@@ -11093,7 +11093,8 @@ class Compiler(boxclosure.ClosureMixin):
             for t in types:
                 if not (isinstance(t, ast.Name) and (t.id in EXC_IDS or t.id in self.classes)):
                     if isinstance(t, ast.Name) and t.id in ('ImportError', 'ModuleNotFoundError'):
-                        imports = [n for n in ast.walk(node) if isinstance(n, (ast.Import, ast.ImportFrom))]
+                        imports = [n for body in node.body for n in ast.walk(body)
+                                   if isinstance(n, (ast.Import, ast.ImportFrom))]
                         if imports:
                             names = [(a.name if isinstance(n, ast.Import) else n.module or '')
                                      for n in imports for a in (n.names if isinstance(n, ast.Import) else [n])]
@@ -11103,11 +11104,13 @@ class Compiler(boxclosure.ClosureMixin):
                                 "  write instead: move the import to the top of the file"
                                 % (', '.join(repr(name) for name in names), t.id))
                             refusal.source_line = imports[0].lineno
+                            refusal.source_column = imports[0].col_offset
                             raise refusal
                     refusal = Unsupported("a caught exception type %s (only builtin or user "
                                           "Exception subclasses are supported)" %
                                           getattr(t, 'id', type(t).__name__))
                     refusal.source_line = node.lineno
+                    refusal.source_column = node.col_offset
                     raise refusal
 
         has_finally = bool(node.finalbody)
