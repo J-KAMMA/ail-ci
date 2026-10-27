@@ -327,6 +327,23 @@ modules: test_ail_pre48, test_ail_exception_context, test_ail_exception_values_c
 test_ail_exception_values_app, test_ail_exception_aggregate_objects, test_ail_exc_str,
 test_ail_excfix, test_ail_raise_from, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3 (11 modules, 82 tests, 925 s, 0 failed, 1 skipped).
+## 2026-10-27 -- re-apply pre52: an optional import is refused by name at its own line (job-rbpre52-10261857)
+
+Re-applied the accepted pre52 change on the current tree.  `try: import html ... except
+ImportError:` reached the general emitter's try check, which refused `ImportError` as an
+unsupported caught exception type without a position.  The check now names the imports in the
+try body (`import of 'html' guarded by except ImportError`), points at the first import's line
+and column, and says to move it to the top of the file; `ModuleNotFoundError` gets the same
+message.  An import only in a handler, `else` or `finally` is not called guarded, so it keeps
+the caught-type refusal, now located at the `try`.  Other unsupported caught types are located
+at their `try` too.  `except Exception` is unchanged.  Added the accepted
+`AIL_CURRENT/test_ail_pre52.py` (fifteen refusals and four accepted programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  `tools/diff_ids.py` is not
+present on this tree; `tools/update_manifest.py --check` passes.  Probes `/tmp/probes/pre52_*`
+(18 programs: direct/from/two-module/alias/tuple, ModuleNotFoundError, nested def, if, loop,
+no-import, other type, handler/else/finally, `except Exception`, ZeroDivisionError, plain
+imports) match CPython or are refused by name on both builds.  Tests on the final tree:
+`test_ail_pre52`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
 
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
