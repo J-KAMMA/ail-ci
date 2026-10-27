@@ -293,7 +293,7 @@ expression for it. Positive `9223372036854775808` is still refused at compile ti
 ```
 overflow in + - * and unary -      traps: the program stops and says "integer overflow"
 abs(INT64_MIN)                     traps; there is no int64 answer
-2 ** 63                            traps
+2 ** 63                            refused at compile time as a constant; the same value reached through a variable traps
 INT64_MIN // -1                    traps; the exact answer is 2**63, which has no int64 answer
 ```
 
@@ -603,14 +603,15 @@ Two more findings from the same audit were recorded here and have since been fix
   constant-exponent case, `ail_ipow`, whenever both operands are integers.** It used to route
   unconditionally through `pow()` and lose exactness above 2^53, because a variable exponent's sign
   cannot be checked at compile time the way a constant's can. `pow()` is still exactly right, and
-  unchanged, when the base is a float or the exponent is a float constant. Two exactness boundaries
-  follow directly from routing through `ail_ipow`, and both are traps rather than silent wrong
-  answers, matching how this document already treats every other integer edge:
+  unchanged, when either operand is a float. Two exactness boundaries follow directly from routing
+  through `ail_ipow`, and both are traps rather than silent wrong answers, matching how this
+  document already treats every other integer edge:
   - a constant integer base raised to a computed exponent (`2 ** n`, `(-2) ** n`, `10 ** n`) is
     refused by name at compile time: the exponent is unknown then, and an int64 answer may not
     exist, so the construct is outside the subset instead of stopping mid-run (this includes an
     exponent whose run-time value turns out to be a float). A constant exponent is still folded,
-    and refused by name only when its exact result leaves int64;
+    and refused by name only when its exact result leaves int64; a purely constant integer
+    expression such as `2 ** 63` is refused at compile time before emission;
   - a variable base with a computed exponent still uses `ail_ipow`: an exact integer power that
     overflows int64 traps, and a variable exponent that turns out negative also traps, where
     Python would return a float (`2 ** -1` is `0.5`). A *constant* negative exponent still takes
