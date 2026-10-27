@@ -1,3 +1,24 @@
+## 2026-10-27 -- re-apply pre281: empty sequence repeated by a huge count (job-rbpre281-10270939)
+
+Re-applying the accepted pre281 change on the current integration tree.  The current tree already
+has pre271's empty-list skip in `ail_op_imul` (with the bare `MemoryError` guard for an oversized
+repeat), so that site kept both fixes unchanged.  The remaining sites from pre281 are applied: the
+list/tuple operator `ail_op_mul`, the string repeat `ail_str_repeat`, and the v1
+`ail__repeat_str`/`ail__repeat_vec` helpers now skip the repeat loop when the sequence has no
+elements, so `[] * 10**18`, `() * 10**18`, `"" * 10**18` and `b"" * 10**18` return at once instead
+of looping over the huge count.  Negative, zero, bool, non-empty and aliased sequences are
+unchanged, and a huge count reaching the statement through an argument, a list item, an attribute
+or a dict value matches CPython on both builds.
+`AIL_CURRENT/test_ail_pre281.py` (4 tests, both builds) is added and registered in
+`ail_check.MODULES` and `ci_shards.json`.  `AIL_CURRENT/MANIFEST.json` was refreshed (the new
+module is pinned after `git add`); `tools/update_manifest.py --check` passes.  `tools/diff_ids.py`
+is not present on this tree.
+Probes in `/tmp/probes/pre281` on both builds: `p1_basic`, `p2_types`, `p3_alias`, `p4_routes`,
+`p5_negative_empty`, `p6_otherseq`, `p7_growth`, `p8_nested`, `p9_empty_big`, `p10_empty_routes`
+and `p11_nonempty_sanity` match CPython; `p6b_bytearray_alias` still shows the pre-existing
+bytearray `*=` aliasing difference recorded as `C?-job-rbpre281-10270939-2`.
+Final-state tests: `test_ail_pre281` (41.9 s), `test_ail_safetynet` (100.2 s), `test_ail_files`
+(109.9 s), `test_ail_corpus_findings3` (169.4 s): 4 modules, 270 s, 0 failed.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
