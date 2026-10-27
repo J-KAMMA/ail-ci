@@ -1207,7 +1207,7 @@
     "python/pkg-v12/sqllower.py": "0a43e48b876de8b4be906ba899a6b278ab7cc7a7c2840a969b65f10cff3881d6",
     "test_ail_sqlite.py": "63395b5f32565b31449f6037d1af75b1a099d449cec45d77a92244d62733017a",
     "python/pkg-v12/ailsql_core.h": "3c7ee503046f6fa8ae679ad2f15aeeb59b16e6d9317a7b0f7365682e24824f01",
-    "python/pkg-v12/exctext.py": "e4ba6b04499d18aaca0c6c183245cfb092d5d1e00b682b5c1727f873121f1ae0",
+    "python/pkg-v12/exctext.py": "eb7ba0747827e7b41ebaa9b45124544eabf1f29fbb2792ce83d4ec0938b514b9",
     "python/pkg-v12/userexc.py": "3c722e95f6e3565dd7491bbfee58841d841f49e1ec71750a571089d6c61f3f99",
     "test_ail_exc_str.py": "32ed7953c2e142287bc32551403b7772036c35d614cae2e74c3b820e6b219188",
     "python/pkg-v12/typedinherit.py": "f6ac278aaccce2301205b1bcd1f431bc4e65f8e4c8c9aa64baddf9f5e2309e0d",
@@ -1491,7 +1491,7 @@
     "test_ail_fuzz28.py": "ad83b2708aa5bcf71066c7de8a3173d19380a2173650c5802c81832a3ba02d16",
     "test_ail_fuzz4.py": "d9e03e7e309c61ba2d468381bdde436fcf0285d4b93b5901d1095116335d8544",
     "test_ail_qtest4.py": "0c52976857770ac11df4d0101b7e788dcda56144a091f975b61a90fbee5d20fe",
-    "test_ail_pre317.py": "f5baa5ddc24b53bb94ae3a09c616baf9f55d1e36fcd6fc862359cb0aa1e45029"
+    "test_ail_pre317.py": "9234b751b4db871e67371990d4c7daca6a1083f8cb548c0dbad5692c2c99725e"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1765,7 +1765,7 @@
     "python/pkg-v12/sqllower.py": "0a43e48b876de8b4be906ba899a6b278ab7cc7a7c2840a969b65f10cff3881d6",
     "test_ail_sqlite.py": "63395b5f32565b31449f6037d1af75b1a099d449cec45d77a92244d62733017a",
     "python/pkg-v12/ailsql_core.h": "3c7ee503046f6fa8ae679ad2f15aeeb59b16e6d9317a7b0f7365682e24824f01",
-    "python/pkg-v12/exctext.py": "e4ba6b04499d18aaca0c6c183245cfb092d5d1e00b682b5c1727f873121f1ae0",
+    "python/pkg-v12/exctext.py": "eb7ba0747827e7b41ebaa9b45124544eabf1f29fbb2792ce83d4ec0938b514b9",
     "python/pkg-v12/userexc.py": "3c722e95f6e3565dd7491bbfee58841d841f49e1ec71750a571089d6c61f3f99",
     "test_ail_exc_str.py": "32ed7953c2e142287bc32551403b7772036c35d614cae2e74c3b820e6b219188",
     "python/pkg-v12/typedinherit.py": "f6ac278aaccce2301205b1bcd1f431bc4e65f8e4c8c9aa64baddf9f5e2309e0d",
@@ -2049,6 +2049,6 @@
     "test_ail_fuzz28.py": "ad83b2708aa5bcf71066c7de8a3173d19380a2173650c5802c81832a3ba02d16",
     "test_ail_fuzz4.py": "d9e03e7e309c61ba2d468381bdde436fcf0285d4b93b5901d1095116335d8544",
     "test_ail_qtest4.py": "0c52976857770ac11df4d0101b7e788dcda56144a091f975b61a90fbee5d20fe",
-    "test_ail_pre317.py": "f5baa5ddc24b53bb94ae3a09c616baf9f55d1e36fcd6fc862359cb0aa1e45029"
+    "test_ail_pre317.py": "9234b751b4db871e67371990d4c7daca6a1083f8cb548c0dbad5692c2c99725e"
   }
 }

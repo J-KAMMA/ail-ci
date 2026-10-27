@@ -100,6 +100,52 @@ def main() -> None:
 main()
 '''
 
+ALIAS_NAME = r'''def main() -> None:
+    try:
+        raise ValueError("a")
+    except ValueError as e:
+        x = e
+        x.args[0] = "z"
+        print(e.args)
+main()
+'''
+
+ALIAS_LIST = r'''def main() -> None:
+    try:
+        raise ValueError("a")
+    except ValueError as e:
+        xs = [e]
+        xs[0].args[0] = "z"
+        print(e.args)
+main()
+'''
+
+ALIAS_ATTRIBUTE = r'''class Box:
+    def __init__(self) -> None:
+        self.e = None
+
+
+def main() -> None:
+    try:
+        raise ValueError("a")
+    except ValueError as e:
+        b = Box()
+        b.e = e
+        b.e.args[0] = "z"
+        print(e.args)
+main()
+'''
+
+ALIAS_DICT = r'''def main() -> None:
+    try:
+        raise ValueError("a")
+    except ValueError as e:
+        d = {"e": e}
+        d["e"].args[0] = "z"
+        print(e.args)
+main()
+'''
+
 VALUE_ARGUMENT = r'''def main(v: str) -> None:
     try:
         raise ValueError("a")
@@ -197,7 +243,8 @@ class Pre317Tests(Base):
                 self.refused(text, "e.args[i]", mode=mode)
 
     def test_value_routes_are_refused(self):
-        for text in (VALUE_ARGUMENT, VALUE_LIST, VALUE_ATTRIBUTE, VALUE_DICT):
+        for text in (VALUE_ARGUMENT, VALUE_LIST, VALUE_ATTRIBUTE, VALUE_DICT,
+                     ALIAS_NAME, ALIAS_LIST, ALIAS_ATTRIBUTE, ALIAS_DICT):
             for mode in ("typed", "gonly"):
                 self.refused(text, "e.args[i]", mode=mode)
 
