@@ -33,6 +33,7 @@ def show(tag, fn):
 
 
 xs = [1, 2, 3]
+neg = 0 - 1
 for r in (-3, -1, 0, 1, 3, 4):
     show("perm " + repr(r), lambda r=r: itertools.permutations(xs, r))
     show("comb " + repr(r), lambda r=r: itertools.combinations(xs, r))
@@ -42,9 +43,9 @@ show("perm None", lambda: itertools.permutations(xs, None))
 show("perm kw None", lambda: itertools.permutations(xs, r=None))
 show("comb None", lambda: itertools.combinations(xs, None))
 show("cwr None", lambda: itertools.combinations_with_replacement(xs, None))
-show("perm empty -1", lambda: itertools.permutations([], -1))
-show("comb empty -1", lambda: itertools.combinations([], -1))
-show("cwr empty -1", lambda: itertools.combinations_with_replacement([], -1))
+show("perm empty -1", lambda: itertools.permutations([], neg))
+show("comb empty -1", lambda: itertools.combinations([], neg))
+show("cwr empty -1", lambda: itertools.combinations_with_replacement([], neg))
 show("perm empty 0", lambda: itertools.permutations([], 0))
 show("comb empty 0", lambda: itertools.combinations([], 0))
 show("cwr empty 0", lambda: itertools.combinations_with_replacement([], 0))
