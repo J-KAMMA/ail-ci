@@ -4,7 +4,9 @@ The pre334 review recorded that `tools/ci_shards.py --check` failed because four
 (`test_ail_fuzz4`, `test_ail_pre126`, `test_ail_pre59`, `test_ail_pre61`) were listed twice in
 `ail_check.MODULES`, so `--update` placed each of them on two shards.  The module list is now
 unique, and a stale assignment file cannot reintroduce a duplicate: `build()` keeps only the
-first placement of each module.
+first placement of each module.  A module that a later change adds before the file is
+regenerated is spread over the shards by name and still runs in exactly one, so `--check`
+accepts it; only a stale or duplicated name is an error.
 """
 import collections
 import importlib.util
@@ -42,7 +44,17 @@ class CiShardsAssignment(unittest.TestCase):
         self.assertEqual(len(mapped), len(set(mapped)),
                          'duplicated: %s' % ' '.join(sorted(
                              name for name, count in collections.Counter(mapped).items() if count > 1)))
-        self.assertEqual(set(mapped), set(ail_check.MODULES))
+        # A module added by a later change is spread over the shards by name even before the
+        # file is regenerated (the workflow's `--shard` does that), so the file need not list
+        # every module; a stale name in the file is still an error.
+        self.assertEqual(sorted(set(mapped) - set(ail_check.MODULES)), [])
+        ci = load_ci_shards()
+        planned = [name for index in range(data['shards'])
+                   for name in ci.shard_modules(data, index)]
+        counts = collections.Counter(planned)
+        self.assertEqual([name for name, count in counts.items() if count > 1], [],
+                         'a module runs in two shards')
+        self.assertEqual(set(counts), set(ail_check.MODULES))
 
     def test_check_passes(self):
         result = subprocess.run([sys.executable, str(TOOLS / 'ci_shards.py'), '--check'],

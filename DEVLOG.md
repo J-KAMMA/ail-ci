@@ -1,3 +1,32 @@
+## 2026-10-27 -- pre346: accept modules added after the shard file was generated (job-rbpre346-10280725)
+
+Applied alone on today's integ, `test_ail_pre346` failed.  Four modules added by changes merged
+after this branch's base (`test_ail_fuzz59`, `test_ail_pre360`, `test_ail_pre363`,
+`test_ail_pre365`) are in `ail_check.MODULES` but not in the `tools/ci_shards.json` this change
+regenerated, so `tools/ci_shards.py --check` exited 1 with `unassigned:` and
+`test_assignment_places_every_module_once` failed on exact set equality.
+
+The CI contract already covers that case: `.github/workflows/tests.yml` documents that a module
+missing from the file "is still spread over the shards by name", and `--shard` /
+`shard_modules()` do exactly that.  `--check` now fails only on a stale (`unknown`) or duplicated
+name and still reports `unassigned`; the test now checks that every current module reaches
+exactly one shard through `shard_modules()` and that no assigned name is stale or duplicated.
+The original pre346 defect (a duplicated placement, from the four duplicate `MODULES` entries)
+still fails the check.  `tools/update_manifest.py` was run and `--check` passes.
+
+The report also listed `test_ail_safetynet`.  It passes on this tree and on integ + this change
+(5 tests, OK, 106 s), so that failure could not be reproduced, as recorded for the pre345
+rebase.
+
+Probes in `/tmp/probes/pre346fix` (Python tooling, so plain CPython 3.12; `cmp.sh` targets AIL
+programs and no language behaviour changed): `p01_missing_module_ok` (missing and completely
+empty assignment accepted, each module still in one shard), `p02_duplicate_fails` (duplicated
+placement exits 1 and `build()` repairs it), `p03_stale_name_fails` (unknown name exits 1),
+`p04_build_dedup` (duplicated input and empty module list), `p05_shard_coverage` (real tree and a
+subset file: every module once, stale name not run) and `p06_integ_added_modules` (the four
+added modules: `--check` exits 0 and all 515 are planned once).  All PASS.  Final-state tests:
+`test_ail_pre346`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-10-27 -- re-apply pre346 on the integration tree (job-rbpre346-10280548)
 
 Re-applied the accepted pre346 CI-shard fix on top of this tree.  `ail_check.MODULES` had the four

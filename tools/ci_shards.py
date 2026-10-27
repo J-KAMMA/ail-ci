@@ -5,7 +5,7 @@
     python3 tools/ci_shards.py --report       # predicted cost of each shard
     python3 tools/ci_shards.py --update       # keep the assignment, add new modules, drop removed ones
     python3 tools/ci_shards.py --rebalance    # recompute everything from ~/.cache/ail_par_check.json
-    python3 tools/ci_shards.py --check        # exit 1 if a module has no shard
+    python3 tools/ci_shards.py --check        # exit 1 if the file names an unknown or duplicated module
 
 tools/ci_shards.json holds the weights (relative seconds from the timing cache that par_check.py
 keeps) and the assignment. A shard runs its modules with `par_check.py -j 4`, so its cost is the
@@ -149,7 +149,9 @@ def main():
     for label, names in (('unassigned', missing), ('unknown', extra), ('duplicated', duplicates)):
         if names:
             print('%s: %s' % (label, ' '.join(names)))
-    return 1 if missing or extra or duplicates else 0
+    # `--shard` still spreads an unassigned module over the shards by name, so only a stale
+    # (unknown) or duplicated name makes the file disagree with what CI runs.
+    return 1 if extra or duplicates else 0
 
 
 if __name__ == '__main__':
