@@ -1,3 +1,28 @@
+## 2026-10-27 -- pre324: class method default reading an earlier class-body name (job-pre324-10271601)
+
+The pre304 review's first pre-existing difference (p18) still reproduced on this tree:
+`x = 100; class C: x = 3; def m(self, a=x): ...` printed `100` on both builds, because a
+non-literal method default is hoisted to module scope before the class body runs, where CPython
+evaluates it in the class namespace and prints `3`.  A method/property bound earlier in the same
+class body was wrong the same way (`a=x` became the module global instead of the function).
+`_hoist_defaults` now refuses this one construct by name on both builds
+(`a default in method C.m reads the class-body name x; ... CPython evaluates the default in the
+class body`).  The scan only counts names bound earlier in the class body and only loads that the
+def statement evaluates now: a class attribute bound later, an unrelated class name, a module
+global, a module function's default, and a lambda/comprehension body (which resolves globals) are
+unchanged.
+
+Probes in `/tmp/probes/pre324` on both builds: `p18_default_class_attr`, `p18_default_expr`,
+`p18_with_init`, `p18_init_before_attr`, `p18_kwonly`, `p18_method_earlier`, `p18_alias_attr`,
+`p18_class_attr_route`, `p18_negative_attr`, `p18_empty_attr`, `p18_builtin_shadow`,
+`p18_comp_outer_class` and `p18_lambda_default_class` are refused by name; `p18_default_later`,
+`p18_no_class_attr`, `p18_lambda_global`, `p18_comp_body_global` and `p18_module_func` match
+CPython.  Final-commit tests: `test_ail_pre324`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` (4 modules, 341 s, 0 failed); the related
+`test_ail_fuzz1.NonLiteralDefaults.test_class_attribute_default_refused_or_same` passes.  The
+full `test_ail_fuzz1` module has two unrelated environment failures (`difffuzz` is not installed).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an
