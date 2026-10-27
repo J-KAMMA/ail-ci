@@ -5,10 +5,14 @@ reaches the call through a parameter, list item, class/instance attribute or dic
 constant folder could not see it, so both builds compiled the program and then stopped with
 ``integer overflow`` where CPython prints the bignum.  The checker now refuses the symmetric
 shape -- a constant exponent of at least 63 (2**63 already leaves int64) with a base computed
-at run time -- and binds a plain function's module-level constant arguments, so the exact
-result is folded when the base and exponent both arrive as parameters.  Safe bases (0/1/-1,
-bool and float), exponents below 63, negative exponents and a program that binds its own
-``pow`` keep matching CPython.
+at run time -- and binds a plain function's module-level constant arguments when the function
+is not called anywhere else, so the exact result is folded when both operands arrive as
+parameters.  A function that is also called inside another function, a lambda or itself is
+left unbound, so the existing constant-base rule still refuses it by name instead of the
+program stopping with ``integer overflow`` at run time.  Literal safe bases (0/1/-1, bool and
+float), exponents below 63, negative exponents and a program that binds its own ``pow`` keep
+matching CPython; a safe base that reaches the call through a parameter the bindings cannot
+pin down is refused by name rather than run.
 """
 import os
 import subprocess
@@ -32,6 +36,16 @@ REFUSED = (
     ('repeated_call', 'def power(b):\n    print(pow(b, 63))\n\n\npower(2)\npower(2)\n'),
     ('alias_inside', 'def power(b):\n    p = pow\n    print(p(b, 63))\n\n\npower(2)\n'),
     ('never_called', 'def power(b):\n    print(pow(b, (3**100)>>150))\n'),
+    ('nested_site_disagrees', 'def power(e):\n    return pow(2, e)\n\n\n'
+                              'print(power(10))\n\n\ndef g():\n    return power(100)\n\n\n'
+                              'print(g())\n'),
+    ('recursive_site', 'def power(e):\n    if e < 50:\n        return power(e * 100)\n'
+                       '    return pow(2, e)\n\n\nprint(power(10))\n'),
+    ('lambda_site', 'def power(e):\n    return pow(2, e)\n\n\nprint(power(10))\n'
+                    'h = lambda: power(100)\nprint(h())\n'),
+    ('shadowed_nested_argument', 'n = 2\n\n\ndef power(e):\n    return pow(2, e)\n\n\n'
+                                 'print(power(n))\n\n\ndef g():\n    n = 100\n    return power(n)\n'
+                                 '\n\nprint(g())\n'),
 )
 
 SAFE = r'''def power(base, exponent):
@@ -114,7 +128,7 @@ class Pre364(unittest.TestCase):
                         status, _, output = build_run(directory, text, name, general)
                         self.assertNotEqual(status, 0, output)
                         self.assertTrue('int64 constant expression out of range' in output
-                                        or 'base computed at run time' in output, output)
+                                        or 'computed at run time' in output, output)
                         self.assertNotIn('integer overflow', output)
                         self.assertNotIn('Traceback', output)
 

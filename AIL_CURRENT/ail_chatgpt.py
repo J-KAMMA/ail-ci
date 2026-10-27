@@ -1757,9 +1757,12 @@ def _pow_call_value(node, known):
 def _pow_parameter_bindings(tree, known):
     """Constant values reaching a plain function's parameters from module-level call sites.
 
-    A parameter is bound only when the function is not used as a value, every call site agrees
-    on its constant value, and the body never stores it; anything less stays unknown.  The
-    result splits ints (the folding map) from other scalars (the safe-base map)."""
+    A parameter is bound only when the function is not used as a value, is never called
+    outside module scope, every module-level call site agrees on its constant value, and the
+    body never stores it; anything less stays unknown.  A call inside a function, lambda or
+    the function's own body could pass a different value, so it disqualifies the function
+    instead of being folded away.  The result splits ints (the folding map) from other
+    scalars (the safe-base map)."""
     definitions = {}
     duplicates = set()
     for node in tree.body:
@@ -1773,11 +1776,13 @@ def _pow_parameter_bindings(tree, known):
     if not definitions:
         return {}
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    module_scope = {id(node) for node in _walk_module_scope(tree)}
     escaped = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in definitions:
             parent = parents.get(node)
-            if not (isinstance(parent, ast.Call) and parent.func is node):
+            if not (isinstance(parent, ast.Call) and parent.func is node
+                    and id(parent) in module_scope):
                 escaped.add(node.id)
     calls = {}
     for node in _walk_module_scope(tree):

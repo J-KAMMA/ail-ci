@@ -1,3 +1,32 @@
+## 2026-10-27 -- pre364 follow-up: a function called outside module scope is not bound (job-pre364-10280336)
+
+The review of the first commit found that `_pow_parameter_bindings` treated module-level call
+sites as the only calls.  A function also called from another function, a lambda or itself
+still had its module-level arguments folded, which suppressed the pre-existing constant-base
+refusal: `def f(e): return pow(2, e); print(f(10)); def g(): return f(100)` printed 1024 and
+then stopped with `integer overflow` on both builds, where the base tree refused `pow(2, e)`
+by name (and CPython prints the bignum).  A recursive `f(e * 100)` and mixed module/nested
+sites had the same shape.  A definition is now bound only when every load of its name is the
+callee of a module-scope call; a call inside a function or lambda, or in the function's own
+body, makes it escaped and leaves the parameters unknown, so the constant-base rule fires.
+Calls from module scope still fold as before.
+
+Probes in `/tmp/probes/pre364fix` (both builds via `cmp.sh`, on this tree and `/tmp/base`):
+refused by name here -- `p01` (nested disagreeing site), `p02` (recursive), `p03` (mixed
+sites; base stopped with `integer overflow`), `p04` (nested agreeing site), `p05` (lambda),
+`p06` (nested argument shadowing a module constant), `p07` (module-only both parameters,
+exact; base overflowed), `p08` (function used as a value), `p12` (module keyword arguments,
+exact; base overflowed), `p13` (class-body call).  Match CPython on both builds -- `p09`
+(float through a nested call), `p10` (small ints through a nested call), `p11` (keyword
+arguments through a nested call), `p14` (call in a list display at module scope).  `p01`,
+`p02`, `p04`-`p06`, `p08` and `p13` reproduce the base tree's named refusal, so the runtime
+overflow the review found is gone.
+
+`test_ail_pre364.py` gains four refused cases (`nested_site_disagrees`, `recursive_site`,
+`lambda_site`, `shadowed_nested_argument`; 14 refused programs, 2 matching, both builds).
+Its three tests pass; `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass on the final commit.  `tools/update_manifest.py` was run and
+`--check` passes.
 ## 2026-10-27 -- pre364: a wide constant `pow()` exponent with a routed base is refused (job-pre364-10280336)
 
 The rbpre331 record left one pre-existing item open: a constant `pow()` exponent reaching the
