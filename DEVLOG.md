@@ -1,3 +1,40 @@
+## 2026-10-27 -- pre364: a wide constant `pow()` exponent with a routed base is refused (job-pre364-10280336)
+
+The rbpre331 record left one pre-existing item open: a constant `pow()` exponent reaching the
+call through a parameter, list item, attribute or dict value still stopped with
+`integer overflow`.  On this tree the literal-base spellings are already refused, but routing
+the integer base the same way still differed on both builds:
+`def power(b): print(pow(b, (3**100)>>150)); power(2)` (and the list, class-attribute,
+instance-attribute and dict-value spellings) compiled and then stopped with `integer overflow`
+where CPython prints the bignum.  The checker had a rule for a constant base with a run-time
+exponent but no symmetric rule, and it could not see a base that arrived through a route.
+`_check_int64_pow_constants` now refuses a constant exponent of at least 63 (2**63 already
+leaves int64) with a base computed at run time, leaving statically known bool, float and
+non-number bases alone, and `_pow_parameter_bindings` binds a plain function's module-level
+constant call arguments (undecorated, not used as a value, no conflicting sites, no body
+store), splitting ints for the folding map from other scalars for the safe-base check.  So
+`pow(b, e)` called once with `2` and `(3**100)>>150` folds to the exact result and is refused
+with `int64 constant expression out of range`.
+
+Probes in `/tmp/probes/pre364` (both builds via `cmp.sh`), refused by name: `r01_arg` (exact),
+`r02_list`, `r03_attr_class`, `r04_attr_instance`, `r05_dict`, `r06_param63` (exact), `r13`
+(both parameters, exact), `r15`, `r16` (two different call sites), `r17` (function used as a
+value), `r18` (parameter reassigned in the body), `r19` (alias inside), `r20` (same value at
+two call sites, exact), `r24` (never called) and `r25` (module name bound to a float).  Match
+CPython: `r07`/`r08` (exponent 62, bases 2/-2), `r09` (float literal base), `r10` (bool
+literal base), `r11` (negative exponent), `r12` (small exponent), `r21`/`r22`/`r23` (float,
+bool and 1 passed through a module-level call), `r26` (in-range argument) and the recorded
+`p01`-`p07` literal-base controls.  `r18` and `r25` are named refusals rather than CPython
+matches: a reassigned parameter and a float module constant are not folded by these maps.
+`**` with both operands routed (`q12`) still stops with the pre-existing `integer overflow`.
+
+Added `AIL_CURRENT/test_ail_pre364.py` (3 tests, 10 refused programs and 2 matching programs,
+both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`; DIFFERENCES
+row `C?-job-pre364-10280336-1`.  `test_ail_pre364`, `test_ail_pre331`, `test_ail_pre299`,
+`test_ail_pre294`, `test_ail_pre305` and `test_ail_pre351` pass, as do the final-state
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (8 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --check` reports
+only the four pre-existing duplicate shard entries (fuzz4, pre126, pre59, pre61).
 ## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
 
 The rbrbrbrbrbpre33 review's first pre-existing difference was `x = 10; print(x**40)`, a
