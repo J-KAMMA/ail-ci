@@ -7,8 +7,12 @@ Python's float answer`) while the general path printed CPython's float.  The leg
 path now leaves such a power to the general path, whose tagged value keeps the int result for a
 non-negative exponent and returns the float for a negative one.  Constant exponents keep their old
 int/float lowering, and the whole-program fallback is the existing mechanism (no output or message
-changes in programs without a computed integer power).  The review's second item, out-of-int64
-integer powers, was not changed and remains a difference.
+changes in programs without a computed integer power).  A function that declares `-> int` keeps the
+exact-integer path instead: its result is already committed to int64 at the ABI boundary, so a
+computed power there cannot become CPython's float, and `ail_ipow`'s existing run-time refusal for
+a negative exponent stands (this is the shape used by the `__pow__` method in `test_ail_dunders`,
+which is built on the typed path alone).  The review's second item, out-of-int64 integer powers,
+was not changed and remains a difference.
 
 Probes in `/tmp/probes/pre321` on both builds: `p01_var_var`, `p02_local`, `p03_routes`,
 `p04_pow_compare`, `p05_const_exp`, `p06_zero`, `p07_float_base`, `p08_exp_routes`,

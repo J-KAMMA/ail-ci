@@ -563,6 +563,18 @@ HANDLE = 'handle'
 FLOOR_BIN = {k: v for k, v in STRICT_BIN.items() if k in (ast.Mod, ast.FloorDiv)}
 
 
+def _declares_int_return(ctx):
+    """Whether the function being compiled has an explicit `-> int` annotation.
+
+    Such a function has already fixed its result as an int64 at the ABI boundary, so a power
+    with a variable integer exponent cannot fall back to a float there; the exact-integer helper
+    stays, with its own run-time refusal for a negative exponent. An unannotated function (or
+    one declared to return a float) can leave the whole program to the general path instead."""
+    fn = getattr(ctx, 'fn_node', None)
+    ann = getattr(fn, 'returns', None) if fn is not None else None
+    return isinstance(ann, ast.Name) and ann.id in (INT, '__ail_checked_int__')
+
+
 def _int_const(node):
     """The value of `node` if it is a compile-time integer constant, else None.
 
@@ -1577,12 +1589,18 @@ def _etype(node, ctx):
             # Python's is. A variable exponent's sign is not known here, and CPython returns a
             # float for a negative one (`2 ** -1` is `0.5`); the typed path's exact int64
             # `ail_ipow` cannot represent that, so leave the whole program to the general path,
-            # which carries the value's type at run time and already matches CPython.
+            # which carries the value's type at run time and already matches CPython. A function
+            # that declares `-> int` has already committed its result to an int64, though: there
+            # the exact integer power is the only shape the typed path can honour, and a negative
+            # exponent keeps ail_ipow's existing run-time refusal (the `__pow__` method in the
+            # dunders tests is exactly this shape, and is built on the typed path alone).
             if _etype(node.left, ctx) == INT:
                 cv = _int_const(node.right)
                 if cv is not None:
                     return INT if cv >= 0 else FLT
                 if _etype(node.right, ctx) == INT:
+                    if _declares_int_return(ctx):
+                        return INT
                     raise Unsupported(
                         'a power whose integer exponent is not a constant may be negative at run '
                         'time, where CPython returns a float (2 ** -1 is 0.5); the typed path '
