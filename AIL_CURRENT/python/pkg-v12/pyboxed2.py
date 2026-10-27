@@ -3393,9 +3393,8 @@ class Compiler(boxclosure.ClosureMixin):
 
     # ------------------------------------------------------------------------- function register
     def _register_function(self, node, cname=None, is_method=False, owner_class=None):
-        if node.args.posonlyargs:
-            raise Unsupported('positional-only parameters in def %s' % node.name)
-        params = [a.arg for a in node.args.args]
+        posonly = [a.arg for a in node.args.posonlyargs]
+        params = posonly + [a.arg for a in node.args.args]
         kwonly = [a.arg for a in node.args.kwonlyargs]
         vararg = node.args.vararg.arg if node.args.vararg else None
         kwarg = node.args.kwarg.arg if node.args.kwarg else None
@@ -3440,7 +3439,7 @@ class Compiler(boxclosure.ClosureMixin):
         cname = cname or ('pf_' + node.name)
         all_params = list(params) + list(kwonly) + ([vararg] if vararg else []) + \
             ([kwarg] if kwarg else [])
-        info = {'node': node, 'params': params, 'kwonly': kwonly, 'vararg': vararg, 'kwarg': kwarg,
+        info = {'node': node, 'params': params, 'posonly': posonly, 'kwonly': kwonly, 'vararg': vararg, 'kwarg': kwarg,
                'defaults': defaults, 'kw_defaults': kw_defaults, 'cname': cname,
                'is_method': is_method, 'is_static': is_static, 'owner_class': owner_class,
                'lru_cache': lru, 'all_params': all_params,
@@ -3758,10 +3757,9 @@ class Compiler(boxclosure.ClosureMixin):
                self.global_slots['class:generator'], info['cname'], c_str_literal(info['node'].name)))
 
     def _register_nested(self, node, outer_ctx):
-        # *args is packed into a tuple at the call; **kwargs and positional-only parameters are not modelled
-        if node.args.kwarg or node.args.posonlyargs:
-            raise Unsupported('a nested def %s with **kwargs or positional-only parameters'
-                              % node.name)
+        # *args is packed into a tuple at the call; **kwargs are not modelled
+        if node.args.kwarg:
+            raise Unsupported('a nested def %s with **kwargs' % node.name)
         if node.decorator_list:
             raise Unsupported('a decorator on nested def %s' % node.name)
         # CPython binds the function when the def statement runs; a call textually before it (or
@@ -3777,7 +3775,8 @@ class Compiler(boxclosure.ClosureMixin):
             # the name can hold that value when the call runs.
             if node.name in outer_ctx.slot_of:
                 outer_ctx.nested_def_may_rebind.add(node.name)
-        positional = [a.arg for a in node.args.args]
+        posonly = [a.arg for a in node.args.posonlyargs]
+        positional = posonly + [a.arg for a in node.args.args]
         vararg = node.args.vararg.arg if node.args.vararg else None
         kwonly = [a.arg for a in node.args.kwonlyargs]
         defaults = dict(zip(positional[len(positional) - len(node.args.defaults):], node.args.defaults))
@@ -3825,7 +3824,7 @@ class Compiler(boxclosure.ClosureMixin):
         by_cell = [nm for nm in free if nm in outer_cells]
         by_ptr = [nm for nm in free if nm in nonlocal_names and nm not in by_cell]
         by_val = [nm for nm in free if nm not in by_cell and nm not in by_ptr]
-        info = {'node': node, 'params': params, 'cname': cname, 'by_val': by_val, 'by_ptr': by_ptr,
+        info = {'node': node, 'params': params, 'posonly': posonly, 'cname': cname, 'by_val': by_val, 'by_ptr': by_ptr,
                 'by_cell': by_cell, 'positional': positional, 'vararg': vararg, 'kwonly': kwonly,
                 'defaults': defaults, 'default_inits': default_inits}
         outer_ctx.nested_funcs[node.name] = info
@@ -3940,6 +3939,8 @@ class Compiler(boxclosure.ClosureMixin):
         if extra and not vararg:
             raise Unsupported('%s() called with the wrong number of arguments' % name)
         for k, v in kwargs.items():
+            if k in info.get('posonly', ()):
+                raise Unsupported('%s() got the positional-only argument %s as a keyword' % (name, k))
             if k not in positional and k not in kwonly or k in bound:
                 raise Unsupported('%s() called with the keyword argument %r it cannot take' % (name, k))
             bound[k] = v
@@ -5114,7 +5115,8 @@ class Compiler(boxclosure.ClosureMixin):
     # the refusals of `_percent_format` that the run-time formatter (safetyrt.FMT) answers instead
     _PCT_RUNTIME = ('% formatting with too few arguments', 'a % directive this compiler does not recognise',
                     "the '#' flag in %-format", 'precision on an int', '%r with a width or precision',
-                    '% formatting with too many arguments')
+                    '% formatting with too many arguments',
+                    'conversion of a value that is not proven to be an int')
 
     def _percent_runtime(self, node, ctx):
         """`fmt % args` formatted when the program runs (CPython's printf-style rules, safetyrt.FMT)."""
@@ -5161,6 +5163,11 @@ class Compiler(boxclosure.ClosureMixin):
                 buf = []
             if argi >= len(argcs):
                 raise Unsupported('%% formatting with too few arguments')
+            if typ in ('d', 'i', 'u') and self.infer_kind(arg_nodes[argi], ctx) not in ('int', 'bool'):
+                # CPython's %d/i/u also accept a float (truncating it, and raising on inf/nan),
+                # which ail_obj_format's 'd' spec deliberately does not; let the run-time
+                # formatter own that conversion instead of compiling a narrower one.
+                raise Unsupported('a %%%s conversion of a value that is not proven to be an int' % typ)
             val = argcs[argi]
             argi += 1
             if typ == 'd':
@@ -5194,7 +5201,7 @@ class Compiler(boxclosure.ClosureMixin):
                     raise Unsupported("the '#' flag in %%-format %r (not built; CPython "
                                       "only differs at precision 0)" % fmt_str[i:i + 6])
                 if prec is not None and typ == 'd':
-                    raise Unsupported('%%.%dd precision on an int (not built; only '
+                    raise Unsupported('%%.%sd precision on an int (not built; only '
                                       'floats take .N)' % prec)
                 sign_c = '+' if '+' in flags else (' ' if ' ' in flags else '')
                 spec_txt = ('<' if '-' in flags else '') + sign_c + \
@@ -5204,7 +5211,17 @@ class Compiler(boxclosure.ClosureMixin):
                 spec_txt += typ
             specslot = self._str_lit_slot(spec_txt, ctx)
             t = ctx.tmp()
-            if self.dunder_ops:
+            if typ == 'd':
+                # %d accepts a float and truncates it toward zero; non-numbers get CPython's
+                # "a real number is required" message.  ail2f_percent already implements both
+                # (the %i/%u and computed-template paths use it), so keep the direct
+                # ail_obj_format for the common int/bool case and hand everything else to it.
+                self.rt_needs.add('fmt')
+                dirslot = self._str_lit_slot(m.group(0), ctx)
+                ctx.emit('if (%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL) { st = ail_obj_format(cx, &%s, %s, %s); }'
+                         ' else { st = ail2f_percent(cx, &%s, %s, %s); }'
+                         % (val, val, t, val, specslot, t, dirslot, val))
+            elif self.dunder_ops:
                 # an instance (an IntEnum / IntFlag member, a user class) is converted by %'s rules (str(), int(), float()),
                 # not by its __format__ with a spec made up from the directive
                 self.rt_needs.add('fmt')
@@ -5244,6 +5261,9 @@ class Compiler(boxclosure.ClosureMixin):
         return acc
 
     def expr_UnaryOp(self, node, ctx):
+        if (isinstance(node.op, ast.USub) and isinstance(node.operand, ast.Constant)
+                and type(node.operand.value) is int and node.operand.value == 1 << 63):
+            return 'ail_box_int(-9223372036854775807LL - 1)'
         v = self.expr(node.operand, ctx)
         if isinstance(node.op, ast.USub):
             t = ctx.tmp()
@@ -6449,6 +6469,9 @@ class Compiler(boxclosure.ClosureMixin):
         allnames = set(params) | set(kwonly)
         for kwname, kwnode in kwargs.items():
             v = self.expr(kwnode, ctx)
+            if kwname in info.get('posonly', ()):
+                raise Unsupported('%s() got the positional-only argument %s as a keyword' %
+                                  (fname, kwname))
             if kwname in allnames:
                 kwvals[kwname] = v
             elif kwarg:
@@ -9031,7 +9054,7 @@ class Compiler(boxclosure.ClosureMixin):
     }
     _ARG_BAD = {'s': '%(a)s.tag != AIL_T_STR', 'ts': '%(a)s.tag != AIL_T_STR && %(a)s.tag != AIL_T_TUPLE',
                 'sn': '%(a)s.tag != AIL_T_STR && %(a)s.tag != AIL_T_NONE',
-                'i': '%(a)s.tag != AIL_T_INT && %(a)s.tag != AIL_T_BOOL && %(a)s.tag != AIL_T_NONE',
+                'i': '%(a)s.tag != AIL_T_INT && %(a)s.tag != AIL_T_BOOL && %(a)s.tag != AIL_T_NONE && %(a)s.tag != AIL_T_INST',
                 'n': '%(a)s.tag != AIL_T_INT && %(a)s.tag != AIL_T_BOOL',
                 'it': '%(a)s.tag == AIL_T_INT || %(a)s.tag == AIL_T_FLOAT || %(a)s.tag == AIL_T_BOOL || %(a)s.tag == AIL_T_NONE'}
     _ARG_KINDS = {'it': ('list', 'tuple', 'str', 'dict', 'set', 'deque'), 's': ('str',), 'ts': ('str', 'tuple'), 'sn': ('str',), 'i': ('int', 'bool'), 'n': ('int', 'bool')}
@@ -9569,7 +9592,9 @@ class Compiler(boxclosure.ClosureMixin):
         """Emit the optional start/end arguments of a str search and return
         (has_lo, lo, has_hi, hi) as C expressions. CPython treats a None bound as
         "from the start" / "to the end", and the value may arrive through a variable,
-        list item, attribute or call, so the tag is tested at run time."""
+        list item, attribute or call, so the tag is tested at run time. An instance
+        bound is converted through __index__ exactly as CPython's PyNumber_AsSsize_t
+        does, so a start/end object is not read as its pointer payload."""
         out = []
         for pos in (1, 2):
             if len(args) <= pos:
@@ -9577,6 +9602,7 @@ class Compiler(boxclosure.ClosureMixin):
                 continue
             b = ctx.tmp()
             ctx.emit('%s = %s;' % (b, self.expr(args[pos], ctx)))
+            self._check_seq_index_bound(b, ctx, allow_none=True)
             out.extend(('(%s.tag != AIL_T_NONE)' % b,
                         '((%s.tag != AIL_T_NONE) ? (%s).i : 0)' % (b, b)))
         return out
@@ -9590,7 +9616,7 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = %s;' % (b, self.expr(arg, ctx)))
         return b
 
-    def _check_seq_index_bound(self, b, ctx):
+    def _check_seq_index_bound(self, b, ctx, allow_none=False):
         had = None
         if self.dunder_ops:
             fn = ctx.new_cvar('xfn')
@@ -9601,18 +9627,25 @@ class Compiler(boxclosure.ClosureMixin):
                      'if (%s) { ail_obj %s; %s = 1; st = %s(cx, &%s, %s); if (st != AIL_OK) goto %s; %s = %s; } }'
                      % (b, fn, b, fn, xv, had, fn, xv, b, ctx.cur_err_target(), b, xv))
         err = ctx.cur_err_target()
+        # A source argument that was actually None may be skipped (allow_none), but a None
+        # returned by __index__ must still raise: only a run-time had == 0 counts as "no bound".
         if had is not None:
-            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { '
+            none = ' && (%s || %s.tag != AIL_T_NONE)' % (had, b) if allow_none else ''
+        else:
+            none = ' && %s.tag != AIL_T_NONE' % b if allow_none else ''
+        text = 'slice indices must be integers%s or have an __index__ method' % (' or None' if allow_none else '')
+        if had is not None:
+            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL%s) { '
                      'if (%s) { const char *tn = ail__tname_c(%s); size_t n = strlen(tn) + 64; '
                      'char *buf = (char *)malloc(n); if (!buf) ail_die("out of memory"); '
                      'snprintf(buf, n, "__index__ returned non-int (type %%s)", tn); '
                      'st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); free(buf); } else { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
-                     '"slice indices must be integers or have an __index__ method"); } goto %s; }'
-                     % (b, b, had, b, err))
+                     '"%s"); } goto %s; }'
+                     % (b, b, none, had, b, text, err))
         else:
-            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
-                     '"slice indices must be integers or have an __index__ method"); goto %s; }'
-                     % (b, b, err))
+            ctx.emit('if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL%s) { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
+                     '"%s"); goto %s; }'
+                     % (b, b, none, text, err))
         ctx.uses_st = True
 
     def _m_index(self, recv, kind, args, kwargs, ctx):
@@ -10048,6 +10081,10 @@ class Compiler(boxclosure.ClosureMixin):
             while len(a) < 1:
                 a.append(ast.Constant(value=None))
             a.append(kwargs['maxsplit'])
+        if len(a) > 1 and isinstance(a[1], ast.Constant) and a[1].value is None:
+            # CPython raises TypeError for maxsplit=None; reading the None object's int slot
+            # used to answer as maxsplit=0, splitting (or keeping) the wrong number of pieces.
+            raise Unsupported(".%s() maxsplit cannot be None (CPython raises TypeError)" % name)
         return a
 
     def _maxsplit_expr(self, node, ctx):
@@ -11229,7 +11266,8 @@ class Compiler(boxclosure.ClosureMixin):
             for t in types:
                 if not (isinstance(t, ast.Name) and (t.id in EXC_IDS or t.id in self.classes)):
                     if isinstance(t, ast.Name) and t.id in ('ImportError', 'ModuleNotFoundError'):
-                        imports = [n for n in ast.walk(node) if isinstance(n, (ast.Import, ast.ImportFrom))]
+                        imports = [n for body in node.body for n in ast.walk(body)
+                                   if isinstance(n, (ast.Import, ast.ImportFrom))]
                         if imports:
                             names = [(a.name if isinstance(n, ast.Import) else n.module or '')
                                      for n in imports for a in (n.names if isinstance(n, ast.Import) else [n])]
@@ -11239,11 +11277,13 @@ class Compiler(boxclosure.ClosureMixin):
                                 "  write instead: move the import to the top of the file"
                                 % (', '.join(repr(name) for name in names), t.id))
                             refusal.source_line = imports[0].lineno
+                            refusal.source_column = imports[0].col_offset
                             raise refusal
                     refusal = Unsupported("a caught exception type %s (only builtin or user "
                                           "Exception subclasses are supported)" %
                                           getattr(t, 'id', type(t).__name__))
                     refusal.source_line = node.lineno
+                    refusal.source_column = node.col_offset
                     raise refusal
 
         has_finally = bool(node.finalbody)

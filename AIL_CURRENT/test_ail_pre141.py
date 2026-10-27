@@ -7,8 +7,8 @@ evaluated into a hidden local at the `def` statement, so reassigning the source 
 does not change the default, a shared list stays shared, and an argument/list-item/dict-value/
 attribute value keeps the value it had at the `def`. A recursive call inside the nested function
 reads the hidden local from that function's own frame, so it sees the def-time value too. Literal
-scalar and tuple defaults are still filled in at the call site. `**kwargs` and positional-only
-parameters remain refused by name.
+scalar and tuple defaults are still filled in at the call site. `**kwargs` parameters remain
+refused by name; positional-only parameters are supported like plain ones.
 """
 import os
 import subprocess
@@ -174,6 +174,13 @@ def main():
 
 main()
 ''',
+    'positional_only': '''
+def main():
+    def f(a, /):
+        return a
+    print(f(1))
+main()
+''',
 }
 
 REFUSED = {
@@ -182,13 +189,6 @@ def main():
     def f(**kw):
         return kw
     print(f())
-main()
-''',
-    'positional_only': '''
-def main():
-    def f(a, /):
-        return a
-    print(f(1))
 main()
 ''',
 }
@@ -241,7 +241,7 @@ class Pre141Tests(unittest.TestCase):
                     got, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
                                                     text, general)
                     self.assertIsNone(got, '%s (general=%s) built\n%s' % (slug, general, build_err))
-                    self.assertIn('nested def f with **kwargs or positional-only parameters',
+                    self.assertIn('nested def f with **kwargs',
                                   build_err, slug)
 
 

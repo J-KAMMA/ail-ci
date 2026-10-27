@@ -14008,6 +14008,7 @@ static inline ail_st ail_str_split_ws(ail_ctx *cx, ail_obj *out, ail_obj sobj) {
     return AIL_OK;
 }
 static inline ail_st ail_str_split_sep(ail_ctx *cx, ail_obj *out, ail_obj sobj, ail_obj sepobj) {
+    if (sepobj.tag == AIL_T_NONE) return ail_str_split_ws(cx, out, sobj);
     ail_str s = ail_view_to_str(sobj), sep = ail_view_to_str(sepobj);
     if (sep.n == 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "empty separator");
     ail_vecobj *v = ail_vec_new(cx);
@@ -14056,6 +14057,7 @@ static inline ail_st ail_str_split_ws_into(ail_ctx *cx, ail_obj listobj, ail_obj
     return AIL_OK;
 }
 static inline ail_st ail_str_split_sep_into(ail_ctx *cx, ail_obj listobj, ail_obj sobj, ail_obj sepobj) {
+    if (sepobj.tag == AIL_T_NONE) return ail_str_split_ws_into(cx, listobj, sobj);
     ail_str s = ail_view_to_str(sobj), sep = ail_view_to_str(sepobj);
     if (sep.n == 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "empty separator");
     ail_vecobj *v = (ail_vecobj *)listobj.o;
@@ -18314,6 +18316,7 @@ static inline ail_st ail_meth_inst_getattr_by_name(ail_ctx *cx, ail_obj *out, ai
 static inline ail_st ail_meth_str_split(ail_ctx *cx, ail_obj *out, ail_obj sobj,
                                          int sep_is_none, ail_obj sepobj,
                                          int has_maxsplit, int64_t maxsplit) {
+    if (sepobj.tag == AIL_T_NONE) sep_is_none = 1; /* a None arriving at run time splits on whitespace */
     if (maxsplit < 0) has_maxsplit = 0; /* CPython: negative maxsplit means no limit */
     ail_str s = ail_view_to_str(sobj);
     ail_vecobj *v = ail_vec_new(cx);
@@ -18355,6 +18358,7 @@ static inline ail_st ail_meth_str_split(ail_ctx *cx, ail_obj *out, ail_obj sobj,
 static inline ail_st ail_meth_str_rsplit(ail_ctx *cx, ail_obj *out, ail_obj sobj,
                                           int sep_is_none, ail_obj sepobj,
                                           int has_maxsplit, int64_t maxsplit) {
+    if (sepobj.tag == AIL_T_NONE) sep_is_none = 1; /* a None arriving at run time splits on whitespace */
     if (maxsplit < 0) has_maxsplit = 0; /* CPython: negative maxsplit means no limit */
     ail_str s = ail_view_to_str(sobj);
     /* Build the pieces back-to-front into a scratch vec, then reverse. */

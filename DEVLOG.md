@@ -293,6 +293,132 @@ the difference row. Final-state tests: `test_ail_pre31`, `test_ail_safetynet`, `
 `test_ail_corpus_findings3` (4 modules, 237 s, 0 failed); probes in `/tmp/probes` cover in-range
 literals, shadowing, arithmetic/conditional values, argument, list, tuple, dict and attribute
 routes, plus refusals for literal, negative, routed and boundary values on both builds.
+## 2026-10-27 - rbpre1 re-apply: positional-only parameters (job-rbpre1-10270815)
+
+Re-applied the accepted rbpre1 change on this tree.  `def f(a, /, ...)` no longer refuses by
+name: the general path registers positional-only parameters in order (with their defaults,
+`*args`, keyword-only parameters and annotations), and both emitters refuse a call that passes
+one as a keyword.  Methods, static methods, nested defs, aliasing and values reaching a call
+through an argument, a list item, an attribute and a dict value match CPython on both builds.
+The new `AIL_CURRENT/test_ail_pre1.py` is registered in `ail_check.MODULES`, and
+`test_ail_pre141.py` now compares its nested positional-only case with CPython (its `**kwargs`
+refusal wording was updated, keeping that fix).  `tools/diff_ids.py` is not present on this
+tree; `tools/update_manifest.py` was run and `--check` passes.  Probes
+`/tmp/probes/pre1_defaults.py`, `pre1_sources.py`, `pre1_methods_nested.py` match CPython on
+both builds, and `pre1_refuse.py` is refused by name on both.
+## 2026-10-27 -- re-apply pre48: exception argument `repr` and file OSError `args` (job-rbrbpre48-10271116)
+
+Re-applied the accepted pre48 change on the current integration tree. This tree already carried the
+direct `repr(e.args[i])` half (as `_ail_exc_arg_repr`), so that side is kept unchanged rather than
+duplicated; the missing alias refusal was added to `exctext.py`, and the general-path file OSError
+adapter in `filert.py` now builds two-element `args == (errno, strerror)` with the filename kept as
+an attribute instead of appended to `args`. Storing an `e.args[i]` value in a name, list, tuple,
+dict, attribute or user-function argument is refused by name on the typed path, so the default
+build takes the general path, which keeps the argument object; a direct `repr(e.args[i])` keeps the
+argument's own kind (str/int/float/bool/None, negative and out-of-range indices, empty args as
+IndexError). Added and registered `test_ail_pre48.py`. `tools/diff_ids.py` is not present on this
+tree; `tools/update_manifest.py` (then `--check`) passes.
+
+Probes in `/tmp/probes` (all eight run with `cmp.sh`): `p48_direct`, `p48_floats`, `p48_routes`,
+`p48_alias`, `p48_alias_arg`, `p48_empty` and `p48_file` match CPython on both the forced general
+and default builds; `p48_oserror` matches CPython on the default build and is refused by name on
+the forced build (`not in the subset: raising OSError with more than one argument`). Final-state
+modules: test_ail_pre48, test_ail_exception_context, test_ail_exception_values_core,
+test_ail_exception_values_app, test_ail_exception_aggregate_objects, test_ail_exc_str,
+test_ail_excfix, test_ail_raise_from, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (11 modules, 82 tests, 925 s, 0 failed, 1 skipped).
+## 2026-10-27 -- re-apply pre52: an optional import is refused by name at its own line (job-rbpre52-10261857)
+
+Re-applied the accepted pre52 change on the current tree.  `try: import html ... except
+ImportError:` reached the general emitter's try check, which refused `ImportError` as an
+unsupported caught exception type without a position.  The check now names the imports in the
+try body (`import of 'html' guarded by except ImportError`), points at the first import's line
+and column, and says to move it to the top of the file; `ModuleNotFoundError` gets the same
+message.  An import only in a handler, `else` or `finally` is not called guarded, so it keeps
+the caught-type refusal, now located at the `try`.  Other unsupported caught types are located
+at their `try` too.  `except Exception` is unchanged.  Added the accepted
+`AIL_CURRENT/test_ail_pre52.py` (fifteen refusals and four accepted programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  `tools/diff_ids.py` is not
+present on this tree; `tools/update_manifest.py --check` passes.  Probes `/tmp/probes/pre52_*`
+(18 programs: direct/from/two-module/alias/tuple, ModuleNotFoundError, nested def, if, loop,
+no-import, other type, handler/else/finally, `except Exception`, ZeroDivisionError, plain
+imports) match CPython or are refused by name on both builds.  Tests on the final tree:
+`test_ail_pre52`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+
+## 2026-10-27 -- re-apply pre61: functools.partial with bound values (job-rbpre61-10271129)
+
+Re-applied the accepted pre61 change on this tree.  The accepted fix made `genlib._partial` copy the
+`partial()` call's source location onto every synthetic lambda, because the lambda scan in
+`pyboxed2.py` reads `Lambda.lineno`; this tree already carries that fix plus
+`ast.fix_missing_locations`, so no compiler change was needed and the current version is kept.
+Added the accepted `AIL_CURRENT/test_ail_pre61.py` and registered it in `ail_check.MODULES` and
+both `tools/ci_shards.json` lists.  `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.  Probes in `/tmp/probes`
+(`pre61_lambda`, `pre61_def_map`, `pre61_routes`, `pre61_types`, `pre61_empty_neg_alias`) match
+CPython on both builds; `pre61_refuse_notdef`, `_toomany`, `_kworder`, `_star`, `_nofunc`,
+`_aliasfunc` and `_lambdadefault` are refused by name on both.  Final-state tests:
+`test_ail_pre61`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(4 modules, 368 s, 0 failed).
+## 2026-10-27 -- re-apply pre47: constant integer expressions (job-rbrbpre47-10271110)
+
+Re-applied the accepted pre47 change on this tree. The generic exact folder
+(`pyfunc._const_int_expr` / `fold_int_constant`) was already present, so the conflict resolution
+keeps its zero/base shortcuts, bool-result handling and 2**22-bit budget. `pyfront.fold_int_constants`
+now runs before both builds (from `pyc.to_c` and `_build_unshadowed`): an in-range constant
+expression becomes one int64 literal (`-2**63`, `2**63 - 1`) and an out-of-range one is refused by
+name with the pre47 wording (`a constant integer expression overflows int64: ... outside the signed
+64-bit range ... 64-bit signed integer`), without the older `int64 constant expression out of
+range` phrase that `test_ail_pre191` rejects. The pass skips `str.split`/`rsplit` maxsplit arguments
+and f-strings, and separates a rewritten digit from an adjacent keyword. `pyfront._c_expr` refuses
+an out-of-int64 literal and emits a folded INT64_MIN as `(-9223372036854775807LL - 1)` instead of
+`ck_neg(9223372036854775808)`; `pyboxed` and `pyboxed2` accept the same unary spelling. Added
+`AIL_CURRENT/test_ail_pre47.py` and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes.
+
+Probes in `/tmp/probes` (both builds via `~/tools/cmp.sh`): `pre47_inrange`, `pre47_typed_routes`,
+`pre47_fstring`, `pre47_keyword` and `pre47_maxsplit` match CPython (INT64_MIN/MAX, negative, zero
+and bool widths, argument, list item, attribute and dict value routes, f-string debug, keyword
+adjacency and maxsplit); `pre47_ref_pow`, `_negated`, `_decimal`, `_shift`, `_cancel`, `_huge`,
+`_argument`, `_list`, `_attribute`, `_dict` and `_alias` are refused by name. `pre47_unary_cancel`
+(`-(-2)**63 - 1`, which CPython evaluates in range) is refused by name by the tree's existing unary
+check. The pipeline INT64_MIN spellings are covered by
+`test_ail_pre47.test_int64_min_in_pipeline_element`. Final-state tests: 15 modules (pre47, pre191,
+pre204, pre203, pre236, pre251, pre121, pre172, pre177, pre201, pre269, pre285, safetynet, files,
+corpus_findings3), 67 tests, 0 failed (1 skipped).
+## 2026-10-27 -- re-apply pre7: out-of-int64 delete index is refused by name (job-rbrbrbpre7-10271151)
+
+Re-applying the accepted pre7 change on the current integration tree. The behaviour is already
+present: `ail_chatgpt.py`'s `_check_index_expression` refuses a constant subscript index outside
+int64 before either emitter, so `del a[2**63]`, `del a[2**64]`, `del a[-2**63 - 1]` and a nested
+receiver (`del a[0][2**63]`) fail at compile time with `int64 index out of range: ...` on both
+builds instead of trapping `integer overflow` while computing the index, where CPython's
+unbounded int raises `IndexError`. No compiler code change was needed, keeping both sides'
+fixes. Added the accepted `AIL_CURRENT/test_ail_pre7.py` (it accepts this tree's wording),
+registered it in `ail_check.MODULES` and `ci_shards.json`, and recorded the row. In-range
+constant indexes (`1 + 1`, `-1`, `True`, slices, str and dict keys, and the INT64_MIN/INT64_MAX
+dict-key boundaries) still delete normally and match CPython. `tools/diff_ids.py` is not
+present on this tree; `tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes`: `pre7_inrange`, `pre7_routes`, `pre7_dict_bounds`, `pre7_slice`,
+`pre7_str_key` and `pre7_empty` match CPython on both builds; `pre7_list_pow`, `pre7_shift`,
+`pre7_negative`, `pre7_prod`, `pre7_nested`, `pre7_dict_key` and `pre7_pow64` are refused by
+name on both builds (`int64 index out of range`). Tests on the final commit: `test_ail_pre7`,
+`test_ail_pre246`, `test_ail_pre269`, `test_ail_pre177`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`.
+
+## 2026-10-27 -- re-apply pre39: keyword-wrapper int() refusal (job-rbrbrbrbpre39-10271218)
+
+Re-applied the accepted pre39 change on this tree. The current tree already carries a superset of
+the accepted `ail_chatgpt._check_int64_literals` pass from the later pre290 wrapper-chain work
+(module constants, literal containers, identity/keyword/keyword-only wrappers, `_UNKNOWN` for
+unresolved names, and propagation through wrapper chains), so no compiler edit was needed and
+both sides' fixes are kept. Added the accepted `test_ail_pre39.py` (13 refused, 12
+CPython-parity programs, both builds) and registered it in `ail_check.MODULES`. Probes in
+`/tmp/probes`: 8 matching (`p39_match_{values,boundary,nonfinite,shadow,unknown,attribute,alias,empty}`)
+and 14 refused by name (`p39_refuse_{literal,negative,boundary,keyword,positional,kwonly,identity,constant,constant_keyword,items,tuple,dict,numeric_key,expression}`),
+all against CPython on both builds. `python3 tools/diff_ids.py` is not present in this tree;
+`tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
@@ -2995,6 +3121,78 @@ when it does not fit) and the runtime's exponent helper does the same.  The v2 g
 review-fix entry above.
 `test_ail_fuzz71.py` builds `f"{1e308:.0f}"`, `f"{1.5:.600f}"`, `%.600f`,
 `"{:.600f}".format(...)`, negative values and widths wider than the result on both builds.
+## 2026-10-24 - pre34: literal `%d` accepts a float (profile percentages)
+
+CPython's `%d` converts a real operand with `int()` rules, so a profile line such as
+`print("%d%%" % (100.0 * part / total))` prints `60%`; a non-number raises
+`TypeError: %d format: a real number is required, not str`. The general path handled only
+int/bool in its literal-`%d` fast path (`pyboxed2._percent_format`), so a float percentage
+stopped with `TypeError: unsupported format string passed to non-int`. `%i`, `%u` and a computed
+template already used `safetyrt.ail2f_percent` and matched CPython. The literal `%d` path now
+keeps `ail_obj_format` for int/bool and sends other operands to `ail2f_percent`, which truncates
+finite floats toward zero, raises `ValueError` for NaN and `OverflowError` for infinity, and
+produces CPython's type-error message. Out-of-int64 finite floats remain the documented int64
+limit. Added `test_ail_pre34.py` (4 programs, both builds) and registered it in
+`ail_check.MODULES`; DIFFERENCES `C?-job-pre34-10240952-1`.
+## 2026-10-24 - pre68: literal `%d`/`%i`/`%u` with a float
+
+A literal format string such as `"%d" % 3.7` was lowered to `ail_obj_format`'s `d` spec, which
+rejects a float (`TypeError: unsupported format string passed to non-int`) on both the forced
+general build and the default build. CPython truncates the float toward zero for `d`, `i` and `u`
+and raises `OverflowError` / `ValueError` for infinity / NaN. Those three conversions now fall
+back to the run-time formatter (`safetyrt.FMT`) unless the argument is provably an `int` or
+`bool`; widths, signs, `%%`, ints/bools, and values through an argument, list item, attribute and
+dict value are covered by `AIL_CURRENT/test_ail_pre68.py` (2 programs, both builds).
+## 2026-10-24 - pre70: a run-time None separator splits on whitespace
+
+`str.split`/`str.rsplit` only recognised a `None` separator that was a source literal.
+A None reaching the call through a variable, a list item, a dict value, an attribute or
+a function argument was read as an empty string separator, so both builds raised
+`ValueError: empty separator` where CPython splits on whitespace (`.split(sep)` with
+`sep = None` is `.split()`). The object-level helpers in
+`python/pkg-v12/cruntime.py` (`ail_meth_str_split`, `ail_meth_str_rsplit`,
+`ail_str_split_sep`, `ail_str_split_sep_into`) now switch to the whitespace mode when
+the separator is the None object; this also covers the pooled `x = recv.split(sep)`
+assignment path. Non-str separators still raise CPython's TypeError and `sep=""` still
+raises ValueError. `test_ail_pre70.py` keeps the variable/list/dict/attribute/argument
+cases and maxsplit 0/1/-1/-2/100, empty and whitespace receivers compared with CPython
+on both builds.
+## 2026-10-24 - qtest1: __index__ returning None is not a default bound
+
+Review found that the str search window accepted any converted bound whose tag was
+None. A class whose `__index__` returns None (`N()` in
+`"abcabc".startswith(("bc",), N())`) was silently treated as "no bound" and returned
+True/1/2/1 where CPython raises `TypeError: __index__ returned non-int (type NoneType)`.
+The window's tag test now allows None only when the dunder lookup did not run (its
+`had` flag is 0); test_ail_qtest1 covers startswith/endswith/find/count/index plus
+values through a list item and a dict.
+
+## 2026-10-24 - qtest1: str search start/end bounds use __index__
+
+`str.startswith`/`endswith` (and `find`/`count`/`index`) read an instance start/end
+as its pointer payload after the general path's tag check rejected `AIL_T_INST`.
+`"abcabc".startswith(("bc",), Idx(1))` with an `__index__` class printed a caught
+TypeError where CPython returns True. The shared str window now converts an
+instance bound through `__index__` with CPython's slice-index messages (None still
+means the default bound), and the static check admits instances so the runtime
+conversion is reachable. Added `AIL_CURRENT/test_ail_qtest1.py`; tuple prefixes,
+empty prefixes, None, negative/huge bounds and wrong types stay compared on both
+builds.
+## 2026-10-24 - qtest2: str.split/rsplit maxsplit=None
+
+`"a b".split(maxsplit=None)` and `"a,b,c".rsplit(",", maxsplit=None)` silently used
+maxsplit=0 on both builds (the general path read the None object's int slot), so the
+first kept one piece and the second kept the whole text. CPython raises
+`TypeError: 'NoneType' object cannot be interpreted as an integer`. A literal None
+maxsplit is now refused by name in `python/pkg-v12/pyboxed2.py`; the unified build falls
+back to that refusal. `test_ail_qtest2.py` keeps the surrounding whitespace-run,
+tab/newline, maxsplit 0/1/-1 and empty-string shapes compared with CPython on both builds.
+
+Other differences seen while probing (not changed): a separator that is None at run time
+through a variable/list/dict gives `ValueError: empty separator` where CPython splits on
+whitespace (`None` is only recognised as a literal), and a maxsplit constant above
+int64 (for example `2**63`) fails to compile with "integer overflow" where CPython raises
+`OverflowError`.
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

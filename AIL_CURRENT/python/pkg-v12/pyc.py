@@ -46,7 +46,7 @@ import buildcache
 import shadowing
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
-from pyfront import Unsupported, to_pipeline_c, _number_constant
+from pyfront import Unsupported, fold_int_constants, to_pipeline_c, _number_constant
 import pyfunc
 from pyfunc import to_c as func_to_c
 from pyfunc import _module_const_scalar, module_table_refusal, _written_globals
@@ -516,7 +516,7 @@ def _rewrite_script(source, force):
 def to_c(source, strict=True, name='run', info=None, external=None):
     unbound.SCRIPT.clear()
     try:
-        return _to_c(source, strict, name, info, external)
+        return _to_c(fold_int_constants(source), strict, name, info, external)
     finally:
         unbound.SCRIPT.clear()
 
@@ -798,6 +798,7 @@ def build(source, out, strict=True, report=None, force_general=False):
 
 
 def _build_unshadowed(source, out, strict, report, force_general):
+    source = fold_int_constants(source)
     out = pathlib.Path(out)
     c = out.with_suffix('.c')
     info = {'_checked_arrays': True}
