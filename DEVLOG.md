@@ -1,13 +1,13 @@
 ## 2026-10-27 - pre52 suite fix: update the branch onto today's integ (job-pre52-10270920)
 
 The integration gate applied this branch alone on today's integration branch and reported 136 test
-modules failing. The branch was still based on integ 8346862, eight integrated candidates behind
-today's integ (cand-1027092746), so the branch delta still contained the reverse of those candidates
-(their runtime, pyboxed2, pyc, pyfunc and safetyrt changes) and applying it removed them. The
-current integration branch is now merged into this branch, resolving the record files by keeping
-today's rows and re-applying only the pre52 change on top. No compiler behaviour beyond pre52's
-narrowing changed: `stmt_Try` still scans only the `try` body for a guarded import and still locates
-the caught-type refusal at the `try`, and `test_ail_pre52.py` is still registered. Final-state tests:
+modules failing. The branch was still based on integ 8346862, several integrated candidates behind
+today's integ, so the branch delta still contained the reverse of those candidates (their runtime,
+pyboxed2, pyc, pyfunc and safetyrt changes) and applying it removed them. The current integration
+branch is now merged into this branch, resolving the record files by keeping today's rows and
+re-applying only the pre52 change on top. No compiler behaviour beyond pre52's narrowing changed:
+`stmt_Try` still scans only the `try` body for a guarded import and still locates the caught-type
+refusal at the `try`, and `test_ail_pre52.py` is still registered. Final-state tests:
 `test_ail_pre52`, `test_ail_pre27`, `test_ail_pre270`, `test_ail_multifile`, `test_ail_safetynet`,
 `test_ail_files` and `test_ail_corpus_findings3`; `tools/update_manifest.py --check` passes.
 
@@ -625,6 +625,48 @@ not be run.  `python3 tools/update_manifest.py` updated the manifest for the tou
 
 Tests on the final commit: `test_ail_fuzz4`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` (4 modules, 354 s, 0 failed).
+## 2026-10-26 -- re-apply fuzz49: augmented assignment on an instance calls the in-place method
+
+Re-applied the accepted fuzz49 change on the current integration tree. The general path
+compiled `a += b` through the plain operator helpers, so `ail_op_iadd` fell straight back to
+`__add__`; `__iadd__` / `__isub__` / `__imul__` / `__iand__` / `__ior__` / `__ixor__` were not
+in the class dispatch tables at all. A class defining both printed the `__add__` result where
+CPython mutates and keeps the object. `dunderrt` now appends the in-place operators to the
+dispatch enum only for a program whose classes define one (other programs keep their runtime
+text) and emits the `__iadd__`-family check before the plain operator; `safetyrt` falls back to
+`__add__`/`__radd__` when the in-place method returns `NotImplemented`. A name that is ever the
+target of an augmented assignment is no longer given a trusted class kind, since the method may
+return another type and earlier code (a loop body, a lambda) would use a stale kind. Ported
+`test_ail_fuzz49.py`, registered it in `ail_check.MODULES` and `tools/ci_shards.json`. Both
+builds, 13 differential cases.
+## 2026-10-26 -- pre200 reapply: maxsplit intermediates above 4096 bits fold (job-rbrbpre200-10261625)
+
+Re-applied the accepted pre200 change on this tree.  A maxsplit intermediate above the old
+4096-bit cap now folds when the whole expression reduces to an int64 value, so
+`"a b c".split(" ", 2**4096 // 2**4050)` (final 2**46), `2**4096 >> 4096` (final 1) and the same
+value through an argument, a list item, an attribute, a dict value, a local, a module/class
+constant and a default argument match CPython on both builds.  This tree's rbpre190 reapply
+already gives the maxsplit folder and `pyfunc` the 2**20-bit width (2**24 for a large exponent)
+with exact power sizing, so that larger limit is kept and the accepted 8192-bit raise is
+subsumed.
+
+The integration conflict was `ail_chatgpt._constant_int_exact`, used by the module/class/default
+constant check, which still had its own 4096-bit cap and refused
+`class Box: n = 2**4096 // 2**4050`; its cap now uses the same 2**20-bit width while the
+pre190 zero/base shortcuts and special-exponent handling are kept.  The pre200 review fix is
+also applied: an exact value that CPython's int-to-str digit limit cannot format now shows
+`too large` in the source-positioned refusal instead of escaping as a conversion error.  Added
+`test_ail_pre200.py` (folded direct/argument/list/attribute/dict/local cases, over-limit and
+out-of-int64 refusals) and registered it in `ail_check.MODULES` and both `tools/ci_shards.json`
+lists.
+
+Probes `/tmp/probes/p200_direct.py`, `p200_flows.py`, `p200_boundaries.py`, `p200_types.py` and
+`p200_aliasing.py` match CPython on both builds; `p200_giant.py` is refused by name on both with
+`int64 constant expression out of range: too large`.  Final-state modules: test_ail_pre200,
+test_ail_pre184, test_ail_pre190, test_ail_pre203, test_ail_pre214, test_ail_pre205,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (44 tests, 1 skipped, 0 failed,
+274 s).  `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and
+`--check` passed.
 
 ## 2026-10-26 -- re-apply pre203: unary INT64_MIN constant expression (job-rbpre203-10261301)
 
@@ -2573,6 +2615,35 @@ and `dict(d)` may call a user `__eq__` a different number of times than CPython 
 table has a particular internal shape (CPython's own count depends on key-table sharing).
 `test_ail_fuzz1` could not run locally because `difffuzz` is not in this snapshot; the required
 and targeted modules were run on the final commit.
+## 2026-10-23 - pre22: `with` around `yield` (job-pre22-10240312)
+
+The p12/p23/p24 case still differs on this tree: a generator with `with` around its `yield`
+and then `g.close()` runs no `__exit__` at all, because the general path's generator close finishes
+the fiber without running the suspended frames (CPython raises `GeneratorExit` there and passes it
+to `__exit__`). Building real `GeneratorExit` close semantics is a runtime change outside this job,
+so the construct is refused by name before file-lowering removes the `with`:
+
+* `withlib.refuse_with_yield` (called from `pyboxed2.Compiler.compile`) refuses any `with` whose
+  body yields in the same function, for every manager expression and for `with open(...)` too.
+* `test_ail_pre22.py` covers the refusal on both builds and checks that a `with` beside (not
+  around) a `yield` still runs and matches CPython.
+## 2026-10-24 -- pre26: repr(e.args[i]) keeps the argument's kind
+
+On the typed path `e.args[i]` reads as text, so `repr(e.args[i])` repr'd that text: a
+`ValueError(3.0)` handler printed `'3.0'` where CPython prints `3.0`, and int, bool and None
+arguments were quoted the same way.  The handler rewrite now lowers `repr(e.args[i])`,
+`f"{e.args[i]!r}"` and `%r` of one argument to a new `_ail_exc_arg_repr` accessor that formats
+the stored argument (a str keeps its quotes, a number does not).  Both builds agree with
+CPython; `test_ail_pre26.py` keeps the probe, including negative and out-of-range indexes.
+## 2026-10-24 - pre27: an optional import is refused by name at its own line
+
+`try: import html ... except ImportError:` reached the general emitter's try check, which refused
+`ImportError` as an unsupported caught exception type without a position. The check now names the
+guarded import (`import of 'html' guarded by except ImportError`), points at the import line and
+column, and says to move it to the top of the file; `ModuleNotFoundError` gets the same message.
+Other unsupported caught types are located at their `try` instead of printing no location.
+`except Exception` is unchanged. Added `AIL_CURRENT/test_ail_pre27.py` (nine refusals, both builds,
+plus the accepted `except Exception` program).
 
 ## 2026-10-23 - C compiler step cache (job-ctime3-10232149)
 

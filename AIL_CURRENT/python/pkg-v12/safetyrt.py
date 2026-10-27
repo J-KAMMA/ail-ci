@@ -2196,6 +2196,18 @@ def patch_notimplemented(c_text):
                  '    if (f) { nst = f(cx, out, a, b); if (nst != AIL_OK || !ail2n_is(*out)) return nst; }\n'
                  '    f = ail_dun2(b, rev);\n'
                  '    if (f) { nst = f(cx, out, b, a); if (nst != AIL_OK || !ail2n_is(*out)) return nst; }\n')
+    # an in-place method that returns NotImplemented: `a += b` is then `a = a + b`, resolved below through
+    # __add__ / __radd__ (the same for -=, *=, &=, |=, ^=)
+    for key in ('IADD', 'ISUB', 'IMUL', 'IAND', 'IOR', 'IXOR'):
+        old = ('    if (a.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(a, AIL_D2_%s); '
+               'if (f) return f(cx, out, a, b); }\n' % key)
+        new = ('    if (a.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(a, AIL_D2_%s); '
+               'if (f) { ail_st nst = f(cx, out, a, b); if (nst != AIL_OK || !ail2n_is(*out)) return nst; } }\n' % key)
+        n = c_text.count(old)
+        if n > 1:
+            raise AssertionError('safetyrt: no unique place for an in-place NotImplemented fallback')
+        if n:
+            c_text = c_text.replace(old, new)
     c_text = one(c_text, '        if (ne && (f = ail_dun2(x, AIL_D2_NE))) return f(cx, out, x, y);\n'
                  '        if ((f = ail_dun2(x, AIL_D2_EQ))) {\n'
                  '            st = f(cx, &r, x, y); if (st != AIL_OK) return st;\n',
