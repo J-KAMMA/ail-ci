@@ -1,3 +1,25 @@
+## 2026-10-27 -- pre372: an augmented power beyond int64 is refused by name (job-pre372-10280521)
+
+The first still-differing item from the pre33 review on this tree was `b = 10; b **= 40`: both
+builds compiled it and then stopped with `integer overflow` where CPython prints the big
+integer (`b ** e` is already folded and `-(2 ** 63)` already matches here).  The module
+constant-power pass only looked at `Assign`/`AnnAssign`/expression values, so the augmented
+statement was never folded.  `_check_int64_augmented_powers` in `AIL_CURRENT/ail_chatgpt.py`
+now scans direct module and function body statements: when the target has one earlier
+straight-line constant binding and the exponent is statically known, the exact power is
+compared with int64 and refused with `int64 constant expression out of range`.  The base or
+exponent may come through a name, an alias, a list item, a dict value, a class attribute or a
+passthrough call; a later rebinding is allowed, while a binding in an earlier branch, loop or
+import leaves the pre-existing run-time trap.  In-range powers, the safe bases 0/1/-1,
+zero/negative exponents, bool/float bases and values known only at run time still match
+CPython.
+
+Added `AIL_CURRENT/test_ail_pre372.py` (2 tests, 16 refused and 1 matching program, both
+builds), registered in `ail_check.MODULES` and `tools/ci_shards.json` (weight 31.6).  Probes
+in `/tmp/probes` (34 programs, both builds via `cmp.sh`): q01-q17 are refused by name;
+m01-m17 match CPython.  Final-state tests: test_ail_pre372, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3 (4 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
