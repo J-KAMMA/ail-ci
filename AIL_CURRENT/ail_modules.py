@@ -600,7 +600,8 @@ class Program:
     def reads_state(self, mod, n, skip):
         """`n` reads a value of another local module that may differ between the end of the importing
         module and the first call of the function (`cfg.level`, a `from cfg import level` name), or
-        passes a module object around: such a read is an effect of the module body."""
+        passes a module object around: such a read is an effect of the module body. A name that no
+        module rebinds is settled by then, so a default argument may read it."""
         if isinstance(n, ast.Attribute) and id(n) not in skip:
             chain = []
             cur = n
@@ -617,8 +618,12 @@ class Program:
             for index, attr in enumerate(reversed(chain)):
                 kind = owner.kinds.get(attr)
                 last = index == len(chain) - 1
-                if kind in ('func', 'class') and attr not in self.ext_names(owner) and last:
+                if last and not self.mutable(owner, attr) and kind in ('func', 'class', 'var'):
                     return None
+                if last and kind is None:
+                    found = self.resolve(owner, attr, 0, True)
+                    if found[0] == 'var' and not self.mutable(found[1], found[2]):
+                        return None
                 sub = self.child(owner, attr) if kind is None else None
                 if sub is None:
                     return n
@@ -631,8 +636,12 @@ class Program:
             if entry[0] == 'mod':
                 return n
             kind = entry[1].kinds.get(entry[2])
-            if kind in ('func', 'class') and not self.mutable(entry[1], entry[2]):
+            if kind in ('func', 'class', 'var') and not self.mutable(entry[1], entry[2]):
                 return None
+            if kind is None:
+                found = self.resolve(mod, n.id, 0, True)
+                if found[0] == 'var' and not self.mutable(found[1], found[2]):
+                    return None
             return n
         return None
 
