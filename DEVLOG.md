@@ -1,3 +1,30 @@
+## 2026-10-27 -- pre377: instance item errors name the class (job-pre377-10280635)
+
+The pre354 review's first recorded item no longer reproduces on this tree: `p08_dict_slice`
+(`d = {1: 2}; d[1:2]`, caught and uncaught) matches CPython's `KeyError: slice(1, 2, None)`
+on both builds, because pre353 already fixed dict slice keys.  The next recorded item did
+reproduce: `class A: pass; A()[0]` (and `A()[1:2]`) printed
+`TypeError: 'instance' object is not subscriptable` on both builds, where CPython names
+`'A'`.  The v2 general runtime's `ail_op_getitem`, `ail_op_setitem`, `ail_op_delitem` and
+`ail_op_getslice` built these messages from `ail_type_name(c.tag)`, which has only the tag;
+they now use `ail__tname_c(c)`, the runtime's existing object-to-name helper, so an instance
+shows its class (and a subclass its own name) while builtin values are unchanged.  The
+matching `dunderrt.patch` anchors were updated so the operator-method patch still applies.
+The review's `p11_lambda_comp` refusal (`a slice object the general path could not build`)
+was not reached by a probe and that path is unchanged.
+
+Probes in `/tmp/probes/pre377` (both builds via `cmp.sh`): match CPython `p08_dict_slice`,
+`p08b_uncaught`, `p08_dict_slice_control`, `p09_instance_name`, `p09b_plain`,
+`p09_uncaught`, `p09_routes` (argument, alias, list item, attribute, dict value, subclass,
+slice object), `p09_setdel`, `p09_init_class`, `p09_builtins` (int, None, bool, float,
+bytes, function) and `p09_dunder` (an instance with the item methods still works);
+`p11_lambda_comp` also matches.  Added `AIL_CURRENT/test_ail_pre377.py` (7 programs + an
+uncaught case, both builds) and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`; added DIFFERENCES row `C?-job-pre377-10280635-1`.  Final-state
+tests: test_ail_pre377 (2 tests, 49 s), test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (25 tests, 503 s, 1 skipped).  `tools/update_manifest.py` was run
+and `--check` passes.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
