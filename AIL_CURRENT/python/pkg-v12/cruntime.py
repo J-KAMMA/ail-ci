@@ -547,8 +547,7 @@ static int ail_exc_kind_of(const char *w) {
         return AIL_EXC_VALUE;
     if (!strcmp(w, "division by zero") || !strcmp(w, "integer division by zero")
         || !strcmp(w, "integer modulo by zero")) return AIL_EXC_ZERODIV;
-    if (!strcmp(w, "list index out of range") || !strcmp(w, "list assignment index out of range")
-        || !strcmp(w, "pop index out of range")
+    if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")
         || !strcmp(w, "pop from empty list") || !strcmp(w, "grid row index out of range")
         || !strcmp(w, "grid column index out of range") || !strcmp(w, "bytes index out of range")
         || !strcmp(w, "string index out of range"))
@@ -28226,6 +28225,10 @@ def _piece_text(p, want):
             text = _filert.http_exception(text)        # G12: URLError / HTTPError, codes 30, 31 (after the others)
     elif p in _filert.LEGACY_EDITS and 'FILEEXC' in want:
         text = _filert.legacy_errno(p, text)
+    if p == 'DIE' and 'LISTDELMSG' in want:
+        old = '    if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")\n'
+        if old in text:
+            text = text.replace(old, '    if (!strcmp(w, "list index out of range") || !strcmp(w, "list assignment index out of range")\n        || !strcmp(w, "pop index out of range")\n')
     if p == 'DIE' and 'EXCCLASSES' in want:
         text = _exctext.classes_table(text)          # S4e: Exception (28) and the user exception classes (29..)
     if 'EXCSTR' in want and p != 'DIE':

@@ -22120,6 +22120,7 @@ def _stmt_inner(node, ctx, ind):
                 k = _expr(node.targets[0].slice, ctx)
                 pre = _flush(ctx, pad)
                 ctx.parts.add('LIST')
+                ctx.parts.add('LISTDELMSG')
                 ctx.has_try = True
                 if exctext.ACTIVE:
                     _exc_text_parts(ctx)
