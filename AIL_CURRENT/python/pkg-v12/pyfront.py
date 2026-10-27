@@ -713,12 +713,45 @@ def refuse_field_method_call(tree, allow_owners=False):
 
     _visit(tree, None, None)
 
+    def _class_alias_classes(node, seen=frozenset()):
+        """Resolve a name bound to a class name (or an alias chain) in its Python scope."""
+        key = ('class-alias', id(node))
+        if key in seen:
+            return set()
+        seen = seen | {key}
+        name = node.id
+        lookup = scope_of.get(id(node), tree)
+        while True:
+            if isinstance(lookup, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)) \
+                    and name in _param_names(lookup):
+                return set()
+            values = [value for bound, value in assignments.get(lookup, ())
+                      if bound == name]
+            if values:
+                found = set()
+                for value in values:
+                    if isinstance(value, ast.Name):
+                        if value.id in classes:
+                            found.add(value.id)
+                        else:
+                            found |= _class_alias_classes(value, seen)
+                return found
+            if lookup is tree:
+                return set()
+            parent = scope_parent.get(lookup)
+            if parent is None:
+                return set()
+            lookup = parent
+
     def _classes_of(node, ctx=(None, None), seen=frozenset()):
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id in classes:
                 return {node.func.id}
-            return set()
+            return _classes_of(node.func, ctx, seen)
         if isinstance(node, ast.Name):
+            alias = _class_alias_classes(node, seen)
+            if alias:
+                return alias
             cls_name, func = ctx
             if func is not None:
                 params = _param_names(func)
@@ -930,7 +963,7 @@ def refuse_field_method_call(tree, allow_owners=False):
         if attr not in all_names:
             continue
         recv = node.func.value
-        if isinstance(recv, ast.Name) and recv.id in classes:
+        if isinstance(recv, ast.Name) and (recv.id in classes or _class_alias_classes(recv)):
             continue
         if isinstance(recv, ast.Call) and isinstance(recv.func, ast.Name) and recv.func.id == 'super':
             continue

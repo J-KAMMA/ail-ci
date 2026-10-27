@@ -1,3 +1,25 @@
+## 2026-10-27 -- pre339: a class alias to a bound-method field is refused by name (job-pre339-10272146)
+
+The pre314 review's first pre-existing item was `class_alias`: with `self.f = self.g` and a
+method `f`, CPython calls the bound `g` (`55`), while both builds stopped with
+`AttributeError: 'C' object has no attribute 'g'` when the receiver was constructed through an
+alias (`Alias = C; Alias().f()`).  Reproduced on both builds with `cmp.sh`.
+`refuse_field_method_call` now resolves a name bound to a class (and alias chains) in its Python
+scope when the receiver of a colliding call is constructed by it, so the construct is refused by
+name on both builds; a parameter or function-local binding shadows the alias, and an alias of a
+class without the collision, a lambda field and a non-feature program keep CPython's result.  The
+alias reaches the same refusal through an assigned receiver, tuple unpacking, a function-local
+alias, an argument, a list item, an attribute and a dict value.  Added
+`AIL_CURRENT/test_ail_pre339.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.
+
+Probes in `/tmp/probes/pre339` on both builds: refused by name: `class_alias`,
+`class_alias_assigned`, `alias_chain`, `alias_tuple_unpack`, `alias_local_direct`, `alias_arg`,
+`alias_list`, `alias_attr` and `alias_dict`; match CPython: `class_alias_lambda`,
+`alias_param_shadow`, `alias_local_shadow`, `alias_unrelated` and `alias_no_feature`.
+Final-state tests: test_ail_pre339, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre326: a nested class inside a function is already refused by name (job-pre326-10271918)
 
 The pre324 reviewer's first pre-existing item was a nested class inside a function
