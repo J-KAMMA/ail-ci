@@ -1,3 +1,15 @@
+## 2026-10-27 -- pre376 review fix: pin the new test module in MANIFEST.json (job-pre376-10280607)
+
+The review found that the previous commit's `AIL_CURRENT/MANIFEST.json` did not pin
+`test_ail_pre376.py`, so `python3 tools/update_manifest.py --check` exited 1 and
+`tools/par_check.py` aborted in `ail_check.preflight` with `ValueError: hash mismatch:
+test_ail_pre376.py`.  Ran `python3 tools/update_manifest.py` (it added the pin in both the
+`tests` and `files` maps), `--check` now exits 0.  No code changed; the false sentence in the
+entry below was corrected.  `tools/ci_shards.py --check` still exits 1 with only the four
+pre-existing duplicate assignments.  Re-ran the `/tmp/probes/pre376` set on both builds and
+test_ail_pre376, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 on this
+commit.
+
 ## 2026-10-27 -- pre376: int() of a class attribute read as `self.attr` in a method (job-pre376-10280607)
 
 The pre359 review's `r10` probe still differed on this tree: a plain method reading its class
@@ -27,7 +39,9 @@ method that rebinds `self` is not folded.  Added
 `AIL_CURRENT/test_ail_pre376.py` (2 tests, 19 programs, both builds) and registered it in
 `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests: test_ail_pre376,
 test_ail_pre359, test_ail_pre338, test_ail_pre358, test_ail_safetynet, test_ail_files and
-test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+test_ail_corpus_findings3.  (`tools/update_manifest.py` was not run before this commit, so
+`--check` failed here with `unpinned test_ail_pre376.py`; the review follow-up above adds the
+pin.)
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
