@@ -120,6 +120,24 @@ print(D().g)
         return 9
 print(D().g)
 ''',
+    'list_index_method': '''class E:
+    def __init__(self):
+        self.g = 5
+class D:
+    def g(self):
+        return 1
+xs = [D(), E()]
+print(xs[0].g)
+''',
+    'list_negative_method': '''class E:
+    def __init__(self):
+        self.g = 5
+class D:
+    def g(self):
+        return 1
+xs = [E(), D()]
+print(xs[-1].g)
+''',
 }
 
 CONTROL = '''class D:
@@ -140,6 +158,101 @@ print(d.g(0), d.g(-5), d.g(""), d.g([]), d.g(True), d.g(None))
 print(d.prop, D().g(9223372036854775807), D().g(-9223372036854775808))
 print(E().g, getattr(d, "g")(7), callable(d.g))
 '''
+
+FIELD_CONTROL = {
+    'field_setattr': '''class D:
+    def g(self):
+        return 1
+d = D()
+setattr(d, 'g', 42)
+print(d.g)
+''',
+    'field_module_assign': '''class D:
+    def g(self):
+        return 1
+d = D()
+d.g = 42
+print(d.g)
+''',
+    'field_arg_assign': '''class D:
+    def g(self):
+        return 1
+def setg(o):
+    o.g = 42
+d = D()
+setg(d)
+print(d.g)
+''',
+    'field_tuple_unpack': '''class D:
+    def __init__(self, v):
+        self.g, self.h = v, 2
+    def g(self):
+        return 1
+print(D(5).g, D(5).h)
+''',
+    'field_nested_function': '''class D:
+    def __init__(self):
+        def setup(o):
+            o.g = 7
+        setup(self)
+    def g(self):
+        return 1
+print(D().g)
+''',
+    'field_alias': '''class D:
+    def g(self):
+        return 1
+d = D()
+alias = d
+alias.g = 42
+print(d.g)
+''',
+    'field_list_item': '''class D:
+    def g(self):
+        return 1
+d = D()
+xs = [d]
+xs[0].g = 42
+print(d.g)
+''',
+    'field_dict_value': '''class D:
+    def g(self):
+        return 1
+d = D()
+dd = {'x': d}
+dd['x'].g = 42
+print(d.g)
+''',
+    'field_attribute': '''class D:
+    def g(self):
+        return 1
+class Box:
+    def __init__(self):
+        self.d = D()
+b = Box()
+b.d.g = 42
+print(b.d.g)
+''',
+    'list_index_field': '''class E:
+    def __init__(self):
+        self.g = 5
+class D:
+    def g(self):
+        return 1
+xs = [E(), D()]
+print(xs[0].g, xs[-2].g)
+''',
+    'unbound_call_second_arg': '''class D:
+    def g(self):
+        return 1
+    def m(self, x):
+        return x.g
+class E:
+    def __init__(self):
+        self.g = 9
+print(D.m(D(), E()))
+''',
+}
 
 
 def _cpython(directory, name, text):
@@ -185,7 +298,8 @@ class Pre318Tests(unittest.TestCase):
 
     def test_value_routes_are_refused(self):
         for slug in ('argument_route', 'list_route', 'dict_route', 'attribute_route',
-                     'alias_route', 'inherited_method'):
+                     'alias_route', 'inherited_method', 'list_index_method',
+                     'list_negative_method'):
             self.check_refused(slug, REFUSED[slug])
 
     def test_other_method_kinds_are_refused(self):
@@ -202,6 +316,19 @@ class Pre318Tests(unittest.TestCase):
                 self.assertIsNotNone(got, 'control (general=%s)\n%s' % (general, build_err))
                 self.assertEqual(got, (want, want_rc), 'control (general=%s)\n%s'
                                  % (general, build_err))
+
+    def test_field_routes_keep_cpython_behaviour(self):
+        for slug, text in FIELD_CONTROL.items():
+            with tempfile.TemporaryDirectory(prefix='ail-pre318-') as directory:
+                want, want_rc = _cpython(directory, slug, text)
+                self.assertEqual(want_rc, 0, slug)
+                for general in (True, False):
+                    got, build_err = _build(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                            text, general)
+                    self.assertIsNotNone(got, '%s (general=%s)\n%s'
+                                         % (slug, general, build_err))
+                    self.assertEqual(got, (want, want_rc), '%s (general=%s)\n%s'
+                                     % (slug, general, build_err))
 
 
 if __name__ == '__main__':

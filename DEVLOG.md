@@ -1,3 +1,26 @@
+## 2026-10-27 -- pre318 review: keep fields assigned outside the class and index explicit receivers (job-pre318-10271507)
+
+The review found that the method-value check treated only a direct `self.attr = ...` inside the
+class as a field: `setattr(d, 'g', ...)`, a module or function `d.g = ...`, tuple unpacking and a
+nested helper `o.g = ...` were refused even though CPython reads the stored field. A constant
+list/tuple index also unioned every element class, so `[E(), D()][0].g` was refused because D has
+a method of that name, and an explicit unbound `D.m(D(), E())` shifted the argument by the
+implicit `self`. Field discovery now walks every attribute store and `setattr` and resolves its
+receiver; a constant list/tuple subscript selects only that element (negative indices too); and a
+call through a class name indexes arguments without the implicit receiver. Method reads remain
+refused: `[D(), E()][0].g` and `[E(), D()][-1].g` name `D.g`.
+
+Probes in `/tmp/probes` on both builds: `field_setattr`, `field_module_assign`,
+`field_arg_assign`, `field_tuple`, `field_nested`, `field_alias`, `field_list_item`,
+`field_dict_value`, `field_attribute`, `field_augassign`, `field_annotation`, `field_types`
+(empty, negative, large int, bool, float, str, list and None values), `list_mixed`,
+`list_negative_field` and `param_second_dmethod` match CPython; `method_still_refused`,
+`list_negative_method`, `param_second` (the class-attribute form) and `list_nonconstant`
+(a non-constant mixed-list index) are refused by name. `test_ail_pre318.py` now covers the
+review's five field/index/call cases on both builds. Final-state tests: `test_ail_pre318`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`; manifest updated and
+`--check` passes.
+
 ## 2026-10-27 -- pre318: refuse a user method read as a value by name (job-pre318-10271507)
 
 The rbpre278 review recorded four pre-existing differences: `r_bound_default.py`,

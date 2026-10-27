@@ -1242,7 +1242,7 @@ def _check_bound_method_values(tree):
     for node in ast.walk(tree):
         if not isinstance(node, ast.ClassDef):
             continue
-        methods, fields, field_values, bases = set(), set(), {}, []
+        methods, bases = set(), []
         for base in node.bases:
             if isinstance(base, ast.Name):
                 bases.append(base.id)
@@ -1259,32 +1259,8 @@ def _check_bound_method_values(tree):
                    or name.endswith('_property') for name in decorators):
                 continue
             methods.add(item.name)
-            args = item.args.posonlyargs + item.args.args
-            if not args:
-                continue
-            self_name = args[0].arg
-            stack = list(item.body)
-            while stack:
-                sub = stack.pop()
-                if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
-                    continue
-                stack.extend(ast.iter_child_nodes(sub))
-                if isinstance(sub, ast.Assign):
-                    targets, value = sub.targets, sub.value
-                elif isinstance(sub, ast.AnnAssign):
-                    targets, value = [sub.target], sub.value
-                elif isinstance(sub, ast.AugAssign):
-                    targets, value = [sub.target], None
-                else:
-                    continue
-                for target in targets:
-                    if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
-                            and target.value.id == self_name):
-                        fields.add(target.attr)
-                        if value is not None:
-                            field_values.setdefault(target.attr, []).append(value)
-        classes[node.name] = {'methods': methods, 'fields': fields,
-                              'field_values': field_values, 'bases': bases}
+        classes[node.name] = {'methods': methods, 'fields': set(),
+                              'field_values': {}, 'bases': bases}
     if not classes:
         return
 
@@ -1389,26 +1365,32 @@ def _check_bound_method_values(tree):
                     key = ('param', id(func), node.id)
                     if key in seen:
                         return set()
+                    calls = []
                     if id(func) in func_owner:
                         owner = func_owner[id(func)]
                         static = any(isinstance(decorator, ast.Name)
                                      and decorator.id == 'staticmethod'
                                      for decorator in func.decorator_list)
                         if func.name == '__init__':
-                            calls, offset = calls_by_name.get(owner, ()), 1
+                            for call in calls_by_name.get(owner, ()):
+                                calls.append((call, 1))
                         else:
-                            calls = list(calls_by_name.get(func.name, ())) + \
-                                list(calls_by_attr.get(func.name, ()))
-                            offset = 0 if static else 1
+                            for call in calls_by_name.get(func.name, ()):
+                                calls.append((call, 0))
+                            for call in calls_by_attr.get(func.name, ()):
+                                receiver = call.func.value
+                                explicit = isinstance(receiver, ast.Name) \
+                                    and receiver.id in classes
+                                calls.append((call, 0 if static or explicit else 1))
                     else:
                         func_name = getattr(func, 'name', '')
-                        calls = calls_by_name.get(func_name, ()) if func_name else ()
-                        offset = 0
-                    index -= offset
-                    if index < 0:
-                        return set()
+                        for call in (calls_by_name.get(func_name, ()) if func_name else ()):
+                            calls.append((call, 0))
                     found = set()
-                    for call in calls:
+                    for call, offset in calls:
+                        index = params.index(node.id) - offset
+                        if index < 0:
+                            continue
                         value = None
                         if index < len(call.args):
                             value = call.args[index]
@@ -1463,20 +1445,91 @@ def _check_bound_method_values(tree):
             return found
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name):
             found = set()
+            index = _constant_index(node.slice)
             for item in ast.walk(tree):
                 if not isinstance(item, ast.Assign):
                     continue
                 if not any(isinstance(t, ast.Name) and t.id == node.value.id for t in item.targets):
                     continue
                 if isinstance(item.value, (ast.List, ast.Tuple)):
-                    for elt in item.value.elts:
-                        found |= _classes_of(elt, ctx, seen)
+                    elements = item.value.elts
+                    if index is not None and -len(elements) <= index < len(elements):
+                        found |= _classes_of(elements[index], ctx, seen)
+                    else:
+                        for elt in elements:
+                            found |= _classes_of(elt, ctx, seen)
                 elif isinstance(item.value, ast.Dict) and isinstance(node.slice, ast.Constant):
                     for key, value in zip(item.value.keys, item.value.values):
                         if isinstance(key, ast.Constant) and key.value == node.slice.value:
                             found |= _classes_of(value, ctx, seen)
             return found
         return set()
+
+    def _store_attributes(target, value):
+        if isinstance(target, ast.Attribute):
+            yield target, value
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            if isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts):
+                for element, element_value in zip(target.elts, value.elts):
+                    yield from _store_attributes(element, element_value)
+            else:
+                for element in target.elts:
+                    yield from _store_attributes(element, None)
+        elif isinstance(target, ast.Starred):
+            yield from _store_attributes(target.value, None)
+
+    store_targets = []
+    setattr_shadowed = _binds_name(tree, 'setattr')
+    for item in ast.walk(tree):
+        if isinstance(item, ast.Assign):
+            for target in item.targets:
+                for attribute, value in _store_attributes(target, item.value):
+                    store_targets.append((attribute.value, attribute.attr, value))
+        elif isinstance(item, ast.AnnAssign) and item.value is not None:
+            for attribute, value in _store_attributes(item.target, item.value):
+                store_targets.append((attribute.value, attribute.attr, value))
+        elif isinstance(item, ast.AugAssign):
+            for attribute, value in _store_attributes(item.target, None):
+                store_targets.append((attribute.value, attribute.attr, value))
+        elif isinstance(item, (ast.For, ast.AsyncFor)):
+            for attribute, value in _store_attributes(item.target, None):
+                store_targets.append((attribute.value, attribute.attr, value))
+        elif isinstance(item, (ast.With, ast.AsyncWith)):
+            for entry in item.items:
+                if entry.optional_vars is not None:
+                    for attribute, value in _store_attributes(entry.optional_vars, None):
+                        store_targets.append((attribute.value, attribute.attr, value))
+        elif isinstance(item, ast.comprehension):
+            for attribute, value in _store_attributes(item.target, None):
+                store_targets.append((attribute.value, attribute.attr, value))
+        elif (not setattr_shadowed and isinstance(item, ast.Call)
+              and isinstance(item.func, ast.Name) and item.func.id == 'setattr'
+              and len(item.args) >= 2 and not item.keywords
+              and isinstance(item.args[1], ast.Constant)
+              and isinstance(item.args[1].value, str)):
+            value = item.args[2] if len(item.args) > 2 else None
+            store_targets.append((item.args[0], item.args[1].value, value))
+
+    def _add_field(cls_name, attr, value):
+        info = classes.get(cls_name)
+        if info is None:
+            return False
+        changed = attr not in info['fields']
+        info['fields'].add(attr)
+        if value is not None:
+            values = info['field_values'].setdefault(attr, [])
+            if all(existing is not value for existing in values):
+                values.append(value)
+                changed = True
+        return changed
+
+    for _pass in range(2):
+        changed = False
+        for base, attr, value in store_targets:
+            for cls_name in _classes_of(base, ctx_of.get(id(base), (None, None))):
+                changed = _add_field(cls_name, attr, value) or changed
+        if not changed:
+            break
 
     parents = {}
     for parent in ast.walk(tree):
