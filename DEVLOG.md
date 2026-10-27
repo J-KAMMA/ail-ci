@@ -1,3 +1,11 @@
+## 2026-10-27 -- re-apply pre304: class-body names visible to later attributes (job-rbpre304-10271604)
+
+Re-applied the accepted pre304 change on top of this tree; its class-body name map and the
+method/property rebinding refusal are now merged with the tree's newer class-attribute refusal
+path (`_class_attr_through_class_refusal`).  The two accepted DEVLOG entries and the new rows are
+kept.  Verified with `test_ail_pre304`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` on the final commit; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre302 review: parenthesize a folded negative float literal (job-pre302-10270745)
 
 The review found that the replacement produced by `_fold_float_int_text` was an
@@ -463,6 +471,51 @@ both builds); `pre306_attr_fit`, `pre306_attr_mutated_instance` (match CPython, 
 `pre306_attr_instance` with an out-of-range value assigned after construction still keeps the
 run-time trap.  Final tests on the committed tree: `test_ail_pre306`, `test_ail_safetynet`,
 `test_ail_files`, `test_ail_corpus_findings3`.  `tools/update_manifest.py --check` passes.
+## 2026-10-26 -- pre304 review: method/property rebinding is refused by name (job-pre304-10270748)
+
+The review of the pre304 change found that it introduced a wrong answer: when a method or
+property rebinds an earlier class attribute (`class C: x = 3; def x(self): ...; y = x + 1`),
+the name map still held the old attribute slot, so `y` printed `4` (and a comprehension printed
+`[0, 1, 2]`) where CPython raises TypeError.  The map is now built from the class body's
+statement order instead of only its attributes, and a method/property binding marks its name as
+refused, so a later attribute read of that name is refused by name at compile time on both builds
+(the base behaviour).  The same applies when a module global has the same name, where the base
+printed the global's value instead of CPython's TypeError.  A method before the attribute, a
+method after the use, a later re-assignment after the method, inherited methods, and unrelated
+methods keep matching CPython.
+
+Probes in `/tmp/probes`: `pre304rev_method_plain`, `pre304rev_method_comp`,
+`pre304rev_property`, `pre304rev_static_class`, `pre304rev_global_same_name` are refused by name
+on both builds (CPython raises TypeError); `pre304rev_method_before_attr`,
+`pre304rev_rebind_after_method`, `pre304rev_method_after_use`, `pre304rev_unrelated_method` and
+`pre304rev_inherited_method` match CPython on both builds.  `test_ail_pre304.py` now has 3 tests.
+## 2026-10-26 -- pre304: class-body names are visible to later attributes (job-pre304-10270748)
+
+The first pre-existing difference in the rbrbfuzz28 review was a class-body comprehension that
+reads an earlier class attribute: `class C: x = 3; ys = [i for i in range(x)]` stopped with
+`name 'x' is not defined` when `ys` was read through an instance or through `C()`, and the
+inherited and empty-comprehension cases refused too.  pyboxed2 now keeps the class body's earlier
+assignments in a temporary name map (name -> the attribute's module slot) while it compiles each
+attribute value, including the lazy `_class_attr_value` fallback and the `C.attr` read.  Only a
+comprehension's outermost iterable sees the map, as in CPython: the comprehension body runs in
+its own scope, so a class name there still reads a module global of the same name, or is refused
+by name when there is none.  Duplicate assignments, a later class definition that uses the outer
+global first, aliases and arithmetic, sources through a list item, a dict value and an instance
+attribute, inheritance and overriding, and class/instance/method reads all match CPython.
+
+Added `AIL_CURRENT/test_ail_pre304.py` (2 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`; DIFFERENCES row
+`C?-job-pre304-10270748-1`.  Probes in `/tmp/probes`: `pre304_inst`, `pre304_call`,
+`pre304_instance_read`, `pre304_inherit`, `pre304_inherit_call`, `pre304_empty`, `pre304_comps`,
+`pre304_shadow_global`, `pre304_comp_body_global`, `pre304_arith`, `pre304_dup`,
+`pre304_later`, `pre304_routes`, `pre304_args`, `pre304_negative_bool`, `pre304_nested`,
+`pre304_class_read`, `pre304_alias`, `pre304_method`, `pre304_override` and `pre304_plain` match
+CPython on both builds; `pre304_comp_body_noglobal` is refused by name on both builds.
+Final-state tests: `test_ail_pre304`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 275 s, 0 failed), plus `test_ail_pre279`,
+`test_ail_pre283`, `test_ail_fuzz29`, `test_ail_dunders`, `test_ail_typed_inherit` and
+`test_ail_virtual_dispatch` (6 modules, 191 s, 0 failed).  `tools/update_manifest.py --check`
+passes.
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
