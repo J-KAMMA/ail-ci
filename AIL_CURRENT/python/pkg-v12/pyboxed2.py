@@ -2243,6 +2243,19 @@ class Compiler(boxclosure.ClosureMixin):
             and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
             and isinstance(n.args[1].value, str))
         self.assigned_attrs = frozenset(assigned_attrs)
+        any_all_genargs = set()
+        for call in ast.walk(tree):
+            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
+                    call.func.id in ('any', 'all'):
+                any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        for gen in ast.walk(tree):
+            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
+                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                refusal = Unsupported(
+                    'a generator expression nested inside another generator expression '
+                    '(the inner one would be materialised eagerly, not lazily)')
+                refusal.source_line = getattr(gen, 'lineno', None)
+                raise refusal
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
@@ -5919,6 +5932,9 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
+        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+            raise Unsupported('a generator expression nested inside another generator expression '
+                              '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
@@ -8230,6 +8246,9 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('next() with other than (iterator[, default])')
         if isinstance(args[0], ast.GeneratorExp):
             gen = args[0]
+            if any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                raise Unsupported('a generator expression nested inside another generator expression '
+                                  '(the inner one would be materialised eagerly, not lazily)')
             first = gen.generators[0]
             src = self._resolve_iter_src(first.iter, ctx)
             opened = ctx.tmp()
@@ -8701,6 +8720,9 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('%s() over a generator expression whose iterable is itself a '
                                   'generator expression (the inner generator would be materialised '
                                   'eagerly)' % name)
+            if any(n is not arg and isinstance(n, ast.GeneratorExp) for n in ast.walk(arg)):
+                raise Unsupported('a generator expression nested inside another generator expression '
+                                  '(the inner one would be materialised eagerly, not lazily)')
             # fused: short-circuits at the first deciding element, like CPython's any()/all()
             # over a generator (the materialising list path cannot, so it must not be used).
             # The two -> bool is still computed in evaluation order; the `goto` leaves every
