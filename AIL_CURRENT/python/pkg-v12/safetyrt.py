@@ -2345,9 +2345,6 @@ class slice:
 
     def indices(self, n):
         return _ail_slice_indices(self.start, self.stop, self.step, n)
-
-
-_ail_slice_type = slice
 '''
 
 # name -> (C call, argument count, fragment): primitives the preludes call

@@ -4,9 +4,10 @@ The pre327 reviewer recorded this as pre-existing: a function whose parameter or
 is named ``slice``, followed by a slice of a user-class instance, raised
 ``TypeError: 'int' object is not callable`` on both builds, where CPython passes its
 builtin ``slice`` object to ``__getitem__``.  The general path built the object with a
-call to the user-visible name ``slice``; it now calls the prelude's private alias, so
-user code that binds ``slice`` still sees its own binding while the subscript uses the
-builtin type.
+call to the user-visible name ``slice``; it now calls the prelude class through the
+compiler's class reference, so user code that binds ``slice`` still sees its own binding
+while the subscript uses the builtin type.  A user binding of any helper name (the first
+fix's ``_ail_slice_type`` alias included) cannot shadow it.
 """
 import os
 import subprocess
@@ -102,6 +103,40 @@ def cut(x):
 
 
 print(cut(C()))
+''',
+    'alias_local': '''
+class C:
+    def __getitem__(self, i):
+        return (i.start, i.stop, i.step)
+
+
+def cut(x):
+    _ail_slice_type = 9
+    return x[1:2]
+
+
+print(cut(C()))
+''',
+    'alias_global': '''
+class C:
+    def __getitem__(self, i):
+        return (i.start, i.stop, i.step)
+
+
+_ail_slice_type = 9
+print(C()[1:2])
+''',
+    'alias_param': '''
+class C:
+    def __getitem__(self, i):
+        return (i.start, i.stop, i.step)
+
+
+def cut(_ail_slice_type, x):
+    return x[1:2]
+
+
+print(cut(9, C()))
 ''',
     'routes_and_store': '''
 class C:
