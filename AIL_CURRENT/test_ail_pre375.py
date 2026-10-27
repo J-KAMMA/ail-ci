@@ -9,10 +9,17 @@ its assignment table, so the receiver never reached the by-name refusal.
 
 The table now takes a walrus target and each element a ``for`` iterable is seen to hold (a
 literal, a name bound to one, an instance field, a subscript of one and an argument list,
-including a method argument).  A target in a comprehension is deliberately left alone, and a
-plain assignment is not merged into a parameter's call-site resolution.  A receiver that can
-only be an unrelated class, an empty iterable and a name that only another function rebinds
-keep CPython's result.
+including a method argument).  A walrus/``for`` binding is an additional possible value, not a
+replacement: when its value cannot be resolved, a module-level alias of the colliding class is
+still consulted (and a plain local assignment still shadows, as before).  A target in a
+comprehension is deliberately left alone, and a plain assignment is not merged into a
+parameter's call-site resolution.
+
+The pre375 task's p6 (``y = C; y().g()``) is refused too: constructing a class whose colliding
+field holds a bound method fails inside ``__init__`` at run time (``self.f = self.g`` reads the
+method as a value), so the construction itself is refused by name.  A field holding a plain
+lambda is representable and keeps CPython.  A receiver that can only be an unrelated class, an
+empty iterable and a name that only another function rebinds keep CPython's result.
 """
 import os
 import subprocess
@@ -102,6 +109,33 @@ H().run([C])
     return y().f()
 print(go(D))
 ''',
+    # Constructing a class whose colliding field holds a bound method fails inside __init__
+    # at run time (`self.f = self.g` reads the method as a value); the construction is now
+    # refused by name instead.
+    'p6_alias_construction': C + '''y = C
+y().g()
+''',
+    'p6_direct_construction': C + '''C().g()
+''',
+    # A walrus/`for` binding is one more possible value, not a replacement: the module-level
+    # alias of the colliding class is still a possible receiver.
+    'walrus_shadows_module_alias': C + '''X = C
+def pick():
+    return C
+def go():
+    (X := pick())
+    print(X().f())
+go()
+''',
+    'for_shadows_module_alias': C + D + '''ys = [D]
+ys.append(C)
+X = C
+def go():
+    for X in ys:
+        pass
+    print(X().f())
+go()
+''',
 }
 
 MATCH = {
@@ -130,6 +164,28 @@ go(D)
     for y in [C]:
         pass
 y = D
+print(y().f())
+''',
+    # A plain local binding still shadows the enclosing scope: only the walrus/`for` routes
+    # are additional possibilities, so an unrelated class built this way keeps CPython.
+    'plain_local_shadow': C + D + '''X = C
+def go():
+    X = D
+    print(X().f())
+go()
+''',
+    'walrus_local_unrelated': C + D + '''def go():
+    if (y := D):
+        print(y().f())
+go()
+''',
+    # A colliding field holding a plain lambda is representable; construction stays supported.
+    'lambda_field_construction': '''class C:
+    def __init__(self):
+        self.f = lambda: 101
+    def f(self):
+        return 102
+y = C
 print(y().f())
 ''',
     'no_feature': '''for y in range(3):

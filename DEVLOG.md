@@ -1,3 +1,36 @@
+## 2026-10-27 -- pre375 follow-up: rebind shadowing and the p6 construction (job-pre375-10280558)
+
+The pre375 review found two defects.  (1) A new under-refusal: walrus and `for` bindings were in
+the plain assignment table, so `_classes_of` treated them as a local binding and stopped before
+consulting a module-level alias.  `p9` (`X = C` at module scope, `(X := pick())` in a function,
+`X().f()`) and `p1` (`X = C` module alias, `for X in ys` over a list mutated after its literal)
+compiled and stopped with `AttributeError` where the base refused by name.  Walrus and `for`
+bindings now live only in the rebinding table and are resolved as *additional* possible values:
+when their value resolves to nothing, the enclosing scopes (including the module alias) are
+still consulted; a plain local assignment still shadows, exactly as before.  Both probes are
+refused by name on both builds again.
+
+(2) The task's p6 (`y = C; y().g()`, and equally `C().g()`) was not fixed by the previous
+commit.  The failure is construction, not alias dispatch: `self.f = self.g` reads a method as a
+value, which this subset cannot build, so `__init__` raises `AttributeError` on both builds where
+CPython returns 55.  The field/method collision screen now refuses the construction of a class
+whose colliding field may hold a bound method (`_may_be_bound`), naming the class and the field;
+a colliding field holding a plain lambda/function is representable and still matches CPython.
+This also covers construction through an alias, a list item, a dict value, an attribute, an
+argument or a call in another function (all refused by name; the last is conservative).
+
+Probes in `/tmp/probes/pre375fix` on both builds via `cmp.sh`: `c1_p6_alias_g`, `c2_p6_direct_g`,
+`c3_p6_in_function`, `c5_bound_arg_refused`, `w1_walrus_outer_alias`, `w2_for_mutated_alias`,
+`w7_walrus_argument`, `w9_walrus_dict_value` are refused by name; `c4_lambda_field_match`,
+`c6_unrelated_construct`, `s1_param_shadows_class`, `s2_local_shadows_class`,
+`w3_walrus_local_unrelated`, `w4_plain_local_shadow`, `w5_plain_unknown_shadow`,
+`w6_for_local_unrelated`, `w8_for_empty` match CPython.  The 20 reviewer probes were re-run:
+every one is refused by name or matches except the two known pre-existing differences `p2`
+(module-level `for` over a mutated list) and `p13` (comprehension target), both unchanged.
+Final-state tests: test_ail_pre375 (74 s), test_ail_pre278 (72 s), test_ail_pre361 (34 s),
+test_ail_safetynet (82 s), test_ail_files (43 s, 1 skip) and test_ail_corpus_findings3 (89 s),
+all OK.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre375: walrus and `for`-target class receivers are refused by name (job-pre375-10280558)
 
 Reproduced the first still-differing pre-existing item from the pre361 review on this tree.  Its

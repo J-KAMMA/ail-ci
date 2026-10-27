@@ -675,9 +675,11 @@ def refuse_field_method_call(tree, allow_owners=False):
         elif isinstance(item, ast.NamedExpr) and isinstance(item.target, ast.Name):
             # A walrus binds in the scope that contains it (a comprehension's target does not
             # introduce a scope here, which is also where CPython binds a walrus inside one).
-            scope = scope_of.get(id(item), tree)
-            assignments.setdefault(scope, []).append((item.target.id, item.value))
-            rebinds.setdefault(scope, []).append((item.target.id, item.value))
+            # It is a rebinding, not a plain assignment: it is one more possible value and
+            # cannot make an enclosing plain binding unreachable the way a local assignment
+            # does.
+            rebinds.setdefault(scope_of.get(id(item), tree), []).append(
+                (item.target.id, item.value))
 
     def _inherited(name, key, seen):
         info = classes.get(name)
@@ -795,6 +797,13 @@ def refuse_field_method_call(tree, allow_owners=False):
             while lookup is not tree:
                 values = [value for name, value in assignments.get(lookup, ())
                           if name == node.id]
+                # A walrus or a `for` target is one more possible value, not a replacement: the
+                # loop may run zero times and the branch may not be taken, so a module-level
+                # alias of a colliding class is still a possible receiver.  A plain local
+                # binding still shadows the enclosing scopes, as it always did.
+                for name, value in rebinds.get(lookup, ()):
+                    if name == node.id:
+                        found |= _classes_of(value, ctx, seen, names_are_classes)
                 if values:
                     for value in values:
                         found |= _classes_of(value, ctx, seen, names_are_classes)
@@ -804,6 +813,9 @@ def refuse_field_method_call(tree, allow_owners=False):
                     break
                 lookup = parent
             for name, value in assignments.get(tree, ()):
+                if name == node.id:
+                    found |= _classes_of(value, ctx, seen, names_are_classes)
+            for name, value in rebinds.get(tree, ()):
                 if name == node.id:
                     found |= _classes_of(value, ctx, seen, names_are_classes)
             for item in ast.walk(tree):
@@ -898,6 +910,9 @@ def refuse_field_method_call(tree, allow_owners=False):
                 for name, value in assignments.get(lookup, ()):
                     if name == node.id:
                         found.extend(_iter_values(value, ctx, seen))
+                for name, value in rebinds.get(lookup, ()):
+                    if name == node.id:
+                        found.extend(_iter_values(value, ctx, seen))
                 if lookup is tree:
                     break
                 parent = scope_parent.get(lookup)
@@ -926,7 +941,8 @@ def refuse_field_method_call(tree, allow_owners=False):
             found = []
             lookup = scope_of.get(id(node), tree)
             while True:
-                for name, value in assignments.get(lookup, ()):
+                for name, value in list(assignments.get(lookup, ())) + \
+                        list(rebinds.get(lookup, ())):
                     if name != node.value.id:
                         continue
                     if isinstance(value, (ast.List, ast.Tuple)):
@@ -956,7 +972,6 @@ def refuse_field_method_call(tree, allow_owners=False):
             if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
                 ctx = (func_owner.get(id(scope)), scope)
             for value in _iter_values(item.iter, ctx):
-                _add_assign([item.target], value, scope)
                 _add_assign([item.target], value, scope, rebinds)
 
     def _field_values(name, attr, seen=frozenset()):
@@ -1078,6 +1093,34 @@ def refuse_field_method_call(tree, allow_owners=False):
         if isinstance(node, (ast.List, ast.Tuple, ast.Dict)):
             return False
         return True
+
+    # Constructing a class whose colliding field holds a bound method already fails at run
+    # time: `self.f = self.g` reads the method as a value, and this subset has no route for
+    # that read (CPython builds a bound method).  Refuse the construction by name instead of
+    # stopping inside `__init__`; a field holding a plain lambda or function is representable
+    # and is left to the instance-table route.
+    build_refusals = {}
+    for name, names in collisions.items():
+        for attr in names:
+            if any(_may_be_bound(value) for value in _field_values(name, attr)):
+                build_refusals[name] = attr
+                break
+    if build_refusals:
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            # Resolve the callee, not the Call: a parameter or local plain binding named like
+            # the class shadows it, and `_classes_of(Call)` does not look that up.
+            possible = _classes_of(node.func, call_ctx.get(id(node), (None, None)),
+                                   frozenset(), True)
+            hit = possible & set(build_refusals)
+            if not hit:
+                continue
+            cls_name = sorted(hit)[0]
+            raise Unsupported(
+                'constructing %s: the class also stores an instance field named %s holding a '
+                'bound method, which this subset cannot build (CPython reads the method as a '
+                'value)' % (cls_name, build_refusals[cls_name]))
 
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
