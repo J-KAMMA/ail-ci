@@ -1,3 +1,33 @@
+## 2026-10-27 -- pre359: int() of an inherited class attribute outside int64 is refused by name (job-pre359-10280222)
+
+The pre337 review recorded two pre-existing items.  The first, `bump = lambda xs:
+xs.__setitem__(0, 1.5)` followed by `int(items[0])`, is already refused on both builds by name
+(`not in the subset: the method .__setitem__() (on a value of unknown static kind)`), which the
+task allows, so it needed no compiler change and is only pinned in the new test module.
+
+The second (`p3`, subclass class-attribute lookup) still differed: both builds compiled
+`class Box: text = 1e300; class Sub(Box): pass; print(int(Sub().text))` and then stopped with
+`integer overflow`, where CPython prints the big integer.  `_known_class_attributes` skipped
+every class with a base, so `Sub` was unknown and the inherited value never reached the static
+int() check.  It now accepts a class whose single base is a plain name bound once to an earlier
+known class (also through a base alias) and copies the base's class attributes, class/instance
+constructor state and `__init__` parameter map; a name bound in the subclass body shadows an
+inherited class attribute.  The conversion is now refused by name with the existing
+`int() of a float outside int64: ... (CPython makes a big integer)` message on both builds, also
+through a three-level chain, an inherited `__init__` parameter, the negative value, a module
+constant, a list item, a dict value, a function argument and a local; an inherited string keeps
+the `int64 constant expression out of range` refusal.  Overridden in-range values, a subclass
+with its own `__init__`, an unrelated base and plain classes match CPython.  Multiple
+inheritance and later class-attribute stores were already refused by name on both builds.
+
+Probes in `/tmp/probes/pre359` on both builds: `p_lambda`, `p_lambda_direct`, `p_subclass`,
+`p_subclass_cls`, `p_alias`, `p_base` and `s01`-`s19`; every one matches CPython or is refused by
+name (`s11_base_mutated` and `s12_two_bases` are existing named refusals).  Added
+`AIL_CURRENT/test_ail_pre359.py` (2 tests, 21 programs, both builds) and registered it in
+`ail_check.MODULES`; `tools/ci_shards.py --update` added it to `tools/ci_shards.json` (its
+`--check` still reports the four duplicate assignments that are already in the committed file).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre338: int() of an out-of-int64 class attribute read through an instance is refused (job-pre338-10272141)
 
 The pre315 reviewer's first pre-existing item was `t01_class_attr_instance.py`:
