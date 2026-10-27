@@ -1245,6 +1245,7 @@ def _check_int64_literals(tree):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
+    _check_int64_binpow_constants(tree, known, attributes, passthrough, parents)
 
 
 _INT_BINARY = {
@@ -1798,6 +1799,182 @@ def _check_int64_pow_constants(tree, known):
                                    _function_scope_stores(function), parameters)
         for node in _walk_own_scope(function):
             check(node, local, scope_names)
+
+
+def _check_binpow_constant(node, base, exponent):
+    """Refuse a ``**`` whose known int operands make an exact result outside int64."""
+    if type(base) is not int or type(exponent) is not int:
+        return
+    value = _exact_pow_or_too_big(base, exponent)
+    if value is None:
+        return
+    if value is not _CONST_INT_TOO_BIG and _INT64_MIN <= value <= _INT64_MAX:
+        return
+    shown = 'too large' if value is _CONST_INT_TOO_BIG else _constant_diagnostic(value)
+    error = ValueError(f'int64 constant expression out of range: {shown}')
+    error.source_line = getattr(node, 'lineno', None)
+    error.source_column = getattr(node, 'col_offset', None)
+    raise error
+
+
+def _binpow_function_lookup(function, module_known, module_int_known):
+    """A name lookup for one function body: its own int constants, then the module's rich
+    constant values for names the function does not shadow."""
+    local = _function_local_int_constants(function, module_int_known)
+    shadowed = set(_function_scope_stores(function))
+    shadowed |= _scope_parameters(function)
+    shadowed |= _scope_declared(function)
+
+    def lookup(name):
+        if name in local:
+            return local[name]
+        if name in shadowed:
+            return _UNKNOWN
+        return module_known.get(name, _UNKNOWN)
+
+    def global_name(name):
+        return name not in shadowed
+
+    return lookup, global_name
+
+
+def _binpow_param_constants(function, lookup, global_name, attributes, passthrough):
+    """Parameters a function unconditionally rebinds to an int constant in its own body,
+    ``name -> (line, value)``.  Only a direct top-level assignment counts, and only the single
+    store of that name, so a conditional or repeated assignment is not used."""
+    parameters = _scope_parameters(function)
+    declared = _scope_declared(function)
+    stores = _function_scope_stores(function)
+    found = {}
+    for statement in function.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not (isinstance(target, ast.Name) and target.id in parameters
+                and target.id not in declared and stores.get(target.id) == 1):
+            continue
+        value = _constant_value(statement.value, lookup, global_name, passthrough, attributes)
+        if type(value) is int and _INT64_MIN <= value <= _INT64_MAX:
+            found[target.id] = (statement.lineno, value)
+    return found
+
+
+def _binpow_power_parameters(tree, module_known, module_int_known, attributes, passthrough):
+    """Module functions whose parameter is the base of a power with a known int exponent.
+
+    ``name -> {parameter: (argument index, [exponents])}``.  A parameter the function rebinds
+    is left out: ``_binpow_param_constants`` folds that use instead."""
+    counts = _binding_counts(tree.body)
+    found = {}
+    for function in tree.body:
+        if (not isinstance(function, ast.FunctionDef) or function.decorator_list
+                or counts.get(function.name) != 1):
+            continue
+        positional = [argument.arg for argument in (*function.args.posonlyargs, *function.args.args)]
+        keyword_only = [argument.arg for argument in function.args.kwonlyargs]
+        mapped = {name: index for index, name in enumerate(positional)}
+        mapped.update((name, None) for name in keyword_only)
+        if not mapped:
+            continue
+        lookup, global_name = _binpow_function_lookup(function, module_known, module_int_known)
+        rebound = set(_function_scope_stores(function)) | _scope_declared(function)
+        uses = {}
+        for node in _walk_own_scope(function):
+            if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
+                continue
+            base = node.left
+            if not (isinstance(base, ast.Name) and base.id in mapped and base.id not in rebound):
+                continue
+            exponent = _constant_value(node.right, lookup, global_name, passthrough, attributes)
+            if type(exponent) is not int or exponent < 0:
+                continue
+            uses.setdefault(base.id, []).append(exponent)
+        if uses:
+            found[function.name] = {name: (mapped[name], exponents)
+                                    for name, exponents in uses.items()}
+    return found
+
+
+def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, parents):
+    """Refuse ``base ** exponent`` on statically known ints whose exact result leaves int64.
+
+    Module constants, literal containers read by subscript, class and instance attributes, a
+    function's own int locals, a parameter the function unconditionally rebinds to a constant
+    and a constant argument to a function that raises it to a constant exponent are resolved
+    here.  A value that only exists at run time keeps the language's run-time ``integer
+    overflow`` stop; an in-range result, a negative exponent (CPython's float answer) and the
+    bases 0, 1 and -1 are left alone.  A power whose own value leaves int64 but sits in a
+    larger constant expression that still fits (`2 ** 63 - 1`) is left to the existing fold."""
+    module_int_known = _known_module_constants(tree)
+    module_lookup = lambda name: module_known.get(name, _UNKNOWN)
+    module_global = lambda name: True
+    power_parameters = _binpow_power_parameters(tree, module_known, module_int_known,
+                                                attributes, passthrough)
+
+    def enclosing_constant_fits(node):
+        root = node
+        while True:
+            parent = parents.get(root)
+            if parent is None:
+                break
+            value = _const_fold_int(parent)
+            if value is None:
+                break
+            root = parent
+        value = _const_fold_int(root)
+        return value is not None and _INT64_MIN <= value <= _INT64_MAX
+
+    def check(node, lookup, global_name, param_constants):
+        def value_of(expression):
+            if isinstance(expression, ast.Name) and expression.id in param_constants:
+                line, constant = param_constants[expression.id]
+                if getattr(node, 'lineno', 0) >= line:
+                    return constant
+            return _constant_value(expression, lookup, global_name, passthrough, attributes)
+
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and global_name(node.func.id) and node.func.id in power_parameters):
+            for parameter, (index, exponents) in power_parameters[node.func.id].items():
+                argument = _bound_argument(node, parameter, index)
+                if argument is None:
+                    continue
+                value = value_of(argument)
+                if type(value) is not int:
+                    continue
+                for exponent in exponents:
+                    _check_binpow_constant(node, value, exponent)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            base = value_of(node.left)
+            exponent = value_of(node.right)
+            if type(base) is int and type(exponent) is int and enclosing_constant_fits(node):
+                return
+            _check_binpow_constant(node, base, exponent)
+
+    def visit(node, lookup, global_name, param_constants):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for default in (*node.args.defaults, *[item for item in node.args.kw_defaults
+                                                   if item is not None]):
+                visit(default, lookup, global_name, param_constants)
+            inner_lookup, inner_global = _binpow_function_lookup(node, module_known,
+                                                                 module_int_known)
+            inner_params = _binpow_param_constants(node, inner_lookup, inner_global,
+                                                   attributes, passthrough)
+            for statement in node.body:
+                visit(statement, inner_lookup, inner_global, inner_params)
+            return
+        if isinstance(node, ast.ClassDef):
+            for item in (*node.decorator_list, *node.bases, *node.keywords):
+                visit(item, lookup, global_name, param_constants)
+            for statement in node.body:
+                if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    visit(statement, lookup, global_name, param_constants)
+            return
+        check(node, lookup, global_name, param_constants)
+        for child in ast.iter_child_nodes(node):
+            visit(child, lookup, global_name, param_constants)
+
+    for statement in tree.body:
+        visit(statement, module_lookup, module_global, {})
 
 
 def _check_int64_unary_constants(tree):

@@ -1,3 +1,37 @@
+## 2026-10-27 -- pre367: a constant power behind a name is refused by name (job-pre367-10280424)
+
+The pre351 reviewer's unverified items were re-run first: `test_ail_files` and
+`test_ail_corpus_findings3` both pass on this tree, so the remaining recorded pre-existing
+difference is the one pre351 itself left: `x = 10; print(x ** 40)` at module level was already
+refused by name, but the same value reaching `**` inside a function body, through an argument,
+a list item, a class/instance attribute or a dict value compiled and then stopped with
+`integer overflow` on both builds, where CPython prints the exact bignum.
+
+`_check_int64_binpow_constants` (called from `_check_int64_literals`) now resolves the power's
+operands while compiling: the module's rich constant environment (`_constant_value`, so safe
+literal containers read by subscript, class attributes and instances), a function's own int
+locals, a parameter the function unconditionally rebinds to a constant, and a constant argument
+to a module function whose parameter is the base of a constant-exponent power.  An exact result
+outside int64 is refused with `int64 constant expression out of range` on both builds, as the
+task allows.  The existing enclosing-expression allowance is kept, so `(2 ** 63 - 1) // 1` and
+`10 ** 40 - 10 ** 40` still fold and match CPython.  In-range powers, negative and float
+exponents, bool bases, bases 0/1/-1, shadowed locals/containers, a parameter rebound in range,
+empty containers and run-time-only operands are unchanged.  Not covered (pre-existing, still the
+run-time `integer overflow` stop): a literal container bound inside a function, a default
+argument, an instance created inside a function, and a value known only at run time.
+
+Added `AIL_CURRENT/test_ail_pre367.py` (2 tests, 31 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre367` on both builds:
+`p01`-`p08`, `r01`-`r21` (argument, keyword argument, local, local alias, local exponent, list
+item, list alias, class attribute, instance attribute, dict value, tuple and floor-div nesting,
+negative base, method, rebound parameter, base boundary, int alias, argument from a list item /
+dict value / attribute, named cancellation) are refused by name; `p07`, `m01`-`m12` (in-range
+argument calls, module routes, int64 boundaries including `(-2) ** 63`, literal cancellation,
+negative/float exponents, bools, dynamic operands and arguments, shadowed local and container,
+rebound parameter, local exponent, empty containers) match CPython.  The unchanged pre-existing
+variants `x01`-`x03` still stop at run time.  Final-state tests: test_ail_pre367,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3, test_ail_pre351 and
+test_ail_pre33.  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
 
 The rbrbrbrbrbpre33 review's first pre-existing difference was `x = 10; print(x**40)`, a
