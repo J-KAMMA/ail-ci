@@ -1,3 +1,28 @@
+## 2026-10-27 -- rbrbfuzz59 repair re-check: branch is green on the batch bases (job-rbrbfuzz59-10280140)
+
+The repair task reported `test_ail_fuzz59` and `test_ail_safetynet` failing when this branch is
+applied alone on the integration tree.  The culprit job (`culprit rbrbfuzz59`, run 40542121839,
+16:33Z) ran while the repair branch it names was still the export that predates the fix from
+job-rbrbfuzz59-10272331 (the `_ail_srepr` non-str fallback and the `list[str]` route), so the
+report describes that earlier tree, not this one.  Re-ran the exact culprit steps here: this
+branch is a snapshot of integ `753c709` plus a 7-file change (352 insertions: `tuplegen.lrepr`
+scalars through `%r`, `_ail_srepr` falling back to `%r` for a non-str, `%r` lowered through
+`_repr_conv` in `pyfunc._build_percent_value`, the new `test_ail_fuzz59`, registration, the two
+DIFFERENCES rows and this log).  `git diff 753c709 b8c01c7 -- . ':!.agent' ':!corpus'
+':!AIL_CURRENT/MANIFEST.json'` piped into `git apply --3way` on integ `5dff385` and on the batch
+candidate base `cf63372` conflicts only in `DEVLOG.md` (union merge, as before); no source hunk
+conflicts.  On both bases `test_ail_fuzz59` passed 7 tests in 37.7 s and `test_ail_safetynet`
+passed 5 tests in 134-136 s; on this branch itself they pass in 37.6 s and 131.6 s.  The same
+check on the pre-fix snapshot (branch job-rbrbfuzz59-10272028, `7cd2ef1`) also passes (37.7 s,
+134.3 s), so nothing in the branch's semantics depends on the older export.  Probes
+`p1_slot_foreign` (int/bool/float/None left in a `list[str]` by a failed `heappush`, plus a str
+in a `list[int]` slot), `p2_slot_routes` (item, dict value, attribute, argument), `p3_srepr_escapes`
+(quotes, backslash, newline/tab/CR, control and non-ASCII characters, empty string),
+`p4_percent_r` (int, negative, bool, float, str, None, tuple, list, dict, and a program-defined
+`repr`) and `p5_refused_width` (`%5r`, `%.2r`) match CPython on the general and default builds.
+No source change was needed; this entry records the re-verification.  `tools/update_manifest.py
+--check` passes.
+
 ## 2026-10-27 -- fuzz59 apply on an integ that already has the first change (job-rbrbfuzz59-10272331)
 
 The culprit gate applied this job alone on an integ tree that already contained the first fuzz59
