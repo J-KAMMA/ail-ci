@@ -59,6 +59,9 @@ class CiShardsAssignment(unittest.TestCase):
         }
         data = ci.build(['a', 'b', 'c', 'a'], {}, previous, False)
         self.assertEqual(data['assignment'], [['a', 'b'], ['c'], []])
+        data = ci.build(['a', 'b', 'a'], {}, previous, True)
+        mapped = [name for members in data['assignment'] for name in members]
+        self.assertEqual(sorted(mapped), ['a', 'b'])
 
 
 if __name__ == '__main__':

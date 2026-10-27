@@ -63,6 +63,7 @@ def fallback_weight(cache, modules):
 
 
 def build(modules, cache, previous, rebalance):
+    modules = list(dict.fromkeys(modules))   # a duplicate name is still one module
     n = previous.get('shards', SHARDS)
     old_weights = {} if rebalance else previous.get('weights', {})
     default = fallback_weight(cache, modules)
