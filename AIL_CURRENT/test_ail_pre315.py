@@ -4,8 +4,9 @@ The reviewer of rbrbpre9 recorded that an out-of-range ``int()`` still stopped a
 ``integer overflow`` when the text or float reached it through a module/function variable, a
 list/dict item, an instance attribute or a class attribute, where CPython prints the big
 integer.  The static int() pass now follows those routes (and a wrapper argument) and refuses
-the call by name with the existing wording.  A container changed before the call, an attribute
-overwritten on the instance, in-range values and dynamic values keep their previous behaviour.
+the call by name with the existing wording.  A container changed before the call (including
+through an alias), an attribute overwritten on the instance or by a method, unreachable
+conversions, in-range values and dynamic values keep their previous behaviour.
 """
 import os
 import subprocess
@@ -149,6 +150,69 @@ other = Other()
 other.text = "9223372036854775808"
 other.text = "52"
 print(int(other.text))
+
+
+class AliasBox:
+    pass
+
+
+alias_box = AliasBox()
+alias_box.text = "9223372036854775808"
+same_box = alias_box
+same_box.text = "53"
+print(int(alias_box.text))
+
+
+class ResetBox:
+    def __init__(self):
+        self.text = "9223372036854775808"
+
+    def reset(self):
+        self.text = "54"
+
+
+reset_box = ResetBox()
+reset_box.reset()
+print(int(reset_box.text))
+
+nested = [["9223372036854775808"]]
+nested_inner = nested[0]
+nested_inner[0] = "55"
+print(int(nested[0][0]))
+
+
+def unreachable_show(value):
+    if True:
+        return 56
+    return int(value)
+
+
+print(unreachable_show("9223372036854775808"))
+
+
+class DirectResetBox:
+    def touch(self):
+        self.value = "57"
+
+
+direct_reset = DirectResetBox()
+direct_reset.value = "9223372036854775808"
+direct_reset.touch()
+print(int(direct_reset.value))
+
+
+class ExternalResetBox:
+    def __init__(self):
+        self.label = "9223372036854775808"
+
+
+def reset_label(target):
+    target.label = "58"
+
+
+external_reset = ExternalResetBox()
+reset_label(external_reset)
+print(int(external_reset.label))
 '''
 
 

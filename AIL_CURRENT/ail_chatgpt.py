@@ -659,13 +659,40 @@ def _static_mutation_state(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             counts[node.id] = counts.get(node.id, 0) + 1
     parameters = {node.arg for node in ast.walk(tree) if isinstance(node, ast.arg)}
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     mutated = set()
     mutated_attrs = set()
+    parameter_attrs = set()
+    outside_parameter_attrs = set()
     aliases = {}
+
+    def enclosing_function(node):
+        while node in parents:
+            node = parents[node]
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                return node
+        return None
+
+    def argument_names(function):
+        arguments = function.args
+        names = {argument.arg for argument in
+                 (*arguments.posonlyargs, *arguments.args, *arguments.kwonlyargs)}
+        if arguments.vararg is not None:
+            names.add(arguments.vararg.arg)
+        if arguments.kwarg is not None:
+            names.add(arguments.kwarg.arg)
+        return names
+
     for node in ast.walk(tree):
         if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
                 and isinstance(node.ctx, (ast.Store, ast.Del))):
             mutated_attrs.add((node.value.id, node.attr))
+            if node.value.id in parameters:
+                parameter_attrs.add(node.attr)
+                function = enclosing_function(node)
+                if (function is not None and not isinstance(parents.get(function), ast.ClassDef)
+                        and node.value.id in argument_names(function)):
+                    outside_parameter_attrs.add(node.attr)
         elif (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
                 and isinstance(node.ctx, (ast.Store, ast.Del))):
             mutated.add(node.value.id)
@@ -690,9 +717,13 @@ def _static_mutation_state(tree):
             target, value = node.targets[0], node.value
         elif isinstance(node, ast.AnnAssign):
             target, value = node.target, node.value
-        if isinstance(target, ast.Name) and isinstance(value, ast.Name):
-            aliases.setdefault(target.id, set()).add(value.id)
-            aliases.setdefault(value.id, set()).add(target.id)
+        if isinstance(target, ast.Name):
+            if isinstance(value, ast.Name):
+                aliases.setdefault(target.id, set()).add(value.id)
+                aliases.setdefault(value.id, set()).add(target.id)
+            elif (isinstance(value, ast.Subscript) and isinstance(value.value, ast.Name)):
+                aliases.setdefault(target.id, set()).add(value.value.id)
+                aliases.setdefault(value.value.id, set()).add(target.id)
     changed = True
     while changed:
         changed = False
@@ -705,7 +736,34 @@ def _static_mutation_state(tree):
             elif sources & mutated and target not in mutated:
                 mutated.add(target)
                 changed = True
-    return counts, parameters, mutated, mutated_attrs, aliases
+    groups = _static_alias_groups(aliases)
+    if mutated_attrs:
+        expanded = set()
+        for name, attribute in mutated_attrs:
+            for member in groups.get(name, (name,)):
+                expanded.add((member, attribute))
+        mutated_attrs = expanded
+    return (counts, parameters, mutated, mutated_attrs, aliases,
+            parameter_attrs, outside_parameter_attrs)
+
+
+def _static_alias_groups(aliases):
+    groups = {}
+    for start in aliases:
+        if start in groups:
+            continue
+        members = set()
+        pending = [start]
+        while pending:
+            name = pending.pop()
+            if name in members:
+                continue
+            members.add(name)
+            pending.extend(aliases.get(name, ()))
+        frozen = frozenset(members)
+        for member in frozen:
+            groups[member] = frozen
+    return groups
 
 
 def _static_scope_values(body, base, attributes, passthrough, stores, parameters, declared, mutated):
@@ -762,8 +820,12 @@ def _static_class_attributes(tree, module_env, attributes, passthrough, stores, 
             attributes[(cls.name, name)] = value
 
 
-def _static_direct_attributes(tree, module_env, attributes, passthrough, mutated_attrs):
+def _static_direct_attributes(tree, module_env, attributes, passthrough, groups, parameter_attrs):
     seen = {}
+
+    def group(name):
+        return groups.get(name, frozenset((name,)))
+
     for node in ast.walk(tree):
         target = None
         if isinstance(node, ast.Assign):
@@ -774,11 +836,11 @@ def _static_direct_attributes(tree, module_env, attributes, passthrough, mutated
         elif isinstance(node, ast.Delete):
             for item in node.targets:
                 if isinstance(item, ast.Attribute) and isinstance(item.value, ast.Name):
-                    key = (item.value.id, item.attr)
+                    key = (group(item.value.id), item.attr)
                     seen[key] = seen.get(key, 0) + 1
             continue
         if isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
-            key = (target.value.id, target.attr)
+            key = (group(target.value.id), target.attr)
             seen[key] = seen.get(key, 0) + 1
     for statement in tree.body:
         if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
@@ -787,7 +849,9 @@ def _static_direct_attributes(tree, module_env, attributes, passthrough, mutated
         if not (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)):
             continue
         key = (target.value.id, target.attr)
-        if seen.get(key) != 1:
+        if target.attr in parameter_attrs:
+            continue
+        if seen.get((group(target.value.id), target.attr)) != 1:
             continue
         value = _static_value(statement.value, lambda each: module_env.get(each, _UNKNOWN),
                               attributes, passthrough)
@@ -795,7 +859,8 @@ def _static_direct_attributes(tree, module_env, attributes, passthrough, mutated
             attributes[key] = value
 
 
-def _static_init_attributes(tree, module_env, attributes, passthrough, stores, mutated_attrs):
+def _static_init_attributes(tree, module_env, attributes, passthrough, stores, mutated_attrs,
+                            outside_parameter_attrs):
     specs = {}
     for cls in (node for node in tree.body if isinstance(node, ast.ClassDef)):
         if stores.get(cls.name, 0) > 1:
@@ -808,6 +873,16 @@ def _static_init_attributes(tree, module_env, attributes, passthrough, stores, m
         if not positional:
             continue
         itself, params = positional[0], positional[1:]
+        method_writes = {}
+        for method in (item for item in cls.body if isinstance(item, ast.FunctionDef)):
+            receiver = next(iter((*method.args.posonlyargs, *method.args.args)), None)
+            if receiver is None:
+                continue
+            for node in ast.walk(method):
+                if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+                        and node.value.id == receiver.arg
+                        and isinstance(node.ctx, (ast.Store, ast.Del))):
+                    method_writes[node.attr] = method_writes.get(node.attr, 0) + 1
         spec = {}
         for statement in init.body:
             if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
@@ -818,6 +893,10 @@ def _static_init_attributes(tree, module_env, attributes, passthrough, stores, m
                 continue
             if not (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
                     and target.value.id == itself):
+                continue
+            if target.attr in outside_parameter_attrs:
+                continue
+            if method_writes.get(target.attr, 0) > 1:
                 continue
             if isinstance(value_node, ast.Name) and value_node.id in params:
                 spec[target.attr] = ('param', params.index(value_node.id))
@@ -849,7 +928,9 @@ def _static_init_attributes(tree, module_env, attributes, passthrough, stores, m
 
 
 def _static_int_call_environment(tree, module_counts):
-    _, _, mutated, mutated_attrs, _ = _static_mutation_state(tree)
+    (_, _, mutated, mutated_attrs, aliases, parameter_attrs,
+     outside_parameter_attrs) = _static_mutation_state(tree)
+    groups = _static_alias_groups(aliases)
     global_names = set()
     for node in ast.walk(tree):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
@@ -860,8 +941,9 @@ def _static_int_call_environment(tree, module_counts):
                                  global_names, mutated)
     stores = {name: count for name, count in module_counts.items()}
     _static_class_attributes(tree, known, attributes, passthrough, stores, mutated, mutated_attrs)
-    _static_direct_attributes(tree, known, attributes, passthrough, mutated_attrs)
-    _static_init_attributes(tree, known, attributes, passthrough, stores, mutated_attrs)
+    _static_direct_attributes(tree, known, attributes, passthrough, groups, parameter_attrs)
+    _static_init_attributes(tree, known, attributes, passthrough, stores, mutated_attrs,
+                            outside_parameter_attrs)
     known = _static_scope_values(tree.body, {}, attributes, passthrough, module_counts, set(),
                                  global_names, mutated)
     return known, attributes, mutated
@@ -909,6 +991,98 @@ def _parameter_source(node, mapped, passthrough, local):
     return None
 
 
+def _constant_truth(node):
+    value = _static_value(node, lambda name: _UNKNOWN, {}, {})
+    if isinstance(value, (bool, int, float, str, bytes, tuple, frozenset)) or value is None:
+        return bool(value)
+    return None
+
+
+def _block_terminates(body):
+    return bool(body) and _statement_terminates(body[-1])
+
+
+def _statement_terminates(statement):
+    if isinstance(statement, (ast.Return, ast.Raise)):
+        return True
+    if isinstance(statement, ast.If):
+        truth = _constant_truth(statement.test)
+        if truth is not None:
+            return _block_terminates(statement.body if truth else statement.orelse)
+    return False
+
+
+def _unreachable_node_ids(body):
+    """Ids of nodes in statements that cannot run: after return/raise or in a statically untaken branch."""
+    dead = set()
+
+    def mark(node):
+        dead.update(id(item) for item in ast.walk(node))
+
+    def walk_block(statements):
+        live = True
+        for statement in statements:
+            if not live:
+                mark(statement)
+                continue
+            walk_statement(statement)
+            if _statement_terminates(statement):
+                live = False
+
+    def walk_statement(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            return
+        if isinstance(node, ast.If):
+            truth = _constant_truth(node.test)
+            if truth is True:
+                walk_block(node.body)
+                for statement in node.orelse:
+                    mark(statement)
+            elif truth is False:
+                for statement in node.body:
+                    mark(statement)
+                walk_block(node.orelse)
+            else:
+                walk_block(node.body)
+                walk_block(node.orelse)
+            return
+        if isinstance(node, ast.While):
+            if _constant_truth(node.test) is False:
+                for statement in node.body:
+                    mark(statement)
+            else:
+                walk_block(node.body)
+            walk_block(node.orelse)
+            return
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            walk_block(node.body)
+            walk_block(node.orelse)
+            return
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            walk_block(node.body)
+            return
+        if isinstance(node, ast.Try):
+            walk_block(node.body)
+            for handler in node.handlers:
+                walk_block(handler.body)
+            walk_block(node.orelse)
+            walk_block(node.finalbody)
+            return
+        for child in ast.iter_child_nodes(node):
+            walk_statement(child)
+
+    walk_block(body)
+    return dead
+
+
+def _tree_unreachable_node_ids(tree):
+    dead = _unreachable_node_ids(tree.body)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            dead |= _unreachable_node_ids(node.body)
+    return dead
+
+
 def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
     candidates = {}
     for fn in tree.body:
@@ -928,7 +1102,10 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
     for name, (fn, mapped, rebound) in candidates.items():
         used = {}
         local = _binding_counts(fn.body)
+        dead = _unreachable_node_ids(fn.body)
         for sub in _shallow_walk(fn.body):
+            if id(sub) in dead:
+                continue
             if (not int_shadowed and isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
                     and sub.func.id == 'int' and len(sub.args) == 1 and not sub.keywords):
                 source = _parameter_source(sub.args[0], mapped, passthrough, local)
@@ -943,7 +1120,10 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
         for name, (fn, mapped, rebound) in candidates.items():
             used = dict(functions.get(name, {}))
             local = _binding_counts(fn.body)
+            dead = _unreachable_node_ids(fn.body)
             for sub in _shallow_walk(fn.body):
+                if id(sub) in dead:
+                    continue
                 if not isinstance(sub, ast.Call) or not isinstance(sub.func, ast.Name):
                     continue
                 callee = sub.func.id
@@ -963,13 +1143,15 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough):
 
 
 class _Int64CallChecker(ast.NodeVisitor):
-    def __init__(self, known, passthrough, int_params, int_shadowed, attributes=None, mutated=None):
+    def __init__(self, known, passthrough, int_params, int_shadowed, attributes=None, mutated=None,
+                 dead=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
         self.int_shadowed = int_shadowed
         self.attributes = attributes or {}
         self.mutated = mutated or set()
+        self.dead = dead or set()
         self.shadow = []
         self.locals = []
 
@@ -1053,6 +1235,8 @@ class _Int64CallChecker(ast.NodeVisitor):
         self._check_conversion(node, argument, base_node)
 
     def visit_Call(self, node):
+        if id(node) in self.dead:
+            return
         if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
                 and self._global_name('int')):
             self._check_int_call(node)
@@ -1156,7 +1340,8 @@ def _check_int64_literals(tree):
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough)
-    _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes, mutated).visit(tree)
+    dead = _tree_unreachable_node_ids(tree)
+    _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes, mutated, dead).visit(tree)
     parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]

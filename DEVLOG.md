@@ -1,3 +1,26 @@
+## 2026-10-27 - pre315 follow-up: keep aliased/method-mutated values and dead conversions dynamic (job-pre315-10271444)
+
+The rbrbpre9 review found four false refusals in the first pre315 change.  The static int()
+environment now follows name aliases through list/subscript assignments and expands attribute
+writes across the same alias groups, so an instance attribute overwritten through an alias is
+not folded; an `__init__` attribute is skipped when a method of the class writes it more than
+once; and the wrapper scan ignores calls in unreachable statements (after `return`/`raise` or in
+a statically untaken branch).  All four review probes now match CPython on both builds:
+`r03_method_attr`, `r04_alias_attr`, `r05_nested_alias` and `r13_dead_wrapper`, plus
+`r03b_dead_wrapper_after_return` and `r13c_dead_wrapper_false_branch`, plus
+`r03b_direct_method_attr`, `r03c_init_external_reset` and `r04b_alias_argument` for the same
+mutation reached through a direct attribute, an external reset function and a function argument.
+
+The intended routes stay refused by name with the same wording on both builds (`p01`-`p16`,
+`p22`, `p24`): module/local variable, list/dict item, direct/`__init__`/class attribute,
+wrapper argument, base 16, module/list aliases, and out-of-int64 float/negative values.
+`p17` (int64 boundaries, negative minimum, whitespace, dict values), `p18` (empty string
+`ValueError`), `p19` (in-range routes), `p20` (mutated list/dict and aliased list), `p21`
+(in-range floats) and `p23` (in-range base 16) match CPython on both builds.  Tests:
+`test_ail_pre253`, `test_ail_pre263`, `test_ail_pre290`, `test_ail_pre315`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-27 - pre315: out-of-int64 int() through a variable, item or attribute (job-pre315-10271444)
 
 The first still-differing item in the rbrbpre9 review was `int()` of a statically known value
@@ -7,23 +30,27 @@ where CPython prints the big integer.  `ail_chatgpt` now builds a conservative s
 environment for module and function-local names, aliases, containers, direct and `__init__`
 instance attributes, class attributes and wrapper arguments, and refuses the call by name with
 the existing `int64 constant expression out of range` / `int() of a float outside int64`
-wording.  Mutated containers and overwritten attributes are not folded; in-range, invalid and
-run-time-only conversions keep their previous behaviour.  The second recorded item (a function
-or class named `int`) is already refused by name by the shadowing rule and was left unchanged.
+wording.  Mutations through aliases, nested containers and methods are not folded; in-range,
+invalid and run-time-only conversions keep their previous behaviour, as do unreachable
+conversions.  The second recorded item (a function or class named `int`) is refused by name by
+the shadowing rule; the diff extends the existing shadow test to `ast.ClassDef` so a class named
+`int` is recognised too.
 
-Added `AIL_CURRENT/test_ail_pre315.py` (15 refused cases, 1 CPython-parity program, both builds)
-and registered it in `ail_check.MODULES` and `ci_shards.json`.  Probes in `/tmp/probes`:
-`p01_var_str`, `p02_list_str`, `p03_dict_str`, `p04_attr_str`, `p05_var_base16`, `p06_var_float`,
-`p07_list_float`, `p10_dict_float`, `p11_attr_float`, `p12_tuple_float`, `p13_class_attr_str`,
-`p14_init_attr_str`, `p15_local_var_str`, `p16_arg_str`, `p17_list_base16`, `p18_class_attr_float`,
-`p19_dict_base16`, `p20_local_list_str`, `p28_attr_base16`, `p29_local_float` and `p30_arg_float`
-are refused by name on both builds; `p21_mutated_list`, `p22_mutated_dict`, `p24_mutated_init_attr`,
-`p25_alias_mutated_list`, `p26_in_range_routes` and `p27_local_mutated_list` match CPython on both
-builds.  `p08_func_int` and `p09_class_int` stay refused by the shadowing rule, and `p23` is
-refused by the separate class-attribute-store rule.  Final tests: `test_ail_pre253`,
+Added `AIL_CURRENT/test_ail_pre315.py` (14 refused cases, 1 CPython-parity program covering the
+follow-up cases, both builds) and registered it in `ail_check.MODULES` and `ci_shards.json`.
+Probes in `/tmp/probes`: `p01_var_str`, `p02_list_str`, `p03_dict_str`, `p04_attr_str`,
+`p05_var_base16`, `p06_var_float`, `p07_list_float`, `p10_dict_float`, `p11_attr_float`,
+`p12_tuple_float`, `p13_class_attr_str`, `p14_init_attr_str`, `p15_local_var_str`,
+`p16_arg_str`, `p17_list_base16`, `p18_class_attr_float`, `p19_dict_base16`,
+`p20_local_list_str`, `p28_attr_base16`, `p29_local_float` and `p30_arg_float` are refused by
+name on both builds; `p21_mutated_list`, `p22_mutated_dict`, `p24_mutated_init_attr`,
+`p25_alias_mutated_list`, `p26_in_range_routes` and `p27_local_mutated_list` match CPython on
+both builds.  `p08_func_int` and `p09_class_int` stay refused by the shadowing rule, and `p23`
+is refused by the separate class-attribute-store rule.  Final tests: `test_ail_pre253`,
 `test_ail_pre263`, `test_ail_pre290`, `test_ail_pre315`, `test_ail_safetynet`, `test_ail_files`
 and `test_ail_corpus_findings3` (14 + 25 tests, all passing).  `tools/update_manifest.py` and
 `--check` pass.
+
 ## 2026-10-26 -- pre271: oversized in-place list repeat raises MemoryError (job-pre271-10262226)
 
 The first pre-existing difference in the rbpre55 review was `xs *= 2**62`: the general path's
