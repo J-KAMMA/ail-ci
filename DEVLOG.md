@@ -2,24 +2,31 @@
 
 Re-applied the accepted pre386 change on top of this tree.  The accepted diff no longer applied
 because the integration tree already carries the newer pre367 `**` resolution
-(`_check_int64_binpow_constants` / `_binpow_power_parameters`), which covers every route pre386
-added: a parameter bound at a module call site (positional, keyword, alias, identity wrapper,
-tuple item), a function-local constant, a list item, a dict value, `dict.get` and a
-class/instance attribute.  No compiler change was needed, so both sides' fixes are kept by
-leaving pre367 in place.  The accepted `AIL_CURRENT/test_ail_pre386.py` is added; its refusal
+(`_check_int64_binpow_constants` / `_binpow_power_parameters`), which covers a parameter bound
+at a module call site (positional, keyword, alias, identity wrapper, tuple item), a
+function-local scalar, a module list item, a module dict value, `dict.get` and a
+class/instance attribute.  The accepted `AIL_CURRENT/test_ail_pre386.py` is added; its refusal
 assertion accepts both pre386's `does not fit in a 64-bit signed integer` and this tree's
 existing `int64 constant expression out of range`, and still rejects `integer overflow`.  It is
 registered in `ail_check.MODULES` and `tools/ci_shards.json` (weight 18.2).
 
-Probes in `/tmp/probes/pre386` on both builds via `cmp.sh`: 14 routed powers are refused by name
-(argument, keyword, alias, identity wrapper, tuple item, assigned power, local, list item, dict
-value, `dict.get`, class and instance attribute, the 2**63 boundary and a negative base); 11
-programs match CPython (in-range argument/list/dict/attribute, safe bases -1/0/1, negative
-exponents, float/bool bases, zero/one exponents, int64 boundaries, a dynamic base/exponent,
-empty containers and the exponent types); the pre273 constant-base control (`10 ** es[0]`) is
-refused by name as before.  `tools/diff_ids.py` is not present on this tree.  Final-state
-tests: test_ail_pre386, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
-`tools/update_manifest.py` was run and `--check` passes.
+The pre386 review found one route pre367 did not cover: a literal container bound inside a
+function (`def f(): xs = [10]; print(xs[0] ** 40)`, and the dict mirror).  It compiled and then
+stopped with `integer overflow`, where the accepted pre386 refuses by name and CPython prints
+the exact integer.  `_binpow_function_lookup` now also resolves a function's own safe literal
+containers through `_scope_constant_map`, so the local list item, dict value, an alias of the
+container and the `2 ** 63` boundary are refused by name on both builds; a container mutated
+or rebound in the same body stays dynamic and keeps the run-time stop, as before.  The
+accepted test gained the two refusing local probes and two matching in-range local probes.
+
+Probes in `/tmp/probes/fix386` on both builds via `cmp.sh`: the local list item, local dict
+value, local alias and the `2 ** 63` boundary are refused by name; local in-range list/dict,
+safe bases -1/0/1, negative exponent, float/bool bases and a dynamic index match CPython.  A
+mutated or rebound local container, a function-local `dict.get` and a function-local tuple
+item still stop with `integer overflow`; all are pre-existing and the accepted pre386 leaves
+them too.  `tools/diff_ids.py` is not present on
+this tree.  Final-state tests: test_ail_pre386, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 

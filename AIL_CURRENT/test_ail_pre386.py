@@ -38,6 +38,8 @@ REFUSED = (
     ('local_constant', 'def f():\n    x = 10\n    print(x ** 40)\n\nf()\n'),
     ('list_item', 'xs = [10]\nprint(xs[0] ** 40)\n'),
     ('dict_value', "d = {'v': 10}\nprint(d['v'] ** 40)\n"),
+    ('local_list_item', 'def f():\n    xs = [10]\n    print(xs[0] ** 40)\n\nf()\n'),
+    ('local_dict_value', "def f():\n    d = {'v': 10}\n    print(d['v'] ** 40)\n\nf()\n"),
     ('dict_get', "d = {'v': 10}\nprint(d.get('v') ** 40)\n"),
     ('class_attribute', 'class C:\n    v = 10\n\nprint(C.v ** 40)\n'),
     ('instance_attribute', 'class C:\n    v = 10\n\nprint(C().v ** 40)\n'),
@@ -48,6 +50,8 @@ MATCHING = (
     ('argument_in_range_large', 'def f(x):\n    print(x ** 62)\n\nf(2)\n'),
     ('list_in_range', 'xs = [2]\nprint(xs[0] ** 62)\n'),
     ('dict_in_range', "d = {'b': 3}\nprint(d['b'] ** 39)\n"),
+    ('local_list_in_range', 'def f():\n    xs = [2]\n    print(xs[0] ** 62)\n\nf()\n'),
+    ('local_dict_in_range', "def f():\n    d = {'b': 3}\n    print(d['b'] ** 39)\n\nf()\n"),
     ('attribute_in_range', 'class C:\n    v = 3\n\nprint(C().v ** 39)\n'),
     ('safe_bases', 'for b in (0, 1, -1):\n    print(b ** 1000000)\n'
                    'xs = [1]\nprint(xs[0] ** 63)\n'),
