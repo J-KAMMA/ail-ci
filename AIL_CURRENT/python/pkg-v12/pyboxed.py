@@ -1066,6 +1066,12 @@ class Compiler:
                     or (isinstance(dec_bare, ast.Name)
                         and self.from_imports.get(dec_bare.id) == ('functools', 'lru_cache'))):
                 lru = True
+            elif (not is_method
+                  and ((isinstance(dec_bare, ast.Name)
+                        and self.from_imports.get(dec_bare.id) == ('ail_ffi', 'export'))
+                       or self._is_mod_attr(dec_bare, 'ail_ffi', 'export'))):
+                pass                     # ail_ffi.export is the identity on CPython; it only marks
+                                         # a function for `ail build --lib`
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'staticmethod':
                 is_static = True
             else:

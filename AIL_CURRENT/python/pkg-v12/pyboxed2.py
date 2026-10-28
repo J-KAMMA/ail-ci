@@ -3821,6 +3821,48 @@ class Compiler(boxclosure.ClosureMixin):
         pass  # validated in Pass 0 (_check_importfrom); nothing to emit
 
     # ------------------------------------------------------------------------- function register
+    def _export_type_ok(self, ann, result):
+        """The annotation shapes ail_ffi.export accepts (its own check runs at import time on CPython)."""
+        if isinstance(ann, ast.Constant) and ann.value is None:
+            return result
+        if isinstance(ann, ast.Name):
+            if ann.id in ('int', 'float', 'bool', 'str', 'bytes',
+                          '__ail_checked_int__', '__ail_checked_float__', '__ail_checked_bool__',
+                          '__ail_checked_str__', '__ail_checked_bytes__'):
+                return True
+            if ann.id in ('None', '__ail_checked_void__', '__ail_checked_flist__'):
+                return result
+            return (not result and ann.id in self.classes and self.classes[ann.id].get('dc')
+                    and self._export_dataclass_ok(ann.id))
+        if (isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
+                and ann.value.id in ('list', '__ail_checked_list')):
+            return isinstance(ann.slice, ast.Name) and ann.slice.id in ('int', 'float')
+        return False
+
+    def _export_dataclass_ok(self, name):
+        init = self.classes.get(name, {}).get('methods', {}).get('__init__')
+        if not init:
+            return False
+        for arg in init['node'].args.args[1:]:
+            ann = arg.annotation
+            if not isinstance(ann, ast.Name) or ann.id not in ('int', 'float', 'bool'):
+                return False
+        return True
+
+    def _check_export(self, node):
+        args = node.args
+        if args.defaults or args.kw_defaults or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg:
+            raise Unsupported('@export %s: plain parameters without defaults only' % node.name)
+        if node.returns is None:
+            raise Unsupported('@export %s: the result needs an annotation (-> None for no result)' % node.name)
+        for arg in args.args:
+            if arg.annotation is None or not self._export_type_ok(arg.annotation, False):
+                raise Unsupported('@export %s: parameter %s needs one of int float bool str bytes list[int] '
+                                  'list[float] or a dataclass of int/float/bool' % (node.name, arg.arg))
+        if not self._export_type_ok(node.returns, True):
+            raise Unsupported('@export %s: the result must be int float bool str bytes list[int] list[float] or None'
+                              % node.name)
+
     def _register_function(self, node, cname=None, is_method=False, owner_class=None):
         posonly = [a.arg for a in node.args.posonlyargs]
         params = posonly + [a.arg for a in node.args.args]
@@ -3852,6 +3894,14 @@ class Compiler(boxclosure.ClosureMixin):
                 nm = dec_bare.attr
             if nm == 'lru_cache' or nm == 'cache':
                 lru = True
+            elif (not is_method
+                  and ((isinstance(dec_bare, ast.Name)
+                        and self.from_imports.get(dec_bare.id) == ('ail_ffi', 'export'))
+                       or (isinstance(dec_bare, ast.Attribute) and dec_bare.attr == 'export'
+                           and isinstance(dec_bare.value, ast.Name)
+                           and self.module_aliases.get(dec_bare.value.id) == 'ail_ffi'))):
+                self._check_export(node)  # ail_ffi.export is the identity on CPython; it only marks
+                                         # a function for `ail build --lib`
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'staticmethod':
                 is_static = True
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'property' and len(node.decorator_list) == 1:

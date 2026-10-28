@@ -1,3 +1,25 @@
+## 2026-10-28 -- ex21: `@export` compiles as the identity it is on CPython (job-ex21-10290616)
+
+Surveying the Python-syntax examples, `c_export/geometry.py` was refused with "the decorator on def
+add (only @staticmethod on a method and @functools.lru_cache/@lru_cache/@cache are supported)".
+`@export` from `ail_ffi` is an identity decorator on CPython; only `ail build --lib` treats it as a
+marker, and G4's `ail_ffi_lower` blanked the whole `from ail_ffi import export` line before the
+general path saw it.  The lower now keeps the import when `export` is one of its names (and keeps
+`import ail_ffi as x` when `@x.export` is written), and the general path accepts the decorator for a
+top-level function.  The decorator still validates the same signature CPython's decorator does, so a
+missing result annotation, a default, an unsupported parameter type or a method keeps a named
+refusal instead of compiling a program CPython rejects.  `geometry.py` now builds on both `cmp.sh`
+builds and prints the same `5 3 HÉLLO! [1, 4, 9] 3.0` line as CPython (with `PYTHONPATH` pointing at
+`AIL_CURRENT` for `ail_ffi`).  `__file__` blocked five research scripts but was not the choice: after
+its support none of them build (they then stop at local-module imports, name collisions or external
+tools), and the compiler resolves paths, so symlink/`./` spellings could silently differ.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh` with `PYTHONPATH=AIL_CURRENT`: `ex21_basic`,
+`ex21_module_alias`, `ex21_call_form`, `ex21_types`, `ex21_routes` and the example itself
+(`ex21_geometry`) match CPython; `ex21_no_return`, `ex21_default`, `ex21_bad_type`,
+`ex21_bad_dataclass`, `ex21_method` and `ex21_alias_import` are refused by name (the first five
+raise CPython's `TypeError`).  Added `test_ail_ex21.py`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
