@@ -75,7 +75,7 @@ class _AilIntEnum(_AilEnum):
         return self.value
 
     def __index__(self) -> int:
-        return self.value
+        return int(self.value)
 
     def __float__(self) -> float:
         return float(self.value)

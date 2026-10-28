@@ -116,6 +116,53 @@ subset ("a class body statement other than def/assignment/pass/docstring"), unch
 (only report paths differ).  Final-state tests: test_ail_pre410, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3 (4 modules, 396 s, 0 failed).
 `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-28 -- pre412: an IntEnum float/str value indexes by its normalised int (job-pre412-10281314)
+
+The pre397 review's first still-differing item was `class E(IntEnum): A = 1.5` used as a
+subscript: `[0, 1][E.A]` raised `TypeError: list indices must be integers or slices, not
+float` on both builds while CPython uses the normalised int `1`.  The member itself keeps the
+written value here (the pre-existing `.value` difference), but `_AilIntEnum.__index__` returned
+that raw value, so the runtime saw a float or a str.  It now returns `int(self.value)`, which
+truncates a float, parses a decimal string and unwraps another IntEnum member.  The declared
+value forms and the int64 boundaries match CPython for direct list/tuple/str subscription, a
+direct `__index__` call, `list.index` bounds and str search bounds, with the member reaching the
+lookup through an alias, an argument, a list item, a class attribute and a dict value.  The
+pre-existing `.value`/`int()`/hash difference stays open, as do the separate causes the same
+review recorded for normalised values outside int64, slice bounds, bytes/bytearray/deque
+subscription, sequence repeat and `pop(i)`.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `pre412_float_value`,
+`pre412_string_value`, `pre412_int64_bounds`, `intenum_str_int64`,
+`intenum_float_index_consumers` and `intenum_str_index_consumers` match CPython.  The earlier
+`intenum_float_index`/`intenum_str_index` differ only in the pre-existing `.value` lines they
+print; the pre-existing `intenum_float_slice`, `intenum_str_slice`,
+`intenum_float_repeat_pop`, `intenum_float_bounds`, `intenum_str_bounds`,
+`intenum_float_conv` and `intenum_str_conv` still differ for the reasons above.  Added
+`AIL_CURRENT/test_ail_pre412.py` (1 test, 3 programs, both builds).  Final-state tests: test_ail_pre412, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-28 -- pre414: an exception instance names its class in item errors (job-pre414-10281317)
+
+The first still-differing pre-existing item from the pre396 review was the exception
+instance name in item errors: ``del MyErr()[0]`` printed
+``'exception' object doesn't support item deletion`` on both builds where CPython prints
+``'MyErr' object doesn't support item deletion``.  The v2 object-to-name helper
+``ail__tname_c`` used by the item messages returned a class name only for ``AIL_T_INST``;
+an exception value has tag ``AIL_T_EXC`` and fell through to the tag name ``exception``.
+It now takes the same class-name path for exception values, so deletion, reading and
+assignment of an item name the custom class or its subclass.  The review's other
+pre-existing items (the ``A[0]`` class-subscript wording and the bad/raising ``__index__``
+case during ``del``) are separate causes and are unchanged.
+
+Probes in ``/tmp/probes/pre414`` on both builds via ``cmp.sh``: ``p_exc_name.py`` (the
+recorded ``del MyErr()[0]``) now matches CPython, where it differed on both builds before
+the change; ``e_all.py`` covers deletion with int and bool keys, a subclass, a built-in
+alias, an argument, a list item, an attribute, a dict value, and item reads/stores on the
+custom class and a subclass, and matches CPython on both builds.  ``p_class_sub.py``,
+``p_bad_index.py``, ``p_raise_index.py`` and ``p_inst_name.py`` were also checked; the
+first three belong to the review's separate pre-existing causes and still differ, while
+``p_inst_name.py`` already matched.  Final-state tests: test_ail_pre414, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed, 308s).
+``tools/update_manifest.py`` and ``--check`` pass.
 
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
