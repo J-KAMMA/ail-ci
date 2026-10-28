@@ -86,6 +86,29 @@ def main() -> None:
         sp(">H", 70000)
     except Bad as e:
         print("E9", str(e))
+    print(struct.calcsize("<x"), struct.pack("<x").hex(), struct.calcsize("<s"))
+    print(struct.pack("<s", b"Q").hex(), struct.unpack("<s", b"Q"))
+    try:
+        struct.unpack("<x", b"")
+    except struct.error as e:
+        print("E10", str(e))
+    try:
+        struct.pack(">q", 9223372036854775808)
+    except struct.error as e:
+        print("E11", str(e))
+    try:
+        struct.pack(">q", -9223372036854775809)
+    except struct.error as e:
+        print("E12", str(e))
+    try:
+        struct.pack(">Q", 18446744073709551616)
+    except struct.error as e:
+        print("E13", str(e))
+    try:
+        struct.pack(">c", bytearray(b"Z"))
+    except struct.error as e:
+        print("E14", str(e))
+    print(type(struct.unpack(">4s", bytearray(b"abcd"))[0]).__name__)
 
 
 main()
@@ -99,6 +122,7 @@ def main() -> None:
     print(struct.pack(">2I4x?", 1, 4294967295, True).hex())
     print(struct.pack(">c3s", b"Z", b"ab").hex())
     print(struct.calcsize(">I4xH"), struct.calcsize(">0I"), struct.calcsize(">10s"))
+    print(struct.pack("<x").hex(), struct.calcsize("<s"), struct.pack("<s", b"Q").hex())
     try:
         struct.pack(">I", -1)
     except struct.error as e:

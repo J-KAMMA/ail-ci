@@ -119,6 +119,7 @@ class Format:
                 refuse(node, 'struct.%s: the native format character %r is not built' % (name, char))
             if char not in SIZES:
                 refuse(node, 'struct.%s: the format character %r is not built; %s' % (name, char, LEFT_NOTE))
+            count = count if repeated else 1
             if char == 's':
                 self.grow(node, count)
                 field = (char, count, self.size)
@@ -132,7 +133,6 @@ class Format:
                 self.size += count
             else:
                 size = SIZES[char]
-                count = count if repeated else 1
                 self.grow(node, size * count)
                 for _ in range(count):
                     field = (char, size, self.size)
@@ -200,8 +200,6 @@ class Renamer(ast.NodeTransformer):
         if name == 'unpack':
             if len(node.args) != 2:
                 refuse(node, 'struct.unpack: two arguments are built (the format and the buffer)')
-            if not fmt.values:
-                return ast.copy_location(ast.Tuple(elts=[], ctx=ast.Load()), node)
             helper = self.fresh('unpack', self.tree)
             self.helpers.append(unpack_helper(helper, fmt))
             call = ast.Call(func=ast.Name(id=helper, ctx=ast.Load()), args=[node.args[1]], keywords=[])
@@ -230,11 +228,10 @@ def range_check(line, code, arg):
         else:
             lines.append('    if %s < 0:' % arg)
         lines.append('        raise ValueError(%r)' % ("'%s' format requires %d <= number <= %d" % (code, low, high)))
-        if high < 9223372036854775807:
-            lines.append('    if %s > %d:' % (arg, high))
-            lines.append('        raise ValueError(%r)' % ("'%s' format requires %d <= number <= %d" % (code, low, high)))
+        lines.append('    if %s > %d:' % (arg, high))
+        lines.append('        raise ValueError(%r)' % ("'%s' format requires %d <= number <= %d" % (code, low, high)))
         return lines
-    if code in SIGNED and code != 'q':
+    if code in SIGNED:
         low, high = SIGNED[code]
         return ['    if %s < %d or %s > %d:' % (arg, low, arg, high),
                 '        raise ValueError(%r)' % ("'%s' format requires %d <= number <= %d" % (code, low, high))]
@@ -253,7 +250,7 @@ def pack_helper(name, fmt):
         current = 'v%d' % arg
         arg += 1
         if code == 'c':
-            lines.append('    if not isinstance(%s, bytes) and not isinstance(%s, bytearray):' % (current, current))
+            lines.append('    if not isinstance(%s, bytes):' % current)
             lines.append('        raise ValueError("char format requires a bytes object of length 1")')
             lines.append('    if len(%s) != 1:' % current)
             lines.append('        raise ValueError("char format requires a bytes object of length 1")')
@@ -286,8 +283,8 @@ def unpack_helper(name, fmt):
             kinds.append('bool')
         else:
             kinds.append('int')
-    annotation = 'tuple[%s]' % ', '.join(kinds)
-    lines = ['def %s(d) -> %s:' % (name, annotation)]
+    annotation = ' -> tuple[%s]' % ', '.join(kinds) if kinds else ''
+    lines = ['def %s(d)%s:' % (name, annotation)]
     lines.append('    if not isinstance(d, bytes) and not isinstance(d, bytearray):')
     lines.append('        raise TypeError("a bytes-like object is required, not \'%s\'" % type(d).__name__)')
     lines.append('    if len(d) != %d:' % fmt.size)
@@ -297,7 +294,7 @@ def unpack_helper(name, fmt):
         if code == '?':
             parts.append('d[%d] != 0' % offset)
         elif code in ('c', 's'):
-            parts.append('d[%d:%d]' % (offset, offset + size))
+            parts.append('bytes(d[%d:%d])' % (offset, offset + size))
         else:
             signed = 'True' if code in SIGNED else 'False'
             parts.append('int.from_bytes(d[%d:%d], "%s", signed=%s)' % (offset, offset + size, fmt.endian, signed))

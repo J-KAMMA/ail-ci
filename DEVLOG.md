@@ -1,3 +1,24 @@
+## 2026-10-28 -- stdlib27 review: `struct` default counts, int64 ranges, `c`/`s` buffer types
+
+The review found five defects in the first `struct` lowering.  A format character with no repeat count now
+defaults to one for `s` and `x` (previously `count` stayed 0, so `calcsize("<x")` was 0 and `unpack("<x",
+b"")` returned `()`).  The `q`/`Q` range checks are now emitted: `q` uses the signed range and `Q` always
+gets both bounds, so an out-of-range value raises the CPython `struct.error` text instead of
+`OverflowError: int too big to convert`.  `c` accepts only `bytes` again (a `bytearray` is refused with
+CPython's "char format requires a bytes object of length 1").  An `unpack` `c`/`s` field converts its
+slice with `bytes(...)`, so a `bytearray` buffer yields `bytes`.  An `x`-only unpack now checks the buffer
+length too, through a helper with no return annotation (`tuple[]` is invalid).  `update_manifest.py` was
+re-run for `structlib.py` and `test_ail_stdlib27.py`, and `--check` passes.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`, all same stdout as CPython 3.12: `ps27_count`
+(no-count `x`/`s`, `xs`, `0x`/`0s`, padding, `unpack` length for an `x`-only buffer), `ps27_range`
+(±boundaries for every signed/unsigned code, `q`/`Q` over both ends, bool values), `ps27_c_types` (`c`
+with `bytes`/empty/long/`bytearray`, `s` with `bytes`/`bytearray`, values through an argument, a list
+item, a dict value and an attribute, bytearray mutation after pack) and `ps27_unpack_buf` (`c`/`s` from
+`bytes` and `bytearray`, stability after mutating the buffer, `x`/`0x` lengths, mixed fields).  Added these
+cases to `test_ail_stdlib27.py` (default counts, `q`/`Q` boundaries, `c` bytearray, bytearray unpack type)
+on `AIL_IR=0`/`1` and on the `AIL_NO_GENERAL=1` path.
+
 ## 2026-10-28 -- stdlib27: `struct` pack / unpack / calcsize (job-stdlib27-10290700)
 
 `import struct` was still refused by the generic import screen (six imports across the corpus and the
