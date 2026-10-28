@@ -1,3 +1,22 @@
+## 2026-10-28 -- re-apply pre389 on the integration tree (job-rbpre389-10281439)
+
+Re-applied the accepted pre389 fix for `int()` of an out-of-int64 float carried by a function
+parameter default.  The accepted job was `job-pre389-10280836`; its diff no longer applied
+because this tree had since gained the pre322 per-statement escape tracking in
+`_scope_constant_map` and the argument-container pass in the int64 checker.  Both sides' fixes
+are kept: the new `_never_supplied_defaults` collects module functions defined once without
+decorators whose every load is a direct call, whose name is bound in no other scope, whose
+calls never use `*args`/`**kwargs`, and whose parameter is supplied by none of them; its default
+is folded into the function's constant scope, so `int()` of an out-of-int64 default is refused
+by name.  Containers are folded only when the body's escaped-name set (the pre322 machinery)
+never exposes them, and a supplied argument, a rebound parameter, a callee through an alias or
+`*args`/`**kwargs`, a method, a nested def, and a default naming a module container keep the
+previous run-time `integer overflow`.
+
+Added `AIL_CURRENT/test_ail_pre389.py` (2 tests, 11 refused and 12 matching programs, both
+builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json` (weight 38.8).
+Added DIFFERENCES row `C?-job-rbpre389-10281439-1`.  `tools/update_manifest.py` was run and
+`--check` passes.  `tools/diff_ids.py` is not present on this tree, so it was not run.
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
