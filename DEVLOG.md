@@ -78,6 +78,30 @@ lp_direct_posonly, lp_mixed and lp_default_posonly are refused by name; lp_defva
 CPython; lp_defposonly and lp_kwonly/lp_vararg are refused by name.  `test_ail_pre427.py` passes
 on both builds, as do `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
 
+## 2026-10-28 -- pre428: multiplication names exception operands by their class (job-pre428-10281850)
+
+The pre416 review recorded as pre-existing on both builds that `E() * F()` printed
+`unsupported operand type(s) for *: 'exception' and 'exception'`, where CPython 3.12 names the
+classes (`'E' and 'F'`).  The general runtime's multiplication error used `ail_type_name` on the
+tags instead of the object-to-name helper, so class names (including ordinary instances) were
+lost.  It now formats each operand through `ail__tname_c` into its own 101-byte buffer with
+CPython's `%.100s` cap and a 256-byte message (calling the helper twice into one `snprintf`
+would alias its shared buffer).  The `dunderrt.py` anchor that inserts the `__mul__`/`__rmul__`
+dispatch before this error was updated to the new first line.
+
+Probes in `/tmp/probes/pre428` on both builds via `cmp.sh`: `p1_direct` (E/F, both orders,
+same class, subclass), `p2_routes` (alias, argument, list item, dict value, attribute, return),
+`p3_mixed` (int/float/bool/None/set/dict/str/list/tuple/bytes in both orders, including the
+already-matching `can't multiply sequence` path), `p4_long_99/100/101/150/300` (name cap),
+`p5_instances` (ordinary classes and subclass) and `p6_controls` (in-range operations,
+`__mul__`/`__rmul__`, caught error) all match CPython.  The baseline matrix
+`/tmp/probes/pre428_baseline/p0_pre_existing.py` now matches for `*`; its `//`, `%`, `/`, `**`
+and comparison lines are the review's remaining pre-existing items and still differ.
+
+Added `AIL_CURRENT/test_ail_pre428.py` (7 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  `tools/update_manifest.py` and `--check` pass;
+`tools/ci_shards.py --check` passes.  Final-state tests: test_ail_pre428, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3, plus test_ail_left1 (multiplication errors).
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
