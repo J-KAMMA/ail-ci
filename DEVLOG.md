@@ -1,3 +1,25 @@
+## 2026-10-28 -- pre419: subscripting a class names the class (job-pre419-10281416)
+
+The pre396 review recorded as pre-existing that `class A: pass; A[0]` raised `TypeError:
+'type' object is not subscriptable` on both builds, where CPython 3.12 says `TypeError: type
+'A' is not subscriptable`.  The v2 general runtime (`ail_op_getitem` / `ail_op_getslice` in
+`cruntime.py`) now quotes the class's own name through `ail_class_name_c` for an index or
+slice key, capped at 200 characters like CPython's `%.200s`.  Item assignment and deletion
+keep their `'type' object ...` wording, and non-class receivers are unchanged.  A class
+defining `__class_getitem__` or a metaclass `__getitem__` is still not modelled; that is the
+same separate pre-existing difference on the base tree and is not changed here.
+
+Probes in `/tmp/probes/pre419` on both builds via `cmp.sh`: `p01_keys` (None, bool, int,
+negative, float, str, tuple, list and bytes keys), `p02_slices` (slice literals and slice
+objects), `p03_routes` (alias, argument, list item, dict value, attribute, return from a
+function, subclass and a slice), `p04_long_names` (199, 200, 201 and 250-character class
+names), `p05_control` (instances, ordinary subscripts and non-class values) all match
+CPython; `p06_class_getitem` still differs identically to the base and is unchanged.  Added
+`AIL_CURRENT/test_ail_pre419.py` (4 tests) and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.  Final-state tests: test_ail_pre419, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a

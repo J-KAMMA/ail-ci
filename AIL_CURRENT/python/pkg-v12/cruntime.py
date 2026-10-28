@@ -14852,6 +14852,16 @@ static inline ail_st ail__raise_item_tname(ail_ctx *cx, int builtin_id, const ch
     free(buf);
     return st;
 }
+static inline void ail_class_name_c(ail_obj cls, char *buf, size_t cap);
+/* Subscripting a class object quotes the class's own name, not its type: CPython says
+   `type 'A' is not subscriptable` (and caps the name at 200 characters). */
+static inline ail_st ail__raise_class_subscript(ail_ctx *cx, ail_obj c) {
+    char nb[201];
+    ail_class_name_c(c, nb, sizeof nb);
+    char buf[256];
+    snprintf(buf, sizeof buf, "type '%s' is not subscriptable", nb);
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
 static inline ail_st ail_deque_concat(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_counter_binop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op);
 static inline ail_st ail_counter_unary(ail_ctx *cx, ail_obj *out, ail_obj a, int neg);
@@ -16072,6 +16082,7 @@ static inline ail_st ail_op_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj i
     }
 }
 static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key) {
+    if (__builtin_expect(c.tag == AIL_T_CLASS, 0)) return ail__raise_class_subscript(cx, c);
     if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->aux, 0)) {   /* a dict view */
         return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object is not subscriptable", c);
     }
@@ -16123,6 +16134,7 @@ static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
 }
 static inline ail_obj ail_range_new(ail_ctx *cx, int64_t start, int64_t stop, int64_t step); /* defined below */
 static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int has_lo, int64_t lo, int has_hi, int64_t hi, int has_step, int64_t step) {
+    if (__builtin_expect(c.tag == AIL_T_CLASS, 0)) return ail__raise_class_subscript(cx, c);
     if (c.tag == AIL_T_STR) return ail_str_getslice(cx, out, c, has_lo, lo, has_hi, hi, has_step, step);
     if (c.tag == AIL_T_LIST && __builtin_expect(((ail_gcobj *)c.o)->aux, 0)) {   /* a dict view */
         return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object is not subscriptable", c);
