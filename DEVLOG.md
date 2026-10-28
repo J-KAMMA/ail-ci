@@ -11,12 +11,11 @@ plus at least one module constant, with no `main` and no executable statement, n
 runs as a script, and a `main` is still the entry point. Probes in `/tmp/probes` on both builds via
 `cmp.sh`: `math_example`, `defonly_const_probe`, `defonly_const_after_probe`, `const_print`,
 `const_list`, `const_import`, `const_class`, `const_types`, `const_expr`, `const_annot`,
-`const_guard`, `const_print_top`, `const_array`, `const_side` and `const_call` match CPython on
-both builds; `const_main` (a real `main`) and `const_print_top` (a top-level statement) still run.
-`const_alias` (`B = A`) and `const_call` (`X = len("abc")`) keep the pre-existing typed-path
-`a function with no parameters and no print()/assert` refusal because the front end does not
-classify those assignments as module constants; the general path builds them as no-ops. Added
-`test_ail_ex13.py`.
+`const_guard`, `const_print_top`, `const_array` and `const_side` match CPython on both builds;
+`const_main` (a real `main`) and `const_print_top` (a top-level statement) still run. `const_alias`
+(`B = A`) and `const_call` (`X = len("abc")`) keep the pre-existing typed-path `a function with no
+parameters and no print()/assert` refusal because the front end does not classify those assignments
+as module constants; the general path builds them as no-ops. Added `test_ail_ex13.py`.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
