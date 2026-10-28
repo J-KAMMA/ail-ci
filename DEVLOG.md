@@ -1,3 +1,28 @@
+## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
+
+The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
+clashing comprehension target but never rewrote a nested lambda body.  With `x = 99` in the
+enclosing scope, `x = 99; ys = [(lambda: x)() for x in range(3)]` kept the lambda reading the
+outer `x` and printed `[99, 99, 99]` where CPython prints `[0, 1, 2]`; the same shape inside a
+function also differed.  The body's free loads (parameters, walrus targets and nested
+comprehension targets excluded) are now resolved against the enclosing comprehension stack:
+a function-scope lambda captures the renamed target and matches CPython, while at module
+scope the existing closure pass refuses the construct by name (`not in the subset: closures
+nested too deeply to settle their shared names`) instead of printing the wrong list.
+Argument defaults keep their pre363 handling, and a class-body target read stays refused by
+name.  Module-level no-clash lambda reads, class-body reads and a positional-only lambda
+remain refused by name, as they were before this change.
+
+Added `AIL_CURRENT/test_ail_pre404.py` (2 tests, 18 matching and 6 refused programs, both
+builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Probes in `/tmp/probes/pre404` on both builds via `cmp.sh`: `f01`-`f19` (the reported case,
+argument, list item, attribute, dict value, set/dict comprehension, consumed generator, if
+condition, nested same-name comprehensions, two targets, empty/negative/string, walrus body,
+nested lambda, defaults and outer-read controls) match CPython; `m01`-`m07` module-scope
+routes and `c01` class-body are refused by name.  Final-state tests: test_ail_pre404,
+test_ail_pre363, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --check` still
+reports the four duplicate entries present on the base tree.
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
@@ -250,6 +275,115 @@ default) match CPython. Final-state tests: test_ail_pre380, test_ail_pre363, tes
 (comprehension cases), test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --check` still
 reports the four shard entries duplicated on the base tree.
+## 2026-10-27 -- pre388: a container read before a later mutation is folded for int() (job-pre388-10280828)
+
+The pre373 review's first recorded item reproduced on both builds:
+`items = [1e300]; a = items; x = a[0]; a[0] = 1.5; print(int(x))` compiled and then stopped with
+`integer overflow`, where CPython prints the big integer.  `_escaped_constant_names` collected one
+scope-wide set of container names that may be mutated, so the later `a[0] = 1.5` made the whole
+flat list dynamic and the scalar `x` bound from `a[0]` stayed unknown.  The escape analysis now
+returns the event per top-level statement (`_escaped_constant_statements`), and
+`_scope_constant_map` walks the statements in order: a scalar read through a load-only subscript
+keeps the literal's value up to the statement that may mutate the container, and a container is
+dropped from that statement on.  Top-level statements run once and in order, and a use inside a
+nested definition counts at its definition statement, so a mutation that comes first still makes
+the read dynamic.  The conversion is refused by name on both builds with the existing
+`int() of a float outside int64: ... (CPython makes a big integer)` message (an int or string
+item keeps `int64 constant expression out of range`).
+
+Covered by `AIL_CURRENT/test_ail_pre388.py` (2 tests, 24 programs, both builds): the recorded
+alias, a direct scalar read, a dict value, a computed index, `del` after the read, an alias
+chain, a tuple, a negative value, the int64 boundary float, a function-local list, a call or
+`print` between the read and the conversion, and an int/str item.  A mutation that comes first
+(direct, through an alias, a loop, a nested definition or inside a function), in-range reads
+before and after a mutation, an append, and an inline item match CPython.
+
+Probes in `/tmp/probes/pre388` on both builds: `v01`-`v12`, `w01`-`w15` and `x01`-`x06`; every one
+matches CPython or is refused by name except the review's second item (a list held in an instance
+attribute, `v11`/`pre388_r10`), a list or float reaching a function as an argument (`w02`, `w03`)
+and an attribute-held scalar (`w04`), which keep the pre-existing run-time trap and are recorded
+in DIFFERENCES.  Final-state tests: test_ail_pre388, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3, plus test_ail_pre322, test_ail_pre311, test_ail_pre31, test_ail_pre9,
+test_ail_pre39, test_ail_pre357, test_ail_pre358 and test_ail_pre359.  `tools/update_manifest.py`
+was run and `--check` passes.
+
+## 2026-10-28 -- pre390: the pre372 Speed items do not differ on this tree (job-pre390-10280851)
+
+Re-ran `bash ~/tools/cmp.sh` against CPython on both builds for the two recorded programs:
+`corpus/gdev/g00_012.py` and `corpus/gdev/g12_036.py` both exit 0 with identical stdout, and the
+general and default binaries are byte-identical (148240 and 268680 bytes).  The recorded
+3.87 vs 3.88 s and 9.02 vs 9.05 s are compile-time deltas with identical generated C, so no
+behaviour differs and there is nothing to fix or refuse.  The review's unverified modules pass
+on this tree: test_ail_safetynet (5), test_ail_files (18, 1 skipped), test_ail_globals (32) and
+test_ail_corpus_findings3 (2).  Six probes in `/tmp/probes/pre390` match CPython on both builds:
+p01 vigenere empty/non-ASCII-key/punctuation boundaries, p02 argument/list-item/attribute/dict
+routes, p03 dataclass ordering/Enum auto/heap ties, p04 Random/heapq/deque, p05 optional float
+and property ValueError with an empty summary, p06 Final plus isalpha/isascii/isupper.  No code,
+test or DIFFERENCES change.
+## 2026-10-28 -- pre346: normalize duplicate placements instead of rewriting the shard file (job-rbpre346-10280910)
+
+Re-applying pre346 on today's integ (`99f5526`) still failed `test_ail_pre346`.  The job patch
+rewrote `tools/ci_shards.json` from this branch's old base, while integ had regenerated the file
+for its newer module list, so `git apply --3way` reported a conflict and left conflict markers in
+the working file; `json.loads` then raised and `test_assignment_places_every_module_once` errored.
+Regenerating the file from integ's own copy does not help: every hunk still conflicts in the
+three-way merge.
+
+The file is therefore no longer part of this change (it keeps the tree's content).  Instead
+`shard_modules()` and `--check` treat a placement that names a module twice as a stale-file
+artifact and run it on its first shard, so a module can never run in two shards; a module missing
+from the file is still spread by name and `--check` now fails only on a stale (`unknown`) name,
+reporting `duplicated:` without failing.  `build()` still drops duplicate inputs and duplicate
+placements, and the module list is still unique, so `--update` writes a clean file.
+`test_duplicate_placement_runs_once` covers the stale-file case.  `tools/update_manifest.py` was
+run and `--check` passes.
+
+Verified on integ `99f5526` plus this change: the patch applies with `git apply --3way` (rc 0, no
+conflicts), `test_ail_pre346` passes 5 tests and `test_ail_safetynet` passes 5 tests (109 s); the
+reported safetynet failure could not be reproduced, as in the pre345 and pre346 re-apply records.
+
+## 2026-10-27 -- pre346: accept modules added after the shard file was generated (job-rbpre346-10280725)
+
+Applied alone on today's integ, `test_ail_pre346` failed.  Four modules added by changes merged
+after this branch's base (`test_ail_fuzz59`, `test_ail_pre360`, `test_ail_pre363`,
+`test_ail_pre365`) are in `ail_check.MODULES` but not in the `tools/ci_shards.json` this change
+regenerated, so `tools/ci_shards.py --check` exited 1 with `unassigned:` and
+`test_assignment_places_every_module_once` failed on exact set equality.
+
+The CI contract already covers that case: `.github/workflows/tests.yml` documents that a module
+missing from the file "is still spread over the shards by name", and `--shard` /
+`shard_modules()` do exactly that.  `--check` now fails only on a stale (`unknown`) or duplicated
+name and still reports `unassigned`; the test now checks that every current module reaches
+exactly one shard through `shard_modules()` and that no assigned name is stale or duplicated.
+The original pre346 defect (a duplicated placement, from the four duplicate `MODULES` entries)
+still fails the check.  `tools/update_manifest.py` was run and `--check` passes.
+
+The report also listed `test_ail_safetynet`.  It passes on this tree and on integ + this change
+(5 tests, OK, 106 s), so that failure could not be reproduced, as recorded for the pre345
+rebase.
+
+Probes in `/tmp/probes/pre346fix` (Python tooling, so plain CPython 3.12; `cmp.sh` targets AIL
+programs and no language behaviour changed): `p01_missing_module_ok` (missing and completely
+empty assignment accepted, each module still in one shard), `p02_duplicate_fails` (duplicated
+placement exits 1 and `build()` repairs it), `p03_stale_name_fails` (unknown name exits 1),
+`p04_build_dedup` (duplicated input and empty module list), `p05_shard_coverage` (real tree and a
+subset file: every module once, stale name not run) and `p06_integ_added_modules` (the four
+added modules: `--check` exits 0 and all 515 are planned once).  All PASS.  Final-state tests:
+`test_ail_pre346`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
+## 2026-10-27 -- re-apply pre346 on the integration tree (job-rbpre346-10280548)
+
+Re-applied the accepted pre346 CI-shard fix on top of this tree.  `ail_check.MODULES` had the four
+duplicate entries (`test_ail_fuzz4`, `test_ail_pre126`, `test_ail_pre59`, `test_ail_pre61`) back,
+so `tools/ci_shards.py --check` failed; each duplicate is removed, keeping the first occurrence,
+and `test_ail_pre346` is registered.  `build()` now deduplicates its module input and keeps only
+the first placement of a name read from a stale assignment file.  `tools/ci_shards.json` was
+regenerated by `--update` over the 511 unique modules and `--check` exits 0.
+
+`test_ail_pre346.py` checks the module list is unique, every module is assigned exactly once,
+`--check` passes, and `build()` drops duplicate placements.  `tools/diff_ids.py` is not present on
+this tree, so it was not run; `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
@@ -406,6 +540,86 @@ row `C?-job-pre364-10280336-1`.  `test_ail_pre364`, `test_ail_pre331`, `test_ail
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (8 modules, 0 failed).
 `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --check` reports
 only the four pre-existing duplicate shard entries (fuzz4, pre126, pre59, pre61).
+## 2026-10-28 -- pre367 integration: the specific refusal wordings keep priority (job-pre367-10280933)
+
+`_check_int64_binpow_constants` refused every out-of-int64 power it could resolve with its own
+`int64 constant expression out of range`, before three older checks that own their contexts, so
+`test_ail_pre97`, `test_ail_pre160`, `test_ail_pre190`, `test_ail_pre200`, `test_ail_pre205` and
+`test_ail_pre273` failed on the integration branch.  The checker now leaves a node alone when it
+is a `str.split`/`rsplit` maxsplit constant (`id(node) in maxsplit`, the pre97/pre190/pre200/pre205
+wording), when it is a syntactic literal power that is the whole right-hand side of a plain
+assignment (the pre160 emitter fold keeps its `outside the signed 64-bit range` wording), and when
+a syntactically constant base of magnitude at least 2 is raised to an exponent the front end does
+not see as constant (`pyfront.refuse_variable_int_pow` keeps its `constant base N ... computed at
+run time` wording, pre273).  A power whose base reaches the checker through a name, list item,
+attribute, dict value or a constant argument is still refused by name here, and a literal power in
+a class body or default still is too.
+
+Probes in `/tmp/probes` on both builds: `p1_saturate_assign` is refused by the emitter's wording,
+`p2_maxsplit_pow` and `p9_assign_name_pow`/`p10_list_dict_attr`/`p5_name_base_refused` are refused
+by name, `p3_variable_pow_local` and `p4_variable_pow_inrange` are refused by the front end,
+`p6_inrange_local`, `p7_closure_shadow` and `p8_maxsplit_inrange` match CPython.  Tests on the
+final commit: the six restored modules plus `test_ail_pre367`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`, `test_ail_pre113`, `test_ail_pre33`,
+`test_ail_pre331`, `test_ail_pre334`, `test_ail_pre335`, `test_ail_pre338` and
+`test_ail_pre351` all pass.  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-27 -- pre367 follow-up: closure free names resolve to the enclosing function (job-pre367-10280424)
+
+The pre367 review found a false refusal: a nested function's free name was looked up only
+against module constants, so `x = 10; def outer(): x = 2; def inner(): return x ** 62` was
+refused as `10 ** 62` instead of computing `2 ** 62`.  `_binpow_function_lookup` now takes the
+names bound by enclosing function scopes (parameters, stores, nested def/class names, imports
+and exception targets; a global/nonlocal declaration is not a local binding and stays with the
+outer map) and prefers the enclosing scope's single-assignment int constant to a same-named
+module value.  `_binpow_enclosing_scope` builds that map as the checker descends into nested
+functions; methods of a class nested in a function inherit the function's bindings the same
+way.  Module-level functions are unchanged.
+
+Probes in `/tmp/probes/pre367_fix` on both builds: `c1`, `c2`, `c11` and `f01`-`f04`,
+`f07`-`f10`, `f13`, `f14` (value or exponent bound by an enclosing local, parameter, method,
+two-level nesting, default argument) match CPython; `f05`, `f06`, `f15` (an out-of-range value
+or exponent bound in the enclosing scope) are refused by name; `f12` (enclosing name bound to a
+nested def) matches base and CPython (runtime TypeError, no false refusal); `f11` (class nested
+in a function) is the unchanged "not in the subset" on both builds.  Added these cases to
+`test_ail_pre367.py` (2 tests, 45 programs, both builds).  Required tests: test_ail_pre367,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+
+## 2026-10-27 -- pre367: a constant power behind a name is refused by name (job-pre367-10280424)
+
+The pre351 reviewer's unverified items were re-run first: `test_ail_files` and
+`test_ail_corpus_findings3` both pass on this tree, so the remaining recorded pre-existing
+difference is the one pre351 itself left: `x = 10; print(x ** 40)` at module level was already
+refused by name, but the same value reaching `**` inside a function body, through an argument,
+a list item, a class/instance attribute or a dict value compiled and then stopped with
+`integer overflow` on both builds, where CPython prints the exact bignum.
+
+`_check_int64_binpow_constants` (called from `_check_int64_literals`) now resolves the power's
+operands while compiling: the module's rich constant environment (`_constant_value`, so safe
+literal containers read by subscript, class attributes and instances), a function's own int
+locals, a parameter the function unconditionally rebinds to a constant, and a constant argument
+to a module function whose parameter is the base of a constant-exponent power.  An exact result
+outside int64 is refused with `int64 constant expression out of range` on both builds, as the
+task allows.  The existing enclosing-expression allowance is kept, so `(2 ** 63 - 1) // 1` and
+`10 ** 40 - 10 ** 40` still fold and match CPython.  In-range powers, negative and float
+exponents, bool bases, bases 0/1/-1, shadowed locals/containers, a parameter rebound in range,
+empty containers and run-time-only operands are unchanged.  Not covered (pre-existing, still the
+run-time `integer overflow` stop): a literal container bound inside a function, a default
+argument, an instance created inside a function, and a value known only at run time.
+
+Added `AIL_CURRENT/test_ail_pre367.py` (2 tests, 31 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre367` on both builds:
+`p01`-`p08`, `r01`-`r21` (argument, keyword argument, local, local alias, local exponent, list
+item, list alias, class attribute, instance attribute, dict value, tuple and floor-div nesting,
+negative base, method, rebound parameter, base boundary, int alias, argument from a list item /
+dict value / attribute, named cancellation) are refused by name; `p07`, `m01`-`m12` (in-range
+argument calls, module routes, int64 boundaries including `(-2) ** 63`, literal cancellation,
+negative/float exponents, bools, dynamic operands and arguments, shadowed local and container,
+rebound parameter, local exponent, empty containers) match CPython.  The unchanged pre-existing
+variants `x01`-`x03` still stop at run time.  Final-state tests: test_ail_pre367,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3, test_ail_pre351 and
+test_ail_pre33.  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- pre351: local constant power is already refused by name (job-pre351-10280022)
 ## 2026-10-27 -- pre363: a lambda called in a class-body comprehension no longer recurses (job-pre363-10280258)
 

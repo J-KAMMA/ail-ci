@@ -5,13 +5,14 @@
     python3 tools/ci_shards.py --report       # predicted cost of each shard
     python3 tools/ci_shards.py --update       # keep the assignment, add new modules, drop removed ones
     python3 tools/ci_shards.py --rebalance    # recompute everything from ~/.cache/ail_par_check.json
-    python3 tools/ci_shards.py --check        # exit 1 if a module has no shard
+    python3 tools/ci_shards.py --check        # exit 1 if the file names an unknown module
 
 tools/ci_shards.json holds the weights (relative seconds from the timing cache that par_check.py
 keeps) and the assignment. A shard runs its modules with `par_check.py -j 4`, so its cost is the
 larger of its longest module and its total weight / 4 (longest-processing-time assignment on that
 cost). A module missing from the file is spread over the shards by name, so a new test module
-still runs in CI before the file is updated.
+still runs in CI before the file is updated; a module the file places more than once runs on its
+first shard only, so a stale file cannot run it twice. `--update` writes placements once.
 """
 import argparse
 import json
@@ -63,6 +64,7 @@ def fallback_weight(cache, modules):
 
 
 def build(modules, cache, previous, rebalance):
+    modules = list(dict.fromkeys(modules))   # a duplicate name is still one module
     n = previous.get('shards', SHARDS)
     old_weights = {} if rebalance else previous.get('weights', {})
     default = fallback_weight(cache, modules)
@@ -70,8 +72,14 @@ def build(modules, cache, previous, rebalance):
     assignment = [[] for _ in range(n)]
     if not rebalance:
         wanted = set(modules)
+        seen = set()
         for index, members in enumerate(previous.get('assignment', [])[:n]):
-            assignment[index] = [m for m in members if m in wanted]
+            kept = []
+            for name in members:
+                if name in wanted and name not in seen:
+                    seen.add(name)
+                    kept.append(name)
+            assignment[index] = kept
     placed = {m for members in assignment for m in members}
     for name in sorted((m for m in modules if m not in placed), key=lambda m: (-weights[m], m)):
         place(weights, assignment, name)
@@ -79,12 +87,24 @@ def build(modules, cache, previous, rebalance):
             'assignment': [sorted(members) for members in assignment]}
 
 
+def assignments(data, modules):
+    """The file's placements of current modules, each module at its first shard."""
+    placed = set()
+    kept = [[] for _ in data['assignment']]
+    for index, members in enumerate(data['assignment']):
+        for name in members:
+            if name in modules and name not in placed:
+                placed.add(name)
+                kept[index].append(name)
+    return kept, placed
+
+
 def shard_modules(data, index):
     modules = all_modules()
     n = data['shards']
-    mapped = {m for members in data['assignment'] for m in members}
-    chosen = [m for m in data['assignment'][index] if m in modules]
-    chosen += [m for k, m in enumerate(m for m in modules if m not in mapped) if k % n == index]
+    kept, placed = assignments(data, modules)
+    chosen = list(kept[index])
+    chosen += [m for k, m in enumerate(m for m in modules if m not in placed) if k % n == index]
     return sorted(chosen)
 
 
@@ -136,13 +156,16 @@ def main():
         return 0
     modules = all_modules()
     mapped = [m for members in data['assignment'] for m in members]
-    missing = sorted(set(modules) - set(mapped))
-    extra = sorted(set(mapped) - set(modules))
-    duplicates = sorted({m for m in mapped if mapped.count(m) > 1})
-    for label, names in (('unassigned', missing), ('unknown', extra), ('duplicated', duplicates)):
-        if names:
-            print('%s: %s' % (label, ' '.join(names)))
-    return 1 if missing or extra or duplicates else 0
+    names = set(mapped)
+    missing = sorted(set(modules) - names)
+    extra = sorted(names - set(modules))
+    duplicates = sorted(m for m in names if mapped.count(m) > 1)
+    for label, listed in (('unassigned', missing), ('unknown', extra), ('duplicated', duplicates)):
+        if listed:
+            print('%s: %s' % (label, ' '.join(listed)))
+    # `--shard` spreads an unassigned module over the shards by name and runs a duplicated
+    # placement on its first shard only, so only a stale name makes the file disagree with CI.
+    return 1 if extra else 0
 
 
 if __name__ == '__main__':
