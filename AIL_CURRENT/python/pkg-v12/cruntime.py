@@ -17775,7 +17775,15 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
             if (v != v) return ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer");
             if (isinf(v)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer");
             double r = nearbyint(v);
-            if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "round() result exceeds int64");
+            /* A finite value outside int64 is this language's declared 64-bit stop.  The typed
+               path (pre54/pre104/fz2) makes it an ordinary `integer overflow` that a program with
+               an active try can catch as OverflowError; the fz2 review recorded the general path's
+               uncatchable AIL_LIMIT stop as a pre-existing difference.  Raising the same named
+               exception here makes catch/except (and a bare `except`) behave the same on both
+               builds; uncaught it still ends the program with exit 1 and the "integer overflow"
+               text (now prefixed by CPython's own class name). */
+            if (r >= 9223372036854775808.0 || r < -9223372036854775808.0)
+                return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "integer overflow");
             *out = ail_box_int((int64_t)r);
             return AIL_OK;
         }
