@@ -10029,7 +10029,7 @@ class Compiler(boxclosure.ClosureMixin):
         up on the value's type; a plain instance is not callable and names its class)."""
         owners = [c for c in self.class_order if '__call__' in self.classes[c]['methods']]
         if not owners:
-            return self.call_value(fld, args, {}, ctx)
+            return self.call_value(fld, args, {}, ctx, inst_call=False)
         res = ctx.tmp()
         ctx.emit('if (%s) {' % self._method_owners_check(fld, '__call__'))
         ctx.indent += 1
@@ -10058,7 +10058,7 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.indent -= 1
         ctx.emit('} else {')
         ctx.indent += 1
-        r = self.call_value(fld, args, {}, ctx)
+        r = self.call_value(fld, args, {}, ctx, inst_call=False)
         ctx.emit('%s = %s;' % (res, r))
         ctx.indent -= 1
         ctx.emit('}')
