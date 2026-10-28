@@ -1890,9 +1890,63 @@ def _annotation_target_names(target):
     return names
 
 
+def _annotation_callee_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
 def _annotation_reads(annotation, name):
-    """The reads of ``name`` in ``annotation`` that an inner scope does not shadow."""
+    """The reads of ``name`` in ``annotation`` that run when the annotation is evaluated.
+
+    A lambda body and a generator-expression element are deferred: creating the object does not
+    read the name.  The body runs only when the lambda is called directly, and the element only
+    when a known consumer iterates the generator (or it is unpacked or iterated by a
+    comprehension).  Defaults and the first generator iterable are evaluated immediately.
+    """
     reads = []
+    consumers = {
+        'add', 'all', 'any', 'append', 'bytearray', 'bytes', 'count', 'dict',
+        'difference_update', 'discard', 'enumerate', 'extend', 'filter', 'frozenset', 'insert',
+        'intersection_update', 'iter', 'join', 'list', 'map', 'max', 'min', 'next', 'remove',
+        'reversed', 'set', 'sorted', 'sum', 'symmetric_difference_update', 'tuple', 'update',
+        'zip',
+    }
+
+    def lambda_parts(node):
+        args = node.args
+        parameters = {arg.arg for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
+        for arg in (args.vararg, args.kwarg):
+            if arg is not None:
+                parameters.add(arg.arg)
+        defaults = [default for default in [*args.defaults, *args.kw_defaults]
+                    if default is not None]
+        return parameters, defaults
+
+    def visit_generators(generators, shadowed, eager):
+        # The first iterable is evaluated in the enclosing scope.  The remaining iterables,
+        # conditions and the element run inside the comprehension scope; for a bare generator
+        # expression they are deferred until something iterates it.
+        inner = shadowed
+        for index, generator in enumerate(generators):
+            if index == 0 or eager:
+                # An eagerly evaluated iterable is also iterated, so a generator expression
+                # used as one is consumed and its element runs.
+                if eager and isinstance(generator.iter, ast.GeneratorExp):
+                    visit_generator(generator.iter, inner)
+                else:
+                    visit(generator.iter, inner)
+            inner = inner or name in _annotation_target_names(generator.target)
+            if eager:
+                for condition in generator.ifs:
+                    visit(condition, inner)
+        return inner
+
+    def visit_generator(node, shadowed):
+        inner = visit_generators(node.generators, shadowed, True)
+        visit(node.elt, inner)
 
     def visit(node, shadowed):
         if isinstance(node, ast.Name):
@@ -1900,42 +1954,46 @@ def _annotation_reads(annotation, name):
                 reads.append(node)
             return
         if isinstance(node, ast.Lambda):
-            args = node.args
-            parameters = {arg.arg for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
-            for arg in (args.vararg, args.kwarg):
-                if arg is not None:
-                    parameters.add(arg.arg)
-            for default in [*args.defaults, *args.kw_defaults]:
-                if default is not None:
+            _, defaults = lambda_parts(node)
+            for default in defaults:
+                visit(default, shadowed)
+            return
+        if isinstance(node, ast.Call):
+            consumer = _annotation_callee_name(node.func) in consumers
+            if isinstance(node.func, ast.Lambda):
+                parameters, defaults = lambda_parts(node.func)
+                for default in defaults:
                     visit(default, shadowed)
-            visit(node.body, shadowed or name in parameters)
+                visit(node.func.body, shadowed or name in parameters)
+            else:
+                visit(node.func, shadowed)
+            for argument in node.args:
+                if consumer and isinstance(argument, ast.GeneratorExp):
+                    visit_generator(argument, shadowed)
+                else:
+                    visit(argument, shadowed)
+            for keyword in node.keywords:
+                if consumer and isinstance(keyword.value, ast.GeneratorExp):
+                    visit_generator(keyword.value, shadowed)
+                else:
+                    visit(keyword.value, shadowed)
             return
-        if isinstance(node, ast.ListComp):
-            visit(node.elt, _visit_generators(node.generators, shadowed))
+        if isinstance(node, ast.GeneratorExp):
+            visit_generators(node.generators, shadowed, False)
             return
-        if isinstance(node, (ast.SetComp, ast.GeneratorExp)):
-            visit(node.elt, _visit_generators(node.generators, shadowed))
+        if isinstance(node, (ast.ListComp, ast.SetComp)):
+            visit(node.elt, visit_generators(node.generators, shadowed, True))
             return
         if isinstance(node, ast.DictComp):
-            inner = _visit_generators(node.generators, shadowed)
+            inner = visit_generators(node.generators, shadowed, True)
             visit(node.key, inner)
             visit(node.value, inner)
             return
+        if isinstance(node, ast.Starred) and isinstance(node.value, ast.GeneratorExp):
+            visit_generator(node.value, shadowed)
+            return
         for child in ast.iter_child_nodes(node):
             visit(child, shadowed)
-
-    def _visit_generators(generators, shadowed):
-        # The first iterable is evaluated in the enclosing scope; the rest run inside the
-        # comprehension scope, where the targets (and only those) shadow the class name.
-        visit(generators[0].iter, shadowed)
-        inner = shadowed
-        for index, generator in enumerate(generators):
-            inner = inner or name in _annotation_target_names(generator.target)
-            if index:
-                visit(generator.iter, inner)
-            for condition in generator.ifs:
-                visit(condition, inner)
-        return inner
 
     visit(annotation, False)
     return reads
@@ -2057,6 +2115,7 @@ def _scope_bindings(statements):
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             visit(node.iter)
             if not _constant_empty_iter(node.iter):
+                visit(node.target)
                 for child in node.body:
                     visit(child)
             for child in node.orelse:

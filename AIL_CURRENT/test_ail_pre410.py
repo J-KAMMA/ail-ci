@@ -102,6 +102,31 @@ class C:
     x: (lambda v=C: v)() = 1
 print(C.x)
 ''',
+    'lambda_called': '''
+class C:
+    x: (lambda: C)() = 1
+print(C.x)
+''',
+    'genexp_consumed': '''
+class C:
+    x: list(C for _ in range(1)) = 1
+print(C.x)
+''',
+    'genexp_first_iterable': '''
+class C:
+    x: (v for v in C) = 1
+print(C.x)
+''',
+    'genexp_unpacked': '''
+class C:
+    x: [*(C for _ in range(1))] = 1
+print(C.x)
+''',
+    'genexp_consumed_by_comprehension': '''
+class C:
+    x: [v for v in (C for _ in range(1))] = 1
+print(C.x)
+''',
 }
 
 MATCHING = {
@@ -163,6 +188,47 @@ print(C.x)
     'no_class_name_read': '''
 class C:
     x: int = 1
+print(C.x)
+''',
+    'for_target': '''
+for C in [1, 2]:
+    pass
+class C:
+    x: C = 1
+print(C.x)
+''',
+    'for_break': '''
+for C in range(10):
+    break
+class C:
+    x: C = 1
+print(C.x)
+''',
+    'for_tuple_target': '''
+for a, C in [(1, 7)]:
+    pass
+class C:
+    x: C = 1
+print(C.x)
+''',
+    'lambda_deferred': '''
+class C:
+    x: (lambda: C) = 1
+print(C.x)
+''',
+    'genexp_deferred': '''
+class C:
+    x: (C for _ in range(1)) = 1
+print(C.x)
+''',
+    'genexp_second_iterable_deferred': '''
+class C:
+    x: (v for v in range(1) for _ in C) = 1
+print(C.x)
+''',
+    'lambda_in_list': '''
+class C:
+    x: [(lambda: C)] = 1
 print(C.x)
 ''',
 }
