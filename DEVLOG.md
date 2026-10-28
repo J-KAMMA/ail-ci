@@ -1,3 +1,27 @@
+## 2026-10-28 -- stdlib21: textwrap.shorten (job-stdlib21-10290508)
+
+After the unicodedata commit below, the corpus/example scan of imports still refused at compile time
+found `decimal` 2, `textwrap.shorten` 1, a `re` use 1 and `datetime` 1 (the last compiles on the
+general path). `decimal` stays refused by name: exact decimal arithmetic needs a context, arbitrary
+precision and rounding modes, which is not a lowering to existing code or a small AIL module. The next
+supportable refusal is `textwrap.shorten`, now lowered to `_ail_tw_shorten`, CPython 3.12's default
+TextWrapper with `max_lines=1` (collapsed whitespace, the same hyphen/em-dash chunks,
+`_handle_long_word` and the ` [...]` placeholder), for `shorten(text, width)` and
+`shorten(text, width=...)`. The width is required; a missing width, `placeholder=` and the other
+TextWrapper options keep a named compile-time refusal. A non-str argument gives CPython's
+`AttributeError` for an int and `TypeError` for bytes, with the same text.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `tw_shorten_basic` (widths -3..70, empty, spaces,
+long word, hyphens), `tw_shorten_routes` (argument, list item, attribute, dict value, `from`/alias
+imports), `tw_shorten_ws` (tabs, CR/LF, VT/FF, NBSP/em space, hyphens/em-dashes), `tw_shorten_types`
+(bool/float/large width, Unicode), `tw_shorten_fuzz` (4000 LCG cases over `"ab AB- .!?&,0123\t\n\r"`),
+and `tw_shorten_nonstr` / `tw_shorten_bytes` (exact error text) match CPython;
+`tw_shorten_refuse_onearg` and `tw_shorten_refuse_placeholder` are refused by name. The job test module
+`test_ail_stdlib21.py` now also compares the shorten cases and a 500-case fuzz on AIL_IR=0 and 1 and
+pins the two refusals. Final-state tests: test_ail_stdlib21, test_ail_files, test_ail_safetynet,
+test_ail_corpus_findings3, test_ail_pre360 and test_ail_python_syntax (6 modules, 0 failed);
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- stdlib21: unicodedata.category (job-stdlib21-10290508)
 
 The corpus/example scan of imports still refused at module level found `unicodedata` 3, `decimal` 2

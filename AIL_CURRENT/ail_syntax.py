@@ -1395,6 +1395,147 @@ _MATH_HELPERS['tw_dedent'] = (
     '        else:\n'
     '            out.append(line[len(margin):])\n'
     '    return "\\n".join(out)\n')
+_MATH_HELPERS['tw_shorten'] = (
+    'def _ail_tw_shorten(text: str, width: int) -> str:\n'
+    '    text = " ".join(text.strip().split())\n'
+    '    if width <= 0:\n'
+    '        raise ValueError("invalid width " + str(width) + " (must be > 0)")\n'
+    '    placeholder = " [...]"\n'
+    '    if len(placeholder.lstrip()) > width:\n'
+    '        raise ValueError("placeholder too large for max width")\n'
+    '    munged = ""\n'
+    '    col = 0\n'
+    '    for ch in text:\n'
+    '        if ch == "\\t":\n'
+    '            step = 8 - col % 8\n'
+    '            munged += " " * step\n'
+    '            col += step\n'
+    '        elif ch == "\\n" or ch == "\\r":\n'
+    '            munged += " "\n'
+    '            col = 0\n'
+    '        elif ch == "\\x0b" or ch == "\\x0c":\n'
+    '            munged += " "\n'
+    '            col += 1\n'
+    '        else:\n'
+    '            munged += ch\n'
+    '            col += 1\n'
+    '    text = munged\n'
+    '    chunks: list[str] = []\n'
+    '    n = len(text)\n'
+    '    i = 0\n'
+    '    while i < n:\n'
+    '        ch = text[i]\n'
+    '        sp = ch == " " or ch == "\\n" or ch == "\\r" or ch == "\\x0b" or ch == "\\x0c"\n'
+    '        if sp:\n'
+    '            j = i\n'
+    '            while j < n and (text[j] == " " or text[j] == "\\n" or text[j] == "\\r"\n'
+    '                             or text[j] == "\\x0b" or text[j] == "\\x0c"):\n'
+    '                j += 1\n'
+    '            chunks.append(text[i:j])\n'
+    '            i = j\n'
+    '            continue\n'
+    '        if (ch == "-" and i + 1 < n and text[i + 1] == "-" and i > 0\n'
+    '                and (text[i - 1].isalnum() or text[i - 1] == "_" or text[i - 1] == "!"\n'
+    '                     or text[i - 1] == "\\"" or text[i - 1] == "\'" or text[i - 1] == "&"\n'
+    '                     or text[i - 1] == "." or text[i - 1] == "," or text[i - 1] == "?")):\n'
+    '            k = i\n'
+    '            while k < n and text[k] == "-":\n'
+    '                k += 1\n'
+    '            if k - i >= 2 and k < n and (text[k].isalnum() or text[k] == "_"):\n'
+    '                chunks.append(text[i:k])\n'
+    '                i = k\n'
+    '                continue\n'
+    '        j = i + 1\n'
+    '        end = n\n'
+    '        while j < n:\n'
+    '            c = text[j]\n'
+    '            if c == " ":\n'
+    '                end = j\n'
+    '                break\n'
+    '            if c == "-":\n'
+    '                nxt = text[j + 1] if j + 1 < n else ""\n'
+    '                if nxt != "" and (nxt.isalnum() or nxt == "_") and not nxt.isdecimal():\n'
+    '                    nxt2 = text[j + 2] if j + 2 < n else ""\n'
+    '                    nxt3 = text[j + 3] if j + 3 < n else ""\n'
+    '                    after = False\n'
+    '                    if nxt2 != "" and (nxt2.isalnum() or nxt2 == "_") and not nxt2.isdecimal():\n'
+    '                        after = True\n'
+    '                    elif nxt2 == "-" and nxt3 != "" and (nxt3.isalnum() or nxt3 == "_") and not nxt3.isdecimal():\n'
+    '                        after = True\n'
+    '                    if after:\n'
+    '                        hit = False\n'
+    '                        if j - 2 >= 0 and (text[j - 2].isalnum() or text[j - 2] == "_") \\\n'
+    '                                and not text[j - 2].isdecimal() and (text[j - 1].isalnum() or text[j - 1] == "_") \\\n'
+    '                                and not text[j - 1].isdecimal():\n'
+    '                            hit = True\n'
+    '                        elif j - 3 >= 0 and text[j - 2] == "-" \\\n'
+    '                                and (text[j - 3].isalnum() or text[j - 3] == "_") and not text[j - 3].isdecimal() \\\n'
+    '                                and (text[j - 1].isalnum() or text[j - 1] == "_") and not text[j - 1].isdecimal():\n'
+    '                            hit = True\n'
+    '                        if hit:\n'
+    '                            end = j + 1\n'
+    '                            break\n'
+    '                prev = text[j - 1]\n'
+    '                if prev.isalnum() or prev == "_" or prev == "!" or prev == "\\"" or prev == "\'" \\\n'
+    '                        or prev == "&" or prev == "." or prev == "," or prev == "?":\n'
+    '                    k = j\n'
+    '                    while k < n and text[k] == "-":\n'
+    '                        k += 1\n'
+    '                    if k - j >= 2 and k < n and (text[k].isalnum() or text[k] == "_"):\n'
+    '                        end = j\n'
+    '                        break\n'
+    '            j += 1\n'
+    '        chunks.append(text[i:end])\n'
+    '        i = end\n'
+    '    cnt = len(chunks)\n'
+    '    if cnt == 0:\n'
+    '        return ""\n'
+    '    cur_line: list[str] = []\n'
+    '    cur_len = 0\n'
+    '    pos = 0\n'
+    '    while pos < cnt:\n'
+    '        size = len(chunks[pos])\n'
+    '        if cur_len + size <= width:\n'
+    '            cur_line.append(chunks[pos])\n'
+    '            cur_len += size\n'
+    '            pos += 1\n'
+    '        else:\n'
+    '            break\n'
+    '    if pos < cnt and len(chunks[pos]) > width:\n'
+    '        space_left = 1 if width < 1 else width - cur_len\n'
+    '        chunk = chunks[pos]\n'
+    '        end = space_left\n'
+    '        if len(chunk) > space_left:\n'
+    '            hyphen = -1\n'
+    '            k = 0\n'
+    '            while k < space_left:\n'
+    '                if chunk[k] == "-":\n'
+    '                    hyphen = k\n'
+    '                k += 1\n'
+    '            if hyphen > 0:\n'
+    '                other = False\n'
+    '                k = 0\n'
+    '                while k < hyphen:\n'
+    '                    if chunk[k] != "-":\n'
+    '                        other = True\n'
+    '                    k += 1\n'
+    '                if other:\n'
+    '                    end = hyphen + 1\n'
+    '        cur_line.append(chunk[:end])\n'
+    '        cur_len += len(chunk[:end])\n'
+    '        chunks[pos] = chunk[end:]\n'
+    '    if len(cur_line) > 0 and cur_line[-1].strip() == "":\n'
+    '        cur_len -= len(cur_line[-1])\n'
+    '        cur_line.pop()\n'
+    '    if (pos >= cnt or (cnt - pos == 1 and chunks[pos].strip() == "")) and cur_len <= width:\n'
+    '        return "".join(cur_line)\n'
+    '    while len(cur_line) > 0:\n'
+    '        if cur_line[-1].strip() != "" and cur_len + len(placeholder) <= width:\n'
+    '            cur_line.append(placeholder)\n'
+    '            return "".join(cur_line)\n'
+    '        cur_len -= len(cur_line[-1])\n'
+    '        cur_line.pop()\n'
+    '    return placeholder.lstrip()\n')
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',)}
 import string as _string_module
 
@@ -1412,15 +1553,16 @@ _OPERATOR_BINARY = {'add': ast.Add, 'sub': ast.Sub, 'mul': ast.Mult, 'truediv': 
 _OPERATOR_COMPARE = {'lt': ast.Lt, 'le': ast.LtE, 'gt': ast.Gt, 'ge': ast.GtE, 'eq': ast.Eq, 'ne': ast.NotEq}
 _OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv': ast.Invert}
 _SMALL_MODULES = {
-    'textwrap': ('wrap', 'fill', 'dedent'),
+    'textwrap': ('wrap', 'fill', 'dedent', 'shorten'),
     'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
     'string': tuple(_STRING_CONSTANTS),
     'os': ('cpu_count',),
     'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem', 'itemgetter'),
 }
 _SMALL_NOTE = {
-    'textwrap': 'textwrap.wrap(text[, width]), fill(text[, width]) and dedent(text) are built; the other options '
-                'and functions are not',
+    'textwrap': 'textwrap.wrap(text[, width]), fill(text[, width]), dedent(text) and shorten(text[, width]) are '
+                'built; shorten with a placeholder or other TextWrapper options, the other options and the other '
+                'functions are not',
     'time': 'time.perf_counter() / monotonic() / time() (and the _ns forms), sleep(), localtime(), gmtime(), '
             'strftime() and mktime() are built (the wall clock is an input: AIL_CLOCK=<seconds> pins it); '
             'asctime, ctime, struct_time, tzset and the zone constants are not',
@@ -2389,6 +2531,18 @@ class _Surface:
         plain = not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args)
         if plain and module == 'time' and name in _TIME_CLOCKS and not args:
             return ast.Call(func=ast.Name(id=_TIME_CLOCKS[name], ctx=ast.Load()), args=[], keywords=[])
+        if module == 'textwrap' and name == 'shorten' and not any(
+                isinstance(arg, ast.Starred) for arg in args):
+            width = None
+            if len(args) == 2 and not node.keywords:
+                width = args[1]
+            elif len(args) == 1 and len(node.keywords) == 1 and node.keywords[0].arg == 'width':
+                width = node.keywords[0].value
+            if width is not None:
+                if 'tw_shorten' not in self.helpers:
+                    self.helpers.append('tw_shorten')
+                return ast.Call(func=ast.Name(id='_ail_tw_shorten', ctx=ast.Load()),
+                                args=[args[0], width], keywords=[])
         if module == 'textwrap' and name in ('wrap', 'fill', 'dedent') and not any(
                 isinstance(arg, ast.Starred) for arg in args):
             if name == 'dedent' and len(args) == 1 and not node.keywords:
