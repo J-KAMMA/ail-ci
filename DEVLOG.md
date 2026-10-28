@@ -1,3 +1,28 @@
+## 2026-10-28 -- pre415: a power routed through a starred call argument is refused by name (job-pre415-10281318)
+
+The pre400 review's first pre-existing item, a `**kwargs` call, is already refused by name on
+this tree (`not in the subset: a **kwargs call argument`), so no change was needed for it.  The
+next item still differed: `def power(b, e): return b ** e` called as `power(*args)` with a
+constant tuple or list compiled on both builds and then stopped with `integer overflow`, where
+CPython prints the bignum.  The routed-power check now binds the values a starred argument
+unpacks -- a literal, a module or local tuple/list, an alias, a list item, a class attribute, a
+dict value or an argument forwarded through a wrapper -- and refuses an out-of-int64 constant
+result by name on both builds (`int64 constant expression out of range ... through a call`).
+Containers are folded only when their uses are read-only, and a parameter the callee stores to
+before the power does not carry its call argument into the power.  The other pre400 items
+(nested-def, method, default-argument and parameter-alias routes, class-attribute assignment,
+a module global mutated through a call, and dead-code routed powers) are unchanged.
+
+Probes in `/tmp/probes/pre415` on both builds: 12 refusal probes (direct, module tuple/list,
+alias, list item, class attribute, dict value, wrapper argument, local tuple, `pow()` spelling,
+mixed star+keyword, negative base) are refused by name; 18 matching probes cover in-range
+tuple/list calls, INT64 boundaries, float/bool/negative exponents, safe bases 0/1/-1, a mutated
+list before the call, non-power calls, empty/extra star arguments, wrapper routes, dynamic star
+values and keyword calls.  `test_ail_pre415` (3 tests, both builds) pins the refusals, the
+matches and the already-named `**kwargs` refusal.  Final-state tests: test_ail_pre415,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
