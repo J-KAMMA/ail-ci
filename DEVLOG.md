@@ -1,3 +1,27 @@
+## 2026-10-28 -- ex24: a Python-syntax module of definitions builds as a no-op (job-ex24-10290744)
+
+`language_examples/math.ail` is a module (`LIMIT`, `sum_to`), not a program, and CPython prints
+nothing for it; the compiler called its last function and refused it with "the first parameter
+must be the sequence read from the file".  `integer_series.ail` is the same shape and compiled as
+a file-reading tool (`usage: tool FILE`, exit 2) where CPython exits 0 silently.  A Python-surface
+file whose top level is only effect-free definitions and literal module constants now builds a
+no-op entry (`pyc._python_module_only` / `_python_definitions_only`): annotations are effect free
+when built from builtin names, literals, subscripts and `|` unions (`list[int]`, `dict[str, int]`,
+`int | None`), defaults must be literals, and both builds get an empty `main` (the boxed path gets
+a trailing `pass` so it does not call the last function).  A definitions-only module with a
+decorator or a non-constant annotation/default would run code at load time, so it is refused by
+name instead of losing the effect; imports, class bodies and any top-level executable statement
+keep the old function/script path.
+
+Added `AIL_CURRENT/test_ail_ex24.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES`; added DIFFERENCES row `C?-job-ex24-10290744-1`.  Probes in `/tmp/probes`:
+`ex24_math`, `ex24_integer_series`, `ex24_defs`, `ex24_consts_bytes_neg`, `ex24_empty_consts`,
+`ex24_subscript_ann`, `ex24_print_top` and `ex24_main` match CPython on both builds;
+`ex24_defaults_effect`, `ex24_annotation_effect` (also through a list item and a dict value) are
+refused by name on both builds.  Tests on the final tree: test_ail_ex24, test_ail_python_syntax,
+test_ail_check, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

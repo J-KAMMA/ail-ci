@@ -367,6 +367,145 @@ def _reads_global(fn, name):
     return loads and name not in bound
 
 
+_EFFECT_FREE_ANNOTATIONS = frozenset({
+    'bool', 'bytearray', 'bytes', 'dict', 'float', 'frozenset', 'int', 'list', 'object', 'set',
+    'str', 'tuple',
+    # result-contract markers the Python surface inserts for builtin return annotations
+    '__ail_checked_int__', '__ail_checked_float__', '__ail_checked_bool__', '__ail_checked_str__',
+    '__ail_checked_bytes__', '__ail_checked_void__', '__ail_checked_flist__',
+    '__ail_checked_list',
+})
+
+
+def _annotation_is_effect_free(node):
+    """An annotation whose evaluation at module load runs no user code.
+
+    `def f(x: make())` calls `make` while the module loads, so a definitions-only entry must not
+    silently drop it. A builtin type name, a literal, and a subscription or `|` union built only
+    from those (`list[int]`, `dict[str, int]`, `int | None`) evaluate no user code.
+    """
+    if isinstance(node, ast.Name):
+        return node.id in _EFFECT_FREE_ANNOTATIONS
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.Subscript):
+        return (_annotation_is_effect_free(node.value)
+                and _annotation_is_effect_free(node.slice))
+    if isinstance(node, ast.Tuple):
+        return all(_annotation_is_effect_free(element) for element in node.elts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return (_annotation_is_effect_free(node.left)
+                and _annotation_is_effect_free(node.right))
+    return False
+
+
+def _definition_has_no_effect(node):
+    """A top-level function definition CPython evaluates without an observable effect.
+
+    A class body, a decorator, a non-constant annotation or default all run code while the module
+    loads, which the compiled entry does not; those shapes keep the old path instead of silently
+    dropping the effect.
+    """
+    if not isinstance(node, ast.FunctionDef):
+        return False
+    if node.decorator_list or getattr(node, 'type_params', None):
+        return False
+    args = node.args
+    parameters = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+    parameters += [parameter for parameter in (args.vararg, args.kwarg) if parameter is not None]
+    if any(parameter.annotation is not None
+           and not _annotation_is_effect_free(parameter.annotation)
+           for parameter in parameters):
+        return False
+    if node.returns is not None and not _annotation_is_effect_free(node.returns):
+        return False
+    defaults = [value for value in [*args.defaults, *args.kw_defaults] if value is not None]
+    return all(isinstance(value, ast.Constant) for value in defaults)
+
+
+def _python_definitions_only(source):
+    """The tree of a Python-surface file that only defines things, or None.
+
+    A `Pass`, a docstring, a function definition and a literal module constant are the shapes
+    that make up a module. Anything else -- a top-level call, an import, a class body -- is not
+    this shape, so the caller keeps the older function/script path.
+    """
+    if os.environ.get('AIL_SURFACE') != 'python' or not is_function(source):
+        return None
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return None
+    assigned = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            name = node.targets[0].id
+            assigned[name] = assigned.get(name, 0) + 1
+    for node in tree.body:
+        if _is_docstring_stmt(node) or isinstance(node, ast.Pass):
+            continue
+        if isinstance(node, ast.FunctionDef):
+            continue
+        if (isinstance(node, ast.Assign) and _is_module_const_assign(node)
+                and assigned[node.targets[0].id] == 1):
+            continue
+        return None
+    return tree
+
+
+def _python_module_only(source):
+    """A Python-surface file that only defines things: CPython runs nothing observable for it.
+
+    `to_c` treats any `def` as a function program and calls its last function. That is the AIL
+    convention (a block program is a `main`), but a Python module -- effect-free definitions,
+    literal module constants and a docstring only -- is not run: importing it has no output. The
+    entry's own uncalled `main` already refuses in `ail_chatgpt.py`; this covers a module whose
+    last function is an ordinary library function (`math.ail`'s `sum_to`) or whose functions take
+    annotated parameters (`integer_series.ail`), which otherwise compile as a file-reading tool.
+
+    Restricted to the Python surface so a block-syntax file keeps its function-program behaviour.
+    An import is not classified as effect-free: `import this` prints, and skipping any import
+    whose load-time effect this compiler cannot see would be a silent difference. Those sources
+    keep the old path (and its refusal or file-tool shape) instead.
+    """
+    tree = _python_definitions_only(source)
+    return tree is not None and all(
+        not isinstance(node, ast.FunctionDef) or _definition_has_no_effect(node)
+        for node in tree.body)
+
+
+def _python_load_effect(source):
+    """The first definition in a definitions-only Python module that runs code at load time.
+
+    A decorator, a non-constant annotation or default executes while CPython loads the module.
+    Such a module is not run by the compiled entry, so the old function-program path would print
+    the wrong thing (or read a file); name the effect instead of dropping it silently.
+    """
+    tree = _python_definitions_only(source)
+    if tree is None:
+        return None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and not _definition_has_no_effect(node):
+            return node
+    return None
+
+
+def _refuse_python_load_effect(source):
+    """Refuse a definitions-only Python module whose own definition runs code while it loads."""
+    effect = _python_load_effect(source)
+    if effect is None:
+        return
+    refusal = Unsupported(
+        'a Python module whose definition %s runs code at load time (a decorator, a '
+        'non-constant annotation or default) is not run by the compiled entry; the effect would '
+        'be lost.\n'
+        '  write instead: run that code at module level, or use a literal default and an '
+        'annotation built from a builtin type' % effect.name)
+    refusal.source_line = effect.lineno
+    raise refusal
+
+
 def _entry_name(taken):
     if 'main' not in taken:
         return 'main'
@@ -552,6 +691,12 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
             raise refusal
     if is_function(source):
         rewritten = _rewrite_script(source, force=False)
+        module_only = False
+        if rewritten is None:
+            _refuse_python_load_effect(source)
+        if rewritten is None and _python_module_only(source):
+            rewritten = _rewrite_script(source, force=True)
+            module_only = rewritten is not None
         if rewritten is None:
             return func_to_c(source, name=name, strict=strict, info=info, external=external)
         # the rewritten text has lost its comments: keep the @dataclass markers for dunders.py
@@ -561,6 +706,8 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
             return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
         finally:
             dunders.HINT.clear()
+            if module_only and info is not None:
+                info['_python_module_only'] = True
     if _is_single_expression(source):
         if info is not None:
             info.setdefault('kinds', ['array'])
@@ -1072,7 +1219,9 @@ def _build_unshadowed_exact(source, out, strict, report, force_general):
 def _build_unshadowed_inner(source, out, strict, report, force_general, local_proof=True, legacy_int=False):
     out = pathlib.Path(out)
     c = out.with_suffix('.c')
+    _refuse_python_load_effect(source)
     info = {'_checked_arrays': True}
+    module_only = _python_module_only(source)
     if legacy_int:
         info['_tint_legacy'] = True
     if native_diagnostics.enabled():
@@ -1126,9 +1275,13 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             import pyboxed2 as _boxed_impl
         typed_main = not force_general and _has_main_entry(source)
         boxed_report = {}
+        # The general path calls the last top-level def when there is no module statement. A
+        # Python module is not run, so give it one no-op module statement: the boxed entry then
+        # takes its plain `main(void)` shape, exactly like the typed path's empty entry point.
+        boxed_source = source + '\npass\n' if module_only else source
         try:
-            boxed_c = (_boxed_impl.build(source, boxed_report, allow_mix=False) if force_general
-                       else _boxed_impl.build(source, boxed_report))
+            boxed_c = (_boxed_impl.build(boxed_source, boxed_report, allow_mix=False) if force_general
+                       else _boxed_impl.build(boxed_source, boxed_report))
         except Unsupported as boxed_refusal:
             if boundary:
                 raise _typed_e
@@ -1223,7 +1376,8 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
+    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET
+                                  or info.get('_python_module_only')) else _main_for(info)
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
