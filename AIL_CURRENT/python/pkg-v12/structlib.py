@@ -190,5 +190,6 @@ def run(tree, text):
         if wrappers:
             chunks.extend(wrappers)
         if roots:
+            roots.add('_AilStructIndexProbe')
             chunks.append(stdlib5.shake(stdlib5.prelude('struct'), roots))
         text.append('\n\n'.join(chunks))

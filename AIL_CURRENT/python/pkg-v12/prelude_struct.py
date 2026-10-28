@@ -9,6 +9,11 @@ class _AilStructError(Exception):
     pass
 
 
+class _AilStructIndexProbe:
+    def __index__(self) -> int:
+        return 0
+
+
 def _ail_struct_order(prefix: str) -> str:
     if prefix == ">" or prefix == "!":
         return "big"
@@ -184,9 +189,20 @@ def _ail_struct_value(value, code: str, size: int, signed: bool) -> int:
                 or isinstance(value, dict) or isinstance(value, set) or value is None:
             raise _AilStructError("required argument is not an integer")
         try:
-            v = int(value)
-        except TypeError:
+            v = getattr(value, "__index__")()
+        except AttributeError:
             raise _AilStructError("required argument is not an integer")
+        if isinstance(v, bool):
+            if v:
+                v = 1
+            else:
+                v = 0
+        elif not isinstance(v, int):
+            raise TypeError("__index__ returned non-int (type " + type(v).__name__ + ")")
+    if code == "P":
+        if v < 0 - 9223372036854775807 - 1 or v > _ail_struct_limits(code, size, False)[1]:
+            raise _AilStructError("int too large to convert")
+        return v
     limits = _ail_struct_limits(code, size, signed)
     if v < limits[0] or v > limits[1]:
         raise _AilStructError("'" + code + "' format requires " + str(limits[0]) + " <= number <= " + str(limits[1]))
@@ -310,6 +326,12 @@ def _ail_struct_calcsize(fmt: str) -> int:
     return _ail_struct_total(_ail_struct_tokens(fmt))
 
 
+def _ail_struct_buffer(data):
+    if isinstance(data, bytes) or isinstance(data, bytearray):
+        return data
+    raise TypeError("a bytes-like object is required, not '" + type(data).__name__ + "'")
+
+
 def _ail_struct_read(tokens: list[str], data: bytes, start: int) -> list:
     prefix = tokens[0]
     order = _ail_struct_order(prefix)
@@ -326,7 +348,7 @@ def _ail_struct_read(tokens: list[str], data: bytes, start: int) -> list:
             out.append(bytes(data[offset:offset + n]))
             offset = offset + n
         else:
-            offset = _ail_struct_align(offset, code, prefix)
+            offset = _ail_struct_align(offset - start, code, prefix) + start
             if code == "c":
                 j = 0
                 while j < n:
@@ -353,6 +375,7 @@ def _ail_struct_read(tokens: list[str], data: bytes, start: int) -> list:
 
 def _ail_struct_unpack_list(fmt: str, data: bytes) -> list:
     tokens = _ail_struct_tokens(fmt)
+    data = _ail_struct_buffer(data)
     total = _ail_struct_total(tokens)
     if len(data) != total:
         raise _AilStructError("unpack requires a buffer of " + str(total) + " bytes")
@@ -361,6 +384,7 @@ def _ail_struct_unpack_list(fmt: str, data: bytes) -> list:
 
 def _ail_struct_unpack_from_list(fmt: str, data: bytes, offset: int = 0) -> list:
     tokens = _ail_struct_tokens(fmt)
+    data = _ail_struct_buffer(data)
     total = _ail_struct_total(tokens)
     if offset < 0:
         if len(data) >= total:

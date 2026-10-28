@@ -1,3 +1,15 @@
+## 2026-10-28 -- stdlib19 review: negative `P`, `__index__`, buffer types and native `unpack_from` offsets
+
+The review's `P` probe showed `struct.pack('@P', -1)` refused; CPython's pointer format takes
+`PyLong_AsVoidPtr`, so `P` now accepts -(2**63) .. 2**64-1 and rejects the rest with
+`int too large to convert`. Integer formats no longer call `int()`: they use `__index__` (a class
+with only `__int__` gets `struct.error: required argument is not an integer`, a non-int
+`__index__` gets CPython's TypeError, and a class with both uses `__index__`). `unpack` /
+`unpack_from` of a non-bytes-like value now raise `TypeError: a bytes-like object is required,
+not '...'` after the format is parsed. The probes also found that native `unpack_from` aligned the
+absolute buffer offset; alignment is now relative to the start, so `unpack_from('@P', data, 1)`
+reads at offset 1 like CPython. `test_ail_stdlib19` covers each case on both builds.
+
 ## 2026-10-28 -- stdlib batch 6: `struct` pack / unpack / unpack_from / calcsize (job-stdlib19-10290445)
 
 Added the `struct` lowering (`structlib.py`) onto a Python prelude (`prelude_struct.py`) and registered

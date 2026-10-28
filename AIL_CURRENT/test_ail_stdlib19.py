@@ -40,8 +40,49 @@ class Index:
         return 7
 
 
+class OnlyInt:
+    def __int__(self) -> int:
+        return 5
+
+
+class Both:
+    def __int__(self) -> int:
+        return 5
+
+    def __index__(self) -> int:
+        return 6
+
+
+class BadIndex:
+    def __index__(self):
+        return 'x'
+
+
 def main() -> None:
     print(struct.pack('<b', Index()).hex())
+    print(struct.pack('@P', -1).hex(), struct.pack('@P', -2).hex())
+    print(struct.pack('@P', -9223372036854775807 - 1).hex())
+    print(struct.unpack('@P', b'\xff' * 8))
+    for value in (-9223372036854775807 - 2, 9223372036854775807 + 9223372036854775807 + 3):
+        try:
+            struct.pack('@P', value)
+        except struct.error as error:
+            print(str(error))
+    print(struct.pack('<b', Both()).hex())
+    try:
+        struct.pack('<b', OnlyInt())
+    except struct.error as error:
+        print(str(error))
+    try:
+        struct.pack('<b', BadIndex())
+    except TypeError as error:
+        print(str(error))
+    try:
+        struct.unpack('<I', 'abcd')
+    except TypeError as error:
+        print(str(error))
+    print(struct.unpack_from('@P', b'x' + b'\xff' * 8, 1))
+    print(struct.unpack_from('@bI', b'xx\x01\x02\x03\x04', 2))
     print(struct.pack('>I', 0x01020304).hex())
     print(struct.pack('<q', -2).hex())
     print(struct.pack('=l', 1).hex(), struct.pack('@l', 1).hex())
@@ -171,6 +212,66 @@ class PreludeStruct(unittest.TestCase):
                 except prelude_struct._AilStructError as error:
                     got = ('error', str(error))
                 self.assertEqual(got, want, (fmt, offset))
+
+    def test_pointer_index_and_buffer_boundaries(self):
+        for value in (-9223372036854775808, -2, -1, 0, 18446744073709551615):
+            self.assertEqual(bytes(prelude_struct._ail_struct_pack_list('@P', [value])),
+                             pystruct.pack('@P', value))
+        for value in (-9223372036854775809, 18446744073709551616):
+            with self.assertRaises(prelude_struct._AilStructError) as mine:
+                prelude_struct._ail_struct_pack_list('@P', [value])
+            with self.assertRaises(pystruct.error) as want:
+                pystruct.pack('@P', value)
+            self.assertEqual(str(mine.exception), str(want.exception))
+
+        class OnlyInt:
+            def __int__(self):
+                return 5
+
+        class Both:
+            def __int__(self):
+                return 5
+
+            def __index__(self):
+                return 6
+
+        class BadIndex:
+            def __index__(self):
+                return 'x'
+
+        for fmt in ('<b', '<B', '<h', '<H', '<i', '<I', '<l', '<L', '<q', '<Q', '@n', '@N'):
+            self.assertEqual(bytes(prelude_struct._ail_struct_pack_list(fmt, [Both()])),
+                             pystruct.pack(fmt, Both()))
+            with self.assertRaises(prelude_struct._AilStructError) as mine:
+                prelude_struct._ail_struct_pack_list(fmt, [OnlyInt()])
+            with self.assertRaises(pystruct.error) as want:
+                pystruct.pack(fmt, OnlyInt())
+            self.assertEqual(str(mine.exception), str(want.exception))
+            with self.assertRaises(TypeError) as mine:
+                prelude_struct._ail_struct_pack_list(fmt, [BadIndex()])
+            with self.assertRaises(TypeError) as want:
+                pystruct.pack(fmt, BadIndex())
+            self.assertEqual(str(mine.exception), str(want.exception))
+        self.assertEqual(bytes(prelude_struct._ail_struct_pack_list('@P', [Both()])),
+                         pystruct.pack('@P', Both()))
+
+        for data in ('abcd', 5, None, [1, 2, 3, 4]):
+            with self.assertRaises(TypeError) as mine:
+                prelude_struct._ail_struct_unpack_list('<I', data)
+            with self.assertRaises(TypeError) as want:
+                pystruct.unpack('<I', data)
+            self.assertEqual(str(mine.exception), str(want.exception))
+            with self.assertRaises(TypeError) as mine:
+                prelude_struct._ail_struct_unpack_from_list('<I', data, 0)
+            with self.assertRaises(TypeError) as want:
+                pystruct.unpack_from('<I', data, 0)
+            self.assertEqual(str(mine.exception), str(want.exception))
+
+        data = bytes(range(24))
+        for fmt in ('@P', '@bI', '@biq', '@bhi', '@b0hP'):
+            for offset in (0, 1, 2, 3, 4):
+                self.assertEqual(tuple(prelude_struct._ail_struct_unpack_from_list(fmt, data, offset)),
+                                 pystruct.unpack_from(fmt, data, offset), (fmt, offset))
 
 
 class CompiledStruct(unittest.TestCase):
