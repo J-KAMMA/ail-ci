@@ -224,6 +224,32 @@ tests: test_ail_pre377 (2 tests, 49 s), test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3 (25 tests, 503 s, 1 skipped).  `tools/update_manifest.py` was run
 and `--check` passes.
 
+## 2026-10-27 -- pre380: a lambda body follows a renamed comprehension target (job-pre380-10280705)
+
+The pre363 review left two pre-existing items. The gdev instruction counts were not re-measured:
+`perf_event_paranoid` is 4 here. The module-level `[(lambda: x)() for x in range(3)]` body-read
+case still differed on both builds: with `x = 99` in the enclosing scope, `compscope.rename`
+renamed the comprehension target (because the name clashes) but never looked inside the nested
+lambda body, so the lambda kept reading the outer `x` and printed `[99, 99, 99]` where CPython
+prints `[0, 1, 2]`. `_Scope` now resolves the free loads of a lambda nested in a comprehension
+(parameters, walrus targets and nested-comprehension targets excluded) against the enclosing
+comprehension stack. In a function the lambda then captures the renamed target and matches
+CPython; at module scope the existing closure pass refuses the construct by name (`not in the
+subset: closures nested too deeply to settle their shared names`) instead of printing the wrong
+list. Argument defaults keep their pre363 handling, and the class-body guard still refuses a
+class-body target read by name.
+
+Added `AIL_CURRENT/test_ail_pre380.py` (2 tests, 16 matching and 6 refused programs, both
+builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Probes in `/tmp/probes/pre380` on both builds via `cmp.sh`: `r01`-`r14` (argument, list item,
+attribute, dict value, set/dict comprehension, consumed generator, if condition, nested
+comprehension with the same name, two targets, empty/negative/string, outer value after the
+comprehension, shadowed inner target) match CPython; `q01`-`q08` module-scope routes are refused
+by name; controls `c01`-`c04` (default, outer read, target passed as an argument, class-body
+default) match CPython. Final-state tests: test_ail_pre380, test_ail_pre363, test_ail_quirks
+(comprehension cases), test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --check` still
+reports the four shard entries duplicated on the base tree.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
