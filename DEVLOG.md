@@ -1,3 +1,25 @@
+## 2026-10-28 -- pre346: normalize duplicate placements instead of rewriting the shard file (job-rbpre346-10280910)
+
+Re-applying pre346 on today's integ (`99f5526`) still failed `test_ail_pre346`.  The job patch
+rewrote `tools/ci_shards.json` from this branch's old base, while integ had regenerated the file
+for its newer module list, so `git apply --3way` reported a conflict and left conflict markers in
+the working file; `json.loads` then raised and `test_assignment_places_every_module_once` errored.
+Regenerating the file from integ's own copy does not help: every hunk still conflicts in the
+three-way merge.
+
+The file is therefore no longer part of this change (it keeps the tree's content).  Instead
+`shard_modules()` and `--check` treat a placement that names a module twice as a stale-file
+artifact and run it on its first shard, so a module can never run in two shards; a module missing
+from the file is still spread by name and `--check` now fails only on a stale (`unknown`) name,
+reporting `duplicated:` without failing.  `build()` still drops duplicate inputs and duplicate
+placements, and the module list is still unique, so `--update` writes a clean file.
+`test_duplicate_placement_runs_once` covers the stale-file case.  `tools/update_manifest.py` was
+run and `--check` passes.
+
+Verified on integ `99f5526` plus this change: the patch applies with `git apply --3way` (rc 0, no
+conflicts), `test_ail_pre346` passes 5 tests and `test_ail_safetynet` passes 5 tests (109 s); the
+reported safetynet failure could not be reproduced, as in the pre345 and pre346 re-apply records.
+
 ## 2026-10-27 -- pre346: accept modules added after the shard file was generated (job-rbpre346-10280725)
 
 Applied alone on today's integ, `test_ail_pre346` failed.  Four modules added by changes merged
