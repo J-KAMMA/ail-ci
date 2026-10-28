@@ -132,17 +132,14 @@ def _run(directory, name, text, general):
 
 class Pre214Tests(unittest.TestCase):
     def refused(self, slug, text):
+        # exact ints (bigint): builds and matches CPython (stdout, exit code)
         with tempfile.TemporaryDirectory(prefix='ail-pre214-') as directory:
+            want, want_rc, err = _cpython(directory, slug, text)
             for general in (True, False):
-                name = '%s_%s' % (slug, 'g' if general else 'd')
-                built, exe = _build(directory, name, text, general)
-                output = built.stdout + built.stderr
-                self.assertEqual(built.returncode, 2, '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
-                self.assertFalse(exe.exists(), '%s (general=%s) built an executable' % (slug, general))
-                self.assertIn('int64 constant expression out of range', output,
-                              '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
-                self.assertIn('9223372036854775808', output,
-                              '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
+                got, build_err = _run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                      text, general)
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
+                self.assertEqual(got, (want, want_rc), '%s (general=%s)\n%s' % (slug, general, build_err))
 
     def matches(self, slug, text):
         with tempfile.TemporaryDirectory(prefix='ail-pre214-') as directory:

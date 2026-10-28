@@ -112,7 +112,20 @@ class TextLowering(object):
             return self.str_subscript(node)
         if isinstance(node, ast.Call):
             return self.str_call(node)
+        if isinstance(node, ast.Attribute):
+            return self.exc_field(node)
         raise self.NotS0('a str expression of shape %s' % type(node).__name__)
+
+    EXC_FIELDS = {'__ail_text__': 'exc_text', '__ail_repr__': 'exc_repr', '__ail_argsrepr__': 'exc_argsrepr',
+                  '__ail_type__': 'exc_type', '__ail_qual__': 'exc_qual'}
+
+    def exc_field(self, node):
+        """`e.__ail_text__` and friends of the exception the innermost handler is handling (exctext.py)."""
+        names = getattr(self, 'handler_names', None)
+        if not (isinstance(node.value, ast.Name) and node.attr in self.EXC_FIELDS and names
+                and node.value.id == names[-1]):
+            raise self.NotS0('a str expression of shape Attribute')
+        return self.rt(self.EXC_FIELDS[node.attr], [])
 
     def name_value(self, node):
         if node.id in self.scope_vars:
@@ -173,7 +186,10 @@ class TextLowering(object):
         return self.concat(vals)
 
     def str_from_int(self, arg, buf):
-        v = self.as_int(self.expr(arg))
+        v = self.expr(arg)
+        if v.type == I.TINT:
+            return self.rt('tint_str', [v])
+        v = self.as_int(v)
         return self.rt('str_from_int_buf' if buf else 'str_from_int', [v])
 
     def fstring_pieces(self, node, buf_always):
@@ -227,7 +243,10 @@ class TextLowering(object):
         if kind == P.INT:
             if P._is_bool_expr(node, self.ctx):
                 raise self.NotS0('a bool converted to str')
-            return self.rt('str_from_int', [self.as_int(self.expr(node))])
+            v = self.expr(node)
+            if v.type == I.TINT:
+                return self.rt('tint_str', [v])
+            return self.rt('str_from_int', [self.as_int(v)])
         return self.rt('str_from_float', [self.coerce(self.expr(node), I.F64)])
 
     def fmt_value(self, val_node, kind, spec, orig_text, str_default_align):
@@ -404,6 +423,12 @@ class TextLowering(object):
                 if at == P.INT and not P._is_bool_expr(arg, self.ctx):
                     return self.str_from_int(arg, buf=False)
                 raise self.NotS0('str() of kind %r' % (at,))
+            if self.is_builtin(name) and name in ('bin', 'oct', 'hex') and len(node.args) == 1:
+                v = self.coerce(self.expr(node.args[0]), I.TINT)
+                return self.rt('tint_' + name, [v])
+            if self.is_builtin(name) and name == 'chr' and len(node.args) == 1 and not node.keywords:
+                v = self.coerce(self.expr(node.args[0]), I.TINT)
+                return self.rt('tint_chr', [v])
             raise self.NotS0('str call of %r' % name)
         if isinstance(f, ast.Attribute):
             return self.str_method(node)
@@ -419,8 +444,21 @@ class TextLowering(object):
                 chars = self.expr(node.args[0])
                 return self.rt('str_%s_chars' % attr, [recv, chars])
             return self.rt('str_%s' % attr, [recv])
+        if attr in ('lower', 'upper') and self.is_str(f.value) and not node.args and not node.keywords:
+            return self.rt('str_' + attr, [self.expr(f.value)])
         if attr == 'decode' and self.text_kind(f.value) == 'bytes' and not node.args and not node.keywords:
             return self.decode_value(f.value)
+        if attr == 'join' and self.is_str(f.value) and len(node.args) == 1 and not node.keywords \
+                and isinstance(node.args[0], (ast.List, ast.Tuple)) \
+                and all(not isinstance(e, ast.Starred) and self.is_str(e) for e in node.args[0].elts):
+            # `sep.join([a, b, c])` of a display: the separator between the evaluated pieces
+            sep = self.expr(f.value)
+            parts = []
+            for e in node.args[0].elts:
+                if parts:
+                    parts.append(sep)
+                parts.append(self.expr(e))
+            return self.concat(parts)
         if attr == 'join' and self.is_str(f.value) and len(node.args) == 1 and not node.keywords \
                 and isinstance(node.args[0], ast.Name) and self.is_slist_name(node.args[0].id):
             sep = self.expr(f.value)
@@ -668,7 +706,8 @@ class TextLowering(object):
         for a0 in node.args:
             if P._is_bool_expr(a0, self.ctx):
                 kinds.append('bool')
-                vals.append(self.expr(a0))
+                v = self.expr(a0)
+                vals.append(self.coerce(v, I.I64) if v.type == I.TINT else v)     # (a bool call result of a tagged function)
                 continue
             if self.text_kind(a0) == 'bytes':
                 raise self.NotS0('print of bytes')
@@ -685,8 +724,13 @@ class TextLowering(object):
                 kinds.append('flt')
                 vals.append(self.expr(a0))
             elif t == P.INT:
-                kinds.append('int')
-                vals.append(self.as_int(self.expr(a0)))
+                v = self.expr(a0)
+                if v.type == I.TINT:
+                    kinds.append('str')
+                    vals.append(self.rt('tint_str', [v]))
+                else:
+                    kinds.append('int')
+                    vals.append(self.as_int(v))
             else:
                 raise self.NotS0('print of kind %r' % (t,))
         extra = {}

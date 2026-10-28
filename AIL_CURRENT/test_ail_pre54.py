@@ -1,12 +1,10 @@
-"""pre54: a constant `round()` at the int64 boundary is refused by name.
+"""pre54: a constant `round()` at the int64 boundary matches CPython.
 
-`round(x)` with one argument returns an int.  AIL's int is signed 64-bit; CPython's is
-unbounded.  `round(-9223372036854775808.0)` is exactly INT64_MIN, which is representable,
-but `abs()`, unary `-` and `* -1` on it are not: CPython answers 2**63 and AIL used to stop
-with `integer overflow` on both builds (the `z_intmin` case recorded by the pre35 reviewer).
-The value is known at compile time, so the source is now refused by name instead of being
-compiled into a program that stops later.  Values just inside the boundary, a two-argument
-round() (a float result) and a user-defined `round` keep CPython's answers.
+`round(x)` with one argument returns an int.  `round(-9223372036854775808.0)` is exactly
+INT64_MIN, and `abs()`, unary `-` and `* -1` on it give 2**63.  With exact ints (bigint,
+BIGINT.md) the program builds on both builds and prints CPython's answers (it used to be
+refused by name while ints were signed 64-bit).  Values just inside the boundary, a
+two-argument round() (a float result) and a user-defined `round` keep CPython's answers.
 """
 import os
 import subprocess
@@ -98,16 +96,10 @@ def _compile(directory, name, text, general):
 
 
 class Pre54Tests(unittest.TestCase):
-    def test_constant_round_at_the_boundary_is_refused_by_name(self):
+    def test_constant_round_at_the_boundary_matches_cpython(self):
+        # exact ints (bigint): builds and matches CPython (stdout, exit code)
         for label, text in REFUSED.items():
-            for general in (True, False):
-                with self.subTest(label=label, general=general), \
-                        tempfile.TemporaryDirectory(prefix='ail-pre54-refuse-') as directory:
-                    built, exe = _compile(directory, label, text, general)
-                    output = built.stdout + built.stderr
-                    self.assertNotEqual(built.returncode, 0, output)
-                    self.assertIn('round() of a constant float at the int64 boundary is refused', output)
-                    self.assertFalse(exe.exists(), output)
+            self.check_matches_cpython('boundary_' + label, text)
 
     def check_matches_cpython(self, slug, text):
         with tempfile.TemporaryDirectory(prefix='ail-pre54-') as directory:

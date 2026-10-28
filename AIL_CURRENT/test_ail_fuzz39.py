@@ -3,7 +3,7 @@
 `is` / `is not` with a tuple constant was a silent difference: CPython merges equal tuple constants of one code object
 (`a = (); b = (); a is b` is True, and `()` is a singleton), while each tuple display here is an object of its own, so
 `p is q` for two empty tuples printed False. The tuple rewrite now leaves such a comparison for numidentity.py, which
-refuses it by name (DIFFERENCES C?-job-fuzz39-10230820-1); a literal passed to both parameters of `def same(a, b):
+refuses it by name (DIFFERENCES C175); a literal passed to both parameters of `def same(a, b):
 return a is b` is refused too. Different tuple constants, the same object reached twice, list/dict/set identity,
 `.copy()`, mutable default arguments and small-int identity are unchanged and compared with CPython.
 
@@ -53,7 +53,7 @@ def check_program(test, name, text):
             test.assertEqual(got.returncode, want[1], (name, general, got.stderr[-800:]))
 
 
-def check_refused(test, name, text, marker='C?-job-fuzz39-10230820-1', word='tuple'):
+def check_refused(test, name, text, marker='C175', word='tuple'):
     with tempfile.TemporaryDirectory(prefix='ail-fuzz39-') as directory:
         for general in (True, False):
             _, built = build(directory, name + ('g' if general else 'd'), text, general)

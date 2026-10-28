@@ -2,7 +2,7 @@
 
 * The wheel's file list is exactly the SDK selection (MANIFEST.json sdk_files, the files ail_sdk.export_sdk
   writes) plus the `ail` command module and the dist-info; nothing private (experiments/, docs/design,
-  a held-out task set, evidence/) is in it, every SDK file carries its MANIFEST pin, RECORD is right, and the version
+  tasks-novel, evidence/) is in it, every SDK file carries its MANIFEST pin, RECORD is right, and the version
   comes from the one source (packaging/ail_lang/__init__.py).
 * Every compiler file that is pinned in the source tree is selected (an SDK that lacks one fails at the first
   program that needs it).
@@ -29,7 +29,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 REPO = ROOT.parent
 BACKEND = REPO / "packaging" / "ail_wheel_backend.py"
-PRIVATE_PARTS = ("experiments", "a held-out task set", "evidence", "design", "bench", "tests")
+PRIVATE_PARTS = ("experiments", "tasks-novel", "evidence", "design", "bench", "tests")
 LICENSE_FILES = ("LICENSE-APACHE", "LICENSE-MIT")
 PACKAGE_FILES = ("__init__.py", "__main__.py", "cli.py", "project.py", "lsp.py")
 CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc") or shutil.which("clang")

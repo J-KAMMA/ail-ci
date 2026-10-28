@@ -9,8 +9,9 @@ result still leaves int64.
 
 The matching programs cover a list, a tuple, a str and a bytes receiver, a dict key, a negative
 result, and a value reaching the subscript through a function argument, a class attribute, a
-dict value, a list item and an alias, on both builds.  The refusal programs keep the by-name
-message for indexes whose exact value really is outside int64.  An empty list with the in-range
+dict value, a list item and an alias, on both builds.  The programs whose exact index value
+really is outside int64 build too (exact ints, bigint, BIGINT.md) and end like CPython with
+IndexError and exit code 1, exception line included.  An empty list with the in-range
 index raises IndexError at run time, as CPython does.
 """
 import os
@@ -96,7 +97,7 @@ def _build(directory, name, text, general):
 
 
 class Pre280Tests(unittest.TestCase):
-    def check(self, slug, text, rc=0):
+    def check(self, slug, text, rc=0, exc_line=False):
         with tempfile.TemporaryDirectory(prefix='ail-pre280-') as directory:
             want, got_rc, err = _cpython(directory, slug, text)
             self.assertEqual(got_rc, rc, err)
@@ -109,6 +110,9 @@ class Pre280Tests(unittest.TestCase):
                     got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
                     self.assertEqual((got.stdout.replace(b'\r\n', b'\n'), got.returncode), (want, rc),
                                      '%s\n%s' % (slug, got.stderr[-2000:]))
+                    if exc_line:
+                        last = err.decode('utf-8', 'replace').strip().splitlines()[-1]
+                        self.assertIn(last, got.stderr.decode('utf-8', 'replace'), slug)
 
     def test_wide_intermediate_constant_index_matches_cpython(self):
         self.check('wide', WIDE)
@@ -116,17 +120,9 @@ class Pre280Tests(unittest.TestCase):
         self.check('empty', EMPTY, rc=1)
 
     def test_out_of_range_constant_index_is_still_refused(self):
-        with tempfile.TemporaryDirectory(prefix='ail-pre280-') as directory:
-            for number, expression in enumerate(REFUSED):
-                text = 'print([10, 20, 30][%s])\n' % expression
-                for general in (True, False):
-                    with self.subTest(expression=expression, general=general):
-                        name = 'out%d_%s' % (number, 'g' if general else 'd')
-                        built, exe = _build(directory, name, text, general)
-                        output = built.stdout + built.stderr
-                        self.assertEqual(built.returncode, 2, '%s\n%s' % (expression, output[-4000:]))
-                        self.assertFalse(exe.exists(), '%s built an executable' % expression)
-                        self.assertIn('int64 index out of range', output, output[-4000:])
+        # exact ints (bigint): builds and ends like CPython (IndexError, exit 1, same exception line)
+        for number, expression in enumerate(REFUSED):
+            self.check('out%d' % number, 'print([10, 20, 30][%s])\n' % expression, rc=1, exc_line=True)
 
 
 if __name__ == '__main__':

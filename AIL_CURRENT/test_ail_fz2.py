@@ -8,7 +8,8 @@ the declared int64 difference, so the seed was reported as a silent DIFF.  `ail_
 the ordinary `integer overflow` stop (stderr "integer overflow", exit 1, stdout flushed up to the
 call), exactly like `+`, `-`, `*` and the other int64 limits; the general path and the two-argument
 `round(x, n)` already reported it that way.  A *constant* float at or outside the boundary is
-still refused by name at compile time (pre54).
+builds and prints the exact integer under exact ints (it was refused by name at compile time
+for the int64 era, pre54).
 
 Each wide program must either match CPython exactly or stay inside the fuzz runner's `overflow`
 contract: exit 1, "integer overflow" on stderr, and AIL's stdout a prefix of CPython's.  In-range
@@ -193,15 +194,8 @@ class Fz2Tests(unittest.TestCase):
     def test_nan_and_infinity_keep_cpython_exceptions(self):
         self.same('non_finite', NON_FINITE)
 
-    def test_constant_wide_round_is_refused_by_name(self):
-        with tempfile.TemporaryDirectory(prefix='ail-fz2-') as directory:
-            for mode, extra in MODES:
-                with self.subTest(mode=mode):
-                    got, build_rc, err = _build_and_run(directory, 'constant_' + mode,
-                                                        CONSTANT_WIDE, mode, extra)
-                    self.assertIsNone(got, '%s\n%s' % (mode, err[-3000:]))
-                    self.assertEqual(build_rc, 3, err[-3000:])
-                    self.assertIn('round() of a constant float at the int64 boundary is refused', err)
+    def test_constant_wide_round_matches_cpython(self):
+        self.same('constant', CONSTANT_WIDE)
 
 
 if __name__ == '__main__':

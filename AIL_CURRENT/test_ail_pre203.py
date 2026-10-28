@@ -118,12 +118,14 @@ class Pre203Tests(unittest.TestCase):
     def test_nested_unary_overflow_is_still_refused_by_name(self):
         text = 'print(-(-9223372036854775808))\n'
         with tempfile.TemporaryDirectory(prefix='ail-pre203-') as directory:
+            # exact ints (bigint): the value 2**63 is no longer refused, both builds print CPython's answer
+            want, want_rc, err = _cpython(directory, 'refused_source', text)
+            self.assertEqual(want_rc, 0, err)
             for label, extra in MODES:
                 with self.subTest(label):
                     got, build_err = _build_and_run(directory, 'refused_' + label, text, extra)
-                    self.assertIsNone(got, build_err)
-                    self.assertIn('int64 constant expression out of range', build_err)
-                    self.assertNotIn('integer overflow', build_err)
+                    self.assertIsNotNone(got, build_err)
+                    self.assertEqual(got, (want, want_rc), build_err)
 
     def test_generic_fold_limit_covers_wide_unary(self):
         sys.path.insert(0, str(ROOT / 'python/pkg-v12'))

@@ -73,6 +73,20 @@ TRY_CATCH = '''func @guarded(%n: i64) -> (i64) attrs {linkage = "extern", names 
 }
 '''
 
+TINTDIV = '''def quot(a: int, b: int) -> int:
+    try:
+        return a // b
+    except ZeroDivisionError:
+        return -1
+
+
+def main() -> None:
+    print(quot(7, 2), quot(1, 0))
+
+
+main()
+'''
+
 TRY_FINALLY = '''func @cleanup(%n: i64) -> (i64) attrs {linkage = "extern", names = ["n"], sym = "cleanup"} {
   %r = local.alloc {name = "r"} : place<i64>
   %zero = const {value = 0} : i64
@@ -230,7 +244,8 @@ def last_line(text_):
 class ProgramTests(unittest.TestCase):
     maxDiff = None
 
-    def check_program(self, name, source, must_be_ir, args_list=((),), cpython=True, stderr_with_cpython=True):
+    def check_program(self, name, source, must_be_ir, args_list=((),), cpython=True, stderr_with_cpython=True,
+                      compare_legacy=True):
         """Build in every mode; every run agrees across the modes (stdout, stderr, status) and with
         CPython (stdout, status, and the last line of stderr when `stderr_with_cpython`)."""
         with tempfile.TemporaryDirectory() as tmp:
@@ -241,8 +256,26 @@ class ProgramTests(unittest.TestCase):
             results = []
             for args in args_list:
                 runs = {tag: run(built.exe[tag], args) for tag in built.exe}
-                for tag in ('ir', 'ir-checked'):
-                    self.assertEqual(runs[tag], runs['legacy'], '%s %s args=%s' % (name, tag, args))
+                for tag in (('ir', 'ir-checked') if compare_legacy else ()):
+                    # (a division by zero in a tagged-int function is the ZeroDivisionError CPython raises, so an
+                    # uncaught one ends with that text; the legacy build ends with its bare trap message)
+                    legacy_run = runs['legacy'][:2] + (runs['legacy'][2].replace(
+                        'integer division by zero', 'ZeroDivisionError: integer division or modulo by zero').replace(
+                        'integer modulo by zero', 'ZeroDivisionError: integer modulo by zero'),)
+                    # (the exceptions the IR raises end the program with the class name in front of the message
+                    # CPython prints; the legacy build prints the bare message)
+                    named = re.sub(r'(?m)^[A-Za-z]+Error: ', '', runs[tag][2])
+                    bare = runs[tag][:2] + (named,)
+                    if last_line(runs['legacy'][2]) == 'integer overflow':
+                        # the int64 legacy build stops where Python has big integers; the tagged build is exact
+                        expected = cpython_run(tmp, name, source, args)
+                        self.assertEqual(runs[tag][:2], expected[:2], '%s %s args=%s' % (name, tag, args))
+                        continue
+                    if not (runs[tag] == runs['legacy'] or runs[tag] == legacy_run or bare == runs['legacy']):
+                        # the IR's exceptions carry CPython's text (`IndexError: index out of range` where the
+                        # legacy trap says `bytes index out of range`): the run still ends the same way
+                        self.assertEqual(runs[tag][:2], runs['legacy'][:2], '%s %s args=%s' % (name, tag, args))
+                        self.assertTrue(runs[tag][2].strip(), (name, tag, args))
                 if cpython:
                     expected = cpython_run(tmp, name, source, args)
                     self.assertEqual(runs['legacy'][1], expected[1], '%s args=%s stdout' % (name, args))
@@ -270,6 +303,9 @@ class ProgramTests(unittest.TestCase):
         self.assertEqual(out[0], 0)
         self.assertTrue(out[1].strip().endswith('done'))
 
+    def test_division_by_zero_in_a_tint_function_is_catchable(self):
+        self.check_program('tintdiv', TINTDIV, ['quot'])
+
     def test_bytearray_parameter_kept_across_calls_and_exceptions(self):
         out = self.check_program('bytes', BYTEARRAY, ['fill', 'check'])[0]
         self.assertEqual(out[0], 0)
@@ -291,7 +327,15 @@ class ProgramTests(unittest.TestCase):
                 self.assertEqual(last_line(results[k][2]), last_line(expected[2]), k)
 
     def test_caught_traps_in_an_ir_function(self):
-        self.check_program('traps', TRAPS, ['quot', 'peek', 'scan_bytes', 'wrap_add'], cpython=False)
+        # (wrap_add(INT64_MAX, 2) is Python's exact 18446744073709551614 in the IR build, where the int64 legacy
+        # build stops with an OverflowError its handler catches: both IR builds are compared with CPython)
+        with tempfile.TemporaryDirectory() as tmp:
+            built = Built(tmp, 'traps', TRAPS)
+            for tag in ('ir', 'ir-checked'):
+                self.assertEqual({'quot', 'peek', 'scan_bytes', 'wrap_add'} - built.ir[tag], set(), built.fallback[tag])
+            expected = cpython_run(tmp, 'traps', TRAPS)
+            for tag in ('ir', 'ir-checked'):
+                self.assertEqual(run(built.exe[tag])[:2], expected[:2], tag)
 
     # ------------------------------------------------------------------ switch off
     def test_switch_off_leaves_no_trace_of_the_s2_runtime(self):

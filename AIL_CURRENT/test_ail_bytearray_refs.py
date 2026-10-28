@@ -2,7 +2,7 @@
 
 A struct method that reads a bytearray field takes a reference to it for the call and gives it back (`self.arena` in a table
 class, a name store in a tree parser): the retain, the release that does not free and the store helper were a third of the
-instructions of ranking-2 (28.2 G -> 18.0 G, -36%) and a tree parser (10.4 G -> 7.3 G, -30%); each ran the full metadata
+instructions of term_rank-2 (28.2 G -> 18.0 G, -36%) and a tree parser (10.4 G -> 7.3 G, -30%); each ran the full metadata
 check. A live object now takes one compare and an increment inline in the retain, the store helper is inline, the release
 is one out-of-line function whose first test is the release that does not free, and a dead object (a count of 0), a counter at
 its limit and the last release (the small-object cache, `free`) take the unchanged full path. What this module pins, against

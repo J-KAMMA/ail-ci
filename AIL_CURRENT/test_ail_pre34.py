@@ -12,7 +12,7 @@ The general path's literal-`%d` fast path passed the operand to
 the wrong message.  `%i`, `%u` and a computed template already went through
 `safetyrt.ail2f_percent`, which implements CPython's rules; the literal `%d`
 path now keeps the direct formatter for int/bool and sends the other values to
-that same runtime.  DIFFERENCES C?-job-pre34-10240952-1.
+that same runtime.  DIFFERENCES C383.
 
 The residual is the language's int64 limit: a finite float outside int64 is a
 big integer in CPython, and stays the documented `integer overflow` limit here.

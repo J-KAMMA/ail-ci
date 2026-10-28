@@ -3,7 +3,7 @@
 `int` is 64-bit and `a + b`, `a - b`, `a * b` raise OverflowError when the exact result leaves
 int64 (`ck_add`/`ck_sub`/`ck_mul`); `xs[i]` on a list, float list or bytes value raises IndexError
 outside [-len, len) (`ail_list_get` & co.). Both checks are one compare and branch, but in the
-innermost loop of an LLM-written program they are most of the loop (a grid-life program: 65% of all
+innermost loop of an LLM-written program they are most of the loop (scar_life: 65% of all
 instructions). This pass proves, per AST node, that a check cannot fire, and `pyfunc` then emits
 the plain operation. It never changes what a program does: a node is marked only when EVERY
 execution reaching it is proven in range; anything the rules below do not cover keeps its check.

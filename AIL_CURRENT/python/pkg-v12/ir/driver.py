@@ -14,6 +14,7 @@ The legacy emitter always runs first and stays the source of the C boundary: the
 keeps its symbol, linkage and signature (checked textually), and its runtime needs are merged
 into the legacy context, so the rest of the program is compiled exactly as before.
 """
+import ast
 import inspect
 import json
 import os
@@ -108,6 +109,91 @@ def _w_alias_shortcuts(ctx, fn_name, notes):
                                 'afterwards: Python semantics (the legacy emitter copies here)'})
 
 
+def _negative_one_shift_escapes(fn, P):
+    """True when a literal ``-1 << 63`` can be stored in an int64 container (a list, tuple or
+    dict display, an element or attribute store, a list mutator, or a return value).  The IR's
+    containers hold int64, so narrowing the tagged INT64_MIN there would make later arithmetic
+    overflow; such a function must keep the exact general path instead."""
+    shifts = []
+    for node in ast.walk(fn):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.LShift) \
+                and isinstance(node.right, ast.Constant) and type(node.right.value) is int \
+                and node.right.value == 63:
+            try:
+                left = P._int_const(node.left)
+            except Exception:
+                left = None
+            if type(left) is int and left == -1:
+                shifts.append(node)
+    if not shifts:
+        return False
+    ids = {id(s) for s in shifts}
+    tainted = set()
+
+    def mentions(node):
+        for sub in ast.walk(node):
+            if id(sub) in ids:
+                return True
+            if isinstance(sub, ast.Name) and sub.id in tainted:
+                return True
+        return False
+
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(fn):
+            value = None
+            target = None
+            if isinstance(node, ast.Assign) and len(node.targets) == 1:
+                value, target = node.value, node.targets[0]
+            elif isinstance(node, ast.AnnAssign) and node.value is not None:
+                value, target = node.value, node.target
+            elif isinstance(node, ast.NamedExpr):
+                value, target = node.value, node.target
+            if isinstance(target, ast.Name) and value is not None and mentions(value) \
+                    and target.id not in tainted:
+                tainted.add(target.id)
+                changed = True
+
+    def any_mention(exprs):
+        return any(e is not None and mentions(e) for e in exprs)
+
+    for node in ast.walk(fn):
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            if any_mention(node.elts):
+                return True
+        elif isinstance(node, ast.Dict):
+            if any_mention(list(node.keys) + list(node.values)):
+                return True
+        elif isinstance(node, ast.ListComp):
+            if mentions(node.elt):
+                return True
+        elif isinstance(node, ast.DictComp):
+            if mentions(node.key) or mentions(node.value):
+                return True
+        elif isinstance(node, (ast.SetComp, ast.GeneratorExp)):
+            if mentions(node.elt):
+                return True
+        elif isinstance(node, ast.Assign):
+            if any(isinstance(t, (ast.Subscript, ast.Attribute)) for t in node.targets) \
+                    and mentions(node.value):
+                return True
+        elif isinstance(node, ast.AugAssign):
+            if isinstance(node.target, (ast.Subscript, ast.Attribute)) and mentions(node.value):
+                return True
+        elif isinstance(node, ast.Call):
+            # a call can store the value (a class or tuple constructor, list.append, a helper
+            # that keeps it); print is the direct use that stays exact through the tag.
+            func = node.func
+            if isinstance(func, ast.Name) and func.id == 'print':
+                continue
+            if any_mention(list(node.args) + [k.value for k in node.keywords]):
+                return True
+        elif isinstance(node, ast.Return) and node.value is not None and mentions(node.value):
+            return True
+    return False
+
+
 def _legacy_walias(P, fn, ctx):
     """W-ALIAS sites of a function that stays on the legacy emitter (syntactic scan, walias.py)."""
     try:
@@ -118,6 +204,143 @@ def _legacy_walias(P, fn, ctx):
         return None
     _w_alias_shortcuts(ctx, fn.name, notes)
     return {'walias': notes}
+
+
+def _split_c_params(text):
+    """Comma-separated C parameter declarations, split at the top level only."""
+    out, depth, start = [], 0, 0
+    for i, ch in enumerate(text):
+        if ch in '([{':
+            depth += 1
+        elif ch in ')]}':
+            depth -= 1
+        elif ch == ',' and depth == 0:
+            out.append(text[start:i].strip())
+            start = i + 1
+    tail = text[start:].strip()
+    if tail:
+        out.append(tail)
+    return out
+
+
+def _decl_name(text):
+    """The variable a C parameter declaration declares."""
+    m = re.search(r'\(\s*\*\s*([A-Za-z_]\w*)\s*\)', text)
+    if m:
+        return m.group(1)
+    text = re.sub(r'\[[^\]]*\]\s*$', '', text)
+    m = re.search(r'([A-Za-z_]\w*)\s*$', text)
+    return m.group(1) if m else None
+
+
+def _tint_legacy(P, fn, cname, ctx, sig, generated, flags):
+    """Locate a legacy int64 signature and the parameters `flags` says must become tagged.
+
+    Returns ``(lp, rp, segs, tinted)``: the parentheses positions in `sig`, the C parameter
+    declarations, and the C names whose type has to change to ``ail_tint``; None when the legacy
+    text does not have the expected shape."""
+    at = sig.find(cname + '(')
+    if at < 0:
+        return None
+    lp = at + len(cname)
+    depth, rp = 0, None
+    for i in range(lp, len(sig)):
+        if sig[i] == '(':
+            depth += 1
+        elif sig[i] == ')':
+            depth -= 1
+            if depth == 0:
+                rp = i
+                break
+    if rp is None:
+        return None
+    raw = sig[lp + 1:rp].strip()
+    segs = [] if raw == 'void' else _split_c_params(raw)
+    tinted = set()
+    for (name, _), flag in zip(getattr(ctx, 'params', ()), flags):
+        if flag:
+            tinted.add(ctx.cname(name))
+    return (lp, rp, segs, tinted)
+
+
+def _wrap_legacy_tint(P, fn, cname, ctx, sig, generated, params, ret):
+    """Wrap the legacy definition of `fn` in the tagged ABI (see `_tint_legacy`)."""
+    parsed = _tint_legacy(P, fn, cname, ctx, sig, generated, params)
+    if parsed is None:
+        return None
+    lp, rp, segs, tinted = parsed
+    if not tinted and not ret:
+        return None
+    names = [_decl_name(seg) for seg in segs]
+    if any(n is None for n in names):
+        return None
+    new_segs = []
+    for seg, name in zip(segs, names):
+        if name in tinted and 'int64_t' in seg:
+            seg = seg.replace('int64_t', 'ail_tint', 1)
+        new_segs.append(seg)
+    prefix = sig[:lp]
+    if ret:
+        at = prefix.rfind('int64_t')
+        if at < 0:
+            return None
+        prefix = prefix[:at] + 'ail_tint' + prefix[at + len('int64_t'):]
+    new_sig = prefix + '(' + ', '.join(new_segs) + ')'
+    marker = sig + ' {\n'
+    pos = generated.find(marker)
+    if pos < 0:
+        return None
+    if getattr(fn, '_ail_dispatcher', False):
+        # A hierarchy dispatcher hands the receiver straight to the method of its class. Once
+        # every method in the hierarchy shares the tagged parameters and result (TINT_SIGS below),
+        # the switch itself is already correct: only its C signature has to name the tagged types.
+        return new_sig, generated[:pos] + new_sig + ' {\n' + generated[pos + len(marker):]
+    inner = '_ail_i64_' + cname
+    inner_sig = sig[:lp - len(cname)] + inner + sig[lp:]
+    inner_body = generated[:pos] + inner_sig + ' {\n' + generated[pos + len(marker):]
+    args = ['ail_tint_i64(%s)' % n if n in tinted else n for n in names]
+    call = '%s(%s)' % (inner, ', '.join(args))
+    noret = getattr(ctx, 'ret', None) == getattr(P, 'NORET', object())
+    if ret:
+        body = '    return ail_tint_from_int64(%s);\n' % call
+    elif noret:
+        body = '    %s;\n' % call
+    else:
+        body = '    return %s;\n' % call
+    return new_sig, inner_sig + ';\n' + new_sig + ' {\n' + body + '}\n' + inner_body
+
+
+def wrap_legacy_tint(P, result):
+    """Apply the wrapper `_apply` recorded on the context, if any (after the legacy aliasing check)."""
+    sig, generated, ctx = result
+    info = getattr(ctx, '_tint_legacy_wrap', None)
+    if not info:
+        return result
+    fn, cname, params, ret = info
+    wrapped = _wrap_legacy_tint(P, fn, cname, ctx, sig, generated, params, ret)
+    if wrapped is None:
+        return result
+    return wrapped[0], wrapped[1], ctx
+
+
+def _keep_legacy_tint(P, fn, cname, ctx, _sig):
+    """Keep a legacy-fallback function on the tagged ABI `TINT_SIGS` announced for it."""
+    if not (_sig and (any(_sig[0]) or _sig[1])):
+        return
+    # A function with no C result has nothing to tag (the synthesized NORET entry point in a
+    # script-shaped program is one such case).
+    if _sig[1] and getattr(ctx, 'ret', None) == getattr(P, 'NORET', object()):
+        _sig = (_sig[0], 0)
+        getattr(P, 'TINT_SIGS', {})[fn.name] = _sig
+        getattr(P, 'TINT_ACTIVE', {})[fn.name] = _sig
+    if any(_sig[0]) or _sig[1]:
+        # The legacy body keeps int64 arithmetic, but the signature (and every call) stays
+        # the tagged one `TINT_SIGS` announced: the wrapper is added once the legacy
+        # aliasing check has run (wrap_legacy_tint). Callers compiled earlier and the
+        # recursive self-call inside this body already use that signature, so dropping it
+        # here made the two disagree.
+        ctx._tint_legacy_wrap = (fn, cname, _sig[0], bool(_sig[1]))
+        ctx.parts.add('TINTT')
 
 
 def apply(P, args, kwargs, result):
@@ -133,11 +356,168 @@ def apply(P, args, kwargs, result):
         I.SRC.clear()
 
 
+def _drop_tint(P, *names):
+    """A function that stays on the legacy int64 emitter must not advertise a tagged ABI.
+    TINT_ACTIVE is what call sites read; TINT_SIGS is what the IR's own call lowering reads.
+    Both must forget the function, or a caller lowered earlier or later emits an `ail_tint` call
+    to a function that actually returns plain int64 (an invalid initializer in the C)."""
+    for _map in (getattr(P, 'TINT_ACTIVE', None), getattr(P, 'TINT_SIGS', None)):
+        if _map is not None:
+            for _name in names:
+                _map.pop(_name, None)
+
+
 def _apply(P, args, kwargs, result, current):
     sig, generated, ctx = result
     bound = inspect.signature(P._one_function_numeric_impl).bind(*args, **kwargs).arguments
     fn, cname = bound['fn'], bound['cname']
     recursive = bool(bound.get('recursive', False))
+    _py = os.environ.get('AIL_SURFACE') == 'python'
+    # A mixed-mode clone with the tagged lowering turned OFF is explicitly asking for the legacy
+    # int64 emitter (pymix's own selection probe, and `_setup_mix`'s retry after a tagged attempt
+    # the IR cannot lower): the checks below are conditions for *tagged* lowering, not for the
+    # legacy result, so they must not turn into a refusal here.
+    _tagged = not getattr(P, 'TINT_DISABLED', False)
+    _user_methods = set(getattr(ctx, 'user_method_names', ()))
+    _attr_calls = [n for n in ast.walk(fn)
+                   if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    if _py and _tagged and any(n.func.attr in _user_methods for n in _attr_calls):
+        from pyfront import Unsupported
+        if not os.environ.get('AIL_NO_GENERAL'):
+            raise Unsupported('%s() calls a user method, which the tagged-int lowering does not type' % fn.name)
+    _io_names = {'open', 'write_text', 'write_bytes', 'read_text', 'read_bytes', 'file_chunks'}
+    _file_helpers = getattr(P, '_FILE_HELPER_NAMES', ())
+    _io_like = any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(fn)) or any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and (n.func.id in _io_names or n.func.id in _file_helpers
+             or n.func.id.startswith('_ail_nt_'))
+        for n in ast.walk(fn))
+    _library_call = any(n.func.attr not in _user_methods for n in _attr_calls) or any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and (n.func.id.startswith(('_ail_', '_Ail')) or n.func.id in _io_names
+             or n.func.id in getattr(ctx, 'prelude_names', ()))
+        for n in ast.walk(fn)) or any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(fn))
+    if _py and _tagged and not _library_call and (getattr(ctx, 'numeric_tokens', None) or getattr(ctx, 'numeric_assignments', None)):
+        from pyfront import Unsupported
+        if not os.environ.get('AIL_NO_GENERAL'):
+            raise Unsupported('%s() mixes int and float bindings, which the tagged-int lowering does not cover'
+                              % fn.name)
+    # B2b: a function whose ints are not locally proven needs the IR's tagged-int lowering. If the
+    # IR cannot lower it, the typed path must not fall back to the legacy int64 emitter: raise so
+    # pyc.build tries the exact general path.
+    # A module variable is not a local the local proof can type: the proof treats every read of one
+    # as an unknown operand. Its C storage is still the int64 static (checked on every store), so
+    # that failure is not an int operation that needs the tagged lowering.
+    _module_vars = set(getattr(getattr(ctx, 'modconsts', None), 'vars', {}) or ())
+    _uses_module_var = bool(getattr(ctx, 'gdecl', None)) or any(
+        isinstance(n, ast.Name) and n.id in _module_vars for n in ast.walk(fn))
+    _needs_tint = False
+    _proof = None
+    try:
+        import bigcap
+        if not _py:
+            raise RuntimeError
+        _d = bigcap._Defined(set(getattr(ctx, 'funcs', {})) | set(getattr(ctx, 'classes', {})))
+        _d.classes = frozenset(getattr(ctx, 'classes', {}))
+        _d.module_ints = bigcap.module_int_consts(getattr(ctx, 'modconsts', None) or {})
+        _proven = bigcap.proven_int_names(fn, _d)
+        _bounds = bigcap.local_int_bounds(fn, _d)
+        _names = set(bigcap._lp_params(fn)) | set(bigcap._lp_locals(fn.body))
+        _params = dict(getattr(ctx, 'params', ()))
+        _tint_names = {n for n in _names if n not in _proven and
+                       (getattr(ctx, 'types', {}).get(n) == P.INT or _params.get(n) == P.INT)}
+        _proof = bigcap._lp_reason([fn], None, _d)
+        # "an operand not proven int or float" is what an untyped GLOBAL (a module-level float the
+        # function only reads) produces; it is not an int operation. Let that shape keep the
+        # legacy typed emitter (a no-int program must not take the general path).
+        _int_failure = (_proof is not None and 'not proven int or float' not in _proof
+                        and any(w in _proof for w in ('int', 'operand', 'shift', 'power', 'overflow')))
+        if _uses_module_var:
+            _int_failure = False
+        _needs_tint = bool(_tint_names) or _int_failure
+        _no_tint_locals = not _tint_names
+        if _io_like or fn.name.startswith(('_Ail', '_ail')):
+            _needs_tint = False
+    except Exception:
+        _needs_tint = False
+        _no_tint_locals = False
+    def _text_int(n):
+        if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                and n.func.id in ('int', '_ail_int2') and n.args):
+            return False
+        try:
+            return P._etype(n.args[0], ctx) in (P.STR, P.BYTES)
+        except Exception:
+            return False
+    _text_int_nodes = [n for n in ast.walk(fn) if _py and _text_int(n)]
+    _text_int_call = bool(_text_int_nodes)
+    def _safe_text_int(n):
+        arg = n.args[0]
+        if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
+            return False
+        try:
+            v = int(arg.value, 10)
+        except ValueError:
+            return True
+        return -(1 << 63) <= v < (1 << 63)
+    _unsafe_text_int = any(not _safe_text_int(n) for n in _text_int_nodes)
+    if _unsafe_text_int and _tagged and not _io_like and not fn.name.startswith(('_Ail', '_ail')):
+        _needs_tint = True
+    _has_tint_call = any(
+        isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+        and (getattr(P, 'TINT_SIGS', {}).get(n.func.id) or ((), 0))[1]
+        for n in ast.walk(fn)) or _text_int_call
+    # A call result the proof cannot bound has no named local to tag. When the IR can lower the
+    # function, TINT_SIGS gives its result the tagged type and the return checks the conversion.
+    # A build with the general path available still uses it: the typed path cannot hold a result
+    # above int64 in a list/dict/field, and dropping to the general path is what keeps such a
+    # program exact. Only a typed-only build (AIL_NO_GENERAL) has no exact alternative, and there
+    # the function keeps the legacy emitter if the IR cannot lower it.
+    _call_result_proof = (_proof or '').startswith('a call result not proven to fit int64')
+    _typed_only = bool(os.environ.get('AIL_NO_GENERAL')) or getattr(P, 'GENERAL_BLOCKED', False)
+    # A module-table reader keeps the legacy emitter (the IR has no set/dict parameter), exactly
+    # as it does with AIL_IR=0; refusing it here would lose a supported typed-path shape.
+    _map_param = any(k in getattr(P, 'MAPS', ()) or k == getattr(P, 'SLIST', None)
+                     for _, k in getattr(ctx, 'params', ()))
+    _proof_without_local = (_py and _tagged and _needs_tint and _no_tint_locals and not _has_tint_call
+                            and not (_call_result_proof and _typed_only)
+                            and not _map_param
+                            and not (_proof or '').startswith(('it calls ', 'it contains ')))
+    if _proof_without_local:
+        if os.environ.get('AIL_NO_GENERAL'):
+            _needs_tint = False
+        else:
+            from pyfront import Unsupported
+            raise Unsupported('%s() has an int operation the local proof cannot bound, but no tagged local (%s)'
+                              % (fn.name, _proof))
+    _sig = getattr(P, 'TINT_SIGS', {}).get(fn.name) if _py else None
+    if _sig and (any(_sig[0]) or _sig[1]) and not _io_like:
+        _needs_tint = True
+    _neg63_escapes = _negative_one_shift_escapes(fn, P) if _py else False
+    _big_shift = False
+    for _n in ast.walk(fn):
+        if isinstance(_n, ast.BinOp) and isinstance(_n.op, ast.LShift):
+            _rhs, _lhs = _n.right, _n.left
+        elif isinstance(_n, ast.AugAssign) and isinstance(_n.op, ast.LShift):
+            _rhs, _lhs = _n.value, _n.target
+        else:
+            continue
+        if isinstance(_rhs, ast.Constant) and type(_rhs.value) is int and _rhs.value >= 63:
+            try:
+                _lv = P._int_const(_lhs)
+            except Exception:
+                _lv = None
+            if isinstance(_lv, int) and not isinstance(_lv, bool) \
+                    and (_lv == 0 or (_rhs.value == 63 and _lv == -1 and not _neg63_escapes)):
+                # zero fits int64; -1 << 63 stays on the IR as a promotable tagged value unless it
+                # is stored in an int64 container, where the tag would be narrowed
+                continue
+            _big_shift = True
+            break
+    if _py and _tagged and _big_shift and not _io_like and not (_sig and (any(_sig[0]) or _sig[1])) \
+            and not os.environ.get('AIL_NO_GENERAL'):
+        from pyfront import Unsupported
+        raise Unsupported('%s() shifts beyond int64 without a tagged result' % fn.name)
     try:
         if bound.get('is_method'):
             raise lower.NotS0('a method')
@@ -156,7 +536,7 @@ def _apply(P, args, kwargs, result, current):
             raise lower.NotS0('not in AIL_IR_FUNCS')
         _summaries(ctx)
         if os.environ.get("AIL_IR_AST") == fn.name:
-            import ast, sys
+            import sys
             with open(os.environ.get("AIL_IR_AST_FILE", "/dev/stderr"), "a") as out:
                 print(ast.unparse(fn), file=out)
                 print("---- types:", dict(ctx.types), file=out)
@@ -183,19 +563,70 @@ def _apply(P, args, kwargs, result, current):
         new_sig, body, needs = emit_c.emit_function(function, PENDING, checked_exceptions(), _summaries(ctx),
                                                     named.group(1) if named else None,
                                                     None if link_units else LISTVAL)
+        if bound.get('static_helpers') and not new_sig.startswith(('static', '__attribute__')):
+            new_sig = 'static' + chr(10) + new_sig
         # (a function with a try has its parameters `volatile` in the legacy signature, for the
         # setjmp rule; a qualifier on a parameter does not change the type of the function)
-        if new_sig != sig and ''.join(new_sig.split()) != ''.join(re.sub(r'\bvolatile\b', '', sig).split()):
+        if new_sig != sig and ''.join(new_sig.split()) != ''.join(re.sub(r'\bvolatile\b', '', sig).split()) \
+                and not _needs_tint:
             raise I.IRError('IR signature %r differs from the legacy %r' % (new_sig, sig))
         if needs['need'] and ctx.need is None:
             raise lower.NotS0('checked helpers in a non-strict build')
     except lower.NotS0 as reason:
+        if os.environ.get('AIL_IR_TRACE'):
+            import traceback
+            with open(os.environ['AIL_IR_TRACE'], 'a') as _t:
+                _t.write('== %s' % fn.name + chr(10))
+                _t.write('   needs_tint=%r tint_names=%r int_failure=%r proof=%r sig=%r text_int=%r' % (
+                    _needs_tint, sorted(locals().get('_tint_names') or ()), locals().get('_int_failure'),
+                    _proof, _sig, _unsafe_text_int) + chr(10))
+                traceback.print_exc(file=_t)
         _record(fn.name, cname, 'legacy', str(reason), ctx, extra=_legacy_walias(P, fn, ctx))
+        if _uses_module_var and getattr(P, 'GLOBAL_INT_TINT', False):
+            # The module ints are `ail_tint` statics this pass; the legacy int64 emitter cannot
+            # share them. The whole program takes the exact general path instead of mixing two
+            # representations of one variable.
+            from pyfront import Unsupported
+            raise Unsupported('%s() needs the tagged-int lowering for its module variables: %s'
+                              % (fn.name, reason))
+        _tinted_sig = bool(_sig and (any(_sig[0]) or _sig[1]))
+        if os.environ.get('AIL_NO_GENERAL') and _tagged \
+                and not fn.name.startswith(('_Ail', '_ail')) \
+                and (_unsafe_text_int or (_text_int_call and 'fall off its end' in str(reason))):
+            from pyfront import Unsupported
+            raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
+                              % (fn.name, reason))
+        if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason)) \
+                and not _call_result_proof \
+                and not fn.name.startswith(('_Ail', '_ail')) \
+                and not getattr(P, 'TINT_DISABLED', False) \
+                and fn.name not in getattr(P, 'TINT_EXCLUDED', ()) \
+                and cname not in getattr(P, 'TINT_EXCLUDED', ()) \
+                and not os.environ.get('AIL_NO_GENERAL'):
+            from pyfront import Unsupported
+            raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
+                              % (fn.name, reason))
+        if _py and _tinted_sig:
+            _keep_legacy_tint(P, fn, cname, ctx, _sig)
         return result
     except Exception as error:
         if current == 'verify':
             raise
         _record(fn.name, cname, 'legacy', 'IR failure: %s: %s' % (type(error).__name__, error), ctx)
+        if _unsafe_text_int and _tagged and not _io_like and not fn.name.startswith(('_Ail', '_ail'))                 and not getattr(P, 'TINT_DISABLED', False) and not os.environ.get('AIL_NO_GENERAL'):
+            # the legacy emitter parses int(<text>) into an int64 and stops at "integer overflow" on a value CPython keeps
+            # exactly: a function the IR cannot lower must not keep that parse, the whole program takes the exact path
+            from pyfront import Unsupported
+            raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: IR failure: %s: %s'
+                              % (fn.name, type(error).__name__, error))
+        if _uses_module_var and getattr(P, 'GLOBAL_INT_TINT', False):
+            # (the legacy emitter cannot read the module ints this pass keeps in tagged statics: the whole program
+            # takes the exact general path, as for a function the IR refuses)
+            from pyfront import Unsupported
+            raise Unsupported('%s() needs the tagged-int lowering for its module variables: IR failure: %s: %s'
+                              % (fn.name, type(error).__name__, error))
+        if _py:
+            _keep_legacy_tint(P, fn, cname, ctx, _sig)
         return result
     ctx.parts.update(needs['parts'])
     ctx.floor.update(needs['floor'])
@@ -216,4 +647,4 @@ def _apply(P, args, kwargs, result, current):
         PENDING.add(cname)
     if needs.get('byval'):
         LISTVAL.add(cname)
-    return sig, body, ctx
+    return (new_sig if _needs_tint else sig), body, ctx

@@ -2,7 +2,7 @@
 
 The same test is evaluated once and the same (checked or proven) add runs - adding 0 never overflows -
 but the update is a conditional move rather than a branch. On loaded data the test is the
-unpredictable branch of a neighbour count (a grid-life program: eight of them per cell). The legacy path does the
+unpredictable branch of a neighbour count (scar_life: eight of them per cell). The legacy path does the
 same rewrite on the AST (`pyfunc._if_add_fusion`); this is the IR twin, kept here so `lower.py` only
 carries the call.
 """

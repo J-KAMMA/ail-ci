@@ -73,21 +73,25 @@ class Pre351(unittest.TestCase):
     )
 
     def _assert_refused(self, cases, prefix):
-        for general in (False, True):
-            for name, source in cases:
+        # exact ints: a power beyond int64 builds on both builds and matches CPython (it was refused for the int64 era)
+        for name, source in cases:
+            with tempfile.TemporaryDirectory() as directory:
+                expected, status = run_cpython(directory, prefix + name, source)
+            for general in (False, True):
                 with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
                     built, exe = compile_source(directory, prefix + name, source, general=general)
-                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
-                    self.assertFalse(exe.exists())
-                    self.assertTrue(any(message in built.stderr for message in REFUSALS), built.stderr)
+                    self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                    ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
+                    self.assertEqual(ran.returncode, status, ran.stderr)
+                    self.assertEqual(ran.stdout.replace('\r\n', '\n'), expected)
 
-    def test_first_item_is_refused_by_name(self):
+    def test_first_item_builds_and_matches_cpython(self):
         self._assert_refused(self.CASES, 'pre351_')
 
-    def test_first_item_routes_are_refused_by_name(self):
+    def test_first_item_routes_build_and_match_cpython(self):
         self._assert_refused(self.ROUTES, 'pre351_route_')
 
-    def test_other_recorded_items_are_refused_by_name(self):
+    def test_other_recorded_items_build_and_match_cpython(self):
         self._assert_refused(self.OTHER_CASES, 'pre351_other_')
 
     def test_in_range_powers_match_cpython(self):

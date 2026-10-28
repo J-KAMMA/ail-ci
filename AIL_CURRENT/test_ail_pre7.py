@@ -1,11 +1,9 @@
 # -*- coding: utf-8 -*-
-"""pre7: `del` with a constant index outside int64 is refused by name.
+"""pre7: `del` with a constant index outside int64 matches CPython.
 
-An AIL int is a signed 64-bit value, so `del a[2**63]` cannot represent its index.  Keeping
-the expression as arithmetic made both builds trap "integer overflow" while computing the
-index, before the delete, where CPython computes its unbounded int and raises IndexError
-("cannot fit 'int' into an index-sized integer").  The value is known at compile time, so the
-construct is refused there instead, for both builds and for a nested receiver too.
+With exact ints (bigint, BIGINT.md) `del a[2**63]` builds and raises CPython's IndexError
+("cannot fit 'int' into an index-sized integer") like CPython, for both builds and for a nested
+receiver too.  (It used to be refused by name when an int was a signed 64-bit value.)
 """
 import os
 import shutil
@@ -32,6 +30,7 @@ def build(directory, source, general):
     path = Path(directory, 'p.py')
     path.write_text(source, encoding='utf-8')
     exe = Path(directory, 'exe_g' if general else 'exe_d')
+    exe.unlink(missing_ok=True)       # the CLI refuses to overwrite an existing output
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
     env.pop('AIL_UNIFIED_FORCE', None)
     if general:
@@ -51,16 +50,19 @@ class DeleteIndexBeyondInt64(unittest.TestCase):
         self.tmp.cleanup()
 
     def test_constant_index_outside_int64_is_refused_by_name(self):
+        # exact ints (bigint): builds and matches CPython (stdout, exit code)
         for source in REFUSED:
+            ref = Path(self.dir, 'ref.py')
+            ref.write_text(source, encoding='utf-8')
+            expected = subprocess.run([sys.executable, str(ref)], capture_output=True, timeout=60)
             for general in (False, True):
-                built, _ = build(self.dir, source, general)
+                built, exe = build(self.dir, source, general)
                 where = 'general' if general else 'default'
-                self.assertNotEqual(built.returncode, 0, where + ' built:\n' + source)
-                text = built.stdout + built.stderr
-                # This tree's front end also refuses a constant index outside int64 before the
-                # emitter runs, with `int64 index out of range`; accept either named refusal.
-                self.assertTrue('outside the 64-bit signed integer range' in text
-                                or 'int64 index out of range' in text, where + ':\n' + text)
+                self.assertEqual(built.returncode, 0, where + ':\n' + source + built.stdout + built.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, timeout=60)
+                self.assertEqual((ran.stdout.replace(b'\r\n', b'\n'), ran.returncode),
+                                 (expected.stdout.replace(b'\r\n', b'\n'), expected.returncode),
+                                 where + ':\n' + source + ran.stderr.decode(errors='replace'))
 
     def test_representable_constant_index_still_builds_and_matches(self):
         ref = Path(self.dir, 'ref.py')

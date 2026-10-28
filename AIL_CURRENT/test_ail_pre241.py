@@ -192,16 +192,28 @@ class Pre241Tests(unittest.TestCase):
                 self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
                 self.assertEqual(got, (want, want_rc), '%s (general=%s)\n%s' % (slug, general, build_err))
 
+    def matches_cpython(self, slug, text):
+        # exact ints (bigint): build on both paths and compare (stdout, returncode) with CPython
+        with tempfile.TemporaryDirectory(prefix='ail-pre241-') as directory:
+            want, want_rc, _err = _cpython(directory, slug, text)
+            for general in (True, False):
+                got, build_err = _run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                      text, general)
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
+                self.assertEqual(got, (want, want_rc), '%s (general=%s)\n%s' % (slug, general, build_err))
+
     def test_out_of_int64_bool_shifts_are_refused(self):
+        # exact ints (bigint)
         for slug, text in OUT_OF_RANGE.items():
-            self.refused(slug, text)
+            self.matches_cpython(slug, text)
 
     def test_in_range_bool_shifts_match_cpython(self):
         self.matches('in_range', IN_RANGE)
         self.matches('in_range_argument', IN_RANGE_ARGUMENT)
 
     def test_bool_maxsplit_uses_the_same_folding(self):
-        self.refused('maxsplit_out', MAXSPLIT_OUT_OF_RANGE, 'maxsplit constant does not fit')
+        # exact ints (bigint)
+        self.matches_cpython('maxsplit_out', MAXSPLIT_OUT_OF_RANGE)
         self.matches('maxsplit_in', MAXSPLIT_IN_RANGE)
 
 

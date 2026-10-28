@@ -430,14 +430,8 @@ def _build(directory, name, text, general):
 
 class Pre283Tests(unittest.TestCase):
     def refused(self, slug, text):
-        with tempfile.TemporaryDirectory(prefix='ail-pre283-') as directory:
-            for general in (True, False):
-                name = '%s_%s' % (slug, 'g' if general else 'd')
-                built, exe = _build(directory, name, text, general)
-                output = built.stdout + built.stderr
-                self.assertNotEqual(built.returncode, 0, '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
-                self.assertIn(CLASS_STORE, output, '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
-                self.assertFalse(exe.exists(), '%s (general=%s) built an executable' % (slug, general))
+        # exact ints / class objects (bigint): a store through a class value updates the class like CPython
+        self.matches(slug, text)
 
     def matches(self, slug, text):
         with tempfile.TemporaryDirectory(prefix='ail-pre283-') as directory:
@@ -478,10 +472,10 @@ class Pre283Tests(unittest.TestCase):
                 self.assertEqual((got.stdout.replace(b'\r\n', b'\n'), got.returncode), (want, want_rc),
                                  '%s (typed)' % slug)
                 built, exe = _build(directory, slug + '_g', text, general=True)
-                output = built.stdout + built.stderr
-                self.assertNotEqual(built.returncode, 0, '%s (general)\n%s' % (slug, output[-3000:]))
-                self.assertIn(CLASS_STORE, output, '%s (general)\n%s' % (slug, output[-3000:]))
-                self.assertFalse(exe.exists(), '%s (general) built an executable' % slug)
+                self.assertEqual(built.returncode, 0, '%s (general)\n%s' % (slug, (built.stdout + built.stderr)[-3000:]))
+                got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+                self.assertEqual((got.stdout.replace(b'\r\n', b'\n'), got.returncode), (want, want_rc),
+                                 '%s (general)' % slug)
 
     def test_instance_and_shadowed_stores_still_match(self):
         for slug, text in MATCH.items():
@@ -490,16 +484,8 @@ class Pre283Tests(unittest.TestCase):
 
     def test_run_time_class_base_is_refused_by_name(self):
         for slug, text in RUNTIME.items():
-            with self.subTest(case=slug), tempfile.TemporaryDirectory(prefix='ail-pre283-') as directory:
-                for general in (True, False):
-                    name = '%s_%s' % (slug, 'g' if general else 'd')
-                    built, exe = _build(directory, name, text, general)
-                    self.assertEqual(built.returncode, 0,
-                                     '%s (general=%s)\n%s' % (slug, general, (built.stdout + built.stderr)[-3000:]))
-                    got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
-                    error = got.stderr.decode('utf-8', 'replace')
-                    self.assertNotEqual(got.returncode, 0, '%s (general=%s) ran' % (slug, general))
-                    self.assertIn(CLASS_STORE, error, '%s (general=%s)\n%s' % (slug, general, error[-1500:]))
+            with self.subTest(case=slug):
+                self.matches(slug, text)
 
 
 if __name__ == '__main__':

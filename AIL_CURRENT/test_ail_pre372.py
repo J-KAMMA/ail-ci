@@ -1,20 +1,17 @@
-"""pre372: an augmented power that overflows int64 is refused by name at compile time.
+"""pre372: an augmented power beyond int64 matches CPython under exact ints.
 
 The rbrbrbrbrbpre33 review recorded `b = 10; b **= 40` compiling on both builds and then
-stopping with `integer overflow`, where CPython prints the unbounded integer.  The module
-constant-power pass folded `b ** e`, but the augmented spelling is a separate statement.  A
-direct module or function body statement whose target has exactly one prior straight-line
-constant binding is now folded; when the exact power leaves int64 it is refused with
-`int64 constant expression out of range` before either emitter sees it.  The base and the
-exponent may take a value through a list item, a dict value, a class attribute or a
-passthrough call, and a later rebinding does not change the recorded base.
+stopping with `integer overflow`, where CPython prints the unbounded integer.  For the int64 era
+the augmented power was refused by name at compile time (`int64 constant expression out of
+range`); under exact ints it builds and prints the exact integer.  The base and the exponent may
+take a value through a list item, a dict value, a class attribute or a passthrough call, and a
+later rebinding does not change the recorded base.
 
 In-range powers, the safe bases 0/1/-1, a zero or negative exponent, a float or bool base,
-a base rebound before the statement, and a base or exponent known only at run time still
-match CPython.  A module name that some function declares `global` is not folded, since a
-call between the binding and `x **= e` may have rebound it.  Programs are built with the
-general path forced and with the default build; stdout and the exit status must match
-CPython.
+a base rebound before the statement, and a base or exponent known only at run time also
+match CPython.  A module name that some function declares `global` is handled too.  Programs are
+built with the general path forced and with the default build; stdout and the exit status must
+match CPython.
 """
 import os
 import subprocess
@@ -25,7 +22,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-REFUSED = (
+EXACT = (
     ('direct', 'b = 10\nb **= 40\nprint(b)\n'),
     ('exponent_name', 'b = 10\ne = 40\nb **= e\nprint(b)\n'),
     ('list_base', 'b = [10][0]\nb **= 40\nprint(b)\n'),
@@ -152,18 +149,18 @@ def run_cpython(directory, name, text):
 
 
 class Pre372(unittest.TestCase):
-    def test_augmented_power_overflow_is_refused_by_name(self):
+    def test_augmented_power_beyond_int64_matches_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre372-') as directory:
-            for name, text in REFUSED:
+            for name, text in EXACT:
+                want, status = run_cpython(directory, name, text)
                 for general in (False, True):
                     with self.subTest(case=name, general=general):
                         built, exe = build(directory, name, text, general)
-                        output = built.stdout + built.stderr
-                        self.assertNotEqual(built.returncode, 0, output)
-                        self.assertFalse(exe.exists())
-                        self.assertIn('int64 constant expression out of range', output)
-                        self.assertNotIn('integer overflow', output)
-                        self.assertNotIn('Traceback', output)
+                        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                        ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120,
+                                             cwd=directory)
+                        self.assertEqual(ran.returncode, status, ran.stderr[-1200:])
+                        self.assertEqual(ran.stdout.replace('\r\n', '\n'), want)
 
     def test_in_range_powers_still_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre372-') as directory:

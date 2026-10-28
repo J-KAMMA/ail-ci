@@ -58,10 +58,23 @@ _entry('str_strip_chars', (S, S), (S,), 'ail_str_strip_chars({0}, {1})', _PURE, 
 _entry('str_lstrip_chars', (S, S), (S,), 'ail_str_lstrip_chars({0}, {1})', _PURE, parts=('STR',), pure=True)
 _entry('str_rstrip_chars', (S, S), (S,), 'ail_str_rstrip_chars({0}, {1})', _PURE, parts=('STR',), pure=True)
 
+_entry('str_lower', (S,), (S,), 'ail_str_lower({A}, {0})', Effects(allocs=[ARENA], raises=[DIE]),
+       parts=('STR', 'CASEMAP'), arena='s')
+_entry('str_upper', (S,), (S,), 'ail_str_upper({A}, {0})', Effects(allocs=[ARENA], raises=[DIE]),
+       parts=('STR', 'CASEMAP'), arena='s')
 _entry('str_char_at', (S, N), (S,), 'ail_ir_char_at({0}, {1})', _PURE, parts=('STR', 'IRSTR'), pure=True)
 _entry('str_bytes', (S,), (N,), '({0}).n', _PURE, parts=('STR',), pure=True)
 for _p in ('isdigit', 'isalpha', 'isalnum', 'isspace', 'isupper', 'islower', 'isdecimal', 'isnumeric'):
     _entry('str_' + _p, (S,), (T1,), '(ail_str_%s({0}) != 0)' % _p, _PURE, parts=('STR', 'STRPRED'), pure=True)
+
+# --- the exception a handler is handling (S4e, the forms exctext.py rewrites str(e), repr(e), type(e).__name__ to)
+_EXCP = ('EXCSTR', 'STR', 'STRRET', 'DIE')
+_entry('exc_text', (), (S,), 'ail_exc_text(ail_handled_value, {A})', Effects(io=True, allocs=[ARENA]), parts=_EXCP, arena='s')
+_entry('exc_repr', (), (S,), 'ail_exc_repr(ail_handled_value, {A})', Effects(io=True, allocs=[ARENA]), parts=_EXCP, arena='s')
+_entry('exc_argsrepr', (), (S,), 'ail_exc_argsrepr(ail_handled_value, {A})', Effects(io=True, allocs=[ARENA]), parts=_EXCP,
+       arena='s')
+_entry('exc_type', (), (S,), 'ail_exc_typename(ail_handled_value)', Effects(io=True), parts=_EXCP)
+_entry('exc_qual', (), (S,), 'ail_exc_qualname(ail_handled_value)', Effects(io=True), parts=_EXCP)
 
 # --- comparing
 _entry('str_eq', (S, S), (T1,), '(ail_str_eq({0}, {1}) != 0)', _PURE, parts=('STR',), pure=True)
@@ -83,6 +96,13 @@ _entry('str_from_int', (N,), (S,), 'ail_str_from_int({A}, {0})', _ALLOC, parts=(
 # digits in a 24-byte buffer of the calling block: only for a piece consumed in the same block
 _entry('str_from_int_buf', (N,), (S,), 'ail_str_from_int_buf((uint8_t[24]){{0}}, {0})', _PURE, parts=('STR',))
 _entry('str_from_float', (F,), (S,), 'ail_str_from_float({A}, {0})', _ALLOC, parts=('STR', 'FREPR', 'FMT'), arena='s')
+_entry('tint_str', (I.TINT,), (S,), 'ail_tint_str({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
+_entry('tint_mod2', (I.TINT,), (I.TINT,), 'ail_tint_mod2({0})', _PURE, parts=('TINTT',), pure=True)
+_entry('tint_bin', (I.TINT,), (S,), 'ail_tint_bin({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
+_entry('tint_oct', (I.TINT,), (S,), 'ail_tint_oct({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
+_entry('tint_hex', (I.TINT,), (S,), 'ail_tint_hex({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
+_entry('tint_chr', (I.TINT,), (S,), 'ail_tint_chr({A}, {0})',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR'), arena='s')
 _entry('fmt_int', (N,), (S,), 'ail_fmt_spec_int({A}, {0}, {width}, {align}, {zero}, {fill})', _ALLOC,
        parts=('STR', 'FMT'), arena='s', attrs=('width', 'align', 'zero', 'fill'))
 _entry('fmt_float', (F,), (S,), 'ail_fmt_spec_float({A}, {0}, {width}, {align}, {zero}, {prec}, {fill})', _ALLOC,
@@ -93,6 +113,14 @@ _entry('fmt_str', (S,), (S,), 'ail_fmt_gen_str({A}, {0}, {fill}, {align}, {width
 # --- numbers from text
 _entry('str_to_int', (S,), (N,), 'ail_str_to_int({0})', Effects(raises=[VALUE]), parts=('STR',))
 _entry('bytes_to_int', (B,), (N,), 'ail_bytes_to_int({0})', Effects(raises=[VALUE]), parts=('BYTES',))
+_entry('tint_from_str', (S,), (I.TINT,), 'ail_tint_from_str({A}, 10, {0})',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR', 'STRREPR'), arena='s')
+_entry('tint_from_str_base', (S, N), (I.TINT,), 'ail_tint_from_str({A}, {1}, {0})',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR', 'STRREPR'), arena='s')
+_entry('tint_from_bytes', (B,), (I.TINT,), 'ail_tint_from_bytes({A}, 10, ({0}).p, ({0}).n)',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR', 'STRREPR', 'BYTES'), arena='s')
+_entry('tint_from_bytes_base', (B, N), (I.TINT,), 'ail_tint_from_bytes({A}, {1}, ({0}).p, ({0}).n)',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR', 'STRREPR', 'BYTES'), arena='s')
 _entry('str_to_float', (S,), (F,), 'ail_str_to_float({0})', Effects(raises=[VALUE]), parts=('STR', 'FREPR'))
 
 # --- text and bytes
@@ -105,6 +133,8 @@ _entry('bytes_decode_view', (B,), (S,), 'ail_bytes_decode_utf8_view({0})', Effec
 # a str is UTF-8 already: its bytes as a view, for a consumer that is done with them at once
 _entry('str_encode_view', (S,), (B,), '(ail_bytes){{(const unsigned char *)({0}).p, ({0}).n}}', _PURE,
        parts=('BYTES',), pure=True)
+_entry('bytes_eq', (B, B), (T1,), '(ail_bytes_eq({0}, {1}) != 0)', _PURE, parts=('BYTES',), pure=True)
+_entry('bytes_cmp', (B, B), (N,), 'ail_bytes_cmp({0}, {1})', _PURE, parts=('BYTES',), pure=True)
 _entry('bytes_cat', (B, B), (B,), 'ail_bytes_cat({B}, {0}, {1})', _BALLOC, parts=('BYTES',), arena='b')
 _entry('bytes_find_range', (B, B, N, N), (N,), 'ail_bytes_find_range({0}, {1}, {2}, {3})', _PURE, parts=('BYTES', 'BYTESRET'),
        pure=True)

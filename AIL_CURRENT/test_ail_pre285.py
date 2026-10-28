@@ -141,7 +141,7 @@ class Pre285Tests(unittest.TestCase):
     def test_local_cancellation_is_refused_by_name(self):
         for slug, text in REFUSED.items():
             with self.subTest(case=slug):
-                self.refused(slug, text)
+                self.matches(slug, text)      # exact ints (bigint): built, and CPython's answer
 
     def test_in_range_and_runtime_cases_match_cpython(self):
         for slug, text in MATCHING.items():

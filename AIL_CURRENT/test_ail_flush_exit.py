@@ -155,7 +155,9 @@ class FlushExit(unittest.TestCase):
         self.run_one('mixed_raise', MIXED_RAISE, mixed=True)
 
     def test_mixed_int_value_error_in_clone(self):
-        self.run_one('mixed_int', MIXED_INT, mixed=True)
+        # (int(text) returns an exact tagged int now, so `conv` is no longer given a typed int64 clone: the program
+        # still has to flush what it printed before the uncaught ValueError)
+        self.run_one('mixed_int', MIXED_INT)
 
     def test_mixed_output_beyond_one_buffer(self):
         self.run_one('mixed_big', MIXED_BIG, mixed=True)

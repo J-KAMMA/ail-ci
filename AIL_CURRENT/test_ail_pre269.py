@@ -4,7 +4,8 @@ CPython's ints are unbounded, so ``del a[2**63 * 0]`` and ``del a[(1 << 63) >> 6
 delete an ordinary element.  The front-end's constant-index pass used to stop at the first
 int64-exceeding step and refused both with ``int64 index out of range``.  The whole index is
 now folded with the same size budget as the other constant checks, and only the exact final
-value is range-checked; a final value that still leaves int64 keeps the named refusal.
+value is range-checked; a final value that still leaves int64 is an exact big integer
+(bigint, BIGINT.md) and ends like CPython (IndexError, exit 1) instead of being refused.
 
 The cases below cover list/str/bytes/tuple/dict reads, list and dict deletion, the INT64
 boundaries reached through a wider intermediate, an empty list, a negative result, and values
@@ -146,23 +147,16 @@ class Pre269Tests(unittest.TestCase):
                     self.assertEqual(got, (want, want_rc), build_err)
 
     def test_out_of_int64_index_still_refused_by_name(self):
+        # exact ints (bigint): the index beyond int64 builds; it ends like CPython (IndexError, exit 1)
         with tempfile.TemporaryDirectory(prefix='ail-pre269-') as directory:
             for label, text in REFUSED.items():
+                want, want_rc, err = _cpython(directory, 'ref_' + label, text)
                 for general in (True, False):
                     mode = 'g' if general else 'd'
                     with self.subTest(label=label, mode=mode):
-                        built, exe = _build(directory, '%s_%s' % (label, mode), text, general)
-                        output = built.stdout + built.stderr
-                        self.assertEqual(built.returncode, 2, '%s (%s)\n%s' % (label, mode, output[-4000:]))
-                        self.assertFalse(exe.exists(), '%s (%s) built an executable' % (label, mode))
-                        named = ('int64 index out of range',
-                                 'int64 constant out of range',
-                                 'int64 constant expression out of range',
-                                 'outside the signed 64-bit range')
-                        self.assertTrue(any(item in output for item in named),
-                                        '%s (%s)\n%s' % (label, mode, output[-4000:]))
-                        self.assertNotIn('integer overflow', output, '%s (%s)' % (label, mode))
-                        self.assertNotIn('Traceback', output, '%s (%s)' % (label, mode))
+                        got, build_err = _run(directory, '%s_%s' % (label, mode), text, general)
+                        self.assertIsNotNone(got, build_err)
+                        self.assertEqual(got, (want, want_rc), build_err)
 
 
 if __name__ == '__main__':

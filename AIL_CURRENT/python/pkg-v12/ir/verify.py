@@ -35,7 +35,7 @@ class _Listy(object):
 
 
 _LISTY = _Listy()
-S0_TYPES = frozenset([I.I1, I.I64, I.F64])
+S0_TYPES = frozenset([I.I1, I.I64, I.F64, I.TINT])
 # S1 adds read-only bytes views and numeric lists / struct objects reached through borrows
 S1_TYPES = S0_TYPES | frozenset([I.T('bytes'), I.T('obj', I.T('list', I.I64)),
                                  I.T('obj', I.T('list', I.F64)), I.T('span', I.I64), I.T('span', I.F64),
@@ -257,6 +257,10 @@ class _Checker(object):
                 self.want(where, -(1 << 63) <= value < (1 << 63), 'constant out of i64 range')
         elif t.is_float:
             self.want(where, isinstance(value, float), 'float constant expected, found %r' % (value,))
+        elif t == I.TINT:
+            ok = isinstance(value, int) and not isinstance(value, bool)
+            if self.want(where, ok, 'integer constant expected, found %r' % (value,)):
+                self.want(where, -(1 << 63) <= value < (1 << 63), 'constant out of i64 range')
         else:
             self.err(where, 'constants are scalars in S0')
 
@@ -318,6 +322,54 @@ class _Checker(object):
                   % (src, ins.operands[0].type))
         self.want(where, ins.result.type == dst, 'result must be %s, found %s' % (dst, ins.result.type))
 
+    def op_tint_from(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.I64, I.TINT)
+
+    def op_tint_i64(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.I64)
+
+    def op_tint_i64sat(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.I64)
+
+    def op_tint_f64(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.F64)
+
+    def op_tint_nonzero(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.I1)
+
+    def op_tint_neg(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.TINT)
+
+    def op_tint_inv(self, ins, scope, stack, where, top):
+        self._unary(ins, where, I.TINT, I.TINT)
+
+    def op_tint_binary(self, ins, scope, stack, where, top):
+        self._binary(ins, where, (I.TINT,), I.TINT)
+
+    def op_tint_op_i64(self, ins, scope, stack, where, top):
+        if not self.nresults(ins, where, 1):
+            return
+        self.want(where, ins.operands[0].type == I.TINT and ins.operands[1].type == I.I64,
+                  'tint operation against an int64 constant')
+        self.want(where, ins.result.type == I.TINT, 'result must be tint')
+
+    def op_tint_op_i64_value(self, ins, scope, stack, where, top):
+        if not self.nresults(ins, where, 1):
+            return
+        self.want(where, ins.operands[0].type == I.TINT and ins.operands[1].type == I.I64,
+                  'tint operation against an int64 constant')
+        self.want(where, ins.result.type == I.I64, 'result must be i64')
+
+    def op_tint_cmp(self, ins, scope, stack, where, top):
+        self._binary(ins, where, (I.TINT,), I.I1)
+    def op_tint_cmp_i64(self, ins, scope, stack, where, top):
+        if not self.nresults(ins, where, 1):
+            return
+        self.want(where, ins.operands[0].type == I.TINT and ins.operands[1].type == I.I64,
+                  'tint comparison against an int64 constant')
+        self.want(where, ins.result.type == I.I1, 'result must be i1')
+
+
     def op_cmp(self, ins, scope, stack, where, top):
         if not self.nresults(ins, where, 1):
             return
@@ -361,13 +413,13 @@ class _Checker(object):
         self.want(where, isinstance(ins.attrs.get('name'), str) and ins.attrs['name'].isidentifier(),
                   'global.load needs a variable name')
         if self.nresults(ins, where, 1):
-            self.want(where, ins.result.type in (I.I64, I.F64), 'a module variable is an i64 or an f64')
+            self.want(where, ins.result.type in (I.I64, I.F64, I.TINT), 'a module variable is an i64, an f64 or a tint')
 
     def op_global_store(self, ins, scope, stack, where, top):
         self.nresults(ins, where, 0)
         self.want(where, isinstance(ins.attrs.get('name'), str) and ins.attrs['name'].isidentifier(),
                   'global.store needs a variable name')
-        self.want(where, ins.operands[0].type in (I.I64, I.F64), 'a module variable is an i64 or an f64')
+        self.want(where, ins.operands[0].type in (I.I64, I.F64, I.TINT), 'a module variable is an i64, an f64 or a tint')
 
     def op_call(self, ins, scope, stack, where, top):
         sym = ins.attrs.get('callee')
@@ -688,6 +740,25 @@ class _Checker(object):
                 self.want(where, self._is_list_ref(v) if a == 'list' else v.type.is_scalar or v.type in (I.BYTES, I.STRV),
                           'obj.init argument of type %s as %s' % (v.type, a))
 
+    def op_obj_call(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        sym = ins.attrs.get('callee')
+        sig = self.program.callee_type(sym) if self.program is not None else None
+        if not self.want(where, sig is not None, 'call to unknown function %r' % (sym,)):
+            return
+        params, results = sig.args[0].args, sig.args[1].args
+        place, args = ins.operands[0], ins.operands[1:]
+        self.want(where, place.type.is_place and self._is_obj(place.type.pointee) and list(results) == [place.type.pointee],
+                  'obj.call adopts an object result into a place of that object')
+        abi = ins.attrs.get('abi') or ['value'] * len(args)
+        ok = len(args) == len(params) == len(abi)
+        for a, p, how in zip(args, params, abi):
+            if how in ('array', 'flist'):
+                ok = ok and p.head == 'span' and (a.type == p or (self._is_list_ref(a) and a.type.args[0].args[0] == p.args[0]))
+            else:
+                ok = ok and a.type == p
+        self.want(where, ok, 'arguments (%s) do not match %s' % (', '.join(str(a.type) for a in args), sig))
+
     def op_obj_copyref(self, ins, scope, stack, where, top):
         self.nresults(ins, where, 0)
         p, o = ins.operands
@@ -867,11 +938,12 @@ class _Checker(object):
 
     def op_for_range(self, ins, scope, stack, where, top):
         lo, hi, step = ins.operands[:3]
-        self.want(where, lo.type == hi.type == step.type == I.I64, 'for.range bounds must be i64')
+        self.want(where, lo.type == hi.type == step.type and lo.type in (I.I64, I.TINT),
+                  'for.range bounds must be all i64 or all tint')
         carried = self.types(ins.operands[3:])
         body = ins.regions[0]
-        self.want(where, self.types(body.args) == [I.I64] + carried,
-                  'for.range body arguments must be (i64, carried values...)')
+        self.want(where, self.types(body.args) == [lo.type] + carried,
+                  'for.range body arguments must be (index, carried values...)')
         self.region(body, scope, stack + [('for.range', ins)])
 
     def _innermost_loop(self, stack):
@@ -924,10 +996,15 @@ class _Checker(object):
         self.want(where, isinstance(code, int) and not isinstance(code, bool) and 1 <= code <= 10,
                   'raise needs an exception code 1..10')
         self.want(where, isinstance(name, str) and name.isidentifier(), 'raise needs an exception name')
-        self.want(where, form in ('name', 'new', 'msg'),
-                  'raise form is name (raise E), new (raise E()) or msg (raise E("..."))')
+        self.want(where, form in ('name', 'new', 'msg', 'val'),
+                  'raise form is name (raise E), new (raise E()), msg (raise E("...")) or val')
         self.want(where, (form == 'msg') == isinstance(ins.attrs.get('msg'), str),
                   'raise msg is a string exactly for the msg form')
+        if form == 'val':
+            self.want(where, len(ins.operands) == 1 and ins.operands[0].type == I.STRV,
+                      'raise val takes one str operand')
+        else:
+            self.want(where, not ins.operands, 'raise %s takes no operands' % form)
 
     def op_reraise(self, ins, scope, stack, where, top):
         self.want(where, any(kind == 'handler' for kind, _ in stack),
@@ -944,7 +1021,7 @@ class _Checker(object):
             codes = ins.attrs.get('codes')
             ok = (isinstance(codes, list) and len(codes) == len(ins.regions) - 1 and len(codes) >= 1
                   and all(isinstance(c, list) and c and all(isinstance(x, int) and not isinstance(x, bool)
-                                                            and 1 <= x <= 10 for x in c) for c in codes))
+                                                            and 1 <= x <= 255 for x in c) for c in codes))
             self.want(where, ok, 'a catch try lists the exception codes of every handler')
             if ok:
                 flat = [x for c in codes for x in c]
@@ -957,6 +1034,18 @@ class _Checker(object):
 
 for _name in I.INT_BINARY:
     setattr(_Checker, 'op_' + _name, _Checker.op_int_binary)
+for _name in ('tint.add', 'tint.sub', 'tint.mul', 'tint.floordiv', 'tint.floormod', 'tint.shl', 'tint.shr', 'tint.pow',
+              'tint.and', 'tint.or', 'tint.xor'):
+    setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_binary)
+for _name in ('tint.eq', 'tint.ne', 'tint.lt', 'tint.le'):
+    setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_cmp)
+for _name in ('tint.eq_i64', 'tint.ne_i64', 'tint.lt_i64', 'tint.le_i64'):
+    setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_cmp_i64)
+for _name in ('tint.floordiv_i64', 'tint.mod_i64', 'tint.add_i64', 'tint.sub_i64', 'tint.mul_i64',
+              'tint.mod_pos_i64'):
+    setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_op_i64)
+for _name in ('tint.mod_i64_i64', 'tint.mod_pos_i64_i64'):
+    setattr(_Checker, 'op_' + _name.replace('.', '_'), _Checker.op_tint_op_i64_value)
 for _name in I.FLOAT_BINARY:
     setattr(_Checker, 'op_' + _name, _Checker.op_float_binary)
 for _pred in I.CMP_PREDICATES:

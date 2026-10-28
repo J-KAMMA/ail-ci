@@ -1,4 +1,4 @@
-"""One silent wrong answer found by differential fuzzing match statements (DIFFERENCES C?-job-fuzz23-10230421-1).
+"""One silent wrong answer found by differential fuzzing match statements (DIFFERENCES C172).
 
 A guard that reads a name the pattern binds must read that value, but the lowering only substituted
 the name outside nested scopes: a comprehension target of the same name hid it, so

@@ -1,7 +1,7 @@
 """Struct-list element locals held without a reference (`_mark_borrowed_aliases`, pkg-v12/pyfunc.py).
 
 `let e = s.evs[i]` and `for e in s.evs` retain the element, release the previous one in the slot and release it again at
-exit; audit-2 did that for every record and for every event of every venue (26% of its instructions with the
+exit; ticket_audit-2 did that for every record and for every event of every venue (26% of its instructions with the
 reference-count helpers out of line). The analysis that lets a function hold the element without a reference required that
 the whole function call nothing but a few builtins; it now accepts what cannot drop the last reference to an element:
 
@@ -245,7 +245,7 @@ class BorrowTests(unittest.TestCase):
             san = Path(self.dir.name, 'borrow.%s.san' % tag)
             cc = subprocess.run(['gcc', '-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
                                  '-fno-omit-frame-pointer', '-pthread', '-w',
-                                 str(Path(self.dir.name, 'borrow.%s.d' % tag, 'program.c')), '-lm', '-o', str(san)],
+                                 *map(str, sorted(Path(self.dir.name, 'borrow.%s.d' % tag).glob('program*.c'))), '-lm', '-o', str(san)],
                                 capture_output=True, text=True)
             self.assertEqual(cc.returncode, 0, cc.stderr[-2000:])
             for n in (4, 40):

@@ -156,7 +156,7 @@ class LICM(object):
         for top in self.fn.body.instrs:
             if top is loop or any(i is loop for r in top.regions for i in I.walk(r)):
                 return out
-            if top.op in ('obj.init', 'obj.copyref') or (top.op == 'store' and top.operands[0].type.pointee.head == 'obj'):
+            if top.op in ('obj.init', 'obj.copyref', 'obj.call') or (top.op == 'store' and top.operands[0].type.pointee.head == 'obj'):
                 out.add(top.operands[0])
         return set()
 

@@ -13,10 +13,11 @@ place. What this module pins:
   list of str written in the loop is live at the loop header (four live-across shapes are pinned, each of which
   would read freed text after a reset), and the iteration-local shape keeps the legacy build's peak memory;
 * what stays legacy: sharing (`ys = xs`), a list handed to a call, a loop whose body resizes the list it
-  iterates, and a function with a try in a loop (priced on tally-ail-4: +20% of the function);
+  iterates, and a function with a try in a loop (priced on tally_lang-ail-4: +20% of the function);
 * sanitizers (ASan + UBSan + LSan) report nothing on the IR builds.
 """
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -398,7 +399,8 @@ class ProgramTests(unittest.TestCase):
             for args in args_list:
                 runs = {tag: run(built.exe[tag], args) for tag in built.exe}
                 for tag in ('ir', 'ir-checked'):
-                    self.assertEqual(runs[tag], runs['legacy'], '%s %s args=%s' % (name, tag, args))
+                    named = runs[tag][:2] + (re.sub(r'(?m)^[A-Za-z]+Error: ', '', runs[tag][2]),)
+                    self.assertEqual(named, runs['legacy'], '%s %s args=%s' % (name, tag, args))
                 if cpython:
                     expected = cpython_run(tmp, name, source, args)
                     self.assertEqual(runs['ir'][1], expected[1], '%s args=%s stdout' % (name, args))
@@ -440,8 +442,12 @@ class ProgramTests(unittest.TestCase):
                                 ('after_loop', 'int64_t while_after(', False),
                                 ('while_after', 'int64_t local(', False), ('local', 'int64_t read_only(', True),
                                 ('read_only', 'void py_main(', True)):
-            text_ = body('int64_t ' + fn, nxt) if False else c[c.index('int64_t %s(int64_t v_n) {' % fn):]
-            text_ = text_[:text_.index(nxt)] if nxt in text_ else text_
+            # (an unproven int parameter or result makes the signature tagged: `ail_tint fn(int64_t v_n)`)
+            head = re.search(r'(?:int64_t|ail_tint) %s\((?:int64_t|ail_tint) v_n\) {' % fn, c)
+            text_ = c[head.start():]
+            tail = re.search(r'(?:int64_t|ail_tint) ' + re.escape(nxt[len('int64_t '):]), text_) if nxt.startswith('int64_t ') \
+                else None
+            text_ = text_[:tail.start()] if tail else (text_[:text_.index(nxt)] if nxt in text_ else text_)
             self.assertEqual('ail_sarena_keep_roots(' in text_, resets, fn)
 
     def test_an_iteration_local_list_keeps_the_legacy_peak_memory(self):
@@ -458,8 +464,12 @@ class ProgramTests(unittest.TestCase):
             self.assertLessEqual(rss['ir'], rss['legacy'] * 1.1 + 512, rss)
 
     def test_shapes_with_a_second_name_a_call_or_a_resizing_loop_stay_legacy(self):
-        results, built = self.check('stay', STAY, ['main'], stay=['share', 'hand_over', 'resize_while_iterating'],
-                                    cpython=False)
+        # (typed path alone: the default build gives the function that shares a list to the general path, which
+        # shares as Python does)
+        import unittest.mock
+        with unittest.mock.patch.dict(os.environ, {'AIL_NO_GENERAL': '1'}):
+            results, built = self.check('stay', STAY, ['main'], stay=['share', 'hand_over', 'resize_while_iterating'],
+                                        cpython=False)
         self.assertIn('list', built.fallback['ir']['share'])
         with tempfile.TemporaryDirectory() as tmp:
             expected = cpython_run(tmp, 'stay', STAY)

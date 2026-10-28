@@ -131,16 +131,15 @@ def _run(directory, name, text, general):
 class Pre227Tests(unittest.TestCase):
     def test_class_constant_out_of_int64_is_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre227-') as directory:
+            # exact ints (bigint): builds and matches CPython (stdout, exit code)
             for label, text in OUT_OF_RANGE.items():
+                want, want_rc, _err = _cpython(directory, label, text)
                 for general in (True, False):
                     with self.subTest(label + ('_g' if general else '_d')):
-                        built, _ = _build(directory, '%s_%s' % (label, 'g' if general else 'd'),
-                                          text, general)
-                        self.assertNotEqual(built.returncode, 0, label)
-                        message = built.stdout + built.stderr
-                        self.assertTrue(any(text in message for text in REFUSALS), message)
-                        self.assertNotIn('integer overflow', message, label)
-                        self.assertNotIn('Traceback', message, label)
+                        got, build_err = _run(directory, '%s_%s' % (label, 'g' if general else 'd'),
+                                              text, general)
+                        self.assertIsNotNone(got, build_err)
+                        self.assertEqual(got, (want, want_rc), label + '\n' + build_err)
 
     def test_class_constant_in_range_matches_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre227-') as directory:

@@ -137,16 +137,8 @@ class Pre177Tests(unittest.TestCase):
                 self.assertEqual(got, (want, rc), '%s (general=%s)\n%s' % (text[:2000], general, build_err))
 
     def refused(self, slug, text, message, value):
-        """No executable in either build, exit 2, and the refusal names the value."""
-        with tempfile.TemporaryDirectory(prefix='ail-pre177-') as directory:
-            for general in (True, False):
-                name = '%s_%s' % (slug, 'g' if general else 'd')
-                built, exe = _build(directory, name, text, general)
-                output = built.stdout + built.stderr
-                self.assertEqual(built.returncode, 2, '%s (general=%s)\n%s' % (text[:2000], general, output[-3000:]))
-                self.assertFalse(exe.exists(), '%s (general=%s) built an executable' % (slug, general))
-                self.assertIn(message, output, '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
-                self.assertIn(value, output, '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
+        """Exact ints (bigint): the huge index builds and ends like CPython (IndexError, exit 1)."""
+        self.check(slug, text, rc=1)
 
     def test_huge_constant_index_is_refused(self):
         for slug, (expression, value) in HUGE_INDEXES.items():

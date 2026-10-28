@@ -67,73 +67,70 @@ def check_program(test, name, text):
             test.assertEqual(got.returncode, want[1], (name, general, got.stderr[-800:]))
 
 
-FLOAT = 'int() of a float outside int64'
-INT = 'int64 constant expression out of range'
-
-REFUSED = {
-    'recorded_list_alias': ('''
+MATCH = {
+    'recorded_list_alias_exact': '''
 items = [1e300]
 a = items
 x = a[0]
 a[0] = 1.5
 print(int(x))
-''', FLOAT),
-    'direct_scalar_read': ('''
+''',
+    'direct_scalar_read_exact': '''
 items = [1e300]
 x = items[0]
 items[0] = 1.5
 print(int(x))
-''', FLOAT),
-    'dict_value': ('''
+''',
+    'dict_value_exact': '''
 d = {"k": 1e300}
 x = d["k"]
 d["k"] = 1.5
 print(int(x))
-''', FLOAT),
-    'computed_index': ('''
+''',
+    'computed_index_exact': '''
 items = [1e300]
 a = items
 i = 0
 x = a[i]
 a[0] = 1.5
 print(int(x))
-''', FLOAT),
-    'delete_after': ('''
+''',
+    'delete_after_exact': '''
 items = [1e300]
 a = items
 x = a[0]
 del a[0]
 print(int(x))
-''', FLOAT),
-    'alias_chain': ('''
+''',
+    'alias_chain_exact': '''
 items = [1e300]
 a = items
 b = a
 x = b[0]
 a[0] = 1.5
 print(int(x))
-''', FLOAT),
-    'tuple': ('''
+''',
+    'tuple_exact': '''
 items = (1e300,)
 a = items
 x = a[0]
 print(int(x))
-''', FLOAT),
-    'negative': ('''
+''',
+    'negative_exact': '''
 items = [-1e300]
 a = items
 x = a[0]
 a[0] = 1.5
 print(int(x))
-''', FLOAT),
-    'int64_boundary': ('''
+''',
+    'int64_boundary_exact': '''
 items = [9223372036854775808.0]
 a = items
 x = a[0]
 a[0] = 1.5
 print(int(x))
-''', FLOAT),
-    'function_local': ('''
+''',
+    'function_local_exact': '''
 def main():
     items = [1e300]
     a = items
@@ -143,8 +140,8 @@ def main():
 
 
 main()
-''', FLOAT),
-    'call_between': ('''
+''',
+    'call_between_exact': '''
 items = [1e300]
 def show(value):
     return value
@@ -154,29 +151,26 @@ a = items
 x = a[0]
 show(a)
 print(int(x))
-''', FLOAT),
-    'print_between': ('''
+''',
+    'print_between_exact': '''
 items = [1e300]
 a = items
 x = a[0]
 print(a)
 print(int(x))
-''', FLOAT),
-    'string_item': ('''
+''',
+    'string_item_exact': '''
 items = ["9223372036854775808"]
 x = items[0]
 items[0] = "1"
 print(int(x))
-''', INT),
-    'int_item': ('''
+''',
+    'int_item_exact': '''
 items = [9223372036854775808]
 x = items[0]
 items[0] = 1
 print(int(x))
-''', INT),
-}
-
-MATCH = {
+''',
     'mutated_first': '''
 items = [1e300]
 a = items
@@ -252,12 +246,11 @@ print(int([2.9][0]))
 }
 
 
-class Pre388Tests(unittest.TestCase):
-    def test_read_before_mutation_is_refused(self):
-        for slug, (text, needle) in REFUSED.items():
-            with self.subTest(case=slug):
-                check_refused(self, slug, text, needle)
+# Under exact ints (biggate.ON) the moved cases are not int64 refusals: int() of the item is an exact
+# big int, so they must print what CPython prints (they were refusals on the int64-only build).
 
+
+class Pre388Tests(unittest.TestCase):
     def test_mutated_first_and_in_range_reads_match_cpython(self):
         for slug, text in MATCH.items():
             with self.subTest(case=slug):

@@ -44,6 +44,31 @@ def build(directory, name, text, general):
                                 '-o', exe.name], cwd=directory, capture_output=True, text=True, timeout=900, env=env)
 
 
+def cpython_last_line(directory, name, text):
+    src = Path(directory) / (name + '_cpython_full.py')
+    src.write_text(text, encoding='utf-8')
+    done = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, timeout=120,
+                          env=dict(os.environ, PYTHONUTF8='1', PYTHONWARNINGS='ignore'))
+    lines = done.stderr.decode('utf-8', 'replace').strip().splitlines()
+    return done.stdout.replace(b'\r\n', b'\n'), done.returncode, (lines[-1] if lines else '')
+
+
+def check_exact(test, name, text):
+    """Exact ints: a value beyond int64 builds on both builds and matches CPython's stdout, exit code
+    and last stderr line (the int64-era tests refused these programs by name)."""
+    with tempfile.TemporaryDirectory(prefix='ail-pre371-') as directory:
+        want = cpython_last_line(directory, name, text)
+        for general in (True, False):
+            exe, built = build(directory, name, text, general)
+            test.assertEqual(built.returncode, 0, (name, general, (built.stdout + built.stderr)[-1200:]))
+            got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+            err = got.stderr.decode('utf-8', 'replace')
+            test.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0], (name, general, err[-800:]))
+            test.assertEqual(got.returncode, want[1], (name, general, err[-800:]))
+            if want[2]:
+                test.assertIn(want[2], err, (name, general))
+
+
 def check_refused(test, name, text, message='int() of a float outside int64'):
     with tempfile.TemporaryDirectory(prefix='ail-pre371-') as directory:
         for general in (True, False):
@@ -302,11 +327,11 @@ print(int(Box(True).v), int(Box(False).v))
 class AnnotatedConstructorAttributeOutsideInt64(unittest.TestCase):
     def test_refused_by_name(self):
         for name, text in sorted(REFUSED.items()):
-            check_refused(self, 'refuse_' + name, text)
+            check_exact(self, 'refuse_' + name, text)
 
     def test_big_integer_string_refused_by_name(self):
         for name, text in sorted(REFUSED_CONVERSION.items()):
-            check_refused(self, 'reflect_' + name, text, 'int64 constant expression out of range')
+            check_exact(self, 'reflect_' + name, text)
 
     def test_conversions_that_fit_are_cpython(self):
         for name, text in sorted(MATCH.items()):

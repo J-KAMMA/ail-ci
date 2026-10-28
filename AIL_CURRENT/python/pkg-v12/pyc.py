@@ -705,7 +705,10 @@ def _refuse_round_at_int64_boundary(source):
     2**63.  The value is known at compile time, so refuse the source there rather than compiling a
     program that stops later with `integer overflow` (found by the pre54 review as `z_intmin`).
     A two-argument round() returns a float and is left alone; an int argument is exact already.
+    With exact ints (BIGINT.md) abs/-/* -1 of that value is exact as in CPython, so nothing is refused.
     """
+    if os.environ.get('AIL_SURFACE') == 'python':
+        return
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -798,21 +801,297 @@ def build(source, out, strict=True, report=None, force_general=False):
                     report[key] = [shadowing.restore_text(item, shadow) for item in report[key]]
 
 
+class _BigCapable(Unsupported):
+    """The typed path was skipped because a rule-2/3/4 local proof failed; `build` first tries the exact general path."""
+
+
+def _refuse_big_capable(source, local=True):
+    """docs/design/BIGINT.md section 5 and rules 2-4: a whole program with a function that can need a big int (an int literal
+    beyond int64, `**`/`<<`/math calls, or rule 4's unproven int local) is not built on the typed path, which has int64 only.
+    The general path has exact ints. `local=False` keeps only the hard constructs, for the fallback when only the typed path
+    can build the program (a binary file or a socket)."""
+    import bigcap
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return
+    prelude = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
+    if prelude:                       # library prelude units are not the program's own code (BIGINT.md rules 2-4)
+        tree.body = [n for n in tree.body if getattr(n, 'name', None) not in prelude]
+    marks = bigcap.marked(tree, local=local)
+    if os.environ.get('AIL_NO_GENERAL'):
+        # a typed-only build keeps `2 ** k` and `int.from_bytes(...)` (their int64 overflow is the loud stop they always
+        # had); `math.factorial`, an out-of-range literal and a variable shift stay refused by name
+        marks = {k: v for k, v in marks.items() if not _typed_only_ok(v)}
+    if marks:
+        name = sorted(marks, key=lambda k: (k != '<module>', k))[0]
+        raise _BigCapable('%s can need an int beyond int64 (%s); the typed path has int64 only and the general path has exact big ints'
+                          % ('the module code' if name == '<module>' else 'function %s()' % name, marks[name]))
+
+
+def _typed_only_ok(reason):
+    """Whether the root of a bigcap reason (the construct, under any 'it calls f(), which can need a big int (..)' chain)
+    is one a typed-only build still compiles."""
+    import re
+    while True:
+        m = re.match(r'it (?:calls|contains) [\w.]+\(\), which can need a big int \((.*)\)$', reason)
+        if not m:
+            break
+        reason = m.group(1)
+    return (reason in ('`**` with an exponent that is not a constant', 'a call of int.from_bytes',
+                       '`**=` with an exponent that is not a constant',
+                       'the int literal INT64_MIN (its negation leaves int64)')
+            or reason.endswith('() on a float constant beyond 2**62'))     # its int64 overflow is the loud stop
+
+
+def _refuse_typed_big_store(source, force_general=False):
+    """A typed-only build has int64 containers and parameters.  A function whose own proof cannot
+    bound its int (a growing local, a literal, a power, ...) can return an exact ail_tint, but
+    storing that result in a dict/list/set item, a subscript, an attribute or an int64 argument
+    converts it to int64 and stops on overflow at run time.  On the typed attempt this asks for
+    the exact general path; when that path is blocked (AIL builtins/typed-only prelude) name the
+    construct instead."""
+    import bigcap
+    if os.environ.get('AIL_IR', '1').strip().lower() in ('0', 'off', 'no', 'false'):
+        return        # AIL_IR=0 asks for the legacy int64 emitter: its overflow is the loud stop, not a store to refuse
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return
+    if not os.environ.get('AIL_NO_GENERAL'):
+        blocked = ('_ail_' in source or '_Ail' in source or any(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and (n.func.id in shadowing.AIL_BUILTINS or n.func.id.startswith(('_ail_', '_Ail')))
+            for fn in ast.walk(tree) if isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+            for n in ast.walk(fn)))
+        if not blocked and force_general:
+            return
+    prelude = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
+    if prelude:
+        tree.body = [n for n in tree.body if getattr(n, 'name', None) not in prelude]
+    marks = bigcap.marked(tree, local=True)
+    if not marks:
+        return
+    producers = {}
+    for name, why in marks.items():
+        if name == '<module>' or name.startswith(('_Ail', '_ail')):
+            continue
+        if why.startswith(('it calls ', 'it contains ')):
+            continue
+        if 'call result not proven' in why:
+            continue
+        if os.environ.get('AIL_NO_GENERAL') and why.startswith(('an operand not proven int', 'a call of int()')):
+            continue         # the proof could not type an operand (a parameter, an attribute) or the value is parsed text:
+            #                  not a growing value (a parsed number beyond int64 stops at the int64 slot, loudly)
+        producers[name] = why
+    if not producers:
+        return
+    defs = {}
+    classes = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            classes.add(node.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            defs.setdefault(node.name, []).append(node)
+    defined = bigcap._Defined(defs)
+    defined.classes = frozenset(classes)
+    defined.containers = bigcap.nonint_containers(tree)
+    defined.module_ints = bigcap.module_int_consts_of(tree)
+    # a function declared to return something other than an int (a list, a float, text, nothing) never hands out a
+    # tagged int: its unproven locals are its own business
+    def returns_non_int(fn):
+        ann = fn.returns
+        if ann is None:
+            return False
+        if isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name) and ann.value.id in (
+                'list', 'List', 'dict', 'Dict', 'set', 'Set', 'tuple', 'Tuple', 'deque', 'frozenset') \
+                or isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name) \
+                and ann.value.id.startswith('__ail_checked_') and ann.value.id != '__ail_checked_int__':
+            return True               # a container: its int elements are int64 items, not tagged results
+        words = {n.id for n in ast.walk(ann) if isinstance(n, ast.Name)}
+        words |= {n.value for n in ast.walk(ann) if isinstance(n, ast.Constant) and isinstance(n.value, str)}
+        return not (words & {'int', 'bool', 'Any', 'object', '__ail_checked_int__', '__ail_checked_bool__'})
+    producers = {k: v for k, v in producers.items() if not all(returns_non_int(f) for f in defs.get(k, ()))}
+    if not producers:
+        return
+    parents = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parents[child] = node
+
+    def target_name(func):
+        if isinstance(func, ast.Name):
+            return func.id
+        if isinstance(func, ast.Attribute):
+            return func.attr
+        return None
+
+    def param_arith(fn, name):
+        for n in ast.walk(fn):
+            if isinstance(n, ast.BinOp) and any(
+                    isinstance(x, ast.Name) and x.id == name for x in (n.left, n.right)):
+                return True
+            if isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name) and n.target.id == name:
+                return True
+        return False
+
+    def tinted_param(fn, name):
+        bounds = bigcap.local_int_bounds(fn, defined)
+        proven = bigcap.proven_int_names(fn, defined)
+        unproven = {n for n, v in bounds.items() if v is not None
+                    and (v[0] in bigcap._LP_INTS or v[0] == 'unknown') and n not in proven}
+        unproven -= getattr(defined, 'containers', set())
+        if name not in unproven:
+            return False
+        if param_arith(fn, name):
+            return True
+        ann = fn.returns
+        if isinstance(ann, ast.Name) and ann.id == 'int':
+            return True
+        return any(isinstance(n, ast.Return) and n.value is not None
+                   and any(isinstance(x, ast.Name) and x.id == name for x in ast.walk(n.value))
+                   for n in ast.walk(fn))
+
+    def argument_accepts_tint(call, arg):
+        called = target_name(call.func)
+        fns = defs.get(called)
+        if not fns:
+            return None
+        for fn in fns:
+            params = list(getattr(fn.args, 'posonlyargs', ())) + list(fn.args.args)
+            if isinstance(parents.get(fn), ast.ClassDef):
+                params = params[1:]
+            if arg in call.args:
+                index = call.args.index(arg)
+            else:
+                kw = next((k for k in call.keywords if k.value is arg), None)
+                if kw is None or kw.arg is None:
+                    continue
+                index = next((i for i, p in enumerate(params) if p.arg == kw.arg), -1)
+            if 0 <= index < len(params) and tinted_param(fn, params[index].arg):
+                return True
+        return False
+
+    int64_arg_methods = frozenset((
+        'append', 'appendleft', 'insert', 'extend', 'extendleft', 'add', 'update', 'setdefault',
+        'heappush', 'heappushpop', 'heapreplace', 'insort', 'insort_left', 'insort_right'))
+
+    def stored_as(node):
+        while isinstance(node, (ast.BinOp, ast.UnaryOp, ast.BoolOp, ast.Compare, ast.IfExp,
+                                ast.JoinedStr, ast.FormattedValue)):
+            node = parents.get(node)
+            if node is None:
+                return None
+        parent = parents.get(node)
+        if isinstance(parent, ast.Dict) and node in list(parent.keys) + list(parent.values):
+            return 'a dict item'
+        if isinstance(parent, ast.Tuple):
+            outer = parents.get(parent)
+            if isinstance(outer, ast.BinOp) and isinstance(outer.op, ast.Mod) and outer.right is parent:
+                return None              # the operands of a `%` format are read, not stored
+            if isinstance(outer, ast.Assign) and outer.value is parent \
+                    and all(isinstance(t, ast.Tuple) and len(t.elts) == len(parent.elts)
+                            and all(isinstance(e, ast.Name) for e in t.elts) for t in outer.targets):
+                return None              # `a, b = b, a + b`: each element is written to its own target
+        if isinstance(parent, (ast.List, ast.Tuple, ast.Set)):
+            return 'a list/tuple/set item'
+        if isinstance(parent, ast.Call) and node in list(parent.args) + [k.value for k in parent.keywords]:
+            called = target_name(parent.func)
+            if called in int64_arg_methods:
+                return 'an argument of %s()' % called
+            if called in defs and not argument_accepts_tint(parent, node):
+                return 'an argument of %s()' % called
+        if isinstance(parent, (ast.Assign, ast.AnnAssign)) and parent.value is node:
+            targets = parent.targets if isinstance(parent, ast.Assign) else [parent.target]
+            if any(isinstance(t, (ast.Subscript, ast.Attribute)) for t in targets):
+                return 'a subscript or attribute'
+        if isinstance(parent, ast.AugAssign) and parent.value is node \
+                and isinstance(parent.target, (ast.Subscript, ast.Attribute)):
+            return 'a subscript or attribute'
+        return None
+
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = target_name(node.func)
+        if name not in producers:
+            continue
+        store = stored_as(node)
+        if store:
+            raise _BigCapable(
+                'function %s() can need an int beyond int64 (%s); the typed path has int64 only and its result is stored in %s'
+                % (name, producers[name], store))
+
+
+_TINT_GATE_WORDS = ('tagged-int', 'tagged local', 'can need an int beyond int64')
+
+
 def _build_unshadowed(source, out, strict, report, force_general):
+    """Try the typed path with exact (tagged) ints, then the exact general path. When neither builds the program and the
+    typed attempt was stopped by a tagged-int gate (not by another construct), the program was accepted before the big-int
+    work: build it once more on the legacy int64 emitter, whose overflow is a loud stop (never a wrap-around). The
+    hard big-int constructs (`_refuse_big_capable`) stay refused."""
     source = fold_int_constants(source)
+    try:
+        return _build_unshadowed_exact(source, out, strict, report, force_general)
+    except (Unsupported, PipelineError) as first:
+        first_error = first
+        if force_general or os.environ.get('AIL_NO_TINT_LEGACY') \
+                or not any(w in str(first) for w in _TINT_GATE_WORDS) \
+                or os.environ.get('AIL_SURFACE') != 'python':
+            raise
+        if os.environ.get('AIL_NO_GENERAL') and not any(w in str(first) for w in _TINT_GATE_WORDS[:2]):
+            # a typed-only build refuses by name a value that can leave int64 for an int64 slot (BIGINT.md B2):
+            # that is the rule's answer, not a gap in the lowering
+            raise
+    try:
+        return _build_unshadowed_inner(source, out, strict, report, False, local_proof=False, legacy_int=True)
+    except (Unsupported, PipelineError) as second:
+        # the first attempt already named why the general path cannot build the program either; the legacy int64
+        # emitter's own refusal is the bare typed one
+        if 'the general path could not build this program either' in str(first_error) \
+                and 'the general path could not build this program either' not in str(second):
+            raise first_error
+        raise
+
+
+def _build_unshadowed_exact(source, out, strict, report, force_general):
+    """Try the typed path; a big-capable refusal first tries the exact general path and, when only the typed path can build
+    the program (a binary file, a socket), falls back to the typed path with only the hard big-int constructs refused."""
+    try:
+        return _build_unshadowed_inner(source, out, strict, report, force_general, local_proof=True)
+    except _BigCapable:
+        try:
+            return _build_unshadowed_inner(source, out, strict, report, True, local_proof=False)
+        except _BigCapable:
+            raise
+        except Unsupported:
+            return _build_unshadowed_inner(source, out, strict, report, force_general, local_proof=False)
+
+
+def _build_unshadowed_inner(source, out, strict, report, force_general, local_proof=True, legacy_int=False):
     out = pathlib.Path(out)
     c = out.with_suffix('.c')
     info = {'_checked_arrays': True}
+    if legacy_int:
+        info['_tint_legacy'] = True
     if native_diagnostics.enabled():
         info['_want_source_regions'] = True
     try:
+        if not force_general and not legacy_int and _is_whole_program(source):
+            # B2b: an unproven int local is an `ail_tint` on the typed path, so only the hard
+            # big-int constructs (a literal beyond int64, `**`, a variable shift, factorial/comb/perm)
+            # stay off it.
+            _refuse_big_capable(source, local=False)
+        if not legacy_int:
+            _refuse_typed_big_store(source, force_general)
         body = to_c(source, strict=strict, info=info)
         if force_general:
             raise Unsupported('general path explicitly requested')
     except Unsupported as _typed_e:
         # AIL_NO_GENERAL=1: judges use it to ask the TYPED path alone (their negatives assert a
         # by-name refusal of the typed path; through the fallback that refusal would be invisible).
-        if os.environ.get('AIL_NO_GENERAL'):
+        if os.environ.get('AIL_NO_GENERAL') or legacy_int:
             raise
         # DESIGN_GENERAL_PATH_20260916.md's general path, first cut: the typed path refused
         # (named its own reason, already raised as `Unsupported` -- propagated below if this
@@ -867,7 +1146,12 @@ def _build_unshadowed(source, out, strict, report, force_general):
             # expressions inside a single statement); the CRT longjmp
             # walks it via RtlUnwindEx and faulted intermittently.
             # Prologue-level unwind info stays and is sufficient.
-            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c), '-lm']
+            # The big-int runtime is much larger than the program's own code and most of it is unused (a program that
+            # adds only never calls divmod/text/range/...): drop the unused functions at link time for those builds.
+            # A program without the big runtime keeps exactly the old command line and binary (the no-int guarantee).
+            bigc = ['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []
+            bigl = ['-Wl,--gc-sections'] if boxed_report.get('bigint') else []
+            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *bigc, *link_flags(), *bigl, '-o', str(out), str(c), '-lm']
                     + (['-pthread'] if boxed_report.get('threads') else []),     # G12: threads (threadrt.py)
                                capture_output=True, text=True, phase='compile_link')
             if r.returncode:
@@ -900,7 +1184,9 @@ def _build_unshadowed(source, out, strict, report, force_general):
                 to = out.parent / ('%s_mix%d.o' % (out.name, i))
                 tc.write_text(csrc, encoding='utf-8')
                 native_diagnostics.generated(tc, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-                r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', '-c', '-o', str(to), str(tc)],
+                r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
+                         *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []),
+                         '-c', '-o', str(to), str(tc)],
                                    capture_output=True, text=True, phase='compile')
                 if r.returncode:
                     raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path, typed clone of %r):\n%s' %
@@ -909,12 +1195,15 @@ def _build_unshadowed(source, out, strict, report, force_general):
             c.write_text(boxed_c, encoding='utf-8')
             native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
             obj_boxed = out.parent / ('%s_boxed.o' % out.name)
-            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', '-c', '-o', str(obj_boxed), str(c)],
+            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
+                     *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []),
+                     '-c', '-o', str(obj_boxed), str(c)],
                                capture_output=True, text=True, phase='compile')
             if r.returncode:
                 raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path):\n%s' %
                                     r.stderr[-800:]))
-            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(obj_boxed)]
+            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(),
+                     *(['-Wl,--gc-sections'] if boxed_report.get('bigint') else []), '-o', str(out), str(obj_boxed)]
                                + objs + ['-lm'], capture_output=True, text=True, phase='link')
             if r.returncode:
                 raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path, link step):\n%s' %

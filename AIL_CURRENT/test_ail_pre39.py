@@ -1,9 +1,9 @@
-"""Pre39: int() of an out-of-int64 float is refused through keyword wrapper calls too.
+"""Pre39: int() of an out-of-int64 float matches CPython through keyword wrapper calls too.
 
-CPython has unbounded integers, so `int(1e300)` prints a 301-digit integer. This language's ints
-are signed int64, so the front end refuses a conversion whose float value it can see is outside
-int64, naming the construct and the value instead of compiling a program that stops with
-`integer overflow`. The pre31 check covered positional arguments; this module pins the keyword
+CPython has unbounded integers, so `int(1e300)` prints a 301-digit integer. With exact ints
+(bigint, BIGINT.md) the Python surface builds such a conversion and prints the same integer
+(it used to be refused by name while ints were signed int64). The pre31 module covered
+positional arguments; this module pins the keyword
 spellings as well (`take(x=...)`, an identity call and a keyword-only wrapper), beside the
 positional and literal shapes it already handled. Values that fit int64, non-finite floats and
 run-time-only floats are unchanged and still compared with CPython. A name the constant collector
@@ -44,13 +44,8 @@ def build(directory, name, text, general):
 
 
 def check_refused(test, name, text):
-    with tempfile.TemporaryDirectory(prefix='ail-pre39-') as directory:
-        for general in (True, False):
-            _, built = build(directory, name + ('g' if general else 'd'), text, general)
-            test.assertNotEqual(built.returncode, 0, (name, general))
-            message = built.stdout + built.stderr
-            test.assertIn('int() of a float outside int64', message, (name, general, message[-1200:]))
-            test.assertIn('big integer', message, (name, general, message[-1200:]))
+    # exact ints (bigint): builds and matches CPython (stdout, exit code)
+    check_program(test, name, text)
 
 
 def check_program(test, name, text):

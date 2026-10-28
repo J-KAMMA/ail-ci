@@ -3,8 +3,8 @@
 `-(-2)**63` is exactly 2**63, so CPython prints 9223372036854775808. The compiler used to
 emit the inner `(-2)**63` (which fits int64) and then negate it, stopping at run time with
 `integer overflow`. Constant integer expressions whose value fits int64 are now emitted as
-one literal; one whose value does not fit is refused by name at compile time, on both the
-default and the general path. `2**63 - 1` and `-2**63` are in range and must still be right.
+one literal; one whose value does not fit int64 is a big integer (bigint, BIGINT.md) that
+builds on both the default and the general path and prints CPython's value. `2**63 - 1` and `-2**63` are in range and must still be right.
 """
 import os
 import shutil
@@ -18,7 +18,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 PYC = ROOT / 'python' / 'pkg-v12' / 'pyc.py'
 HAVE_CC = shutil.which('gcc') is not None
-REFUSAL = 'constant integer expression overflows int64'
 
 
 def build(directory, name, text, general):
@@ -56,14 +55,8 @@ class Pre47(unittest.TestCase):
                     self.assertEqual(got.returncode, want.returncode, got.stderr[-500:])
 
     def check_refused(self, name, text):
-        with tempfile.TemporaryDirectory(prefix='ail-pre47-') as directory:
-            for general in (False, True):
-                mode = 'general' if general else 'default'
-                with self.subTest(program=name, mode=mode):
-                    built, _exe = build(directory, name + '_' + mode, text, general)
-                    self.assertNotEqual(built.returncode, 0, built.stdout)
-                    self.assertIn(REFUSAL, built.stderr)
-                    self.assertIn('64-bit signed integer', built.stderr)
+        # exact ints (bigint): builds and matches CPython (stdout, exit code)
+        self.check_program(name, text)
 
     def test_in_range_constants_match_cpython(self):
         self.check_program('in_range', '''def show(x):

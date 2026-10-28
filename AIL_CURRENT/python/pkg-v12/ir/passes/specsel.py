@@ -3,7 +3,7 @@
 
     %r.. = if %c { A; yield %a.. } { B; yield %b.. }   ->   A'; B'; %r.. = select(%c, %a.., %b..)
 
-A branch whose test reads a container element mispredicts on irregular data (a grid-life program's cell update:
+A branch whose test reads a container element mispredicts on irregular data (scar_life's cell update:
 `if s == 1 { if rule[wt] == 1 {..} else {..} } elif s == 0 {..}`, about a third of the time on a random
 grid). Running both arms and selecting the results costs a few instructions and no misprediction.
 Ifs are flattened innermost first, so a nest whose every arm qualifies becomes one block.
@@ -41,7 +41,7 @@ _WRAPPABLE = {'add', 'sub', 'mul', 'neg'}
 _ELEMENT = ('list.get', 'span.get', 'spec.get')
 _READS = _ELEMENT + ('ba.get', 'bytes.get', 'field.get')
 _NUM = (I.I64, I.F64)
-_INITS = ('store', 'obj.init', 'obj.copyref', 'ba.new', 'ba.call', 'ba.copyref')
+_INITS = ('store', 'obj.init', 'obj.copyref', 'obj.call', 'ba.new', 'ba.call', 'ba.copyref')
 
 
 class _Abort(Exception):

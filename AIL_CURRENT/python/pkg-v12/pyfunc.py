@@ -80,6 +80,20 @@ from pyfront import (BINOP, BOOLOP, CMPOP, HELPER_ORDER, HELPERS, STRICT_BIN, Un
 FLOAT_PARAM_BODY_EVIDENCE = True
 FLOAT_FLOOR_MOD = True
 
+# B2b: {function name / C symbol: (per-parameter tint flags, tint result)} for this compile.
+TINT_SIGS = {}
+TINT_ACTIVE = {}
+# True when the program calls a typed-only runtime primitive (monotonic_ms, tcp_*, ...) that the
+# general path cannot build. Such a program must stay on the typed path even if that means keeping
+# an unproven call result on the legacy emitter; trying the general path would fail outright.
+GENERAL_BLOCKED = False
+TINT_EXCLUDED = set()
+TINT_DISABLED = False
+# Whole-program switch: int module variables are `ail_tint` statics, so a function that rebinds
+# one keeps exact Python ints (the IR lowers global.load/global.store as tint). Off when a class
+# method touches a module variable: methods stay on the legacy emitter, which has int64 globals.
+GLOBAL_INT_TINT = False
+
 INT, FLT, LIST, SET, DICT, RANGE, BYTES = 'int', 'float', 'list', 'set', 'dict', 'range', 'bytes'
 # SEMANTICS.md section 31. A SECOND string type, beside BYTES and never mixed with it: a
 # sequence of Python CODE POINTS (one int32 each), because that -- and only that -- keeps
@@ -578,6 +592,39 @@ def _declares_int_return(ctx):
     return isinstance(ann, ast.Name) and ann.id in (INT, '__ail_checked_int__')
 
 
+def _exponent_nonneg_loop_var(node, ctx):
+    """Whether `node` is a name that is only ever bound as the target of a `for` over a list/tuple
+    literal of non-negative int constants, or over `range(<non-negative constants>)`.
+
+    Such an exponent can never be negative at run time, so `int ** name` is an int exactly as
+    CPython's is and the typed path's exact integer power is right."""
+    fn = getattr(ctx, 'fn_node', None)
+    if not isinstance(node, ast.Name) or fn is None:
+        return False
+    args = fn.args
+    if node.id in [a.arg for a in args.posonlyargs + args.args + args.kwonlyargs]             + [a.arg for a in (args.vararg, args.kwarg) if a is not None]:
+        return False
+    stores = [n for n in ast.walk(fn) if isinstance(n, ast.Name) and n.id == node.id
+              and isinstance(n.ctx, (ast.Store, ast.Del))]
+    if len(stores) != 1:
+        return False
+    for loop in ast.walk(fn):
+        if isinstance(loop, ast.For) and loop.target is stores[0]:
+            it = loop.iter
+            if isinstance(it, (ast.List, ast.Tuple)):
+                vals = [_int_const(e) for e in it.elts]
+                return all(v is not None and v >= 0 for v in vals)
+            if isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == 'range'                     and 1 <= len(it.args) <= 3 and not it.keywords:
+                vals = [_int_const(e) for e in it.args]
+                if any(v is None for v in vals):
+                    return False
+                if len(vals) == 3 and vals[2] <= 0:
+                    return False                # a negative step walks down from start, but stays >= stop
+                return vals[0] >= 0 if len(vals) > 1 else True
+            return False
+    return False
+
+
 def _int_const(node):
     """The value of `node` if it is a compile-time integer constant, else None.
 
@@ -748,6 +795,8 @@ def fold_maxsplit_constant(node):
     if value is _MAXSPLIT_NOT_CONST:
         return None
     if value is _MAXSPLIT_TOO_BIG or not _I64_MIN <= value <= _I64_MAX:
+        if os.environ.get('AIL_SURFACE') == 'python':
+            return None               # exact ints (BIGINT.md): evaluated at run time (OverflowError there, as CPython)
         refusal = Unsupported(
             'the str.split()/rsplit() maxsplit constant does not fit in a 64-bit signed '
             'integer, and an integer here is one (SEMANTICS section 1); CPython accepts it '
@@ -865,6 +914,10 @@ def fold_int_constant(node):
     if value is _CONST_INT_NOT or isinstance(value, bool):
         return None                      # a bool result keeps its own printing (True/False)
     if value is _CONST_INT_BIG or not _I64_MIN <= value <= _I64_MAX:
+        if os.environ.get('AIL_SURFACE') == 'python':
+            # exact ints (BIGINT.md): the value beyond int64 is an ordinary big int of the tagged lowering / the
+            # general path, not a program to refuse; the expression is left to be evaluated
+            return None
         refusal = Unsupported(
             'an integer constant expression here is outside the signed 64-bit range of an '
             'AIL int (SEMANTICS section 1); CPython computes it exactly with an unbounded int')
@@ -975,6 +1028,66 @@ def _fn_kind(node, ctx):
     return None
 
 
+def _tint_callback_adapter(node, ctx, symbol):
+    """A plain-int64 trampoline for a tagged function passed where an `int` Callable is expected.
+
+    The typed-only build keeps a tagged signature on a function whose IR lowering falls back
+    (ir/driver.py `_keep_legacy_tint`). A Callable parameter still names the legacy int64 ABI, so
+    handing it the tagged symbol directly calls through a mismatched function-pointer type. The
+    trampoline converts the scalar int parameters in and the int result out; every other kind is
+    passed through unchanged (only scalar `int` parameters and an `int` result can be tagged).
+    """
+    if not os.environ.get('AIL_NO_GENERAL') or not hasattr(ctx, 'borrowed_callback_helpers'):
+        return None
+    tsig = TINT_ACTIVE.get(node.id) or TINT_ACTIVE.get(symbol)
+    if not tsig or not (any(tsig[0]) or tsig[1]):
+        return None
+    kind = _fn_kind(node, ctx)
+    if not callable_types.valid(kind):
+        return None
+    params, result = callable_types.unpack(kind)
+    name = '_ail_tint_adapter_%s_%s' % (getattr(ctx, 'private_callback_prefix', 'module'), symbol)
+    if name in ctx.borrowed_callback_helpers:
+        return name
+    decls, call = [], []
+    for index, item in enumerate(params):
+        if index < len(tsig[0]) and tsig[0][index]:
+            if item != 'int':
+                return None
+            decls.append('int64_t p%d' % index)
+            call.append('ail_tint_from_int64(p%d)' % index)
+        elif item == 'array':
+            decls.extend(('const int64_t *p%d' % index, 'int64_t p%d_n' % index))
+            call.extend(('p%d' % index, 'p%d_n' % index))
+        elif item in callable_types._C and ',' not in callable_types._C[item]:
+            decls.append('%s p%d' % (callable_types._C[item], index))
+            call.append('p%d' % index)
+        else:
+            return None
+    if result in ('list', 'flist'):
+        decls.extend(('int64_t *p_out' if result == 'list' else 'double *p_out', 'int64_t p_out_n'))
+        call.extend(('p_out', 'p_out_n'))
+        ret = 'int64_t'
+        body = 'return %s(%s);' % (symbol, ', '.join(call))
+    elif result == 'noret':
+        ret = 'void'
+        body = '%s(%s);' % (symbol, ', '.join(call))
+    elif result in callable_types._C and ',' not in callable_types._C[result]:
+        ret = callable_types._C[result]
+        body = 'return %s(%s);' % (symbol, ', '.join(call))
+    else:
+        return None
+    if tsig[1]:
+        if result != 'int':
+            return None
+        ret = 'int64_t'
+        body = 'return ail_tint_i64(%s(%s));' % (symbol, ', '.join(call))
+    ctx.borrowed_callback_helpers[name] = 'static %s %s(%s) { %s }\n' % (
+        ret, name, ', '.join(decls) or 'void', body)
+    ctx.parts.add('TINTT')
+    return name
+
+
 def _fn_value(node, ctx):
     if not callable_types.valid(_fn_kind(node, ctx)):
         raise Unsupported('a function value requires a matching Callable signature')
@@ -991,7 +1104,15 @@ def _fn_value(node, ctx):
             raise Unsupported('function values require an owned str/bytes return ABI')
         if result == LIST:
             ctx.list_calls.add(node.id)
-        return ctx.csym.get(node.id, node.id)
+        symbol = ctx.csym.get(node.id, node.id)
+        adapter = _tint_callback_adapter(node, ctx, symbol)
+        if adapter is not None:
+            return adapter
+        tsig = TINT_ACTIVE.get(node.id) or TINT_ACTIVE.get(symbol)
+        if tsig and (any(tsig[0]) or tsig[1]):
+            raise Unsupported('passing %s(), which uses the tagged-int signature, as a function value '
+                              'is not supported' % node.id)
+        return symbol
     if isinstance(node, ast.IfExp):
         return '(%s ? %s : %s)' % (_expr(node.test, ctx), _fn_value(node.body, ctx), _fn_value(node.orelse, ctx))
     if isinstance(node, ast.Call):
@@ -1272,6 +1393,25 @@ _AIL_CLOCK = {'_ail_time': (FLT, 'ail_time', ()), '_ail_time_ns': (INT, 'ail_tim
               '_ail_local_isdst': (INT, 'ail_local_isdst', (INT,)), '_ail_tz_name': (INT, 'ail_tz_name', (INT,)),
               '_ail_mktime': (INT, 'ail_mktime', (INT,) * 7)}
 
+
+# The file/path/os helper names the file prelude and filelib define.  Their calls are the
+# program's real I/O, independent of what a user function happens to be called.
+def _file_helper_names():
+    names = set()
+    try:
+        import filelib
+        names.update(filelib.PRIMS)
+    except Exception:
+        pass
+    try:
+        import filelib_prelude
+        for source, _needs in filelib_prelude.SNIPPETS.values():
+            names.update(n.name for n in ast.walk(ast.parse(source)) if isinstance(n, ast.FunctionDef))
+    except Exception:
+        pass
+    return frozenset(names)
+
+_FILE_HELPER_NAMES = _file_helper_names()
 
 _AIL_SYSINFO = {'_ail_perf_counter': (FLT, 'ail_perf_counter'), '_ail_perf_counter_ns': (INT, 'ail_perf_counter_ns'),
                 '_ail_cpu_count': (INT, 'ail_cpu_count')}
@@ -1602,7 +1742,7 @@ def _etype(node, ctx):
                 if cv is not None:
                     return INT if cv >= 0 else FLT
                 if _etype(node.right, ctx) == INT:
-                    if _declares_int_return(ctx):
+                    if _declares_int_return(ctx) or _exponent_nonneg_loop_var(node.right, ctx):
                         return INT
                     raise Unsupported(
                         'a power whose integer exponent is not a constant may be negative at run '
@@ -1928,7 +2068,7 @@ def _c_int_literal(value):
 
 def module_table_refusal(name, value):
     """The refusal for a module-level set, dict or list that is not a number table (STOP words, KEYWORDS):
-    functions cannot read it, so it is built in main() and passed in (rep5 a ranking program)."""
+    functions cannot read it, so it is built in main() and passed in (rep5 term_rank)."""
     if isinstance(value, ast.Set):
         what, declared = 'set', 'set[str]'
     elif isinstance(value, ast.Dict):
@@ -2370,7 +2510,10 @@ def _emit_module_consts(modconsts):
         # (the module body runs before any function, so the initial value is all a function sees
         # first); every function that reads or `global`-rebinds it names `v_<name>` directly
         if kind == INT:
-            out.append('static int64_t v_%s = %s;\n' % (name, _c_int_literal(value)))
+            if GLOBAL_INT_TINT:
+                out.append('static ail_tint v_%s = {%s, NULL};\n' % (name, _c_int_literal(value)))
+            else:
+                out.append('static int64_t v_%s = %s;\n' % (name, _c_int_literal(value)))
         elif kind == FLT:
             out.append('static double v_%s = (%r);\n' % (name, value))
         elif kind == STR:
@@ -3942,7 +4085,7 @@ def _mark_tuple_lists(fn, seed=None, params=None, exclude=()):
                 elif prev != n.iter.id:
                     # Only a list of RECORDS (one with an arity) has row variables; a loop over a
                     # plain list of numbers binds an ordinary int, so `for i in vi:` and later
-                    # `for i in ei:` over two index lists is fine (rep5 an audit program, 3 builds).
+                    # `for i in ei:` over two index lists is fine (rep5 ticket_audit, 3 builds).
                     # The record owner wins over a plain list; two record owners still conflict.
                     if prev in arity and n.iter.id in arity:
                         raise Unsupported(
@@ -7472,7 +7615,7 @@ def _is_utf8_codec_call(node, ctx, method):
     if (method == "decode" and isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
             and node.func.attr == "decode" and isinstance(node.func.value, (ast.Subscript, ast.Name))
             and not _is_bytes_expr(node.func.value, ctx) and _is_bytearray_expr(node.func.value, ctx)):
-        # `ba.decode()` / `ba[a:b].decode()` on a bytearray is `bytes(ba[a:b]).decode()` (rep5 a tree-folding program)
+        # `ba.decode()` / `ba[a:b].decode()` on a bytearray is `bytes(ba[a:b]).decode()` (rep5 tree_fold)
         recv = node.func.value
         node.func.value = ast.fix_missing_locations(ast.copy_location(
             ast.Call(func=ast.copy_location(ast.Name(id='bytes', ctx=ast.Load()), recv),
@@ -13352,13 +13495,16 @@ def _expr(node, ctx):
         #   * refusing at COMPILE time is the honest outcome here rather than a run-time trap: the
         #     value is known now, so there is nothing to wait for.
         if not (-(1 << 63) <= node.value <= (1 << 63) - 1):
-            raise Unsupported(
+            refusal = Unsupported(
                 'the integer literal %d does not fit in a 64-bit signed integer, and an integer '
                 'here is one (SEMANTICS section 1). CPython computes it exactly, because its int '
                 'is unbounded; this compiler would have to wrap it, which is a different answer. '
                 'A negative INT64_MIN spelling is handled by the unary branch; a positive '
                 '9223372036854775808 remains out of range'
                 % node.value)
+            if os.environ.get('AIL_SURFACE') != 'python':
+                refusal.source_location_kind = 'source'
+            raise refusal
         return _c_int_literal(node.value)
     if isinstance(node, ast.Subscript):
         if (not isinstance(node.slice, ast.Slice) and not isinstance(node.value, ast.Name)
@@ -15828,6 +15974,9 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
         variant = ctx.clones[fname].get(_claim_key(site))
         if variant is not None:
             symbol, params, _arity = variant
+    _tsig = (TINT_ACTIVE.get(fname) or TINT_ACTIVE.get(symbol) or ((), 0)) if dynamic is None else ((), 0)
+    _tint_params = _tsig[0]
+    _tint_ret = _tsig[1]
     # C leaves function-argument evaluation order unspecified. Materialize each scalar
     # argument in source order with the C comma operator, then pass the values in parameter
     # order. Keep the sequence INSIDE this expression: hoisting it to ctx.pre would execute
@@ -16184,6 +16333,9 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
             staged.append(_obj_store(value, out[0], kind, ctx) if _managed_obj(kind, ctx)
                           else '%s = %s' % (value, out[0]))
             out = [value]
+        if kind == INT and index < len(_tint_params) and _tint_params[index] and len(out) == 1:
+            ctx.parts.add('TINTT')
+            out = ['ail_tint_from_int64((int64_t)(%s))' % out[0]]
         groups[index] = out
     out = [value for group in groups for value in group]
     def ordered(call):
@@ -16214,6 +16366,9 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
         ctx.parts.add('BYTESRET')
         return ordered('%s(%s)' % (symbol, ', '.join(out)))
     call = ordered('%s(%s)' % (symbol, ', '.join(out)))
+    if ret == INT and _tint_ret:
+        ctx.parts.add('TINTT')
+        call = 'ail_tint_i64(%s)' % call
     if ret in MAPS:
         temporary, _ = ctx.temp(ret)
         ctx.parts.add(ret.upper())
@@ -16347,7 +16502,7 @@ def _if_add_fusion(node, ctx):
     """`if <test> { x += K; }` (no else, x an int local, K a nonzero int constant) -> the statement
     `x += K if <test> else 0`: the same test evaluated once, the same checked add (adding 0 never
     overflows), but a conditional move instead of a branch. A test on loaded data is the
-    unpredictable branch of a neighbour count (a grid-life program: eight of them per cell, 30% of its cycles
+    unpredictable branch of a neighbour count (scar_life: eight of them per cell, 30% of its cycles
     in mispredicts); a well-predicted test costs one extra register move."""
     if node.orelse or len(node.body) != 1:
         return None
@@ -25060,13 +25215,25 @@ _PAR_REGION = re.compile(r'^[ ]*/\*@par:begin:(\d+)\*/\n(.*?)^[ ]*/\*@par:end:\1
 _PAR_CAPTURE_TYPES = ('int64_t', 'double', 'ail_flist', 'ail_list', 'ail_bytes', 'ail_bytearray *',
                       'const int64_t *', 'const double *')
 # Runtime helpers a parallel body may reach: pure arithmetic, bounds-checked element access (their
-# traps are intercepted, see cruntime._PARALLEL_DIE_EDITS) and nothing that allocates, counts
-# references or touches an arena.
+# traps are intercepted, see cruntime._PARALLEL_DIE_EDITS), and the tagged-int (tint_typed.py)
+# arithmetic.  The tint small-value arms are pure; a result that needs a big int allocates its own
+# `ail_tbig` with malloc (thread-safe, never shared or freed) and a result that cannot be extracted
+# back to int64 stops through ail_die, which PAR turns into a trap on that worker.  Nothing here
+# counts references or touches an arena.
 _PAR_HELPERS = frozenset((
     'ail_die', 'ail_raise_named', 'ail_fdiv', 'ck_add', 'ck_sub', 'ck_mul', 'ck_neg', 'ck_shl', 'ck_shlk', 'ck_shr',
     'ail_list_get', 'ail_list_set', 'ail_flist_get', 'ail_flist_set', 'ail_bytearray_get',
     'ail_bytearray_set', 'ail_bytearray_len', 'ail_bytearray_index', 'ail_bytearray_meta', 'ail_bytes_get',
     'ail_ffloormod', 'ail_fsqrt', 'ail_ipow', 'ail_round0',
+    # tagged-int boundary conversions: inline, no allocation, no shared state (a big value is read
+    # only, and the overflow trap goes through ail_die like the other helpers above)
+    'ail_tint_from_int64', 'ail_tint_i64', 'ail_tint_i64_sat', 'ail_tint_double', 'ail_tint_is_small',
+    'ail_tint_is_zero', 'ail_tint_sign', 'ail_tint_to_int64', 'ail_tint_neg', 'ail_tint_add', 'ail_tint_sub',
+    'ail_tint_mul', 'ail_tint_floordiv', 'ail_tint_mod', 'ail_tint_lshift', 'ail_tint_rshift',
+    'ail_tint_add_i64', 'ail_tint_sub_i64', 'ail_tint_mul_i64', 'ail_tint_floordiv_i64', 'ail_tint_mod_i64',
+    'ail_tint_mod_i64_i64', 'ail_tint_mod_pos_i64', 'ail_tint_mod_pos_i64_i64', 'ail_tint_mod2',
+    'ail_tint_cmp', 'ail_tint_eq', 'ail_tint_lt', 'ail_tint_le', 'ail_tint_eq_i64', 'ail_tint_ne_i64',
+    'ail_tint_lt_i64', 'ail_tint_le_i64',
 ))
 
 
@@ -25765,6 +25932,10 @@ def _for_enumerate_start(node, it, ctx, ind):
             and all(isinstance(e, ast.Name) for e in node.target.elts)):
         raise Unsupported('enumerate() without an (i, v) target')
     source, start = it.args[0], _enumerate_start(it)
+    if isinstance(start, ast.Constant) and type(start.value) is int and not (
+            -(1 << 62) < start.value < (1 << 62)):
+        # the typed walk counts in int64; a start past that range belongs to the exact/general path
+        raise Unsupported('enumerate() start outside the typed int64 range')
     if _is_slist_expr(source, ctx):
         kind = STR
     elif isinstance(source, ast.Name) and ctx.type_of(source.id) in (LIST, 'array') and not any(
@@ -31136,7 +31307,7 @@ def _name_repeated_list_returns(tree):
 def _unannotate_bytes_key_locals(tree):
     """`ids: dict[bytes, int] = {}` / `seen: set[bytes] = set()` as a local is `ids = {}` /
     `seen = set()`: a bytes-keyed dict or set is recognised from its bytes keys (`_mark_bkeys`), and
-    the annotation has no kind of its own (rep5 a ranking program: refused as an unsupported annotation)."""
+    the annotation has no kind of its own (rep5 term_rank: refused as an unsupported annotation)."""
     def bytes_keyed(ann):
         if not (isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
                 and ann.value.id in ('dict', 'set')):
@@ -31760,7 +31931,7 @@ static inline void ail_obj_dealloc(void *value) {
    and an increment inline (r <= 1 is a count of 0 or a wrapped UINT32_MAX), the per-class store helper is inline, and the
    release is one function whose first test is the release that does not free. (A ticket validator's `let e = s.evs[i]`
    spent a quarter of its instructions in the out-of-line retain, release and store. The release stays a call: inlined at the
-   hundred epilogue and unwinder sites it added 9% to the text of route_search-3 for 1% of its instructions.) */
+   hundred epilogue and unwinder sites it added 9% to the text of rail_transfer-3 for 1% of its instructions.) */
 static inline __attribute__((always_inline)) void *ail_obj_retain(void *value) {
     if (value) {
         ail_obj_header *h = value;
@@ -34551,8 +34722,20 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
             for section in ('exports', 'constants'):
                 if section in external:
                     external[section] = {fresh.get(key, key): value for key, value in external[section].items()}
+    _info0 = dict(info) if info is not None else None
     try:
-        result = _to_c_unshadowed(source, name, strict, info, entry, sig, library, external)
+        try:
+            result = _to_c_unshadowed(source, name, strict, info, entry, sig, library, external)
+        except Unsupported as error:
+            # A unit compile (`_want_units`: separate link units, module objects, the C export, check) has no
+            # general path to fall back to: a function the tagged-int lowering does not cover keeps the legacy
+            # int64 emitter (its overflow is the loud stop it always had) instead of refusing the program.
+            if info is None or not info.get('_want_units') or info.get('_tint_legacy')                     or os.environ.get('AIL_SURFACE') != 'python' or os.environ.get('AIL_NO_TINT_LEGACY')                     or not any(w in str(error) for w in ('tagged-int', 'tagged local')):
+                raise
+            info.clear()
+            info.update(_info0)
+            info['_tint_legacy'] = True
+            result = _to_c_unshadowed(source, name, strict, info, entry, sig, library, external)
     except Unsupported as error:
         shadowing.restore_error(error, shadow)
         raise
@@ -34795,7 +34978,7 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
     raise report if related else first
 
 
-def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0):
+def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0, _tint_exclude=(), _tint_retry=0):
     """C for every `def` in the source, with the last one as the entry point.
 
     Functions may call each other, including themselves, directly or in a cycle. Recursion shares
@@ -34931,6 +35114,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # -- and reset on every call so a `Ctx` built later in THIS compile never sees a stale table
     # left over from a previous, unrelated `to_c()` call (see `_MODCONSTS`'s own docstring).
     _MODCONSTS = _scan_module_consts(tree)
+    global GLOBAL_INT_TINT
+    GLOBAL_INT_TINT = False
     if _MODCONSTS.vars:
         boolkind.check_numeric_vars(_BOOLS, _MODCONSTS.vars, _MODCONSTS.bools, Unsupported)
     if _MODCONSTS.vars and (library or any(external.values())):
@@ -35238,7 +35423,194 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     readonly_bytes_consumers = (set() if info is not None and info.get('_disable_readonly_bytes_arg') else
                                 readonly_bytes_scalar.summaries(fns, sigs, clones, classes, EXC_NAMES,
                                                                blocked=_MODCONSTS.names() | set(external_exports)))
-    for f in fns:
+    # B2b: the tagged-small-int signature of every function. A parameter or result whose int cannot be
+    # proven locally is an `ail_tint`; proven locals keep plain int64. The entry function keeps the
+    # harness's int64 result ABI (its value is converted at the return).
+    import bigcap as _bigcap
+    _defined = _bigcap._Defined(f.name for f in fns)
+    _defined.classes = frozenset(classes)
+    _defined.containers = _bigcap.nonint_containers(tree)
+    _defined.module_ints = _bigcap.module_int_consts(_MODCONSTS)
+    _tint_sigs = {}
+    _call_result_names = set()
+    _python_surface = os.environ.get('AIL_SURFACE') == 'python'
+    _ir_on = os.environ.get('AIL_IR', '1').strip().lower() not in ('0', 'off', 'no', 'false')
+    # A module int variable can be an `ail_tint` static (exact Python ints) only when every function
+    # that touches it can be lowered by the IR. A class method or constructor stays on the legacy
+    # emitter (which types module variables as int64), so such a program keeps the int64 statics.
+    def _global_int_tint_ok():
+        if not (_python_surface and _ir_on and not TINT_DISABLED) or not _MODCONSTS.vars:
+            return False
+        if _MODCONSTS.bools:
+            return False
+        if any(kind not in (INT, FLT) for kind, _ in _MODCONSTS.vars.values()):
+            return False
+        if not any(kind == INT for kind, _ in _MODCONSTS.vars.values()):
+            return False
+        names = set(_MODCONSTS.vars)
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and any(
+                    isinstance(n, ast.Name) and n.id in names for n in ast.walk(node)):
+                return False
+        return True
+    global TINT_DISABLED
+    # `_tint_legacy`: the typed-only retry of pyc (the general path cannot build the program): the
+    # legacy int64 emitter with its loud overflow stop, no tagged signatures
+    TINT_DISABLED = bool(info is not None and ((info.get('_mixed_clone')
+                                                and not info.get('_mixed_tagged'))
+                                               or info.get('_tint_legacy')))
+    GLOBAL_INT_TINT = _global_int_tint_ok()
+    _io_names = {'open', 'write_text', 'write_bytes', 'read_text', 'read_bytes', 'file_chunks'}
+
+    def _param_arith(fn, name):
+        for n in ast.walk(fn):
+            if isinstance(n, ast.BinOp) and isinstance(n.op, (ast.Add, ast.Sub, ast.Mult, ast.Div,
+                                                               ast.FloorDiv, ast.Mod, ast.Pow,
+                                                               ast.LShift, ast.RShift, ast.BitAnd,
+                                                               ast.BitOr, ast.BitXor)) \
+                    and any(isinstance(x, ast.Name) and x.id == name for x in (n.left, n.right)):
+                return True
+            if isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name) and n.target.id == name \
+                    and isinstance(n.op, (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv,
+                                          ast.Mod, ast.Pow, ast.LShift, ast.RShift)):
+                return True
+        return False
+
+    # Under whole-program module-int tint storage, a function whose int result can be a module
+    # int must return the exact tagged value: converting it to the int64 result ABI would abort
+    # (`p20`). Calls propagate it, so a wrapper that only returns another such call is marked too.
+    _modint_names = {n for n, (k, _v) in _MODCONSTS.vars.items() if k == INT} if GLOBAL_INT_TINT else set()
+    _exact_int_ret = set()
+    if _modint_names:
+        _changed = True
+        while _changed:
+            _changed = False
+            for _f in fns:
+                if _f.name in _exact_int_ret or sigs[_f.name][1] != INT:
+                    continue
+                if _f.name == entry_name and not library:
+                    continue
+                _hits = any(isinstance(n, ast.Name) and n.id in _modint_names for n in ast.walk(_f)) \
+                    or any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                           and n.func.id in _exact_int_ret for n in ast.walk(_f))
+                if _hits:
+                    _exact_int_ret.add(_f.name)
+                    _changed = True
+
+    for _i, _f in enumerate(fns if (_python_surface and not TINT_DISABLED and _ir_on) else []):
+        # Real I/O is the one exemption: its lowering stays on the legacy typed path, so a tint
+        # signature would not match it. A compiler rewrite (`_ail_divmod_f`, ...) is not I/O.
+        _io_like = any(isinstance(n, (ast.With, ast.AsyncWith)) for n in ast.walk(_f)) or any(
+            isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+            and (n.func.id in _io_names or n.func.id in _FILE_HELPER_NAMES
+                 or n.func.id.startswith('_ail_nt_'))
+            for n in ast.walk(_f))
+        if _f.name.startswith(('_Ail', '_ail')) or _io_like:
+            _tint_sigs[_f.name] = ((), 0)
+            _tint_sigs[csym[_f.name]] = ((), 0)
+            continue
+        _bounds = _bigcap.local_int_bounds(_f, _defined)
+        _proven = _bigcap.proven_int_names(_f, _defined)
+        _unproven = {n for n, v in _bounds.items() if v is not None
+                     and (v[0] in _bigcap._LP_INTS or v[0] == 'unknown') and n not in _proven}
+        _unproven -= getattr(_defined, 'containers', set())
+        _proof = _bigcap._lp_reason([_f], None, _defined)
+        # A method's `self` is a non-int value, so an attribute operation (`self.x * self.x`) has no
+        # unproven local to name; its proof failure still means the method needs the tagged lowering.
+        # An int result that comes straight from an unbounded call (`return d.get(k, 0)`,
+        # `return self.items.pop()`) has no local to tag either: the function's own result is tagged,
+        # so the call result is converted (checked) at the return instead of staying an int64.
+        _call_result = _proof is not None and 'call result not proven to fit int64' in _proof
+        if _call_result:
+            _call_result_names.add(_f.name)
+        _needs_tint = bool(_unproven) or (_proof is not None and (_f.name in method_names or _call_result))
+        _all_tint = bool(GLOBAL_INT_TINT)  # whole-program module-int tint storage: every int parameter and result is tagged
+        _params = tuple(1 if (k == INT and (_all_tint or (n in _unproven
+                                                            and (sigs[_f.name][1] == INT or _param_arith(_f, n))))) else 0
+                        for n, k in sigs[_f.name][0])
+        _ret = 1 if (sigs[_f.name][1] == INT and (_all_tint or _needs_tint or _f.name in _exact_int_ret)
+                     and not (_f.name == entry_name and not library)
+                     and _f.name != 'main') else 0
+        _tint_sigs[_f.name] = (_params, _ret)
+        _tint_sigs[csym[_f.name]] = (_params, _ret)
+    # A hierarchy dispatcher and the methods it switches over share one C result type. If any
+    # method of a hierarchy method name needs the tagged result, all of them (and every `__vt`
+    # switch for that name) do, or the switch hands back a mix of int64 and ail_tint. Only the
+    # classes below the dispatcher's root belong to that group: an unrelated class with a method
+    # of the same name has its own signature and must not be dragged into the hierarchy's ABI.
+    _method_groups = {}
+    for _name in _tint_sigs:
+        if not _name.endswith('__vt'):
+            continue
+        _root, _sep, _rest = _name.partition('__')
+        _base = _rest[:-4] if _rest.endswith('__vt') else _rest
+        try:
+            _family = _hier_subtree(classes, _root)
+        except Exception:
+            _family = [_root]
+        _names = [_name]
+        for _cls in _family:
+            _member = '%s__%s' % (_cls, _base)
+            if _member in _tint_sigs and _member not in _names:
+                _names.append(_member)
+        _method_groups[(_root, _base)] = _names
+    for _names in _method_groups.values():
+        _vt = [_n for _n in _names if _n.endswith('__vt')]
+        if _vt:
+            _width = max(len(_tint_sigs[_n][0]) for _n in _vt)
+            _params = tuple(1 if any(len(_tint_sigs[_n][0]) > _i and _tint_sigs[_n][0][_i]
+                                     for _n in _names) else 0 for _i in range(_width))
+            for _n in _names:
+                _old = _tint_sigs[_n][0]
+                _tint_sigs[_n] = (_params + _old[_width:], _tint_sigs[_n][1])
+        if any(_tint_sigs[_n][1] for _n in _names):
+            for _n in _names:
+                _tint_sigs[_n] = (_tint_sigs[_n][0], 1)
+    global TINT_SIGS, TINT_ACTIVE, GENERAL_BLOCKED, TINT_EXCLUDED
+    _tint_exclude = set(_tint_exclude)
+    if _tint_exclude:
+        for _name in list(_tint_sigs):
+            if _name in _tint_exclude:
+                _tint_sigs.pop(_name, None)
+        for _f in fns:
+            if csym[_f.name] in _tint_exclude:
+                _tint_sigs.pop(_f.name, None)
+                _tint_sigs.pop(csym[_f.name], None)
+    TINT_EXCLUDED = set(_tint_exclude)
+    TINT_SIGS = _tint_sigs
+    TINT_ACTIVE = dict(_tint_sigs)
+    GENERAL_BLOCKED = any(
+        isinstance(_n, ast.Call) and isinstance(_n.func, ast.Name)
+        and (_n.func.id in shadowing.AIL_BUILTINS or _n.func.id.startswith(('_ail_', '_Ail')))
+        for _f in fns for _n in ast.walk(_f))
+    # A tagged function may fall back to the legacy emitter when the IR cannot lower it (see
+    # ir/driver.py). Its callers must then see the plain int64 signature, so a caller compiled
+    # earlier would still have emitted the tagged call. Put every tagged function before the rest,
+    # callees first: by the time any caller is compiled, each tagged callee has either stayed on
+    # the IR (tagged ABI) or been untagged by the fallback.
+    _compile_fns = fns
+    if _call_result_names:
+        _tagged_names = {n for n, _ts in _tint_sigs.items()
+                         if n in names and (any(_ts[0]) or _ts[1])}
+        if _tagged_names:
+            _by_name = {f.name: f for f in fns}
+            _ordered, _seen = [], set()
+
+            def _visit(_name):
+                if _name in _seen:
+                    return
+                _seen.add(_name)
+                for _dep in sorted(reach.get(_name, ())):
+                    if _dep in _tagged_names:
+                        _visit(_dep)
+                _ordered.append(_name)
+
+            for _f in fns:
+                if _f.name in _tagged_names:
+                    _visit(_f.name)
+            _compile_fns = ([_by_name[_n] for _n in _ordered]
+                            + [f for f in fns if f.name not in _seen])
+    for f in _compile_fns:
         cname = csym[f.name]
         # `base_ctx` is THIS function's OWN fully-typed, UNSPECIALISED ctx (`_caller_ctx`) -- the
         # same one `_plan_clones` used when it decided which clones to build. Every compile of `f`
@@ -35251,6 +35623,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                                   arity_seeds.get(f.name), clones, base_ctx, classes,
                                   defaults, f.name in method_names, grid_by_func, owned_str_fns, owned_bytes_fns,
                                   separate_units=bool(info is not None and info.get('_want_units')),
+                                  static_helpers=bool(info is not None and info.get('_mixed_clone')
+                                                      and cname != csym[fns[-1].name]),
                                   local_methods=not bool(info is not None and info.get('_link_units')),
                                   cleanup_symbols=cleanup_symbols,
                                   readonly_scalar_helpers=readonly_scalar_helpers,
@@ -35273,6 +35647,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         symbol_contexts[cname] = ctx
         if getattr(f, '_ail_dispatcher', False) and not clones.get(f.name):
             b = _dispatcher_c(b, f, csym)
+            from ir import driver as _driver
+            h, b, ctx = _driver.wrap_legacy_tint(_sys_modules()[__name__], (h, b, ctx))
         heads.append(h)
         bodies.append(b)
         body_names.append(f.name)
@@ -35291,6 +35667,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                                          defaults, f.name in method_names, grid_by_func,
                                          owned_str_fns, owned_bytes_fns,
                                          separate_units=bool(info is not None and info.get('_want_units')),
+                                         static_helpers=bool(info is not None and info.get('_mixed_clone')
+                                                             and csym_variant != csym[fns[-1].name]),
                                          local_methods=not bool(info is not None and info.get('_link_units')),
                                          cleanup_symbols=cleanup_symbols,
                                          readonly_scalar_helpers=readonly_scalar_helpers,
@@ -35371,6 +35749,8 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                 runtime_parts.add('DIE')
             if value_kind in (STR, BYTES, LIST, FLIST, SLIST, BLIST, BYTEARRAY, BINARYFILE, TCPSOCKET):
                 runtime_parts.add(value_kind.upper())
+    if GLOBAL_INT_TINT:
+        runtime_parts.add('TINTT')
     if {'TCPSOCKET', 'TCPHEAD'} & runtime_parts:
         head = cruntime.TCPHEAD + head
     head += cruntime.emit(runtime_parts)
@@ -35492,6 +35872,15 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
             list(zip(body_names, unit_bodies)))
     if info is not None and info.get('_want_source_regions'):
         info['c_source_regions'] = list(zip(body_names, bodies))
+    # A function whose tint signature made it into a caller before the function itself fell back to
+    # the legacy int64 ABI leaves that caller wrapping arguments the callee no longer takes. Rebuild
+    # once with every such signature disabled, so callers and callees agree.
+    _tint_fell = set(TINT_SIGS) - set(TINT_ACTIVE)
+    if _tint_fell and _tint_retry < 4:
+        retry_info = dict(info) if info is not None else None
+        return _to_c_once(source, name, strict, retry_info, entry, sig, library, external,
+                          _sort_stage=_sort_stage, _tint_exclude=_tint_exclude | _tint_fell,
+                          _tint_retry=_tint_retry + 1)
     return declarations + '\n'.join(bodies)
 
 
@@ -36366,6 +36755,10 @@ def _one_function(*args, **kwargs):
         # still the legacy emitter's C (value semantics): refuse what CPython would share
         import aliasrefuse
         aliasrefuse.check(_sys_modules()[__name__], args[0], result[2])
+        from ir import driver as _driver
+        if not getattr(args[0], '_ail_dispatcher', False):
+            # a dispatcher's body is replaced afterwards (`_dispatcher_c`); pyfunc wraps it there
+            final = _driver.wrap_legacy_tint(_sys_modules()[__name__], result)
     else:
         import aliasrefuse
         aliasrefuse.check_ir(_sys_modules()[__name__], args[0], result[2])
@@ -36417,6 +36810,7 @@ def _one_function_legacy(*args, **kwargs):
 def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=None, arity_seed=None,
                   clones=None, base_ctx=None, classes=None, defaults=None, is_method=False,
                   grid_by_func=None, owned_str_fns=None, owned_bytes_fns=None, separate_units=False,
+                  static_helpers=False,
                   checked_arrays=False, cleanup_symbols=None, readonly_scalar_helpers=(), non_escaping_helpers=(),
                   local_methods=True, float64_pipelines=None, internal_exact_bytes_fns=(), byterows_by_func=None,
                   experimental_borrow_numeric_names=False, experimental_borrow_leaf_self=False,
@@ -37269,6 +37663,11 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         # care where the newline falls.
         sig = '__attribute__((always_inline)) static inline' + chr(10) + sig
     elif is_method and local_methods:
+        sig = 'static' + chr(10) + sig
+    if static_helpers and not sig.startswith(('static', '__attribute__')):
+        # A mixed-mode clone is its own translation unit with its own copy of the runtime and of
+        # every helper the candidate calls. Only the candidate's own `__typed` symbol is exported;
+        # a shared helper left external would collide with the same helper in another clone's .o.
         sig = 'static' + chr(10) + sig
     # A physical cell preserves the last actual numeric type; reads never change its tag.
     mixed = _numeric_mixed_bindings(ctx)

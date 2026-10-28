@@ -56,16 +56,25 @@ class ConstantPowerOverflow(unittest.TestCase):
         ('huge_exponent', 'print(2 ** 100000000)\n'),
     )
 
+    def _matches(self, name, source, syntax='python', cpython_source=None, modes=(False, True)):
+        with tempfile.TemporaryDirectory() as directory:
+            expected, status = run_cpython(directory, 'ref_' + name, cpython_source or source)
+        for general in modes:
+            with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
+                built, exe = compile_source(directory, 'pow_' + name, source, syntax=syntax,
+                                            general=general)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
+                self.assertEqual((ran.stdout.replace('\r\n', '\n'), ran.returncode),
+                                 (expected, status), ran.stderr)
+
     def test_out_of_range_constant_powers_are_refused_by_name(self):
-        for general in (False, True):
-            for name, source in self.CASES:
-                with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
-                    built, exe = compile_source(directory, 'pow_' + name, source, general=general)
-                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
-                    self.assertFalse(exe.exists())
-                    self.assertTrue(any(message in built.stderr for message in REFUSALS), built.stderr)
+        # exact ints (bigint)
+        for name, source in self.CASES:
+            self._matches(name, source)
 
     def test_ail_syntax_refuses_the_same_construct(self):
+        # brace syntax keeps 64-bit ints (BIGINT.md): the refusal stays
         source = 'fn main() { print(2 ** 63); }\n'
         for general in (False, True):
             with self.subTest(general=general), tempfile.TemporaryDirectory() as directory:

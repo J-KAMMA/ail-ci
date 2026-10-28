@@ -1,9 +1,9 @@
-"""A constant ``pow(base, exp)`` whose exact result leaves int64 is refused by name.
+"""A constant ``pow(base, exp)`` whose exact result leaves int64 matches CPython.
 
-CPython's int is unbounded, so ``pow(2, 63)`` prints the bignum; this compiler's int is 64-bit,
-so the same call compiled and then stopped with ``integer overflow``.  The two-argument builtin
-is now folded at compile time: an in-range constant result keeps the ordinary lowering, a
-negative exponent keeps CPython's float answer, and an out-of-range result is refused by name.
+CPython's int is unbounded, so ``pow(2, 63)`` prints the bignum.  With exact ints (bigint,
+BIGINT.md) the Python surface builds the same call on both builds and prints the same integer
+(it used to be refused by name while ints were 64-bit).  An in-range constant result keeps the
+ordinary lowering and a negative exponent keeps CPython's float answer.
 A program that binds its own ``pow`` is left alone.
 """
 import os
@@ -98,16 +98,16 @@ def build_run(directory, text, name, general):
 
 
 class Pre294(unittest.TestCase):
-    def test_constant_pow_out_of_int64_is_refused_by_name(self):
+    def test_constant_pow_out_of_int64_matches_cpython(self):
+        # exact ints (bigint): builds and matches CPython (stdout, exit code)
         with tempfile.TemporaryDirectory(prefix='ail-pre294-') as directory:
             for name, text in REFUSED:
+                want = subprocess.run([sys.executable, '-B', '-c', text], capture_output=True, timeout=120)
                 for general in (False, True):
                     with self.subTest(case=name, general=general):
-                        status, _, output = build_run(directory, text, name, general)
-                        self.assertNotEqual(status, 0, output)
-                        self.assertIn('int64 constant expression out of range', output)
-                        self.assertNotIn('Traceback', output)
-                        self.assertNotIn('integer overflow', output)
+                        status, got, output = build_run(directory, text, name, general)
+                        self.assertEqual(
+                            (status, got), (want.returncode, want.stdout.replace(b'\r\n', b'\n')), output)
 
     def test_in_range_float_and_modular_pow_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre294-') as directory:

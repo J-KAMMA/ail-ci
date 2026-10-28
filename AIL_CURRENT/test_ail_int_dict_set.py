@@ -420,7 +420,7 @@ REFUSED = [
 ]
 
 
-# Few keys over a wide id range, cleared and refilled each round (a ranking program's per-document
+# Few keys over a wide id range, cleared and refilled each round (term_rank's per-document
 # id-to-count table): such tables spill from the dense array to the hash table on a sparse widen,
 # and must still give CPython's results -- insertion order, re-adds after del, clear, and a table
 # that spilled early and then fills densely. `wide` (a permutation written in stride order) spills

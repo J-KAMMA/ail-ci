@@ -1,11 +1,10 @@
 """pre310: the rbrbpre47 review's first pre-existing difference, `2 ** 63`.
 
-CPython has unbounded ints and prints 9223372036854775808; an AIL int is int64
-(SEMANTICS section 1), so the value has no representation here.  This tree already
-refuses the construct by name at compile time on both builds (the generic constant
-checks from pre121/pre177/pre97), so no compiler change is needed.  The test locks
-that named refusal for the whole list the review recorded, plus the routes a value
-can take and the in-range int64 boundaries, which must still match CPython.
+CPython has unbounded ints and prints 9223372036854775808.  With exact ints (bigint,
+BIGINT.md) the Python surface builds the construct on both builds and prints the same
+value (it used to be refused by name while an int was int64).  The test locks that
+CPython match (stdout and exit code) for the whole list the review recorded, plus the
+routes a value can take and the in-range int64 boundaries.
 """
 import os
 import subprocess
@@ -71,23 +70,25 @@ class Pre310(unittest.TestCase):
         ('returned', 'def show():\n    return 2 ** 63\n\nprint(show())\n'),
     )
 
-    def test_out_of_range_constants_are_refused_by_name(self):
+    def check_matches(self, prefix, name, source):
+        with tempfile.TemporaryDirectory() as directory:
+            expected, status = run_cpython(directory, prefix + name, source)
         for general in (False, True):
-            for name, source in self.CASES:
-                with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
-                    built, exe = compile_source(directory, 'pre310_' + name, source, general=general)
-                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
-                    self.assertFalse(exe.exists())
-                    self.assertTrue(any(message in built.stderr for message in REFUSALS), built.stderr)
+            with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
+                built, exe = compile_source(directory, prefix + name, source, general=general)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
+                self.assertEqual((ran.stdout.replace('\r\n', '\n'), ran.returncode), (expected, status),
+                                 ran.stderr)
 
-    def test_first_case_through_routes_is_refused_by_name(self):
-        for general in (False, True):
-            for name, source in self.ROUTES:
-                with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
-                    built, exe = compile_source(directory, 'pre310_route_' + name, source, general=general)
-                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
-                    self.assertFalse(exe.exists())
-                    self.assertTrue(any(message in built.stderr for message in REFUSALS), built.stderr)
+    def test_out_of_range_constants_match_cpython(self):
+        # exact ints (bigint): builds and matches CPython (stdout, exit code)
+        for name, source in self.CASES:
+            self.check_matches('pre310_', name, source)
+
+    def test_first_case_through_routes_matches_cpython(self):
+        for name, source in self.ROUTES:
+            self.check_matches('pre310_route_', name, source)
 
     def test_in_range_boundaries_still_match_cpython(self):
         source = '''def show(x):

@@ -120,12 +120,18 @@ class Pre184Tests(unittest.TestCase):
         return built, exe
 
     def test_out_of_int64_constant_is_refused(self):
+        # exact ints (bigint)
         for name, source in REFUSED.items():
+            path = self.dir / (name + "_ref.py")
+            path.write_text(source, encoding="utf-8")
+            want_code, want_out = run_py(path)
             for general in (False, True):
-                built, _ = self.build(name, source, general)
-                self.assertNotEqual(built.returncode, 0, name + " general=" + str(general))
-                self.assertIn("int64 constant expression out of range", built.stdout + built.stderr,
-                              name + " general=" + str(general))
+                built, exe = self.build(name, source, general)
+                self.assertEqual(built.returncode, 0, name + " general=" + str(general) + "\n"
+                                 + built.stdout + built.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, timeout=60)
+                self.assertEqual((ran.stdout, ran.returncode), (want_out, want_code),
+                                 name + " general=" + str(general))
 
     def test_in_range_constant_still_matches_cpython(self):
         for name, source in IN_RANGE.items():
