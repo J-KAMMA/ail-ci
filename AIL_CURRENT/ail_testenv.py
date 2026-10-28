@@ -46,3 +46,32 @@ def objcopy_available():
 def glibc_cookie_streams():
     """fopencookie() is a glibc extension (macOS has funopen, MinGW neither)."""
     return sys.platform.startswith('linux')
+
+
+def rustc():
+    """Path of a usable `rustc`, else None. A rustup proxy resolves its toolchain under
+    RUSTUP_HOME (default `$HOME/.rustup`); when a test runs with a scratch HOME the installed
+    toolchain still sits beside the cargo bin that provides the proxy, so use that instead of
+    treating the proxy's "no default toolchain" error as rustc being absent."""
+    path = shutil.which('rustc')
+    if not path:
+        return None
+
+    def usable(env):
+        try:
+            probe = subprocess.run([path, '--version'], capture_output=True, timeout=60, env=env)
+        except (OSError, subprocess.SubprocessError):
+            return False
+        return probe.returncode == 0
+
+    env = dict(os.environ)
+    if usable(env):
+        return path
+    cargo_home = Path(path).resolve().parent.parent
+    for home in (cargo_home.parent / '.rustup', Path.home() / '.rustup'):
+        if home.is_dir() and str(home) != env.get('RUSTUP_HOME'):
+            env['RUSTUP_HOME'] = str(home)
+            if usable(env):
+                os.environ['RUSTUP_HOME'] = str(home)
+                return path
+    return None
