@@ -1,3 +1,16 @@
+## 2026-10-28 -- ctime2: gcc time is 19.5% runtime prelude, 80.5% program code (job-ctime2-10290148)
+
+Measured where gcc's time goes on the build path: 20 corpus programs from
+`lab/corpus/programs` (shuffled with seed 20261028, first 20 that build: 11 typed, 9 general),
+each generated once with `--debug-dir`, split at the first mapped function body into the
+runtime prelude (`cruntime.emit` pieces plus declarations) and the program's own code, and
+compiled with the build's `-O2` flags (median of 5, gcc startup floor subtracted).  The
+prelude is 97.1% of the generated C bytes but only 19.5% of gcc `-c` time pooled over the
+sample (mean 20.2%, median 18.6%; typed 21.2%, general 13.3%).  At `-O2` the optimizer time
+on the program's own functions dominates parsing the large prelude.  The fixed part is below
+30%, so no cached object or PCH was built and no compiler file changed: the measurement is
+`lab/profile/GCC_SHARE.md` with `lab/profile/measure_gcc_share.py` to reproduce it.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
