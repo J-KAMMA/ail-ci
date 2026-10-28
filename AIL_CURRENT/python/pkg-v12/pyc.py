@@ -1302,6 +1302,13 @@ def build_link_units(source, out, unit_map, external=None):
     return _finalize_output(out)
 
 
+def _entry_file_name(path):
+    """CPython's `__file__` for the script: absolute as invoked, without normalising a relative
+    path (so `./p.py` keeps the dot)."""
+    path = os.fspath(path)
+    return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description='compile one Python expression or function to a '
                                              'standalone program')
@@ -1340,7 +1347,7 @@ def main(argv=None):
 
     if a.file:
         src = pathlib.Path(a.file).read_text(encoding='utf-8')
-        os.environ.setdefault('AIL_SOURCE_FILE', os.path.abspath(a.file))
+        os.environ.setdefault('AIL_SOURCE_FILE', _entry_file_name(a.file))
     elif a.source is not None:
         src = a.source
     else:

@@ -74,26 +74,47 @@ except NameError as error:
     print(type(error).__name__, error)
 '''
 
+DELETED_HELPER = r'''X = 1
+del __file__
+'''
 
-def cpython(directory, files):
+DELETED_IMPORT = r'''import helper
+print(helper.X)
+try:
+    print(helper.__file__)
+except AttributeError as error:
+    print(type(error).__name__, error)
+'''
+
+PATH_ONLY = "print(repr(__file__))\n"
+
+FROM_ONLY = r'''from helper import __file__ as f
+
+print('from', f)
+'''
+
+
+def cpython(directory, files, script='main.py'):
     for name, text in files.items():
         (Path(directory) / name).write_text(text, encoding='utf-8')
-    done = subprocess.run([sys.executable, '-B', 'main.py'], cwd=directory,
+    done = subprocess.run([sys.executable, '-B', script], cwd=directory,
                           capture_output=True, timeout=120, env=dict(os.environ, PYTHONUTF8='1'))
     return done.stdout.replace(b'\r\n', b'\n'), done.returncode, done.stderr
 
 
-def build_and_run(directory, files, general):
+def build_and_run(directory, files, general, script='main.py'):
     for name, text in files.items():
         (Path(directory) / name).write_text(text, encoding='utf-8')
     exe = Path(directory) / ('exe_g' if general else 'exe_d')
+    if exe.exists() or exe.is_symlink():
+        exe.unlink()
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
     env.pop('AIL_NO_GENERAL', None)
     if general:
         env['AIL_UNIFIED_FORCE'] = '1'
     else:
         env.pop('AIL_UNIFIED_FORCE', None)
-    built = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', 'main.py',
+    built = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', script,
                             '--syntax', 'python', '-o', exe.name], cwd=directory, capture_output=True,
                            text=True, timeout=900, env=env)
     if built.returncode != 0:
@@ -103,12 +124,12 @@ def build_and_run(directory, files, general):
 
 
 class SourceFileDunderTests(unittest.TestCase):
-    def check(self, slug, files):
+    def check(self, slug, files, script='main.py'):
         with tempfile.TemporaryDirectory(prefix='ail-ex18-') as directory:
-            want, want_rc, err = cpython(directory, files)
+            want, want_rc, err = cpython(directory, files, script)
             self.assertEqual(want_rc, 0, err)
             for general in (True, False):
-                got, build_err = build_and_run(directory, files, general)
+                got, build_err = build_and_run(directory, files, general, script)
                 self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
                 self.assertEqual(got, (want, 0), '%s (general=%s)\n%s' % (slug, general, build_err))
             return want
@@ -127,9 +148,43 @@ class SourceFileDunderTests(unittest.TestCase):
         self.assertIn('values /', out)
         self.assertIn('helper-fn changed', out)
 
+    def test_from_import_of_a_module_that_only_has_the_implicit_binding(self):
+        out = self.check('from-only', {'main.py': FROM_ONLY, 'helper.py': 'X = 1\n'}).decode()
+        self.assertIn('from /', out)
+        self.assertIn('helper.py', out)
+
     def test_deleted_name(self):
         out = self.check('deleted', {'main.py': DELETED}).decode()
         self.assertIn("NameError name '__file__' is not defined", out)
+
+    def test_imported_module_deleting_its_file_is_refused(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex18-') as directory:
+            for general in (True, False):
+                got, build_err = build_and_run(directory, {'main.py': DELETED_IMPORT,
+                                                           'helper.py': DELETED_HELPER}, general)
+                self.assertIsNone(got, 'general=%s\n%s' % (general, build_err))
+                self.assertIn('`del __file__` in an imported module', build_err)
+
+    def test_entry_keeps_the_spelling_it_was_invoked_with(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex18-') as directory:
+            os.mkdir(Path(directory) / 'sub')
+            os.symlink('.', str(Path(directory) / 'link'))
+            for script in ('./main.py', 'sub/../main.py', 'link/main.py'):
+                want, want_rc, err = cpython(directory, {'main.py': PATH_ONLY}, script)
+                self.assertEqual(want_rc, 0, err)
+                for general in (True, False):
+                    got, build_err = build_and_run(directory, {'main.py': PATH_ONLY}, general, script)
+                    self.assertIsNotNone(got, '%s (general=%s)\n%s' % (script, general, build_err))
+                    self.assertEqual(got, (want, 0), '%s (general=%s)\n%s' % (script, general, build_err))
+            # the merge path must use the same spelling for the entry, while the imported module
+            # keeps its canonical path
+            want, want_rc, err = cpython(directory, {'main.py': MULTI, 'helper.py': HELPER}, './main.py')
+            self.assertEqual(want_rc, 0, err)
+            for general in (True, False):
+                got, build_err = build_and_run(directory, {'main.py': MULTI, 'helper.py': HELPER},
+                                               general, './main.py')
+                self.assertIsNotNone(got, 'merge (general=%s)\n%s' % (general, build_err))
+                self.assertEqual(got, (want, 0), 'merge (general=%s)\n%s' % (general, build_err))
 
 
 if __name__ == '__main__':

@@ -5267,6 +5267,7 @@ def _compile_freestanding(args, parser, native_build):
 
 
 def main(argv=None):
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     check_cmd = sub.add_parser('check', help='strict source/type check without a C build; exit 0 passed, 1 source error, 2 configuration/I/O/dependency')
@@ -5621,6 +5622,16 @@ def main(argv=None):
             import ail_export
             lowered_text, lowered['manifest'] = ail_export.lower(text)
             return lowered_text
+        # CPython's __file__ for the entry keeps the spelling it was invoked with; the merge reads it
+        # from here, and pyc gets it in the subprocess environment below.  `Path` collapses a leading
+        # `./`, so recover the token from the command line rather than from `args.source`.
+        invoked_source = os.fspath(args.source)
+        invoked_target = os.path.normpath(invoked_source)
+        for token in raw_argv:
+            if token and not token.startswith('-') and os.path.normpath(token) == invoked_target:
+                invoked_source = token
+                break
+        os.environ['AIL_SOURCE_FILE'] = ail_modules.entry_file_name(invoked_source)
         try:
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
@@ -5702,7 +5713,7 @@ def main(argv=None):
                                                 for key, value in loading['source_map'].items()}), encoding='utf-8')
                 debug_env = {'AIL_DEBUG': '1', 'AIL_LINE_MAP': str(line_map)}
             environment = _surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
-                                                'AIL_SOURCE_FILE': os.path.abspath(os.fspath(args.source)),
+                                                'AIL_SOURCE_FILE': ail_modules.entry_file_name(invoked_source),
                                                 **({'AIL_NO_GENERAL': '1'} if contracts or strict else {}), **ffi_env, **debug_env})
             if prelude_units:
                 environment['AIL_PRELUDE_UNITS'] = '\n'.join(prelude_units)

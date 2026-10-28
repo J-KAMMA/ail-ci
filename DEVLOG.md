@@ -1,3 +1,28 @@
+## 2026-10-28 -- ex18 review: invocation spelling and imported `del __file__` (job-ex18-10290510)
+
+The ex18 review found two defects.  (1) An imported module that ran `del __file__` and was then read as
+`helper.__file__` stopped at run time with `NameError: name 'helper____file__' is not defined` and exit
+1, where CPython raises `AttributeError: module 'helper' has no attribute '__file__'` and exits 0.  A
+module-level `del __file__`, or one made through `global __file__`, in an imported module is now
+refused by name with a `write instead:` hint; a purely function-local deletion still matches CPython.
+(2) The entry `__file__` was canonicalised by `abspath`/`Path.resolve`, so compiling `./p.py` produced
+`.../p.py` instead of CPython's `..././p.py`, and a symlinked entry lost its spelling.  The entry now
+keeps the path as invoked: a relative path is joined to the current directory without normalising, an
+absolute or symlinked path is kept as written.  `ail_chatgpt.py` recovers the token from the command
+line because `Path('./p.py')` collapses the dot, and passes it to both the merge and pyc through
+`AIL_SOURCE_FILE`; `pyc.py` applies the same rule.  While here, `from m import __file__` now works for
+a module that only has the implicit binding (`_uses_file_dunder` sees the import alias and
+`bound_names` knows the implicit name), matching CPython instead of the previous refusal.
+
+Probes in `/tmp/probes18fix` on both builds (general via `AIL_UNIFIED_FORCE=1` and default): via
+`cmp.sh`, `p_basic`, `p_rebind`, `p_routes` (argument, list item, dict value, attribute, `len`,
+`f`-string), `p_del_entry`, `p_global_del`, `p_local_del`, `p_comp`, `p_branch` all match.  Multi-file
+probes `m_normal`, `m_del_local`, `m_from`, `m_from_del`, `m_namespace` match or are refused by name,
+and `m_del_module`, `m_del_global`, `m_del_reassign` are refused with the new message on both builds.
+Entry spelling probes `path_single` and `path_merge` match for `./main.py`, `sub/../main.py` and
+`link/main.py` (symlinked directory), with and without an import.  `test_ail_ex18.py` covers both
+defects and the from-import case.
+
 ## 2026-10-28 -- ex18: a Python-syntax program's `__file__` matches CPython (job-ex18-10290510)
 
 Building the 14 Python-syntax files under `AIL_CURRENT/language_examples` left `__file__` as the
