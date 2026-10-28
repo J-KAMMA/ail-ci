@@ -16,6 +16,7 @@ ASAN_DETECT_LEAKS = 'detect_leaks=0' if DARWIN else 'detect_leaks=1'
 LEAK_CHECK_REASON = 'AddressSanitizer has no leak checker on macOS (detect_leaks is not supported there)'
 
 _GNU_TIME = []
+_RUSTC = []
 
 
 def gnu_time():
@@ -35,6 +36,22 @@ def gnu_time():
                 pass
         _GNU_TIME.append(found)
     return _GNU_TIME[0]
+
+
+def rustc_path():
+    """Path of a `rustc` that actually runs, else None. rustup leaves a shim in PATH even when no
+    default toolchain is installed; the shim fails on every call and is not a usable compiler."""
+    if not _RUSTC:
+        found = shutil.which('rustc')
+        if found:
+            try:
+                probe = subprocess.run([found, '--version'], capture_output=True, text=True, timeout=60)
+                if probe.returncode != 0:
+                    found = None
+            except (OSError, subprocess.SubprocessError):
+                found = None
+        _RUSTC.append(found)
+    return _RUSTC[0]
 
 
 def objcopy_available():
