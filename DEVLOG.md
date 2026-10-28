@@ -1,3 +1,23 @@
+## 2026-10-28 -- ex13: a definitions-plus-constants Python source runs as a no-op (job-ex13-10290432)
+
+Building every Python-syntax example in `language_examples` (hello, integer_series, math, stdin_sum,
+sum, use_math) with `--syntax python`, only `math.ail` (`LIMIT = 6` plus `def sum_to(n)`) was
+refused on the default build: `not in the subset: the first parameter must be the sequence read
+from the file`. The general build already gave CPython's answer (nothing, exit 0). The typed path
+compiled the functions and then tried to synthesize the array-entry tool wrapper, whose first
+parameter must be the sequence read from the file. A Python source whose top level is definitions
+plus at least one module constant, with no `main` and no executable statement, now emits a no-op
+`int main(void) { return 0; }`, matching CPython and the general path; a top-level statement still
+runs as a script, and a `main` is still the entry point. Probes in `/tmp/probes` on both builds via
+`cmp.sh`: `math_example`, `defonly_const_probe`, `defonly_const_after_probe`, `const_print`,
+`const_list`, `const_import`, `const_class`, `const_types`, `const_expr`, `const_annot`,
+`const_guard`, `const_print_top`, `const_array`, `const_side` and `const_call` match CPython on
+both builds; `const_main` (a real `main`) and `const_print_top` (a top-level statement) still run.
+`const_alias` (`B = A`) and `const_call` (`X = len("abc")`) keep the pre-existing typed-path
+`a function with no parameters and no print()/assert` refusal because the front end does not
+classify those assignments as module constants; the general path builds them as no-ops. Added
+`test_ail_ex13.py`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
