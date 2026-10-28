@@ -172,6 +172,58 @@ Probes in ``/tmp/probes/pre375`` on both builds via ``cmp.sh``: ``p06_alias``, `
 ``c18`` match CPython.  Final-state tests: test_ail_pre375, test_ail_pre361, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3 (5 modules, 255 s, 0 failed).
 ``tools/update_manifest.py`` was run and ``--check`` passes.
+## 2026-10-27 -- pre377 follow-up: long class names in item-error messages
+
+The pre377 review found that the class name still went into a fixed `char buf[64]`, so a
+40-character class truncated the message mid-word (`...' object is not subscr`) on both
+builds, while base had printed a complete `'instance'` message.  `ail__raise_item_tname` now
+formats the six item-error sites (getitem default and dict-view, setitem, delitem, getslice
+default and dict-view) into a buffer sized from the message and name; no fixed buffer remains
+on that path.  Probes also showed CPython itself formats the name with `%.200s`: a
+300-character class prints its first 200 characters, so the helper caps the name at 200 to
+match.  The dunderrt patch anchors were updated to the helper calls.  Added 40- and
+210-character cases to `test_ail_pre377.py` (both builds), and corrected the DIFFERENCES row:
+a builtin function object now says `builtin_function_or_method` (CPython's text) instead of
+`'function'`; other builtin values are unchanged.
+
+Probes in `/tmp/probes` (both builds via `cmp.sh`): `p01_boundaries` (class-name lengths 1,
+20-25, 32-35, 40, 300; getitem, negative index, slice, setitem, delitem) matches, including
+the 200-character cap; `p02_uncaught_long` (40) and `p03_uncaught_short` match uncaught stderr;
+`p04_routes_long` (argument, alias, list item, attribute, dict value, subclass, setitem and
+delitem through an argument) matches; `p05_dunder_long` (long-named class with the item
+methods still works); `p06_builtins` (int, None, bool, float, bytes, builtin function, lambda,
+str key, tuple key) matches; `p07_empty_ok` matches.  Final-state tests:
+`par_check.py -j 2 test_ail_pre377 test_ail_safetynet test_ail_files
+test_ail_corpus_findings3` -- 4 modules, 0 failed (371 s).  `tools/update_manifest.py` was run
+and `--check` passes.
+
+## 2026-10-27 -- pre377: instance item errors name the class (job-pre377-10280635)
+
+The pre354 review's first recorded item no longer reproduces on this tree: `p08_dict_slice`
+(`d = {1: 2}; d[1:2]`, caught and uncaught) matches CPython's `KeyError: slice(1, 2, None)`
+on both builds, because pre353 already fixed dict slice keys.  The next recorded item did
+reproduce: `class A: pass; A()[0]` (and `A()[1:2]`) printed
+`TypeError: 'instance' object is not subscriptable` on both builds, where CPython names
+`'A'`.  The v2 general runtime's `ail_op_getitem`, `ail_op_setitem`, `ail_op_delitem` and
+`ail_op_getslice` built these messages from `ail_type_name(c.tag)`, which has only the tag;
+they now use `ail__tname_c(c)`, the runtime's existing object-to-name helper, so an instance
+shows its class (and a subclass its own name) while builtin values are unchanged.  The
+matching `dunderrt.patch` anchors were updated so the operator-method patch still applies.
+The review's `p11_lambda_comp` refusal (`a slice object the general path could not build`)
+was not reached by a probe and that path is unchanged.
+
+Probes in `/tmp/probes/pre377` (both builds via `cmp.sh`): match CPython `p08_dict_slice`,
+`p08b_uncaught`, `p08_dict_slice_control`, `p09_instance_name`, `p09b_plain`,
+`p09_uncaught`, `p09_routes` (argument, alias, list item, attribute, dict value, subclass,
+slice object), `p09_setdel`, `p09_init_class`, `p09_builtins` (int, None, bool, float,
+bytes, function) and `p09_dunder` (an instance with the item methods still works);
+`p11_lambda_comp` also matches.  Added `AIL_CURRENT/test_ail_pre377.py` (7 programs + an
+uncaught case, both builds) and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`; added DIFFERENCES row `C?-job-pre377-10280635-1`.  Final-state
+tests: test_ail_pre377 (2 tests, 49 s), test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (25 tests, 503 s, 1 skipped).  `tools/update_manifest.py` was run
+and `--check` passes.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
