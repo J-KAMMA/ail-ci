@@ -1,3 +1,21 @@
+## 2026-10-28 -- routed-power deferral narrowed to pyfront's int_constant shape (job-rbpre385-10281859)
+
+The first pre385 deferral used `_const_fold_int` on a `**` base, which folds `~` and bool
+arithmetic although pyfront's `int_constant` does not.  A routed `def take(n): print((~2) ** n)`
+or `(True + True) ** n` called with 64 then compiled and stopped with `integer overflow` instead
+of being refused by name.  `older_pass_owns` now uses `_binpow_syntactic_int` for `**` (and keeps
+`_pow_static_int` for `pow()`), so those bases are refused with the `through a call` wording while
+a genuine syntactic `2 ** n` still keeps the pre273 wording and `pow(~2, n)` keeps pre299's.
+
+Probes in `/tmp/probes` via `cmp.sh` on both builds: r_invert_base, r_bool_arith_base,
+r_bool_arith3_base, r_invert_param, r_invert_alias and r_invert_pow_call are refused by name;
+r_invert_small, r_bool_arith_small, r_invert_neg_small match CPython; r_syntactic_base_still_old
+keeps the pre273 wording.  r_invert_list, r_invert_attr and r_invert_dict still stop with
+`integer overflow` on both this branch and the base tree, so they are pre-existing.  Final-state
+tests: test_ail_pre385, test_ail_pre273, test_ail_pre299, test_ail_pre364, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 pass (7 modules, 0 failed).  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-28 -- routed-power diagnostics keep the pre273/pre299 wording (job-rbpre385-10281859)
 
 The pre385 routed-power pass runs before the older computed-exponent checks and followed a call
