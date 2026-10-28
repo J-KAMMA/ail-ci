@@ -3,9 +3,11 @@
 The general path materialises a generator expression when it is built.  It refused every
 generator expression that contained another one, although `sum(...)`/`"".join(...)`/`any(...)`
 read the inner generator whole at exactly the point CPython does.  The refusal now remains only
-where the eager lowering would move an observable side effect: an inner generator saved as a
-value, or an outer generator used as a for/comprehension source (its body interleaves with the
-loop body).  Both builds are compared with CPython 3.12.
+where the eager lowering would move an observable side effect or evaluate an element CPython
+never reaches: an inner generator saved as a value, an outer generator used as a
+for/comprehension source (its body interleaves with the loop body), or a plain tuple/list unpack
+(which pulls only len(targets)+1 elements).  A starred unpack reads every element and still
+matches.  Both builds are compared with CPython 3.12.
 """
 import os
 import subprocess
@@ -99,6 +101,17 @@ def outer(row):
 rows = [[1, 2], [3]]
 print(sum(sum(inner(x) for x in outer(row)) for row in rows))
 ''',
+    'starred_unpack': '''rows = [[1, 2], [3], [4, 5]]
+first, *rest = (sum(x for x in row) for row in rows)
+print(first)
+print(rest)
+*init, last = (sum(x for x in row) for row in rows)
+print(init)
+print(last)
+rows = []
+*all_values, = (sum(x for x in row) for row in rows)
+print(all_values)
+''',
 }
 
 REFUSED = {
@@ -107,6 +120,10 @@ REFUSED = {
 ''',
     'inner_saved_value': '''for value in ((y for y in row) for row in [[1], [2]]):
     print(list(value))
+''',
+    'plain_unpack': '''rows = [1, 1, 1, 0]
+a, b = (sum(10 // y for y in [x]) for x in rows)
+print(a, b)
 ''',
 }
 

@@ -12453,16 +12453,19 @@ def _genexp_parents(tree):
 
 def _genexp_immediate_consumer(node, parents):
     """True iff `node` is read whole at the same point by its parent: an argument of a
-    consuming builtin/method, a starred unpack, a tuple/list unpacking, or the argument of
-    any/all/next (compiled lazily by their own handlers).  A for/comprehension source is not
-    immediate: the body interleaves with the consumer, so the eager lowering would move its
-    side effects."""
+    consuming builtin/method, a starred unpack, or the argument of any/all/next (compiled
+    lazily by their own handlers).  A for/comprehension source is not immediate: the body
+    interleaves with the consumer, so the eager lowering would move its side effects.  A
+    plain tuple/list unpack is not immediate either: it pulls exactly len(targets)+1 elements
+    (the extra one only to detect "too many values"), while the eager lowering would evaluate
+    every element, including ones CPython never reaches."""
     par = parents.get(node)
     if isinstance(par, ast.Starred):
         return True
     if isinstance(par, (ast.Assign, ast.AnnAssign)):
         target = par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1 else getattr(par, 'target', None)
-        if isinstance(target, (ast.Tuple, ast.List)):
+        if isinstance(target, (ast.Tuple, ast.List)) and \
+                any(isinstance(e, ast.Starred) for e in target.elts):
             return True
     if isinstance(par, ast.Call) and node in par.args:
         f = par.func

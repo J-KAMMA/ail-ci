@@ -1,3 +1,23 @@
+## 2026-10-28 -- cov29 review: a plain unpack is not an immediate consumer
+
+The cov29 change accepted a plain tuple/list unpack (`a, b = gen`) as a consumer that reads a
+nested generator whole at the same point.  It does not: CPython pulls exactly `len(targets)+1`
+elements (the extra one only to report "too many values"), while the eager lowering materialises
+every element.  `rows = [1, 1, 1, 0]; a, b = (sum(10 // y for y in [x]) for x in rows)` printed
+`zero`/`done` instead of CPython's `too many`/`done` on both builds because the fourth element was
+evaluated, and the side-effect form evaluated a row CPython never reaches.  The base refused by
+name.
+
+`_genexp_immediate_consumer` now returns true for a tuple/list unpack only when the target
+contains a direct `*` element, which really does read every element; otherwise the nested
+generator is refused by name again.  `test_ail_cov29` gains a starred-unpack case (including an
+empty outer generator) that must match CPython on both builds, and a plain-unpack refusal case.
+Probes in `/tmp/probes/cov29fix` via `cmp.sh`: `p_unpack3`, `p_unpack2_side`, `p_unpack_neg` and
+`p_unpack_routes` are refused by name on both builds; `p_star_basic`, `p_star_middle`,
+`p_star_empty`, `p_star_via_argument`, `p_star_via_list_item`, `p_star_via_attribute`,
+`p_star_via_dict_value` and `p_star_negative` match CPython on both builds.  Corpus refusals over
+219 programs stay default 21 and `AIL_UNIFIED_FORCE=1` 21, with the nested-generator reason 0.
+
 ## 2026-10-28 -- cov29: a nested generator expression with an eagerly consumed inner one matches (job-cov29-10290513)
 
 A census of all 219 `lab/corpus/programs` built in both modes (`default` and
@@ -5,8 +25,8 @@ A census of all 219 `lab/corpus/programs` built in both modes (`default` and
 frequent named construct was "a generator expression nested inside another generator expression"
 (3 programs, general build).  The general path materialises a generator expression when it is
 built, so it refused every nested one; an inner generator passed whole to `sum`, `"".join`,
-`any`/`all`/`next`, `list`/`tuple`/`sorted`, a starred unpack or a tuple/list unpack is read at
-exactly the same point by CPython.
+`any`/`all`/`next`, `list`/`tuple`/`sorted`, a starred unpack is read at exactly the same point
+by CPython.
 
 `pyboxed2._nested_value_genexp` now keeps the refusal only when the outer or inner generator is
 not read whole at that point: an inner generator saved as a value, or an outer generator used as
