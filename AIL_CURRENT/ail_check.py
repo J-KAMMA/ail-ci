@@ -308,6 +308,7 @@ MODULES = (
     'test_ail_splitlines_utf8', 'test_ail_str_adjacent_cat', 'test_ail_str_case', 'test_ail_str_cursor', 'test_ail_struct_lifetimes',
     'test_ail_struct_list_objects', 'test_ail_tcp_json_lines', 'test_ail_tcp_json_lines_poll', 'test_ail_tcp_listener', 'test_ail_text_find_search',
     'test_ail_utf8_stream_fuzz',
+    'test_ail_ex10',
     'test_ail_pre75',
     'test_ail_pre57',
     'test_ail_fz1',

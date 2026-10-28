@@ -1,3 +1,27 @@
+## 2026-10-28 -- ex10: `__file__` names the source file (job-ex10-10290412)
+
+A coverage scan of the Python-syntax examples under `AIL_CURRENT/language_examples` (the `.py`
+files and the six `.ail` files written in the Python syntax, built with `compile --syntax python`)
+left 14 refused; the most common message was `__file__ is not available` (5 files:
+`row_codec_compare.py`, `row_decimal_quad.py`, `row_state_quad_compare.py`,
+`row_store_identity_compare.py`, `test_row_cpu_profile.py`, reached through
+`row_locals_compare.py`).  CPython 3.12 makes `__file__` the absolute path of the script, and a
+locally imported module's `__file__` (also `module.__file__`) its own absolute source path, so the
+front end now substitutes a string constant at parse time.  Modules get their own path in
+`ail_modules`' rewriter; the entry path is the resolved command-line path; a namespace package's
+`__file__` is `None`.  A program that binds `__file__` itself (assignment, parameter, import
+alias, def/class/except name) is left alone and still refused by name rather than being silently
+rewritten; a program without the name keeps its previous text and C byte for byte.
+
+Probes in `/tmp/probes/f1.py`..`f9.py` on both builds via `cmp.sh` match CPython: direct
+`__file__`; `pathlib.Path` name/suffix/stem; alias, list item and dict value; f-string and
+concatenation; argument and default argument; comprehension item; class/instance attribute;
+`os.path.basename`/`dirname`; a docstring/string that only mentions the name; and a program that
+assigns `__file__`.  A parameter named `__file__` (`f4.py`) is still refused by name on both
+builds, as before.  A sibling module and `module.__file__` match CPython in a manual two-file
+build, and a namespace package gives `None`; `test_ail_ex10.py` pins the direct and module cases
+on both builds.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

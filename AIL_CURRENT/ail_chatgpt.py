@@ -4205,6 +4205,45 @@ def _refuse_load(error):
     raise SystemExit(2)
 
 
+def _substitute_file_name(text, file_name):
+    """`__file__` is a compile-time constant: the entry path as it was named on the command line,
+    or a module's own path (ail_modules rewrites those before the merged text is parsed).  A
+    program that binds the name itself keeps its own binding."""
+    if '__file__' not in text:
+        return text
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)) and node.id == '__file__':
+            return text
+        if isinstance(node, ast.arg) and node.arg == '__file__':
+            return text
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == '__file__':
+            return text
+        if isinstance(node, ast.alias) and (node.asname or node.name.split('.')[0]) == '__file__':
+            return text
+        if isinstance(node, ast.ExceptHandler) and node.name == '__file__':
+            return text
+    spans = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id == '__file__':
+            spans.setdefault(node.lineno, []).append((node.col_offset, node.end_col_offset))
+    if not spans:
+        return text
+    replacement = repr(file_name).encode('utf8')
+    lines = text.splitlines(keepends=True)
+    for number, columns in spans.items():
+        line = lines[number - 1]
+        ending = line[len(line.rstrip('\r\n')):]
+        body = line[:len(line) - len(ending)].encode('utf8')
+        for start, end in sorted(columns, reverse=True):
+            body = body[:start] + replacement + body[end:]
+        lines[number - 1] = body.decode('utf8') + ending
+    return ''.join(lines)
+
+
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
                   notes=None, local_imports=False, ffi=None, prelower=None):
@@ -4283,6 +4322,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                      library=module_only)
             text = fold_constants(text)
             text = _fold_float_int_text(text)
+            if syntax == 'python':
+                text = _substitute_file_name(text, str(path))
             tree = ast.parse(text, filename=str(path))
             if syntax == 'python' and entry and not module_only and not declarations_only:
                 _check_main_called(tree)
