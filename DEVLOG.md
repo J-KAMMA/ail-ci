@@ -1,3 +1,27 @@
+## 2026-10-28 -- pre367 integration: the specific refusal wordings keep priority (job-pre367-10280933)
+
+`_check_int64_binpow_constants` refused every out-of-int64 power it could resolve with its own
+`int64 constant expression out of range`, before three older checks that own their contexts, so
+`test_ail_pre97`, `test_ail_pre160`, `test_ail_pre190`, `test_ail_pre200`, `test_ail_pre205` and
+`test_ail_pre273` failed on the integration branch.  The checker now leaves a node alone when it
+is a `str.split`/`rsplit` maxsplit constant (`id(node) in maxsplit`, the pre97/pre190/pre200/pre205
+wording), when it is a syntactic literal power that is the whole right-hand side of a plain
+assignment (the pre160 emitter fold keeps its `outside the signed 64-bit range` wording), and when
+a syntactically constant base of magnitude at least 2 is raised to an exponent the front end does
+not see as constant (`pyfront.refuse_variable_int_pow` keeps its `constant base N ... computed at
+run time` wording, pre273).  A power whose base reaches the checker through a name, list item,
+attribute, dict value or a constant argument is still refused by name here, and a literal power in
+a class body or default still is too.
+
+Probes in `/tmp/probes` on both builds: `p1_saturate_assign` is refused by the emitter's wording,
+`p2_maxsplit_pow` and `p9_assign_name_pow`/`p10_list_dict_attr`/`p5_name_base_refused` are refused
+by name, `p3_variable_pow_local` and `p4_variable_pow_inrange` are refused by the front end,
+`p6_inrange_local`, `p7_closure_shadow` and `p8_maxsplit_inrange` match CPython.  Tests on the
+final commit: the six restored modules plus `test_ail_pre367`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`, `test_ail_pre113`, `test_ail_pre33`,
+`test_ail_pre331`, `test_ail_pre334`, `test_ail_pre335`, `test_ail_pre338` and
+`test_ail_pre351` all pass.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre367 follow-up: closure free names resolve to the enclosing function (job-pre367-10280424)
 
 The pre367 review found a false refusal: a nested function's free name was looked up only

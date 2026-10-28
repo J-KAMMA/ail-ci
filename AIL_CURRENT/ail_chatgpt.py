@@ -1245,7 +1245,7 @@ def _check_int64_literals(tree):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
-    _check_int64_binpow_constants(tree, known, attributes, passthrough, parents)
+    _check_int64_binpow_constants(tree, known, attributes, passthrough, parents, maxsplit)
 
 
 _INT_BINARY = {
@@ -1832,6 +1832,63 @@ def _check_int64_pow_constants(tree, known):
             check(node, local, scope_names)
 
 
+_BINPOW_CONST_OPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
+                     ast.Pow, ast.LShift, ast.RShift, ast.BitAnd, ast.BitOr, ast.BitXor)
+
+
+def _binpow_syntactic_exponent_is_constant(node):
+    """Whether the front end sees a constant exponent (pyfront._pow_exponent_is_constant)."""
+    if isinstance(node, ast.Constant):
+        return type(node.value) in (int, float, bool)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert, ast.Not)):
+        return _binpow_syntactic_exponent_is_constant(node.operand)
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINPOW_CONST_OPS:
+        return (_binpow_syntactic_exponent_is_constant(node.left)
+                and _binpow_syntactic_exponent_is_constant(node.right))
+    return False
+
+
+def _binpow_syntactic_int_node(node):
+    """Whether an expression is int-only in the shape pyfront.int_constant folds."""
+    if isinstance(node, ast.Constant):
+        return type(node.value) is int
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        return _binpow_syntactic_int_node(node.operand)
+    if isinstance(node, ast.BinOp) and type(node.op) in _BINPOW_CONST_OPS:
+        return (_binpow_syntactic_int_node(node.left)
+                and _binpow_syntactic_int_node(node.right))
+    return False
+
+
+def _binpow_syntactic_int(node):
+    """The int of a syntactic int-only expression (pyfront.int_constant's shape), else None.
+    Invert and a bool leaf are excluded because the front end's folder does not fold them."""
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) is int else None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value = _binpow_syntactic_int(node.operand)
+        if value is None:
+            return None
+        return -value if isinstance(node.op, ast.USub) else value
+    if _binpow_syntactic_int_node(node):
+        return _const_fold_int(node)
+    return None
+
+
+def _binpow_assignment_value(node, parents):
+    """Whether a power is (inside) the whole right-hand side of a plain assignment, where the
+    existing checks keep the run-time overflow stop and the emitter folds with its own wording."""
+    root = node
+    while True:
+        parent = parents.get(root)
+        if parent is None or _const_fold_int(parent) is None:
+            break
+        root = parent
+    parent = parents.get(root)
+    return (isinstance(parent, ast.Assign) and parent.value is root
+            and not isinstance(parents.get(parent), ast.ClassDef))
+
+
 def _check_binpow_constant(node, base, exponent):
     """Refuse a ``**`` whose known int operands make an exact result outside int64."""
     if type(base) is not int or type(exponent) is not int:
@@ -1945,7 +2002,7 @@ def _binpow_power_parameters(tree, module_known, module_int_known, attributes, p
     return found
 
 
-def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, parents):
+def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, parents, maxsplit):
     """Refuse ``base ** exponent`` on statically known ints whose exact result leaves int64.
 
     Module constants, literal containers read by subscript, class and instance attributes, a
@@ -1954,7 +2011,10 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
     here.  A value that only exists at run time keeps the language's run-time ``integer
     overflow`` stop; an in-range result, a negative exponent (CPython's float answer) and the
     bases 0, 1 and -1 are left alone.  A power whose own value leaves int64 but sits in a
-    larger constant expression that still fits (`2 ** 63 - 1`) is left to the existing fold."""
+    larger constant expression that still fits (`2 ** 63 - 1`) is left to the existing fold.
+    A maxsplit constant and a constant base with a computed exponent keep their own front-end
+    wording, and the whole right-hand side of an assignment keeps the emitter's wording and
+    run-time stop (the pre97, pre273 and pre160 rules)."""
     module_int_known = _known_module_constants(tree)
     module_lookup = lambda name: module_known.get(name, _UNKNOWN)
     module_global = lambda name: True
@@ -1982,6 +2042,8 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
                     return constant
             return _constant_value(expression, lookup, global_name, passthrough, attributes)
 
+        if id(node) in maxsplit:
+            return
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and global_name(node.func.id) and node.func.id in power_parameters):
             for parameter, (index, exponents) in power_parameters[node.func.id].items():
@@ -1994,6 +2056,15 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
                 for exponent in exponents:
                     _check_binpow_constant(node, value, exponent)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            if (_binpow_syntactic_int_node(node.left)
+                    and _binpow_syntactic_int_node(node.right)
+                    and _binpow_assignment_value(node, parents)):
+                return
+            syntactic_base = _binpow_syntactic_int(node.left)
+            if (syntactic_base is not None and abs(syntactic_base) >= 2
+                    and _INT64_MIN <= syntactic_base <= _INT64_MAX
+                    and not _binpow_syntactic_exponent_is_constant(node.right)):
+                return
             base = value_of(node.left)
             exponent = value_of(node.right)
             if type(base) is int and type(exponent) is int and enclosing_constant_fits(node):
