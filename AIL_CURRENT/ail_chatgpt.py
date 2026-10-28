@@ -975,8 +975,13 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
     return functions
 
 
-def _wrapper_int_defaults(tree, int_params):
-    """The default expression of every parameter a wrapper passes to int()."""
+def _wrapper_int_defaults(tree, int_params, known, passthrough, attributes):
+    """The constant value of every default a wrapper passes to int().
+
+    Defaults are evaluated once, in the module scope where they are defined, so a local
+    name bound at a call site must not change the value a default carries.
+    """
+    lookup = lambda name: known.get(name, _UNKNOWN)
     defaults = {}
     for fn in tree.body:
         if not isinstance(fn, ast.FunctionDef) or fn.name not in int_params:
@@ -984,11 +989,13 @@ def _wrapper_int_defaults(tree, int_params):
         args = fn.args
         positional = [argument.arg for argument in (*args.posonlyargs, *args.args)]
         first = len(positional) - len(args.defaults)
-        mapping = {positional[first + offset]: default
+        mapping = {positional[first + offset]:
+                   _constant_value(default, lookup, lambda unused: True, passthrough, attributes)
                    for offset, default in enumerate(args.defaults)}
         for argument, default in zip(args.kwonlyargs, args.kw_defaults):
             if default is not None:
-                mapping[argument.arg] = default
+                mapping[argument.arg] = _constant_value(
+                    default, lookup, lambda unused: True, passthrough, attributes)
         defaults[fn.name] = mapping
     return defaults
 
@@ -1170,10 +1177,11 @@ class _Int64CallChecker(ast.NodeVisitor):
                 and self._global_name(node.func.id)):
             for name, index in self.int_params[node.func.id].items():
                 argument = _bound_argument(node, name, index)
-                if argument is None:
-                    argument = self.int_defaults.get(node.func.id, {}).get(name)
                 if argument is not None:
                     self._check_int_value(node, self._value(argument))
+                else:
+                    default = self.int_defaults.get(node.func.id, {}).get(name, _UNKNOWN)
+                    self._check_int_value(node, default)
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
@@ -1445,7 +1453,7 @@ def _check_int64_literals(tree):
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes)
-    int_defaults = _wrapper_int_defaults(tree, int_params)
+    int_defaults = _wrapper_int_defaults(tree, int_params, known, passthrough, attributes)
     _Int64CallChecker(known, passthrough, int_params, int_defaults, int_shadowed, attributes,
                       program_bound).visit(tree)
     maxsplit = _maxsplit_constant_nodes(tree)

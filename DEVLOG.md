@@ -1,3 +1,25 @@
+## 2026-10-28 -- pre393 review fix: defaults are evaluated in the defining module scope (job-pre393-10280904)
+
+The pre393 review found that the new default fallback evaluated the default expression with
+`_Int64CallChecker._value`, i.e. in the call site's local scope.  A default is evaluated once
+at def time in the module scope, so a local in the caller that reused a name from the default
+(`BIG = 5` module-wide, `BIG = 1e300` inside the caller of `f(x=BIG)`) produced a false
+refusal for a value that never reaches `int()`.  `_wrapper_int_defaults` now takes the module
+`known` map, `passthrough` and `attributes` and stores each default's *constant value*,
+resolved with module-scope lookup; `visit_Call` checks that stored value when the argument is
+omitted.  A shadowing caller local can therefore neither refuse an in-range default nor hide
+an out-of-range one.
+
+Probes in `/tmp/probes` (13 programs, both builds via `cmp.sh`): `s01_shadow_scalar`,
+`s02_shadow_list_item`, `s03_shadow_in_method`, `s04_shadow_kwonly`, `s05_shadow_dict_value`,
+`s06_shadow_attribute`, `s07_shadow_explicit_argument`, `s08_shadow_in_range_default`,
+`s12_shadow_nonconstant_default` and `s13_default_and_call_same_scope` match CPython;
+`s09_shadow_out_of_range_default`, `s10_shadow_negative_default` and `s11_shadow_string_default`
+are refused by name (CPython prints the big integer).  `test_ail_pre393.py` gained 10 matching
+and 2 refused shadowing programs, both builds.  Final-state tests: test_ail_pre393,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-28 -- pre393: int() of an out-of-int64 default argument is refused by name (job-pre393-10280904)
 
 The pre370 review recorded as pre-existing (its probe `r09`) that `def f(x=1e300): return int(x)`

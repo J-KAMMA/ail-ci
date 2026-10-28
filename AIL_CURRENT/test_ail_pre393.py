@@ -8,8 +8,11 @@ to the default expression.  The same fallback exposed a constant string outside 
 a wrapper, which now gets the direct ``int()`` conversion refusal instead of a run-time stop.
 
 An in-range default, an in-range argument that overrides the default, a dead function and a
-non-int read keep CPython's result.  Programs are built with the general path forced and with
-the default build; stdout and the exit status must match CPython.
+non-int read keep CPython's result.  Defaults are evaluated once in the module scope where
+they are defined, so a local name bound at a call site must not change them: a shadowing
+local of the same name neither refuses an in-range default nor hides an out-of-range one.
+Programs are built with the general path forced and with the default build; stdout and the
+exit status must match CPython.
 """
 import os
 import shutil
@@ -163,6 +166,33 @@ def f(x):
 
 print(f("9223372036854775808"))
 ''',
+    'out_of_range_default_with_shadow': '''
+BIG = 1e300
+
+
+def f(x=BIG):
+    return int(x)
+
+
+def g():
+    BIG = 5
+    return f()
+
+
+print(g())
+''',
+    'negative_default_with_shadow': '''
+def f(x=-1e300):
+    return int(x)
+
+
+def g():
+    x = 5
+    return f()
+
+
+print(g())
+''',
 }
 
 MATCH = {
@@ -217,6 +247,134 @@ def f(x=1e300):
 
 
 print(f(*[1]))
+''',
+    'shadowed_scalar_at_call_site': '''
+BIG = 5
+
+
+def f(x=BIG):
+    return int(x)
+
+
+def g():
+    BIG = 1e300
+    return f()
+
+
+print(g())
+''',
+    'shadowed_list_item_at_call_site': '''
+M = [5]
+
+
+def f(x=M[0]):
+    return int(x)
+
+
+def g():
+    M = [1e300]
+    return f()
+
+
+print(g())
+''',
+    'shadowed_in_method': '''
+BIG = 7
+
+
+def f(x=BIG):
+    return int(x)
+
+
+class C:
+    def g(self):
+        BIG = 1e300
+        return f()
+
+
+print(C().g())
+''',
+    'shadowed_kwonly_at_call_site': '''
+BIG = 6
+
+
+def f(*, x=BIG):
+    return int(x)
+
+
+def g():
+    BIG = 1e300
+    return f()
+
+
+print(g())
+''',
+    'shadowed_dict_value_at_call_site': '''
+D = {"k": 5}
+
+
+def f(x=D["k"]):
+    return int(x)
+
+
+def g():
+    D = {"k": 1e300}
+    return f()
+
+
+print(g())
+''',
+    'shadowed_attribute_at_call_site': '''
+class C:
+    v = 5
+
+
+class D:
+    v = 1e300
+
+
+def f(x=C.v):
+    return int(x)
+
+
+def g():
+    C = D
+    return f()
+
+
+print(g())
+''',
+    'shadowed_explicit_argument_at_call_site': '''
+BIG = 5
+
+
+def f(x=BIG):
+    return int(x)
+
+
+def g(v):
+    BIG = 1e300
+    return f(v)
+
+
+print(g(2))
+print(g(2.9))
+''',
+    'shadowed_nonconstant_default': '''
+def make():
+    return 4
+
+
+def f(x=make()):
+    return int(x)
+
+
+def g():
+    make = lambda: 1e300
+    return f()
+
+
+print(g())
 ''',
 }
 
