@@ -1,3 +1,31 @@
+## 2026-10-28 -- pre410: class-body annotation name reads use enclosing scopes (job-pre410-10281225)
+
+The first still-differing item in the pre403 review was its pre-existing `rp3_unrelated_func` and
+`rp4_if_false`: `def f(): C = 5` (or `if False: C = 5`) before `class C: x: C = 1` compiled and
+printed `1` on both builds, where CPython evaluates the annotation and raises NameError.  This
+tree did not carry the class-name read check from pre403, so the same cause was fixed by adding
+it with scope-aware earlier bindings: a read is allowed only by a binding in the class body
+before the read or in an enclosing module/function scope before the class, and a binding in a
+constant-false `if`/`while`, an empty literal `for`, a nested function/lambda/comprehension, or an
+unrelated function no longer hides the NameError.  The check models a same-line binding, a walrus
+in the annotation, a PEP 695 type parameter named like the class, and the annotation-only target
+(which binds after the annotation).  Comprehension targets and lambda parameters still shadow the
+class name, while the first comprehension iterable and a lambda default are refused.  String
+annotations and `from __future__ import annotations` are unchanged.
+
+Probes in `/tmp/probes/pre410` on both builds: `rp3_unrelated_func`, `rp4_if_false`, `r_direct`,
+`r_annotation_only`, `r_method_param`, `r_method_return`, `r_later`, `r_comp_iterable`,
+`r_lambda_default`, `r_argument`, `r_list_item`, `r_attribute`, `r_dict_value`,
+`r_class_if_false`, `r_if_zero`, `r_self_target` and `r_loop_binding` are refused by name;
+`m_prior_module`, `m_if_true`, `m_module_alias`, `m_earlier_class`, `m_same_line`, `m_walrus`,
+`m_annassign_target`, `m_pep695`, `m_comp_shadow`, `m_lambda_shadow`, `m_string`, `m_future`
+and `m_no_annotation` match CPython.  `m_class_if_true` is refused by the pre-existing class-body
+subset ("a class body statement other than def/assignment/pass/docstring"), unchanged.  A
+`--debug-dir` build of `m_no_annotation` has a `program.c` byte-identical to the base work tree
+(only report paths differ).  Final-state tests: test_ail_pre410, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (4 modules, 396 s, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
