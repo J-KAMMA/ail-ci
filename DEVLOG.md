@@ -19,7 +19,7 @@ options/functions (for example `TextWrapper`, `shorten(..., placeholder=...)`) a
 
 This makes `lab/corpus/programs/deepseek-v4.1-flash-free/t116.py` build on both AIL_IR=0 and
 AIL_IR=1 and match CPython on all three recorded inputs. Added and registered
-`test_ail_stdlib1.py`; no new DIFFERENCES row (the supported functions match CPython).
+`test_ail_stdlib1.py` and assigned it in `tools/ci_shards.json` (weight 10.0); no new DIFFERENCES row (the supported functions match CPython).
 Probes in `/tmp/probes`: `tw.py`, `tw2.py`, `tw3.py`, `tw4.py`, `tw_random.py` (hyphen/tab/
 newline/empty/negative-width boundaries, 120 generated texts), `cw.py` and `cp.py`
 (copy stays a named refusal). Final-state tests: test_ail_stdlib1, test_ail_pre360,
