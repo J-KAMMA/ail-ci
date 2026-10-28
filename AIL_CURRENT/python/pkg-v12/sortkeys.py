@@ -356,10 +356,13 @@ class _Rewriter:
             return call
         source = call.args[0]
         if _items_receiver(source) is not None:
-            raise self.Unsupported('sorted(d.items()) is supported only as the iterable of '
-                                   '`for k, v in sorted(d.items(), ...)`; this language has no '
-                                   'tuple values (use sorted(d.keys(), key=lambda k: ...) and '
-                                   'index d[k])')
+            # `sorted(d.items())` as a value is already built by the ordinary emitter (a list of
+            # AIL tuples, exactly what CPython's dict_items holds; `dict(sorted(...))`, indexing,
+            # unpacking and the tuple repr all agree). This key-column rewrite only takes a name
+            # as its source, so it leaves the call alone rather than refusing a construct the
+            # rest of the compiler handles; a shape the ordinary path cannot build is refused
+            # there by name.
+            return call
         key, reverse = self.options(call, what)
         if key is None:
             if self.stage >= 1 and isinstance(source, ast.Name) and source.id in self.dicts:

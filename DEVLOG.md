@@ -1,3 +1,29 @@
+## 2026-10-28 -- cov19: `sorted(d.items())` as a value is left to the ordinary emitter
+
+Rebuilding all 219 Python corpus programs on this tree (both the default build and `AIL_IR=1`)
+gives 48 compile-time refusal messages over 24 programs.  After the imports (the stdlib tasks'
+work: textwrap, collections, decimal, unicodedata, struct, re) the largest non-import group was
+`sorted(d.items())` -- 4 messages over 2 programs, tied with `json.loads` without a declared
+type.  The construct itself is already built exactly by the ordinary emitter (a list of AIL
+tuples, so indexing, tuple unpacking, `dict(...)` and the repr agree with CPython); the blanket
+refusal in `sortkeys.py` was raised only by the fallback key-column rewrite, which runs after the
+ordinary compile failed, and it hid the programs' real blockers.
+
+`_Rewriter.sorted_site` now leaves a `sorted(d.items())` call to the ordinary path instead of
+refusing it.  The key-column rewrite cannot take a `.items()` call as its source, so this never
+reorders such a call; a shape the ordinary path cannot build is still refused there by name.
+After the change the same 24 programs are refused (48 messages): `sorted(d.items())` is 0, and
+the two programs report their true blockers (`t456`: a non-name base class; `t467`: `sys.stdin`
+used as a plain value / `list[int] | None`).
+
+Probes in `/tmp/probes/cov19` (`items_value`, `items_key`, `items_routes`, `items_neg_int`,
+`items_mutation`) cover a value, key= with negative/reverse, an argument, a list item, an
+attribute, a dict value, empty/negative/int keys and mutation after the sort; all match CPython
+on both builds.  The unit test in `test_ail_cov19.py` also checks that the rewrite no longer
+raises for `sorted(d.items())` (it did on the base) and still rewrites a keyed list sort.
+`test_ail_cov19` (5 tests), `test_ail_sort_keys`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass on the final commit; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
