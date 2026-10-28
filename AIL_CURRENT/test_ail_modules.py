@@ -1256,7 +1256,8 @@ class PackageRefusals(ModulesBase):
                       "pkg/b.py": "X = 1\n", "main.py": "import pkg.a\nprint(pkg.a.f())\n"}), "1\n")
 
     def test_module_file_attributes_and_dynamic_imports(self):
-        self.refused({"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__file__)\n"}, "not available")
+        self.assertEqual(self.same_as_cpython({"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__file__)\n"}),
+                         str(self.dir / "lib.py") + "\n")
         # the front end refuses these (exit 3) by name, with the same hint
         for source, needle in (("import importlib\nm = importlib.import_module('math')\nprint(m)\n", "importlib"),
                                ("m = __import__('math')\nprint(m)\n", "__import__")):

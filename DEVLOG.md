@@ -20,9 +20,10 @@ Probes in `/tmp/probes/ex11` on both builds via `cmp.sh`: `p_basic`, `p_repr`, `
 `p_dict_comp` match CPython; `p_module_assign`, `p_del`, `p_global_assign` are refused by name.
 The imported-module/`helper.__file__` directory (`/tmp/probes/ex11mod`) and a namespace package
 (`/tmp/probes/ex11ns`) match CPython; `/tmp/probes/ex11/pathtest.sh` matches `./`, `../` and a
-symlink entry spelling. Final-state tests: test_ail_ex11, test_ail_safetynet, test_ail_files and
-test_ail_corpus_findings3 (4 modules, 0 failed). `tools/update_manifest.py --check` and
-`tools/ci_shards.py --check` pass.
+symlink entry spelling. Final-state tests: test_ail_ex11, test_ail_modules (its old
+`lib.__file__ is not available` assertion now checks the path, 70 tests), test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (5 modules, 0 failed; test_ail_files skips its Windows
+target case as before). `tools/update_manifest.py --check` and `tools/ci_shards.py --check` pass.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
