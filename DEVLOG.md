@@ -1,3 +1,24 @@
+## 2026-10-28 -- stdlib23: argparse long options and positionals (job-stdlib23-10290511)
+
+Before this change the imports still refused in `lab/corpus/programs` and
+`AIL_CURRENT/language_examples` (by top-level module, local project modules excluded) were:
+argparse 9, tempfile 7, struct 6, unicodedata 3, contextlib 3, shutil 3, signal 2, decimal 2,
+unittest 2, resource 1.  `argparse` was the most used.  It is now lowered by `argparselib.py` onto
+the Python prelude `prelude_argparse.py`: long `--name` options and positionals, `type=` int /
+float / str / `Path` / `pathlib.Path`, `default=` (None, a matching literal, or a string converted
+by `type=`), `required=`, `choices=`, `help=` (ignored), and `parse_args()` from `sys.argv` or an
+explicit list.  A valid parse and CPython's missing-required, unknown-option, expected-one-argument
+and invalid-choice errors match on both builds; `prog=` keeps the error prefix deterministic.
+Short options, actions other than the default store, `nargs`, subparsers, groups, `metavar`, the
+help text, empty `choices`, `parse_args(None)`, an unsupported `default=`, writing a Namespace
+attribute and a Namespace used as a value stay named compile-time refusals.
+`test_ail_stdlib23.py` compares the programs with CPython on AIL_IR=0 and AIL_IR=1 and covers two
+refusals.  Probes in `/tmp/probes/argparse_*` match CPython or are refused by name, including
+`--opt=value`, negative int/float values, an empty value, a missing optional (None), `Path` and
+`pathlib.Path` values and typed defaults, explicit lists, sys.argv, abbreviations, duplicate options,
+choices and the error exits.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
