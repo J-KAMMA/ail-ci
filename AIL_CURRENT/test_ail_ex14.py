@@ -4,6 +4,10 @@ The C-library build (`compile --lib`) already lowers `@export`; a normal `compil
 the decorator before the rest of the program was looked at.  `geometry.py` is the language example:
 it is also a CPython program (`if __name__ == "__main__": print(...)`).  Both builds must print the
 same bytes and exit 0 as CPython, and an invalid export annotation is still refused by name.
+
+A Python-syntax module of definitions and constants with no entry-point-shaped function also runs
+as CPython does (bind the names, print nothing, exit 0) instead of being refused because its first
+parameter is not the file sequence; `math.ail` is that language example.
 """
 import os
 import subprocess
@@ -15,6 +19,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 CLI = ROOT / 'ail_chatgpt.py'
 GEOMETRY = ROOT / 'language_examples' / 'c_export' / 'geometry.py'
+MATH = ROOT / 'language_examples' / 'math.ail'
 
 PROGRAM = '''from dataclasses import dataclass
 import ail_ffi
@@ -102,6 +107,18 @@ if __name__ == "__main__":
 '''
 
 
+MODULE_PROGRAM = '''SCALE = 3
+
+
+def scaled(n: int) -> int:
+    return n * SCALE
+
+
+def label(text: str) -> str:
+    return text.upper()
+'''
+
+
 class ExportProgramTests(unittest.TestCase):
     def build_and_run(self, source, directory):
         cpython_env = dict(os.environ)
@@ -135,6 +152,16 @@ class ExportProgramTests(unittest.TestCase):
     def test_geometry_example_matches_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-ex14-geometry-') as directory:
             self.build_and_run(GEOMETRY, directory)
+
+    def test_module_definition_program_matches_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex14-module-') as directory:
+            source = Path(directory) / 'module_program.py'
+            source.write_text(MODULE_PROGRAM, encoding='utf-8')
+            self.build_and_run(source, directory)
+
+    def test_math_module_example_matches_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex14-math-') as directory:
+            self.build_and_run(MATH, directory)
 
     def test_invalid_export_annotation_is_refused(self):
         text = ('from ail_ffi import export\n\n@export\n'

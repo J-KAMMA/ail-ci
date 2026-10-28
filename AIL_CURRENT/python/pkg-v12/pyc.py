@@ -201,6 +201,22 @@ def is_function(source):
     return any(isinstance(n, ast.FunctionDef) for n in tree.body)
 
 
+def _has_toplevel_exec(source):
+    """Whether the module body has a statement other than a definition, class or import.
+
+    This is the general path's own split between a module body and a def-only file entry (see
+    pyboxed2's `has_toplevel_exec`); the typed path needs the same line when it treats a
+    definition-only module's last function as an entry point.
+    """
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    return any(not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                  ast.Import, ast.ImportFrom))
+               for n in tree.body)
+
+
 def _is_single_expression(source):
     """Keep the expression-over-xs API; route a lone print call as a script.
 
@@ -1086,6 +1102,27 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
         if not legacy_int:
             _refuse_typed_big_store(source, force_general)
         body = to_c(source, strict=strict, info=info)
+        kinds = info.get('kinds') or []
+        if (not force_general and _has_toplevel_exec(source)
+                and not (kinds and kinds[0] == 'array')
+                and _rewrite_script(source, force=False) is None):
+            # A source with only definitions, classes, imports and fixed module constants has no
+            # entry-point-shaped function.  CPython runs its module body (which does nothing but
+            # bind those names), so build that body instead of refusing the first parameter or
+            # handing the program to the general path, which selects its own entry function.  The
+            # synthetic entry is appended last (the entry is the last top-level function) and
+            # returns no value, so `_io_main_for` calls it and exits 0 without printing anything.
+            name = '__ail_module_entry'
+            while name in source:
+                name += '_'
+            module_source = source.rstrip() + '\n\n\ndef %s():\n    pass\n' % name
+            info.clear()
+            info['_checked_arrays'] = True
+            if legacy_int:
+                info['_tint_legacy'] = True
+            if native_diagnostics.enabled():
+                info['_want_source_regions'] = True
+            body = to_c(module_source, strict=strict, info=info)
         if force_general:
             raise Unsupported('general path explicitly requested')
     except Unsupported as _typed_e:

@@ -1,3 +1,35 @@
+## 2026-10-28 -- ex14 follow-up: a definition-only module example runs like CPython (job-ex14-10290439)
+
+Re-surveyed `AIL_CURRENT/language_examples` after the `@export` work.  The Python-syntax `.py`
+examples `c_export/geometry.py` and `c_headers_workflow/table_crc.py` build; of the six `.ail`
+files that parse as Python, `hello`, `integer_series`, `stdin_sum` and `sum` build, and
+`use_math.ail` is refused by name for its undefined `sum_to` (CPython raises NameError).  The
+remaining example refusal was `math.ail`: the default build stopped with
+`not in the subset: the first parameter must be the sequence read from the file` while the general
+build and CPython exit 0 with no output.  The typed path treated `sum_to(n)` as the last-function
+file entry and refused its `int` first parameter even though the source is a module body (an import,
+`LIMIT = 6`, and definitions).  The 12 refused research `.py` drivers remain refused for their own
+reasons (`__file__` 5, unavailable local imports 3, duplicate import bindings 3, `Path`/`os.environ`
+and a big int 1); this change does not claim them.
+
+A source with a top-level executable statement (including a fixed module constant) and no
+entry-point-shaped function now keeps its module body on the typed path.  It appends a synthetic
+definition that returns `None` and builds that as the entry, so no file sequence is required and the
+program exits 0 without printing.  Def-only file-entry programs (the `pyc.py` convention, such as
+`integer_series.ail`) and array-first entries are unchanged.  `math.ail` now builds on both paths
+and matches CPython.
+
+Probes in `/tmp/probes/ex14` via `cmp.sh` on both builds: `math_example.py` (a copy of
+`math.ail`), `p_module.py` (constant plus definitions), `p_nested.py` (import, constant, nested
+definitions) and `p_ann_int.py` (annotated constant plus definitions) all have stdout empty and
+exit 0 like CPython.  Def-only shapes outside this change keep their pre-existing behaviour: the
+default path refuses `p_int_params.py`/`p_types.py`/`p_zero_params.py` by name and the general path
+still treats the last definition as a file entry (the `p_types`/`p_zero_params` general-path link
+failure is pre-existing and untouched).  Added the two module cases to `test_ail_ex14.py` (now 5
+tests).  Final-state tests: test_ail_ex14, test_ail_python_syntax, test_ail_pre200,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed);
+`tools/update_manifest.py` ran and `--check` passes.  No DIFFERENCES rows were added.
+
 ## 2026-10-28 -- ex14: `@export` runs as an ordinary Python-syntax program (job-ex14-10290439)
 
 Surveyed the Python-syntax programs under `AIL_CURRENT/language_examples`.  The `.py` AIL examples
