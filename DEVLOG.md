@@ -1,3 +1,49 @@
+## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
+
+The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
+print(int(d.get("k"))); d.update({"k": 1.5})`, which compiled and then stopped with `integer
+overflow` where CPython prints the big integer.  `_scope_constant_map` returned only the final
+environment, so the later mutation dropped `d` before the earlier read was checked.  The int64
+check now visits each top-level statement with the constants visible at that statement; a
+`dict.get` read is load-only, and a call that may mutate or rebind a tracked name clears the
+environment afterwards, so a callback alias can only lose a refusal, never invent one.  The
+conversion is refused by name on both builds (`int() of a float outside int64: ... (CPython
+makes a big integer)`) through `.get`, a subscript, a list item, a dict value, an alias, an
+item store, an alias mutation, a later mutating call, a function argument (`.get` and
+subscript), a constant key name and a negative index.  In-range reads, a mutation before the
+read, callback aliases (`sorted`/`map`) and programs without the feature match CPython.
+
+Remaining pre-existing and unchanged: a function-local container read before a later mutation
+(`p07`), a container reached through a nested list/dict (`p09`/`p14`), an instance attribute
+(`p13`) and a module scalar rebound later (`p15`) still stop with `integer overflow`.
+Probes in `/tmp/probes/pre417` on both builds via `cmp.sh`: p01-p06, p08, p10-p12, p16-p17,
+p20-p24, p25-p26, p28-p29 match CPython or are refused by name; p07, p09, p13-p15 and p27
+remain the pre-existing run-time trap (p27 reads before a risky call in the same statement).
+Final-state tests: test_ail_pre417, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (4 modules, 386 s, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
+## 2026-10-28 -- pre419: subscripting a class names the class (job-pre419-10281416)
+
+The pre396 review recorded as pre-existing that `class A: pass; A[0]` raised `TypeError:
+'type' object is not subscriptable` on both builds, where CPython 3.12 says `TypeError: type
+'A' is not subscriptable`.  The v2 general runtime (`ail_op_getitem` / `ail_op_getslice` in
+`cruntime.py`) now quotes the class's own name through `ail_class_name_c` for an index or
+slice key, capped at 200 characters like CPython's `%.200s`.  Item assignment and deletion
+keep their `'type' object ...` wording, and non-class receivers are unchanged.  A class
+defining `__class_getitem__` or a metaclass `__getitem__` is still not modelled; that is the
+same separate pre-existing difference on the base tree and is not changed here.
+
+Probes in `/tmp/probes/pre419` on both builds via `cmp.sh`: `p01_keys` (None, bool, int,
+negative, float, str, tuple, list and bytes keys), `p02_slices` (slice literals and slice
+objects), `p03_routes` (alias, argument, list item, dict value, attribute, return from a
+function, subclass and a slice), `p04_long_names` (199, 200, 201 and 250-character class
+names), `p05_control` (instances, ordinary subscripts and non-class values) all match
+CPython; `p06_class_getitem` still differs identically to the base and is unchanged.  Added
+`AIL_CURRENT/test_ail_pre419.py` (4 tests) and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`.  Final-state tests: test_ail_pre419, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a

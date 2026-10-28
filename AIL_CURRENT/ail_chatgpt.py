@@ -918,6 +918,15 @@ def _parameter_item_source(node, mapped, passthrough, local, attributes=None, co
                                       constants, blocked, aliases)
         if base is not None:
             return base[0], base[1] + (key,)
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.ctx, ast.Load) and node.func.attr == 'get'
+            and not node.keywords and len(node.args) in (1, 2)):
+        key = _constant_subscript_key(node.args[0], constants, blocked)
+        if key is not _UNKNOWN:
+            base = _parameter_item_source(node.func.value, mapped, passthrough, local,
+                                          attributes, constants, blocked, aliases)
+            if base is not None:
+                return base[0], base[1] + (key,)
     return None
 
 
@@ -1152,6 +1161,12 @@ def _escaped_constant_statements(body, root, program_bound):
         if (isinstance(parent, ast.Call) and node in parent.args
                 and isinstance(parent.func, ast.Name) and parent.func.id in pure_calls):
             continue
+        if (isinstance(parent, ast.Attribute) and isinstance(parent.ctx, ast.Load)
+                and parent.value is node and parent.attr == 'get'):
+            call = parents.get(parent)
+            if (isinstance(call, ast.Call) and call.func is parent
+                    and not call.keywords and len(call.args) in (1, 2)):
+                continue
         index = statement_index(node)
         if index is not None:
             events[index].add(node.id)
@@ -1179,7 +1194,61 @@ def _escaped_constant_statements(body, root, program_bound):
     return events
 
 
-def _scope_constant_map(body, root, base, stores, bound, parameters, declared, program_bound):
+def _scope_executed_nodes(statement):
+    """The nodes a definition runs now: decorators, defaults and a class body, not a
+    function body."""
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        args = statement.args
+        nodes = list(statement.decorator_list) + list(args.defaults)
+        nodes += [default for default in args.kw_defaults if default is not None]
+        for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+            if arg is not None and arg.annotation is not None:
+                nodes.append(arg.annotation)
+        if statement.returns is not None:
+            nodes.append(statement.returns)
+        return nodes
+    if isinstance(statement, ast.ClassDef):
+        nodes = list(statement.decorator_list) + list(statement.bases)
+        nodes += [keyword.value for keyword in statement.keywords]
+        for inner in statement.body:
+            nodes.extend(_scope_executed_nodes(inner))
+        return nodes
+    return [statement]
+
+
+def _scope_simple_statement(statement):
+    return isinstance(statement, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Expr,
+                                  ast.Delete, ast.Assert, ast.Raise))
+
+
+def _scope_risky_call(statement, local, safe_calls):
+    """Whether a statement calls something that may mutate or rebind a tracked name."""
+    for sub in ast.walk(statement):
+        if not isinstance(sub, ast.Call):
+            continue
+        func = sub.func
+        if isinstance(func, ast.Name):
+            if func.id in safe_calls or func.id.startswith('_AilT_'):
+                continue
+            return True
+        if (isinstance(func, ast.Attribute) and func.attr == 'get'
+                and isinstance(func.value, (ast.Name, ast.Subscript))):
+            base = _constant_value(func.value, lambda name: local.get(name, _UNKNOWN),
+                                   lambda unused: True, {})
+            if isinstance(base, dict):
+                continue
+        return True
+    return False
+
+
+def _scope_has_int_call(statement):
+    return any(isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+               and sub.func.id == 'int' and len(sub.args) == 1 and not sub.keywords
+               for sub in ast.walk(statement))
+
+
+def _scope_constant_map(body, root, base, stores, bound, parameters, declared, program_bound,
+                        snapshots=None, conservative=False):
     """Constant values a scope's top-level names bind, including safe container aliases.
 
     Top-level statements run once and in order, so a flat list/tuple/dict literal (or an alias
@@ -1190,6 +1259,7 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
     local = {name: value for name, value in base.items() if name not in bound}
     events = _escaped_constant_statements(body, root, program_bound)
     escaped = set()
+    safe_calls = {'len', 'print', 'str', 'repr', 'int'} - program_bound
 
     def candidate(statement):
         if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
@@ -1202,6 +1272,8 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
         return None, None
 
     for index, statement in enumerate(body):
+        if snapshots is not None:
+            snapshots.append(dict(local))
         name, value_node = candidate(statement)
         if (name is not None and stores.get(name) == 1
                 and name not in parameters and name not in declared):
@@ -1216,6 +1288,9 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
         for bad in escaped:
             if isinstance(local.get(bad), (list, tuple, dict)):
                 local.pop(bad, None)
+        if conservative and any(_scope_risky_call(part, local, safe_calls)
+                                for part in _scope_executed_nodes(statement)):
+            local.clear()
     return local
 
 
@@ -1667,6 +1742,9 @@ def _check_int64_literals(tree):
     program_bound = _all_bound_names(tree)
     known = _scope_constant_map(tree.body, tree, {}, module_counts, set(module_counts),
                                 set(), global_names, program_bound)
+    module_envs = []
+    _scope_constant_map(tree.body, tree, {}, module_counts, set(module_counts),
+                        set(), global_names, program_bound, module_envs, True)
     attributes = _known_class_attributes(tree, known)
     for node in tree.body:
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
@@ -1694,6 +1772,17 @@ def _check_int64_literals(tree):
                                                    known)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
                       program_bound, argument_containers).visit(tree)
+    module_checker = _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
+                                       program_bound, argument_containers)
+    safe_calls = {'len', 'print', 'str', 'repr', 'int'} - program_bound
+    for statement, local in zip(tree.body, module_envs):
+        if not _scope_simple_statement(statement):
+            continue
+        if (_scope_has_int_call(statement)
+                and _scope_risky_call(statement, local, safe_calls)):
+            continue
+        module_checker.value_scopes = [local]
+        module_checker.visit(statement)
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
     while nodes:
