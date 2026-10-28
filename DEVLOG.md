@@ -1,3 +1,26 @@
+## 2026-10-28 -- stdlib28: `struct` pack/unpack/calcsize on a literal format (job-stdlib28-10290744)
+
+The next most-imported refused module after `tempfile` (7 import sites, but its generated names and OS
+semantics cannot match CPython exactly) is `struct` with 6 sites (corpus t475 of both models and four
+`language_examples` harnesses).  A new `structlib.py` pass, called from `stdlib5.py`, parses a literal
+format: `calcsize` folds to its integer size, `pack`, `unpack`, `unpack_from` and `pack_into` become
+helpers generated for that one format, and the runtime helpers are in `prelude_struct.py` (bytes built
+with `int.to_bytes` / `int.from_bytes`).  Built: the standard orders `< > ! =`, integer codes
+`b B h H i I l L q Q`, `? c s p x`, repeat counts, whitespace, empty/zero formats and `struct.error`
+with CPython's messages.  Refused by name: float codes `e f d`, native `@`/default order and native-only
+`n N P`, `Struct`, `iter_unpack`, a non-literal format, a wrong value count and a non-bytearray
+`pack_into` buffer.  Added `test_ail_stdlib28.py` (3 programs on both builds plus 9 refusals) and
+registered it in `ail_check.MODULES`; `AIL_REFERENCE_MORE.md` documents the subset.
+
+Probes in `/tmp/probes` via `bash ~/tools/cmp.sh` (general and default builds): `struct_types`
+(widths, signs, orders, counts, empty/zero, `s`/`p`/`c`/`?`/`x`, `pack_into`, `unpack_from`),
+`struct_routes` (alias, from-import, argument, list item, attribute, dict value), `struct_errors`
+(out-of-range, wrong types, short buffers, negative offsets, caught `struct.error`), `struct_wide`
+(unsigned Q max and signed q min as exact big ints) all match CPython on both builds;
+`struct_refuse_float`, `struct_refuse_native`, `struct_refuse_struct` and `struct_refuse_dynamic` are
+refused by name on both builds.  Final-state tests: test_ail_stdlib28, test_ail_stdlib5,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

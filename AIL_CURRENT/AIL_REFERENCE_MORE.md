@@ -1013,7 +1013,7 @@ Lowered in the front end like batches 1 to 3 (stdlib4.py, csvlib.py, dtlib.py, s
 - Small forms: `int.bit_length()`, `int.bit_count()`, `max/min(..., default=)`, `max(d, key=d.get)` (and over a generator), `x in (constants)`, `itertools.product(x, repeat=n)` with a runtime `n`, unpacking a `tuple | None` after a None test.
 - Refused by name with a "write instead" hint: `decimal`, `unicodedata`, `string.Template`.
 
-### Library batch 5 (fractions, enum, namedtuple, random.Random, keyword, calendar, abc, array, io.StringIO)
+### Library batch 5 (fractions, enum, namedtuple, random.Random, keyword, calendar, abc, array, io.StringIO, struct)
 
 Lowered in the front end (stdlib5.py, enumlib.py, ntlib.py, randlib.py, smalllib5.py; the classes are Python source in `prelude_*.py`); a program that
 imports none of them is unchanged. They are classes with operator methods, so a program using them is built on the general path (several times
@@ -1044,6 +1044,11 @@ slower than typed code), where operator methods dispatch on the run-time class (
   `monthrange(y, m)[1]` is a plain int and stays on the typed path). Refused: `calendar.calendar`, the Calendar classes, `setfirstweekday`.
 - `abc`: `ABC`, `ABCMeta`, `abstractmethod` are dropped (an abstract class can be instantiated). `array.array(tc, it)` for `b B h H i I l L q Q d`: `append extend insert pop
   remove index count reverse tolist byteswap`, indexing, `len`, iteration, range-checked values, `repr`; refused: `f`, `u`, `tobytes`, `frombytes`, `tofile`.
+- `struct`: `pack unpack unpack_from pack_into calcsize` with a literal format string and the standard orders `< > ! =`, the integer codes
+  `b B h H i I l L q Q`, `? c s p x`, repeat counts and whitespace; `struct.error` is the exception (with CPython's message). `calcsize` is folded to
+  an int and the other calls become helpers generated for that one format. Refused by name: the float codes `e f d`, the native order `@` (also the
+  default) and the native-only `n N P`, `Struct`, `iter_unpack`, a format that is not a literal, a wrong value count, and a `pack_into` buffer that is
+  not a `bytearray`.
 - `io.StringIO(text)`: `write writelines getvalue read readline readlines seek tell truncate close`, iteration, `print(.., file=buf)`. `csv.reader(io.StringIO(text))` and
   `csv.DictReader(io.StringIO(text))` read the text; `csv.writer(buf)` / `csv.DictWriter(buf, ..)` write into a StringIO; `list(csv.DictReader(..))` gives
   `list[dict[str, str]]` (general path); `json.load(io.StringIO(text))` is `json.loads(text)`.
