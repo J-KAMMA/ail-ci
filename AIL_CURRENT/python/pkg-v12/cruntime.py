@@ -16121,8 +16121,15 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
     switch (c.tag) {
         case AIL_T_LIST: case AIL_T_TUPLE:
             if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) {
-                char buf[96]; snprintf(buf, sizeof buf, "%s indices must be integers or slices, not %s", c.tag == AIL_T_LIST ? "list" : "tuple", ail_type_name(key.tag));
-                return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+                char tnbuf[201], *buf; size_t need;
+                snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(key));
+                need = sizeof("tuple indices must be integers or slices, not ") + strlen(tnbuf);
+                buf = (char *)malloc(need);
+                if (!buf) ail_die("out of memory");
+                snprintf(buf, need, "%s indices must be integers or slices, not %s", c.tag == AIL_T_LIST ? "list" : "tuple", tnbuf);
+                ail_st st = ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+                free(buf);
+                return st;
             }
             return ail_vec_getitem(cx, out, c, key.i);
         case AIL_T_STR:
