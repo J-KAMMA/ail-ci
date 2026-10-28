@@ -2387,6 +2387,169 @@ def _check_int64_pow_constants(tree, known):
             check(node, local, scope_names, values)
 
 
+def _static_aug_pow_int(node, known, values, attributes, passthrough, global_name):
+    """The int a base or exponent expression denotes for the augmented-power check, or None.
+
+    ``known`` holds the int-only constants the arithmetic folders may use; ``values`` also
+    holds safe flat containers and class values, so the shared resolver can reach an int
+    through a list item, a dict value, a class attribute and a passthrough call."""
+    value = _constant_int(node, known, shifts=True)
+    if type(value) is int:
+        return value
+    try:
+        value = _const_expr_int(node, bounded=False)
+    except _Int64ConstantOverflow:
+        return None
+    if type(value) is int:
+        return value
+    value = _constant_value(node, lambda name: values.get(name, _UNKNOWN), global_name,
+                            passthrough, attributes)
+    return value if type(value) is int else None
+
+
+def _scope_binding_names(statement):
+    """Names a statement (or its nested blocks) binds in this scope, without entering nested
+    functions, classes or lambdas."""
+    stack = [statement]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            yield node.name
+            continue
+        if isinstance(node, ast.Lambda):
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            yield node.id
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                yield (alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            yield node.name
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _call_runs_at_runtime(node):
+    """Whether executing ``node`` may call something.
+
+    A function or lambda body only runs when the value is called, so neither is entered;
+    decorators, defaults and annotations of a definition are evaluated at that point."""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, ast.Call):
+            return True
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            stack.extend(current.decorator_list)
+            stack.extend(current.args.defaults)
+            stack.extend(default for default in current.args.kw_defaults if default is not None)
+            annotations = [argument.annotation for argument in
+                           current.args.posonlyargs + current.args.args + current.args.kwonlyargs]
+            annotations.append(current.args.vararg.annotation if current.args.vararg else None)
+            annotations.append(current.args.kwarg.annotation if current.args.kwarg else None)
+            annotations.append(current.returns)
+            stack.extend(annotation for annotation in annotations if annotation is not None)
+            continue
+        if isinstance(current, ast.Lambda):
+            stack.extend(current.args.defaults)
+            stack.extend(default for default in current.args.kw_defaults if default is not None)
+            continue
+        stack.extend(ast.iter_child_nodes(current))
+    return False
+
+
+def _check_augmented_power_scope(body, known, values, parameters, declared, attributes,
+                                 passthrough, global_name):
+    """Refuse `x **= e` in one scope body when the exact power leaves int64.
+
+    Only a direct body statement is considered: the target must have no binding at all before
+    the one straight-line constant assignment, so the base the statement sees is that value.
+    A target bound in a branch, a loop, an import or a nested definition, a parameter, or a
+    global/nonlocal declaration is left to the ordinary run-time stop.  A statement that can
+    run a call drops every recorded binding, since the callee may rebind a global or nonlocal
+    name between that assignment and the augmented statement."""
+    assigned = {}
+    for statement in body:
+        if (isinstance(statement, ast.AugAssign) and isinstance(statement.op, ast.Pow)
+                and isinstance(statement.target, ast.Name)):
+            name = statement.target.id
+            value = None
+            if (name not in parameters and name not in declared
+                    and isinstance(assigned.get(name), ast.AST)):
+                base = _static_aug_pow_int(assigned[name], known, values, attributes,
+                                           passthrough, global_name)
+                exponent = _static_aug_pow_int(statement.value, known, values, attributes,
+                                               passthrough, global_name)
+                if base is not None and exponent is not None:
+                    value = _exact_pow_or_too_big(base, exponent)
+            # An augmented target never keeps the earlier value for a later statement.
+            assigned[name] = _UNKNOWN
+            for other in _scope_binding_names(statement.value):
+                assigned[other] = _UNKNOWN
+            if _call_runs_at_runtime(statement):
+                # The base load precedes the call, so the fold above already used the right
+                # value; names for later statements are no longer known.
+                assigned.clear()
+            if value is None or (value is not _CONST_INT_TOO_BIG
+                                 and _INT64_MIN <= value <= _INT64_MAX):
+                continue
+            shown = 'too large' if value is _CONST_INT_TOO_BIG else _constant_diagnostic(value)
+            error = ValueError(f'int64 constant expression out of range: {shown}')
+            error.source_line = statement.lineno
+            error.source_column = statement.col_offset
+            raise error
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            # A direct statement runs unconditionally, so it replaces whatever an earlier
+            # binding left in the map.  A call in the value runs after the right-hand side
+            # is read but may still rebind other names for later statements.
+            if _call_runs_at_runtime(statement.value):
+                assigned.clear()
+            for name in _scope_binding_names(statement.value):
+                assigned[name] = _UNKNOWN
+            assigned[statement.targets[0].id] = statement.value
+        else:
+            if _call_runs_at_runtime(statement):
+                assigned.clear()
+            else:
+                for name in _scope_binding_names(statement):
+                    assigned[name] = _UNKNOWN
+
+
+def _check_int64_augmented_powers(tree, module_known):
+    """Refuse `b = 10; b **= 40` by name, on both build paths, before an emitter sees it.
+
+    The module-level power pass folds `b ** e`, but the augmented spelling is a separate
+    statement, so it compiled and then stopped with `integer overflow` where CPython prints
+    the unbounded integer.  The same direct-statement shape is checked in function bodies;
+    a computed base or exponent keeps the pre-existing run-time stop."""
+    attributes = _known_class_attributes(tree, module_known)
+    module_counts = _binding_counts(tree.body)
+    passthrough = _passthrough_functions(tree, module_counts)
+    program_bound = _all_bound_names(tree)
+    global_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            global_names.update(node.names)
+    module_values = _scope_constant_map(tree.body, tree, {}, module_counts,
+                                        set(module_counts), set(), global_names, program_bound)
+    _check_augmented_power_scope(tree.body, module_known, module_values, set(), set(),
+                                 attributes, passthrough, lambda unused: True)
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        parameters = _scope_parameters(function)
+        declared = _scope_declared(function)
+        local = _function_local_int_constants(function, module_known)
+        local_values = _scope_constant_map(function.body, function, module_values,
+                                           _binding_counts(function.body),
+                                           _function_bindings(function), parameters, declared,
+                                           program_bound)
+        local_names = set(_function_scope_stores(function)) | parameters | declared
+        _check_augmented_power_scope(function.body, local, local_values, parameters, declared,
+                                     attributes, passthrough,
+                                     lambda name, local_names=local_names: name not in local_names)
+
+
 def _check_int64_unary_constants(tree):
     """Refuse a statically known unary integer constant expression outside int64 by name.
     `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
@@ -3310,7 +3473,9 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_unary_constants(tree)
                 _check_int64_local_cancellations(tree)
                 _check_int64_int_base_constants(tree)
-                _check_int64_pow_constants(tree, _known_module_constants(tree))
+                module_known = _known_module_constants(tree)
+                _check_int64_pow_constants(tree, module_known)
+                _check_int64_augmented_powers(tree, module_known)
                 _check_class_attribute_assignment(tree)
                 _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:

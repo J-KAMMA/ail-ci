@@ -75,6 +75,46 @@ use, p26 local alias, p27 module-constant index).  Final-state tests: test_ail_p
 test_ail_pre358, test_ail_pre359, test_ail_pre331, test_ail_pre340, test_ail_pre351,
 test_ail_pre311, test_ail_pre322, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- pre372 review fix: a call between the binding and `x **= e` clears the fold (job-pre372-10280521)
+
+The review found a new false compile-time refusal.  In `b = 10` / `def set_small(): global b`
+/ `b = 2` / `set_small()` / `b **= 40`, `_check_augmented_power_scope` still saw the
+straight-line `b -> 10` because `_scope_binding_names` does not treat a call as rebinding, so
+it refused the program with `10 ** 40` although CPython (and the base tree) print
+`1099511627776`.  Every recorded binding is now dropped when a statement can run a call
+(`_call_runs_at_runtime`, which enters decorators, defaults and annotations but not a function
+or lambda body); the base load of the augmented statement itself precedes its own
+right-hand-side call, so that statement's fold stays valid.  A function that declares
+`global b` but is never called still leaves `b **= 40` refused by name, so the new refusal is
+not disabled wholesale.
+
+Added the global-rebinding case to the matching program of `test_ail_pre372.py`.  Probes in
+`/tmp/probes` (18 programs, both builds via `cmp.sh`): p02, p03, p06-p11, p13, p15-p18 match
+CPython; p01, p04, p05, p12, p14 are refused by name on both builds.  Final-state tests:
+test_ail_pre372, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules,
+27 tests, 0 failed, 1 skipped).  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- pre372: an augmented power beyond int64 is refused by name (job-pre372-10280521)
+
+The first still-differing item from the pre33 review on this tree was `b = 10; b **= 40`: both
+builds compiled it and then stopped with `integer overflow` where CPython prints the big
+integer (`b ** e` is already folded and `-(2 ** 63)` already matches here).  The module
+constant-power pass only looked at `Assign`/`AnnAssign`/expression values, so the augmented
+statement was never folded.  `_check_int64_augmented_powers` in `AIL_CURRENT/ail_chatgpt.py`
+now scans direct module and function body statements: when the target has one earlier
+straight-line constant binding and the exponent is statically known, the exact power is
+compared with int64 and refused with `int64 constant expression out of range`.  The base or
+exponent may come through a name, an alias, a list item, a dict value, a class attribute or a
+passthrough call; a later rebinding is allowed, while a binding in an earlier branch, loop or
+import leaves the pre-existing run-time trap.  In-range powers, the safe bases 0/1/-1,
+zero/negative exponents, bool/float bases and values known only at run time still match
+CPython.
+
+Added `AIL_CURRENT/test_ail_pre372.py` (2 tests, 16 refused and 1 matching program, both
+builds), registered in `ail_check.MODULES` and `tools/ci_shards.json` (weight 31.6).  Probes
+in `/tmp/probes` (34 programs, both builds via `cmp.sh`): q01-q17 are refused by name;
+m01-m17 match CPython.  Final-state tests: test_ail_pre372, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3 (4 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
