@@ -1,3 +1,26 @@
+## 2026-10-28 -- stdlib18 review: struct buffers, error name, offsets
+
+Review fixes for `struct` (`job-stdlib18-10290433`).  `pack`/`pack_into`'s `s` code now accepts a
+`bytearray` as well as `bytes` (CPython accepts only `bytes` for `c`), `unpack`/`unpack_from` convert their
+buffer to `bytes` so `s`/`c` results are `bytes` for a `bytearray` input, the generated exception class is
+named `error` so an uncaught error and `type(e).__name__` match CPython, and `unpack_from`/`pack_into`
+implement CPython 3.12's negative offsets and the zero-byte offset messages ("offset N out of range for
+M-byte buffer" only when the offset is below `-len` and `offset + size <= 0`).  Existing positive-offset
+and short-buffer messages are unchanged.
+
+Probes in `/tmp/probes/reviewfix` on both builds via `cmp.sh`: `p_byteslike` (bytes-like `s` through an
+argument, list item, attribute and dict value, and the `c` refusals), `p_unpackbytes` (bytearray input,
+result type, all routes), `p_errname` (caught with `Exception` / `struct.error`, uncaught, `repr`),
+`p_offsets` (zero and nonzero sizes, offsets from `-10` to `9`, `unpack_from` and `pack_into`, buffer
+lengths 0/1/4/8/12), `p_sroutes` and `p_badinputs` (a non-buffer `int`/`str`/`list` for `unpack`,
+`unpack_from` and `pack_into`) all match CPython on both builds.  The earlier `/tmp/probes/stdlib18`
+programs also still match.  `test_ail_stdlib18` gains these five programs as differential cases for both
+builds.
+
+Final-state tests: `test_ail_stdlib18`, `test_ail_python_syntax`, `test_ail_modules`, `test_ail_stdlib5`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.  `tools/update_manifest.py` was
+run and `--check` passes.
+
 ## 2026-10-28 -- stdlib18: struct (job-stdlib18-10290433)
 
 The next still-refused stdlib import with a supportable surface was `struct`: two corpus programs
@@ -12,8 +35,7 @@ pass (a program without the import is returned unchanged).  It lowers `pack`, `u
 on `int.to_bytes` / `int.from_bytes`; the built codes are `x b B h H i I l L q s c ?`, with CPython
 3.12's range checks, buffer checks and error text.  The native layouts (no prefix, `@`, `=`), floats
 `e/f/d`, pointers `n/N/P`, `p`, the unsigned 64-bit `Q` (it can exceed int64), `Struct`, `iter_unpack`, a
-non-literal format and any other attribute are refused by name.  `struct.error` is caught by name; an
-uncaught error prints `_AilStructError` instead of `struct.error`.
+non-literal format and any other attribute are refused by name.  `struct.error` is caught by name.
 
 Probes in `/tmp/probes/stdlib18` on both builds via `cmp.sh`: `p_basic`, `p_errors`, `p_bounds`,
 `p_routes` and `p_error_alias` match CPython's stdout and exit status on the general and default builds.

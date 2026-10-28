@@ -146,9 +146,242 @@ def main() -> None:
 main()
 """
 
+PROGRAMS['byteslike'] = r"""import struct
+
+
+class Box:
+    def __init__(self, v):
+        self.v = v
+
+
+def packed(v):
+    return list(struct.pack('>4s', v))
+
+
+def main() -> None:
+    b = bytearray(b'ab')
+    print(list(struct.pack('>4s', b)))
+    print(list(struct.pack('>2s', b)))
+    print(list(struct.pack('>1s', b)))
+    print(packed(b))
+    print(packed(bytearray(b'wxyz')))
+    xs = [bytearray(b'cd')]
+    print(list(struct.pack('>3s', xs[0])))
+    box = Box(bytearray(b'ef'))
+    print(list(struct.pack('>2s', box.v)))
+    d = {'k': bytearray(b'gh')}
+    print(list(struct.pack('>4s', d['k'])))
+    print(struct.unpack('>2s', b), struct.unpack('>2s', bytes(b)))
+    buf = bytearray(8)
+    print(struct.pack_into('>4s', buf, 0, b), list(buf))
+    print(struct.pack_into('>2s', buf, 2, xs[0]), list(buf))
+    for bad in (5, 'ab', [97, 98]):
+        try:
+            struct.pack('>s', bad)
+        except struct.error as e:
+            print('s', type(e).__name__, e)
+    for bad in (5, bytearray(b'a'), bytearray(b'ab'), b'ab'):
+        try:
+            struct.pack('>c', bad)
+        except struct.error as e:
+            print('c', type(e).__name__, e)
+    print(list(struct.pack('>c', b'a')))
+
+
+main()
+"""
+
+PROGRAMS['unpackbytes'] = r"""import struct
+
+
+class Box:
+    def __init__(self, v):
+        self.v = v
+
+
+def get(data):
+    return struct.unpack('>2s', data)
+
+
+def get_from(data, off):
+    return struct.unpack_from('>2s', data, off)
+
+
+def main() -> None:
+    ba = bytearray(b'ab')
+    print(struct.unpack('>2s', ba))
+    print(struct.unpack('>2c', ba))
+    print(struct.unpack_from('>2s', bytearray(b'abcd'), 1))
+    print(get(ba), get(bytearray(b'xy')))
+    print(get_from(bytearray(b'abcd'), 2))
+    xs = [bytearray(b'pq')]
+    print(struct.unpack('>2s', xs[0]))
+    box = Box(bytearray(b'rs'))
+    print(struct.unpack('>2s', box.v))
+    d = {'k': bytearray(b'tu')}
+    print(struct.unpack('>2s', d['k']))
+    raw = struct.unpack('>2s', ba)[0]
+    print(type(raw).__name__, isinstance(raw, bytes), isinstance(raw, bytearray))
+    print(struct.unpack('>s', bytearray(b'z')))
+    print(struct.unpack('>?c', bytearray(b'\x01q')))
+
+
+main()
+"""
+
+PROGRAMS['errname'] = r"""import struct
+from struct import error as E
+
+
+def main() -> None:
+    try:
+        struct.unpack('>I', b'abc')
+    except Exception as e:
+        print(type(e).__name__, e)
+    try:
+        struct.pack('>B', 256)
+    except Exception as e:
+        print(type(e).__name__, e)
+    try:
+        struct.pack('>s', 5)
+    except E as e:
+        print(type(e).__name__, e)
+    try:
+        raise struct.error('custom')
+    except Exception as e:
+        print(type(e).__name__, str(e), repr(e))
+
+
+main()
+"""
+
+PROGRAMS['offsets'] = r"""import struct
+
+
+def uf0(n, off):
+    try:
+        return struct.unpack_from('>0I', bytes(n), off)
+    except struct.error as e:
+        return 'E ' + str(e)
+
+
+def uf1(off):
+    try:
+        return struct.unpack_from('>I', bytes(range(8)), off)
+    except struct.error as e:
+        return 'E ' + str(e)
+
+
+def uf2(off):
+    try:
+        return struct.unpack_from('>2I', bytes(range(8)), off)
+    except struct.error as e:
+        return 'E ' + str(e)
+
+
+def pi0(n, off):
+    b = bytearray(n)
+    try:
+        struct.pack_into('>0I', b, off)
+        return list(b)
+    except struct.error as e:
+        return 'E ' + str(e)
+
+
+def pi1(n, off):
+    b = bytearray(n)
+    try:
+        struct.pack_into('>I', b, off, 0x01020304)
+        return list(b)
+    except struct.error as e:
+        return 'E ' + str(e)
+
+
+def pi2(n, off):
+    b = bytearray(n)
+    try:
+        struct.pack_into('>2I', b, off, 1, 2)
+        return list(b)
+    except struct.error as e:
+        return 'E ' + str(e)
+
+
+def main() -> None:
+    print('-- zero size unpack_from')
+    ns = [0, 1, 4]
+    offs = [-6, -5, -4, -1, 0, 1, 4, 5, 6]
+    for n in ns:
+        for off in offs:
+            print('uf', n, off, uf0(n, off))
+    print('-- zero size pack_into')
+    for n in ns:
+        for off in offs:
+            print('pi', n, off, pi0(n, off))
+    print('-- nonzero unpack_from')
+    for off in [-10, -8, -5, -4, -1, 0, 1, 4, 8, 9]:
+        print('uf >I', off, uf1(off))
+    for off in [-10, -8, -5, -4, -1, 0, 1, 4, 8, 9]:
+        print('uf >2I', off, uf2(off))
+    print('-- nonzero pack_into')
+    for n in [0, 4, 8, 12]:
+        for off in [-10, -8, -5, -4, -1, 0, 1, 4, 8, 9]:
+            print('pi >I', n, off, pi1(n, off))
+    for n in [0, 4, 8, 12]:
+        for off in [-10, -8, -5, -4, -1, 0, 1, 4, 8, 9]:
+            print('pi >2I', n, off, pi2(n, off))
+
+
+main()
+"""
+
+PROGRAMS['badinputs'] = r"""import struct
+
+
+def uf(data):
+    try:
+        print(struct.unpack('>I', data))
+    except Exception as e:
+        print(type(e).__name__, e)
+
+
+def uff(data):
+    try:
+        print(struct.unpack_from('>I', data, 0))
+    except Exception as e:
+        print(type(e).__name__, e)
+
+
+def pi(buf):
+    try:
+        print(struct.pack_into('>I', buf, 0, 1))
+    except Exception as e:
+        print(type(e).__name__, e)
+
+
+def main() -> None:
+    uf(5)
+    uf('abcd')
+    uf([1, 2, 3, 4])
+    uff(5)
+    uff('abcd')
+    uff([1, 2, 3, 4])
+    pi(b'')
+    pi(5)
+    pi('abcd')
+    pi([0, 0, 0, 0])
+
+
+main()
+"""
+
 CASES = [
     ("basic", PROGRAMS['basic'], [""]),
     ("errors", PROGRAMS['errors'], [""]),
+    ("byteslike", PROGRAMS['byteslike'], [""]),
+    ("unpackbytes", PROGRAMS['unpackbytes'], [""]),
+    ("errname", PROGRAMS['errname'], [""]),
+    ("offsets", PROGRAMS['offsets'], [""]),
+    ("badinputs", PROGRAMS['badinputs'], [""]),
 ]
 
 

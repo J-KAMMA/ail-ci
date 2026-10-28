@@ -8,8 +8,9 @@ refusal), exactly as stdlib4/stdlib5 do.
 
 Built: `struct.pack`, `struct.unpack`, `struct.unpack_from`, `struct.pack_into`, `struct.calcsize` and
 `struct.error`, with a string-literal format that starts with `<`, `>` or `!` (explicit byte order) and
-uses the standard sizes. Format codes: x, b, B, h, H, i, I, l, L, q, s, c and ?. The error messages
-and the buffer checks are CPython 3.12's.
+uses the standard sizes. Format codes: x, b, B, h, H, i, I, l, L, q, s, c and ?. The error messages,
+the error class name and the buffer checks (including negative offsets) are CPython 3.12's; `s` accepts
+a `bytearray` and unpack results are always `bytes`.
 
 Not built (refused by name): the native `@`/`=`/no-prefix layouts (alignment and native sizes), the float
 codes e/f/d, the pointer codes n/N/P, the p code, the unsigned 64-bit Q (it can exceed int64), `struct.Struct`,
@@ -30,9 +31,9 @@ BOUNDS = {'b': (-128, 127), 'B': (0, 255), 'h': (-32768, 32767), 'H': (0, 65535)
           'q': (-9223372036854775808, 9223372036854775807)}
 FLOATS = frozenset('efd')
 POINTERS = frozenset('nNP')
-ERROR = '_AilStructError'
+ERROR = 'error'
 
-SHARED = '''class _AilStructError(Exception):
+SHARED = '''class error(Exception):
     pass
 
 
@@ -47,9 +48,9 @@ def _ail_struct_zeros(n: int) -> bytes:
 
 def _ail_struct_int(value: int, n: int, order: str, signed: bool, lo: int, hi: int, msg: str) -> bytes:
     if not isinstance(value, int):
-        raise _AilStructError("required argument is not an integer")
+        raise error("required argument is not an integer")
     if value < lo or value > hi:
-        raise _AilStructError(msg)
+        raise error(msg)
     return int(value).to_bytes(n, order, signed=signed)
 
 
@@ -58,8 +59,10 @@ def _ail_struct_read(data: bytes, off: int, n: int, order: str, signed: bool) ->
 
 
 def _ail_struct_s(value: bytes, n: int) -> bytes:
-    if not isinstance(value, bytes):
-        raise _AilStructError("argument for 's' must be a bytes object")
+    if isinstance(value, bytearray):
+        value = bytes(value)
+    elif not isinstance(value, bytes):
+        raise error("argument for 's' must be a bytes object")
     if len(value) >= n:
         return value[0:n]
     return value + _ail_struct_zeros(n - len(value))
@@ -67,7 +70,7 @@ def _ail_struct_s(value: bytes, n: int) -> bytes:
 
 def _ail_struct_c(value: bytes) -> bytes:
     if not isinstance(value, bytes) or len(value) != 1:
-        raise _AilStructError("char format requires a bytes object of length 1")
+        raise error("char format requires a bytes object of length 1")
     return value
 
 
@@ -77,27 +80,50 @@ def _ail_struct_bool(value: int) -> bytes:
     return b"\\x00"
 
 
+def _ail_struct_buffer(data: bytes) -> bytes:
+    if isinstance(data, bytearray):
+        return bytes(data)
+    if isinstance(data, bytes):
+        return data
+    raise TypeError("a bytes-like object is required, not '" + type(data).__name__ + "'")
+
+
 def _ail_struct_check_unpack(data: bytes, size: int) -> None:
     if len(data) != size:
-        raise _AilStructError("unpack requires a buffer of " + str(size) + " bytes")
+        raise error("unpack requires a buffer of " + str(size) + " bytes")
 
 
-def _ail_struct_check_unpack_from(data: bytes, off: int, size: int) -> None:
+def _ail_struct_check_unpack_from(data: bytes, off: int, size: int) -> int:
+    n = len(data)
     if off < 0:
-        raise _AilStructError("not enough data to unpack " + str(size) + " bytes at offset " + str(off))
-    if off + size > len(data):
-        raise _AilStructError("unpack_from requires a buffer of at least " + str(off + size)
+        if off < -n and off + size <= 0:
+            raise error("offset " + str(off) + " out of range for " + str(n) + "-byte buffer")
+        start = n + off
+        if start + size > n:
+            raise error("not enough data to unpack " + str(size) + " bytes at offset " + str(off))
+        return start
+    if off + size > n:
+        raise error("unpack_from requires a buffer of at least " + str(off + size)
                               + " bytes for unpacking " + str(size) + " bytes at offset " + str(off)
-                              + " (actual buffer size is " + str(len(data)) + ")")
+                              + " (actual buffer size is " + str(n) + ")")
+    return off
 
 
 def _ail_struct_write(buf: bytearray, off: int, raw: bytes, size: int) -> None:
+    if not isinstance(buf, bytearray):
+        raise TypeError("argument must be read-write bytes-like object, not " + type(buf).__name__)
+    n = len(buf)
     if off < 0:
-        raise _AilStructError("no space to pack " + str(size) + " bytes at offset " + str(off))
-    if off + size > len(buf):
-        raise _AilStructError("pack_into requires a buffer of at least " + str(off + size)
+        if off < -n and off + size <= 0:
+            raise error("offset " + str(off) + " out of range for " + str(n) + "-byte buffer")
+        start = n + off
+        if start + size > n:
+            raise error("no space to pack " + str(size) + " bytes at offset " + str(off))
+        off = start
+    if off + size > n:
+        raise error("pack_into requires a buffer of at least " + str(off + size)
                               + " bytes for packing " + str(size) + " bytes at offset " + str(off)
-                              + " (actual buffer size is " + str(len(buf)) + ")")
+                              + " (actual buffer size is " + str(n) + ")")
     i = 0
     while i < size:
         buf[off + i] = raw[i]
@@ -403,7 +429,8 @@ class Builder:
         annotation = 'tuple[%s]' % ', '.join(types) if types else 'tuple[()]'
         elems = self.elements(tokens, '0', False)
         ret = '(' + ', '.join(elems) + (',' if len(elems) == 1 else '') + ')'
-        text = ('def %s(data: bytes) -> %s:\n    _ail_struct_check_unpack(data, %d)\n    return %s\n'
+        text = ('def %s(data: bytes) -> %s:\n    data = _ail_struct_buffer(data)\n'
+                '    _ail_struct_check_unpack(data, %d)\n    return %s\n'
                 % (name, annotation, size, ret))
         self.sources.append(text)
         return name
@@ -427,7 +454,8 @@ class Builder:
         elems = self.elements(tokens, 'off', True)
         ret = '(' + ', '.join(elems) + (',' if len(elems) == 1 else '') + ')'
         text = ('def %s(data: bytes, off: int = 0) -> %s:\n'
-                '    _ail_struct_check_unpack_from(data, off, %d)\n    return %s\n'
+                '    data = _ail_struct_buffer(data)\n'
+                '    off = _ail_struct_check_unpack_from(data, off, %d)\n    return %s\n'
                 % (name, annotation, size, ret))
         self.sources.append(text)
         return name
@@ -470,6 +498,9 @@ def rewrite_text(source, notes=None):
         tree = Calls(binder, builder).visit(tree)
         ast.fix_missing_locations(tree)
         for each in ast.walk(tree):
+            if (isinstance(each, ast.Name) and isinstance(each.ctx, ast.Load)
+                    and each.id == ERROR and binder.names.get(each.id) == 'error'):
+                continue
             found = binder.attr(each)
             if found is not None:
                 refuse(each, 'struct.%s used here is not built' % found)
