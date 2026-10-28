@@ -1,3 +1,27 @@
+## 2026-10-28 -- cov16 review: the outer generator must be fully consumed too (job-cov16-10290225)
+
+The cov16 relaxation checked only that the inner generator expression was consumed at once.  Its
+outer generator could still be a `for` iterable, a saved value, a `next()` argument or a user
+call, which AIL materialises eagerly: `for v in (sum(f(x) for x in row) for row in [[1], [2], [3]]):
+break` evaluated every row, so `f` ran for `2` and `3` where CPython stops after `1`, and a later
+row that raises (`int("bad")`) escaped before the loop's `break`.  The base refused these programs
+by name; HEAD accepted them silently wrong on both builds.  The compile-time screen now also
+requires the outer generator to be fully consumed in place (an eager builtin/method call, a
+starred argument or a tuple/list unpack target), so a `for` iterable, `next`, a saved value, a
+`print`/user-call argument and a comprehension iterable are refused again.  The inner-only check
+in `expr_GeneratorExp` and the `try` guard are unchanged.  The three corpus programs that motivated
+cov16 (`t172`, both `t432`) consume their outer generator with `str.join`, so the default-build
+refusal count stays 24 -> 21 as before.
+
+Probes in `/tmp/probes/cov16fix` on both builds via `cmp.sh`: `p01_for_break`, `p02_for_break_raise`,
+`p03_next_outer`, `p04_saved_outer`, `p05_user_call_outer`, `p06_print_outer` and
+`p07_comp_iter_outer` are refused by name (`a generator expression nested inside another generator
+expression`); `p08_positive_sum`, `p09_positive_join_routes`, `p10_positive_builtins`,
+`p11_positive_exception`, `p12_positive_unpack`, `p13_positive_star` and `p14_alias_mutation`
+(ints, floats, bools, negatives, empty rows, aliasing, and values through an argument, a list item,
+an attribute and a dict value) match CPython.  `test_ail_cov16` gained the `for_outer` and
+`for_outer_exception` refusal cases.
+
 ## 2026-10-28 -- cov16: a generator expression nested inside another one, when the inner is consumed at once (job-cov16-10290225)
 
 Corpus coverage for cov16 compiled all 219 programs under `lab/corpus/programs` with the default

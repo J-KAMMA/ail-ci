@@ -2351,10 +2351,12 @@ class Compiler(boxclosure.ClosureMixin):
             if not (isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs):
                 continue
             nested = [n for n in ast.walk(gen) if n is not gen and isinstance(n, ast.GeneratorExp)]
-            # An inner generator expression may be materialised eagerly only where something
-            # reads every element of it at that point; a `try` body keeps the refusal because the
+            # Both generators may be materialised eagerly only where something reads every element
+            # of each at that point (the outer one included: a `for` iterable, `next`, a saved
+            # value or a user call can stop early).  A `try` body keeps the refusal because the
             # general path's own exception path is not exact there (see the pre-cov16 probes).
             if nested and (_inside_try(gen, parents) or
+                           not _genexp_fully_consumed_in_place(gen, parents) or
                            any(not _genexp_fully_consumed_in_place(n, parents) for n in nested)):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '

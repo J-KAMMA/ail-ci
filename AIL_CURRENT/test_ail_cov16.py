@@ -106,6 +106,27 @@ for inner in g:
 print(wrap([[1, 2], [3, 5]]))
 print(wrap([]))
 ''', 'nested inside another generator expression'),
+    'for_outer': (r'''log = []
+
+
+def f(x):
+    log.append(x)
+    return x
+
+
+for v in (sum(f(x) for x in row) for row in [[1], [2], [3]]):
+    break
+print(log)
+''', 'nested inside another generator expression'),
+    'for_outer_exception': (r'''def f(x):
+    return int(x)
+
+
+for v in (sum(f(x) for x in row) for row in [["1"], ["bad"]]):
+    print(v)
+    break
+print("after")
+''', 'nested inside another generator expression'),
 }
 
 
