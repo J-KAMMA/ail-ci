@@ -1743,6 +1743,8 @@ class Rewriter(ast.NodeTransformer):
                 return ast.copy_location(ast.Name(self.mod.merged[name], node.ctx), node)
             return node
         if isinstance(node.ctx, ast.Load):
+            if name == '__file__' and '__file__' not in self.mod.kinds and self.module_level(name):
+                return ast.copy_location(ast.Constant(str(self.mod.path)), node)
             if name in MODULE_DUNDERS:
                 self.program.refuse(self.mod, node, "%s is not available: the program is built into one executable, "
                                     "so a module has no file, package or search path at run time.\n"
@@ -1769,6 +1771,8 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
+        if attr == '__file__' and not stored and '__file__' not in target.kinds:
+            return ast.copy_location(ast.Constant(str(target.path)), node)
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))

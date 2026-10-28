@@ -33,7 +33,8 @@ G2 (the classes after `SingleFilePrograms`) adds, each compared with CPython 3.1
   shadows a modelled module (with a note), a directory that does not shadow one;
 * the named refusals (relative import without a package, missing module or name, ambiguous package,
   a submodule read before its import, star-import limits, writes that cannot be followed, imports in
-  functions, `__file__`, `importlib`, `__import__`).
+  functions, `importlib`, `__import__`); `__file__` is the module's absolute path in the entry and
+  in every imported module, as CPython supplies it.
 """
 import json
 import os
@@ -1256,7 +1257,7 @@ class PackageRefusals(ModulesBase):
                       "pkg/b.py": "X = 1\n", "main.py": "import pkg.a\nprint(pkg.a.f())\n"}), "1\n")
 
     def test_module_file_attributes_and_dynamic_imports(self):
-        self.refused({"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__file__)\n"}, "not available")
+        self.same_as_cpython({"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__file__)\n"})
         # the front end refuses these (exit 3) by name, with the same hint
         for source, needle in (("import importlib\nm = importlib.import_module('math')\nprint(m)\n", "importlib"),
                                ("m = __import__('math')\nprint(m)\n", "__import__")):

@@ -187,7 +187,50 @@ class Session:
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
+        def is_export(decorator):
+            base = decorator.func if isinstance(decorator, ast.Call) else decorator
+            return ((isinstance(base, ast.Name) and base.id == 'export' and 'export' in imported) or
+                    (isinstance(base, ast.Attribute) and base.attr == 'export'
+                     and isinstance(base.value, ast.Name) and base.value.id in module_names))
+
+        def is_dataclass(decorator):
+            base = decorator.func if isinstance(decorator, ast.Call) else decorator
+            return ((isinstance(base, ast.Name) and base.id == 'dataclass')
+                    or (isinstance(base, ast.Attribute) and base.attr == 'dataclass'
+                        and isinstance(base.value, ast.Name) and base.value.id == 'dataclasses'))
+
+        def allowed(annotation, result=False):
+            if annotation is None:
+                return False
+            if isinstance(annotation, ast.Constant):
+                return result and annotation.value is None
+            if isinstance(annotation, ast.Name):
+                return (annotation.id in ('int', 'float', 'bool', 'str', 'bytes')
+                        or not result and annotation.id in good_dataclasses)
+            return (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
+                    and annotation.value.id == 'list' and isinstance(annotation.slice, ast.Name)
+                    and annotation.slice.id in ('int', 'float'))
+
+        good_dataclasses = set()
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef) and any(is_dataclass(d) for d in node.decorator_list):
+                fields = [field.annotation for field in node.body if isinstance(field, ast.AnnAssign)]
+                if fields and all(isinstance(f, ast.Name) and f.id in ('int', 'float', 'bool') for f in fields):
+                    good_dataclasses.add(node.name)
+
+        def export_ok(function):
+            args = function.args
+            if args.defaults or args.kw_defaults or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg:
+                return False
+            return (allowed(function.returns, result=True)
+                    and all(allowed(argument.annotation) for argument in args.args))
+
         decls = []
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef) and node.decorator_list:
+                export = [decorator for decorator in node.decorator_list if is_export(decorator)]
+                if export and export_ok(node):
+                    blank.extend((decorator.lineno, decorator.end_lineno) for decorator in export)
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
                 self._link(path, node.value)

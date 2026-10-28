@@ -1,3 +1,28 @@
+## 2026-10-28 -- ex17: `__file__` and valid `@export` in the Python examples (job-ex17-10290508)
+
+Scanned the 15 `*.py` files and the 6 `*.ail` files that parse as Python under
+`AIL_CURRENT/language_examples`: 2 built and 19 were refused (5 by `__file__` in a merged entry or
+module, 1 by `@export`, the rest by imports on the module search path, duplicate module bindings or
+big-int/`Path`/`os.environ` limits).  `__file__` was the most common single refusal.  The entry's
+`__file__` is now its absolute path and each merged module's is that module's own absolute path
+(`m.__file__` too), matching CPython 3.12; a file that binds the name itself keeps the ordinary
+path.  A valid `@export` from `ail_ffi` is dropped for an ordinary Python build because CPython's
+decorator returns the function unchanged; invalid export annotations keep the existing named
+refusal.  After both changes 7 of the 21 candidates build, including `c_export/geometry.py`, which
+prints CPython's output on both builds.
+
+Probes in `/tmp/probes/ex17` via `cmp.sh` on both builds: `p_file_simple`, `p_file_routes`,
+`p_file_unicode`, `p_file_shadow` (`__file__ = 'custom'`) and `p_file_arg` (parameter named
+`__file__`) match CPython; the imported-module probes (`helper.__file__`, `FILE == where()`) match
+on both builds; `p_export_basic`, `p_export_alias` (`@ail_ffi.export`) and `geometry.py` match.
+`p_export_invalid` and `p_export_default` are refused by name on the general path; the default
+build's generic decorator handling compiles them, which is the pre-existing `@decorator` behaviour
+and is unchanged here.
+
+Added `AIL_CURRENT/test_ail_ex17.py` (3 tests: 5 matching programs on both builds, including an
+imported module) and registered it in `ail_check.py`; `test_ail_modules` now expects
+`lib.__file__` to match CPython instead of being refused.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

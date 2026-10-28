@@ -4208,6 +4208,44 @@ def _refuse_load(error):
     raise SystemExit(2)
 
 
+def _bind_file_constant(text, path):
+    """Replace a read of the module-level `__file__` with this file's path, as CPython supplies it.
+
+    A file that binds `__file__` itself is left untouched, so its name still goes through the
+    ordinary rules (and is refused by name if unsupported)."""
+    try:
+        tree = ast.parse(text, filename=str(path))
+    except (SyntaxError, ValueError):
+        return text
+    loads = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name):
+            if node.id != '__file__':
+                continue
+            if not isinstance(node.ctx, ast.Load):
+                return text
+            loads.append((node.lineno, node.col_offset, node.end_lineno, node.end_col_offset))
+        elif isinstance(node, ast.arg) and node.arg == '__file__':
+            return text
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == '__file__':
+            return text
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            if any((alias.asname or alias.name.split('.')[0]) == '__file__' for alias in node.names):
+                return text
+        elif isinstance(node, (ast.Global, ast.Nonlocal)) and '__file__' in node.names:
+            return text
+        elif isinstance(node, ast.ExceptHandler) and node.name == '__file__':
+            return text
+    if not loads:
+        return text
+    value = repr(str(path)).encode('utf-8')
+    lines = text.encode('utf-8').splitlines(keepends=True)
+    for line, start, _end_line, end in sorted(loads, reverse=True):
+        row = lines[line - 1]
+        lines[line - 1] = row[:start] + value + row[end:]
+    return b''.join(lines).decode('utf-8')
+
+
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
                   notes=None, local_imports=False, ffi=None, prelower=None, int64_literals=False):
@@ -4258,6 +4296,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             syntax = ('ail' if detect(text) else 'python') if source_syntax == 'auto' else source_syntax
             if path.suffix.lower() == '.py':
                 syntax = 'python'
+            if syntax == 'python' and entry:
+                text = _bind_file_constant(text, path)
             merged = None
             if ffi is not None and syntax == 'python':
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
