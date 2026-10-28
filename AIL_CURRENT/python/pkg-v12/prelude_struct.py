@@ -73,14 +73,17 @@ def _ail_struct_check(data: bytes, base: int, total: int, mode: int) -> int:
     start = base
     if start < 0:
         start += len(data)
+        if start < 0:
+            raise _ail_struct_error("offset " + str(base) + " out of range for " + str(len(data)) + "-byte buffer")
     if mode == 0:
         if len(data) != total:
             raise _ail_struct_error("unpack requires a buffer of " + str(total) + " bytes")
-    else:
-        if start < 0 or start + total > len(data):
-            raise _ail_struct_error(
-                "unpack_from requires a buffer of at least " + str(base + total) + " bytes for unpacking "
-                + str(total) + " bytes at offset " + str(base) + " (actual buffer size is " + str(len(data)) + ")")
+    elif start + total > len(data):
+        if base < 0:
+            raise _ail_struct_error("not enough data to unpack " + str(total) + " bytes at offset " + str(base))
+        raise _ail_struct_error(
+            "unpack_from requires a buffer of at least " + str(start + total) + " bytes for unpacking "
+            + str(total) + " bytes at offset " + str(start) + " (actual buffer size is " + str(len(data)) + ")")
     return start
 
 

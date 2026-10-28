@@ -1,3 +1,22 @@
+## 2026-10-28 -- stdlib3 review fix: struct operands once, CPython offset texts, unsigned-64 refusal (job-stdlib3-10290146)
+
+The review of the first `struct` lowering found four behavioural defects and one records defect; all are
+fixed.  `unpack` / `unpack_from` used to splice the buffer and offset expressions into every element helper,
+so a call's operands ran once per format element (`p_dup_data`: counter 2 instead of 1; `p_dup_off`: the
+offset ran twice).  A call with more than one value now lowers to a generated typed helper
+(`_ail_struct_<digest>_<n>(data[, base])`), so every operand is evaluated once at the call site; `pack` with
+more than one value gets the same treatment, which also restores CPython's order (all values evaluated before
+the first range check).  `_ail_struct_check` now spells CPython 3.12's three `unpack_from` failures exactly:
+a negative offset still negative after normalisation is `offset N out of range for N-byte buffer`, a negative
+offset that runs past the end is `not enough data to unpack N bytes at offset K`, and a non-negative one is
+`unpack_from requires a buffer of at least N bytes ...`.  Unpacking an unsigned 64-bit value (`Q`, `N`, `P`,
+native 8-byte `L`) is refused by name at compile time instead of trapping `integer overflow` on the high bit
+(CPython returns 2**63 .. 2**64 - 1, outside the int64 subset).  Finally, `pyc.build` refuses a lowered struct
+program by name when it would take the general (boxed) path: that path ignores the helper parameter types, so
+`pack("c", bytearray(b"x"))`, `pack("2s", "ab")` and `unpack(">I", "abcd")` compiled and printed something
+CPython does not.  `test_ail_stdlib3.py` now covers operand-once evaluation, the offset matrix, the unsigned-64
+and general-path refusals, and swaps its unsigned `Q` reads for signed `q`.  MANIFEST regenerated.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

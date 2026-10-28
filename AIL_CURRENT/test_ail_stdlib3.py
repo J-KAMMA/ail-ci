@@ -6,12 +6,14 @@ offsets, native alignment, standard sizes and the error texts are CPython's.  Ev
 Python with a literal format: CPython runs it as the oracle, the compiled program (the Python syntax, typed
 path -- AIL_NO_GENERAL=1 -- so the typed path must take the lowering) prints the same bytes and exits the
 same way, once with the default build and once with AIL_IR=1.  A format that is not a literal, a float format,
-a starred argument, a format with no values at unpack time, a wrong value count and n/N/P outside the native
-byte order are refused by name at compile time.
+a starred argument, a format with no values at unpack time, a wrong value count, n/N/P outside the native
+byte order, and unpacking an unsigned 64-bit value (Q/N/P, or a native 8-byte L) are refused by name at
+compile time.  The general (boxed) path refuses a lowered struct program by name: it does not check the
+argument types, so it would compile calls CPython rejects to different behaviour.
 
 Declared differences (DIFFERENCES.md C-series): the format must be a literal; 'e', 'f', 'd' and 'p' are
-refused; a value whose magnitude does not fit int64 cannot be packed or unpacked (so an unsigned 64-bit value
->= 2**63 is out of the subset); struct.error is the prelude's own class, not CPython's.
+refused; an unsigned 64-bit value cannot be unpacked; struct.error is the prelude's own class, not
+CPython's; a struct use is built on the typed path only.
 """
 import os
 import subprocess
@@ -110,10 +112,10 @@ PROGRAMS['mixed'] = r"""import struct
 
 
 def main():
-    packed = struct.pack(">16sHHIQQQIHHHHHH", b"name", 7, 3, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
+    packed = struct.pack(">16sHHIqqqIHHHHHH", b"name", 7, 3, 9, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10)
     head = packed[:20]
     print(len(packed), list(head))
-    parts = struct.unpack(">16sHHIQQQIHHHHHH", packed)
+    parts = struct.unpack(">16sHHIqqqIHHHHHH", packed)
     name = parts[0]
     print(list(name), len(name), parts[1], parts[8], parts[12], parts[13])
     small = struct.pack("<c?x2s3xI", b"Z", 1, b"ab", 5)
@@ -291,7 +293,7 @@ import struct
 def fields(data: bytes, index: int) -> tuple[int, int]:
     base = 8 + index * 12
     a = unpack_from("<I", data, base)[0]
-    b = unpack_from("<Q", data, base + 4)[0]
+    b = unpack_from("<q", data, base + 4)[0]
     return a, b
 
 
@@ -312,17 +314,67 @@ def main():
 main()
 """
 
-# One representative program also goes through the general (default) path, where the same lowering runs.
-CASES = ['widths', 'align', 'mixed', 'containers', 'routes', 'strings', 'errors', 'from_import', 'unpack_from']
+PROGRAMS['evaluated_once'] = r"""import struct
+
+
+def once_data() -> bytes:
+    print("data")
+    return b"\x01\x02"
+
+
+def once_off() -> int:
+    print("off")
+    return 0
+
+
+def once_value() -> int:
+    print("value")
+    return 2
+
+
+def main():
+    print(struct.unpack("bb", once_data())[1])
+    print(struct.unpack_from("<HH", b"\x01\x00\x02\x00", once_off())[1])
+    packed = struct.pack(">HH", 1, once_value())
+    print(list(packed))
+    try:
+        struct.pack(">HH", 70000, once_value())
+    except struct.error as e:
+        print("error", e)
+
+
+main()
+"""
+
+PROGRAMS['offsets'] = r"""import struct
+
+
+def main():
+    cases = [(-6, 5), (-5, 5), (-4, 5), (-3, 5), (-2, 4), (-1, 4), (0, 4), (3, 5), (5, 5), (0, 0)]
+    for off, size in cases:
+        data = b"x" * size
+        try:
+            print("ok", struct.unpack_from(">I", data, off)[0])
+        except struct.error as e:
+            print("error", e)
+
+
+main()
+"""
+
+# The typed path must build every program; the general (boxed) path refuses a lowered struct program by name.
+CASES = ['widths', 'align', 'mixed', 'containers', 'routes', 'strings', 'errors', 'from_import', 'unpack_from',
+         'evaluated_once', 'offsets']
 DEFAULT_PATH = 'mixed'
 
 
 def compile_python(directory, text, name, **env):
     source, exe = Path(directory, name + ".ail"), Path(directory, name)
     source.write_text(text, encoding="utf-8")
+    environment = {key: value for key, value in dict(os.environ, **env).items() if value is not None}
     built = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", source.name,
                             "--syntax", "python", "-o", exe.name], cwd=directory, capture_output=True,
-                           text=True, timeout=1800, env=dict(os.environ, **env))
+                           text=True, timeout=1800, env=environment)
     return built, source, exe
 
 
@@ -353,7 +405,16 @@ class CompiledPrograms(unittest.TestCase):
     def test_default_path_matches_cpython(self):
         for ir in (False, True):
             with self.subTest(program=DEFAULT_PATH, ir=ir):
-                self.check(DEFAULT_PATH + "_default", PROGRAMS[DEFAULT_PATH], ir)
+                self.check(DEFAULT_PATH + "_default", PROGRAMS[DEFAULT_PATH], ir, AIL_UNIFIED_FORCE=None)
+
+    def test_general_path_refuses_by_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            built, _, exe = compile_python(directory, PROGRAMS['widths'], "general",
+                                           AIL_UNIFIED_FORCE="1", AIL_NO_GENERAL=None)
+            self.assertEqual(built.returncode, 3, "not refused by name (%d):\n%s%s" %
+                             (built.returncode, built.stdout, built.stderr))
+            self.assertIn("built on the typed path only", built.stdout + built.stderr)
+            self.assertFalse(exe.exists())
 
 
 class Refusals(unittest.TestCase):
@@ -377,6 +438,10 @@ class Refusals(unittest.TestCase):
             "count": ("import struct\n\nprint(struct.pack('<2I', 1))\n", "takes 2 values, not 1"),
             "nonnative": ("import struct\n\nprint(struct.pack('>n', 1))\n", "bad char in"),
             "badchar": ("import struct\n\nprint(struct.pack('<Z', 1))\n", "bad char in"),
+            "unsigned64": ("import struct\n\nprint(struct.unpack('>Q', b'\\x00' * 8))\n",
+                           "unsigned 64-bit format 'Q'"),
+            "native64": ("import struct\n\nprint(struct.unpack('@N', b'\\x00' * 8))\n",
+                         "unsigned 64-bit format 'N'"),
         }
         for name, (text, wanted) in cases.items():
             with self.subTest(name):

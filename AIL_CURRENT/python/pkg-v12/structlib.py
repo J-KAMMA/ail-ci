@@ -16,6 +16,7 @@ by name (a note naming the use), and the import the compiler then meets is repor
 `struct.error` is the prelude's own class; an `except struct.error` clause names it.
 """
 import ast
+import hashlib
 import struct as _struct
 
 import stdlib5
@@ -106,14 +107,32 @@ def _call(func, args):
     return ast.Call(func=_name(func), args=list(args), keywords=[])
 
 
-def pack_expr(node, fmt, args):
-    elems, total, big = parse_format(fmt, node)
-    if any(isinstance(a, ast.Starred) for a in args) or node.keywords:
-        stdlib5.refuse(node, 'struct.pack() with a starred or keyword argument is not built; pass the '
-                             'values positionally')
-    wanted = len([e for e in elems if e.code != 'x'])
-    if len(args) != wanted:
-        stdlib5.refuse(node, 'struct.pack(): the format %r takes %d values, not %d' % (fmt, wanted, len(args)))
+def _value_type(elem):
+    if elem.code in SCALAR:
+        return 'int'
+    if elem.code == '?':
+        return 'bool'
+    return 'bytes'
+
+
+def _helper_name(tag, counter):
+    counter[0] += 1
+    return '_ail_struct_%s_%d' % (tag, counter[0])
+
+
+def _add_helper(helpers, name, params, returns, body):
+    """A generated function with typed parameters: the arguments are evaluated once, at the call
+    site and in CPython's order, before any range check or buffer check runs."""
+    arguments = ast.arguments(posonlyargs=[], args=[ast.arg(arg=each, annotation=_name(kind))
+                                                    for each, kind in params],
+                              vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[])
+    fn = ast.FunctionDef(name=name, args=arguments, body=[ast.Return(value=body)],
+                         decorator_list=[], returns=ast.parse(returns, mode='eval').body)
+    ast.fix_missing_locations(fn)
+    helpers.append(ast.unparse(fn))
+
+
+def _pack_chain(node, fmt, elems, total, big, values):
     expr = _const(b'')
     position = 0
     value = 0
@@ -128,15 +147,17 @@ def pack_expr(node, fmt, args):
                 expr = _call('_ail_struct_zeros', [expr, _const(elem.size)])
             position = elem.offset + elem.size
             continue
-        argument = args[value]
+        argument = values[value]
         value += 1
         if elem.code in SCALAR:
+            if isinstance(argument, ast.Constant) and type(argument.value) is bool:
+                argument = _const(int(argument.value))
             low, high, text_high = _range(elem.code, elem.size)
             message = "'%s' format requires %d <= number <= %d" % (elem.code, low, text_high)
             expr = _call('_ail_struct_num', [expr, argument, _const(elem.size), _const(elem.code in SIGNED),
                                              _const(big), _const(low), _const(high), _const(message)])
         elif elem.code == '?':
-            expr = _call('_ail_struct_bool', [expr, _call('bool', [argument])])
+            expr = _call('_ail_struct_bool', [expr, argument])
         elif elem.code == 'c':
             expr = _call('_ail_struct_char', [expr, argument])
         else:
@@ -147,11 +168,32 @@ def pack_expr(node, fmt, args):
     return expr
 
 
-def unpack_expr(node, fmt, data, base, mode):
+def pack_expr(node, fmt, args, helpers, tag, counter):
     elems, total, big = parse_format(fmt, node)
+    if any(isinstance(a, ast.Starred) for a in args) or node.keywords:
+        stdlib5.refuse(node, 'struct.pack() with a starred or keyword argument is not built; pass the '
+                             'values positionally')
     values = [e for e in elems if e.code != 'x']
-    if not values:
-        stdlib5.refuse(node, 'struct: unpacking a format with no values is not built')
+    if len(args) != len(values):
+        stdlib5.refuse(node, 'struct.pack(): the format %r takes %d values, not %d' %
+                       (fmt, len(values), len(args)))
+    # '?' takes any truthy value in CPython; a bool literal in an integer slot is 0 or 1.
+    nodes = []
+    for elem, argument in zip(values, args):
+        if elem.code in SCALAR and isinstance(argument, ast.Constant) and type(argument.value) is bool:
+            argument = _const(int(argument.value))
+        elif elem.code == '?':
+            argument = _call('bool', [argument])
+        nodes.append(argument)
+    if len(values) == 1:
+        return _pack_chain(node, fmt, elems, total, big, nodes)
+    name = _helper_name(tag, counter)
+    body = _pack_chain(node, fmt, elems, total, big, [_name('v%d' % i) for i in range(len(values))])
+    _add_helper(helpers, name, [('v%d' % i, _value_type(elem)) for i, elem in enumerate(values)], 'bytes', body)
+    return _call(name, nodes)
+
+
+def _unpack_elements(node, elems, total, big, data, base, mode):
     elements = []
     for elem in elems:
         if elem.code == 'x':
@@ -169,10 +211,32 @@ def unpack_expr(node, fmt, data, base, mode):
         else:
             elements.append(_call('_ail_struct_get_str', [data, base, _const(elem.offset), _const(elem.size),
                                                           _const(total), _const(mode)]))
-    return ast.Tuple(elts=elements, ctx=ast.Load())
+    return elements
 
 
-def lower(node, attr):
+def unpack_expr(node, fmt, data, base, mode, helpers, tag, counter):
+    elems, total, big = parse_format(fmt, node)
+    values = [e for e in elems if e.code != 'x']
+    if not values:
+        stdlib5.refuse(node, 'struct: unpacking a format with no values is not built')
+    for elem in values:
+        if elem.size == 8 and elem.code in UNSIGNED:
+            stdlib5.refuse(node, "struct: unpacking the unsigned 64-bit format %r is not built: "
+                                 "a value from 2**63 to 2**64 - 1 does not fit the int subset" % elem.code)
+    with_base = base is not None
+    if len(values) == 1:
+        return ast.Tuple(elts=_unpack_elements(node, elems, total, big, data,
+                                               base if with_base else _const(0), mode), ctx=ast.Load())
+    name = _helper_name(tag, counter)
+    params = [('data', 'bytes')] + ([('base', 'int')] if with_base else [])
+    body = ast.Tuple(elts=_unpack_elements(node, elems, total, big, _name('data'),
+                                           _name('base') if with_base else _const(0), mode), ctx=ast.Load())
+    _add_helper(helpers, name, params, 'tuple[' + ', '.join(_value_type(e) for e in values) + ']', body)
+    return _call(name, [data, base] if with_base else [data])
+
+
+
+def lower(node, attr, helpers, tag, counter):
     args = node.args
     if attr == 'calcsize':
         if len(args) != 1 or node.keywords or not _literal(args[0]):
@@ -184,15 +248,15 @@ def lower(node, attr):
                              'format is checked at compile time' % attr)
     fmt = args[0].value
     if attr == 'pack':
-        return pack_expr(node, fmt, args[1:])
+        return pack_expr(node, fmt, args[1:], helpers, tag, counter)
     if attr == 'unpack':
         if len(args) != 2 or node.keywords:
             stdlib5.refuse(node, 'struct.unpack() takes a format and one buffer here')
-        return unpack_expr(node, fmt, args[1], _const(0), 0)
+        return unpack_expr(node, fmt, args[1], None, 0, helpers, tag, counter)
     if len(args) not in (2, 3) or node.keywords:
         stdlib5.refuse(node, 'struct.unpack_from() takes a format, a buffer and an optional offset here')
-    base = args[2] if len(args) == 3 else _const(0)
-    return unpack_expr(node, fmt, args[1], base, 1)
+    base = args[2] if len(args) == 3 else None
+    return unpack_expr(node, fmt, args[1], base, 1, helpers, tag, counter)
 
 
 class _Lower(ast.NodeTransformer):
@@ -210,23 +274,27 @@ class _Lower(ast.NodeTransformer):
         return node
 
 
-def run(tree, text):
+def run(tree, text, source):
     binder = stdlib5.take_imports(tree, 'struct', HANDLED,
                                   unknown='pack, unpack, unpack_from, calcsize and error are the built names')
     if not binder:
         return
+    tag = hashlib.sha1(source.encode('utf-8')).hexdigest()[:10]
+    helpers = []
+    counter = [0]
 
     def fix(node):
         if isinstance(node, ast.Call):
             attr = binder.attr(node.func)
             if attr in ('pack', 'unpack', 'unpack_from', 'calcsize'):
-                return lower(node, attr)
+                return lower(node, attr, helpers, tag, counter)
         if binder.attr(node) == 'error':
             return _name('_ail_struct_error')
         return None
     transform = _Lower(fix)
     tree.body = [transform.visit(stmt) for stmt in tree.body]
     stdlib5.leftover(tree, binder, 'pack / unpack / unpack_from / calcsize / error are the built names')
+    text.extend(helpers)
     text.append(stdlib5.prelude('struct'))
 
 
@@ -245,7 +313,7 @@ def rewrite_text(source, notes=None):
     text = []
     try:
         before = ast.dump(tree)
-        run(tree, text)
+        run(tree, text, source)
         if ast.dump(tree) == before and not text:
             return source
         stdlib5.insert_after_imports(tree, '\n\n'.join(text))

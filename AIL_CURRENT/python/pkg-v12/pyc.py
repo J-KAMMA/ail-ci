@@ -814,6 +814,17 @@ def _build_unshadowed(source, out, strict, report, force_general):
         # by-name refusal of the typed path; through the fallback that refusal would be invisible).
         if os.environ.get('AIL_NO_GENERAL'):
             raise
+        # The struct lowering is typed: its helpers take int / bool / bytes parameters, and every
+        # buffer and offset is bound to one temporary so it is evaluated once.  The boxed general
+        # path ignores those types, so a call CPython rejects (a str buffer, a bytearray 'c') would
+        # compile and print something else -- a silent difference, not a refusal.  Refuse it by
+        # name there instead of compiling a program that diverges.
+        if '_ail_struct_' in source:
+            raise Unsupported('pack / unpack / unpack_from / calcsize are built on the typed path only: '
+                              'the general path does not check the argument types, so a call CPython rejects '
+                              'would compile and print a different result.\n'
+                              '  write instead: keep the program inside the typed subset (AIL_NO_GENERAL=1 '
+                              'shows what stops it)')
         # DESIGN_GENERAL_PATH_20260916.md's general path, first cut: the typed path refused
         # (named its own reason, already raised as `Unsupported` -- propagated below if this
         # program is not a whole-program shape, or if pyboxed itself cannot handle it either).
