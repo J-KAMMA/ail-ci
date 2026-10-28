@@ -258,15 +258,6 @@ show(d["k"])
 
 
 class Pre392Tests(unittest.TestCase):
-    def check_refused(self, slug, text, message):
-        with tempfile.TemporaryDirectory(prefix='ail-pre392-') as directory:
-            for general in (True, False):
-                name = '%s_%s' % (slug, 'g' if general else 'd')
-                exe, built = build(directory, name, text, general)
-                output = built.stdout + built.stderr
-                self.assertEqual(built.returncode, 2, '%s (general=%s)\n%s' % (slug, general, output[-2000:]))
-                self.assertIn(message, output, (slug, general, output[-2000:]))
-
     def check_matches(self, slug, text):
         with tempfile.TemporaryDirectory(prefix='ail-pre392-') as directory:
             want = cpython(directory, slug, text)
@@ -278,18 +269,18 @@ class Pre392Tests(unittest.TestCase):
                 self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0], (slug, general, got.stderr[-800:]))
                 self.assertEqual(got.returncode, want[1], (slug, general, got.stderr[-800:]))
 
-    def test_text_from_containers_refused(self):
+    def test_text_from_containers_matches_cpython(self):
         for slug, text in REFUSED.items():
             with self.subTest(slug=slug):
-                self.check_refused(slug, text, 'int64 constant expression out of range')
+                self.check_matches(slug, text)
 
     def test_in_range_and_dynamic_match_cpython(self):
         for slug, text in MATCHES.items():
             with self.subTest(slug=slug):
                 self.check_matches(slug, text)
 
-    def test_float_control_still_refused(self):
-        self.check_refused('float_control', FLOAT_CONTROL, 'int() of a float outside int64')
+    def test_float_control_matches_cpython(self):
+        self.check_matches('float_control', FLOAT_CONTROL)
 
 
 if __name__ == '__main__':

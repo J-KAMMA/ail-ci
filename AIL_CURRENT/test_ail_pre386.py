@@ -89,17 +89,18 @@ def cpython(directory, name, text):
 
 
 class Pre386(unittest.TestCase):
-    def test_routed_power_is_refused_by_name(self):
+    def test_routed_power_exact_matches_cpython(self):
         for general in (False, True):
             for name, text in REFUSED:
                 with self.subTest(name=name, general=general), \
                         tempfile.TemporaryDirectory(prefix='ail-pre386-') as directory:
+                    want = cpython(directory, name, text)
                     exe, built = build(directory, name, text, general)
-                    output = built.stdout + built.stderr
-                    self.assertNotEqual(built.returncode, 0, (name, output))
-                    self.assertTrue(any(item in output for item in REFUSALS), (name, output))
-                    self.assertNotIn('integer overflow', output, (name, output))
-                    self.assertFalse(exe.exists(), (name, output))
+                    self.assertEqual(built.returncode, 0, (name, general, built.stdout + built.stderr))
+                    got = subprocess.run([str(exe)], capture_output=True, timeout=120,
+                                         cwd=directory)
+                    self.assertEqual(got.stdout, want.stdout, (name, general, got.stderr[-800:]))
+                    self.assertEqual(got.returncode, want.returncode, (name, general, got.stderr[-800:]))
 
     def test_routed_power_in_range_matches_cpython(self):
         for general in (False, True):
@@ -114,14 +115,17 @@ class Pre386(unittest.TestCase):
                     self.assertEqual(got.stdout, want.stdout, (name, general, got.stderr[-800:]))
                     self.assertEqual(got.returncode, want.returncode, (name, general, got.stderr[-800:]))
 
-    def test_constant_base_runtime_exponent_keeps_pre273_refusal(self):
+    def test_constant_base_runtime_exponent_matches_cpython(self):
         text = 'es = [40]\nprint(10 ** es[0])\n'
         for general in (False, True):
-            with tempfile.TemporaryDirectory(prefix='ail-pre386-') as directory:
-                _, built = build(directory, 'constant_base', text, general)
-                output = built.stdout + built.stderr
-                self.assertNotEqual(built.returncode, 0, (general, output))
-                self.assertIn('constant base 10', output, (general, output))
+            with self.subTest(general=general), \
+                    tempfile.TemporaryDirectory(prefix='ail-pre386-') as directory:
+                want = cpython(directory, 'constant_base', text)
+                exe, built = build(directory, 'constant_base', text, general)
+                self.assertEqual(built.returncode, 0, (general, built.stdout + built.stderr))
+                got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+                self.assertEqual(got.stdout, want.stdout, (general, got.stderr[-800:]))
+                self.assertEqual(got.returncode, want.returncode, (general, got.stderr[-800:]))
 
 
 if __name__ == '__main__':
