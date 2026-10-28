@@ -1,3 +1,28 @@
+## 2026-10-28 -- cov27: a nested generator expression whose elements a call consumes
+
+The current corpus census (all 221 programs in `lab/corpus/programs`, both builds, 442 compiles)
+had 24 compile-time refusals on the default build and 24 with `AIL_UNIFIED_FORCE=1`; imports and
+stdlib modules were left to the stdlib tasks.  The most frequent non-import construct was a
+generator expression nested inside another generator expression (3 programs: deepseek t172 and
+t432, glm t432).  The general path materialised a nested generator eagerly and refused the whole
+construct to avoid the observable difference when the inner generator is a value.
+
+A nested generator that is an argument of a call which reads every element before returning
+(`sum`, `str.join`, `list`, `sorted`, `min`/`max`, ...) is now compiled as the existing eager
+list at that call: the consumption point and the side-effect order match CPython.  `any`, `all`
+and `next` are excluded because they stop at the first deciding element, and a nested generator
+used as the outer element, an outer iterable or any other saved value keeps the named
+`a generator expression nested inside another generator expression` refusal.  The construct
+count on the unified build went from 3 refusals to 0; overall refusals went from 24 to 21 on
+both builds (the three programs above now match CPython on all three corpus inputs).
+
+Probes in `/tmp/probes/cov27` on both builds via `cmp.sh`: `p_t172`, `p_repr`, `p_sumzip`,
+`p_empty`, `p_routes` (values through an argument, a list item, an attribute and a dict value),
+`p_negative` (int64-width values), `p_alias` match CPython; `p_refuse_value`,
+`p_refuse_anyiter`, `p_refuse_nextiter`, `p_any_short` (unified) and `p_next_short` are refused
+by name.  `test_ail_pre42.py` still passes unchanged.  `test_ail_cov27.py` pins four programs on
+both builds plus the nested-value refusal.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

@@ -2531,19 +2531,20 @@ class Compiler(boxclosure.ClosureMixin):
             and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
             and isinstance(n.args[1].value, str))
         self.assigned_attrs = frozenset(assigned_attrs)
-        any_all_genargs = set()
-        for call in ast.walk(tree):
-            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
-                    call.func.id in ('any', 'all'):
-                any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        genexp_parents = {child: parent for parent in ast.walk(tree)
+                          for child in ast.iter_child_nodes(parent)}
         for gen in ast.walk(tree):
-            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
-                refusal = Unsupported(
-                    'a generator expression nested inside another generator expression '
-                    '(the inner one would be materialised eagerly, not lazily)')
-                refusal.source_line = getattr(gen, 'lineno', None)
-                raise refusal
+            if not isinstance(gen, ast.GeneratorExp):
+                continue
+            nested = [n for n in ast.walk(gen)
+                      if n is not gen and isinstance(n, ast.GeneratorExp)]
+            if not nested:
+                continue
+            if not _genexp_fully_consumed(gen, genexp_parents):
+                _refuse_nested_genexp(gen)
+            for inner in nested:
+                if not _genexp_fully_consumed(inner, genexp_parents):
+                    _refuse_nested_genexp(inner)
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
@@ -6495,9 +6496,6 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
-            raise Unsupported('a generator expression nested inside another generator expression '
-                              '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
@@ -9519,9 +9517,6 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('%s() over a generator expression whose iterable is itself a '
                                   'generator expression (the inner generator would be materialised '
                                   'eagerly)' % name)
-            if any(n is not arg and isinstance(n, ast.GeneratorExp) for n in ast.walk(arg)):
-                raise Unsupported('a generator expression nested inside another generator expression '
-                                  '(the inner one would be materialised eagerly, not lazily)')
             # fused: short-circuits at the first deciding element, like CPython's any()/all()
             # over a generator (the materialising list path cannot, so it must not be used).
             # The two -> bool is still computed in evaluation order; the `goto` leaves every
@@ -12470,6 +12465,34 @@ def _genexp_consumed_in_place(node, parents):
         if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
             return True
     return False
+
+
+# `any`/`all`/`next` stop consuming at the first deciding element; a nested generator they
+# receive keeps its lazy behaviour through their own fused paths, but a *nested* generator that
+# is merely saved as an outer element must not be materialised.  Only these calls read every
+# element before returning, so materialising a nested generator at the call is the same point.
+_GENEXP_FULL_CALLS = _GENEXP_EAGER_CALLS - {'any', 'all', 'next'}
+
+
+def _genexp_fully_consumed(node, parents):
+    """True iff `node` is an argument of a call that reads every element before returning."""
+    par = parents.get(node)
+    if not (isinstance(par, ast.Call) and node in par.args):
+        return False
+    f = par.func
+    if isinstance(f, ast.Name):
+        return f.id in _GENEXP_FULL_CALLS
+    if isinstance(f, ast.Attribute):
+        return f.attr in _GENEXP_EAGER_METHODS
+    return False
+
+
+def _refuse_nested_genexp(node):
+    refusal = Unsupported(
+        'a generator expression nested inside another generator expression '
+        '(the inner one would be materialised eagerly, not lazily)')
+    refusal.source_line = getattr(node, 'lineno', None)
+    raise refusal
 
 
 def _bound_names(tree):
