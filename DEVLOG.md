@@ -1,3 +1,33 @@
+## 2026-10-28 -- cov14: nested generator expressions with an eagerly consumed inner one (job-cov14-10290221)
+
+Profiled all 219 programs in `lab/corpus/programs` in both builds (the general-path compile
+loop of `lab/corpus/check.py`; this tree has no `lab/profile/run.py`).  Before: 24 refused
+programs in the default build and 24 with `AIL_UNIFIED_FORCE=1`.  Excluding imports, the most
+frequent construct was a generator expression nested inside another one (3 programs:
+deepseek t172/t432 and glm t432); it was the unified build's first refusal and the general
+path blocker for the same three programs in the default build.
+
+`pyboxed2.py` now accepts that nesting when every inner generator is read completely at the
+same point by an eager consumer (`sum`, `min`, `max`, `list`, `tuple`, `sorted`,
+`str.join`, ...), a starred unpack, or a tuple/list unpacking assignment.  The corpus uses are
+`sum(...)` and `str.join(...)` inside the outer element.  Every other nesting (the inner
+generator is the outer one's iterable, so the outer can stop early) keeps the same named
+refusal, as do `next`/`any`/`all` unless their own fused path handles it.  After: 21 refused
+programs in the default build and 21 with `AIL_UNIFIED_FORCE=1`; nested generator expressions
+are 0.  The next non-import refusals remain 2 programs for `sorted(d.items())` and 2 for
+`json.loads` (both have other blockers).
+
+Added `AIL_CURRENT/test_ail_cov14.py` (4 tests: four programs on both builds plus the by-name
+refusal on both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Probes in `/tmp/probes/cov14` via `cmp.sh` on both builds: `basic`, `p_sum`, `p_join`,
+`p_routes`, `p_alias`, `p_any`, `p_any_inner`, `p_nested_any`, `p_next_nested` match CPython
+(including empty, negative, int/float/str/bool, argument/list-item/attribute/dict-value routes
+and aliases); `p_unsafe`, `p_unsafe2` and `p_any_unsafe` are refused by name (`a generator expression nested inside another
+generator expression`).  Final-state tests: test_ail_cov14, test_ail_pre116, test_ail_pre211,
+test_ail_unified, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` and `tools/ci_shards.py --update` were run and their `--check`
+passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
