@@ -220,6 +220,52 @@ Added `AIL_CURRENT/test_ail_pre392.py` (3 tests: 14 refused programs, 7 matching
 float control, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
 Direct run on this tree: 3 tests, 52.9 s, OK.  `tools/diff_ids.py` is not present on this tree;
 `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-28 -- pre395 review fix: cap the class name at 200 characters (job-rbpre395-10281537)
+
+The pre395 review found that `ail__raise_class_not_subscriptable` did not apply CPython's
+`%.200s` cap to the class name, so a 201-character class appeared in full (`len(str(e))` 229
+instead of 228) on both builds, for an index and a slice.  The helper now truncates its
+converted name to 200 characters, matching `ail__raise_item_tname`.  The same cap is applied
+to aliases and to values reaching the subscript through an argument, a list item, a dict
+value, an attribute or a return value.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p19_len1`, `p19_len199`, `p19_len200`,
+`p19_len201`, `p19_len250` and `p19_len300` (index, slice and negative index at each name
+length) and `p19_routes` (201-character class through alias, list item, dict value, attribute,
+argument and return value) all match CPython.  Final-state tests: test_ail_pre395,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3, 4 modules, 272 s, 0 failed.
+`tools/update_manifest.py` was run and `--check` passes.  Correction to the entry below: the
+earlier claim that plain instance `A()[0]` prints `'instance'` was wrong; HEAD and base print
+`'A'`, matching CPython, and only the exception instance `E()[0]` prints `'exception'`.
+
+## 2026-10-28 -- re-apply pre395: class object subscript names the class (job-rbpre395-10281537)
+
+Re-applied the accepted pre395 change on top of the current integration tree.  The pre377
+review's first still-differing pre-existing item reproduced on both builds: `class A: pass;
+A[0]` stopped with `TypeError: 'type' object is not subscriptable`, where CPython 3.12 says
+`TypeError: type 'A' is not subscriptable`.  The general-path runtime's `ail_op_getitem` and
+`ail_op_getslice` now name a class object's own class in that error
+(`ail__raise_class_not_subscriptable`), and the dunderrt patch fragments still match.  The
+message follows the class actually subscribed through an alias, a subclass, an argument, a
+list item, an attribute, a dict value and a return value, for int, negative, wide, bool,
+None, float, str, empty-str and tuple keys and full/open/step/negative/reverse slices.  Item
+assignment keeps CPython's `'type' object does not support item assignment` wording.  The
+recorded second item (`E()[0]`, an exception subclass) still prints `'exception'`, and an
+exploratory plain instance `A()[0]` still prints `'instance'`; an exploratory `del A[0]` also
+still says `doesn't support` against CPython's `does not support`.  Those three are
+pre-existing and unchanged here.
+
+Added `AIL_CURRENT/test_ail_pre395.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json` (weight 38.8).  Probes in `/tmp/probes` on
+both builds via `cmp.sh`: `p01_direct` (class-object index forms, including inherited,
+aliased and int/negative/wide/bool/None/float/str/empty/tuple keys), `p02_slices`
+(full/open/step/zero/negative/empty/reverse slices and a subclass), `p03_routes` (argument,
+list item, dict value, attribute, return value and slices, plus item assignment) and
+`p04_dunderpatch` (a class with `__add__`, so dunderrt's patch is applied) match CPython.
+All match CPython on both builds.  Final-state tests: test_ail_pre395 (17.9 s),
+test_ail_safetynet (132.8 s), test_ail_files (137.2 s) and test_ail_corpus_findings3
+(246.9 s), 4 modules, 380 s, 0 failed.  `tools/update_manifest.py` was run and `--check`
+passes.
 
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
