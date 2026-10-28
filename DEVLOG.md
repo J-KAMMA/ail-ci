@@ -1,3 +1,28 @@
+## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
+
+The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
+clashing comprehension target but never rewrote a nested lambda body.  With `x = 99` in the
+enclosing scope, `x = 99; ys = [(lambda: x)() for x in range(3)]` kept the lambda reading the
+outer `x` and printed `[99, 99, 99]` where CPython prints `[0, 1, 2]`; the same shape inside a
+function also differed.  The body's free loads (parameters, walrus targets and nested
+comprehension targets excluded) are now resolved against the enclosing comprehension stack:
+a function-scope lambda captures the renamed target and matches CPython, while at module
+scope the existing closure pass refuses the construct by name (`not in the subset: closures
+nested too deeply to settle their shared names`) instead of printing the wrong list.
+Argument defaults keep their pre363 handling, and a class-body target read stays refused by
+name.  Module-level no-clash lambda reads, class-body reads and a positional-only lambda
+remain refused by name, as they were before this change.
+
+Added `AIL_CURRENT/test_ail_pre404.py` (2 tests, 18 matching and 6 refused programs, both
+builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Probes in `/tmp/probes/pre404` on both builds via `cmp.sh`: `f01`-`f19` (the reported case,
+argument, list item, attribute, dict value, set/dict comprehension, consumed generator, if
+condition, nested same-name comprehensions, two targets, empty/negative/string, walrus body,
+nested lambda, defaults and outer-read controls) match CPython; `m01`-`m07` module-scope
+routes and `c01` class-body are refused by name.  Final-state tests: test_ail_pre404,
+test_ail_pre363, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --check` still
+reports the four duplicate entries present on the base tree.
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
