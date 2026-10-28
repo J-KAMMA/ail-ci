@@ -1,3 +1,34 @@
+## 2026-10-28 -- pre406: a known dict/list/argument-held power base is refused by name (job-pre406-10281122)
+
+The pre391 review's first still-differing pre-existing item was `p10`: a constant-exponent power
+whose base is held in a dict value (and the same through a list item or a function argument)
+compiled on both builds and then stopped with `integer overflow`, where CPython prints the exact
+bignum.  It reproduced with `d = {'n': 10}; print(d['n'] ** 40)`, `values = [10];
+print(values[0] ** 40)` and `def power(b): print(b ** 40); power(10)`, and with the matching
+augmented `**=` targets.  The constant-base rule only saw a syntactically constant base, so a
+value read from a safe literal container or a known call-site argument was invisible.
+
+`_check_int64_power_routes` now resolves the base through the same safe value map as the int()
+checks (`_module_value_map`, `_scope_constant_map`, safe container aliases) and through
+`_pow_parameter_bindings`; for an augmented power it reads the target's pre-assignment value from
+a copy of the program with that one statement removed.  A constant exponent whose exact result
+leaves int64 is refused at compile time with `int64 constant expression out of range` on both
+builds.  In-range results, bases 0/1/-1, float/bool and negative exponents match CPython, as do
+mutated containers, appended list items and an in-range argument.  A disagreeing set of call
+sites, several augmented stores on one target, an attribute-held value and a nested container
+keep their pre-existing run-time trap, identical on the base tree.
+
+Added `AIL_CURRENT/test_ail_pre406.py` (9 refused, 8 matching programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json` (weight 38.8); added DIFFERENCES
+row `C?-job-pre406-10281122-1`.  Probes in `/tmp/probes/pre406` on both builds via `cmp.sh`:
+`p01`, `p02`, `p03`, `p05`, `p06`, `p07`, `p09`, `p14`, `p15`, `p20`, `p23`, `p26`, `p28`
+and `p29` are refused by name; `p10`-`p13`, `p17`-`p19`, `p21`, `p22`, `p25`, `p27` and
+`p30`-`p33`, `p36`-`p40` match CPython (in-range routes, safe bases, mutation, aliasing,
+missing key/index, negative/float/bool exponents and augmented controls).  `p04`/`p08`
+(attribute), `p16`/`p34` (disagreeing call sites), `p24` (nested container) and `p35` (several
+augmented stores) still trap identically on the base tree, so they are pre-existing and unchanged.
+Final-state tests: test_ail_pre406, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
