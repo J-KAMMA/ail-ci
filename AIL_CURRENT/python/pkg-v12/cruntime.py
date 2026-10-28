@@ -14436,6 +14436,7 @@ static inline ail_st ail__raise_class_not_subscriptable(ail_ctx *cx, ail_obj c) 
         uint32_t ch = (uint32_t)ail_chr(cn, i);
         nb[k++] = ch < 128 ? (char)ch : '?';
     }
+    if (k > 200) k = 200;
     nb[k] = 0;
     size_t need = (size_t)k + sizeof "type '' is not subscriptable";
     char *msg = (char *)malloc(need);

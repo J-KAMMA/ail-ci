@@ -1,3 +1,21 @@
+## 2026-10-28 -- pre395 review fix: cap the class name at 200 characters (job-rbpre395-10281537)
+
+The pre395 review found that `ail__raise_class_not_subscriptable` did not apply CPython's
+`%.200s` cap to the class name, so a 201-character class appeared in full (`len(str(e))` 229
+instead of 228) on both builds, for an index and a slice.  The helper now truncates its
+converted name to 200 characters, matching `ail__raise_item_tname`.  The same cap is applied
+to aliases and to values reaching the subscript through an argument, a list item, a dict
+value, an attribute or a return value.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p19_len1`, `p19_len199`, `p19_len200`,
+`p19_len201`, `p19_len250` and `p19_len300` (index, slice and negative index at each name
+length) and `p19_routes` (201-character class through alias, list item, dict value, attribute,
+argument and return value) all match CPython.  Final-state tests: test_ail_pre395,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3, 4 modules, 272 s, 0 failed.
+`tools/update_manifest.py` was run and `--check` passes.  Correction to the entry below: the
+earlier claim that plain instance `A()[0]` prints `'instance'` was wrong; HEAD and base print
+`'A'`, matching CPython, and only the exception instance `E()[0]` prints `'exception'`.
+
 ## 2026-10-28 -- re-apply pre395: class object subscript names the class (job-rbpre395-10281537)
 
 Re-applied the accepted pre395 change on top of the current integration tree.  The pre377
