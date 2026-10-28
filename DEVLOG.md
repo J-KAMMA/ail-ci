@@ -66,6 +66,57 @@ compile-time refusal.  Registered it in `ail_check.MODULES` and `tools/ci_shards
 DIFFERENCES row `C?-job-fz2-10281148-1`.  Final-state tests: test_ail_fz2, test_ail_pre104,
 test_ail_pre54, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (6 modules,
 0 failed).  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-28 -- pre410 review: for targets bind, deferred lambda/genexp reads do not (job-pre410-10281225)
+
+The pre410 review found two regressions against the base build.  `_scope_bindings` visited a
+`for`/`async for` body but never its target, so `for C in [1, 2]` / `for C in range(10): break` /
+`for a, C in [(1, 7)]` before `class C: x: C = 1` were refused although CPython and the base build
+printed `2`/`0`/`7`; the target is now a binding when the iterable is not a known-empty literal.
+`_annotation_reads` also treated lambda bodies and generator-expression elements as evaluated
+immediately, refusing `x: (lambda: C) = 1` and `x: (C for _ in range(1)) = 1`; a lambda body now
+runs only when the lambda is called directly, and a generator element only when a known consumer
+iterates it (or it is unpacked or iterated by a comprehension), while defaults, the first
+generator iterable, subsequent iterables of a consumed generator and all eager comprehension
+parts still count.
+
+Probes in `/tmp/probes` on both builds: `p_for_target`, `p_for_break`, `p_for_tuple`,
+`p_for_nested`, `p_lambda_deferred`, `p_lambda_nested_deferred`, `p_genexp_deferred`,
+`p_genexp_second_iter_deferred`, `p_genexp_lambda_deferred` and `p_genexp_lambda_called` match
+CPython (the last is refused by name in both builds because CPython raises).  `p_for_empty`,
+`p_lambda_called`, `p_lambda_default`, `p_lambda_nested_called`, `p_genexp_list`, `p_genexp_sum`,
+`p_genexp_next`, `p_genexp_first_iter`, `p_genexp_unpacked`, `p_genexp_comp_consume`,
+`p_read_argument`, `p_read_list_item`, `p_read_attribute` and `p_read_dict_value` are refused by
+name on both builds, matching CPython's NameError.  `p_async_for` is refused by the pre-existing
+subset message on both builds (not modeled), so the async-for target route could not be exercised.
+
+## 2026-10-28 -- pre410: class-body annotation name reads use enclosing scopes (job-pre410-10281225)
+
+The first still-differing item in the pre403 review was its pre-existing `rp3_unrelated_func` and
+`rp4_if_false`: `def f(): C = 5` (or `if False: C = 5`) before `class C: x: C = 1` compiled and
+printed `1` on both builds, where CPython evaluates the annotation and raises NameError.  This
+tree did not carry the class-name read check from pre403, so the same cause was fixed by adding
+it with scope-aware earlier bindings: a read is allowed only by a binding in the class body
+before the read or in an enclosing module/function scope before the class, and a binding in a
+constant-false `if`/`while`, an empty literal `for`, a nested function/lambda/comprehension, or an
+unrelated function no longer hides the NameError.  The check models a same-line binding, a walrus
+in the annotation, a PEP 695 type parameter named like the class, and the annotation-only target
+(which binds after the annotation).  Comprehension targets and lambda parameters still shadow the
+class name, while the first comprehension iterable and a lambda default are refused.  String
+annotations and `from __future__ import annotations` are unchanged.
+
+Probes in `/tmp/probes/pre410` on both builds: `rp3_unrelated_func`, `rp4_if_false`, `r_direct`,
+`r_annotation_only`, `r_method_param`, `r_method_return`, `r_later`, `r_comp_iterable`,
+`r_lambda_default`, `r_argument`, `r_list_item`, `r_attribute`, `r_dict_value`,
+`r_class_if_false`, `r_if_zero`, `r_self_target` and `r_loop_binding` are refused by name;
+`m_prior_module`, `m_if_true`, `m_module_alias`, `m_earlier_class`, `m_same_line`, `m_walrus`,
+`m_annassign_target`, `m_pep695`, `m_comp_shadow`, `m_lambda_shadow`, `m_string`, `m_future`
+and `m_no_annotation` match CPython.  `m_class_if_true` is refused by the pre-existing class-body
+subset ("a class body statement other than def/assignment/pass/docstring"), unchanged.  A
+`--debug-dir` build of `m_no_annotation` has a `program.c` byte-identical to the base work tree
+(only report paths differ).  Final-state tests: test_ail_pre410, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (4 modules, 396 s, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
