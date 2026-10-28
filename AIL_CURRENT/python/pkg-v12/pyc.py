@@ -146,6 +146,12 @@ int main(int argc, char **argv) {
 }
 '''
 
+NO_ENTRY_MAIN = r'''
+int main(void) {
+    return 0;
+}
+'''
+
 IO_MAIN_ARRAY = r'''
 #include <stdio.h>
 #include <stdlib.h>
@@ -596,7 +602,11 @@ def _main_for(info):
                           '  write instead: print the result inside the function (`print(total)`), '
                           'or give it a parameter')
     if kinds[0] != 'array':
-        raise Unsupported('the first parameter must be the sequence read from the file')
+        # A def-only script whose first function does not take the file's int64 sequence is not a
+        # function entry point.  CPython runs the module body and does nothing; the general path
+        # already compiles such a source that way (only a top-level assignment keeps it off the
+        # array-entry route), so the typed path gets the same inert `main` rather than refusing.
+        return NO_ENTRY_MAIN
     extra = kinds[1:]
     if any(k != 'int' for k in extra):
         raise Unsupported('a standalone program can read only one sequence, from the file')
