@@ -1,3 +1,26 @@
+## 2026-10-28 -- pre433: a power base from a function default is refused (job-pre433-10281951)
+
+The rbpre386 review's first still-differing item reproduced on this tree on both builds:
+`def f(x=10): print(x**40); f()` compiled and then stopped with `integer overflow`, where
+CPython prints the bignum.  The constant-power pass bound a parameter from explicit call-site
+arguments only; `_binpow_power_parameters` now carries its statically known default, and
+`_binpow_argument_value` binds a constant `*` expansion at the call, so the default is checked
+as CPython binds it.  The power is refused by name at compile time (`int64 constant expression
+out of range`) on both builds for positional, leading and keyword-only defaults; a negative
+default; defaults read from a module alias, a list item, a class attribute and a dict value;
+empty and expanded `*`; the 10**18/10**19 and 2**62/2**63 boundaries; an explicit out-of-range
+argument; and mixed call sites.  In-range defaults, explicit safe calls, bases 0/1/-1, bool and
+float defaults, and an uncalled function match CPython.
+
+The other recorded items (`int(10)**40`, module tuple unpack, and the function-local
+`dict.get`/tuple/instance-attribute bases) are separate causes and are unchanged here.
+Probes in `/tmp/probes`: `p433_default.py` plus 22 `p433_def_*.py` programs match CPython or
+are refused by name on both builds via `cmp.sh`; `p433_intpow.py` and `p433_tuple.py` still
+show the recorded pre-existing `integer overflow`.  Added `test_ail_pre433.py` and registered
+it in `ail_check.MODULES`.  Final-state tests: test_ail_pre433, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3, test_ail_pre351, test_ail_pre372 and
+test_ail_pre33 pass.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
