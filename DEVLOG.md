@@ -1,3 +1,29 @@
+## 2026-10-28 -- pre425: a routed augmented power is refused by name (job-pre425-10281802)
+
+The rbpre385 review recorded as pre-existing on both builds that a routed augmented `b **= e`
+still stopped with `integer overflow` where CPython prints the bignum (`r16`).  The
+augmented-power folder only saw parameterless straight-line bodies.  `_static_aug_pow_int` now
+also reads a list item, a dict value or a plain attribute assigned in the same body, and an
+item or attribute store invalidates the earlier value; `_check_int64_routed_augmented_powers`
+follows module-scope calls into plain functions, binding positional and keyword arguments
+(including nested wrapper calls and module list/dict items) and refuses an augmented power
+whose exact result leaves int64 with `int64 constant expression out of range`.  Mutated or
+rebound containers, a store before the statement, dynamic arguments and in-range powers stay
+on the run-time path and match CPython; a loop-mutated exponent (`r17`) remains the
+pre-existing run-time trap.  The other recorded items already match or are refused by name on
+this tree: `r04`/`r05` pow routes are named refusals and `r11` is the existing class-attribute
+subset refusal.
+
+Probes in `/tmp/probes/pre425` on both builds via `cmp.sh`: r16 direct, nested, keyword,
+list/dict argument, module list/dict/attribute and function-local-list routes are refused by
+name; in-range, safe-base, negative-exponent, float/bool, dynamic, store-before and mutated
+list/dict controls match CPython.  Added `AIL_CURRENT/test_ail_pre425.py` (2 tests) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`; DIFFERENCES row
+`C?-job-pre425-10281802-1`.  Final-state tests: test_ail_pre425, test_ail_pre372,
+test_ail_pre364, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
+(6 modules, 0 failed).  `tools/update_manifest.py` was run and `--check` passes;
+`tools/ci_shards.py --update` added the module and `--check` exits 0.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
