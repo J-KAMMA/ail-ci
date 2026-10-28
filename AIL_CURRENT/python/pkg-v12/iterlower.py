@@ -740,14 +740,114 @@ class _Lower:
         return statements
 
 
+def _obvious_str(node):
+    """A node whose value is a str without looking at the rest of the program: a string literal, an
+    f-string, or `str(...)`. A str-valued name is not visible here, so it takes the str() wrapper
+    too -- which is CPython's own conversion at the position, so the value and its type do not
+    change."""
+    return ((isinstance(node, ast.Constant) and isinstance(node.value, str))
+            or isinstance(node, ast.JoinedStr)
+            or (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'str' and len(node.args) == 1 and not node.keywords))
+
+
+def _optional_shown(node):
+    """The str `print`/f-string view optlib.py builds for an Optional value:
+    `name__v if name__p else "None"`, or `str(name__v) if name__p else "None"`. It already has one
+    str type, so it is left alone; wrapping the scalar arm again would be `str()` of a str, which
+    the typed path refuses. A source conditional with the same shape is only left refused."""
+    if not (isinstance(node.orelse, ast.Constant) and node.orelse.value == 'None'):
+        return False
+    if not (isinstance(node.test, ast.Name) and node.test.id.endswith(('__p', '__lp'))):
+        return False
+    body = node.body
+    if (isinstance(body, ast.Call) and isinstance(body.func, ast.Name) and body.func.id == 'str'
+            and len(body.args) == 1 and not body.keywords):
+        body = body.args[0]
+    return isinstance(body, ast.Name) and body.id.endswith(('__v', '__lv'))
+
+
+def _coerce_mixed_conditional(node):
+    """`X if C else "text"`: wrap the non-literal arm in str() where CPython converts the chosen
+    value to a str anyway (a print argument, or an f-string field with no conversion/spec). The
+    typed path has one static type per expression, so the two arms must agree; the general path
+    prints the conditional directly and already matches."""
+    if not isinstance(node, ast.IfExp) or _optional_shown(node):
+        return node
+    body_str, else_str = _obvious_str(node.body), _obvious_str(node.orelse)
+    if body_str == else_str:
+        return node
+    def wrap(arm):
+        call = ast.Call(func=ast.Name(id='str', ctx=ast.Load()), args=[arm], keywords=[])
+        return ast.copy_location(call, arm)
+    if body_str:
+        node.orelse = wrap(node.orelse)
+    else:
+        node.body = wrap(node.body)
+    return node
+
+
+def _rebinds_print_or_str(tree):
+    """A program that binds `print` or `str` may mean its own callable; leave the source alone."""
+    names = {'print', 'str'}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name in names:
+            return True
+        if isinstance(node, ast.arg) and node.arg in names:
+            return True
+        if isinstance(node, ast.Name) and node.id in names and isinstance(node.ctx, ast.Store):
+            return True
+    return False
+
+
+def coerce_printed_conditionals(tree):
+    """Give a mixed str/number conditional the str type CPython prints, in print() and f-strings.
+
+    `print(prev if prev is not None else "none")` is one expression whose arms have different
+    types; the typed path requires one type, so it used to refuse the str literal as "used where a
+    number is needed". CPython prints the chosen value through str(), so the non-literal arm is
+    wrapped in str() here (the literal is already a str). f-string fields are handled only when
+    neither a conversion nor a format spec applies -- there format() may differ from str()."""
+    if _rebinds_print_or_str(tree):
+        return False
+    changed = False
+
+    class Coerce(ast.NodeTransformer):
+        def visit_Call(self, node):
+            nonlocal changed
+            self.generic_visit(node)
+            if (isinstance(node.func, ast.Name) and node.func.id == 'print'
+                    and not getattr(node, '_ail_synth', False)):
+                for index, argument in enumerate(node.args):
+                    if isinstance(argument, ast.IfExp):
+                        before = ast.dump(argument)
+                        node.args[index] = _coerce_mixed_conditional(argument)
+                        changed = changed or ast.dump(node.args[index]) != before
+            return node
+
+        def visit_FormattedValue(self, node):
+            nonlocal changed
+            self.generic_visit(node)
+            if (node.format_spec is None and node.conversion == -1
+                    and isinstance(node.value, ast.IfExp)):
+                before = ast.dump(node.value)
+                node.value = _coerce_mixed_conditional(node.value)
+                changed = changed or ast.dump(node.value) != before
+            return node
+
+    Coerce().visit(tree)
+    return changed
+
+
 def rewrite(tree):
     """Lower the iterator spellings in `tree` in place; returns whether anything changed."""
+    changed = coerce_printed_conditionals(tree)
     source_text = ast.dump(tree)
     if not any(word in source_text for word in ("'map'", "'filter'", "'zip'", "'key'", "'base'", 'DictComp',
                                                                 "'open'")):
-        return False
+        return changed
     lower = _Lower()
     lower.sequences = set()
     tree.body = lower.block(tree.body)
     ast.fix_missing_locations(tree)
-    return source_text != ast.dump(tree)
+    return changed or source_text != ast.dump(tree)

@@ -1,3 +1,31 @@
+## 2026-10-28 -- cov12: a str/number conditional in print and f-strings (job-cov12-10290216)
+
+The corpus census (219 programs, first refusal by the typed path) put `a str constant 'none' used
+where a number is needed` at four programs: `deepseek-v4.1-flash-free/t055.py`,
+`deepseek-v4.1-flash-free/t482.py`, `glm-5.3-flash-free/t028.py` and `glm-5.3-flash-free/t055.py`.
+Each prints `x if x is not None else "none"` (or the mirror) where CPython applies `str()` to the
+chosen value; the typed path has one static type per expression, so the two arms could not agree.
+`iterlower.rewrite` now wraps the non-literal arm in `str()` for a print argument, and for an
+f-string field only when it has neither a conversion nor a format spec (there `format()` can
+differ from `str()`). A program that binds `print` or `str` anywhere is left untouched; so is the
+`name__v if name__p else "None"`/`str(name__v) if name__p else "None"` conditional that optlib.py
+already builds for an Optional value (wrapping its scalar arm again was `str()` of a str and
+regressed `deepseek-v4.1-flash-free/t258.py`), and a `str(...)` arm counts as an obvious str. The
+four programs compile on `AIL_NO_GENERAL=1` and match CPython on all three corpus inputs under the
+default and general builds. Before/after first typed refusals: 120 -> 116; the four named
+programs are the whole change (`a str constant ... number` 4 -> 0), and no program's typed
+acceptance changes in the other direction. `!r` and a format spec stay
+refused by name, as do mixed conditionals outside a str conversion position.
+
+Probes in `/tmp/probes/cov12` on both builds via `cmp.sh` (int, negative, zero, int64 boundary,
+float, `-0.0`, `1e300`, `inf`, bool, string-first arm, argument/list-item/attribute/dict-value
+routes, f-string fields, `sep`/`end`, both-number and both-string conditionals, no feature,
+custom `__str__`, list arm, shadowed `print`/`str`, the optlib Optional conditional, and an
+uppercase `"None"` sentinel) match CPython. The format-spec and `!r` f-strings are refused by
+name under `AIL_NO_GENERAL=1`. Added `test_ail_cov12.py` and registered
+it in `ail_check.py`. `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
