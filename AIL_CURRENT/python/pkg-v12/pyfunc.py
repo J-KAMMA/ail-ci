@@ -2491,6 +2491,14 @@ def _check_module_variables(tree, variables):
     return None
 
 
+def _nonfinite_float(value):
+    """CPython has nan/inf floats; C has no `inf` literal, and `%r` of one emits a bare `inf`
+    that only compiles by accident if a user identifier happens to be in scope. Both paths refuse
+    such a literal by name, so the typed module-constant emitter must too rather than deferring to
+    a C-compiler error (the ex15 review's float-inf module constant)."""
+    return value != value or value in (float('inf'), float('-inf'))
+
+
 def _emit_module_consts(modconsts):
     """Static C globals for every module-level constant `_scan_module_consts` accepted. A scalar
     becomes a plain `static const` int64_t/double; a literal list/tuple becomes a `static const`
@@ -2509,6 +2517,8 @@ def _emit_module_consts(modconsts):
         # a module variable: one mutable static, initialised once to its module-level literal
         # (the module body runs before any function, so the initial value is all a function sees
         # first); every function that reads or `global`-rebinds it names `v_<name>` directly
+        if kind == FLT and _nonfinite_float(value):
+            raise Unsupported('a nan/inf float literal')
         if kind == INT:
             if GLOBAL_INT_TINT:
                 out.append('static ail_tint v_%s = {%s, NULL};\n' % (name, _c_int_literal(value)))
@@ -2520,6 +2530,10 @@ def _emit_module_consts(modconsts):
             out.append('static ail_str v_%s = %s;\n' % (name, _str_literal(value)))
     for name, (kind, value) in sorted(modconsts.items()):
         c = 'v_' + name
+        if kind == FLT and _nonfinite_float(value):
+            raise Unsupported('a nan/inf float literal')
+        if kind == FLIST and any(_nonfinite_float(v) for v in value):
+            raise Unsupported('a nan/inf float literal')
         if kind == INT:
             out.append('static const int64_t %s = %s;\n' % (c, _c_int_literal(value)))
         elif kind == FLT:

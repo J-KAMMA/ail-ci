@@ -92,6 +92,57 @@ def double(n):
 if __name__ == '__main__':
     print(double(LIMIT))
 ''',
+    'finite_float_list': '''
+XS = [1.5, 2.0, -0.0]
+
+def first(xs):
+    return xs[0]
+
+print(first(XS))
+''',
+}
+
+NONFINITE = {
+    'inf_scalar': '''
+X = 1e400
+Y = 1.5
+
+def f(n):
+    return n
+''',
+    'inf_list': '''
+XS = [1e400, 2.0]
+
+def f(n):
+    return n
+''',
+    'inf_tuple': '''
+XS = (1e400, 2.0)
+
+def f(n):
+    return n
+''',
+    'inf_array_parameter': '''
+XS = [1e400, 2.0]
+
+def f(xs):
+    return len(xs)
+''',
+    'negative_inf_scalar': '''
+X = -1e400
+Y = 1e-400
+
+def f(x):
+    return x
+''',
+    'inf_with_main_entry': '''
+X = 1e400
+
+def main():
+    print(1)
+
+main()
+''',
 }
 
 
@@ -146,6 +197,16 @@ class Ex15(unittest.TestCase):
     def test_language_example_math_ail_matches_cpython(self):
         text = (ROOT / 'language_examples' / 'math.ail').read_text(encoding='utf-8')
         self.check('language_example_math', text)
+
+    def test_nonfinite_module_constants_are_refused_by_name(self):
+        for name, text in NONFINITE.items():
+            for general in (False, True):
+                with self.subTest(case=name, general=general):
+                    built, _ = build(self.directory, name, text, general)
+                    message = built.stdout + built.stderr
+                    self.assertNotEqual(built.returncode, 0, message)
+                    self.assertIn('nan/inf float literal', message)
+                    self.assertNotIn('the C compiler rejected this', message)
 
 
 if __name__ == '__main__':

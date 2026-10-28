@@ -1,3 +1,15 @@
+## 2026-10-28 -- ex15 review fix: refuse non-finite module constants by name (job-ex15-10290445)
+
+The review found that the new no-op entry path bypassed the typed entry refusal for a module
+whose constants include a non-finite float: `X = 1e400` (also `-1e400`, and the list form
+`XS = [1e400, 2.0]`) emitted `static const double v_X = (inf);`, so the default build failed at
+the C compiler with `'inf' undeclared here` instead of refusing by name.  `_emit_module_consts`
+now refuses a non-finite float scalar or float-list element with the general path's own message,
+`a nan/inf float literal`, before codegen, for every entry shape (scalar/array parameter, a
+`main` entry, a `global` rebind).  Finite float lists still build and match CPython, and
+`language_examples/math.ail` still matches on both builds.  Added the regression cases to
+`test_ail_ex15.py` (3 tests, both builds).
+
 ## 2026-10-28 -- ex15: definitions plus module constants run only the constants (job-ex15-10290445)
 
 `AIL_CURRENT/language_examples/math.ail` is a Python-syntax example with `LIMIT = 6` and one
