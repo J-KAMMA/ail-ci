@@ -3,8 +3,9 @@
 The pre378 review recorded as pre-existing that ``A[1]`` for a user class said
 ``'type' object is not subscriptable`` on both builds, where CPython 3.12 says
 ``type 'A' is not subscriptable``.  The general-path runtime now formats that message
-from the class value's own name for index and slice reads; assignment and deletion keep
-CPython's bare ``'type' object ...`` wording, and instance ``__getitem__`` is unchanged.
+from the class value's own name for index and slice reads, with CPython's 200-character
+message limit; assignment keeps CPython's bare ``'type' object ...`` wording (deletion still
+has the pre-existing ``doesn't`` wording), and instance ``__getitem__`` is unchanged.
 """
 import os
 import subprocess
@@ -156,6 +157,21 @@ def main():
 
 main()
 ''')
+
+    def test_class_object_long_names(self):
+        names = ['A' * 95, 'A' * 96, 'A' * 100, 'A' * 199, 'A' * 200, 'A' * 201, 'B' * 300]
+        lines = ['def sub(label, c, k):', '    try:', '        c[k]', '    except TypeError as e:',
+                 '        print(label, type(e).__name__, e)', '', 'def sub_slice(label, c):',
+                 '    try:', '        c[0:1]', '    except TypeError as e:',
+                 '        print(label, type(e).__name__, e)', '']
+        for i, name in enumerate(names):
+            lines += ['class ' + name + ':', '    pass', '']
+        lines += ['def main():']
+        for i, name in enumerate(names):
+            lines += ['    sub(\'index%d\', %s, 1)' % (i, name)]
+            lines += ['    sub_slice(\'slice%d\', %s)' % (i, name)]
+        lines += ['', 'main()', '']
+        self.check('long_names', '\n'.join(lines))
 
     def test_class_object_assignment_and_instance_control(self):
         self.check('controls', '''

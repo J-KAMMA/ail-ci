@@ -14845,14 +14845,21 @@ static inline const char *ail__tname_c(ail_obj x) {
    __class_getitem__ in this subset, so every subscript operation on a class takes this. */
 static inline ail_st ail__class_subscript_error(ail_ctx *cx, ail_obj c, const char *tail) {
     ail_str nm = ail_view_to_str(((ail_classobj *)c.o)->name);
-    char name[96]; size_t k = 0;
-    for (int64_t i = 0; i < nm.n && k + 1 < sizeof name; i++) {
+    size_t k = 0;
+    char *name = (char *)malloc((size_t)nm.n + 1);
+    if (!name) ail_die("out of memory");
+    for (int64_t i = 0; i < nm.n && k < 200; i++) { /* CPython's message keeps at most 200 name characters */
         uint32_t ch = (uint32_t)ail_chr(nm, i);
         name[k++] = ch < 128 ? (char)ch : '?';
     }
     name[k] = 0;
-    char buf[160]; snprintf(buf, sizeof buf, "type '%s' %s", name, tail);
-    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    size_t blen = k + strlen(tail) + 9; /* "type '" + name + "' " + tail + NUL */
+    char *buf = (char *)malloc(blen);
+    if (!buf) { free(name); ail_die("out of memory"); }
+    snprintf(buf, blen, "type '%s' %s", name, tail);
+    ail_st st = ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    free(name); free(buf);
+    return st;
 }
 static inline ail_st ail_deque_concat(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_counter_binop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op);
