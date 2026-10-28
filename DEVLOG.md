@@ -1,3 +1,29 @@
+## 2026-10-28 -- pre423: a statically dead deferred read in a class annotation matches (job-pre423-10281734)
+
+The first still-differing case in the pre410 review's deferred-read area was a deferred lambda or
+generator-expression element behind a statically false branch: `class C: x: ((lambda: C)() if
+False else 1) = 1` and `class C: x: (0 and (lambda: C)()) = 1` were refused on both builds
+(`a class body annotation reads the class name C before it is bound`) where CPython never
+evaluates the read and prints `1`.  `_annotation_reads` now follows the statically known truth of
+an `if` expression and of `and`/`or` operands, including empty containers, `None`, the empty
+string and numeric unary forms, so a dead operand is not visited while a live one still is.  An
+unknown condition keeps the conservative refusal, as do lambda defaults and the first generator
+iterable.  The simple loop-target cases recorded by the pre410 review already matched CPython on
+this tree (`for C in [1, 2]`, `for C in range(10): break`, a tuple target and nested loops), as
+did bare deferred lambdas/generator expressions.
+
+Probes in `/tmp/probes/pre423` on both builds via `cmp.sh`: `u_if_false`, `u_and_false_0`,
+`u_and_false_empty`, `u_and_false_dict`, `u_and_false_none`, `u_and_false_str`, `u_or_true_1`,
+`u_or_true_list`, `u_or_true_dict`, `u_or_true_str`, `t_bool_chain`, `t_genexp_false`,
+`t_routes`, plus the original loop-target and deferred probes, match CPython; `u_if_true`,
+`u_and_true`, `u_or_false`, `t_if_true_read`, `t_genexp_true` and `t_unknown_cond` are refused by
+name where the first five raise CPython's `NameError` (the unknown condition is the conservative
+refusal).  Remaining pre-existing and unchanged: a `for` over a statically empty `range(0)` still
+lets its target hide the read (CPython raises `NameError`), and a generator expression passed to
+an unmodelled consumer that iterates it is still accepted.  Final-state tests: test_ail_pre423,
+test_ail_pre410, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (5 modules,
+0 failed).  `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py
+--update` added the module and `--check` exits 0.
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};

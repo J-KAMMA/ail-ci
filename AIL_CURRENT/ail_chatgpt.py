@@ -2344,6 +2344,29 @@ def _annotation_reads(annotation, name):
             for default in defaults:
                 visit(default, shadowed)
             return
+        if isinstance(node, ast.IfExp):
+            visit(node.test, shadowed)
+            truth = _annotation_truth(node.test)
+            if truth is not False:
+                visit(node.body, shadowed)
+            if truth is not True:
+                visit(node.orelse, shadowed)
+            return
+        if isinstance(node, ast.BoolOp):
+            for index, operand in enumerate(node.values):
+                visit(operand, shadowed)
+                truth = _annotation_truth(operand)
+                if isinstance(node.op, ast.And):
+                    if truth is False:
+                        return
+                else:
+                    if truth is True:
+                        return
+                if truth is None:
+                    for rest in node.values[index + 1:]:
+                        visit(rest, shadowed)
+                    return
+            return
         if isinstance(node, ast.Call):
             consumer = _annotation_callee_name(node.func) in consumers
             if isinstance(node.func, ast.Lambda):
@@ -2397,6 +2420,36 @@ def _constant_truth(node):
             return not bool(node.operand.value)
         except Exception:
             return None
+    return None
+
+
+def _annotation_truth(node):
+    """The truth value of a statically known annotation expression, else ``None``.
+
+    ``_constant_truth`` covers constants used by the binding pass, but an annotation can also
+    short-circuit on an empty container, so an empty list, tuple, set or dict is falsey here.
+    """
+    truth = _constant_truth(node)
+    if truth is not None:
+        return truth
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return bool(node.elts)
+    if isinstance(node, ast.Dict):
+        return bool(node.keys)
+    if isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.Not):
+            inner = _annotation_truth(node.operand)
+            return None if inner is None else not inner
+        if isinstance(node.operand, ast.Constant):
+            try:
+                if isinstance(node.op, ast.USub):
+                    return bool(-node.operand.value)
+                if isinstance(node.op, ast.UAdd):
+                    return bool(+node.operand.value)
+                if isinstance(node.op, ast.Invert):
+                    return bool(~node.operand.value)
+            except Exception:
+                return None
     return None
 
 
