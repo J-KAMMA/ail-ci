@@ -257,6 +257,8 @@ class Refusals(unittest.TestCase):
                          "struct.pack used here is not built"),
             "star": ("import struct\n\nxs = [1]\nprint(list(struct.pack('>I', *xs)))\n",
                      "struct.pack with a *values argument is not built"),
+            "shadow": ("import struct\n\ndef main() -> None:\n    struct = 5\n    print(struct.pack('>I', 1).hex())\n\nmain()\n",
+                       "is also bound by the program itself; rename it"),
         }
         for name, (text, wanted) in cases.items():
             with self.subTest(name):

@@ -15,6 +15,7 @@ works; only a program that prints the class of the exception sees a different na
 import ast
 import sys
 
+import stdlib3
 import stdlib5
 from stdlib4 import refuse
 
@@ -73,6 +74,10 @@ def run(tree, text):
                              unknown='pack, calcsize and error are built')
     if not b:
         return
+    for alias in list(b.aliases) + list(b.names):
+        if stdlib3.binds(tree, alias):
+            refuse(b.first, '%s is also bound by the program itself; rename it (the name stands for an imported '
+                           'module here)' % alias)
     used = set()
 
     def fix(node):

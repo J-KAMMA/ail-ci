@@ -1,3 +1,14 @@
+## 2026-10-28 -- stdlib4 review fix: refuse a program that rebinds the struct/from-import name (job-stdlib4-10290151)
+
+The review's p6 probe showed that `import struct` followed by a rebinding of the name (`struct = 5` in a
+function) was silently rewritten and printed `00000001` on both builds, where CPython 3.12 raises
+`AttributeError: 'int' object has no attribute 'pack'` (exit 1, no stdout). `structlib.run` now checks every
+imported name with `stdlib3.binds` and refuses by name (`... is also bound by the program itself; rename it`),
+as the `fractions` and batch-4 passes do. Added the refusal case to `test_ail_stdlib4.py` and named the
+refusal (plus the `calcsize` format above `2**31-1`) in the DIFFERENCES row. Probes `/tmp/probes/std4_*.py`
+(shadow of the alias, an alias `st`, a from-imported `pack`, a method named `pack`, and the ordinary pack /
+calcsize / from-import routes) match CPython on both builds; the shadow programs are refused by name.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
