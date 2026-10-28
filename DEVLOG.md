@@ -2,9 +2,9 @@
 
 The review found that fixing `__file__` did not make any refused `language_examples` program
 build: all 12 refused `.py` files still exited 2.  Two of them (`row_decimal_quad.py` and
-`row_codec_controls.py`) are modules, not programs: they contain only imports, definitions and
-assignments, no `main` and no `__main__` guard, so CPython binds the names and exits 0 with
-empty stdout.  `compile` now detects that shape for a `.py` entry and builds the observable
+`row_codec_controls.py`) are modules, not programs: they contain at least one import and one
+definition, only imports/definitions/assignments, no `main` and no `__main__` guard, so CPython
+binds the names and exits 0 with empty stdout.  `compile` now detects that shape for a `.py` entry and builds the observable
 program (`print('', end='')`) instead of choosing one of the module's functions as a
 file-processing entry point.  Both files now build on the general and default paths and match
 CPython (empty stdout, exit 0).  A file with `main`, a `__main__` guard or any other top-level
