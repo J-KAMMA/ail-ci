@@ -1016,24 +1016,8 @@ class PreludeCsv(unittest.TestCase):
 
     def test_reader(self):
         import csv
-        rnd = random.Random(5)
-        for _ in range(4000):
-            kw = {}
-            if rnd.random() < .3:
-                kw["delimiter"] = rnd.choice([";", "|", "\t"])
-            if rnd.random() < .2:
-                kw["quotechar"] = rnd.choice(["'", '"', "|"])
-            if rnd.random() < .2:
-                kw["escapechar"] = rnd.choice(["\\", "x"])
-            if rnd.random() < .2:
-                kw["doublequote"] = rnd.random() < .5
-            if rnd.random() < .2:
-                kw["skipinitialspace"] = rnd.random() < .5
-            if rnd.random() < .2:
-                kw["strict"] = rnd.random() < .5
-            if rnd.random() < .3:
-                kw["quoting"] = rnd.choice([0, 1, 2, 3])
-            text = "".join(rnd.choice('ab ,"\n\r;\\x1') for _ in range(rnd.randint(0, 25)))
+
+        def compare(text, kw):
             lines = io.StringIO(text, newline="").readlines()
 
             def run(make):
@@ -1053,6 +1037,34 @@ class PreludeCsv(unittest.TestCase):
                 out.append(r.line_num)
                 return out
             self.assertEqual(self.fix(run(csv.reader)), self.fix(run(self.ns["_ail_csv_reader"])), (text, kw))
+
+        # CI's Python 3.12.5+ parses a QUOTE_NONNUMERIC field that starts with the escapechar as a number;
+        # 3.12.0-3.12.4 left it a str. The prelude follows the interpreter it is built with, which is the oracle.
+        for text, kw in (("1\\.5,\\.5,.5", {"quoting": csv.QUOTE_NONNUMERIC, "escapechar": "\\"}),
+                         ('\\a"1 xa; 1aa', {"quoting": csv.QUOTE_NONNUMERIC, "escapechar": "\\",
+                                             "delimiter": "|"}),
+                         ("\\1,\\ 2,\\0", {"quoting": csv.QUOTE_NONNUMERIC, "escapechar": "\\"}),
+                         ('"'.join(["", "\\.5", ""]), {"quoting": csv.QUOTE_NONNUMERIC, "escapechar": "\\"})):
+            compare(text, kw)
+        rnd = random.Random(5)
+        for _ in range(4000):
+            kw = {}
+            if rnd.random() < .3:
+                kw["delimiter"] = rnd.choice([";", "|", "\t"])
+            if rnd.random() < .2:
+                kw["quotechar"] = rnd.choice(["'", '"', "|"])
+            if rnd.random() < .2:
+                kw["escapechar"] = rnd.choice(["\\", "x"])
+            if rnd.random() < .2:
+                kw["doublequote"] = rnd.random() < .5
+            if rnd.random() < .2:
+                kw["skipinitialspace"] = rnd.random() < .5
+            if rnd.random() < .2:
+                kw["strict"] = rnd.random() < .5
+            if rnd.random() < .3:
+                kw["quoting"] = rnd.choice([0, 1, 2, 3])
+            text = "".join(rnd.choice('ab ,"\n\r;\\x1') for _ in range(rnd.randint(0, 25)))
+            compare(text, kw)
 
     def test_writer(self):
         import csv

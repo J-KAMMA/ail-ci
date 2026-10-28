@@ -1,3 +1,25 @@
+## 2026-10-28 -- csv: QUOTE_NONNUMERIC fields that start with the escapechar (job-csv1-10282318)
+
+`PreludeCsv.test_reader` failed on CI but not on the maintainer's 3.12.3: CI's setup-python
+installs the latest 3.12 (3.12.15 here).  CPython 3.12.5 (gh-113785) made a QUOTE_NONNUMERIC
+field that begins with the escapechar numeric, so `list(csv.reader(['1\\.5,\\.5,.5'],
+escapechar='\\', quoting=csv.QUOTE_NONNUMERIC))` is `[[1.5, 0.5, 0.5]]`; 3.12.0-3.12.4 left
+those fields as strings.  The prelude now follows the interpreter it runs under (the raw module
+checks `sys.version_info`; csvgen replaces that line with a literal for the compiler's CPython),
+so both the 3.12.3 sandbox and the 3.12.15 CI oracle match CPython.  `test_ail_cov2` pins the
+escaped-start cases (`1\\.5`, `\\.5`, `\\a"1...`, a quoted `"\\.5"`) as well as the random
+reader comparison.
+
+The typed csvlib reader accepted QUOTE_NONNUMERIC but returned every cell as a str (and the
+default build could fail to compile such a program); it is now refused by name at compile time,
+and the general path (which converts the numbers) takes the program.
+
+Probes in `/tmp/probes` via `cmp.sh` on both builds and both interpreters (system 3.12.3 and
+`/opt/hostedtoolcache/Python/3.12.15`): `csv_escaped.py` (escaped start/middle, quoted, empty,
+minimal/all/none, blank, leading spaces), `csv_routes.py` (source through an argument, list item,
+attribute and dict value, plus a run-time quoting value) and `csv_typed.py` (a literal list
+source, so the default build must fall back to the general path).  All matched CPython.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
