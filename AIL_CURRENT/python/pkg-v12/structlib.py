@@ -7,8 +7,10 @@ built keeps the program as written and adds a `note:` line; the import refusal t
 Built: `struct.pack`, `struct.unpack`, `struct.unpack_from` and `struct.calcsize` with a string-literal format.
 The format is checked at build time: the integer codes (`b B h H i I l L q Q n N P`), `?`, `c`, `s`, `p`, `x`,
 whitespace and repeat counts, in every byte order (`@ = < > !`), including native alignment. The float codes
-`e f d` and a format computed at run time are refused by name, as are `Struct`, `pack_into` and `iter_unpack`.
-`struct.error` is `ValueError` on this path (as `zlib.error` is `RuntimeError`).
+`e f d`, a format computed at run time and a zero repeat of `p` (CPython 3.12 raises `SystemError` when it
+unpacks that) are refused by name, as are `Struct`, `pack_into`, `iter_unpack`, `struct.error` and a program
+that rebinds the `struct` import or an imported name. `struct.error` is `ValueError` on this path (as
+`zlib.error` is `RuntimeError`).
 """
 import ast
 from pathlib import Path
@@ -47,12 +49,14 @@ def _check_format(node, fmt):
         if ch in ' \t\n\r':
             i += 1
             continue
+        count = 1
         if '0' <= ch <= '9':
             j = i
             while j < len(fmt) and '0' <= fmt[j] <= '9':
                 j += 1
             if j >= len(fmt):
                 refuse(node, "struct format %r is not valid: bad char in struct format" % fmt)
+            count = int(fmt[i:j])
             ch = fmt[j]
             i = j + 1
         else:
@@ -61,6 +65,9 @@ def _check_format(node, fmt):
             refuse(node, "struct format code %r (%s) is not built: this compiler builds the integer, bool, "
                   "char, string and padding codes (b B h H i I l L q Q n N P ? c s p x) only"
                   % (ch, FLOAT_CODES[ch]))
+        if ch == 'p' and count == 0:
+            refuse(node, "struct format %r repeats 'p' zero times: CPython 3.12 raises SystemError when it "
+                  "unpacks that, so this compiler refuses the format by name" % fmt)
     try:
         return _host_struct.calcsize(fmt)
     except (TypeError, ValueError, _host_struct.error) as exc:
@@ -110,6 +117,80 @@ def _take_imports(tree):
         body.append(node)
     tree.body = body
     return binder
+
+
+def _find_shadow(tree, binder):
+    """The first statement that binds a struct alias or an imported name; the rewrite cannot follow it."""
+    bound = binder.aliases | set(binder.names)
+
+    class Finder(ast.NodeVisitor):
+        def __init__(self):
+            self.found = None
+
+        def hit(self, name, node):
+            if self.found is None and name in bound:
+                self.found = (node, name)
+
+        def visit_Name(self, node):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                self.hit(node.id, node)
+
+        def visit_arg(self, node):
+            self.hit(node.arg, node)
+
+        def visit_FunctionDef(self, node):
+            self.hit(node.name, node)
+            self.generic_visit(node)
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_ClassDef(self, node):
+            self.hit(node.name, node)
+            self.generic_visit(node)
+
+        def visit_ExceptHandler(self, node):
+            if node.name:
+                self.hit(node.name, node)
+            self.generic_visit(node)
+
+        def visit_MatchAs(self, node):
+            if node.name:
+                self.hit(node.name, node)
+            self.generic_visit(node)
+
+        def visit_MatchStar(self, node):
+            if node.name:
+                self.hit(node.name, node)
+            self.generic_visit(node)
+
+        def visit_MatchMapping(self, node):
+            if node.rest:
+                self.hit(node.rest, node)
+            self.generic_visit(node)
+
+        def visit_Import(self, node):
+            for alias in node.names:
+                name = alias.asname or alias.name.split('.')[0]
+                if name not in bound:
+                    continue
+                if alias.name == 'struct' and name in binder.aliases:
+                    continue
+                self.hit(name, alias)
+
+        def visit_ImportFrom(self, node):
+            for alias in node.names:
+                if alias.name == '*':
+                    continue
+                name = alias.asname or alias.name
+                if name not in bound:
+                    continue
+                if not node.level and node.module == 'struct' and binder.names.get(name) == alias.name:
+                    continue
+                self.hit(name, alias)
+
+    finder = Finder()
+    finder.visit(tree)
+    return finder.found
 
 
 class Rewrite(ast.NodeTransformer):
@@ -187,6 +268,11 @@ def rewrite_text(source, notes=None):
         binder = _take_imports(tree)
         if not binder:
             return source
+        shadow = _find_shadow(tree, binder)
+        if shadow is not None:
+            node, name = shadow
+            refuse(node, 'the name %r is rebound here; the struct rewrite needs the struct import and the '
+                  'imported names to stay unshadowed' % name)
         rewrite = Rewrite(binder)
         tree.body = [rewrite.visit(statement) for statement in tree.body]
         receiver = set(id(each.value) for each in ast.walk(tree) if isinstance(each, ast.Attribute))

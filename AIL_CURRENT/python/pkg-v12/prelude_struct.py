@@ -228,6 +228,17 @@ def _ail_struct_unpack(fmt, data):
 
 
 def _ail_struct_unpack_from(fmt, data, offset):
+    if not isinstance(offset, int):
+        try:
+            has_index = hasattr(offset, "__index__")
+        except Exception:
+            has_index = False
+        if has_index:
+            offset = int(offset)
+            if not isinstance(offset, int):
+                raise TypeError("__index__ returned non-int (type %s)" % type(offset).__name__)
+        else:
+            raise TypeError("'%s' object cannot be interpreted as an integer" % type(offset).__name__)
     order, fields, size = _ail_struct_layout(fmt)
     length = len(data)
     if offset < 0:

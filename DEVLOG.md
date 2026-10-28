@@ -1,3 +1,29 @@
+## 2026-10-28 -- stdlib16 review: shadowed names, zero `p` and `unpack_from` offset types
+
+The review found three defects in the struct lowering. A program that rebinds the module alias or a
+from-imported name (`struct = C()`, a `struct` parameter or local, `import struct as st; st = C()`,
+`from struct import pack; pack = ...`) was silently miscompiled: the call on the shadowed name became
+the literal-format helper. `structlib` now scans every binding (assignment, parameter, loop, with,
+except and match target, comprehension, function/class name and a nested import that changes the bound
+object) and refuses the program by name when an alias or an imported name is rebound. A zero repeat of
+`p` (`0p`, also inside a longer format) is refused by name: CPython 3.12 raises `SystemError: Negative
+size passed to PyBytes_FromStringAndSize` when it unpacks one, which this compiler cannot raise, so the
+format is not built. `unpack_from` now converts its offset as `PyNumber_Index` does: `int` and `bool`
+pass, an object with `__index__` is converted (a non-int return gives CPython's `__index__ returned
+non-int (type ...)`), and everything else raises CPython's `'float' object cannot be interpreted as an
+integer` (also for `None`, `str`, `bytes`, `list` and a program class without `__index__`) instead of
+the old slice `TypeError`.
+
+Probes in `/tmp/probes/struct16fix` on both builds via `cmp.sh`: `p_offsets_types` (float, str, None,
+bytes, list and bool offsets through a literal, a variable, a list item, an attribute, a dict value and
+a function argument), `p_offsets_index` (`__index__` objects, a bad `__index__` return, a class without
+`__index__`), `p_regression` (pack/unpack/calcsize, `s`/`p`, negative offsets, empty), `p_shadow_local`
+and `p_shadow_unrelated` match CPython; `p_zero_p`, `p_zero_p_from`, `p_zero_p_inner`,
+`p_shadow_global`, `p_shadow_param`, `p_shadow_alias` and `p_shadow_from` are refused by name (5 match,
+7 refusals). Final-state tests: test_ail_stdlib16, test_ail_safetynet, test_ail_files,
+test_ail_python_syntax and test_ail_corpus_findings3 pass. `tools/update_manifest.py` was run and
+`--check` passes.
+
 ## 2026-10-28 -- stdlib16: struct.pack / unpack / unpack_from / calcsize over a literal format
 
 `struct` was the next most-imported still-refused module (6 corpus/example imports, after argparse 9 and

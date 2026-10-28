@@ -213,6 +213,38 @@ class PreludeStruct(unittest.TestCase):
                     got = ('err', str(exc))
                 self.assertEqual(got, want)
 
+    def test_unpack_from_non_integer_offset(self):
+        import prelude_struct as P
+
+        class Ix:
+            def __init__(self, v):
+                self.v = v
+
+            def __index__(self):
+                return self.v
+
+        class Bad:
+            def __index__(self):
+                return 'x'
+
+        class NoIx:
+            pass
+
+        def outcome(fn):
+            try:
+                return ('ok', fn())
+            except TypeError as exc:
+                return ('err', type(exc).__name__, str(exc))
+            except Exception as exc:
+                return ('err', '', str(exc))
+
+        cases = [1.5, '1', None, b'1', [1], NoIx(), Bad(), Ix(1), Ix(-1), True, False]
+        for offset in cases:
+            with self.subTest(offset):
+                want = outcome(lambda: struct.unpack_from('i', b'abcdefgh', offset))
+                got = outcome(lambda: P._ail_struct_unpack_from('i', b'abcdefgh', offset))
+                self.assertEqual(got, want)
+
     def test_error_messages(self):
         import prelude_struct as P
         cases = [
@@ -280,6 +312,19 @@ class Refusals(unittest.TestCase):
             "error": ("import struct\n\ntry:\n    struct.pack('B', 256)\nexcept struct.error:\n    print('bad')\n",
                       "struct.error"),
             "star": ("import struct\n\nprint(struct.pack('>I', *[1]))\n", "starred"),
+            "zero_p": ("import struct\n\nprint(struct.unpack('0p', b''))\n", "repeats 'p' zero times"),
+            "zero_p_from": ("import struct\n\nprint(struct.unpack_from('0p', b'abc', 0))\n",
+                            "repeats 'p' zero times"),
+            "zero_p_inner": ("import struct\n\nprint(struct.unpack('>i0p', b'1234'))\n",
+                             "repeats 'p' zero times"),
+            "shadow_global": ("import struct\n\n\nclass C:\n    def pack(self, fmt, v):\n        return 'custom'\n\n\n"
+                              "struct = C()\nprint(struct.pack('>I', 1))\n", "is rebound here"),
+            "shadow_param": ("import struct\n\n\ndef f(struct):\n    return struct.pack('>I', 1)\n\n\nprint(f(1))\n",
+                             "is rebound here"),
+            "shadow_alias": ("import struct as st\n\n\nclass C:\n    def pack(self, fmt, v):\n        return 'alias'\n\n\n"
+                             "st = C()\nprint(st.pack('>H', 2))\n", "is rebound here"),
+            "shadow_from": ("from struct import pack\n\n\npack = lambda fmt, v: 'x'\nprint(pack('>I', 1))\n",
+                            "is rebound here"),
         }
         for name, (text, wanted) in cases.items():
             with self.subTest(name):
