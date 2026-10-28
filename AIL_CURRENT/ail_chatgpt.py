@@ -1247,14 +1247,108 @@ def _scope_has_int_call(statement):
                for sub in ast.walk(statement))
 
 
+def _never_supplied_defaults(tree, module_counts, known, global_names):
+    """Values of module-function defaults that every call leaves in place.
+
+    A parameter qualifies when its function is defined once at module level without
+    decorators, is called at least once, every load of its name is a direct call, no other
+    scope binds that name, and no call supplies the parameter -- not positionally, by
+    keyword, nor through ``*args``/``**kwargs``.  The default is then the only value the body
+    can see, so the int64 checker may treat it as the parameter's value.  Defaults resolve
+    names only through module constants assigned earlier at module level, so the value is the
+    one CPython binds at def time; a container default is kept only when the module pass
+    would fold it anyway, which excludes a container mutated anywhere.
+    """
+    defs = {}
+    for index, statement in enumerate(tree.body):
+        if (isinstance(statement, ast.FunctionDef) and not statement.decorator_list
+                and module_counts.get(statement.name) == 1):
+            defs[statement.name] = (index, statement)
+    if not defs:
+        return {}
+    top = {id(statement) for statement in tree.body}
+    rebound = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            if id(node) not in top:
+                rebound.add(node.name)
+        elif isinstance(node, ast.arg):
+            rebound.add(node.arg)
+        elif isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            rebound.add(node.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                rebound.add((alias.asname or alias.name).split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            rebound.add(node.name)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    calls = {}
+    unsafe = set()
+    for node in ast.walk(tree):
+        if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                and node.id in defs):
+            parent = parents.get(node)
+            if isinstance(parent, ast.Call) and parent.func is node:
+                calls.setdefault(node.id, []).append(parent)
+            else:
+                unsafe.add(node.id)
+    assigned = {}
+    for index, statement in enumerate(tree.body):
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
+            targets = statement.targets
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            targets = (statement.target,)
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                assigned[target.id] = index
+    result = {}
+    for name, (index, fn) in defs.items():
+        if name in unsafe or name in rebound or name not in calls:
+            continue
+        positional = [arg.arg for arg in (*fn.args.posonlyargs, *fn.args.args)]
+        keyword_only = [arg.arg for arg in fn.args.kwonlyargs]
+        allowed = {item for item, place in assigned.items()
+                   if place < index and item not in global_names}
+        defaults = {}
+        offset = len(positional) - len(fn.args.defaults)
+        for place, default in enumerate(fn.args.defaults):
+            defaults[positional[offset + place]] = default
+        for parameter, default in zip(keyword_only, fn.args.kw_defaults):
+            if default is not None:
+                defaults[parameter] = default
+        if (any(isinstance(argument, ast.Starred) for call in calls[name] for argument in call.args)
+                or any(keyword.arg is None for call in calls[name] for keyword in call.keywords)):
+            continue
+        kept = {}
+        for parameter, default in defaults.items():
+            place = positional.index(parameter) if parameter in positional else None
+            if any(_bound_argument(call, parameter, place) is not None for call in calls[name]):
+                continue
+            value = _constant_value(
+                default,
+                lambda item: known.get(item, _UNKNOWN) if item in allowed else _UNKNOWN,
+                lambda unused: True, {}, None)
+            if type(value) in (bool, int, float, str, bytes, type(None)):
+                kept[parameter] = value
+            elif _flat_constant_container(value):
+                kept[parameter] = value
+        if kept:
+            result[id(fn)] = kept
+    return result
+
+
 def _scope_constant_map(body, root, base, stores, bound, parameters, declared, program_bound,
-                        snapshots=None, conservative=False):
+                        snapshots=None, conservative=False, parameter_defaults=None):
     """Constant values a scope's top-level names bind, including safe container aliases.
 
     Top-level statements run once and in order, so a flat list/tuple/dict literal (or an alias
     of one) is followed up to the statement that may mutate it: a scalar read through a name
     that is only mutated later keeps the literal's value, which lets the int() check refuse a
-    value outside int64 instead of leaving it to the run-time trap.
+    value outside int64 instead of leaving it to the run-time trap.  A parameter whose callers
+    all omit it takes its default as its value, unless the body rebinds it or a container
+    default escapes.
     """
     local = {name: value for name, value in base.items() if name not in bound}
     events = _escaped_constant_statements(body, root, program_bound)
@@ -1291,12 +1385,18 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
         if conservative and any(_scope_risky_call(part, local, safe_calls)
                                 for part in _scope_executed_nodes(statement)):
             local.clear()
+    for name, value in (parameter_defaults or {}).items():
+        if name in declared or stores.get(name):
+            continue
+        if _flat_constant_container(value) and name in escaped:
+            continue
+        local[name] = value
     return local
 
 
 class _Int64CallChecker(ast.NodeVisitor):
     def __init__(self, known, passthrough, int_params, int_shadowed, attributes, program_bound,
-                 argument_containers=None):
+                 argument_containers=None, parameter_defaults=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
@@ -1304,6 +1404,7 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.attributes = attributes
         self.program_bound = program_bound
         self.argument_containers = argument_containers or {}
+        self.parameter_defaults = parameter_defaults or {}
         self.shadow = []
         self.value_scopes = [known]
 
@@ -1370,7 +1471,8 @@ class _Int64CallChecker(ast.NodeVisitor):
         local = _scope_constant_map(node.body, node, self.value_scopes[-1],
                                     _binding_counts(node.body), _function_bindings(node),
                                     _scope_parameters(node), _scope_declared(node),
-                                    self.program_bound)
+                                    self.program_bound,
+                                    parameter_defaults=self.parameter_defaults.get(id(node)))
         self.shadow.append(_function_bindings(node))
         self.value_scopes.append(local)
         for statement in node.body:
@@ -1770,10 +1872,11 @@ def _check_int64_literals(tree):
                                      known)
     argument_containers = _call_argument_containers(tree, module_counts, global_names, parents,
                                                    known)
+    parameter_defaults = _never_supplied_defaults(tree, module_counts, known, global_names)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
-                      program_bound, argument_containers).visit(tree)
+                      program_bound, argument_containers, parameter_defaults).visit(tree)
     module_checker = _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
-                                       program_bound, argument_containers)
+                                       program_bound, argument_containers, parameter_defaults)
     safe_calls = {'len', 'print', 'str', 'repr', 'int'} - program_bound
     for statement, local in zip(tree.body, module_envs):
         if not _scope_simple_statement(statement):
