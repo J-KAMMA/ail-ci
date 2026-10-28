@@ -1,15 +1,37 @@
+## 2026-10-28 -- pre436 review: routed-power effects follow nested containers and loop targets (job-pre436-10282048)
+
+The pre436 review found three false refusals: a mutation before the call through a dict value
+(`d['k'][1] = 3`), through a nested list item (`ys[0][1] = 3`) and through a loop target
+(`for item in [xs]: item[1] = 3`) still left the literal, because the module effect scan
+matched only the root name.  The scan now carries the identities of every container nested in
+a tracked value and the values a for-loop target can hold, so any effect that can reach `xs`
+before the call drops it.  The dead item-store rebinding subtraction is removed (a subscript
+base is a Load node, so it never changed a count).  A mutation after the call, including
+through those same nested routes, still refuses by name; a direct, aliased or nested mutation
+before it matches CPython.
+
+Probes in `/tmp/probes/pre436fix2` on both builds via `cmp.sh`: the review's `r02` dict value,
+`r04` nested list item and `r06` loop target mutations before the call now match CPython
+(`b01`, `b02`, `c01`), as do a deep dict/list route (`b03`), loop over a nested list (`c02`),
+tuple loop target (`c04`), negative base (`d01`), exponent 63 (`d02`), in-range after (`d03`),
+float/bool (`d04`, `d05`), negative exponent (`d06`), empty `*` (`d07`), safe base (`d08`), a
+parameter route (`e01`), a list-item route (`e03`), an instance attribute (`e06`) and a helper
+that mutates a dict (`e07`).  Direct/alias/dict/nested-list/loop-target mutations after the
+call (`a01`, `a03`, `b04`, `b05`, `c03`), a list-item route (`e02`) and an unrelated earlier
+mutation (`e08`) still refuse by name; class-attribute assignment (`e04`, `e05`) is refused by
+name before this pass as `not in the subset: assigning the class attribute C.xs`.
+
 ## 2026-10-28 -- pre436: a routed power survives a container mutation after the call (job-pre436-10282048)
 
 The pre424 review's first still-differing pre-existing item was the module list mutated after
 the routed power: `def power(b, e): return b ** e`; `xs = [2, 100]`; `print(power(*xs))`;
 `xs[1] = 3`.  On both builds it stopped with `integer overflow` where CPython prints
 1267650600228229401496703205376.  This tree had no routed-power pass, so the pre424 pass is
-included; its container discovery counted the later item store as a second binding of `xs`
-and dropped the literal.  Item and attribute stores no longer count as rebinding a name, and
-a call or item/slice store/delete invalidates a container only when it can run before the
-call (a loop keeps its repeated-store rule).  The later mutation now leaves the exact
-out-of-int64 refusal by name on both builds; a mutation before the call, an in-range result
-and non-integer operands still match CPython.
+included; its container discovery passed through a read-only-use screen that dropped the
+literal once the later item store was seen.  The pass now scores a call or item/slice
+store/delete only when it can run before the call (a loop keeps its repeated-store rule), so
+the later mutation leaves the exact out-of-int64 refusal by name on both builds; a mutation
+before the call, an in-range result and non-integer operands still match CPython.
 
 Probes in `/tmp/probes/pre436` on both builds via `cmp.sh`: `p01` (module list after the
 call, the recorded case), `p02` (append after), `p03` (local list after), `p04` (alias after),

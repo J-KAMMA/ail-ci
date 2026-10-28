@@ -4,11 +4,11 @@ The pre424 review recorded as pre-existing that a module list mutated after the
 routed power trap stopped with ``integer overflow`` where CPython prints the
 bignum.  The routed-power check dropped any list with more than one binding
 before it looked at the order, so the later item store hid the literal the call
-actually saw.  Item and attribute stores are no longer counted as rebinding a
-name, and a call-site mutation is considered only when it can run before the
-call, so a later mutation leaves the exact out-of-int64 refusal in place.  A
-mutation before the call still matches CPython, as do in-range and non-integer
-operands.
+actually saw.  A call-site mutation is considered only when it can run before the
+call, and it reaches a container through an alias, a nested list or dict value or
+a for-loop target, so a later mutation leaves the exact out-of-int64 refusal in
+place.  A mutation before the call still matches CPython, as do in-range and
+non-integer operands.
 """
 import os
 import subprocess
@@ -103,6 +103,42 @@ def power(b, e):
 xs = [-2, 100]
 print(power(*xs))
 xs[1] = 3
+''',
+    'nested_dict_mutated_after': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+d = {'k': xs}
+print(power(*xs))
+d['k'][1] = 3
+''',
+    'nested_list_mutated_after': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+ys = [xs]
+print(power(*xs))
+ys[0][1] = 3
+''',
+    'loop_item_mutated_after': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+print(power(*xs))
+for item in [xs]:
+    item[1] = 3
+''',
+    'unrelated_effect_before': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+other = [1, 2]
+other[0] = 9
+print(power(*xs))
 ''',
 }
 
@@ -213,6 +249,83 @@ print(power(*xs), power(*ys), power(*zs))
 xs[1] = 3
 ys[1] = 3
 zs[1] = 3
+''',
+    'nested_dict_mutated_before': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+d = {'k': xs}
+d['k'][1] = 3
+print(power(*xs))
+''',
+    'nested_list_mutated_before': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+ys = [xs]
+ys[0][1] = 3
+print(power(*xs))
+''',
+    'nested_list_alias_mutated_before': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+ys = [xs]
+alias = ys[0]
+alias[1] = 3
+print(power(*xs))
+''',
+    'deep_nested_list_mutated_before': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+ys = [xs]
+zs = {'k': ys}
+zs['k'][0][1] = 3
+print(power(*xs))
+''',
+    'loop_item_mutated_before': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+for item in [xs]:
+    item[1] = 3
+print(power(*xs))
+''',
+    'loop_over_nested_list_mutated_before': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+ys = [xs]
+for item in ys:
+    item[1] = 3
+print(power(*xs))
+''',
+    'nested_argument_mutated_before': '''
+def power(b, e):
+    return b ** e
+
+def go(a, b):
+    b[1] = 3
+    return power(*a)
+
+xs = [2, 100]
+print(go(xs, xs))
+''',
+    'loop_tuple_target_mutated_before': '''
+def power(b, e):
+    return b ** e
+
+xs = [2, 100]
+for (item,) in [(xs,)]:
+    item[1] = 3
+print(power(*xs))
 ''',
     'unrelated': '''
 def add(a, b):

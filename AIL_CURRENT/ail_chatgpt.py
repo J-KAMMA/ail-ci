@@ -2982,20 +2982,6 @@ def _routed_effect_sites(function):
     return sites
 
 
-def _routed_rebinding_counts(scope):
-    """Bindings that replace a name, ignoring item and attribute stores.
-
-    ``xs[1] = 3`` mutates the list without rebinding ``xs``, so the literal the name first
-    held can still be the value a call sees when the store runs after that call.  Effect
-    ordering in the routed-power check decides whether such a mutation invalidates it."""
-    counts = _binding_counts(scope.body)
-    for node, parent in _scope_nodes_with_parents(scope):
-        if (isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del))
-                and isinstance(parent, (ast.Subscript, ast.Attribute))):
-            counts[node.id] = counts.get(node.id, 0) - 1
-    return {name: count for name, count in counts.items() if count > 0}
-
-
 def _routed_power_known(tree, dead):
     """Module values the routed-power check may read: scalars, literal containers and
     class attributes, with the same fold rules the int() pass uses.  A use in unreachable code
@@ -3005,7 +2991,7 @@ def _routed_power_known(tree, dead):
     for node in ast.walk(tree):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             global_names.update(node.names)
-    module_counts = _routed_rebinding_counts(tree)
+    module_counts = _binding_counts(tree.body)
     parents = {child: parent for parent in ast.walk(tree)
                for child in ast.iter_child_nodes(parent)}
     program_bound = _all_bound_names(tree)
@@ -3042,7 +3028,7 @@ def _routed_local_containers(function, known, attributes, dead):
     """Local literal tuples, lists and dicts the routed-power check may read.  A use in
     unreachable code does not stop the fold; a reachable mutation is handled by the call-site
     ordering, not by dropping the literal here."""
-    counts = _routed_rebinding_counts(function)
+    counts = _binding_counts(function.body)
     result = {}
     for statement in function.body:
         if not (isinstance(statement, ast.Assign) and len(statement.targets) == 1
@@ -3276,7 +3262,7 @@ def _check_int64_routed_power(tree):
 
             changed = container_changed_at(node)
             return {name: value for name, value in env.items()
-                    if not (type(value) in (list, dict) and changed)
+                    if not (isinstance(value, (list, dict, tuple)) and changed)
                     and (name not in stored_at
                          or not any(before(where) for where in stored_at[name]))}
 
@@ -3284,7 +3270,7 @@ def _check_int64_routed_power(tree):
             """A local value map with an already-mutated container made unknown."""
             if not container_changed_at(node):
                 return scope_known
-            return {name: (_UNKNOWN if type(value) in (list, dict) else value)
+            return {name: (_UNKNOWN if isinstance(value, (list, dict, tuple)) else value)
                     for name, value in scope_known.items()}
 
         def follows_parameter(node, current):
@@ -3327,29 +3313,93 @@ def _check_int64_routed_power(tree):
     module_parents = {child: parent for parent in ast.walk(tree)
                       for child in ast.iter_child_nodes(parent)}
 
-    def effect_names(site):
-        """The names an effect site can reach: a call's loaded names (receiver and arguments),
-        or a stored/deleted subscript's base name chain."""
+    def loop_bindings():
+        """Values a name can hold as a for-loop target, including a nested loop over a tracked
+        list.  A mutation through the target can reach a container the target was unpacked
+        from, so the effect scan follows it."""
+        bindings = {}
+
+        def add(name, value):
+            values = bindings.setdefault(name, [])
+            if not any(existing is value for existing in values):
+                values.append(value)
+
+        def bind(target, value):
+            if isinstance(target, ast.Name):
+                add(target.id, value)
+            elif isinstance(target, (ast.Tuple, ast.List)):
+                if isinstance(value, (list, tuple)) and len(value) == len(target.elts):
+                    for item, element in zip(target.elts, value):
+                        bind(item, element)
+
+        def iterables(node):
+            if (isinstance(node, ast.Name) and node.id in bindings
+                    and node.id not in known):
+                return list(bindings[node.id])
+            value = _constant_value(node, lambda name: known.get(name, _UNKNOWN),
+                                    lambda unused: True, {}, attributes)
+            return [value]
+
+        for _ in range(8):
+            changed = False
+            before = {name: list(values) for name, values in bindings.items()}
+            for site in _walk_module_scope(tree):
+                if not isinstance(site, (ast.For, ast.AsyncFor)):
+                    continue
+                elements = []
+                for iterable in iterables(site.iter):
+                    if isinstance(iterable, (list, tuple)):
+                        elements.extend(iterable)
+                    elif isinstance(iterable, dict):
+                        elements.extend(iterable)
+                for element in elements:
+                    bind(site.target, element)
+            changed = any(
+                len(bindings.get(name, ())) != len(values)
+                for name, values in before.items()
+            ) or any(name not in before for name in bindings)
+            if not changed:
+                break
+        return bindings
+
+    module_loop_bindings = loop_bindings()
+
+    def reachable_ids(value):
+        """The identities of a container and every container nested inside it."""
+        result = set()
+        stack = [value]
+        while stack:
+            current = stack.pop()
+            if not isinstance(current, (list, dict, tuple)) or id(current) in result:
+                continue
+            result.add(id(current))
+            if isinstance(current, dict):
+                stack.extend(current.keys())
+                stack.extend(current.values())
+            else:
+                stack.extend(current)
+        return result
+
+    def effect_reachable(site):
+        """Container identities an effect site can change through its loaded names."""
         if isinstance(site, ast.Call):
-            roots = ast.walk(site)
+            roots = list(ast.walk(site))
         else:
-            roots = (inner for target in _effect_targets(site) for inner in ast.walk(target))
-        return {inner.id for inner in roots if isinstance(inner, ast.Name)}
+            roots = [inner for target in _effect_targets(site) for inner in ast.walk(target)]
+        result = set()
+        for inner in roots:
+            if not isinstance(inner, ast.Name):
+                continue
+            if inner.id in known:
+                result.update(reachable_ids(known[inner.id]))
+            for value in module_loop_bindings.get(inner.id, ()):
+                result.update(reachable_ids(value))
+        return result
 
     module_effects = [
-        (site, effect_names(site)) for site in _routed_effect_sites(tree)
+        (site, effect_reachable(site)) for site in _routed_effect_sites(tree)
         if id(site) not in dead
     ]
-    alias_groups = {}
-    for name, value in known.items():
-        if type(value) in (list, dict):
-            alias_groups.setdefault(id(value), set()).add(name)
-
-    def related(name):
-        value = known.get(name)
-        if type(value) in (list, dict):
-            return alias_groups.get(id(value), {name})
-        return {name}
 
     def module_scope_at(node):
         """The module values a call sees after the effects that run before it."""
@@ -3360,14 +3410,15 @@ def _check_int64_routed_power(tree):
         while parent is not None and parent is not tree:
             enclosing.add(id(parent))
             parent = module_parents.get(parent)
-        changed_names = set()
-        for site, names in module_effects:
+        changed_ids = set()
+        for site, ids in module_effects:
             if (site is not node and id(site) not in enclosing
                     and (repeated or (site.lineno, site.col_offset) < position)):
-                changed_names.update(names)
-        if not changed_names:
+                changed_ids.update(ids)
+        if not changed_ids:
             return known
-        return {name: (_UNKNOWN if type(value) in (list, dict) and related(name) & changed_names
+        return {name: (_UNKNOWN if (isinstance(value, (list, dict, tuple))
+                                   and id(value) in changed_ids)
                        else value)
                 for name, value in known.items()}
 
