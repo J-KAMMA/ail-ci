@@ -1,3 +1,29 @@
+## 2026-10-28 -- rbpre406: keep the power-route check separate from the module_envs pass (job-rbpre406-10281810)
+
+Re-applying pre406 on today's integ left `test_ail_pre406` and `test_ail_safetynet` failing on
+both builds: every compile stopped with `NameError: name 'module_envs' is not defined` in
+`_check_int64_literals`.  A newer integ check (pre417) builds `module_envs` at the start of that
+function and reads it in its per-statement loop, while pre406 had moved that start into
+`_module_value_map`; the re-apply left the variable inside the helper and the loop reading it
+in `_check_int64_literals`.
+
+`_module_value_map` is now a separate helper used only by `_check_int64_power_routes`, and
+`_check_int64_literals` keeps its own module-value setup (including the newer `module_envs`
+loop); the route check is called in one line at the end of that function.  The pre406 behaviour
+is unchanged: a known dict/list/argument-held constant power base whose exact result leaves
+int64 is refused by name (`int64 constant expression out of range`) on both builds, while
+in-range routes, safe bases 0/1/-1, mutation/appends and augmented in-range stores match
+CPython.
+
+`tools/ci_shards.json` is no longer rewritten from the old base (the CI contract spreads a
+module absent from the file by name), so a 3-way re-apply cannot leave conflicts there.
+Probes in `/tmp/probes/pre406rb` on both builds via `cmp.sh`: `p01`-`p09` and `p18` are
+refused by name; `p10`-`p17` match CPython (in-range dict/list/argument routes, safe bases,
+mutation, appended list, augmented in-range, no-feature control, an attribute-held in-range
+base and the int64 boundaries).  Final-state tests: test_ail_pre406, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and
+`--check` passes.
+
 ## 2026-10-28 -- pre406: a known dict/list/argument-held power base is refused by name (job-pre406-10281122)
 
 The pre391 review's first still-differing pre-existing item was `p10`: a constant-exponent power
