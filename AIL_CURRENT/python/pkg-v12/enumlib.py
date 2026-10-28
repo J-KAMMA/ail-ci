@@ -20,7 +20,7 @@ error text). Not built, refused by name: a non-int or negative member value, bou
 
 Not built, refused by name: the functional API `Enum("Color", "RED GREEN")`, mixed-in bases
 (`class C(str, Enum)`), members defined with `__init__` / `__new__`, `_generate_next_value_`, class methods.
-Difference: `isinstance(member, int)` is False for an IntEnum member, and a member is not usable as a list index.
+Difference: `isinstance(member, int)` is False for an IntEnum member.
 """
 import ast
 import copy

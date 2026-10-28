@@ -1,3 +1,28 @@
+## 2026-10-28 -- pre412: an IntEnum float/str value indexes by its normalised int (job-pre412-10281314)
+
+The pre397 review's first still-differing item was `class E(IntEnum): A = 1.5` used as a
+subscript: `[0, 1][E.A]` raised `TypeError: list indices must be integers or slices, not
+float` on both builds while CPython uses the normalised int `1`.  The member itself keeps the
+written value here (the pre-existing `.value` difference), but `_AilIntEnum.__index__` returned
+that raw value, so the runtime saw a float or a str.  It now returns `int(self.value)`, which
+truncates a float, parses a decimal string and unwraps another IntEnum member.  The declared
+value forms and the int64 boundaries match CPython for direct list/tuple/str subscription, a
+direct `__index__` call, `list.index` bounds and str search bounds, with the member reaching the
+lookup through an alias, an argument, a list item, a class attribute and a dict value.  The
+pre-existing `.value`/`int()`/hash difference stays open, as do the separate causes the same
+review recorded for normalised values outside int64, slice bounds, bytes/bytearray/deque
+subscription, sequence repeat and `pop(i)`.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `pre412_float_value`,
+`pre412_string_value`, `pre412_int64_bounds`, `intenum_str_int64`,
+`intenum_float_index_consumers` and `intenum_str_index_consumers` match CPython.  The earlier
+`intenum_float_index`/`intenum_str_index` differ only in the pre-existing `.value` lines they
+print; the pre-existing `intenum_float_slice`, `intenum_str_slice`,
+`intenum_float_repeat_pop`, `intenum_float_bounds`, `intenum_str_bounds`,
+`intenum_float_conv` and `intenum_str_conv` still differ for the reasons above.  Added
+`AIL_CURRENT/test_ail_pre412.py` (1 test, 3 programs, both builds).  Final-state tests: test_ail_pre412, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
