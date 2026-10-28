@@ -5,10 +5,13 @@ before the other source passes, so both compile paths see the lowered code and t
 that imports none of the module is returned as it was written (the same string).
 
 Supported: pack, unpack and calcsize with a string/bytes LITERAL format whose first character names the byte order
-('>', '<', '!', or '=' for the native order with standard sizes). The codes are b B h H i I l L q Q (1, 2, 4, 8
-byte integers with CPython's range check and message), ? (one byte, truth value), c (one byte, one bytes argument),
-s (a bytes field of the repeat count) and x (padding), with a repeat count before any of them. The format is parsed
-at compile time, so the field sizes and offsets are constants and every value is evaluated once, left to right.
+('>', '<', '!', or '=' for the native order with standard sizes). The codes are b B h H i I l L q (1, 2, 4, 8
+byte signed/unsigned integers with CPython's range check and message), Q (the same in pack; a Q field in unpack can
+yield a value above 2**63-1, which this language's signed 64-bit int cannot hold, so it stays a named refusal),
+? (one byte, truth value), c (one byte, one bytes argument), s (a bytes field of the repeat count) and x (padding),
+with a repeat count before any of them. Arguments are type-checked with CPython's messages, and a bytearray buffer
+or 's' argument is copied to bytes. The format is parsed at compile time, so the field sizes and offsets are
+constants and every value is evaluated once, left to right.
 
 Not built, refused by name at compile time (never a wrong result): the native-aligned '@' mode (a format with no
 prefix is '@' in CPython; write '>' or '<'), the float codes e f d, the native-size codes n N P, the Pascal string
@@ -42,13 +45,21 @@ NATIVE_SIZES = {'n', 'N', 'P'}
 MAX_FIELDS = 65536
 
 HELPERS = r'''
-def _ail_struct_check(buf: bytes, n: int) -> bytes:
-    if len(buf) != n:
+def _ail_struct_check(buf, n: int) -> bytes:
+    if isinstance(buf, bytes):
+        data = buf
+    elif isinstance(buf, bytearray):
+        data = bytes(buf)
+    else:
+        raise RuntimeError("a bytes-like object is required, not '" + type(buf).__name__ + "'")
+    if len(data) != n:
         raise RuntimeError("unpack requires a buffer of " + str(n) + " bytes")
-    return buf
+    return data
 
 
-def _ail_struct_pack_int(value: int, size: int, signed: bool, big: bool, code: str) -> bytes:
+def _ail_struct_pack_int(value, size: int, signed: bool, big: bool, code: str) -> bytes:
+    if not isinstance(value, int):
+        raise RuntimeError("required argument is not an integer")
     if signed:
         if size < 8:
             lo = -(1 << (size * 8 - 1))
@@ -74,14 +85,20 @@ def _ail_struct_unpack_int(buf: bytes, start: int, size: int, signed: bool, big:
     return int.from_bytes(part, "little", signed=signed)
 
 
-def _ail_struct_pack_s(value: bytes, n: int) -> bytes:
-    if len(value) >= n:
-        return value[0:n]
-    return value + b"\x00" * (n - len(value))
+def _ail_struct_pack_s(value, n: int) -> bytes:
+    if isinstance(value, bytes):
+        data = value
+    elif isinstance(value, bytearray):
+        data = bytes(value)
+    else:
+        raise RuntimeError("argument for 's' must be a bytes object")
+    if len(data) >= n:
+        return data[0:n]
+    return data + b"\x00" * (n - len(data))
 
 
-def _ail_struct_pack_c(value: bytes) -> bytes:
-    if len(value) != 1:
+def _ail_struct_pack_c(value) -> bytes:
+    if not isinstance(value, bytes) or len(value) != 1:
         raise RuntimeError("char format requires a bytes object of length 1")
     return value
 
@@ -149,6 +166,10 @@ def parse(fmt, node, what):
             refuse(node, 'struct.%s: format %r has more than %d fields, which is not built' % (what, fmt, MAX_FIELDS))
         if code in INTEGERS:
             size, signed = INTEGERS[code]
+            if code == 'Q' and what == 'unpack':
+                refuse(node, "struct.unpack: the 'Q' code can yield a value above 2**63-1, which this "
+                             "language's signed 64-bit int cannot hold; it is not built (unpack it as 'q' or as "
+                             "individual bytes)")
             for _ in range(count):
                 fields.append(('int', size, signed, code))
                 total += size

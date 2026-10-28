@@ -8,9 +8,10 @@ and exits with the same status on BOTH compile paths:
 
 The pass is structlib.py, run from ail_syntax.python_surface on the program text: the literal format is parsed at
 compile time and each field becomes int.to_bytes / int.from_bytes over the bytes the compiler already builds.
-Supported: a literal format with a '>' '<' '=' or '!' prefix and the codes b B h H i I l L q Q ? c s x (repeat
-counts included). CPython's out-of-range and short-buffer messages are reproduced through RuntimeError, and the
-programs read them with `except Exception`, so the text matches.
+Supported: a literal format with a '>' '<' '=' or '!' prefix and the codes b B h H i I l L q (and Q in pack;
+unpack of Q can leave the signed 64-bit int and is refused) ? c s x (repeat counts included). CPython's
+out-of-range, short-buffer and argument-type messages are reproduced through RuntimeError, a bytearray buffer or
+'s' argument is copied to bytes, and the programs read the messages with `except Exception`, so the text matches.
 
 Anything else stays a named compile-time refusal, and these tests check the note for each: a dynamic format, the
 native-aligned '@' mode (a format with no prefix), the float codes e f d, the native-size codes n N P, 'p', a bad
@@ -71,7 +72,7 @@ def main() -> None:
     print("mixed", list(struct.pack("<bHiQ", -1, 258, -3, 4)))
     print("empty", list(struct.pack(">")))
     packed = struct.pack("<bHiQ", -1, 258, -3, 4)
-    print(struct.unpack("<bHiQ", packed))
+    print(struct.unpack("<bHiq", packed))
     data = b"\x01\x02\x03\x04\x05"
     print(struct.unpack(">I", data[0:4]))
     print("eq", list(struct.pack("=I", 305419896)))
@@ -107,6 +108,17 @@ def main() -> None:
     print(struct.unpack(">?", a), struct.unpack(">?", b))
     print(struct.unpack(">???", b"\x00\x01\x02"))
     print(struct.calcsize(">4s2c3x?"))
+    ba = bytearray(b"ab\x00\x00")
+    got = struct.unpack(">4s", ba)
+    print(type(got[0]).__name__, got)
+    cb = bytearray(b"a")
+    print(type(struct.unpack(">c", cb)[0]).__name__)
+    live = bytearray(b"abcd")
+    copy = struct.unpack(">4s", live)
+    live[0] = 65
+    print(copy, bytes(live))
+    print(list(struct.pack(">4s", bytearray(b"ab"))))
+    print(list(struct.pack(">c", b"a")))
 
 
 main()
@@ -220,6 +232,38 @@ def main() -> None:
         struct.pack(">c", b"ab")
     except Exception as e:
         print("c", str(e))
+    try:
+        struct.pack(">c", "a")
+    except Exception as e:
+        print("c-str", str(e))
+    try:
+        struct.pack(">c", bytearray(b"a"))
+    except Exception as e:
+        print("c-ba", str(e))
+    try:
+        struct.pack(">4s", "ab")
+    except Exception as e:
+        print("s-str", str(e))
+    try:
+        struct.pack(">4s", 1)
+    except Exception as e:
+        print("s-int", str(e))
+    try:
+        struct.pack(">I", "x")
+    except Exception as e:
+        print("I-str", str(e))
+    try:
+        struct.pack(">I", 1.5)
+    except Exception as e:
+        print("I-float", str(e))
+    try:
+        struct.unpack(">I", "abcd")
+    except Exception as e:
+        print("U-str", str(e))
+    try:
+        struct.unpack(">I", 4)
+    except Exception as e:
+        print("U-int", str(e))
 
 
 main()
@@ -250,7 +294,10 @@ def boundary_program():
                 fmt = order + code
                 lines.append("    try:")
                 lines.append('        p = struct.pack("%s", %d)' % (fmt, value))
-                lines.append('        print("%s", %d, list(p), struct.unpack("%s", p))' % (fmt, value, fmt))
+                if code == "Q":
+                    lines.append('        print("%s", %d, list(p))' % (fmt, value))
+                else:
+                    lines.append('        print("%s", %d, list(p), struct.unpack("%s", p))' % (fmt, value, fmt))
                 lines.append("    except Exception as e:")
                 lines.append('        print("%s", %d, str(e))' % (fmt, value))
     for fmt in (">2I", "<3H", ">xI", ">2c", ">4s", ">2s2x?", ">bBHI", ">0I", ">10x"):
@@ -317,6 +364,8 @@ REFUSALS = {
     "from unknown": ('from struct import Struct\n\nprint(Struct)\n',
                      "from 'struct': Struct is not built"),
     "star import": ('from struct import *\n\nprint(pack)\n', "name what you use"),
+    "Q unpack": ('import struct\n\np = b"\\x00" * 8\nprint(struct.unpack(">Q", p))\n',
+                 "the 'Q' code can yield a value above 2**63-1"),
 }
 
 

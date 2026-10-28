@@ -1,3 +1,35 @@
+## 2026-10-28 -- stdlib2 review fixes: struct argument types, bytearray buffers, Q unpack (job-stdlib2-10290134)
+
+The stdlib2 review found four defects in `python/pkg-v12/structlib.py`. (1) The manifest was stale
+(`update_manifest.py --check` exit 1) and this entry was missing. (2) `struct.unpack` of `Q` with a
+value at or above 2**63 either stopped with `OverflowError: integer overflow` on the default build
+or printed nothing on the general path; this language's int is signed 64-bit, so the CPython value
+cannot be represented. (3) A `bytearray` buffer made the `s`/`c` elements `bytearray` instead of
+`bytes`. (4) A `str` (or other non-integer) argument was accepted or failed with CPython's exception
+but a different message.
+
+The `Q` code is now refused by name in `unpack` at compile time (the note says the value can leave
+the signed 64-bit range; `pack` still supports `Q`), and `unpack`/`calcsize`/`pack` behaviour for
+the other codes is unchanged. `_ail_struct_check` type-checks the buffer with CPython's text
+(`a bytes-like object is required, not 'str'`) and copies a `bytearray` to `bytes`, so `s` and `c`
+elements come back as `bytes`; the length check follows the type check. `_ail_struct_pack_int`
+raises `required argument is not an integer` for a non-int (float, str, bytes, bytearray), and a
+`bool` still packs as 0/1. `_ail_struct_pack_s` accepts `bytes`/`bytearray` and raises
+`argument for 's' must be a bytes object` otherwise; `_ail_struct_pack_c` raises
+`char format requires a bytes object of length 1` unless it is a one-byte `bytes` (a `bytearray` is
+rejected, as CPython does).
+
+Probes in `/tmp/probes/s2` on both builds via `cmp.sh`: `p_unpack_bytes` (bytearray and bytes
+buffers, `s`/`c` element type, a bytearray mutated after unpack, routes through an argument, a list
+item, an attribute and a dict value, short buffers), `p_pack_types` (str/float/bytes/bytearray for an
+integer field, str/int for `s`, str/bytearray/long for `c`, str/int/list for the unpack buffer, each
+also through an argument, a list item, an attribute and a dict value), `p_q` (Q pack boundaries, q
+unpack including 2**63-1 and -1, Q negative message), `p_s_edges` (padding/truncation, `0s`, empty
+bytearray) and the four test programs (`p_basic_test`, `p_bytes_test`, `p_bound_test`,
+`p_routes_test`) match CPython on both builds; `p_qref` and `p_qref2` (`>Q`, `>2Q`) are refused by
+name with the new note. `test_ail_stdlib2` now covers the Q-unpack refusal and the type/bytearray
+cases, and `python3 tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
