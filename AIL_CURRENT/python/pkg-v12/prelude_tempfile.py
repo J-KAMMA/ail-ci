@@ -14,24 +14,47 @@ _counter = 0
 _CHARS = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_"
 
 
-def _ail_tf_usable(d: str) -> bool:
-    return os.path.isdir(d)
+def _ail_tf_writable(d: str) -> bool:
+    for i in range(100):
+        name = os.path.join(d, "tmp" + _ail_tf_rand8())
+        try:
+            os.mkdir(name, 0o700)
+        except FileExistsError:
+            continue
+        except OSError:
+            return False
+        os.rmdir(name)
+        return True
+    return False
+
+
+def _ail_tf_pick(d: str) -> str:
+    if d == "":
+        return ""
+    where = d
+    if where != ".":
+        where = os.path.abspath(where)
+    if _ail_tf_writable(where):
+        return where
+    return ""
+
+
+def _ail_tf_default_dir() -> str:
+    for key in ["TMPDIR", "TEMP", "TMP"]:
+        found = _ail_tf_pick(os.environ.get(key, ""))
+        if found != "":
+            return found
+    for standard in ["/tmp", "/var/tmp", "/usr/tmp"]:
+        found = _ail_tf_pick(standard)
+        if found != "":
+            return found
+    return _ail_tf_pick(os.getcwd())
 
 
 def _ail_tf_gettempdir() -> str:
-    found = os.environ.get("TMPDIR", "")
-    if not _ail_tf_usable(found):
-        found = os.environ.get("TEMP", "")
-    if not _ail_tf_usable(found):
-        found = os.environ.get("TMP", "")
-    if not _ail_tf_usable(found):
-        found = "/tmp"
-    if not _ail_tf_usable(found):
-        found = "/var/tmp"
-    if not _ail_tf_usable(found):
-        found = "/usr/tmp"
-    if not _ail_tf_usable(found):
-        found = os.getcwd()
+    found = _ail_tf_default_dir()
+    if found == "":
+        raise FileNotFoundError("No usable temporary directory found")
     return found
 
 

@@ -24,6 +24,14 @@ PARAMS = {
     'mktemp': (['suffix', 'prefix', 'dir'], ['', 'tmp', None]),
     'TemporaryDirectory': (['suffix', 'prefix', 'dir', 'ignore_cleanup_errors'], ['', 'tmp', None, False]),
 }
+NONE_HELPER = """
+
+def _ail_tf_mktemp_none(suffix: str, prefix: str, dir: str, which: str) -> str:
+    if which == "prefix":
+        raise TypeError("unsupported operand type(s) for +: 'NoneType' and 'str'")
+    raise TypeError('can only concatenate str (not "NoneType") to str')
+    return ""
+"""
 
 
 def prelude(name):
@@ -52,14 +60,7 @@ def default(name):
     return C(name)
 
 
-def value_or_default(node, default_name):
-    """A supplied argument, except a literal None, which CPython reads as the default."""
-    if isinstance(node, ast.Constant) and node.value is None:
-        return default(default_name)
-    return node
-
-
-def bound(call_node, name, params, defaults, kwonly=()):
+def bound(call_node, name, params, defaults, kwonly=(), none_defaults=()):
     if any(isinstance(a, ast.Starred) for a in call_node.args) or any(k.arg is None for k in call_node.keywords):
         refuse(call_node, 'tempfile.%s with * or ** arguments is not built; name each argument' % name)
     if len(call_node.args) > len(params):
@@ -78,7 +79,15 @@ def bound(call_node, name, params, defaults, kwonly=()):
     result = []
     for key, fallback in zip(params, defaults):
         if key in given:
-            result.append(value_or_default(given[key], key))
+            value = given[key]
+            if key in none_defaults and isinstance(value, ast.Constant) and value.value is None:
+                if key == 'dir':
+                    value = call('_ail_tf_gettempdir', [])
+                elif key == 'prefix':
+                    value = C('tmp')
+                else:
+                    value = C('')
+            result.append(value)
         else:
             result.append(default(key) if fallback is None else C(fallback))
     for key in kwonly:
@@ -97,6 +106,7 @@ def rewrite_text(source, notes=None):
         binder = stdlib5.take_imports(tree, 'tempfile', HANDLED, unknown=BUILT)
         if not binder:
             return source
+        needs_none_helper = [False]
 
         def fix(node):
             found = binder.attr(node)
@@ -114,9 +124,23 @@ def rewrite_text(source, notes=None):
                     keywords = [ast.keyword(arg=w.arg, value=stdlib5.Replace(fix).visit(w.value)) for w in node.keywords]
                     node = ast.copy_location(ast.Call(func=node.func, args=args, keywords=keywords), node)
                     if found == 'TemporaryDirectory':
-                        values = bound(node, found, params, defaults, kwonly=('delete',))
+                        values = bound(node, found, params, defaults, kwonly=('delete',), none_defaults=params)
+                    elif found == 'mktemp':
+                        values = bound(node, found, params, defaults, none_defaults=('dir',))
+                        suffix_node, prefix_node = values[0], values[1]
+                        which = None
+                        if isinstance(prefix_node, ast.Constant) and prefix_node.value is None:
+                            which, prefix_node = 'prefix', C('')
+                        elif isinstance(suffix_node, ast.Constant) and suffix_node.value is None:
+                            which, suffix_node = 'suffix', C('')
+                        if which is not None:
+                            if isinstance(suffix_node, ast.Constant) and suffix_node.value is None:
+                                suffix_node = C('')
+                            needs_none_helper[0] = True
+                            return ast.copy_location(call('_ail_tf_mktemp_none',
+                                                          [suffix_node, prefix_node, values[2], C(which)]), node)
                     else:
-                        values = bound(node, found, params, defaults)
+                        values = bound(node, found, params, defaults, none_defaults=params)
                     target = '_ail_tf_new' if found == 'TemporaryDirectory' else '_ail_tf_' + found
                     return ast.copy_location(call(target, values), node)
             return None
@@ -129,7 +153,8 @@ def rewrite_text(source, notes=None):
                 refuse(each, 'tempfile.%s used here is not built: %s' % (found, BUILT))
         if ast.dump(tree) == before:
             return source
-        stdlib5.insert_after_imports(tree, prelude('tempfile'))
+        helper = NONE_HELPER if needs_none_helper[0] else ''
+        stdlib5.insert_after_imports(tree, prelude('tempfile') + helper)
         ast.fix_missing_locations(tree)
         return ast.unparse(tree).rstrip('\n') + '\n'
     except Refused as exc:

@@ -211,6 +211,81 @@ main()
 """
 
 
+TEMPFILE_RELATIVE = r"""import os
+import tempfile
+
+
+def main() -> None:
+    os.mkdir("tf-rel")
+    os.environ["TMPDIR"] = "tf-rel"
+    d = tempfile.gettempdir()
+    print(os.path.isabs(d), d.endswith("tf-rel"), d == os.path.abspath("tf-rel"))
+    print(tempfile.gettempdirb().decode() == d)
+    os.rmdir("tf-rel")
+
+
+main()
+"""
+
+
+TEMPFILE_READONLY = r"""import os
+import tempfile
+
+
+def main() -> None:
+    os.mkdir("tf-ro")
+    os.chmod("tf-ro", 0o500)
+    absro = os.path.abspath("tf-ro")
+    os.environ["TMPDIR"] = absro
+    d = tempfile.gettempdir()
+    print(d == absro, os.path.isdir(d))
+    p = tempfile.mkdtemp()
+    print(os.path.isdir(p), os.path.dirname(p) == absro)
+    q = tempfile.mktemp()
+    print(os.path.isabs(q), os.path.dirname(q) == absro)
+    os.rmdir(p)
+    os.chmod("tf-ro", 0o700)
+    os.rmdir("tf-ro")
+
+
+main()
+"""
+
+
+TEMPFILE_NONE = r"""import os
+import tempfile
+
+
+class Holder:
+    def __init__(self, value: str) -> None:
+        self.value = value
+
+
+def main() -> None:
+    for which in ("prefix", "suffix"):
+        try:
+            if which == "prefix":
+                tempfile.mktemp(prefix=None)
+            else:
+                tempfile.mktemp(suffix=None)
+        except TypeError as e:
+            print(which, type(e).__name__, str(e))
+    x = None
+    values = {"p": None}
+    items = [None]
+    holder = Holder(None)
+    for bad in (x, values["p"], items[0], holder.value):
+        try:
+            tempfile.mktemp(prefix=bad)
+        except TypeError as e:
+            print("route", type(e).__name__)
+    print(os.path.isabs(tempfile.mktemp(dir=None)))
+
+
+main()
+"""
+
+
 TEMPFILE_REFUSALS = {
     "named_file": ("import tempfile\n\nprint(tempfile.NamedTemporaryFile().name)\n", "NamedTemporaryFile"),
     "mkstemp": ("from tempfile import mkstemp\n\nprint(mkstemp())\n", "mkstemp"),
@@ -261,6 +336,20 @@ class CompiledPrograms(unittest.TestCase):
                 self.check("tempfile_aliases", TEMPFILE_ALIASES, [""], ir)
             with self.subTest(path="typed", ir=ir):
                 self.check("tempfile_aliases_typed", TEMPFILE_ALIASES, [""], ir, AIL_NO_GENERAL="1")
+
+    def test_tempfile_environment_matches_cpython(self):
+        for ir in (False, True):
+            for path, env in (("default", {}), ("general", {"AIL_UNIFIED_FORCE": "1"})):
+                with self.subTest(program="relative", path=path, ir=ir):
+                    self.check("tf_relative", TEMPFILE_RELATIVE, [""], ir, **env)
+                with self.subTest(program="readonly", path=path, ir=ir):
+                    self.check("tf_readonly", TEMPFILE_READONLY, [""], ir, **env)
+
+    def test_tempfile_none_arguments_match_cpython(self):
+        for ir in (False, True):
+            for path, env in (("default", {}), ("general", {"AIL_UNIFIED_FORCE": "1"})):
+                with self.subTest(path=path, ir=ir):
+                    self.check("tf_none", TEMPFILE_NONE, [""], ir, **env)
 
 
 class Refusals(unittest.TestCase):

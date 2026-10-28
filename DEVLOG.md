@@ -1,3 +1,21 @@
+## 2026-10-28 -- stdlib batch 22 review fixes: tempfile directory selection (job-stdlib22-10290509)
+
+The review found three tempfile defects; all are fixed. `gettempdir()` now follows CPython's
+`_get_default_tempdir`: each `TMPDIR`/`TEMP`/`TMP` candidate is made absolute (except `.`) and is
+accepted only after a probe file can be created in it, otherwise the search falls through to
+`/tmp`, `/var/tmp`, `/usr/tmp` and the current directory. `mkdtemp()` and `mktemp()` therefore no
+longer use a relative or read-only `TMPDIR`. `mktemp(prefix=None)` and `mktemp(suffix=None)` now
+raise CPython's `TypeError` (the literal-None path is a small helper, so the typed path still
+compiles ordinary calls); `mkdtemp`/`TemporaryDirectory` keep treating `None` as the default for
+`prefix`/`suffix`/`dir`.
+
+Probes in `/tmp/probes` run with `bash ~/tools/cmp.sh` (general and default) and with
+`AIL_NO_GENERAL=1` (typed): `tf_rel`, `tf_dot`, `tf_ro`, `tf_ro2`, `tf_default` and `tf_none3` match
+CPython on all three; `tf_none2` matches on general and default and is refused by name on typed.
+`tf_cache` still differs as recorded (no module-level string cache is expressible on the typed
+path). Added the environment, read-only and `None` cases to `test_ail_stdlib22.py`; difference row
+`C?-job-stdlib22-10290509-2` was updated.
+
 ## 2026-10-28 -- stdlib batch 22 follow-up: tempfile (job-stdlib22-10290509)
 
 The previous commit in this branch added `struct`, so this follow-up takes the next still-refused
