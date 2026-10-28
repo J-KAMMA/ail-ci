@@ -1,3 +1,25 @@
+## 2026-10-28 -- pre416: exception item errors name the class (job-pre416-10281338)
+
+The pre395 review recorded as pre-existing that `class E(Exception): pass; E()[0]` raised
+`TypeError: 'exception' object is not subscriptable` on both builds, where CPython prints
+`'E'`; a slice and a caught `e[0]` differed the same way.  The v2 general runtime's
+object-to-name helper returned the class name for `AIL_T_INST` but let `AIL_T_EXC` fall
+through to the generic tag name `exception`.  Exception values carry a class too, so the
+helper now accepts both tags when the value has a class; item access, assignment and
+deletion name the subclass, while an exception class that defines `__getitem__` still runs
+its own method.  Ordinary instances, builtin values and the v1 path are unchanged.
+
+Added `AIL_CURRENT/test_ail_pre416.py` (2 tests, 6 matching programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Probes in `/tmp/probes/pre416` on both builds via `cmp.sh`: `e01` (reported access,
+slice, assignment, deletion), `e02` (direct call and slice), `e03` (negative, bool and
+string indexes, empty/negative/stepped slices, alias, argument, list item, attribute,
+dict value and subclass), `e05` (an exception defining `__getitem__`) and `e06` (210-
+character class name) match CPython; `a01`, `a02` and `d02` ordinary-instance controls
+match CPython.  Final-state tests: test_ail_pre416, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes;
+`tools/ci_shards.py --update` added the new module.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
