@@ -11870,7 +11870,9 @@ def _genexp_consumed_in_place(node, parents):
 # The eager calls that may receive a *nested* generator.  any()/all()/next() consume only part
 # of their argument (short-circuit / one element), so materialising their inner generator first
 # would add side effects CPython does not run; their own fused paths refuse a nested generator.
-_NESTED_GENEXP_EAGER_CALLS = _GENEXP_EAGER_CALLS - {'any', 'all', 'next'}
+# Counter/array are only reachable through an import, which binds the name, so the bound-name
+# screen below refuses them anyway.
+_NESTED_GENEXP_EAGER_CALLS = _GENEXP_EAGER_CALLS - {'any', 'all', 'next', 'Counter', 'array'}
 
 
 def _genexp_eager_call_argument(node, parents, bound):
@@ -11884,7 +11886,10 @@ def _genexp_eager_call_argument(node, parents, bound):
         return False
     f = par.func
     if isinstance(f, ast.Name):
-        return f.id in _NESTED_GENEXP_EAGER_CALLS and f.id not in bound
+        # One positional argument and no keyword: a second argument (`sum(gen, start)`) is
+        # evaluated before CPython consumes the generator, which the eager lowering reverses.
+        return (f.id in _NESTED_GENEXP_EAGER_CALLS and f.id not in bound
+                and len(par.args) == 1 and not par.keywords)
     if isinstance(f, ast.Attribute) and f.attr == 'join' and not par.keywords \
             and len(par.args) == 1:
         recv = f.value

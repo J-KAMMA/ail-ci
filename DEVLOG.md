@@ -13,21 +13,24 @@ The general path materialises a top-level generator passed to an eager call (`su
 CPython's consumption.  It now allows the same whenever the *inner* generator is a positional
 argument of a provably eager consumer: a plain name that is not bound anywhere in the module
 (`sum`, `list`, `tuple`, `set`, `frozenset`, `dict`, `sorted`, `min`, `max`, `bytes`,
-`bytearray`, `Counter`, `array`) or `str.join` on a string literal / f-string.  `any`, `all` and
-`next` are not eager (short-circuit / one element) and keep their own fused-path refusals.
-Everything else stays the named refusal: a user callee, a nested generator used as an iterable, a
-local binding that hides the builtin, a variable `.join` receiver.
+`bytearray`) as its single positional argument and with no keywords, or `str.join` on a string
+literal / f-string.  A second argument (`sum(gen, start)`) is evaluated before CPython consumes
+the generator, so that stays refused.  `any`, `all` and `next` are not eager (short-circuit / one
+element) and keep their own fused-path refusals.  Everything else stays the named refusal: a user
+callee, a nested generator used as an iterable, a local binding that hides the builtin, a
+variable `.join` receiver.
 
 Corpus after the change: the three programs compile and match CPython 3.12 on stdin inputs 0-2
 on both builds (default and `AIL_UNIFIED_FORCE=1`); refused-by-both falls from 24 to 21.
-Probes in `/tmp/probes/nested` (30 programs) on both builds via `cmp.sh`: p01-p09, p11, p18-p29
+Probes in `/tmp/probes/nested` (31 programs) on both builds via `cmp.sh`: p01-p09, p11, p18-p29
 (join, sum/min/max/sorted/list/tuple/set/dict/bytes, f-string widths, empty/negative/alias,
 argument/list-item/attribute/dict-value routes, side-effect order, conditions, second `for`)
 match CPython; p12 and p30 (user callee / callable variable), p13 (nested as iterable), p15
-(`next`), p16 (local `sum`), p17 (variable `sep.join`) are refused by name; p14 (`any` over a
-nested `sum`) matches on the default build and is refused by name on the unified build; p10
-(`lambda` in the outer element) is refused by name with the pre-existing closure-settling
-refusal.  Added `test_ail_cov3.py` (7 matching programs and 6 refusals, both builds).
+(`next`), p16 (local `sum`), p17 (variable `sep.join`) and p31 (`sum(inner, start=...)`, whose
+second argument CPython evaluates before consuming) are refused by name; p14 (`any` over a nested
+`sum`) matches on the default build and is refused by name on the unified build; p10 (`lambda` in
+the outer element) is refused by name with the pre-existing closure-settling refusal.  Added
+`test_ail_cov3.py` (7 matching programs and 7 refusals, both builds).
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 

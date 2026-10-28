@@ -3,11 +3,12 @@
 The general path used to refuse every nested generator.  The inner generator is materialised
 eagerly, which is observationally the same point in the program when its immediate consumer reads
 every element: `sum(inner)`, `" ".join(inner)`, the list constructors, `sorted`, `min`/`max`,
-`bytes` and `dict` (a plain name that is not bound anywhere in the module), and `str.join` on a
-string literal or f-string.  Any other nesting keeps the named refusal (a user callee, a nested
-generator used as an iterable, a local binding that hides the builtin, a variable `.join`
-receiver, `next()`), because materialising it early would run (or skip) side effects CPython only
-runs at iteration time.
+`bytes` and `dict` (a plain name that is not bound anywhere in the module, as the single
+positional argument and with no keywords), and `str.join` on a string literal or f-string.  Any
+other nesting keeps the named refusal (a user callee, a nested generator used as an iterable, a
+local binding that hides the builtin, a variable `.join` receiver, a second argument such as
+`sum(inner, start)`, `next()`), because materialising it early would run (or skip) side effects
+CPython only runs at iteration time.
 
 PROGRAMS are compiled with AIL_UNIFIED_FORCE=1 (the general path) and with the default build (which
 falls back to it), and must print what CPython prints.
@@ -123,6 +124,10 @@ print("|".join(str(f(v for v in row)) for row in rows))
     'next_inner': r'''
 rows = [[1, 2], [3]]
 print(next(sum(v for v in row) for row in rows))
+''',
+    'extra_argument': r'''
+rows = [[1, 2], [3]]
+print("|".join(str(sum((v for v in row), start=0)) for row in rows))
 ''',
 }
 
