@@ -6,7 +6,7 @@ name: fuzz-lab
 # No secrets or API keys are used; the jobs have read-only repository access.
 on:
   schedule:
-    - cron: "37 3 * * *"
+    - cron: "37 */3 * * *"   # every 3 hours: the 20 free concurrent jobs of a public repo were half idle
   workflow_dispatch:
     inputs:
       seeds_per_job:
@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 50
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 4   # leaves room for the 20-shard integration gate
       matrix:
         shard: [0, 1, 2, 3]
         # 3.12 is the reference AIL matches; 3.x (the newest stable release) shows what an upgrade would change
@@ -57,8 +57,8 @@ jobs:
       - name: Fuzz
         run: |
           gcc --version | head -1
-          # a new seed block every day; blocks of 100000 seeds, one slice per shard
-          base="${START_SEED:-$(( ($(date -u +%s) / 86400) * 100000 ))}"
+          # a new seed block every day (blocks of 100000 seeds) and a new 1000-seed slice every run hour, one part per shard
+          base="${START_SEED:-$(( ($(date -u +%s) / 86400) * 100000 + $(date -u +%-H) * 1000 ))}"
           start=$(( base + ${{ matrix.shard }} * SEEDS_PER_JOB ))
           echo "seeds $start .. $(( start + SEEDS_PER_JOB - 1 ))"
           status=0
