@@ -1,3 +1,23 @@
+## 2026-10-28 -- an LSP server for check diagnostics (job-tool1-10282131)
+
+Added `tools/ail_lsp.py`, a standard-library-only Language Server Protocol server over stdio. It
+handles initialize/initialized, shutdown/exit, didOpen, full-sync didChange with a 500 ms debounce,
+didSave and didClose. On open/save/change it writes the buffer to a temporary file and runs
+`AIL_CURRENT/ail_chatgpt.py check <file> --syntax python`, reuses the JSON report's line/column (and
+recovers `line N` from a refusal message when the report leaves it null), and publishes `ail`
+Errors; a clean check publishes an empty list. User programs are never compiled or run.
+
+Replaced the unrelated skipped `AIL_CURRENT/test_ail_lsp.py` with a scripted JSON-RPC client that
+opens a clean file and the alias refusal, checks their diagnostics, exercises a debounced change,
+save, close, an unknown request and shutdown/exit. `README.md` gained an "Editor support" section.
+
+Probes in `/tmp/probes` (`lsp_clean`, `lsp_alias`, `lsp_import`, `lsp_syntax`, `lsp_undefined`,
+`lsp_uncalled`) via `bash ~/tools/cmp.sh`: clean matches CPython on both builds; the others are
+refused by name (import, main never called) or match CPython's syntax/NameError. A scripted server
+probe published 0/1 diagnostics at the expected zero-based lines (alias 2, import 0, syntax 0:9,
+undefined 1:4, uncalled 0) and exited 0 after shutdown. Final-state tests: test_ail_lsp,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};

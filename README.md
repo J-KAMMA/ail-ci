@@ -21,6 +21,18 @@ pinned file, refresh them with `python3 tools/update_manifest.py`.
 The workflow in `.github/workflows/tests.yml` splits the module list into 20 shards and runs them in
 parallel on `ubuntu-24.04`.
 
+## Editor support
+
+`tools/ail_lsp.py` is a small diagnostics-only Language Server Protocol server over stdio. Start it
+with:
+
+```sh
+python3 tools/ail_lsp.py
+```
+
+Point your editor's LSP client at that command. It publishes `ail` diagnostics when a document is
+opened, changed (full sync, debounced 500 ms) or saved, and clears them on close.
+
 ## License
 
 No license file is included; all rights reserved unless stated otherwise.
