@@ -2532,13 +2532,19 @@ class Compiler(boxclosure.ClosureMixin):
             and isinstance(n.args[1].value, str))
         self.assigned_attrs = frozenset(assigned_attrs)
         any_all_genargs = set()
+        parents = {}
+        for par in ast.walk(tree):
+            for child in ast.iter_child_nodes(par):
+                parents[child] = par
+        self._genexp_parents = parents
+        self._genexp_counts = _bound_names(tree)
         for call in ast.walk(tree):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                    _unsafe_nested_genexp(gen, parents, self._genexp_counts) is not None:
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6495,7 +6501,7 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        if _unsafe_nested_genexp(node, self._genexp_parents, self._genexp_counts) is not None:
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -12446,6 +12452,44 @@ _GENEXP_SAFE_METHODS = frozenset({
     'rsplit', 'splitlines', 'partition', 'rpartition', 'removeprefix', 'removesuffix',
     'bit_length', 'bit_count', 'is_integer', 'get', 'keys', 'values', 'items',
 })
+
+
+# Builtins that read every element of their argument before returning.  A nested generator
+# expression that is their sole argument is materialised at the same point CPython consumes it,
+# so the eager lowering is exact.  next()/any()/all() are absent: they may stop before the inner
+# generator is exhausted.  The name must be unbound in the program, so a user function that
+# shares a builtin's name keeps the refusal.
+_GENEXP_FULL_CALLS = frozenset({
+    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max', 'bytes',
+    'bytearray',
+})
+
+
+def _genexp_fully_consumed(node, parents, counts):
+    """True iff `node` is the only argument of a builtin that reads it to the end immediately."""
+    par = parents.get(node)
+    if not isinstance(par, ast.Call) or len(par.args) != 1 or par.keywords:
+        return False
+    if par.args[0] is not node:
+        return False
+    f = par.func
+    if isinstance(f, ast.Name):
+        return f.id in _GENEXP_FULL_CALLS and counts.get(f.id, 0) == 0
+    # str.join is builtin when the receiver is a string literal; any other receiver could be a
+    # user method that does not read the generator at all.
+    return (isinstance(f, ast.Attribute) and f.attr == 'join'
+            and isinstance(f.value, ast.Constant) and isinstance(f.value.value, str))
+
+
+def _unsafe_nested_genexp(node, parents, counts):
+    """The first generator expression inside `node` whose eager materialisation would not be
+    observationally the same as CPython's lazy one, or None.  An inner generator consumed whole
+    by a call at the point it is written is safe; one used as a loop/comprehension source or by
+    next()/any()/all() can stop early, so it keeps the refusal."""
+    for n in ast.walk(node):
+        if n is not node and isinstance(n, ast.GeneratorExp) and not _genexp_fully_consumed(n, parents, counts):
+            return n
+    return None
 
 
 def _genexp_consumed_in_place(node, parents):

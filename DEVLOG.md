@@ -1,3 +1,30 @@
+## 2026-10-28 -- cov28: a nested generator expression consumed whole at the point it is written
+
+A corpus run of all 219 programs in `lab/corpus/programs` (both builds: default and
+`AIL_UNIFIED_FORCE=1`) left 24 named compile-time refusals before this change and 21 after it.
+Excluding imports and stdlib uses, the most frequent blocker was the general path's
+`a generator expression nested inside another generator expression` (3 programs: deepseek/t172,
+deepseek/t432, glm/t432; it was also the top unified-mode reason).
+
+The v2 general path materialises every generator expression eagerly.  That is exact when the
+reader consumes every element at the same point, so an inner generator expression that is the
+sole argument of an unbound, fully-consuming builtin (`sum`, `list`, `tuple`, `set`,
+`frozenset`, `dict`, `sorted`, `min`, `max`, `bytes`, `bytearray`, or `str.join` on a string
+literal) no longer keeps the refusal.  An inner generator used as a loop or comprehension source,
+by `next()`, or by `any()`/`all()` can stop early and remains refused by name with the same
+message and position; so does a call whose callee is rebound in the program (a user `sum`) or a
+method on any other receiver (a user `join`).  The three corpus programs now match CPython on all three inputs on both
+builds.
+
+Probes in `/tmp/probes/cov28_*.py` via `cmp.sh`: `cov28_core` (sum/list/tuple/sorted/set/dict/
+min/max/join/frozenset over int and str rows), `cov28_empty_negative` (empty and negative ranges,
+empty `min`/`max`), `cov28_effects` (side effects and a caught ValueError in the inner body),
+`cov28_routes` (the rows through an argument, a list item, an attribute, a dict value, an alias
+and after mutation) match CPython on both builds; `cov28_refuse_list_source`,
+`cov28_refuse_next`, `cov28_refuse_comp_source`, `cov28_refuse_star`,
+`cov28_refuse_shadow_sum` and `cov28_refuse_user_join` are refused by name on both builds.  Added `test_ail_cov28.py`; `test_ail_pre41`, `test_ail_pre116`, `test_ail_pre211`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
