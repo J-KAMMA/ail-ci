@@ -37,6 +37,33 @@ def uses_export(text):
     return '@' in text and 'export' in text and 'ail_ffi' in text
 
 
+def has_export(text):
+    """True when a top-level def is actually decorated with ail_ffi.export (the text check is coarse)."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return False
+    names, modules = set(), set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
+            for alias in node.names:
+                if alias.name == 'export':
+                    names.add(alias.asname or 'export')
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == 'ail_ffi':
+                    modules.add(alias.asname or 'ail_ffi')
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for d in node.decorator_list:
+            d = d.func if isinstance(d, ast.Call) else d
+            if _is_name(d, names) or (isinstance(d, ast.Attribute) and d.attr == 'export'
+                                      and _is_name(d.value, modules)):
+                return True
+    return False
+
+
 def _kind(annotation, structs, *, result, where):
     if isinstance(annotation, ast.Constant) and annotation.value is None:
         if result:

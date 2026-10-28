@@ -5622,6 +5622,11 @@ def main(argv=None):
             lowered_text, lowered['manifest'] = ail_export.lower(text)
             return lowered_text
         try:
+            if not library:
+                import ail_export
+                original = source.read_bytes().decode('utf-8')
+                if _python_source(args, original) and ail_export.has_export(original):
+                    ail_export.lower(original)      # validate @export as CPython's decorator does
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
                 module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,

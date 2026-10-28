@@ -170,20 +170,25 @@ class Session:
         imported = set()                # names bound by `from ail_ffi import`
         module_names = set()            # names bound by `import ail_ffi [as x]`
         blank = []                      # (first line, last line)
+        keep = {}                       # line -> import text `export` needs at run time (CPython metadata)
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
                         imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
                         continue
-                    if alias.asname not in (None, alias.name):
+                    if alias.asname not in (None, alias.name) and alias.name != 'export':
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
                     imported.add(alias.name)
+                    if alias.name == 'export':
+                        keep[node.lineno] = 'from ail_ffi import export' + (
+                            ' as ' + alias.asname if alias.asname else '')
                 blank.append((node.lineno, node.end_lineno))
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == 'ail_ffi':
                         module_names.add(alias.asname or 'ail_ffi')
+                        keep[node.lineno] = 'import ail_ffi' + (' as ' + alias.asname if alias.asname else '')
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
@@ -213,6 +218,8 @@ class Session:
         for first, last in blank:
             for index in range(first - 1, last):
                 lines[index] = ''
+        for line, text in keep.items():
+            lines[line - 1] = text
         self.decls.extend(decls)
         # a file that imports ail_ffi but declares nothing is left with its import blanked
         block = []

@@ -3861,6 +3861,10 @@ class Compiler(boxclosure.ClosureMixin):
                 is_setter = True         # called on each obj.NAME = value
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'classmethod' and len(node.decorator_list) == 1:
                 is_classmethod = True    # the first parameter is the class (of the instance it is called on)
+            elif (isinstance(dec_bare, ast.Name) and self.from_imports.get(dec_bare.id) == ('ail_ffi', 'export')) or (
+                    isinstance(dec_bare, ast.Attribute) and isinstance(dec_bare.value, ast.Name)
+                    and self.module_aliases.get(dec_bare.value.id) == 'ail_ffi'):
+                pass                     # @export marks a C-library function; CPython returns it unchanged
             else:
                 raise Unsupported('the decorator on def %s (only @staticmethod on a method and '
                                   '@functools.lru_cache/@lru_cache/@cache are supported)' %

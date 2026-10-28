@@ -1,3 +1,31 @@
+## 2026-10-28 -- ex14: `@export` runs as an ordinary Python-syntax program (job-ex14-10290439)
+
+Surveyed the Python-syntax programs under `AIL_CURRENT/language_examples`.  The `.py` AIL examples
+are `c_export/geometry.py` and `c_headers_workflow/table_crc.py`; `table_crc.py` already builds
+(prints nothing, exit 0), while a normal `compile` of `geometry.py` was refused with `not in the
+subset: the decorator on def add (only @staticmethod on a method and @functools.lru_cache/... are
+supported)`.  The legacy Python-syntax `.ail` programs (`hello`, `integer_series`, `stdin_sum`,
+`sum`) build; `math`/`use_math` are module examples that build with `--module math.ail`, not alone.
+The research `.py` drivers remain refused for their own reasons (`__file__`, unresolved local
+imports, `os.environ`, `Path` as a value), none of which this change claims.
+
+`@export` is CPython metadata: `ail_ffi.export` validates the signature and returns the function
+unchanged.  A normal compile now keeps the `from ail_ffi import export` (also `as`, and
+`import ail_ffi` / `@ail_ffi.export`) instead of blanking it with the FFI stubs, validates the
+decorators through `ail_export.lower`, and lets the general compiler ignore the marker.  An
+invalid export annotation is still refused by name, so no silent difference is introduced.
+`geometry.py` now builds on both paths and prints the same bytes and exits 0 as CPython.
+
+Probes in `/tmp/probes` via `cmp.sh` on both builds (CPython with `PYTHONPATH=AIL_CURRENT`):
+`p_export_types`, `p_export_empty`, `p_export_dataclass`, `p_export_overflow`,
+`p_export_module_attr`, `p_export_alias`, `p_export_unused_import` match CPython;
+`p_export_invalid` and `p_export_invalid_return` are refused by name where CPython raises
+`TypeError` at import.  Added `test_ail_ex14.py` (3 tests: the minimal reproducer, the geometry
+example, invalid annotations) and registered it in `ail_check.MODULES`.  Final-state tests:
+test_ail_ex14, test_ail_ffi, test_ail_c_export, test_ail_python_syntax, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (0 failed).  `tools/update_manifest.py` was run and
+`--check` passes.  No DIFFERENCES rows were added.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
