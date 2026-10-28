@@ -50,6 +50,7 @@
   "test_ail_cratebridge": 53.9,
   "test_ail_cross_target": 10.3,
   "test_ail_crypto": 328.2,
+  "test_ail_cstruct": 10.0,
   "test_ail_csv_reference": 0.1,
   "test_ail_csv_rewrite_stream": 53.9,
   "test_ail_csv_rewrite_stream_resources": 7.2,
@@ -1074,6 +1075,7 @@
   [
    "test_ail_c_api_exception_values",
    "test_ail_callable_owned_results",
+   "test_ail_cstruct",
    "test_ail_exc_str",
    "test_ail_for_bytes_expr",
    "test_ail_gaps_api1",

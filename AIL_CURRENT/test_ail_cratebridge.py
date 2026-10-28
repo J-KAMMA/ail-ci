@@ -25,6 +25,8 @@ from test_ail_ffi import CC, compile_cli, run_cpython  # noqa: E402
 
 BINDGEN = ROOT / "ail_bindgen.py"
 RUSTC = shutil.which("rustc")
+if RUSTC and subprocess.run([RUSTC, "--version"], capture_output=True).returncode:
+    RUSTC = None            # a rustup shim with no installed toolchain cannot build the crate
 
 
 def have_header(name):

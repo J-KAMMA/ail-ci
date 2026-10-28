@@ -4,8 +4,9 @@
     python3 AIL_CURRENT/ail_bindgen.py tinyrs.h --lib ./libtinyrs.so -o tinyrs_ffi.py
     python3 AIL_CURRENT/ail_bindgen.py mylib.h --link mylib --check mylib_open=negative:OSError --errno mylib_open
 
-It reads function prototypes only (comments, preprocessor lines, `extern "C" {}`, struct/enum/typedef
-declarations and inline bodies are skipped) and maps the C types as follows:
+It reads function prototypes and `struct` declarations it can lay out (comments, preprocessor lines,
+`extern "C" {}`, enums, unions, bitfields, flexible array members and inline bodies are skipped) and maps
+the C types as follows:
 
     int / long / size_t / int32_t / uintptr_t / enum ...   the c_* integer type of the same width (LP64)
     float double bool                                         c_float c_double c_bool
@@ -14,8 +15,8 @@ declarations and inline bodies are skipped) and maps the C types as follows:
     const T * / T * for a number T                           cptr(T) / ptr(T)
     a pointer followed by a length parameter                 the pointer plus length("name", C type)
     void *   const void *                                     c_void_p   c_const_void_p
-    T ** and pointers to a struct or an unknown typedef      ptr(c_void_p) and c_void_p, and the stub gets trust=True
-                                                              (the exact-prototype check cannot spell a struct)
+    struct T * (a struct it can read)                         ptr(T) / cptr(T), with a generated @cstruct class
+    T ** and pointers to an opaque or unknown typedef         ptr(c_void_p) and c_void_p, and the stub gets trust=True
     callbacks, variadics, struct by value, unknown typedefs  skipped, listed as a comment (pass --typedef NAME=c_int to name a typedef)
 
 The result is a starting point: review it, add `check=` / `errno=` / `exc=` for the functions whose result is
@@ -90,6 +91,114 @@ def split_top(text, sep=','):
     return [p.strip() for p in parts]
 
 
+STRUCT_RE = re.compile(r'\b(typedef\s+)?(struct|union)\s*([A-Za-z_]\w*)?\s*\{([^{}]*)\}\s*([A-Za-z_]\w*)?\s*;', re.S)
+ARRAY_RE = re.compile(r'^(?P<base>.*?)\b(?P<name>[A-Za-z_]\w*)\s*\[\s*(?P<count>[^\]]*)\s*\]$')
+
+
+def clean_structs(text):
+    """Comments, preprocessor lines and attributes removed; braces and struct bodies kept."""
+    text = text.replace('\\\n', ' ')
+    text = re.sub(r'/\*.*?\*/', ' ', text, flags=re.S)
+    text = re.sub(r'//[^\n]*', ' ', text)
+    text = re.sub(r'(?m)^\s*#.*$', ' ', text)
+    text = re.sub(r'extern\s+"C"\s*\{', ' ', text)
+    text = re.sub(r'__attribute__\s*\(\(.*?\)\)', ' ', text)
+    text = re.sub(r'__declspec\s*\([^)]*\)', ' ', text)
+    return text
+
+
+def struct_keys(structs):
+    keys = set()
+    for item in structs:
+        if item['tag']:
+            keys.add('STRUCT_' + item['tag'])
+        if item['alias']:
+            keys.add(item['alias'])
+    return keys
+
+
+def read_struct_field(statement, typedefs, known):
+    field = None
+    array = ARRAY_RE.match(statement)
+    if array:
+        field = array.group('name')
+        base = parse_type(array.group('base'), typedefs, False)
+        count = array.group('count').strip()
+        if count == '' or (count.isdigit() and int(count) <= 0):
+            raise Skip('flexible array member %r is not supported' % field)
+        if not count.isdigit():
+            raise Skip('field %r has an unsupported array length' % field)
+        if base.stars == 0 and base.base in known:
+            raise Skip('nested by-value array of structs in field %r is not supported' % field)
+        if base.stars:
+            return field, 'c_array(c_void_p, %d)' % int(count)
+        ctype = scalar(base.base, typedefs)
+        if ctype is None:
+            raise Skip('field %r has an unknown type %r' % (field, base.base))
+        return field, 'c_array(%s, %d)' % (ctype, int(count))
+    t = parse_type(statement, typedefs, True)
+    field = t.name
+    if field is None:
+        raise Skip('a field has no name')
+    if t.stars == 0 and t.base in known:
+        raise Skip('nested struct field %r by value is not supported' % field)
+    if t.stars:
+        return field, 'c_void_p'
+    ctype = scalar(t.base, typedefs)
+    if ctype is None:
+        raise Skip('field %r has an unknown type %r' % (field, t.base))
+    return field, ctype
+
+
+def read_structs(text, typedefs, skipped):
+    """The structs bindgen can lay out: @cstruct fields in declaration order."""
+    matches = list(STRUCT_RE.finditer(clean_structs(text)))
+    raw = []
+    for match in matches:
+        raw.append(dict(typedef=bool(match.group(1)), kind=match.group(2), tag=match.group(3),
+                        body=match.group(4), alias=match.group(5)))
+    known = struct_keys([item for item in raw if item['kind'] == 'struct'])
+    out = []
+    for item in raw:
+        shown = item['alias'] or item['tag'] or 'anonymous'
+        if item['kind'] == 'union':
+            skipped.append('# skipped struct %s: union %s is not supported' % (shown, shown))
+            continue
+        if not item['tag'] and not item['alias']:
+            skipped.append('# skipped struct anonymous: a struct needs a name')
+            continue
+        cls = item['tag'] or item['alias']
+        if keyword.iskeyword(cls) or not cls.isidentifier():
+            skipped.append('# skipped struct %s: %r is not a usable Python name' % (shown, cls))
+            continue
+        fields, reason = [], None
+        for statement in split_top(item['body'], ';'):
+            statement = ' '.join(statement.split())
+            if not statement:
+                continue
+            if ':' in statement:
+                reason = 'bitfield field %r is not supported' % statement
+                break
+            try:
+                field, annotation = read_struct_field(statement, typedefs, known)
+            except Skip as why:
+                reason = str(why)
+                break
+            if keyword.iskeyword(field):
+                reason = 'field name %r is a Python keyword' % field
+                break
+            fields.append((field, annotation))
+        if reason is not None:
+            skipped.append('# skipped struct %s: %s' % (shown, reason))
+            continue
+        if not fields:
+            skipped.append('# skipped struct %s: no readable fields' % shown)
+            continue
+        out.append(dict(class_name=pyname(cls), c_name='struct ' + item['tag'] if item['tag'] else item['alias'],
+                        tag=item['tag'], alias=item['alias'], fields=fields))
+    return out
+
+
 class Typ:
     """A parsed C type: base words, pointer depth, const on the pointee, and the name (parameters)."""
 
@@ -128,22 +237,27 @@ def scalar(base, typedefs):
     return None
 
 
-def convert_param(t, nxt, typedefs):
+def convert_param(t, nxt, typedefs, structs):
     """(annotation text, trusted?, the length parameter's C type or None)"""
+    found = structs.get(t.base)
     if t.stars == 0:
         if t.base == 'void':
             raise Skip('void parameter')
+        if found:
+            raise Skip('struct %s by value' % found)
         c = scalar(t.base, typedefs)
         if c is None:
             raise Skip('unknown or struct-by-value type %r (use --typedef NAME=c_type)' % t.base)
         return c, False, None
     length = None
-    if nxt is not None and nxt.stars == 0 and scalar(nxt.base, typedefs) in LENGTH_TYPES and nxt.name and LENGTH_NAMES.search(nxt.name):
+    if not found and nxt is not None and nxt.stars == 0 and scalar(nxt.base, typedefs) in LENGTH_TYPES and nxt.name and LENGTH_NAMES.search(nxt.name):
         length = scalar(nxt.base, typedefs)
     if t.stars >= 3:
         raise Skip('pointer depth %d' % t.stars)
     if t.stars == 2:
         return 'ptr(c_void_p)', True, None
+    if found:
+        return ('cptr(%s)' if t.const else 'ptr(%s)') % found, False, None
     c = scalar(t.base, typedefs)
     if t.base == 'char':
         if length and not t.const:
@@ -160,14 +274,19 @@ def convert_param(t, nxt, typedefs):
     return 'c_void_p', True, None                        # struct or unknown typedef pointer: an opaque handle
 
 
-def convert_result(t, typedefs):
+def convert_result(t, typedefs, structs):
+    found = structs.get(t.base)
     if t.stars == 0:
         if t.base == 'void':
             return 'None', False
+        if found:
+            raise Skip('struct %s by value' % found)
         c = scalar(t.base, typedefs)
         if c is None:
             raise Skip('unknown or struct result type %r' % t.base)
         return c, False
+    if t.stars == 1 and found:
+        return found, False
     if t.stars == 1 and t.base == 'char':
         return ('c_char_p' if t.const else 'c_mut_char_p'), False
     if t.stars == 1 and t.base == 'void':
@@ -181,8 +300,25 @@ def pyname(name):
 
 def generate(text, header, lib=None, link=None, checks=None, errnos=(), typedefs=None):
     checks, typedefs = checks or {}, typedefs or {}
-    body = strip_source(text)
     out, skipped, seen = [], [], set()
+    struct_items = read_structs(text, typedefs, skipped)
+    struct_map = {}
+    for item in struct_items:
+        if item['tag']:
+            struct_map['STRUCT_' + item['tag']] = item['class_name']
+        if item['alias']:
+            struct_map[item['alias']] = item['class_name']
+    for item in struct_items:
+        options = []
+        if header:
+            options.append('header=%r' % header)
+        options.append('name=%r' % item['c_name'])
+        out.append('@cstruct(%s)' % ', '.join(options))
+        out.append('class %s:' % item['class_name'])
+        for field, annotation in item['fields']:
+            out.append('    %s: %s' % (field, annotation))
+        out.append('')
+    body = strip_source(text)
     for statement in body.split(';'):
         statement = ' '.join(statement.split())
         if not statement or '(' not in statement:
@@ -208,12 +344,12 @@ def generate(text, header, lib=None, link=None, checks=None, errnos=(), typedefs
             for index, t in enumerate(types):
                 if t.name is None:
                     t.name = 'a%d' % index
-            result, trusted = convert_result(parse_type(ret_text, typedefs, False), typedefs)
+            result, trusted = convert_result(parse_type(ret_text, typedefs, False), typedefs, struct_map)
             params, index = [], 0
             while index < len(types):
                 t = types[index]
                 nxt = types[index + 1] if index + 1 < len(types) else None
-                annotation, t_trusted, length = convert_param(t, nxt, typedefs)
+                annotation, t_trusted, length = convert_param(t, nxt, typedefs, struct_map)
                 trusted = trusted or t_trusted
                 params.append('%s: %s' % (pyname(t.name), annotation))
                 if length:

@@ -36,12 +36,25 @@ Annotations (the stub's whole contract; a missing parameter or return annotation
                `None` is void; a missing return annotation is refused
 
 `link("m", "z")` at module level names libraries for every stub of the file that has no `lib=`.
-`ptr(c_void_p)` is `void **`, the out-parameter that returns a handle (sqlite3_open). A struct passed by pointer
-is a bytearray (`c_mut_void_p`) / bytes (`c_const_void_p`) laid out by hand with the C offsets; give a stub whose
-C prototype names a struct `trust=True` (the exact-prototype check cannot spell the struct).
+`ptr(c_void_p)` is `void **`, the out-parameter that returns a handle (sqlite3_open).
+
+`@cstruct(header="time.h", name="struct tm")` on a class of C-typed fields gives the struct a real layout:
+
+    @cstruct(header="time.h", name="struct tm")
+    class Tm:
+        tm_sec: c_int
+        ...
+
+`Tm()` is a zeroed bytearray of `sizeof(struct tm)`; `tm.tm_sec` reads and writes the field at its ABI offset.
+`c_array(T, n)` is a fixed array field. Every field is checked with
+`_Static_assert(offsetof(...) == k && sizeof(...) == n)` against the header, so a wrong field type or order is a
+compile error. A pointer to the struct is annotated with the class, `ptr(Tm)` (writable) or `cptr(Tm)` (read
+only); its prototype is compared like any other, so `trust=True` is not needed for a pointer to that struct. A
+struct with no header is still laid out by `Tm()`, but has no C check. Unions, bitfields, struct fields by value,
+arrays of structs and flexible array members are refused by name.
 
 `@extern(...)` options: `trust` (True: the header is included but its prototype is not compared with the stub;
-for a C prototype that names a struct), `lib` (library name for -l, or a path to a shared library relative to the
+for an opaque pointer the header cannot spell), `lib` (library name for -l, or a path to a shared library relative to the
 declaring file; None is the C library), `header` (checked against the real prototype at compile time;
 without one the declaration is trusted and `ail check --ffi` says so), `symbol` (the C name when it differs
 from the stub name), `pkg_config` (link flags from pkg-config, compile side only), `check` (one of
@@ -63,12 +76,14 @@ What the compiled program does differently (the declared differences):
 """
 import ctypes
 import ctypes.util
+import inspect
 import os
 import sys
 
-__all__ = ['extern', 'export', 'exports', 'link', 'length', 'ptr', 'cptr', 'declarations', 'c_int', 'c_uint', 'c_short', 'c_ushort', 'c_long', 'c_ulong',
-           'c_longlong', 'c_ulonglong', 'c_size_t', 'c_ssize_t', 'c_int8', 'c_int16', 'c_int32', 'c_int64',
-           'c_uint8', 'c_uint16', 'c_uint32', 'c_uint64', 'c_byte', 'c_ubyte', 'c_bool', 'c_double', 'c_float',
+__all__ = ['extern', 'export', 'exports', 'link', 'length', 'ptr', 'cptr', 'cstruct', 'c_array', 'declarations',
+           'c_int', 'c_uint', 'c_short', 'c_ushort', 'c_long', 'c_ulong', 'c_longlong', 'c_ulonglong',
+           'c_size_t', 'c_ssize_t', 'c_int8', 'c_int16', 'c_int32', 'c_int64', 'c_uint8', 'c_uint16',
+           'c_uint32', 'c_uint64', 'c_byte', 'c_ubyte', 'c_char', 'c_bool', 'c_double', 'c_float',
            'c_char_p', 'c_mut_char_p', 'c_void_p', 'c_const_void_p', 'c_mut_void_p']
 
 EXCEPTIONS = {'OSError': OSError, 'ValueError': ValueError, 'RuntimeError': RuntimeError, 'KeyError': KeyError,
@@ -119,6 +134,7 @@ c_longlong = _int('c_longlong', ctypes.c_longlong)
 c_ulonglong = _int('c_ulonglong', ctypes.c_ulonglong)
 c_size_t = _int('c_size_t', ctypes.c_size_t)
 c_ssize_t = _int('c_ssize_t', ctypes.c_ssize_t)
+c_char = _int('c_char', ctypes.c_char, signed=True)
 c_bool = CType('c_bool', 'bool', ctypes.c_bool)
 c_double = CType('c_double', 'float', ctypes.c_double)
 c_float = CType('c_float', 'float', ctypes.c_float)
@@ -133,12 +149,16 @@ _BYTEARRAY = CType('bytearray', 'bytearray', ctypes.c_void_p)
 
 class ptr:
     """Annotation: `T *` backed by a bytearray (C may write it); cptr(T) is `const T *` backed by bytes.
-    The buffer holds a whole number of T."""
+    The buffer holds a whole number of T. `ptr(AStruct)` is a pointer to a @cstruct class."""
     const = False
+    cstruct = None
 
     def __init__(self, ctype):
+        if isinstance(ctype, type) and getattr(ctype, '__ail_cstruct__', None) is not None:
+            self.ctype, self.cstruct = ctype, ctype
+            return
         if not isinstance(ctype, CType) or ctype.kind not in ('int', 'float', 'bool', 'handle'):
-            raise TypeError('%s(integer, float, bool or c_void_p C type)' % type(self).__name__)
+            raise TypeError('%s(integer, float, bool, c_void_p C type or @cstruct class)' % type(self).__name__)
         self.ctype = ctype
 
     @property
@@ -146,11 +166,25 @@ class ptr:
         return 'bytes' if self.const else 'bytearray'
 
     def __repr__(self):
-        return '%s(%s)' % (type(self).__name__, self.ctype)
+        return '%s(%s)' % (type(self).__name__, getattr(self.ctype, '__name__', self.ctype))
 
 
 class cptr(ptr):
     const = True
+
+
+class c_array:
+    """A fixed array field of a @cstruct class: `shape: c_array(c_int, 4)`."""
+
+    def __init__(self, ctype, count):
+        if not isinstance(ctype, CType) or ctype.kind not in ('int', 'float', 'bool', 'handle'):
+            raise TypeError('c_array(integer, float, bool or c_void_p C type, count)')
+        if type(count) is not int:
+            raise TypeError('c_array(..., count) takes an int count')
+        self.ctype, self.count = ctype, count
+
+    def __repr__(self):
+        return 'c_array(%s, %d)' % (self.ctype, self.count)
 
 
 class length:
@@ -163,6 +197,175 @@ class length:
 
     def __repr__(self):
         return 'length(%r, %s)' % (self.name, self.ctype)
+
+
+def _cstruct_kind(ctype):
+    """The ail_cbuf accessor family of one C field type."""
+    if ctype is c_bool:
+        return 'bool'
+    if ctype is c_float:
+        return 'f32'
+    if ctype is c_double:
+        return 'f64'
+    if ctype.kind == 'int':
+        return ('i' if ctype.signed else 'u') + str(ctype.bits)
+    return 'i64'                         # c_void_p and pointer fields: an address
+
+
+def _cstruct_ctype(ctype):
+    if ctype.kind in ('int', 'float', 'bool'):
+        return ctype.ctype
+    return ctypes.c_void_p
+
+
+def _cstruct_accessors(kind):
+    if kind == 'bool':
+        return 'get_u8', 'put_u8'
+    if kind in ('u64', 'i64'):
+        return 'get_i64', 'put_i64'
+    return 'get_' + kind, 'put_' + kind
+
+
+def cstruct(header=None, name=None, *, union=False, bitfield=False):
+    """Turn a class of C-typed fields into a fixed-size bytearray with typed attribute access.
+
+        @cstruct(header="time.h", name="struct tm")
+        class Tm:
+            tm_sec: c_int
+            tm_min: c_int
+
+    `Tm()` is a bytearray of `sizeof(struct tm)`; `tm.tm_sec` reads and writes the field at the offset the C
+    ABI gives it. The compiled program checks every field with `_Static_assert(offsetof(...) == k && sizeof
+    (...) == n)` against the header. A pointer to the struct is a parameter annotated with the class itself
+    (`tm: Tm`), `ptr(Tm)` (mutable) or `cptr(Tm)` (const); the prototype is checked like any other type.
+    Unions, bitfields, fields that are structs by value, arrays of structs and flexible array members are
+    refused by name.
+    """
+    if union:
+        raise TypeError('@cstruct: unions are not supported')
+    if bitfield:
+        raise TypeError('@cstruct: bitfields are not supported')
+    if header is not None and not isinstance(header, str):
+        raise TypeError('@cstruct header= needs a string')
+    if name is not None and not isinstance(name, str):
+        raise TypeError('@cstruct name= needs a string')
+
+    def decorate(cls):
+        import ail_cbuf
+        if not isinstance(cls, type):
+            raise TypeError('@cstruct applies to a class')
+        if cls.__bases__ != (object,):
+            raise TypeError('@cstruct %s: a struct class has no base classes' % cls.__name__)
+        annotations = inspect.get_annotations(cls, eval_str=True)
+        for key, value in cls.__dict__.items():
+            if key in ('__module__', '__qualname__', '__doc__', '__annotations__', '__dict__', '__weakref__'):
+                continue
+            raise TypeError('@cstruct %s: a struct class has fields only (%s is not a field)' % (cls.__name__, key))
+        fields, layout, offset = [], [], 0
+        for field, annotation in annotations.items():
+            count = 1
+            if isinstance(annotation, c_array):
+                if isinstance(annotation.ctype, type):
+                    raise TypeError('@cstruct %s: nested by-value array of structs in field %r is not supported'
+                                    % (cls.__name__, field))
+                if annotation.count <= 0:
+                    raise TypeError('@cstruct %s: flexible array member %r is not supported' % (cls.__name__, field))
+                ctype, count = annotation.ctype, annotation.count
+            elif isinstance(annotation, CType):
+                ctype = annotation
+            elif isinstance(annotation, type) and getattr(annotation, '__ail_cstruct__', None) is not None:
+                raise TypeError('@cstruct %s: struct field %r by value is not supported' % (cls.__name__, field))
+            else:
+                raise TypeError('@cstruct %s: field %r is not a C type' % (cls.__name__, field))
+            if ctype.kind not in ('int', 'float', 'bool', 'handle', 'str', 'bytes'):
+                raise TypeError('@cstruct %s: field %r has an unsupported C type' % (cls.__name__, field))
+            raw = _cstruct_ctype(ctype)
+            layout.append((field, raw * count if count != 1 else raw))
+            fields.append((field, ctype, count))
+        if not fields:
+            raise TypeError('@cstruct %s: a struct needs at least one field' % cls.__name__)
+
+        class Layout(ctypes.Structure):
+            _fields_ = layout
+        size = ctypes.sizeof(Layout)
+        records = []
+        for field, ctype, count in fields:
+            descriptor = Layout.__dict__[field]
+            records.append(dict(name=field, offset=descriptor.offset, size=descriptor.size,
+                                count=count, kind=_cstruct_kind(ctype), ctype=ctype))
+        namespace = {}
+        for key, value in cls.__dict__.items():
+            if key not in ('__dict__', '__weakref__', '__annotations__'):
+                namespace[key] = value
+        namespace['__annotations__'] = {}
+
+        def __init__(self):
+            for record in records:
+                field, kind, count, ctype = record['name'], record['kind'], record['count'], record['ctype']
+                if count != 1:
+                    zero = 0.0 if kind.startswith('f') else (False if kind == 'bool' else 0)
+                    value = [zero] * count
+                elif kind.startswith('f'):
+                    value = 0.0
+                elif kind == 'bool':
+                    value = False
+                else:
+                    value = 0
+                setattr(self, field, value)
+        namespace['__init__'] = __init__
+
+        def make_load(records=records):
+            def _load(self, data):
+                for record in records:
+                    field, kind, count, at = record['name'], record['kind'], record['count'], record['offset']
+                    get, put = _cstruct_accessors(kind)
+                    getter = getattr(ail_cbuf, get)
+                    if count != 1:
+                        size = ctypes.sizeof(_cstruct_ctype(record['ctype']))
+                        items = []
+                        for index in range(count):
+                            value = getter(data, at + index * size)
+                            items.append(bool(value) if kind == 'bool' else value)
+                        setattr(self, field, items)
+                    else:
+                        value = getter(data, at)
+                        setattr(self, field, bool(value) if kind == 'bool' else value)
+            return _load
+        namespace['_load'] = make_load()
+
+        def make_store(records=records):
+            def _store(self, data):
+                for record in records:
+                    field, kind, count, at = record['name'], record['kind'], record['count'], record['offset']
+                    get, put = _cstruct_accessors(kind)
+                    setter = getattr(ail_cbuf, put)
+                    if count != 1:
+                        size = ctypes.sizeof(_cstruct_ctype(record['ctype']))
+                        items = getattr(self, field)
+                        for index in range(count):
+                            value = items[index]
+                            if kind == 'bool':
+                                setter(data, at + index * size, 1 if value else 0)
+                            elif kind.startswith('f'):
+                                setter(data, at + index * size, float(value))
+                            else:
+                                setter(data, at + index * size, int(value))
+                    else:
+                        value = getattr(self, field)
+                        if kind == 'bool':
+                            setter(data, at, 1 if value else 0)
+                        elif kind.startswith('f'):
+                            setter(data, at, float(value))
+                        else:
+                            setter(data, at, int(value))
+            return _store
+        namespace['_store'] = make_store()
+
+        made = type(cls.__name__, (object,), namespace)
+        made.__ail_cstruct__ = dict(header=header, name=name or cls.__name__, size=size, fields=records)
+        return made
+
+    return decorate
 
 
 _DECLARED = []
@@ -200,7 +403,19 @@ def declarations():
     return [dict(d) for d in _DECLARED]
 
 
-def _classify(annotation):
+class _StructResult:
+    """The result of a stub that returns a pointer to a @cstruct class: an address (int)."""
+    kind = 'handle'
+
+    def __init__(self, cls):
+        self.cstruct = cls
+        self.ctype = cls
+
+    def __repr__(self):
+        return '%s *' % self.cstruct.__name__
+
+
+def _classify(annotation, result=False):
     if annotation is bytes:
         return _BYTES
     if annotation is bytearray:
@@ -209,6 +424,8 @@ def _classify(annotation):
         return c_char_p
     if annotation is int or annotation is float or annotation is bool:
         raise TypeError('annotate with a C type (c_int, c_double, ...), not %s' % annotation.__name__)
+    if isinstance(annotation, type) and getattr(annotation, '__ail_cstruct__', None) is not None:
+        return _StructResult(annotation) if result else ptr(annotation)
     if isinstance(annotation, (CType, length, ptr)):
         return annotation
     raise TypeError('unsupported FFI annotation: %r' % (annotation,))
@@ -250,7 +467,7 @@ def _signature(function):
     if 'return' not in annotations:
         raise TypeError('%s: a missing return annotation is refused (write `-> None` for void)' % function.__name__)
     result = annotations['return']
-    result = None if result is None else _classify(result)
+    result = None if result is None else _classify(result, result=True)
     if result is not None and result.kind in ('bytes', 'bytearray', 'length'):
         raise TypeError('%s: bytes, bytearray and length cannot be results' % function.__name__)
     return params, result
@@ -318,6 +535,8 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
             for _, kind, _ in params:
                 if isinstance(kind, length):
                     argtypes.append(kind.ctype.ctype)
+                elif getattr(kind, 'cstruct', None) is not None:
+                    argtypes.append(ctypes.c_void_p)
                 elif kind.kind == 'bytes':
                     argtypes.append(ctypes.c_char_p)
                 elif kind.kind == 'bytearray':
@@ -363,6 +582,7 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
                 else:
                     raise TypeError('%s() missing required argument %r' % (function.__name__, name))
             converted = []
+            struct_out = []
             for name, kind, _ in params:
                 if isinstance(kind, length):
                     target = next(k for n, k, _ in params if n == kind.name)
@@ -374,7 +594,29 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
                     converted.append(n)
                     continue
                 value = values[name]
-                if kind.kind == 'int':
+                if getattr(kind, 'cstruct', None) is not None:
+                    if isinstance(value, kind.cstruct):
+                        size = value.__ail_cstruct__['size']
+                        raw = bytearray(size)
+                        value._store(raw)
+                        array = (ctypes.c_ubyte * size).from_buffer(raw)
+                        keep.extend((raw, array))
+                        converted.append(ctypes.addressof(array))
+                        if kind.kind == 'bytearray':
+                            struct_out.append((value, raw))
+                    elif kind.kind == 'bytearray':
+                        if not isinstance(value, bytearray):
+                            raise TypeError('%s: %s must be a %s' % (function.__name__, name, kind.cstruct.__name__))
+                        array = (ctypes.c_ubyte * len(value)).from_buffer(value)
+                        keep.append(array)
+                        converted.append(ctypes.addressof(array))
+                    else:
+                        if not isinstance(value, bytes):
+                            raise TypeError('%s: %s must be bytes or a %s' % (function.__name__, name, kind.cstruct.__name__))
+                        array = (ctypes.c_ubyte * len(value)).from_buffer_copy(value)
+                        keep.append(array)
+                        converted.append(ctypes.addressof(array))
+                elif kind.kind == 'int':
                     if type(value) is not int:
                         raise TypeError('%s: %s must be an int' % (function.__name__, name))
                     low, high = kind.limits()
@@ -401,13 +643,13 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
                         raise TypeError('%s: %s must be an address (int)' % (function.__name__, name))
                     converted.append(value)
                 elif kind.kind == 'bytes':
-                    if type(value) is not bytes:
+                    if not isinstance(value, bytes):
                         raise TypeError('%s: %s must be bytes' % (function.__name__, name))
                     if isinstance(kind, ptr) and len(value) % ctypes.sizeof(kind.ctype.ctype):
                         raise ValueError('%s: %s must hold a whole number of %s' % (function.__name__, name, kind.ctype))
                     converted.append(value)
                 elif kind.kind == 'bytearray':
-                    if type(value) is not bytearray:
+                    if not isinstance(value, bytearray):
                         raise TypeError('%s: %s must be a bytearray' % (function.__name__, name))
                     if isinstance(kind, ptr) and len(value) % ctypes.sizeof(kind.ctype.ctype):
                         raise ValueError('%s: %s must hold a whole number of %s' % (function.__name__, name, kind.ctype))
@@ -417,7 +659,8 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
             ctypes.set_errno(0)
             rc = cfn(*converted)
             err = ctypes.get_errno()
-            del keep[:]
+            for value, raw in struct_out:
+                value._load(bytes(raw))
             if result is None:
                 return None
             probe = (0 if rc is None else 1) if result.kind == 'str' else (rc or 0) if result.kind == 'handle' else rc
@@ -431,6 +674,12 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
             if result.kind == 'str':
                 return '' if rc is None else rc.decode('utf-8')
             if result.kind == 'handle':
+                if getattr(result, 'cstruct', None) is not None:
+                    if not rc:
+                        raise RuntimeError('%s returned NULL' % function.__name__)
+                    value = result.cstruct()
+                    value._load(ctypes.string_at(rc, result.cstruct.__ail_cstruct__['size']))
+                    return value
                 return rc or 0
             return rc
 

@@ -4827,7 +4827,7 @@ def _source_check(args):
         check_objects = list(args.object)
         if getattr(args, 'ffi', False):
             report['ffi'] = ffi.listing()
-        if ffi.decls:
+        if ffi.decls or ffi.cstructs:
             dependency = True
             check_objects.append(ffi.build(ROOT / 'ail_chatgpt.py'))
             os.environ['AIL_FFI_SYMBOLS'] = ' '.join(ffi.symbols())
@@ -5550,7 +5550,7 @@ def main(argv=None):
             ffi.extra_libs = list(getattr(args, 'link', None) or [])      # --link LIB is link("LIB") for the whole program
         if ffi is not None and not ffi.decls and ffi.extra_libs:
             ffi_env = {'AIL_FFI_LINK': shlex.join(ffi._link_args())}
-        if ffi is not None and ffi.decls:
+        if ffi is not None and (ffi.decls or ffi.cstructs):
             try:
                 ffi_objects = [ffi.build(ROOT / 'ail_chatgpt.py')]
             except (OSError, ValueError, subprocess.SubprocessError) as error:

@@ -1103,14 +1103,22 @@ print(m, get_i32(e, 0))                              # 0.75 6
 
 - `link("name", ...)` once per file; `pkg_config="x"` for pkg-config flags; a path links that file. Stubs without `lib=` search the C
   library, then the linked libraries.
-- Out-parameters and structs are byte buffers: `ptr(T)` (writable) / `cptr(T)` (read only) over a `bytearray` / `bytes`, element types are
-  ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; `c_mut_void_p` / `c_const_void_p` for a struct; fields are read and written at the C
-  offsets with `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`.
-- `trust=True` for a prototype that names a struct (`struct tm *`, `sqlite3 *`): the header is included, its prototype is not compared.
+- Out-parameters are byte buffers: `ptr(T)` (writable) / `cptr(T)` (read only) over a `bytearray` / `bytes`, element types are
+  ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; fields are read and written at the C offsets with
+  `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`. For an opaque C struct use `c_mut_void_p` / `c_const_void_p`.
+- `@cstruct` gives a struct a real layout and typed attribute access. `@cstruct(header="time.h", name="struct tm")` on a class of
+  C-typed fields (and `c_array(T, n)` fields) makes `Tm()` a zeroed bytearray of `sizeof(struct tm)`; `tm.tm_hour` reads and writes the
+  field at its ABI offset. Every field is checked with `_Static_assert(offsetof(...) == k && sizeof(...) == n)` against the header, so
+  a wrong field type or order is a compile error. A pointer parameter/result is annotated with the class (or `ptr(Tm)` / `cptr(Tm)`),
+  and `trust=True` is not needed for a pointer to that struct. Unions, bitfields, struct fields by value, arrays of structs and
+  flexible array members are refused by name.
+- `trust=True` for an opaque pointer the header cannot spell (`sqlite3 **`, an unknown typedef): the header is included, its
+  prototype is not compared.
 - Callbacks (AIL functions called from C) are not supported.
 - Rust: export `#[no_mangle] pub extern "C"` functions from a `cdylib` / `staticlib` crate (`panic = "abort"`), generate a header with
   cbindgen, and `python3 AIL_CURRENT/ail_bindgen.py crate.h --lib ./libcrate.so --check fn=nonzero:ValueError` writes the stubs.
-  Recipe: `docs/design/NATIVE_LIBRARIES.md`.
+  Bindgen emits an `@cstruct` class for every `struct` it can lay out and uses `ptr(T)` / `cptr(T)` / `T` for its pointers, so
+  pointer-to-struct prototypes are checked too. Recipe: `docs/design/NATIVE_LIBRARIES.md`.
 
 
 ## Export

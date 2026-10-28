@@ -16,8 +16,11 @@ back byte for byte, so programs without FFI compile exactly as before. For a fil
 Link flags (`-lz`, a shared library path with its rpath) travel in `Session.link_args`.
 """
 import ast
+import copy
+import ctypes
 import hashlib
 import json
+import keyword
 import os
 import shlex
 import shutil
@@ -39,9 +42,32 @@ INTS = {
     'c_uint32': ('uint32_t', 'uint32', 32, False), 'c_uint': ('unsigned int', 'uint32', 32, False),
     'c_uint64': ('uint64_t', 'uint64_bits', 64, False), 'c_ulong': ('unsigned long', 'uint64_bits', 64, False),
     'c_ulonglong': ('unsigned long long', 'uint64_bits', 64, False), 'c_size_t': ('size_t', 'uint64_bits', 64, False),
+    'c_char': ('char', 'int8', 8, True),
 }
 NATIVE = {'int8': 'int8_t', 'int16': 'int16_t', 'int32': 'int32_t', 'uint8': 'uint8_t', 'uint16': 'uint16_t',
           'uint32': 'uint32_t', 'int': 'int64_t', 'uint64_bits': 'uint64_t'}
+CSTRUCT_CTYPES = {
+    'c_int8': ctypes.c_int8, 'c_byte': ctypes.c_int8, 'c_int16': ctypes.c_int16, 'c_short': ctypes.c_short,
+    'c_int32': ctypes.c_int32, 'c_int': ctypes.c_int, 'c_int64': ctypes.c_int64, 'c_long': ctypes.c_long,
+    'c_longlong': ctypes.c_longlong, 'c_ssize_t': ctypes.c_ssize_t, 'c_char': ctypes.c_char,
+    'c_uint8': ctypes.c_uint8, 'c_ubyte': ctypes.c_uint8, 'c_uint16': ctypes.c_uint16, 'c_ushort': ctypes.c_ushort,
+    'c_uint32': ctypes.c_uint32, 'c_uint': ctypes.c_uint, 'c_uint64': ctypes.c_uint64, 'c_ulong': ctypes.c_ulong,
+    'c_ulonglong': ctypes.c_ulonglong, 'c_size_t': ctypes.c_size_t, 'c_bool': ctypes.c_bool,
+    'c_double': ctypes.c_double, 'c_float': ctypes.c_float,
+}
+CSTRUCT_KINDS = {}
+for _name, (_c, _kind, _bits, _signed) in INTS.items():
+    CSTRUCT_KINDS[_name] = ('i' if _signed else 'u') + str(_bits)
+for _name in ('c_bool',):
+    CSTRUCT_KINDS[_name] = 'bool'
+for _name in ('c_double',):
+    CSTRUCT_KINDS[_name] = 'f64'
+for _name in ('c_float',):
+    CSTRUCT_KINDS[_name] = 'f32'
+for _name in ('c_char_p', 'c_mut_char_p', 'c_void_p', 'c_const_void_p', 'c_mut_void_p'):
+    CSTRUCT_KINDS[_name] = 'i64'
+    CSTRUCT_CTYPES[_name] = ctypes.c_void_p
+CSTRUCT_FIELDS = set(CSTRUCT_CTYPES)
 EXCEPTIONS = ('OSError', 'ValueError', 'RuntimeError', 'KeyError', 'IndexError', 'OverflowError', 'EOFError')
 CHECKS = {'negative': '< 0', 'nonzero': '!= 0', 'null': '== 0', 'minus1': '== -1'}
 OPTIONS = ('lib', 'header', 'symbol', 'check', 'errno', 'exc', 'pkg_config', 'sources', 'trust')
@@ -53,6 +79,8 @@ class Param:
         self.length_of = None          # for length("x", T): the parameter name
         self.length_type = None
         self.elem = None               # ptr(T) / cptr(T): the element type name, else None
+        self.struct = None             # @cstruct class name for a pointer to a struct
+        self.struct_c = None           # its C name (`struct tm`)
 
 
 class Decl:
@@ -64,14 +92,21 @@ class Decl:
         self.errno = False
         self.trust = False             # trust=True: the header is included but its prototype is not compared
         self.params = []
-        self.result = None             # annotation name, or None for void
+        self.result = None             # annotation name, 'cstruct', or None for void
+        self.result_struct = None      # the @cstruct class name of a struct pointer result
+        self.result_struct_c = None
         self.tag = None                # per-file hash
         self.local_header = False
         self.directory = None
 
     @property
     def has_bytearray(self):
-        return any(p.ann in ('bytearray', 'c_mut_void_p') for p in self.params)
+        return any(p.struct is None and p.ann in ('bytearray', 'c_mut_void_p') for p in self.params)
+
+    @property
+    def has_writable(self):
+        """A bytearray, or a pointer to a @cstruct class the C function may write."""
+        return self.has_bytearray or any(p.struct is not None and p.ann != 'bytes' for p in self.params)
 
     def c_params(self):
         """[(C type, name)] of the real function, in order."""
@@ -81,7 +116,7 @@ class Decl:
         return out
 
     def prototype(self):
-        ret = 'void' if self.result is None else result_ctype(self.result)
+        ret = 'void' if self.result is None else result_ctype(self.result, self.result_struct_c)
         return '%s %s(%s)' % (ret, self.symbol, ', '.join(self.c_params()) or 'void')
 
 
@@ -95,6 +130,8 @@ def elem_info(name):
 def p_ctype(p):
     if p.length_of is not None:
         return INTS[p.length_type][0]
+    if p.struct is not None:
+        return ('const %s *' if p.ann == 'bytes' else '%s *') % p.struct_c
     if p.elem is not None:
         return ('const %s *' if p.ann == 'bytes' else '%s *') % elem_info(p.elem)[0]
     if p.ann in INTS:
@@ -104,7 +141,9 @@ def p_ctype(p):
             'c_const_void_p': 'const void *', 'c_mut_void_p': 'void *'}[p.ann]
 
 
-def result_ctype(ann):
+def result_ctype(ann, struct_c=None):
+    if ann == 'cstruct':
+        return '%s *' % struct_c
     if ann in INTS:
         return INTS[ann][0]
     return {'c_bool': '_Bool', 'c_double': 'double', 'c_float': 'float', 'c_char_p': 'const char *',
@@ -113,7 +152,11 @@ def result_ctype(ann):
 
 PARAM_ANN = set(INTS) | {'c_bool', 'c_double', 'c_float', 'c_char_p', 'c_mut_char_p', 'c_void_p', 'bytes', 'bytearray', 'str',
                          'c_const_void_p', 'c_mut_void_p'}
-RESULT_ANN = set(INTS) | {'c_bool', 'c_double', 'c_float', 'c_char_p', 'c_mut_char_p', 'c_void_p', 'str'}
+CSTRUCT_ACCESSORS = {'i8': ('get_i8', 'put_i8'), 'u8': ('get_u8', 'put_u8'), 'i16': ('get_i16', 'put_i16'),
+                     'u16': ('get_u16', 'put_u16'), 'i32': ('get_i32', 'put_i32'), 'u32': ('get_u32', 'put_u32'),
+                     'i64': ('get_i64', 'put_i64'), 'u64': ('get_i64', 'put_i64'), 'bool': ('get_u8', 'put_u8'),
+                     'f32': ('get_f32', 'put_f32'), 'f64': ('get_f64', 'put_f64')}
+RESULT_ANN = set(INTS) | {'c_bool', 'c_double', 'c_float', 'c_char_p', 'c_mut_char_p', 'c_void_p', 'str', 'cstruct'}
 
 
 def python_type(ann):
@@ -122,7 +165,40 @@ def python_type(ann):
         return 'int'
     return {'c_bool': 'bool', 'c_double': 'float', 'c_float': 'float', 'c_char_p': 'str', 'c_mut_char_p': 'str', 'str': 'str',
             'c_void_p': 'int', 'bytes': 'bytes', 'c_const_void_p': 'bytes', 'bytearray': 'bytearray',
-            'c_mut_void_p': 'bytearray'}[ann]
+            'c_mut_void_p': 'bytearray', 'cstruct': 'int'}[ann]
+
+
+class CStruct:
+    def __init__(self):
+        self.name = self.c_name = self.header = None
+        self.path = self.directory = None
+        self.fields = []               # dicts: name, ann, count, offset, size, kind, ctype
+        self.size = 0
+        self.local_header = False
+
+    def c_field(self, field):
+        return self.c_name + ' ' + field
+
+
+def _cbuf_source(prefix):
+    """The ail_cbuf accessors as ordinary AIL source, renamed with `prefix` (the same code the runtime uses)."""
+    path = Path(__file__).with_name('ail_cbuf.py')
+    tree = ast.parse(path.read_text(encoding='utf8'))
+    functions = [node for node in tree.body if isinstance(node, ast.FunctionDef)]
+    names = {node.name for node in functions}
+    out = []
+    for node in functions:
+        original = node.name
+        node = copy.deepcopy(node)
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.FunctionDef) and inner.name in names:
+                inner.name = prefix + inner.name
+            elif isinstance(inner, ast.Name) and inner.id in names:
+                inner.id = prefix + inner.id
+        # _load reads bytes and _store writes a bytearray: the same accessor never sees both.
+        node.args.args[0].annotation = ast.Name(id='bytes' if original.startswith('get_') else 'bytearray', ctx=ast.Load())
+        out.append(ast.unparse(node))
+    return '\n\n'.join(out)
 
 
 class Session:
@@ -135,6 +211,7 @@ class Session:
         self.link_args = []
         self.extra_libs = []            # `compile --link LIB`: the same as link("LIB") for the whole program
         self.notes = []
+        self.cstructs = {}              # @cstruct class name -> CStruct
         self._owned = False
 
     def close(self):
@@ -169,29 +246,51 @@ class Session:
     def _lower(self, path, text, tree):
         imported = set()                # names bound by `from ail_ffi import`
         module_names = set()            # names bound by `import ail_ffi [as x]`
-        blank = []                      # (first line, last line)
+        edits = []                      # (first line, last line, replacement text)
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
+                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'cstruct',
+                                                                 'c_array', 'declarations'})
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
                     imported.add(alias.name)
-                blank.append((node.lineno, node.end_lineno))
+                edits.append((node.lineno, node.end_lineno, ''))
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == 'ail_ffi':
                         module_names.add(alias.asname or 'ail_ffi')
-                        blank.append((node.lineno, node.end_lineno))
+                        edits.append((node.lineno, node.end_lineno, ''))
         if not imported and not module_names:
             return text
+        tag = hashlib.sha1(str(path).encode()).hexdigest()[:6]
+        classes = []
+        for node in tree.body:
+            if isinstance(node, ast.ClassDef):
+                deco = [d for d in node.decorator_list if self._is_cstruct(d, imported, module_names)]
+                if not deco:
+                    continue
+                if len(node.decorator_list) != 1:
+                    self._refuse(path, node, '%s: a @cstruct class takes no other decorator' % node.name)
+                classes.append((node, deco[0]))
+        cstructs = []
+        class_names = {node.name for node, _ in classes}
+        for node, call in classes:
+            cs = self._cstruct(path, node, call, imported, module_names, class_names)
+            if cs.name in self.cstructs:
+                self._refuse(path, node, '%s: a @cstruct class is already declared' % cs.name)
+            self.cstructs[cs.name] = cs
+            cstructs.append(cs)
+            edits.append((node.decorator_list[0].lineno, node.end_lineno, self._cstruct_code(cs, tag)))
         decls = []
         for node in tree.body:
+            if isinstance(node, ast.ClassDef) and any(n is node for n, _ in classes):
+                continue
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
                 self._link(path, node.value)
-                blank.append((node.lineno, node.end_lineno))
+                edits.append((node.lineno, node.end_lineno, ''))
                 continue
             if not isinstance(node, ast.FunctionDef):
                 continue
@@ -201,23 +300,21 @@ class Session:
             if len(node.decorator_list) != 1:
                 self._refuse(path, node, '%s: an @extern stub takes no other decorator' % node.name)
             decls.append(self._decl(path, node, deco[0], imported, module_names))
-            blank.append((node.decorator_list[0].lineno, node.end_lineno))
-        if self.forbid and decls:
-            first = decls[0]
-            raise ModuleRefusal(path, first.line, 1, 'FFI declaration %s (lib %s) is forbidden by --no-ffi' % (first.name, first.lib))
-        tag = hashlib.sha1(str(path).encode()).hexdigest()[:6]
+            edits.append((node.decorator_list[0].lineno, node.end_lineno, ''))
+        if self.forbid and (decls or cstructs):
+            first = decls[0] if decls else cstructs[0]
+            raise ModuleRefusal(path, getattr(first, 'line', 1), 1,
+                                'FFI declaration %s is forbidden by --no-ffi' % first.name)
         for decl in decls:
             decl.tag = tag
             decl.export = 'ffi_%s_%s' % (tag, decl.name)
         lines = text.split('\n')
-        for first, last in blank:
-            for index in range(first - 1, last):
-                lines[index] = ''
+        for first, last, replacement in sorted(edits, reverse=True):
+            lines[first - 1:last] = replacement.split('\n') if replacement else ['']
         self.decls.extend(decls)
-        # a file that imports ail_ffi but declares nothing is left with its import blanked
         block = []
         if decls:
-            if any(d.has_bytearray for d in decls):
+            if any(d.has_writable for d in decls):
                 block.append('')
                 block.append('def ffi_put_%s(dst: bytearray, src: bytes, at: int) -> int:' % tag)
                 block.append('    n = len(dst)')
@@ -226,6 +323,9 @@ class Session:
                 block.append('    return at + n')
             for decl in decls:
                 block.extend(self._wrapper(decl))
+        if cstructs:
+            block.append('')
+            block.append(_cbuf_source('_ail_cbuf_%s_' % tag))
         return '\n'.join(lines).rstrip('\n') + '\n' + '\n'.join(block) + ('\n' if block else '')
 
     @staticmethod
@@ -260,6 +360,167 @@ class Session:
             return func.id == 'extern' and 'extern' in imported
         return (isinstance(func, ast.Attribute) and func.attr == 'extern' and isinstance(func.value, ast.Name)
                 and func.value.id in module_names)
+
+    @staticmethod
+    def _is_cstruct(node, imported, module_names):
+        if not isinstance(node, ast.Call):
+            return False
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id == 'cstruct' and 'cstruct' in imported
+        return (isinstance(func, ast.Attribute) and func.attr == 'cstruct' and isinstance(func.value, ast.Name)
+                and func.value.id in module_names)
+
+    def _cstruct(self, path, node, call, imported, module_names, class_names):
+        cs = CStruct()
+        cs.name, cs.line, cs.path, cs.directory = node.name, node.lineno, str(path), str(path.parent)
+        options = {}
+        if call.args:
+            self._refuse(path, call, '%s: @cstruct takes keyword options only' % node.name)
+        for option in call.keywords:
+            if option.arg not in ('header', 'name', 'union', 'bitfield'):
+                self._refuse(path, option.value, '%s: unknown @cstruct option %s' % (node.name, option.arg))
+            options[option.arg] = option.value
+        def constant(key, kind):
+            if key not in options:
+                return None
+            value = options[key]
+            if isinstance(value, ast.Constant) and (value.value is None or isinstance(value.value, kind)):
+                return value.value
+            self._refuse(path, value, '%s: @cstruct %s must be a literal' % (node.name, key))
+        if constant('union', bool):
+            self._refuse(path, options['union'], '%s: @cstruct refuses union %s by name' % (node.name, node.name))
+        if constant('bitfield', bool):
+            self._refuse(path, options['bitfield'], '%s: @cstruct refuses bitfield %s by name' % (node.name, node.name))
+        cs.header = constant('header', str)
+        cs.c_name = constant('name', str) or node.name
+        if not cs.c_name or not all(ch.isalnum() or ch in ' _' for ch in cs.c_name):
+            self._refuse(path, options.get('name', node), '%s: @cstruct name must be a C struct or typedef name' % node.name)
+        if cs.header is not None and not cs.header.replace('/', '').replace('_', '').replace('.', '').replace('-', '').isalnum():
+            self._refuse(path, options['header'], '%s: unsupported header name' % node.name)
+        if node.bases:
+            self._refuse(path, node, '%s: a @cstruct class has no base classes' % node.name)
+        if node.keywords:
+            self._refuse(path, node, '%s: a @cstruct class takes no keyword arguments' % node.name)
+        for statement in node.body:
+            if isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant) and isinstance(statement.value.value, str):
+                continue
+            if isinstance(statement, ast.Pass):
+                continue
+            if not isinstance(statement, ast.AnnAssign) or not isinstance(statement.target, ast.Name):
+                self._refuse(path, statement, '%s: a @cstruct class has C-typed fields only' % node.name)
+            if statement.value is not None:
+                self._refuse(path, statement.value, '%s: a @cstruct field has no default' % node.name)
+            field = statement.target.id
+            if not field.isidentifier() or keyword.iskeyword(field):
+                self._refuse(path, statement.target, '%s: field %r is not a usable attribute name' % (node.name, field))
+            ann_name, count = self._cstruct_field(path, node, statement.annotation, field, imported, module_names, class_names)
+            cs.fields.append(dict(name=field, ann=ann_name, count=count,
+                                  kind=CSTRUCT_KINDS[ann_name], elem_size=ctypes.sizeof(CSTRUCT_CTYPES[ann_name])))
+        if not cs.fields:
+            self._refuse(path, node, '%s: a @cstruct class needs at least one field' % node.name)
+        layout = [(f['name'], CSTRUCT_CTYPES[f['ann']] * f['count'] if f['count'] != 1 else CSTRUCT_CTYPES[f['ann']])
+                  for f in cs.fields]
+        class Layout(ctypes.Structure):
+            _fields_ = layout
+        cs.size = ctypes.sizeof(Layout)
+        for f in cs.fields:
+            descriptor = Layout.__dict__[f['name']]
+            f['offset'], f['size'] = descriptor.offset, descriptor.size
+        if cs.header is not None:
+            cs.local_header = (path.parent / cs.header).is_file()
+        return cs
+
+    def _cstruct_field(self, path, node, ann, field, imported, module_names, class_names):
+        if isinstance(ann, ast.Call) and ((isinstance(ann.func, ast.Name) and ann.func.id == 'c_array' and 'c_array' in imported)
+                                          or (isinstance(ann.func, ast.Attribute) and ann.func.attr == 'c_array'
+                                              and isinstance(ann.func.value, ast.Name) and ann.func.value.id in module_names)):
+            if len(ann.args) != 2 or ann.keywords:
+                self._refuse(path, ann, '%s: c_array(C type, count)' % node.name)
+            element_node = ann.args[0]
+            if isinstance(element_node, ast.Name) and element_node.id in class_names:
+                self._refuse(path, element_node, '%s: nested by-value array of structs in field %r is not supported'
+                             % (node.name, field))
+            element = self._ann_name(path, node, element_node, imported, module_names, node.name)
+            if element in class_names:
+                self._refuse(path, element_node, '%s: nested by-value array of structs in field %r is not supported'
+                             % (node.name, field))
+            if element not in CSTRUCT_FIELDS:
+                self._refuse(path, ann.args[0], '%s: field %r must be an array of C scalar types' % (node.name, field))
+            count = ann.args[1]
+            if not isinstance(count, ast.Constant) or type(count.value) is not int:
+                self._refuse(path, ann.args[1], '%s: field %r needs a literal array length' % (node.name, field))
+            if count.value <= 0:
+                self._refuse(path, ann.args[1], '%s: flexible array member %r is not supported' % (node.name, field))
+            return element, count.value
+        if isinstance(ann, ast.Call):
+            self._refuse(path, ann, '%s: field %r has an unsupported C type' % (node.name, field))
+        if isinstance(ann, ast.Name) and ann.id in class_names:
+            self._refuse(path, ann, '%s: struct field %r by value is not supported' % (node.name, field))
+        name = self._ann_name(path, node, ann, imported, module_names, node.name)
+        if name in class_names:
+            self._refuse(path, ann, '%s: struct field %r by value is not supported' % (node.name, field))
+        if name not in CSTRUCT_FIELDS:
+            self._refuse(path, ann, '%s: field %r is not a C type' % (node.name, field))
+        return name, 1
+
+    def _cstruct_code(self, cs, tag):
+        prefix = '_ail_cbuf_%s_' % tag
+        out = ['class %s:' % cs.name,
+               '    def __init__(self) -> None:']
+        for field in cs.fields:
+            name, kind, count = field['name'], field['kind'], field['count']
+            if count != 1:
+                zero = '0.0' if kind.startswith('f') else ('False' if kind == 'bool' else '0')
+                out.append('        self.%s = [%s] * %d' % (name, zero, count))
+            elif kind.startswith('f'):
+                out.append('        self.%s = 0.0' % name)
+            elif kind == 'bool':
+                out.append('        self.%s = False' % name)
+            else:
+                out.append('        self.%s = 0' % name)
+        out.append('')
+        out.append('    def _load(self, data: bytes) -> None:')
+        for field in cs.fields:
+            name, kind, count, at, size = field['name'], field['kind'], field['count'], field['offset'], field['elem_size']
+            get, put = CSTRUCT_ACCESSORS[kind]
+            getter = prefix + get
+            if count != 1:
+                out.append('        items = []')
+                out.append('        for index in range(%d):' % count)
+                if kind == 'bool':
+                    out.append('            items.append(%s(data, %d + index * %d) != 0)' % (getter, at, size))
+                else:
+                    out.append('            items.append(%s(data, %d + index * %d))' % (getter, at, size))
+                out.append('        self.%s = items' % name)
+            elif kind == 'bool':
+                out.append('        self.%s = %s(data, %d) != 0' % (name, getter, at))
+            else:
+                out.append('        self.%s = %s(data, %d)' % (name, getter, at))
+        out.append('')
+        out.append('    def _store(self, data: bytearray) -> None:')
+        for field in cs.fields:
+            name, kind, count, at, size = field['name'], field['kind'], field['count'], field['offset'], field['elem_size']
+            get, put = CSTRUCT_ACCESSORS[kind]
+            setter = prefix + put
+            if count != 1:
+                out.append('        for index in range(%d):' % count)
+                value = 'self.%s[index]' % name
+                if kind == 'bool':
+                    out.append('            %s(data, %d + index * %d, 1 if %s else 0)' % (setter, at, size, value))
+                elif kind.startswith('f'):
+                    out.append('            %s(data, %d + index * %d, float(%s))' % (setter, at, size, value))
+                else:
+                    out.append('            %s(data, %d + index * %d, int(%s))' % (setter, at, size, value))
+            else:
+                value = 'self.%s' % name
+                if kind == 'bool':
+                    out.append('        %s(data, %d, 1 if %s else 0)' % (setter, at, value))
+                elif kind.startswith('f'):
+                    out.append('        %s(data, %d, float(%s))' % (setter, at, value))
+                else:
+                    out.append('        %s(data, %d, int(%s))' % (setter, at, value))
+        return '\n'.join(out)
 
     def _ann_name(self, path, node, ann, imported, module_names, what):
         if isinstance(ann, ast.Name):
@@ -345,13 +606,24 @@ class Session:
                 kind = ann.func.id if isinstance(ann.func, ast.Name) else ann.func.attr
                 if len(ann.args) != 1 or ann.keywords:
                     self._refuse(path, ann, '%s: %s(element C type)' % (node.name, kind))
-                element = self._ann_name(path, node, ann.args[0], imported, module_names, node.name)
-                if element not in INTS and element not in ('c_double', 'c_float', 'c_bool', 'c_void_p'):
-                    self._refuse(path, ann, '%s: %s takes an integer, float, bool or c_void_p C type' % (node.name, kind))
-                param = Param(arg.arg, 'bytearray' if kind == 'ptr' else 'bytes')
-                param.elem = element
+                element_node = ann.args[0]
+                element = element_node.id if isinstance(element_node, ast.Name) else None
+                if element in self.cstructs:
+                    param = Param(arg.arg, 'bytearray' if kind == 'ptr' else 'bytes')
+                    param.struct, param.struct_c = element, self.cstructs[element].c_name
+                else:
+                    element = self._ann_name(path, node, element_node, imported, module_names, node.name)
+                    if element not in INTS and element not in ('c_double', 'c_float', 'c_bool', 'c_void_p'):
+                        self._refuse(path, ann, '%s: %s takes an integer, float, bool or c_void_p C type' % (node.name, kind))
+                    param = Param(arg.arg, 'bytearray' if kind == 'ptr' else 'bytes')
+                    param.elem = element
                 if default is not None:
                     self._refuse(path, default, '%s: a pointer parameter has no default' % node.name)
+            elif isinstance(ann, ast.Name) and ann.id in self.cstructs:
+                param = Param(arg.arg, 'bytearray')
+                param.struct, param.struct_c = ann.id, self.cstructs[ann.id].c_name
+                if default is not None:
+                    self._refuse(path, default, '%s: a struct pointer parameter has no default' % node.name)
             else:
                 name = self._ann_name(path, node, ann, imported, module_names, node.name)
                 if name not in PARAM_ANN:
@@ -385,14 +657,31 @@ class Session:
         if isinstance(node.returns, ast.Constant) and node.returns.value is None:
             decl.result = None
         else:
-            decl.result = self._ann_name(path, node, node.returns, imported, module_names, node.name)
-            if decl.result not in RESULT_ANN:
-                self._refuse(path, node.returns, '%s: `%s` cannot be a result type' % (node.name, decl.result))
-            if decl.result == 'str':
-                decl.result = 'c_char_p'
+            result_name = node.returns.id if isinstance(node.returns, ast.Name) else None
+            if result_name in self.cstructs:
+                decl.result = 'cstruct'
+                decl.result_struct = result_name
+                decl.result_struct_c = self.cstructs[result_name].c_name
+            elif isinstance(node.returns, ast.Call) and ((isinstance(node.returns.func, ast.Name)
+                                                          and node.returns.func.id in ('ptr', 'cptr') and node.returns.func.id in imported)
+                                                         or (isinstance(node.returns.func, ast.Attribute)
+                                                             and node.returns.func.attr in ('ptr', 'cptr'))):
+                element = node.returns.args[0] if len(node.returns.args) == 1 and not node.returns.keywords else None
+                element_name = element.id if isinstance(element, ast.Name) else None
+                if element_name not in self.cstructs:
+                    self._refuse(path, node.returns, '%s: a pointer result must name a @cstruct class' % node.name)
+                decl.result = 'cstruct'
+                decl.result_struct = element_name
+                decl.result_struct_c = self.cstructs[element_name].c_name
+            else:
+                decl.result = self._ann_name(path, node, node.returns, imported, module_names, node.name)
+                if decl.result not in RESULT_ANN:
+                    self._refuse(path, node.returns, '%s: `%s` cannot be a result type' % (node.name, decl.result))
+                if decl.result == 'str':
+                    decl.result = 'c_char_p'
         if decl.check is not None and (decl.result is None or decl.result in ('c_double', 'c_float', 'c_bool', 'c_char_p', 'c_mut_char_p')):
             self._refuse(path, node, '%s: check= needs an integer or handle result' % node.name)
-        if decl.has_bytearray and decl.result in ('c_char_p', 'c_mut_char_p'):
+        if decl.has_writable and decl.result in ('c_char_p', 'c_mut_char_p'):
             self._refuse(path, node, '%s: a str result together with a bytearray parameter is not supported' % node.name)
         body = [n for n in node.body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
                                               and (n.value.value is Ellipsis or isinstance(n.value.value, str)))]
@@ -414,18 +703,30 @@ class Session:
         for p in d.params:
             if p.length_of is not None:
                 continue
-            text = '%s: %s' % (p.name, python_type(p.ann))
+            text = '%s: %s' % (p.name, p.struct or python_type(p.ann))
             if p.has_default:
                 text += ' = %r' % (p.default,)
             sig.append(text)
-        ret = {None: 'None'}.get(d.result) or python_type(d.result)
+        ret = {None: 'None'}.get(d.result) or (d.result_struct if d.result == 'cstruct' else python_type(d.result))
         out.append('def %s(%s) -> %s:' % (d.name, ', '.join(sig), ret))
+        structs = []                    # (index, Param, local buffer)
+        for p in d.params:
+            if p.struct is None:
+                continue
+            index = len(structs)
+            size = self.cstructs[p.struct].size
+            structs.append((index, p))
+            out.append('    ffi_s%d = bytearray(%d)' % (index, size))
+            out.append('    %s._store(ffi_s%d)' % (p.name, index))
         args = []
         for p in d.params:
             if p.length_of is not None:
                 target = next(q for q in d.params if q.name == p.length_of)
                 size = elem_info(target.elem)[1] if target.elem is not None else 1
                 args.append('len(%s)' % p.length_of if size == 1 else 'len(%s) // %d' % (p.length_of, size))
+            elif p.struct is not None:
+                index = next(i for i, q in structs if q is p)
+                args.append('bytes(ffi_s%d)' % index)
             elif p.ann in ('bytearray', 'c_mut_void_p'):
                 args.append('bytes(%s)' % p.name)
             else:
@@ -435,20 +736,30 @@ class Session:
             if p.elem is not None and elem_info(p.elem)[1] > 1:
                 out.append('    if len(%s) %% %d != 0:' % (p.name, elem_info(p.elem)[1]))
                 out.append('        raise ValueError("%s: %s must hold a whole number of %s")' % (d.name, p.name, p.elem))
-        if d.has_bytearray:
+        if d.has_writable:
             out.append('    ffi_r = ' + call)
             out.append('    ffi_o = 0')
             for p in d.params:
-                if p.ann in ('bytearray', 'c_mut_void_p'):
+                if p.struct is not None and p.ann != 'bytes':
+                    index = next(i for i, q in structs if q is p)
+                    out.append('    ffi_o = ffi_put_%s(ffi_s%d, ffi_r, ffi_o)' % (d.tag, index))
+                elif p.ann in ('bytearray', 'c_mut_void_p'):
                     out.append('    ffi_o = ffi_put_%s(%s, ffi_r, ffi_o)' % (d.tag, p.name))
+            for index, p in structs:
+                out.append('    %s._load(bytes(ffi_s%d))' % (p.name, index))
             if d.result is None:
                 return out
             out.append('    ffi_rc = %s__rc()' % d.export)
         elif d.result is None:
             out.append('    ' + call)
-            return out
+            for index, p in structs:
+                out.append('    %s._load(bytes(ffi_s%d))' % (p.name, index))
         else:
             out.append('    ffi_rc = ' + call)
+            for index, p in structs:
+                out.append('    %s._load(bytes(ffi_s%d))' % (p.name, index))
+        if d.result is None:
+            return out
         if d.check is not None:
             out.append('    if ffi_rc %s:' % CHECKS[d.check])
             if d.errno:
@@ -461,7 +772,15 @@ class Session:
                     out.append('        raise %s("[Errno %%d] %%s" %% (ffi_e, ffi_%s__strerror(ffi_e)))' % (d.exc, d.tag))
             else:
                 out.append('        raise %s("%s failed with %%d" %% ffi_rc)' % (d.exc, d.name))
-        out.append('    return ffi_rc != 0' if d.result == 'c_bool' else '    return ffi_rc')
+        if d.result == 'cstruct':
+            out.append('    ffi_b = %s__cstruct(ffi_rc)' % d.export)
+            out.append('    if len(ffi_b) == 0:')
+            out.append('        raise RuntimeError("%s returned NULL")' % d.name)
+            out.append('    ffi_obj = %s()' % d.result_struct)
+            out.append('    ffi_obj._load(ffi_b)')
+            out.append('    return ffi_obj')
+        else:
+            out.append('    return ffi_rc != 0' if d.result == 'c_bool' else '    return ffi_rc')
         return out
 
     # ------------------------------------------------------------------ the C object
@@ -485,8 +804,8 @@ class Session:
         return rows
 
     def build(self, cli, env=None):
-        """Build the adapter object; returns its path, or None when no stub was declared."""
-        if not self.decls:
+        """Build the adapter object; returns its path, or None when no stub or struct was declared."""
+        if not self.decls and not self.cstructs:
             return None
         if self.workdir is None:
             import tempfile
@@ -501,6 +820,13 @@ class Session:
                 headers_local.setdefault(d.header, Path(d.directory) / d.header)
             elif d.header not in headers_system:
                 headers_system.append(d.header)
+        for cs in self.cstructs.values():
+            if cs.header is None:
+                continue
+            if cs.local_header:
+                headers_local.setdefault(cs.header, Path(cs.directory) / cs.header)
+            elif cs.header not in headers_system:
+                headers_system.append(cs.header)
         for name, source in headers_local.items():
             if '/' in name or not name.endswith(('.h', '.inc')):
                 raise ValueError('a local FFI header must sit beside its declaration: ' + name)
@@ -514,6 +840,10 @@ class Session:
                 raise ValueError('FFI source file not found: ' + str(source))
             shutil.copyfile(source, work / name)
         code = ['#ifndef _DEFAULT_SOURCE', '#define _DEFAULT_SOURCE 1', '#endif',      # POSIX and BSD declarations (gmtime_r, timegm) under -std=c11
+                # compile-c includes the standard headers before this source, so features.h has already run;
+                # set its __USE_* switches directly for headers included below (struct tm's tm_gmtoff/tm_zone).
+                '#ifndef __USE_MISC', '#define __USE_MISC 1', '#endif',
+                '#ifndef __USE_POSIX', '#define __USE_POSIX 199506L', '#endif',
                 '#include <stddef.h>', '#include <stdint.h>', '#include <errno.h>', '#include <string.h>',
                 '#include <sys/types.h>',
                 '#include <stdlib.h>']
@@ -536,7 +866,7 @@ class Session:
             if d.header is None:
                 extern_decls.append('extern %s;' % d.prototype())
             ptypes = ', '.join(d.c_params()) or 'void'
-            ret = 'void' if d.result is None else result_ctype(d.result)
+            ret = 'void' if d.result is None else result_ctype(d.result, d.result_struct_c)
             if not d.trust:
                 asserts.append('_Static_assert(_Generic(&%s, %s (*)(%s): 1, default: 0), "ail_ffi: the declaration of %s does not match its C prototype");'
                                % (d.symbol, ret, ptypes, d.symbol))
@@ -545,6 +875,14 @@ class Session:
             if any(t == 'c_size_t' or t == 'c_ssize_t' for t in [p.ann for p in d.params] + [d.result]):
                 asserts.append('_Static_assert(sizeof(size_t) == 8, "ail_ffi: c_size_t needs a 64 bit size_t");')
             self._emit(d, functions, bodies)
+        for cs in self.cstructs.values():
+            if cs.header is None:
+                continue
+            for field in cs.fields:
+                asserts.append('_Static_assert(offsetof(%s, %s) == %d && sizeof(((%s *)0)->%s) == %d, '
+                               '"ail_cstruct %s.%s does not match its header");'
+                               % (cs.c_name, field['name'], field['offset'], cs.c_name, field['name'],
+                                  field['size'], cs.name, field['name']))
         for tag in tags:
             name = 'ffi_%s__errno' % tag
             functions[name] = dict(symbol=name, params=[], result='int')
@@ -552,6 +890,11 @@ class Session:
             name = 'ffi_%s__strerror' % tag
             functions[name] = dict(symbol=name, params=[['code', 'int']], result='str')
             bodies.append('ail_c_utf8_view %s(int64_t code) { const char *s = strerror((int)code); return (ail_c_utf8_view){(const unsigned char *)s, strlen(s)}; }' % name)
+        if not functions:
+            # a @cstruct with no stub still builds, to check its layout against the header
+            marker = 'ffi_%s__cstruct_ok' % hashlib.sha1(' '.join(sorted(self.cstructs)).encode()).hexdigest()[:6]
+            functions[marker] = dict(symbol=marker, params=[], result='int')
+            bodies.append('int64_t %s(void) { return 0; }' % marker)
         # the per-declaration helpers must be exported under the declaration's own tag
         source = '\n'.join(code + extern_decls + sorted(set(asserts)) + bodies) + '\n'
         interface = dict(version=1, functions=functions)
@@ -607,6 +950,15 @@ class Session:
                 params.append([n, 'int'])
                 c_params.append('int64_t %s' % n)
                 call_args.append('(void *)(intptr_t)%s' % n)
+            elif p.struct is not None and p.ann == 'bytes':
+                params.append([n, 'borrowed_bytes'])
+                c_params.append('const unsigned char *%s, size_t %s_n' % (n, n))
+                call_args.append('(const %s *)(%s ? %s : ffi_empty)' % (p.struct_c, n, n))
+            elif p.struct is not None:
+                params.append([n, 'bytes'])
+                c_params.append('const unsigned char *%s, size_t %s_n' % (n, n))
+                call_args.append('(%s *)(void *)%s' % (p.struct_c, n))
+                bytearrays.append(n)
             elif p.ann in ('bytes', 'c_const_void_p'):
                 params.append([n, 'borrowed_bytes'])
                 c_params.append('const unsigned char *%s, size_t %s_n' % (n, n))
@@ -625,7 +977,7 @@ class Session:
         res = d.result
         if d.trust:
             # the header's prototype names types the stub cannot spell (a struct): call through the stub's own prototype
-            real = '((%s (*)(%s))%s)(%s)' % ('void' if res is None else result_ctype(res), ', '.join(d.c_params()) or 'void',
+            real = '((%s (*)(%s))%s)(%s)' % ('void' if res is None else result_ctype(res, d.result_struct_c), ', '.join(d.c_params()) or 'void',
                                              d.symbol, ', '.join(call_args))
         else:
             real = '%s(%s)' % (d.symbol, ', '.join(call_args))
@@ -640,23 +992,29 @@ class Session:
             ret_kind, native_ret, convert = 'float', 'double', 'r'
         elif res == 'c_float':
             ret_kind, native_ret, convert = 'float32', 'float', 'r'
-        elif res == 'c_void_p':
+        elif res in ('c_void_p', 'cstruct'):
             ret_kind, native_ret, convert = 'int', 'int64_t', '(int64_t)(intptr_t)r'
         elif res in ('c_char_p', 'c_mut_char_p'):
             ret_kind, native_ret, convert = 'str', 'ail_c_utf8_view', None
         lines = []
-        if d.has_bytearray:
+        if d.has_writable:
             # copy-in/copy-out: the result is the bytearrays' final contents; the C result is kept for `__rc`
             rc_type = 'double' if res in ('c_double', 'c_float') else 'int64_t'
             if res is not None:
                 bodies.append('static %s ffi_rc_%s;' % (rc_type, d.export))
             lines.append('errno = 0;')
-            lines.append(('%s r = %s;' % (result_ctype(res), real)) if res is not None else real + ';')
+            lines.append(('%s r = %s;' % (result_ctype(res, d.result_struct_c), real)) if res is not None else real + ';')
             lines.append('ffi_last_errno = errno;')
             if res is not None:
-                value = 'r' if rc_type == 'double' else ('(int64_t)(intptr_t)r' if res == 'c_void_p' else
+                value = 'r' if rc_type == 'double' else ('(int64_t)(intptr_t)r' if res in ('c_void_p', 'cstruct') else
                                                          '(int64_t)r' if res != 'c_bool' else '(int64_t)r')
                 lines.append('ffi_rc_%s = %s;' % (d.export, value))
+            if res == 'cstruct':
+                size = self.cstructs[d.result_struct].size
+                bodies.append('static unsigned char ffi_cstruct_%s[%d];' % (d.export, size))
+                bodies.append('static int ffi_cstruct_%s_ok;' % d.export)
+                lines.append('ffi_cstruct_%s_ok = r != NULL;' % d.export)
+                lines.append('if (r) memcpy(ffi_cstruct_%s, (const void *)r, %d);' % (d.export, size))
             if len(bytearrays) == 1:
                 lines.append('return (ail_c_bytes_view){%s, %s_n};' % (bytearrays[0], bytearrays[0]))
             else:
@@ -674,6 +1032,14 @@ class Session:
                 name = d.export + '__rc'
                 functions[name] = dict(symbol=name, params=[], result=rc_kind)
                 bodies.append('%s %s(void) { return ffi_rc_%s; }' % ('double' if rc_kind == 'float' else 'int64_t', name, d.export))
+            if res == 'cstruct':
+                size = self.cstructs[d.result_struct].size
+                name = d.export + '__cstruct'
+                bodies.append('ail_c_bytes_view %s(int64_t address) {\n'
+                              '    if (!address || !ffi_cstruct_%s_ok) return (ail_c_bytes_view){NULL, 0};\n'
+                              '    return (ail_c_bytes_view){ffi_cstruct_%s, %d};\n}'
+                              % (name, d.export, d.export, size))
+                functions[name] = dict(symbol=name, params=[['address', 'int']], result='bytes')
             return
         lines.append('errno = 0;')
         if res is None:
@@ -685,11 +1051,25 @@ class Session:
             lines.append('if (!r) return (ail_c_utf8_view){NULL, 0};')
             lines.append('return (ail_c_utf8_view){(const unsigned char *)r, strlen(r)};')
         else:
-            lines.append('%s r = %s;' % (result_ctype(res), real))
+            lines.append('%s r = %s;' % (result_ctype(res, d.result_struct_c), real))
             lines.append('ffi_last_errno = errno;')
+            if res == 'cstruct':
+                size = self.cstructs[d.result_struct].size
+                bodies.append('static unsigned char ffi_cstruct_%s[%d];' % (d.export, size))
+                bodies.append('static int ffi_cstruct_%s_ok;' % d.export)
+                lines.append('ffi_cstruct_%s_ok = r != NULL;' % d.export)
+                lines.append('if (r) memcpy(ffi_cstruct_%s, (const void *)r, %d);' % (d.export, size))
             lines.append('return %s;' % convert)
         functions[d.export] = dict(symbol=d.export, params=params, result=ret_kind)
         bodies.append('%s %s(%s) {\n%s\n}' % (native_ret, d.export, ', '.join(c_params) or 'void', '\n'.join(lines)))
+        if res == 'cstruct':
+            size = self.cstructs[d.result_struct].size
+            name = d.export + '__cstruct'
+            bodies.append('ail_c_bytes_view %s(int64_t address) {\n'
+                          '    if (!address || !ffi_cstruct_%s_ok) return (ail_c_bytes_view){NULL, 0};\n'
+                          '    return (ail_c_bytes_view){ffi_cstruct_%s, %d};\n}'
+                          % (name, d.export, d.export, size))
+            functions[name] = dict(symbol=name, params=[['address', 'int']], result='bytes')
 
     def _flags(self, lib, directory, pkg_config):
         if '/' in lib or lib.endswith(('.so', '.dylib', '.dll', '.a')) or '.so.' in lib:

@@ -1,3 +1,31 @@
+## 2026-10-28 -- F5: C struct layouts with `@cstruct` (job-ffi5-10282140)
+
+`@cstruct(header="time.h", name="struct tm")` on a class of C-typed fields now makes `Tm()` a zeroed
+bytearray of `sizeof(struct tm)` with typed attribute access at the ABI offsets (`c_array(T, n)` for fixed
+arrays).  The lowerer emits the offsets from the same ctypes layout and adds
+`_Static_assert(offsetof(...) == k && sizeof(...) == n)` per field against the header, so a wrong field type
+or order is a compile error.  Pointer-to-struct parameters and results are spelled with the class (or
+`ptr(Tm)` / `cptr(Tm)`) and need no `trust=True`; writable struct arguments copy out through the same
+`ail_cbuf` accessor families the runtime uses (their source is appended per file).  A @cstruct-only file
+still builds an adapter, so its layout is checked even without a stub.  Unions, bitfields, struct fields by
+value, arrays of structs and flexible array members are refused by name in both the shim and the compiler.
+
+`ail_bindgen.py` now reads struct bodies it can lay out (scalars, fixed arrays, pointer fields), emits an
+`@cstruct` class for each, and maps `struct T *` parameters/results to `ptr(T)` / `cptr(T)` / `T` without
+`trust=True`; unions, bitfields, nested structs and flexible array members are listed as named skips.
+`ail_cbuf.py` gained the `i8/u8/i16/u16/u32/f32` accessors the generated code uses.
+
+Probes in `/tmp/probes/f5` on both builds via `cmp.sh`: p01/p02 (gmtime_r, strftime, mktime, empty and
+negative fields, alias, argument/list/attribute/dict routes), p04_union/bitfield/nested/flex (refused by
+name), p05_wrong_type (static assertion), p06 (gmtime result passed back to mktime).  p03 (all integer
+widths, float/double/bool, fixed array, writable struct) and p07 (bindgen-generated stubs for the same
+library) were run in a directory with the header and shim beside the program; both builds matched CPython.
+Final-state tests: test_ail_cstruct, test_ail_ffi, test_ail_cratebridge, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3 (6 modules, 69 tests, 3 skipped, 0 failed).  The two Rust cases skip here
+because the installed cargo/rustc shims have no toolchain (`cargo --version` fails); they run when cargo is
+usable.  `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --update` added the
+new module and `--check` exits 0.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
