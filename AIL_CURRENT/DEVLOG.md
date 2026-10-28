@@ -1,3 +1,18 @@
+## 2026-10-28 -- ex15: definitions plus module constants run only the constants (job-ex15-10290445)
+
+`AIL_CURRENT/language_examples/math.ail` is a Python-syntax example with `LIMIT = 6` and one
+function definition and no call.  The general path already treated the module-level assignment as
+a module body, but the default (typed) path passed the last function to `_main_for`, which refused
+its scalar parameter with `the first parameter must be the sequence read from the file`.  A
+definition-only source with at least one module-level constant (and no `main`) now emits a no-op
+`main`, so CPython's "run the constants, call nothing" shape builds on both paths with the same
+empty stdout and exit 0.  A file with only functions keeps the single-function entry convention,
+and a top-level call or `__main__` guard still runs.  Added `test_ail_ex15.py` (2 tests, both
+builds) and registered it in `ail_check.MODULES`.  Probes `/tmp/probes/p15_*.py`: the int, str,
+float/bool/bytes, negative-boundary, multi-function, import, expression-constant, class, top-level
+call and `__main__` guard programs match CPython on both builds; pure function-only controls keep
+their pre-existing single-function entry behaviour.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
