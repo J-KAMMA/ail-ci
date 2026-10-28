@@ -1,3 +1,26 @@
+## 2026-10-28 -- pre398 review: do not refuse a bound class name or a dead read (job-pre398-10281024)
+
+The pre398 review found two regressions in `_refuse_class_body_indirect_self_read`: it ignored
+an earlier binding of the class name (CPython lets `get()` read the old value), and it refused a
+read that could not happen (`if False: return C`, code after `return`).  The pass now skips a
+class whose name is already bound at module scope before the class statement, and follows
+definite reads only: constant branches are resolved, a read in both arms of an unknown `if`
+still counts, but a read in one arm, in a loop that may not run, or in a dead branch does not.
+Class-attribute calls are likewise considered only when the value expression definitely
+evaluates them.  Unconditional indirect self-reads (`q1_indirect` and the list/dict/tuple/nested
+argument/wrapper forms) are still refused by name on both builds.
+
+Probes in `/tmp/probes/pre398fix` on both builds via `cmp.sh`: prior bindings `prior_value` (5),
+`prior_empty` (""), `prior_none`, `prior_negative` (-7), `prior_list`, `prior_unpack`, `prior_for`,
+`prior_attr`, `prior_dict`, `prior_arg_list_attr_dict` match CPython; dead reads `dead_if_false`,
+`dead_if_zero`, `dead_while_false`, `dead_ifexp`, `dead_boolop`, `dead_after_return`,
+`dead_if_true_else`, `dead_wrapper`, `dead_conditional_unknown`, `dead_empty_for`,
+`dead_class_ifexp`, `dead_class_boolop`, `dead_class_unknown` match CPython; the live
+`live_if_true` and `live_class_if_true` are refused by name.  `prior_class` still fails with the
+pre-existing `duplicate AIL name: C` on base and HEAD alike, so it is not caused here.
+
+Final-state tests: test_ail_pre398, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-28 -- pre398: a class body's indirect self-read through a function is refused (job-pre398-10281024)
 
 The first pre-existing item in the pre382 review was an indirect class-body self-read: a module

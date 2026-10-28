@@ -740,18 +740,6 @@ def _refuse_round_at_int64_boundary(source):
             raise refusal
 
 
-def _class_body_own_nodes(value):
-    """The nodes a class-attribute value evaluates now: lambdas/defs/comprehension bodies are deferred."""
-    stack = [value]
-    while stack:
-        node = stack.pop()
-        if isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
-                             ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
-            continue
-        yield node
-        stack.extend(ast.iter_child_nodes(node))
-
-
 def _function_own_nodes(fn):
     stack = list(fn.body)
     while stack:
@@ -762,8 +750,272 @@ def _function_own_nodes(fn):
         stack.extend(ast.iter_child_nodes(node))
 
 
+def _static_truth(node):
+    """True / False when `node` is a constant expression, otherwise None."""
+    try:
+        if isinstance(node, ast.Constant):
+            return bool(node.value)
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+            value = _static_truth(node.operand)
+            return None if value is None else not value
+        if isinstance(node, ast.BoolOp):
+            values = [_static_truth(value) for value in node.values]
+            if isinstance(node.op, ast.And):
+                if any(value is False for value in values):
+                    return False
+                if all(value is True for value in values):
+                    return True
+            else:
+                if any(value is True for value in values):
+                    return True
+                if all(value is False for value in values):
+                    return False
+            return None
+        if isinstance(node, ast.Compare) and len(node.ops) == 1:
+            left = ast.literal_eval(node.left)
+            right = ast.literal_eval(node.comparators[0])
+            op = node.ops[0]
+            if isinstance(op, ast.Eq):
+                return left == right
+            if isinstance(op, ast.NotEq):
+                return left != right
+            if isinstance(op, ast.Lt):
+                return left < right
+            if isinstance(op, ast.LtE):
+                return left <= right
+            if isinstance(op, ast.Gt):
+                return left > right
+            if isinstance(op, ast.GtE):
+                return left >= right
+            if isinstance(op, ast.Is):
+                return left is right
+            if isinstance(op, ast.IsNot):
+                return left is not right
+            return None
+        return bool(ast.literal_eval(node))
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return None
+
+
+def _expr_definitely_evaluates(node, target):
+    """True when evaluating `node` always evaluates the sub-node `target`."""
+    if node is target:
+        return True
+    if node is None or isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef,
+                                        ast.ClassDef, ast.ListComp, ast.SetComp, ast.DictComp,
+                                        ast.GeneratorExp)):
+        return False
+    if isinstance(node, ast.IfExp):
+        if _expr_definitely_evaluates(node.test, target):
+            return True
+        truth = _static_truth(node.test)
+        if truth is True:
+            return _expr_definitely_evaluates(node.body, target)
+        if truth is False:
+            return _expr_definitely_evaluates(node.orelse, target)
+        return (_expr_definitely_evaluates(node.body, target)
+                and _expr_definitely_evaluates(node.orelse, target))
+    if isinstance(node, ast.BoolOp):
+        values = node.values
+        if not values:
+            return False
+        first = _expr_definitely_evaluates(values[0], target)
+        if isinstance(node.op, ast.And):
+            forced = all(_static_truth(value) is True for value in values[:-1])
+        else:
+            forced = all(_static_truth(value) is False for value in values[:-1])
+        if forced:
+            return first or any(_expr_definitely_evaluates(value, target) for value in values[1:])
+        return first
+    if isinstance(node, ast.Compare):
+        if _expr_definitely_evaluates(node.left, target):
+            return True
+        return _expr_definitely_evaluates(node.comparators[0], target)
+    return any(_expr_definitely_evaluates(child, target) for child in ast.iter_child_nodes(node))
+
+
+def _expr_definitely_reads(node, cname, functions, bound, seen):
+    """True when evaluating `node` always reads the class name `cname`."""
+    if node is None:
+        return False
+    if isinstance(node, ast.Name):
+        return isinstance(node.ctx, ast.Load) and node.id == cname
+    if isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return False
+    if isinstance(node, ast.IfExp):
+        if _expr_definitely_reads(node.test, cname, functions, bound, seen):
+            return True
+        truth = _static_truth(node.test)
+        if truth is True:
+            return _expr_definitely_reads(node.body, cname, functions, bound, seen)
+        if truth is False:
+            return _expr_definitely_reads(node.orelse, cname, functions, bound, seen)
+        return (_expr_definitely_reads(node.body, cname, functions, bound, seen)
+                and _expr_definitely_reads(node.orelse, cname, functions, bound, seen))
+    if isinstance(node, ast.BoolOp):
+        values = node.values
+        if not values:
+            return False
+        first = _expr_definitely_reads(values[0], cname, functions, bound, seen)
+        if isinstance(node.op, ast.And):
+            forced = all(_static_truth(value) is True for value in values[:-1])
+        else:
+            forced = all(_static_truth(value) is False for value in values[:-1])
+        if forced:
+            return first or any(_expr_definitely_reads(value, cname, functions, bound, seen)
+                                for value in values[1:])
+        return first
+    if isinstance(node, ast.Compare):
+        if _expr_definitely_reads(node.left, cname, functions, bound, seen):
+            return True
+        return _expr_definitely_reads(node.comparators[0], cname, functions, bound, seen)
+    if isinstance(node, ast.Call):
+        if _expr_definitely_reads(node.func, cname, functions, bound, seen):
+            return True
+        if any(_expr_definitely_reads(arg, cname, functions, bound, seen) for arg in node.args):
+            return True
+        if any(_expr_definitely_reads(kw.value, cname, functions, bound, seen)
+               for kw in node.keywords):
+            return True
+        if (isinstance(node.func, ast.Name) and node.func.id not in bound
+                and node.func.id in functions):
+            return _function_reads_class(functions[node.func.id], cname, functions, seen)
+        return False
+    if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+        if not node.generators:
+            return False
+        return _expr_definitely_reads(node.generators[0].iter, cname, functions, bound, seen)
+    return any(_expr_definitely_reads(child, cname, functions, bound, seen)
+               for child in ast.iter_child_nodes(node))
+
+
+def _stmt_definitely_reads(stmt, cname, functions, bound, seen):
+    """(does execution definitely read `cname`, can execution continue afterwards)."""
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return False, True
+    if isinstance(stmt, ast.Return):
+        return _expr_definitely_reads(stmt.value, cname, functions, bound, seen), False
+    if isinstance(stmt, ast.Raise):
+        return (_expr_definitely_reads(stmt.exc, cname, functions, bound, seen)
+                or _expr_definitely_reads(stmt.cause, cname, functions, bound, seen)), False
+    if isinstance(stmt, (ast.Break, ast.Continue)):
+        return False, False
+    if isinstance(stmt, ast.If):
+        reads = _expr_definitely_reads(stmt.test, cname, functions, bound, seen)
+        truth = _static_truth(stmt.test)
+        if truth is True:
+            body_reads, body_cont = _stmts_definitely_read(stmt.body, cname, functions, bound, seen)
+            return reads or body_reads, body_cont
+        if truth is False:
+            other_reads, other_cont = _stmts_definitely_read(stmt.orelse, cname, functions, bound, seen)
+            return reads or other_reads, other_cont
+        body_reads, body_cont = _stmts_definitely_read(stmt.body, cname, functions, bound, seen)
+        other_reads, other_cont = _stmts_definitely_read(stmt.orelse, cname, functions, bound, seen)
+        return reads or (body_reads and other_reads), body_cont and other_cont
+    if isinstance(stmt, ast.While):
+        reads = _expr_definitely_reads(stmt.test, cname, functions, bound, seen)
+        truth = _static_truth(stmt.test)
+        if truth is False:
+            other_reads, other_cont = _stmts_definitely_read(stmt.orelse, cname, functions, bound, seen)
+            return reads or other_reads, other_cont
+        if truth is True:
+            body_reads, _ = _stmts_definitely_read(stmt.body, cname, functions, bound, seen)
+            return reads or body_reads, False
+        return reads, True
+    if isinstance(stmt, (ast.For, ast.AsyncFor)):
+        reads = (_expr_definitely_reads(stmt.iter, cname, functions, bound, seen)
+                 or _expr_definitely_reads(stmt.target, cname, functions, bound, seen))
+        return reads, True
+    if isinstance(stmt, (ast.With, ast.AsyncWith)):
+        reads = False
+        for item in stmt.items:
+            reads = reads or _expr_definitely_reads(item.context_expr, cname, functions, bound, seen)
+            reads = reads or _expr_definitely_reads(item.optional_vars, cname, functions, bound, seen)
+        body_reads, body_cont = _stmts_definitely_read(stmt.body, cname, functions, bound, seen)
+        return reads or body_reads, body_cont
+    if isinstance(stmt, ast.Try):
+        body_reads, body_cont = _stmts_definitely_read(stmt.body, cname, functions, bound, seen)
+        other_reads = other_cont = False
+        if body_cont:
+            other_reads, other_cont = _stmts_definitely_read(stmt.orelse, cname, functions, bound, seen)
+        final_reads, final_cont = _stmts_definitely_read(stmt.finalbody, cname, functions, bound, seen)
+        reads = body_reads or final_reads or (other_reads if body_cont else False)
+        return reads, (other_cont if body_cont else False) and final_cont
+    if isinstance(stmt, ast.Assign):
+        reads = _expr_definitely_reads(stmt.value, cname, functions, bound, seen)
+        for target in stmt.targets:
+            reads = reads or _expr_definitely_reads(target, cname, functions, bound, seen)
+        return reads, True
+    if isinstance(stmt, ast.AnnAssign):
+        reads = (_expr_definitely_reads(stmt.target, cname, functions, bound, seen)
+                 or _expr_definitely_reads(stmt.annotation, cname, functions, bound, seen)
+                 or _expr_definitely_reads(stmt.value, cname, functions, bound, seen))
+        return reads, True
+    if isinstance(stmt, ast.AugAssign):
+        reads = (_expr_definitely_reads(stmt.target, cname, functions, bound, seen)
+                 or _expr_definitely_reads(stmt.value, cname, functions, bound, seen))
+        return reads, True
+    if isinstance(stmt, ast.Expr):
+        return _expr_definitely_reads(stmt.value, cname, functions, bound, seen), True
+    if isinstance(stmt, ast.Assert):
+        reads = (_expr_definitely_reads(stmt.test, cname, functions, bound, seen)
+                 or _expr_definitely_reads(stmt.msg, cname, functions, bound, seen))
+        return reads, False
+    if isinstance(stmt, ast.Delete):
+        reads = any(_expr_definitely_reads(target, cname, functions, bound, seen)
+                    for target in stmt.targets)
+        return reads, True
+    if isinstance(stmt, ast.Match):
+        return _expr_definitely_reads(stmt.subject, cname, functions, bound, seen), True
+    return False, True
+
+
+def _stmts_definitely_read(stmts, cname, functions, bound, seen):
+    reads = False
+    for stmt in stmts:
+        stmt_reads, cont = _stmt_definitely_reads(stmt, cname, functions, bound, seen)
+        reads = reads or stmt_reads
+        if not cont:
+            return reads, False
+    return reads, True
+
+
+def _module_binding_names(nodes):
+    """Names bound at module scope by `nodes`, not looking inside defs, lambdas or class bodies."""
+    bound = set()
+
+    def walk(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.add(node.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name != '*':
+                    bound.add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchAs) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchStar) and node.name:
+            bound.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bound.add(node.rest)
+        for child in ast.iter_child_nodes(node):
+            walk(child)
+
+    for node in nodes:
+        walk(node)
+    return bound
+
+
 def _function_reads_class(fn, cname, functions, seen):
-    """True when `fn` (or a module function it calls) reads the class name `cname`."""
+    """True when every execution of `fn` (or a module function it calls) reads `cname`."""
     if id(fn) in seen:
         return False
     seen.add(id(fn))
@@ -773,21 +1025,23 @@ def _function_reads_class(fn, cname, functions, seen):
         bound.add(fn.args.vararg.arg)
     if fn.args.kwarg:
         bound.add(fn.args.kwarg.arg)
-    nodes = list(_function_own_nodes(fn))
-    for node in nodes:
+    for node in _function_own_nodes(fn):
         if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
             bound.add(node.id)
     if cname in bound:
         return False
-    if any(isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id == cname
-           for node in nodes):
-        return True
-    for node in nodes:
-        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id not in bound and node.func.id in functions):
-            if _function_reads_class(functions[node.func.id], cname, functions, seen):
-                return True
-    return False
+    return _stmts_definitely_read(fn.body, cname, functions, bound, seen)[0]
+
+
+def _class_prior_bindings(tree):
+    """(id(class statement) -> module names already bound, all module names bound anywhere)."""
+    prior = {}
+    bound = set()
+    for stmt in tree.body:
+        if isinstance(stmt, ast.ClassDef):
+            prior[id(stmt)] = set(bound)
+        bound |= _module_binding_names([stmt])
+    return prior, bound
 
 
 def _refuse_class_body_indirect_self_read(source):
@@ -796,14 +1050,19 @@ def _refuse_class_body_indirect_self_read(source):
     CPython binds a class name only after its body has run, so `def get(): return C` called as a
     class-attribute value raises `NameError`; AIL's pre-created class object made it return the
     class.  The direct spellings are the pre382 feature; this indirect function route is refused
-    by name instead of silently returning the class.
+    by name instead of silently returning the class.  A name already bound at module scope is
+    not refused: the function reads that earlier value (CPython does too).  The function's dead
+    branches are ignored, so only a read that can actually happen is refused.
     """
     try:
         tree = ast.parse(source)
     except SyntaxError:
         return
     functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    prior, module_bound = _class_prior_bindings(tree)
     for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+        if cls.name in prior.get(id(cls), module_bound):
+            continue
         bound = set()
         for item in cls.body:
             if isinstance(item, ast.FunctionDef):
@@ -817,8 +1076,10 @@ def _refuse_class_body_indirect_self_read(source):
                 targets = [item.target]
             else:
                 continue
-            for node in _class_body_own_nodes(value):
+            for node in ast.walk(value):
                 if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                    continue
+                if not _expr_definitely_evaluates(value, node):
                     continue
                 fn = functions.get(node.func.id)
                 if fn is not None and node.func.id not in bound and _function_reads_class(fn, cls.name, functions, set()):

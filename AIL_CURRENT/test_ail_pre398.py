@@ -5,7 +5,9 @@ defined, called as a class-attribute value, returned the class object where CPyt
 ``NameError`` because the class name is not bound until the body has finished.  The direct
 reads are pre382's feature; this indirect function route is now refused by name at compile
 time on both builds.  A function that reads another class, a parameter/local named like the
-class, and calls made after the class body still match CPython.
+class, and calls made after the class body still match CPython.  A class name already bound
+before the class statement is not refused (the function reads that value, as CPython does), and
+a read in a statically dead branch or after an unconditional return is not refused either.
 """
 import os
 import shutil
@@ -109,6 +111,22 @@ class C:
     x = wrap()
 print(C.x)
 ''',
+    'live_if_true': '''
+def get():
+    if True:
+        return C
+    return 1
+class C:
+    x = get()
+print(C.x)
+''',
+    'live_class_if_true': '''
+def get():
+    return C
+class C:
+    x = get() if True else 1
+print(C.x)
+''',
 }
 
 
@@ -164,6 +182,167 @@ def take(v):
     return v
 class C:
     x = take(7)
+print(C.x)
+''',
+    'prior_value': '''
+C = 5
+def get():
+    return C
+class C:
+    x = get()
+print(C.x)
+''',
+    'prior_empty': '''
+C = ""
+def get():
+    return C
+class C:
+    x = get()
+print(repr(C.x))
+''',
+    'prior_none': '''
+C = None
+def get():
+    return C
+class C:
+    x = get()
+print(C.x)
+''',
+    'prior_negative': '''
+C = -7
+def get():
+    return C
+class C:
+    x = get()
+print(C.x)
+''',
+    'prior_list': '''
+C = [1, 2]
+def get():
+    return C
+class C:
+    x = get()
+print(C.x)
+''',
+    'prior_unpack': '''
+C, D = 4, 5
+def get():
+    return C
+class C:
+    x = get()
+print(C.x)
+''',
+    'prior_for': '''
+for C in [9]:
+    pass
+def get():
+    return C
+class C:
+    x = get()
+print(C.x)
+''',
+    'prior_through_containers': '''
+C = 11
+def get(v):
+    return v
+class C:
+    y = get(C)
+    x = {"k": [y][0]}["k"]
+print(C.x)
+''',
+    'dead_if_false': '''
+def get():
+    if False:
+        return C
+    return 1
+class C:
+    x = get()
+print(C.x)
+''',
+    'dead_if_zero': '''
+def get():
+    if 0:
+        return C
+    return 1
+class C:
+    x = get()
+print(C.x)
+''',
+    'dead_while_false': '''
+def get():
+    while False:
+        return C
+    return 1
+class C:
+    x = get()
+print(C.x)
+''',
+    'dead_ifexp': '''
+def get():
+    return C if False else 1
+class C:
+    x = get()
+print(C.x)
+''',
+    'dead_boolop': '''
+def get():
+    return (False and C) or 1
+class C:
+    x = get()
+print(C.x)
+''',
+    'dead_after_return': '''
+def get():
+    return 1
+    return C
+class C:
+    x = get()
+print(C.x)
+''',
+    'dead_if_true_else': '''
+def get():
+    if True:
+        return 1
+    else:
+        return C
+class C:
+    x = get()
+print(C.x)
+''',
+    'dead_wrapper': '''
+def get():
+    if False:
+        return C
+    return 1
+def wrap():
+    return get()
+class C:
+    x = wrap()
+print(C.x)
+''',
+    'dead_conditional_unknown': '''
+def get(flag=False):
+    if flag:
+        return C
+    return 1
+class C:
+    x = get()
+print(C.x)
+''',
+    'dead_empty_for': '''
+def get():
+    for _ in []:
+        return C
+    return 1
+class C:
+    x = get()
+print(C.x)
+''',
+    'dead_class_ifexp': '''
+def get():
+    return C
+class C:
+    x = get() if False else 1
 print(C.x)
 ''',
 }
