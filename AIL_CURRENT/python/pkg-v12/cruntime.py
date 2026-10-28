@@ -8711,7 +8711,9 @@ static void ail_round_raise(int code, const char *text) {
 static int64_t ail_round0(double x) {
     /* CPython raises these two before it ever looks at the integer result: a program that catches
        them must see ValueError / OverflowError, and an uncaught one must print CPython's line
-       rather than a trap message. A finite value outside int64 stays the int64 contract's trap. */
+       rather than a trap message. A finite value outside int64 is the int64 contract's ordinary
+       stop, worded like every other AIL int64 overflow ("integer overflow", exit 1) so the fuzz
+       runner classes it as the declared 64-bit difference instead of a silent DIFF. */
     if (x != x) ail_round_raise(AIL_EXC_VALUE, "cannot convert float NaN to integer");
     if (isinf(x)) ail_round_raise(AIL_EXC_OVERFLOW, "cannot convert float infinity to integer");
     int save = fegetround();
@@ -8719,7 +8721,7 @@ static int64_t ail_round0(double x) {
     double r = nearbyint(x);
     fesetround(save);
     if (!(r >= -9223372036854775808.0 && r < 9223372036854775808.0))
-        ail_die("round() result does not fit in this language's int64");
+        ail_die("integer overflow");
     return (int64_t)r;
 }
 static double ail_round_n(double x, int64_t n) {
