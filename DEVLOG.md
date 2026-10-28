@@ -379,6 +379,38 @@ Probes in `/tmp/probes/quickstart` through `bash ~/tools/cmp.sh`: `hello.py`, `w
 `outside_subset.py` is refused by name with exit 3 on the default build. Final-state tests:
 test_ail_quickstart_docs (4 s), test_ail_safetynet (144 s), test_ail_files (212 s) and
 test_ail_corpus_findings3 (336 s), all with `-j 2`, 0 failed.
+## 2026-10-28 -- packaging review fixes (job-rel2-10282133)
+
+Fixed the three packaging defects. The wheel build now derives its data list from `MANIFEST.json`
+`sdk_files`, omitting only the three compiler test/bench files (`python/pkg-v12/bench.py`,
+`test_all.py`, `test_pipeline.py`), and copies that exact selection instead of globbing whole
+directories. The wheel therefore carries `python/pkg-v12/SEMANTICS.md` and no longer carries the 13
+research/benchmark `language_examples` files. The build also writes an installed `MANIFEST.json`
+whose `sdk_files` and `sha256` pins describe only the packaged files, so the installed `ail
+integrity` verifies itself, and it copies `LICENSE-APACHE`/`LICENSE-MIT` into the package root so
+installed `ail export-sdk` can include them. `include-package-data` is off so a stale `egg-info`
+cannot add files. `test_ail_packaging` now checks the exact wheel selection and pins, the installed
+manifest, installed `api-builtin`/`integrity`/`export-sdk`, and compile/run outside the repository.
+
+Probes: `packaging_hello.py`, `packaging_types.py`, `packaging_zlib.py` via `cmp.sh` matched CPython
+on both builds; `/tmp/probes/packaging_review_probe.py` passed wheel selection (520 files),
+installed compile/run, `api-builtin abs`, `integrity` (520 checked, verified), and `export-sdk`
+(523 files). Final-state tests: `test_ail_packaging`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 640 s, 0 failed). `tools/update_manifest.py` was run and
+`--check` exits 0.
+
+## 2026-10-28 -- packaging: install the AIL compiler with pip (job-rel2-10282133)
+
+Added a repository-root `pyproject.toml` (setuptools backend, distribution `ail-lang`, Python >= 3.12,
+`MIT OR Apache-2.0`, console script `ail`) and a small `setup.py` that keeps the wheel to the
+`MANIFEST.json` `sdk_files` selection, so the tests, `benchmark_current_rows.py`, docs, `bench/` and
+`lab/` are not packaged.  The wheel carries `AIL_CURRENT`'s compiler modules plus `python/pkg-v12`,
+`stdlib`, `language_examples` and `MANIFEST.json` under `ail_lang/`; compiler-internal test and
+benchmark files are excluded from the package data.  `ail_chatgpt.py` now puts its own directory on
+`sys.path` before importing its sibling modules, which is a no-op in a source checkout and lets the
+installed `ail_lang.ail_chatgpt` run from any working directory.  `test_ail_packaging.py` builds the
+wheel with `pip wheel --no-deps --no-build-isolation`, installs it into a fresh venv, and compiles
+and runs hello world from outside the repository.
 
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
