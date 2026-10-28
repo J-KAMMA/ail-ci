@@ -1,3 +1,30 @@
+## 2026-10-28 -- pre399: a class name is not bound inside its own body (job-pre399-10281027)
+
+The pre382 review recorded that its DIFFERENCES/DEVLOG rows and test docstring described the base
+tree wrongly: the rows said `class D: v = 1; fs = [(lambda: [D][0]().v)()]` printed `[1]` and the
+test said the base tree aborted compilation, but re-probing the pre-fix tree gave
+`TypeError: D() takes other arguments` and a successful build that printed
+`<class '__main__.C'>` respectively.  The real pre-existing difference is the one pre382 fixed:
+CPython binds a class name only after its body has run, while this tree pre-created every class
+object and returned it for a read inside its own body.  On the pre-fix tree,
+`class C: y = (lambda: C)()` printed the class on both builds where CPython raises `NameError`.
+
+Ported pre382's busy-class flag to this integration tree: `_init_class_attrs` leaves
+`g_cls_ready_<slot>` at 0 while the body runs and sets it afterwards, and `expr_Name`,
+`expr_Attribute`, a constructor call through the class name and the lambda/closure compilers check
+it.  A read through a direct name, list/tuple/dict item, argument, alias, class attribute,
+comprehension element, immediate lambda, lambda default or `map`/`sorted` callback now raises
+CPython's `NameError`.  A lambda or method stored in the body and called later still returns the
+class; a saved generator expression's body is lowered lazily, so only its outermost iterable and
+in-place `any`/`next` consumption stay gated.
+
+Probes in `/tmp/probes/pre399` on both builds via `cmp.sh`: 8 match programs (`m01`-`m08`) match
+CPython, and 12 NameError programs (`n01`-`n12`: immediate lambda, construct, direct, list item,
+dict value, argument, class attribute, alias, lambda default, map callback, outermost iterable and
+in-place `any`) print nothing and exit 1 with `NameError ... is not defined`.  Final-state tests:
+test_ail_pre399, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules,
+0 failed).  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:

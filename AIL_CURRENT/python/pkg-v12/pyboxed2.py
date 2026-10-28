@@ -1933,6 +1933,7 @@ class Ctx:
         self.qualname = ''         # CPython's __qualname__ of the function being compiled
         self.self_name = None      # set for a method: its own first parameter's name
         self.class_locals = None   # class body name -> module slot, while a class attribute expression is compiled
+        self.busy_class = None     # the class whose body is being evaluated: its name is not bound yet
 
     def emit(self, line):
         if self.where is not None:
@@ -2278,6 +2279,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.mix_guard_checks = {}
         self.class_values = []     # classes used as values (a call through a value may construct one)
         self.evaluating_class_attrs = set()   # slots whose value is being compiled (re-entrancy guard)
+        self.busy_class_flags = {} # class name -> C int that turns 1 once its body has finished
         self.user_method_names = frozenset()   # every method name a class of the program defines
         self.uses_argv = False     # sys.argv: main takes argc / argv
         self.bytes_prelude = False # bytes / bytearray are the classes of prelude_bytes.py
@@ -2564,6 +2566,8 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append('static int64_t g_attr_%s;\n' % a)
         parts.append('\n/* ---- module-lifetime GC root: classes + module globals ---- */\n')
         parts.append('static ail_obj g_slots_arr[%d];\n' % max(ng, 1))
+        for cname in sorted(self.busy_class_flags):
+            parts.append('static int %s;\n' % self.busy_class_flags[cname])
         parts.append('static ail_frame g_frame;\n')
         parts.append('\n/* ---- forward declarations ---- */\n')
         parts.extend(self.top_decls)
@@ -3416,6 +3420,21 @@ class Compiler(boxclosure.ClosureMixin):
             self.global_slots[key] = self.next_global_slot
             self.next_global_slot += 1
         return self.global_slots[key]
+
+    def _busy_class_flag(self, cname):
+        """The C int that is 0 while `cname`'s body runs and 1 afterwards (registered once)."""
+        flag = self.busy_class_flags.get(cname)
+        if flag is None:
+            flag = 'g_cls_ready_%d' % self._class_global_slot(cname)
+            self.busy_class_flags[cname] = flag
+        return flag
+
+    def _emit_busy_class_check(self, cname, ctx):
+        """CPython binds a class's name only after its body has run: a read while the body is
+        executing raises NameError (a lambda stored there and called later sees the flag set)."""
+        ctx.emit('if (!%s) { st = ail_raise_c(cx, AIL_B_NAMEERROR, "name \'%s\' is not defined"); '
+                 'goto %s; }' % (self._busy_class_flag(cname), cname, ctx.cur_err_target()))
+        ctx.uses_st = True
 
     def _module_stmt(self, node, ctx):
         self.stmt(node, ctx)
@@ -5059,6 +5078,8 @@ class Compiler(boxclosure.ClosureMixin):
             # only the "class used as a plain value" shape is covered here.
             # A local/parameter of the same name shadows the class, and a module-level assignment
             # to the name rebinds it: those go through the ordinary name lookup below.
+            if ctx.busy_class == node.id:
+                self._emit_busy_class_check(node.id, ctx)
             return 'g_slots_arr[%d]' % self.global_slots['class:' + node.id]
         if node.id in ctx.nested_funcs:
             raise Unsupported('using function %s as a first-class value' % node.id)
@@ -5854,6 +5875,8 @@ class Compiler(boxclosure.ClosureMixin):
         # through to the base attribute).
         direct = (isinstance(node.value, ast.Name) and node.value.id in self.classes
                   and node.value.id not in ctx.slot_of and node.value.id not in self.module_names)
+        if direct and ctx.busy_class == node.value.id:
+            self._emit_busy_class_check(node.value.id, ctx)
         value_kind = self.infer_kind(node.value, ctx)
         cname = node.value.id if direct else (value_kind[6:] if value_kind and value_kind.startswith('class:') else None)
         if cname is not None:
@@ -5998,17 +6021,21 @@ class Compiler(boxclosure.ClosureMixin):
             return
         raise Unsupported('a comprehension for-target of type %s' % type(target).__name__)
 
-    def _emit_comp(self, node, ctx, init_c, add_stmt_fn):
+    def _emit_comp(self, node, ctx, init_c, add_stmt_fn, lazy_body=False):
         t = ctx.tmp()
         ctx.emit('%s = %s;' % (t, init_c))
         saved = ctx.class_locals
+        saved_busy = ctx.busy_class
         try:
-            self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set())
+            self._emit_comp_generators(node.generators, 0, node, ctx, t, add_stmt_fn, set(),
+                                       lazy_body=lazy_body)
         finally:
             ctx.class_locals = saved
+            ctx.busy_class = saved_busy
         return t
 
-    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared, opened=None):
+    def _emit_comp_generators(self, generators, i, node, ctx, t, add_stmt_fn, declared,
+                              opened=None, lazy_body=False):
         if i == len(generators):
             add_stmt_fn(node, ctx, t)
             return
@@ -6020,12 +6047,18 @@ class Compiler(boxclosure.ClosureMixin):
             # CPython evaluates a comprehension's outermost iterable in the enclosing scope but
             # runs the rest in a function of its own, which cannot see the class body's names.
             ctx.class_locals = None
+            if lazy_body:
+                # A generator expression's body runs when it is consumed -- after the class
+                # name is bound -- so the busy-class gate must not fire there (only the
+                # outermost iterable above is evaluated during the class body).
+                ctx.busy_class = None
         self._declare_comp_target(gen.target, val, ctx, declared)
         for cond in gen.ifs:
             cc = self.expr(cond, ctx)
             ctx.emit('if (ail_obj_truthy(%s)) {' % cc)
             ctx.indent += 1
-        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared)
+        self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared,
+                                   lazy_body=lazy_body)
         for cond in gen.ifs:
             ctx.indent -= 1
             ctx.emit('}')
@@ -6042,7 +6075,12 @@ class Compiler(boxclosure.ClosureMixin):
         if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
-        t = self.expr_ListComp(node, ctx)
+        def add(n, c, t):
+            v = self.expr(n.elt, c)
+            c.emit('ail_list_append(cx, %s, %s);' % (t, v))
+        # The materialised elements correspond to a generator body, which CPython runs when the
+        # generator is consumed (after a class body's own name is bound), not here.
+        t = self._emit_comp(node, ctx, 'ail_list_new(cx)', add, lazy_body=True)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
 
@@ -6891,6 +6929,8 @@ class Compiler(boxclosure.ClosureMixin):
     def _init_class_attrs(self, name, ctx):
         """Evaluate a class body's attributes once, at its class-definition statement."""
         saved = ctx.class_locals
+        saved_busy = ctx.busy_class
+        ctx.busy_class = name
         try:
             for _aname, aval, slot in self.classes[name].get('class_attrs', []):
                 # The class body runs in its own namespace: an earlier attribute is visible to a
@@ -6910,8 +6950,13 @@ class Compiler(boxclosure.ClosureMixin):
                 finally:
                     self.evaluating_class_attrs.discard(slot)
                 ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+            if name in self.busy_class_flags:
+                # CPython binds the class name once the body has finished (after the module slot
+                # binding below, which does not affect a lambda that reads it later).
+                ctx.emit('%s = 1;' % self.busy_class_flags[name])
         finally:
             ctx.class_locals = saved
+            ctx.busy_class = saved_busy
         if name in self.module_names:
             # A module-level assignment to the class name (before or after the definition, or a
             # `global` declaration) rebinds the module slot: do that binding HERE, at the
@@ -7172,6 +7217,8 @@ class Compiler(boxclosure.ClosureMixin):
             # CPython for the WHOLE activation: U() then calls that value, not the class (an
             # unbound local is UnboundLocalError, an instance is TypeError), exactly as expr_Name
             # already reads it. Without this the constructor-call path silently called the class.
+            if ctx.busy_class == name:
+                self._emit_busy_class_check(name, ctx)
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
@@ -7985,6 +8032,7 @@ class Compiler(boxclosure.ClosureMixin):
             self.lambda_n += 1
             cname = 'plib_%d' % self.lambda_n
             lctx = Ctx(cname)
+            lctx.busy_class = ctx.busy_class
             for p in lnames:
                 lctx.declare_local(p)
             v = self.expr(node.body, lctx)
@@ -8461,6 +8509,7 @@ class Compiler(boxclosure.ClosureMixin):
             self.lambda_n += 1
             cname = 'plam_%d' % self.lambda_n
             lctx = Ctx(cname)
+            lctx.busy_class = ctx.busy_class
             lctx.declare_local(pname)
             for nm in captured:
                 lctx.declare_local(nm)
@@ -9013,6 +9062,9 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _call_attribute(self, f, args, kwargs, ctx):
         recv = f.value
+        if (isinstance(recv, ast.Name) and recv.id == ctx.busy_class
+                and recv.id not in ctx.slot_of and recv.id not in self.module_names):
+            self._emit_busy_class_check(recv.id, ctx)
         # sys.stdin.read() / .readline(): the only sys.stdin surface this emitter models
         # (B046/B047 -- glue in the preamble, see the module docstring's stdin note).
         if isinstance(recv, ast.Attribute) and isinstance(recv.value, ast.Name) and \

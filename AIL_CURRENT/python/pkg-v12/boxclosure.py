@@ -240,7 +240,8 @@ class ClosureMixin:
             default_cs.append(t)
         self.closure_n = getattr(self, 'closure_n', 0) + 1
         cname = 'pc_%d_%s' % (self.closure_n, ''.join(ch if ch.isalnum() else '_' for ch in label))
-        self._emit_closure_function(node, cname, captured, params, nd, qual)
+        self._emit_closure_function(node, cname, captured, params, nd, qual,
+                                    getattr(ctx, 'busy_class', None))
         cells = ['ail_box_int((int64_t)((0x%XLL << 32) | (%dLL << 16) | %dLL))' % (TAG, lo, hi)]
         cells += [self.cell_object(nm, ctx) for nm in captured]
         cells += default_cs
@@ -256,12 +257,13 @@ class ClosureMixin:
                     len(cells), t, t))
         return t
 
-    def _emit_closure_function(self, node, cname, captured, params, nd, qual):
+    def _emit_closure_function(self, node, cname, captured, params, nd, qual, busy_class=None):
         import pyboxed2
         from pyfront import Unsupported
         cid = pyboxed2.cid
         cctx = pyboxed2.Ctx(cname)
         cctx.qualname = qual
+        cctx.busy_class = busy_class
         cctx.ident_names = {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
         cctx.clo_index = {nm: i + 1 for i, nm in enumerate(captured)}
         nonlocal_names = set()
