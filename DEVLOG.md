@@ -214,6 +214,60 @@ test_ail_pre430, test_ail_pre364, test_ail_pre367, test_ail_pre299, test_ail_pre
 test_ail_pre160, test_ail_pre273, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3 (10 modules, 0 failed).  `tools/update_manifest.py` was run and
 `--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
+## 2026-10-28 -- pre431 review: sequential stores before a routed power are folded in order (job-pre431-10281945)
+
+The pre431 review found a false refusal introduced by the store tracking: the stores of
+one name were each folded against the call-site value instead of the previous store, so
+
+    def power(b, e):
+        b = -b
+        b = -b
+        return b ** e
+    print(power(-2, 63))
+
+was refused with `int64 constant expression out of range: 9223372036854775808` where
+CPython (and the base commit) print `-9223372036854775808`, which fits int64.  The stores
+of a name are now applied in source order, each seeing the value the previous one left.
+A store whose value reads another tracked parameter that an earlier (or, inside a loop,
+any) store may have changed is dropped instead of being folded against that stale value,
+so `b = 1; e = b; b = -2; return b ** e` is left to the run time and matches CPython
+rather than inventing a constant.
+
+Probes in `/tmp/probes/pre432` on both builds via `cmp.sh`: `seq_fix` matches CPython;
+`cross_name` and `cross_expr` match; `seq_inrange`, `arith_base`, `arith_mul`, `floordiv`,
+`aug_inrange`, `loop_seq`, `loop_neg`, `via_list`, `via_dict`, `via_attr`, `arg_seq`,
+`nested_pow_arg`, `float_store`, `bool_seq` match; `seq_refuse`, `seq_three`, `aug_seq`
+and `arith_exp` are refused by name with an exactly out-of-int64 result; `safe_early`
+keeps the accepted over-approximation refusal.  Tests: `test_ail_pre431` and
+`test_ail_safetynet`; `test_ail_files` and `test_ail_corpus_findings3` on the committed
+tree.  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-28 -- pre431: a loop store before a routed power no longer hides an out-of-int64 result (job-pre431-10281945)
+
+The rbpre400 review recorded `p10` (loop-store-before) as pre-existing on both builds: a
+power reached through a function call still stopped with the run-time `integer overflow`
+where CPython prints the exact big integer, because the routed-power scan dropped a
+parameter after any store to it, even a loop that assigns the same constant.  This tree
+also lacked the accepted pre400 routed-power check, so the port is included: module-scope
+calls now bind constant positional and keyword arguments into plain top-level functions,
+including mixed and keyword-only calls, and refuse an exact `**`/`pow()` result outside
+int64 by name.  A simple store now updates the bound value when it provably cannot change
+(the same constant, `b = b`, `b += 0`, an unreachable branch, an empty loop), and a loop
+that runs and assigns one constant uses that constant.  A conditional store that may leave
+a different value keeps the pre-existing run-time stop.  Module names bound by a loop that
+is guaranteed to run are folded the same way, so a loop before the call is covered too.
+
+Probes in `/tmp/probes/pre431` on both builds via `cmp.sh`: `p10a`-`p10e` (loop self,
+same/different constant, other store, exponent store) and `m01`-`m04` (module loop same,
+different, empty, break-first) are refused by name or match CPython; `f01`-`f11` cover
+in-range different constants, conditional stores, empty loops, `while False`, `+= 0`,
+`+= 1`, and an unreachable `else`; `r01`-`r05` cover keyword/in-range controls, list,
+dict, attribute and alias routes, a store after the power, and the safe `b = 1` store.
+Final-state tests: test_ail_pre431, test_ail_pre364, test_ail_pre367, test_ail_pre372,
+test_ail_pre351, test_ail_pre33, test_ail_pre299 and test_ail_safetynet (8 modules, 0
+failed); then test_ail_files and test_ail_corpus_findings3 on the committed tree.
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --update` and
+`--check` pass.
 
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
