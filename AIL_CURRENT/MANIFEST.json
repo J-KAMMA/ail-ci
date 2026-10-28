@@ -7019,9 +7019,9 @@
     "python/pkg-v12/argparselib.py": "08677b6327eeedcfbceb1ab3d302c82fa02e4cc78d90884db7c711dd6edd6cd7",
     "python/pkg-v12/prelude_argparse.py": "41f83622704af5c895b8319ac61282c5a36377c250a8a5a8163f29854732bdd9",
     "test_ail_stdlib23.py": "328a9a30896b38409524882a95e1a81d0de68349b4563813133d3b778e682a27",
-    "python/pkg-v12/prelude_tempfile.py": "c2799588d0126fc74f38ed47b2aafb7d3560bb12ad690a986fd1b3f3a7ef7558",
-    "python/pkg-v12/tempfilelib.py": "0e70ecbe0942057696c1f2f7d4063034368a5c8fc0974957dcbf953e4df62eb4",
-    "test_ail_stdlib24.py": "2486aa568ca7a9c5de27d45603b81862cfcb915256e4c4b6d0ffa53a10c9b1f2"
+    "python/pkg-v12/prelude_tempfile.py": "990615b669fb529e1fd2fe96cb8b45f7bf0322c92b420d488b295598adf0099a",
+    "python/pkg-v12/tempfilelib.py": "3bdf1373be6cc711a43821f276fac17bc272fcab911e39ed8c599d5bbdb53bc5",
+    "test_ail_stdlib24.py": "1b94865c604853e05ce855789a694cec46434c327fb2d1043dc9a3b96be644e7"
   },
   "release": "R1.40+xlang-304d34f+native-round72+windows-cpython+workflow-tests-candidate+bracket-read-candidate+n0-v4-candidate+r8-fuzz-plan-v2+r9-byte-arena-sanitizer+r10-native-ledger-n0+r11-n0-fresh-evidence+r12-optimizer-current-chain+r13-xlang-arm64-emulated-gate+r14-native-r11-historical-inputs+r15-native-r11-regression+r16-native-recovered-inputs+r20-native-versioned-scope+r21-native-pinned-input-recovery+r22-provenance-precision+r23-direct-indexed-undefined+r24-protected-lock-line-endings+r25-current-r6-seeds+r26-nullish-ternary+r27-seed777-coercion+r28-includes+r30-indexof+r32-native-model-inputs+r33-native-checkpoint+r36-xlang-dynamic-array+r37-source-bound-gate+r38-host-matrix+r51-native-f32-successor+r52-native-f32-migration-candidate+r53-v1-string-width+r54-v1-runtime-repair+r55-windows-cli-intake",
   "work_id": "r140-xlang-304d34f-integration-20260926",
@@ -24963,9 +24963,9 @@
     "python/pkg-v12/argparselib.py": "08677b6327eeedcfbceb1ab3d302c82fa02e4cc78d90884db7c711dd6edd6cd7",
     "python/pkg-v12/prelude_argparse.py": "41f83622704af5c895b8319ac61282c5a36377c250a8a5a8163f29854732bdd9",
     "test_ail_stdlib23.py": "328a9a30896b38409524882a95e1a81d0de68349b4563813133d3b778e682a27",
-    "python/pkg-v12/prelude_tempfile.py": "c2799588d0126fc74f38ed47b2aafb7d3560bb12ad690a986fd1b3f3a7ef7558",
-    "python/pkg-v12/tempfilelib.py": "0e70ecbe0942057696c1f2f7d4063034368a5c8fc0974957dcbf953e4df62eb4",
-    "test_ail_stdlib24.py": "2486aa568ca7a9c5de27d45603b81862cfcb915256e4c4b6d0ffa53a10c9b1f2"
+    "python/pkg-v12/prelude_tempfile.py": "990615b669fb529e1fd2fe96cb8b45f7bf0322c92b420d488b295598adf0099a",
+    "python/pkg-v12/tempfilelib.py": "3bdf1373be6cc711a43821f276fac17bc272fcab911e39ed8c599d5bbdb53bc5",
+    "test_ail_stdlib24.py": "1b94865c604853e05ce855789a694cec46434c327fb2d1043dc9a3b96be644e7"
   },
   "base_local_change_scope": "Cross-language pipeline hardened to real-world measurement. incr.py: two new incrementalization pattern classes -- dict argmax (d[k]=d.get(k,0)+POS writes plus keys() rescan with tiebreak become update-site tracking) and sliding window sum (del xs[0] sites emit _wacc-=xs[0]); probe 64/64, mode/wma translations fire with byte-identical oracles. pkg-v12: str(<float>) enabled via existing ail_str_from_float FMT machinery (SEMANTICS.md updated). jstrans.py: deterministic JS->subset translator -- float profile (Number/parseFloat, JS Number->String formatting: integral doubles without .0, NaN/Infinity, -0->0, true / on floats, IEEE remainder), plus parser-surface hardening (ASI, shebang, new Array, function-expr arrows, stdin line-terminator fix via rstrip, null-sentinel re-kinding via vartypes/zero_of, trivial-function inlining, named TErrs for all remaining unsupported constructs). Corpus 17/17 byte-identical vs Node; real-world corpus 0->2 end-to-end with zero generic crashes (12 named TErrs). dominfer.py: machine-derived input domains via differential probing (found 2^53+ integer JS precision boundary on all add-protocol programs).",
   "integration": {

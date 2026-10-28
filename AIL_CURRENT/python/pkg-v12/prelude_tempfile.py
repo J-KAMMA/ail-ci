@@ -43,8 +43,8 @@ def _ail_tempfile_gettempprefix() -> str:
 
 def _ail_tempfile_mkdtemp(suffix: str, prefix: str, dir: str) -> str:
     global _ail_tempfile_counter
-    if dir == '':
-        dir = _ail_tempfile_gettempdir()
+    if not isinstance(suffix, str) or not isinstance(prefix, str) or not isinstance(dir, str):
+        raise TypeError('tempfile.mkdtemp() is built for str arguments only')
     attempt = 0
     while attempt < 100:
         attempt = attempt + 1
@@ -56,7 +56,7 @@ def _ail_tempfile_mkdtemp(suffix: str, prefix: str, dir: str) -> str:
             os.mkdir(candidate, 0o700)
         except FileExistsError:
             continue
-        return candidate
+        return os.path.abspath(candidate)
     raise FileNotFoundError('No usable temporary directory found')
 
 
@@ -85,6 +85,5 @@ class _AilTemporaryDirectory:
     def __enter__(self) -> str:
         return self.name
 
-    def __exit__(self, exc_type: int, exc, tb) -> bool:
+    def __exit__(self, exc_type: int, exc, tb):
         self.cleanup()
-        return False

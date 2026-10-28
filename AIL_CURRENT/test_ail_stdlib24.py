@@ -4,10 +4,11 @@ Every program below is ordinary Python. CPython is the oracle; the compiled prog
 AIL_IR=1) prints the same stdout and exits with the same status, or the spelling is refused by name
 at compile time. Built: gettempdir(), mkdtemp(suffix, prefix, dir) and TemporaryDirectory(...) with
 its name, cleanup(), __enter__ and __exit__, from positional arguments, keywords, sys.argv-style
-values, function arguments, list items, attributes and dict values. The name is not compared (it is
-random in CPython); the directory's existence, parent, prefix and suffix are. Refused by name:
-NamedTemporaryFile, mkstemp, tempdir, gettempprefix and TemporaryDirectory(ignore_cleanup_errors= /
-delete=).
+values, function arguments, list items, attributes and dict values, an explicit empty dir and a
+relative dir (the result is absolute). The name is not compared (it is random in CPython); the
+directory's existence, parent, prefix and suffix are. Refused by name: NamedTemporaryFile, mkstemp,
+tempdir, gettempprefix, TemporaryDirectory(ignore_cleanup_errors= / delete=), a TemporaryDirectory
+whose lifetime relies on CPython's garbage-collection finalizer, and bytes arguments.
 """
 import os
 import subprocess
@@ -134,8 +135,30 @@ def main() -> None:
     with TemporaryDirectory(prefix='ail-from-') as directory:
         print(os.path.basename(directory).startswith('ail-from-'), os.path.isdir(directory))
     print(os.path.isdir(gettempdir()))
-    name = TemporaryDirectory(prefix='ail-keep-').name
+    kept = TemporaryDirectory(prefix='ail-keep-')
+    name = kept.name
     print(os.path.basename(name).startswith('ail-keep-'))
+    kept.cleanup()
+
+
+main()
+'''
+
+EMPTY_AND_RELATIVE = r'''import os
+import tempfile
+
+
+def main() -> None:
+    empty = tempfile.mkdtemp(dir='')
+    print(os.path.isabs(empty), os.path.dirname(empty) == os.getcwd())
+    os.rmdir(empty)
+    os.mkdir('ail-relative')
+    relative = tempfile.mkdtemp(dir='ail-relative')
+    print(os.path.isabs(relative), os.path.dirname(relative) == os.path.join(os.getcwd(), 'ail-relative'))
+    os.rmdir(relative)
+    os.rmdir('ail-relative')
+    with tempfile.TemporaryDirectory(dir='') as directory:
+        print(os.path.isabs(directory), os.path.dirname(directory) == os.getcwd())
 
 
 main()
@@ -147,6 +170,7 @@ CASES = (
     ("routes", ROUTES, ()),
     ("environment", ENVIRONMENT, ()),
     ("import_forms", IMPORT_FORMS, ()),
+    ("empty_and_relative", EMPTY_AND_RELATIVE, ()),
 )
 
 
@@ -199,6 +223,20 @@ class Stdlib24Tests(unittest.TestCase):
                      "    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as directory:\n"
                      "        print(directory)\n\n\nmain()\n",
                      "tempfile.TemporaryDirectory(ignore_cleanup_errors=) is not built")
+        self.refused("import tempfile\n\n\n"
+                     "def make() -> str:\n"
+                     "    directory = tempfile.TemporaryDirectory(prefix='ail-del-')\n"
+                     "    return directory.name\n\n\n"
+                     "def main() -> None:\n"
+                     "    print(make())\n"
+                     "    print(tempfile.TemporaryDirectory(prefix='ail-del-').name)\n\n\nmain()\n",
+                     "tempfile.TemporaryDirectory() without cleanup() is not built")
+        self.refused("import tempfile\n\n\n"
+                     "def main() -> None:\n"
+                     "    data = b'bp-'\n"
+                     "    directory = tempfile.mkdtemp(prefix=data)\n"
+                     "    print(directory)\n\n\nmain()\n",
+                     "tempfile.mkdtemp(prefix=) is built for str values only")
 
 
 if __name__ == "__main__":

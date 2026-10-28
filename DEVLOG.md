@@ -1,3 +1,20 @@
+## 2026-10-28 -- stdlib24 review fixes: tempfile dir, abspath, bytes and TemporaryDirectory lifetime (job-stdlib23-10290511)
+
+The review of the tempfile pass found four defects; all are fixed here.  `mkdtemp(dir='')` now uses the
+current directory instead of treating `''` as "no dir" (only `None` gets `gettempdir()`), and
+`mkdtemp` returns `os.path.abspath()` as CPython does, so a relative `dir=` gives an absolute result.
+Bytes arguments are refused by name like a bytes literal (`prefix=`, `suffix=`, `dir=`), including a name,
+list item, dict value or annotated attribute that is statically bytes; a value that only reaches the call
+at run time gets the same named message from the prelude instead of a bare concatenation `TypeError`.
+CPython removes a `TemporaryDirectory` through its garbage-collection finalizer when it is merely dropped;
+AIL has no object finalizer, so that lifetime is not built.  The pass now supports the explicit lifetimes
+that were already documented -- `with TemporaryDirectory(...)` and `x = TemporaryDirectory(...)` followed
+by `x.cleanup()` -- and refuses every other use by name instead of leaking the tree.  `__exit__` also now
+returns `None` like CPython (it returned `False`).  Programs with no `tempfile` import are untouched.
+`test_ail_stdlib24.py` gained an empty/relative dir program and refusals for a dropped TemporaryDirectory
+and bytes arguments; probes in `/tmp/probes/tf_*` cover both builds and match CPython or are refused by
+name.
+
 ## 2026-10-28 -- stdlib24: tempfile gettempdir, mkdtemp and TemporaryDirectory (job-stdlib23-10290511)
 
 Before this change the imports still refused in `lab/corpus/programs` and
@@ -10,8 +27,9 @@ functions through `prelude_tempfile.py`: positional or keyword arguments, `None`
 environment candidate list cached as CPython caches it.  The generated name is an equivalent unique name,
 not CPython's random one.  `NamedTemporaryFile`, `TemporaryFile`, `SpooledTemporaryFile`, `mkstemp`, `mktemp`,
 `gettempdirb`, `gettempprefix`, `tempdir` and `TemporaryDirectory(ignore_cleanup_errors=/delete=)` stay named
-compile-time refusals.  `test_ail_stdlib24.py` (added to `ail_check.MODULES`) compares five programs with
-CPython on AIL_IR=0 and AIL_IR=1 and covers two refusals.  Probes in `/tmp/probes/tf_*` match CPython or are
+compile-time refusals, and a TemporaryDirectory whose lifetime relies on the GC finalizer is refused by name.
+`test_ail_stdlib24.py` (added to `ail_check.MODULES`) compares six programs with CPython on AIL_IR=0 and
+AIL_IR=1 and covers four refusals.  Probes in `/tmp/probes/tf_*` match CPython or are
 refused by name: basic mkdtemp/read/write/remove, with-context and explicit cleanup, nested trees, an exception
 inside the body, empty and positional prefix/suffix, explicit dir, prefix through an argument, list item,
 attribute and dict value, `TMPDIR` selection with caching, import aliases, and the refusal cases.
