@@ -4205,16 +4205,68 @@ def _refuse_load(error):
     raise SystemExit(2)
 
 
+def _define_file_name(text, source):
+    """Give a Python-syntax entry CPython's main-module `__file__`.
+
+    CPython binds `__file__` to the script path as given, made absolute against the current
+    directory (a relative `./x.py` keeps its `./`). A compiled program has no source file at run
+    time, so each read of `__file__` is replaced with that path as a string literal in the exact
+    place the name was parsed. Replacing the read in place (rather than binding the name) keeps
+    the statement order -- the general path runs top-level statements exactly as written -- and
+    keeps every line number. A source that binds `__file__` itself is left alone: the compiler
+    then refuses the name as before, rather than guessing which value a read meant."""
+    if '\r' in text:
+        text = text.replace('\r\n', '\n').replace('\r', '\n')
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    reads = []
+    binds = False
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == '__file__':
+            if isinstance(node.ctx, ast.Load):
+                reads.append(node)
+            else:
+                binds = True
+        elif isinstance(node, ast.arg) and node.arg == '__file__':
+            binds = True
+        elif isinstance(node, ast.alias) and '__file__' in (node.name, node.asname):
+            binds = True
+        elif isinstance(node, ast.ExceptHandler) and node.name == '__file__':
+            binds = True
+        elif (isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == '__file__') or (
+                isinstance(node, ast.MatchMapping) and node.rest == '__file__'):
+            binds = True
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == '__file__':
+            binds = True
+    if not reads or binds:
+        return text
+    path = str(source)
+    if not os.path.isabs(path):
+        path = os.path.join(os.getcwd(), path)
+    literal = repr(path).encode('utf-8')
+    lines = text.split('\n')
+    # positions are UTF-8 byte offsets; replace right to left so earlier columns stay valid
+    for node in sorted(reads, key=lambda node: (node.lineno, node.col_offset), reverse=True):
+        raw = lines[node.lineno - 1].encode('utf-8')
+        lines[node.lineno - 1] = (raw[:node.col_offset] + literal + raw[node.end_col_offset:]).decode('utf-8')
+    return '\n'.join(lines)
+
+
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False, ffi=None, prelower=None):
+                  notes=None, local_imports=False, ffi=None, prelower=None, entry_spelling=None):
     """Resolve source imports once and validate their shared declaration scope.
 
     `prelower` rewrites the entry's text right after it is read (ail_export.lower for `--lib`); the
     classes it leaves behind are then allowed in a module-only Python source.
 
     `local_imports` lets a Python-syntax entry import sibling modules (ail_modules, stage G1): their
-    bodies are merged into the entry's text before everything below sees it."""
+    bodies are merged into the entry's text before everything below sees it.
+
+    `entry_spelling` is the source argument as the command line gave it; CPython's main-module
+    `__file__` keeps a leading `./` or `..`, which the resolved path has already lost."""
     search_paths = tuple(dict.fromkeys(Path(path).resolve() for path in module_paths))
     if any(not path.is_dir() for path in search_paths):
         raise ValueError('each --module-path must name an existing directory')
@@ -4254,6 +4306,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             syntax = ('ail' if detect(text) else 'python') if source_syntax == 'auto' else source_syntax
             if path.suffix.lower() == '.py':
                 syntax = 'python'
+            if entry and syntax == 'python' and not module_only:
+                text = _define_file_name(text, source if entry_spelling is None else entry_spelling)
             merged = None
             if ffi is not None and syntax == 'python':
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
@@ -5244,6 +5298,17 @@ def _compile_freestanding(args, parser, native_build):
     return native_build.emit(args, report)
 
 
+class _SourcePath(argparse.Action):
+    """Keep the command line's own spelling beside the Path.
+
+    CPython builds a main module's `__file__` from the argument as typed, so `./p.py` keeps its
+    `./`; converting straight to `Path` would lose it."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, Path(values))
+        setattr(namespace, self.dest + '_spelling', values)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -5311,7 +5376,7 @@ def main(argv=None):
     build_http_cmd.add_argument('-o', '--output', required=True, type=Path)
     build_http_cmd.add_argument('--compare', action='store_true')
     compile_cmd = sub.add_parser('compile', help='compile AIL source to a standalone executable')
-    compile_cmd.add_argument('source', type=Path)
+    compile_cmd.add_argument('source', action=_SourcePath)
     compile_cmd.add_argument('-o', '--output', required=True, type=Path)
     compile_cmd.add_argument('--module', action='append', type=Path, default=[],
         help='additional .ail file containing functions and literal numeric constants')
@@ -5603,7 +5668,8 @@ def main(argv=None):
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
                 module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,
-                prelower=lower_exports if export_lib else None, **loading)
+                prelower=lower_exports if export_lib else None,
+                entry_spelling=getattr(args, 'source_spelling', os.fspath(args.source)), **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
         if export_lib:

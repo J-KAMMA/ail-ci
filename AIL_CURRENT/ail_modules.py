@@ -1721,6 +1721,11 @@ class Rewriter(ast.NodeTransformer):
             return node
         if name == '__name__' and isinstance(node.ctx, ast.Load):
             return ast.copy_location(ast.Constant('__main__' if self.mod.entry else self.mod.name), node)
+        if (name == '__file__' and isinstance(node.ctx, ast.Load) and not self.mod.entry
+                and self.mod.kind != 'namespace' and '__file__' in self.mod.merged):
+            self.program.refuse(self.mod, node, "%s rebinds __file__, so a read may mean the path or the new value; "
+                                "this compiler cannot tell which one a function call sees.\n"
+                                "  write instead: use another name for the rebinding" % self.mod.path.name)
         if name in self.mod.std:
             return node
         if name in self.mod.alias:
@@ -1743,6 +1748,9 @@ class Rewriter(ast.NodeTransformer):
                 return ast.copy_location(ast.Name(self.mod.merged[name], node.ctx), node)
             return node
         if isinstance(node.ctx, ast.Load):
+            if name == '__file__' and not self.mod.entry and self.mod.kind != 'namespace':
+                # CPython gives an imported module the absolute, normalised path of its file.
+                return ast.copy_location(ast.Constant(str(self.mod.path)), node)
             if name in MODULE_DUNDERS:
                 self.program.refuse(self.mod, node, "%s is not available: the program is built into one executable, "
                                     "so a module has no file, package or search path at run time.\n"
@@ -1769,6 +1777,9 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
+        if (attr == '__file__' and not stored and target.kind != 'namespace'
+                and attr not in target.merged and attr not in target.std and attr not in target.alias):
+            return ast.copy_location(ast.Constant(str(target.path)), node)
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))

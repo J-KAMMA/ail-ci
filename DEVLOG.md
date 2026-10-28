@@ -1,3 +1,41 @@
+## 2026-10-28 -- ex6: `__file__` for Python-syntax entries and merged modules (job-ex6-10290222)
+
+Step 1 built every Python-syntax example under `AIL_CURRENT/language_examples` (`*.py`, 11 files,
+`compile --syntax python`). All 11 were refused; 5 stopped at `__file__` by name
+(`row_codec_compare.py`, `row_decimal_quad.py`, `row_state_quad_compare.py`,
+`row_store_identity_compare.py`, `test_row_cpu_profile.py`) and the rest at a missing
+`benchmark_current_rows`/`pyfunc` import (2), a standard-library name collision or re-export read
+(6), a function-level import with an import-time effect (1) and an out-of-int64 constant (1).
+`__file__` blocked the most examples and is supportable exactly, so it was implemented.
+
+CPython 3.12: a main module's `__file__` is the source argument as typed, made absolute against
+the current directory (`./p.py` keeps `./`, `sub/../p.py` keeps `..`); an imported module's is the
+absolute path of its file. A compiled program has no source file, so `_define_file_name` in
+`ail_chatgpt.py` replaces each entry read with that path at its parsed position (no statement
+reordering, no line shift; the general path runs top-level statements in source order, so an
+appended assignment would run too late for earlier reads). `compile` keeps the command line's
+spelling for this (`_SourcePath`). `ail_modules` replaces free reads in a merged sibling with its
+absolute path, handles `module.__file__`, and leaves a bound name alone (a sibling that rebinds
+`__file__` and reads it is refused by name, since the value depends on when a function runs); a
+namespace package stays refused by name.
+
+After the change the same 11 examples stop only at the other causes above (none at `__file__`), so
+no `.py` example builds end to end: they all import compiler-only local modules. Added
+`test_ail_ex6.py` (8 tests, both builds) and pinned it.
+
+Probes in `/tmp/probes` via `cmp.sh`: `ex6_entry`, `ex6_entry_ops`, `ex6_import`,
+`ex6_import_ops`, `ex6_package`, `ex6_dormant`, `ex6_rebind` match CPython on both builds (the
+argument, list item, attribute, dict value, default, f-string, slice and `len()` routes included;
+imported module and package paths included). `ex6_entry_local_only` and `ex6_localrebind` are
+refused by name on both builds (`name '__file__' is not defined` / `... is not available ...`), as
+are `ex6_import_assign` and `ex6_import_assign2` (a sibling that rebinds `__file__` and reads it,
+directly or as `module.__file__`; it is refused by name). `ex6_tailconst` and `ex6_headconst` control the top-level ordering. `cmp.sh` always names
+the file `p.ail`, so the `./p.ail` and `sub/../p.ail` spellings were compared by hand (CPython vs
+`compile` plus the binary in the same cwd) and match. `ex6_entry_ops` and `ex6_import_ops` differ
+only on `alias is again`: string object identity is a pre-existing compiler-wide limitation
+(`ex6_control_identity` with an ordinary string constant differs identically), so the new test
+does not assert `is`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
