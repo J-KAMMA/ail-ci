@@ -370,12 +370,23 @@ _UNKNOWN = object()
 
 def _shallow_walk(nodes):
     stack = list(nodes)
+    AST = ast.AST
     while stack:
         node = stack.pop()
         yield node
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             continue
-        stack.extend(ast.iter_child_nodes(node))
+        for name in node._fields:
+            try:
+                field = getattr(node, name)
+            except AttributeError:
+                continue
+            if isinstance(field, AST):
+                stack.append(field)
+            elif isinstance(field, list):
+                for item in field:
+                    if isinstance(item, AST):
+                        stack.append(item)
 
 
 def _binding_counts(nodes):
@@ -1804,7 +1815,8 @@ def _check_int64_literals(tree):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
-    _check_int64_binpow_constants(tree, known, attributes, passthrough, parents, maxsplit)
+    _check_int64_binpow_constants(tree, known, attributes, passthrough, parents, maxsplit,
+                                  program_bound)
 
 
 _INT_BINARY = {
@@ -3268,7 +3280,8 @@ def _binpow_power_parameters(tree, module_known, module_int_known, attributes, p
     return found
 
 
-def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, parents, maxsplit):
+def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, parents, maxsplit,
+                                  program_bound=None):
     """Refuse ``base ** exponent`` on statically known ints whose exact result leaves int64.
 
     Module constants, literal containers read by subscript, class and instance attributes, a
@@ -3284,7 +3297,8 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
     module_int_known = _known_module_constants(tree)
     module_lookup = lambda name: module_known.get(name, _UNKNOWN)
     module_global = lambda name: True
-    program_bound = _all_bound_names(tree)
+    if program_bound is None:
+        program_bound = _all_bound_names(tree)
     power_parameters = _binpow_power_parameters(tree, module_known, module_int_known,
                                                 attributes, passthrough, program_bound)
 

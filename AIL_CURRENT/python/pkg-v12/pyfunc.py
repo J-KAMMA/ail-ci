@@ -27148,7 +27148,7 @@ def _promote_floats(fn, ctx):
     _seed_local_annotations(fn, ctx)
     nodes = tuple(ast.walk(fn))
     for _ in range(len(nodes) + 1):
-        _bind_object_types(fn, ctx)
+        _bind_object_types(fn, ctx, nodes)
         changed = False
         for node in nodes:
             if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
@@ -27172,7 +27172,7 @@ def _promote_floats(fn, ctx):
     for name in ctx.blist:
         if name not in ctx.kind:
             ctx.types[name] = BLIST
-    _bind_object_types(fn, ctx)
+    _bind_object_types(fn, ctx, nodes)
     # `slist_names`: every name ever assigned a list of str (AIL_TASK_strops_20260915.md Part B)
     # -- the SLIST counterpart of `container_names` below, needed for the identical reason
     # (`words = s.split()` is settled in `_stmt`'s own SLIST branch, not here). Grown in the SAME
@@ -28084,20 +28084,30 @@ def _mark_tuple_dicts(fn, ctx):
     return out
 
 
-def _bind_object_types(fn, ctx):
+def _bind_object_types(fn, ctx, nodes=None, assigned_names=None):
     """Seed `ctx.types` with the class of a local first assigned a constructor call, or a call to
     another function already known (from `ctx.funcs`, mid fixed-point) to return one -- the same
     job `_bind_container_types` does for LIST/FLIST, done here for class instances, and for the
     same reason: `return p` has to be recognisable as producing an instance while `_signatures` is
     still deciding every function's signature, before a single line of C exists for this body to
-    walk instead."""
-    nodes = list(ast.walk(fn))
-    assigned_names = {target.id for node in nodes for target in (node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []) if isinstance(target, ast.Name)}
-    for handler in (node for node in nodes if isinstance(node, ast.ExceptHandler) and node.name):
-        if handler.name in ctx.kind or handler.name in assigned_names or handler.name in ctx.modconsts:
-            raise Unsupported('exception handler binding %r conflicts with an existing local, parameter or constant' % handler.name)
-        ctx.types[handler.name] = EXCEPTION
-        ctx.exception_handler_names.add(handler.name)
+    walk instead.
+
+    `nodes`, when the caller already has `ast.walk(fn)`'s result, is that same sequence: the walk
+    is the whole function, and `_promote_floats` asks for this pass several times over it, so the
+    caller hands its own tuple in rather than paying for the walk again. `assigned_names` is the
+    matching set of assigned target names; it is needed only to check an `except ... as name`
+    handler, so without one it is never built (nor asked for)."""
+    if nodes is None:
+        nodes = list(ast.walk(fn))
+    handlers = [node for node in nodes if isinstance(node, ast.ExceptHandler) and node.name]
+    if handlers:
+        if assigned_names is None:
+            assigned_names = {target.id for node in nodes for target in (node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []) if isinstance(target, ast.Name)}
+        for handler in handlers:
+            if handler.name in ctx.kind or handler.name in assigned_names or handler.name in ctx.modconsts:
+                raise Unsupported('exception handler binding %r conflicts with an existing local, parameter or constant' % handler.name)
+            ctx.types[handler.name] = EXCEPTION
+            ctx.exception_handler_names.add(handler.name)
     def known(value):
         try:
             return _etype(value, ctx)
