@@ -1,3 +1,29 @@
+## 2026-10-28 -- library batch 24: `struct` with a literal format (job-stdlib24-10290512)
+
+`struct` was the most-imported module still refused (6 programs in `lab/corpus/programs` and
+`AIL_CURRENT/language_examples`; the 6 `heapq` imports were already built). `python/pkg-v12/structlib.py`
+reads the literal format at compile time and lowers `struct.pack`, `unpack`, `unpack_from`, `pack_into` and
+`calcsize` onto `prelude_struct.py` (`int.to_bytes` / `int.from_bytes`). Fields built: the integer codes
+`b B h H i I l L q Q n N P`, bool `?`, char `c`, pad `x`, fixed string `s` and pascal string `p`, with counts,
+the native `@` alignment and the standard `= < > !` layouts. Float codes `e f d`, a non-literal format, a
+wildcard import, `struct.pack` as a value, a `'0p'` field and `struct.error` outside an `except` clause are
+refused by name; `struct.error` in an `except` clause is `ValueError` (the csv.Error precedent). Int stays
+signed 64-bit, so a Q/N/P value or result above 2**63-1 is not representable.
+
+Probes in `/tmp/probes/stdlib24` on both builds via `cmp.sh`: `basic`, `pack_all`, `routes`, `routes2`,
+`buffers`, `alias`, `fromimport`, `errors`, `errtuple`, `qneg`, `boolint`, `empties`, `calc_float`, `customerr`
+match CPython; `nonliteral`, `floatfmt`, `ref_0p`, `ref_empty_unpack`, `ref_value`, `ref_wildcard`,
+`ref_badfmt`, `ref_nonliteral_calc`, `ref_float_unpack`, `ref_collision` and `ref_error_value` are refused by
+name (the note names the use). A direct differential of the format reader and prelude over
+`@ = < > !` x codes x counts found no size, pack or unpack difference for the built fields.
+
+`AIL_CURRENT/test_ail_stdlib24.py` compiles four programs on the default build and with
+`AIL_UNIFIED_FORCE=1`, compares stdout/exit with CPython 3.12, checks seven refusals on both builds, compares
+the format reader and prelude with CPython over generated formats, and checks a non-struct program keeps its
+text. Final-state tests: test_ail_stdlib24, test_ail_check, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (5 modules, 0 failed). `tools/update_manifest.py` was run and `--check` passes;
+`tools/ci_shards.py --update` added the module.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
