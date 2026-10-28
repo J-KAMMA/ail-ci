@@ -335,6 +335,29 @@ programs are refused by name, 16 in-range programs match CPython, and 2 already-
 `test_ail_pre435.py` pins the refusals and matches; `test_ail_pre417`, `test_ail_pre370`,
 `test_ail_pre358`, `test_ail_pre359` and `test_ail_pre340` also pass.  `tools/update_manifest.py`
 was run and `--check` passes; `tools/ci_shards.py --update` registered the new module.
+## 2026-10-28 -- re-apply pre409 on the integration tree (job-rbrbpre409-10282004)
+
+Re-applied the accepted pre409 fix (a class object's subscript TypeError names the class)
+on top of the current integration tree.  The code conflict was already resolved by the
+tree's newer pre419 fix: `ail_op_getitem` and `ail_op_getslice` intercept `AIL_T_CLASS`
+before their ordinary fallbacks and call `ail__raise_class_subscript`, which formats
+`type '<name>' is not subscriptable` from `ail_class_name_c` with CPython's 200-character
+cap.  That early check and helper were kept instead of adding the older
+`ail__class_subscript_error` (the incoming call sites are unreachable behind the early
+returns), so index and slice reads, subclasses, aliases and values reaching the class
+through an argument, list item, attribute or dict value keep the same behaviour.  The
+incoming `test_ail_pre409.py` was added and registered in `ail_check.MODULES` and
+`tools/ci_shards.json` (weight 10.0); it adds 95/96/100/199/200/201/300-character class
+names, a class literally named `_AilDeque_Foo`, item assignment wording and instance
+`__getitem__` controls on both builds.  `tools/diff_ids.py` is not present on this tree.
+
+Probes `/tmp/probes/p409_{index,slice,routes,names,controls}.py` on both builds via
+`cmp.sh` all match CPython (types, empty/negative slices, alias/argument/list-item/
+attribute/dict-value/return routes, 1/95/96/100/199/200/201/300/1000-character names,
+assignment and instance controls).  Final-state tests: test_ail_pre409,
+test_ail_pre419, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
+(5 modules, 0 failed).  `tools/update_manifest.py` was run and `--check` passes;
+`tools/ci_shards.py --update` added the module and `--check` exits 0.
 
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
