@@ -1129,47 +1129,82 @@ def _escaped_constant_statements(body, root, program_bound):
     A container stays foldable up to the first statement that may mutate it.  A read is
     load-only when it is a subscript read, an alias assignment or an argument to a pure
     builtin; a store through the name, a call, a return, iteration or any other use marks it
-    (and every alias) dynamic from that statement on.  A use inside a nested definition counts
-    at the definition statement, whose body runs no earlier than the statements after it.
-    Whether a call is a pure builtin is decided against every binding in the program, not only
-    this scope: a module or enclosing binding of ``len``/``print``/``str``/``repr`` may mutate
-    its argument.
+    (and every alias) dynamic from that statement on.  A function body runs when the function
+    is used, not at its definition, so its effects are recorded at the statement that names
+    it; a function that is never named cannot run.  Whether a call is a pure builtin is
+    decided against every binding in the program, not only this scope: a module or enclosing
+    binding of ``len``/``print``/``str``/``repr`` may mutate its argument.
     """
     pure_calls = {'len', 'print', 'str', 'repr'} - program_bound
     parents = {child: parent for parent in ast.walk(root) for child in ast.iter_child_nodes(parent)}
     owners = {id(statement): index for index, statement in enumerate(body)}
     events = [set() for _ in body]
 
-    def statement_index(node):
-        while node is not None and id(node) not in owners:
-            node = parents.get(node)
-        return owners[id(node)] if node is not None else None
+    def deferred(node):
+        parent = parents.get(node)
+        while parent is not None:
+            if isinstance(parent, ast.ClassDef):
+                return False
+            parent = parents.get(parent)
+        return True
 
-    for node in ast.walk(root):
-        if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
-            continue
+    deferred_defs = {id(node): node for node in ast.walk(root)
+                     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                     and deferred(node)}
+
+    def is_event(node):
         parent = parents.get(node)
         if (isinstance(parent, ast.Subscript) and isinstance(parent.ctx, ast.Load)
                 and (parent.value is node or parent.slice is node)):
-            continue
+            return False
         if (isinstance(parent, ast.Assign) and parent.value is node
                 and len(parent.targets) == 1 and isinstance(parent.targets[0], ast.Name)):
-            continue
+            return False
         if (isinstance(parent, ast.AnnAssign) and parent.value is node
                 and isinstance(parent.target, ast.Name)):
-            continue
+            return False
         if (isinstance(parent, ast.Call) and node in parent.args
                 and isinstance(parent.func, ast.Name) and parent.func.id in pure_calls):
-            continue
+            return False
         if (isinstance(parent, ast.Attribute) and isinstance(parent.ctx, ast.Load)
                 and parent.value is node and parent.attr == 'get'):
             call = parents.get(parent)
             if (isinstance(call, ast.Call) and call.func is parent
                     and not call.keywords and len(call.args) in (1, 2)):
+                return False
+        return True
+
+    def collect(nodes):
+        names = set()
+        stack = list(nodes)
+        while stack:
+            node = stack.pop()
+            if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and id(node) in deferred_defs):
+                args = node.args
+                stack.extend(node.decorator_list)
+                stack.extend(args.defaults)
+                stack.extend(default for default in args.kw_defaults if default is not None)
+                for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs,
+                            args.vararg, args.kwarg):
+                    if arg is not None and arg.annotation is not None:
+                        stack.append(arg.annotation)
+                if node.returns is not None:
+                    stack.append(node.returns)
                 continue
-        index = statement_index(node)
-        if index is not None:
-            events[index].add(node.id)
+            if (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)
+                    and is_event(node)):
+                names.add(node.id)
+            stack.extend(ast.iter_child_nodes(node))
+        return names
+
+    function_effects = {}
+    for node in deferred_defs.values():
+        function_effects.setdefault(node.name, set()).update(collect(node.body))
+
+    for index, statement in enumerate(body):
+        events[index] = collect([statement])
+
     aliases = {}
     for node in ast.walk(root):
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
@@ -1191,8 +1226,12 @@ def _escaped_constant_statements(body, root, program_bound):
                 if sources & names and target not in names:
                     names.add(target)
                     changed = True
+            for name in list(names):
+                for effect in function_effects.get(name, ()):
+                    if effect not in names:
+                        names.add(effect)
+                        changed = True
     return events
-
 
 def _scope_executed_nodes(statement):
     """The nodes a definition runs now: decorators, defaults and a class body, not a

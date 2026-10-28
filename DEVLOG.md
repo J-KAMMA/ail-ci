@@ -1,3 +1,26 @@
+## 2026-10-28 -- pre426: a function body mutates a module container but is never called (job-pre426-10281803)
+
+The pre417 review recorded as pre-existing on both builds the r14 shape `d = {"k": 1e300};
+def mutate(): d["k"] = 1.5; print(int(d.get("k")))`, which stopped with `integer overflow`
+where CPython prints the big integer.  `_escaped_constant_statements` walked every function
+body and attributed its names to the definition statement, so an uncalled mutation dropped
+`d` before the read was checked.  A non-method function body now contributes its effects at
+the statement that names the function (directly, through an alias or as a callback), and a
+function whose name is never used cannot run; nested functions follow their enclosing
+function.  The never-called shape is refused by name on both builds (`int() of a float
+outside int64: ... (CPython makes a big integer)`), as are an uncalled alias, a call after
+the read, a nested never-called function and a read through a function argument.  In-range
+reads, calls and callbacks before the read, and programs without the feature match CPython.
+The other review items r16 (`.keys()` before the read) and r21 (instance attribute) still
+stop with `integer overflow`; they are pre-existing and unchanged.
+
+Probes in `/tmp/probes/pre426` on both builds via `cmp.sh`: p01-p03, p06, p07, p09 and p11
+are refused by name; p02, p04, p05, p08 and p10 match CPython.  Final-state tests:
+test_ail_pre426, test_ail_pre417, test_ail_pre388, test_ail_pre322, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (7 modules, 355 s, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --update` added
+the module and `--check` exits 0.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
