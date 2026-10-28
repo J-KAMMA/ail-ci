@@ -1172,6 +1172,194 @@ def refuse_field_method_call(tree, allow_owners=False):
                           'field named %s (CPython calls the field)' % (attr, attr))
 
 
+_SCALAR_ENTRY_ANNOTATIONS = frozenset((
+    'int', 'float', 'str', 'bool', 'bytes', 'bytearray', 'complex'))
+_EFFECTFUL_ANNOTATION_NODES = (
+    ast.Call, ast.Lambda, ast.NamedExpr, ast.Await, ast.Yield, ast.YieldFrom,
+    ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _entry_annotation_effect(node):
+    """The first construct in an annotation that makes CPython do observable work when it
+    evaluates the annotation, or None for a plain type expression such as `list[int]`."""
+    for n in ast.walk(node):
+        if isinstance(n, _EFFECTFUL_ANNOTATION_NODES):
+            return n
+    return None
+
+
+def _function_annotation_effect(fn):
+    args = list(fn.args.posonlyargs) + list(fn.args.args) + list(fn.args.kwonlyargs)
+    args.extend(a for a in (fn.args.vararg, fn.args.kwarg) if a is not None)
+    for a in args:
+        if a.annotation is not None:
+            hit = _entry_annotation_effect(a.annotation)
+            if hit is not None:
+                return 'the annotation on parameter %s' % a.arg, hit
+    if fn.returns is not None:
+        hit = _entry_annotation_effect(fn.returns)
+        if hit is not None:
+            return 'the return annotation of def %s' % fn.name, hit
+    return None
+
+
+def _decorator_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _function_decorator_effect(fn):
+    for dec in fn.decorator_list:
+        if isinstance(dec, ast.Call) and _decorator_name(dec.func) in ('lru_cache', 'cache'):
+            for arg in list(dec.args) + [kw.value for kw in dec.keywords]:
+                hit = _entry_annotation_effect(arg)
+                if hit is not None:
+                    return 'an argument of the @%s decorator on def %s' % (
+                        _decorator_name(dec.func), fn.name), hit
+    return None
+
+
+def _class_base_name(node):
+    core = node.value if isinstance(node, ast.Subscript) else node
+    return core.id if isinstance(core, ast.Name) else None
+
+
+def refuse_def_only_definition_side_effects(tree):
+    """Refuse a def-only program whose module body has definition-time work the module-body path
+    cannot reproduce.
+
+    A source with no executable top-level statement (only def/class/import) is run as a module by
+    `_main_for`/`pyboxed2` when its last def takes a scalar (not the file's int64 sequence).  That
+    module body defines functions and installs class attributes, but it does not execute class-body
+    statements, evaluate annotations, apply class decorators/metaclasses or call class-creation
+    hooks.  CPython does all of those at the `class`/`def` statement, so accepting such a source
+    silently would drop output or an exception.  Refuse it by name instead; plain definitions and
+    ordinary type annotations keep compiling.  (When a top-level statement already forces the
+    module-body path, these omissions are pre-existing and are left unchanged.)
+    """
+    if not all(isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom))
+               for n in tree.body):
+        return
+    defs = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
+    classes = [n for n in tree.body if isinstance(n, ast.ClassDef)]
+    if not defs:
+        return
+    first_args = list(defs[-1].args.posonlyargs) + list(defs[-1].args.args)
+    if not first_args:
+        return
+    ann = first_args[0].annotation
+    if not (isinstance(ann, ast.Name) and ann.id in _SCALAR_ENTRY_ANNOTATIONS):
+        return
+
+    future_annotations = any(
+        isinstance(n, ast.ImportFrom) and n.module == '__future__'
+        and any(a.name == 'annotations' for a in n.names) for n in tree.body)
+    for fn in defs:
+        hit = _function_decorator_effect(fn)
+        if hit is not None:
+            what, node = hit
+            refusal = Unsupported('%s is evaluated when CPython runs the def, and this '
+                                  'def-only program compiles only its definitions' % what)
+            refusal.source_line = getattr(node, 'lineno', None)
+            raise refusal
+        if not future_annotations:
+            hit = _function_annotation_effect(fn)
+            if hit is not None:
+                what, node = hit
+                refusal = Unsupported('%s is evaluated when CPython runs the def, and this '
+                                      'def-only program compiles only its definitions' % what)
+                refusal.source_line = getattr(node, 'lineno', None)
+                raise refusal
+
+    by_name = {c.name: c for c in classes}
+    for c in classes:
+        if c.decorator_list:
+            refusal = Unsupported('a decorator on class %s (CPython applies it when the class is '
+                                  'defined)' % c.name)
+            refusal.source_line = getattr(c, 'lineno', None)
+            raise refusal
+        if c.keywords:
+            refusal = Unsupported('class keyword arguments on class %s (CPython evaluates the '
+                                  'metaclass and its options when the class is defined)' % c.name)
+            refusal.source_line = getattr(c, 'lineno', None)
+            raise refusal
+        for base in c.bases:
+            if isinstance(base, ast.Subscript):
+                hit = _entry_annotation_effect(base.slice)
+                if hit is not None:
+                    refusal = Unsupported('the base-class type arguments of class %s (CPython '
+                                          'evaluates them when the class is defined)' % c.name)
+                    refusal.source_line = getattr(hit, 'lineno', None)
+                    raise refusal
+
+    hooks = {c.name for c in classes
+             if any(isinstance(s, ast.FunctionDef) and s.name == '__init_subclass__'
+                    for s in c.body)}
+    if hooks:
+        for c in classes:
+            cur, seen = _class_base_name(c.bases[0]) if c.bases else None, set()
+            while cur is not None and cur not in seen:
+                if cur in hooks:
+                    refusal = Unsupported('class %s defines __init_subclass__, which CPython calls '
+                                          'when its subclass %s is created' % (cur, c.name))
+                    refusal.source_line = getattr(c, 'lineno', None)
+                    raise refusal
+                seen.add(cur)
+                parent = by_name.get(cur)
+                cur = _class_base_name(parent.bases[0]) if parent is not None and parent.bases else None
+
+    set_name = {c.name for c in classes
+                if any(isinstance(s, ast.FunctionDef) and s.name == '__set_name__' for s in c.body)}
+    if set_name:
+        for c in classes:
+            for item in c.body:
+                value = item.value if isinstance(item, (ast.Assign, ast.AnnAssign)) else None
+                if isinstance(value, ast.Call) and isinstance(value.func, ast.Name) \
+                        and value.func.id in set_name:
+                    refusal = Unsupported('class %s installs an instance of %s, whose __set_name__ '
+                                          'CPython calls when the class is defined'
+                                          % (c.name, value.func.id))
+                    refusal.source_line = getattr(item, 'lineno', None)
+                    raise refusal
+
+    for c in classes:
+        for item in c.body:
+            if isinstance(item, ast.Expr):
+                if isinstance(item.value, ast.Constant) and (
+                        isinstance(item.value.value, str) or item.value.value is Ellipsis):
+                    continue
+                refusal = Unsupported('the class-body statement in class %s (CPython runs it when '
+                                      'the class is defined)' % c.name)
+                refusal.source_line = getattr(item, 'lineno', None)
+                raise refusal
+            if isinstance(item, ast.FunctionDef):
+                hit = _function_decorator_effect(item)
+                if hit is not None:
+                    what, node = hit
+                    refusal = Unsupported('%s in class %s is evaluated when CPython defines '
+                                          'the class' % (what, c.name))
+                    refusal.source_line = getattr(node, 'lineno', None)
+                    raise refusal
+                if not future_annotations:
+                    hit = _function_annotation_effect(item)
+                    if hit is not None:
+                        what, node = hit
+                        refusal = Unsupported('%s in class %s is evaluated when CPython defines '
+                                              'the class' % (what, c.name))
+                        refusal.source_line = getattr(node, 'lineno', None)
+                        raise refusal
+            elif isinstance(item, ast.AnnAssign) and not future_annotations:
+                hit = _entry_annotation_effect(item.annotation)
+                if hit is not None:
+                    refusal = Unsupported('the class annotation on %s in class %s is evaluated when '
+                                          'CPython defines the class' % (item.target.id, c.name))
+                    refusal.source_line = getattr(hit, 'lineno', None)
+                    raise refusal
+
+
 def refuse_complex_pow(node):
     """`(-4.0) ** 0.5`: a negative base to a fractional power is a complex number in Python, and this
     language has no complex type. Constant operands are refused here, at compile time; any other

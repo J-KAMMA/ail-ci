@@ -2513,6 +2513,8 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _compile_cond(self, source):
         tree = ast.parse(source)
+        from pyfront import refuse_def_only_definition_side_effects
+        refuse_def_only_definition_side_effects(tree)
         self.source_has_class = any(isinstance(n, ast.ClassDef) for n in ast.walk(tree))
         import exctext
         exctext.refuse_args_item_store(tree, Unsupported)

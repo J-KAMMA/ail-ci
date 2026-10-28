@@ -46,7 +46,8 @@ import buildcache
 import shadowing
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
-from pyfront import Unsupported, fold_int_constants, to_pipeline_c, _number_constant, refuse_field_method_call
+from pyfront import (Unsupported, fold_int_constants, to_pipeline_c, _number_constant,
+                      refuse_field_method_call, refuse_def_only_definition_side_effects)
 import pyfunc
 from pyfunc import to_c as func_to_c
 from pyfunc import _module_const_scalar, module_table_refusal, _written_globals
@@ -535,6 +536,7 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
     `_rewrite_script(force=True)`)."""
     tree = ast.parse(source.strip())
     refuse_field_method_call(tree)
+    refuse_def_only_definition_side_effects(tree)
     import threadlib
     threadlib.refuse_typed(tree, Unsupported)        # G12: threads are built on the general path only
     if len(tree.body) == 1 and isinstance(tree.body[0], ast.Expr):

@@ -9,6 +9,11 @@ constant keeps it off the array-entry route) and matched CPython.
 `_main_for` now returns an inert `main` when the first parameter is not the file's int64
 sequence, so both builds run the definitions and exit 0.  An array parameter keeps its existing
 function entry point (read a file of int64 and print the result), which is checked here too.
+A def-only source whose module body has definition-time work the module-body path does not
+reproduce (class-body statements, annotation expressions, class decorators/metaclasses,
+`__init_subclass__`/`__set_name__`, a supported decorator's argument) is refused by name on both
+builds instead of silently dropping that work; class-body assignments, defaults and annotations
+behind `from __future__ import annotations` still match CPython.
 
 Every program is compared with CPython on the default build and the forced general build.
 """
@@ -102,6 +107,117 @@ ARRAY = r'''def total(values: list[int]) -> int:
     return sum(values)
 '''
 
+SIDE_EFFECT_MATCHING = {
+    'class_assignment': '''class C:
+    x = print("assign")
+
+def f(n: int) -> int:
+    return n
+''',
+    'default_call': '''def g(x=(print("d") or 1)):
+    return x
+
+def f(n: int) -> int:
+    return n
+''',
+    'future_annotations': '''from __future__ import annotations
+
+def g(x: (print("ga") or int) = 1):
+    return x
+
+def f(n: int) -> int:
+    return n
+''',
+    'plain_annotations': '''class C:
+    """doc"""
+    K = 3
+
+    def m(self, x: list[int]) -> int:
+        return x[0] + self.K
+
+def f(n: int) -> int:
+    return n
+''',
+}
+
+SIDE_EFFECT_REFUSED = {
+    'class_body_print': ("""class C:
+    print("class-body")
+
+def f(n: int) -> int:
+    return n
+""", 'the class-body statement in class C'),
+    'class_body_exit': ("""import sys
+class C:
+    sys.exit(4)
+
+def f(n: int) -> int:
+    return n
+""", 'the class-body statement in class C'),
+    'init_subclass': ("""class Base:
+    def __init_subclass__(cls):
+        print("sub")
+class C(Base):
+    pass
+def f(n: int) -> int:
+    return n
+""", '__init_subclass__'),
+    'annotation_call': ("""def g(x: (print("ga") or int) = 1):
+    return x
+def f(n: int) -> int:
+    return n
+""", 'the annotation on parameter x'),
+    'class_decorator': ("""def deco(c):
+    print("dec")
+    return c
+@deco
+class C:
+    pass
+def f(n: int) -> int:
+    return n
+""", 'a decorator on class C'),
+    'set_name': ("""class D:
+    def __set_name__(self, owner, name):
+        print("sn")
+class C:
+    x = D()
+def f(n: int) -> int:
+    return n
+""", '__set_name__'),
+    'class_annotation': ("""class C:
+    x: (print("ca") or int) = 1
+def f(n: int) -> int:
+    return n
+""", 'the class annotation on x'),
+    'method_annotation': ("""class C:
+    def m(self, x: (print("ma") or int)) -> int:
+        return x
+def f(n: int) -> int:
+    return n
+""", 'the annotation on parameter x'),
+    'return_annotation': ("""def g() -> (print("ra") or int):
+    return 1
+def f(n: int) -> int:
+    return n
+""", 'the return annotation of def g'),
+    'base_arguments': ("""class T:
+    def __class_getitem__(cls, x):
+        print("gi")
+        return cls
+class C(T[(print("arg") or 1)]):
+    pass
+def f(n: int) -> int:
+    return n
+""", 'the base-class type arguments of class C'),
+    'lru_cache_argument': ("""import functools
+@functools.lru_cache(maxsize=(print("lru") or 8))
+def g(x):
+    return x
+def f(n: int) -> int:
+    return n
+""", 'an argument of the @lru_cache decorator on def g'),
+}
+
 
 class Ex20Tests(Base):
     def test_math_example_matches_cpython(self):
@@ -112,6 +228,21 @@ class Ex20Tests(Base):
         for src in (INT, STR, BYTES, FLOAT, BOOL):
             with self.subTest(src=src.splitlines()[-2]):
                 self.assertEqual(self.same(src), b"")
+
+    def test_definition_time_side_effects_match_cpython(self):
+        for name, src in SIDE_EFFECT_MATCHING.items():
+            with self.subTest(name=name):
+                self.same(src)
+
+    def test_definition_time_side_effects_are_refused_by_name(self):
+        for name, (src, message) in SIDE_EFFECT_REFUSED.items():
+            for general in (False, True):
+                with self.subTest(name=name, general=general):
+                    built, _ = self.build(src, general)
+                    output = built.stdout + built.stderr
+                    self.assertNotEqual(built.returncode, 0, output[-1200:])
+                    self.assertIn('not in the subset', output, output[-1200:])
+                    self.assertIn(message, output, output[-1200:])
 
     def test_array_first_parameter_still_reads_the_file(self):
         path = self.dir / "p.py"
