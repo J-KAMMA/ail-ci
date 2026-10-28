@@ -200,6 +200,27 @@ them too.  `tools/diff_ids.py` is not present on
 this tree.  Final-state tests: test_ail_pre386, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
 
+## 2026-10-28 -- pre392: int() of out-of-int64 text from a container through a wrapper (job-rbpre392-10281505)
+
+Re-applied the accepted pre392 change on the current integration tree.  Its behaviour was already
+carried here by later integration work: `_Int64CallChecker.visit_Call` applies `_check_conversion`
+(both the float check and `_int_conversion_outside_int64` for text/bytes) to arguments reaching
+`int(<parameter>)`, including values resolved through `argument_containers`.  No `ail_chatgpt.py`
+delta was needed; the accepted test and its registration are added.
+
+The accepted tests cover text read from a bound container and converted by a helper's `int(v)`:
+dict value, list item, tuple negative index, int key, class/instance attribute, alias, `dict.get`
+and its default, a keyword argument, a wrapper/passthrough chain and a function-local container,
+all refused by name (`int64 constant expression out of range`) on both builds.  In-range
+text/bytes, invalid text, dynamic text, a container mutated to an in-range value, a reassigned
+binding and a helper that does not convert match CPython; the float refusal is unchanged.  A
+nested container keeps the pre-existing run-time limit.
+
+Added `AIL_CURRENT/test_ail_pre392.py` (3 tests: 14 refused programs, 7 matching programs and the
+float control, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Direct run on this tree: 3 tests, 52.9 s, OK.  `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
