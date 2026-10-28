@@ -1,3 +1,25 @@
+## 2026-10-28 -- pre420: a list/tuple index error names the instance's class (job-pre420-10281637)
+
+The pre411 review recorded as pre-existing, on both builds, that an instance without
+`__index__` used as a list or tuple index printed the runtime tag instead of the class:
+`list indices must be integers or slices, not instance` where CPython prints `not C` (and a
+subclass's name).  This was the first of its recorded items that still differed on this tree.
+The general path built that message with `ail_type_name(key.tag)`, the tag table; it now uses
+`ail__tname_c(key)`, the object-to-name helper that already serves the item errors, and the
+text is built in a dynamically sized buffer capped at 200 characters like CPython's `%.200s`
+(the old 96-byte stack buffer also truncated a long class name).
+
+Added `AIL_CURRENT/test_ail_pre420.py` (both builds) and registered it in
+`ail_check.MODULES`; it covers a list, a tuple, an empty list/tuple, a subclass, a
+210-character class name, an instance that does define `__index__`, and float/str/None keys,
+with the value reaching the subscription directly and through an argument, a list item, an
+attribute and a dict value.  Probes in `/tmp/probes` on both builds via `cmp.sh`: `p2.py`,
+`p2b.py`, `p2c.py`, `p2d.py` and `p2e.py` match CPython (the only remaining line in `p2.py` is
+the instance `KeyError` repr, whose address cannot match).  A non-int `__index__` return
+(`list indices ... not float` instead of `__index__ returned non-int (type float)`) is a
+separate pre-existing cause, left unchanged.  Final-state tests: test_ail_pre420,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
