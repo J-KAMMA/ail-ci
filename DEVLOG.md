@@ -1,3 +1,20 @@
+## 2026-10-28 -- stdlib28 review: `c` takes only bytes, `struct.error` is always defined, `pack_into` TypeError text
+
+The review of the `struct` work found three defects, now fixed.  `_ail_struct_char` accepted a
+`bytearray` where CPython raises `struct.error("char format requires a bytes object of length 1")`, so
+only a length-1 `bytes` is accepted now.  The prelude was injected only when a pack/unpack helper was
+generated, so a program that used `struct.calcsize` and then caught `struct.error` failed to build;
+the replacement of `struct.error` now marks the prelude as needed.  A non-bytearray `pack_into` buffer
+raises `TypeError("argument must be read-write bytes-like object, not <type>")` exactly as CPython does
+(it was not, and is not, a compile-time refusal).  The empty and whitespace-only format (``''``, ``' '``)
+is now built too, as CPython's zero-size format, instead of being refused as native order.  `argparse`
+(9 import sites) is still refused: its parser mutates state, prints usage and exits with CPython-specific
+messages, so it cannot be lowered to a small exact module; CLI arguments remain explicit.
+`test_ail_stdlib28` gained a fourth program for the `calcsize`-only `struct.error` case and the
+char/`pack_into` error lines; `AIL_REFERENCE_MORE.md` no longer claims the buffer case is refused by
+name.  Probes `p_char_only`, `p_error_use`, `p_pack_into_wrongbuf` and `p_empty_fmt` match CPython on
+both builds.
+
 ## 2026-10-28 -- stdlib28: `struct` pack/unpack/calcsize on a literal format (job-stdlib28-10290744)
 
 The next most-imported refused module after `tempfile` (7 import sites, but its generated names and OS

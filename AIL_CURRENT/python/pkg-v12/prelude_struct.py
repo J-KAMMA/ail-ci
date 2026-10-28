@@ -25,10 +25,8 @@ def _ail_struct_bool(v) -> bytes:
 
 
 def _ail_struct_char(v) -> bytes:
-    if isinstance(v, bytes) or isinstance(v, bytearray):
-        if len(v) != 1:
-            raise error("char format requires a bytes object of length 1")
-        return bytes(v)
+    if isinstance(v, bytes) and len(v) == 1:
+        return v
     raise error("char format requires a bytes object of length 1")
 
 
@@ -104,7 +102,7 @@ def _ail_struct_check(data, offset: int, size: int, exact: int) -> None:
 
 def _ail_struct_store(buf, offset: int, data: bytes) -> None:
     if not isinstance(buf, bytearray):
-        raise TypeError("argument 1 must be a read-write bytes-like object, not " + type(buf).__name__)
+        raise TypeError("argument must be read-write bytes-like object, not " + type(buf).__name__)
     if offset < 0:
         raise error("no space to pack " + str(len(data)) + " bytes at offset " + str(offset))
     need = offset + len(data)

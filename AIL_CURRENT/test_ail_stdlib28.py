@@ -44,6 +44,8 @@ def main() -> None:
     print(struct.pack('<3s', b'a').hex(), struct.pack('<3s', b'abcdef').hex(), struct.pack('<3s', b'').hex())
     print(struct.pack('<0s', b'abc').hex(), struct.pack('<2I', 1, 2).hex(), struct.pack('<II', 1, 2).hex())
     print(struct.pack('<2x').hex(), struct.pack('<').hex(), struct.pack('>').hex())
+    print(struct.calcsize(''), struct.calcsize(' '), struct.pack('').hex(), struct.unpack('', b''))
+    print(struct.unpack_from('', b'abc', 2))
     b = bytearray(b'0123456789abcdef')
     struct.pack_into('>I', b, 3, 0x01020304)
     print(bytes(b).hex())
@@ -120,6 +122,7 @@ def main() -> None:
     show(lambda: struct.pack('<c', b''))
     show(lambda: struct.pack('<c', b'ab'))
     show(lambda: struct.pack('<c', 'a'))
+    show(lambda: struct.pack('<c', bytearray(b'a')))
     show(lambda: struct.pack('<3s', 'abc'))
     show(lambda: struct.pack('<3s', 3))
     show(lambda: struct.unpack('<I', b'abc'))
@@ -129,9 +132,27 @@ def main() -> None:
     show(lambda: struct.unpack_from('<I', b'abcd', 4))
     show(lambda: struct.pack_into('<I', bytearray(2), 0, 1))
     show(lambda: struct.pack_into('<I', bytearray(4), -1, 1))
+    show(lambda: struct.pack_into('<I', b'01234567', 0, 1))
+    show(lambda: struct.pack_into('<I', '01234567', 0, 1))
     show(lambda: struct.pack('<B', True))
     show(lambda: struct.unpack('<?', b'\x02'))
     show(lambda: struct.unpack('<?', b'\x00'))
+
+
+main()
+'''
+
+ERROR_ONLY = r'''import struct
+
+
+def main() -> None:
+    print(struct.calcsize('<I'))
+    try:
+        x = 1 // 0
+    except struct.error as e:
+        print('struct', e)
+    except ZeroDivisionError as e:
+        print('zero', str(e))
 
 
 main()
@@ -141,6 +162,7 @@ CASES = [
     ('types', TYPES),
     ('routes', ROUTES),
     ('errors', ERRORS),
+    ('error_only', ERROR_ONLY),
 ]
 
 

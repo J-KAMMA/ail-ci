@@ -5,8 +5,8 @@ The format string has to be a literal, so the compiler parses it and knows the s
 and `calcsize` becomes the integer size.  Only the standard byte orders `<`, `>`, `!` and `=` are built (the
 native `@`, which is also the default, aligns fields and sizes `l`/`P` for the host); the integer, bool, char,
 string and pascal-string codes are built, the float codes `e`, `f` and `d` and everything else are refused by
-name.  `struct.error` is the exception the helpers raise.  `Struct`, `iter_unpack`, `pack_into` with a
-non-bytearray buffer and a format that is not a literal are refused too.
+name.  `struct.error` is the exception the helpers raise.  `Struct`, `iter_unpack` and a format that is not a
+literal are refused too; `pack_into` with a non-bytearray buffer raises CPython's TypeError.
 """
 import ast
 import hashlib
@@ -42,6 +42,8 @@ def _limits(size, signed):
 
 def _parse(fmt, node):
     """(endian, [(code, count, size, signed), ...], total size) or a refusal naming the format."""
+    if not fmt.strip():
+        return sys.byteorder, [], 0
     index = 0
     if fmt and fmt[0] in '<>=!@':
         prefix = fmt[0]
@@ -184,6 +186,7 @@ class Lower:
     def fix(self, node):
         attr = self.b.attr(node)
         if attr == 'error':
+            self.prelude = True
             return stdlib5.name('error')
         if not isinstance(node, ast.Call):
             return None

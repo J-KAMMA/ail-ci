@@ -1045,10 +1045,10 @@ slower than typed code), where operator methods dispatch on the run-time class (
 - `abc`: `ABC`, `ABCMeta`, `abstractmethod` are dropped (an abstract class can be instantiated). `array.array(tc, it)` for `b B h H i I l L q Q d`: `append extend insert pop
   remove index count reverse tolist byteswap`, indexing, `len`, iteration, range-checked values, `repr`; refused: `f`, `u`, `tobytes`, `frombytes`, `tofile`.
 - `struct`: `pack unpack unpack_from pack_into calcsize` with a literal format string and the standard orders `< > ! =`, the integer codes
-  `b B h H i I l L q Q`, `? c s p x`, repeat counts and whitespace; `struct.error` is the exception (with CPython's message). `calcsize` is folded to
+  `b B h H i I l L q Q`, `? c s p x`, repeat counts, whitespace and the empty format; `struct.error` is the exception (with CPython's message). `calcsize` is folded to
   an int and the other calls become helpers generated for that one format. Refused by name: the float codes `e f d`, the native order `@` (also the
-  default) and the native-only `n N P`, `Struct`, `iter_unpack`, a format that is not a literal, a wrong value count, and a `pack_into` buffer that is
-  not a `bytearray`.
+  default) and the native-only `n N P`, `Struct`, `iter_unpack`, a format that is not a literal, and a wrong value
+  count. A `pack_into` buffer that is not a `bytearray` raises CPython's `TypeError`.
 - `io.StringIO(text)`: `write writelines getvalue read readline readlines seek tell truncate close`, iteration, `print(.., file=buf)`. `csv.reader(io.StringIO(text))` and
   `csv.DictReader(io.StringIO(text))` read the text; `csv.writer(buf)` / `csv.DictWriter(buf, ..)` write into a StringIO; `list(csv.DictReader(..))` gives
   `list[dict[str, str]]` (general path); `json.load(io.StringIO(text))` is `json.loads(text)`.
