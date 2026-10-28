@@ -974,7 +974,7 @@
     "test_ail_owned_type_repair.py": "69c06613a1270419a92e7bbfbd18ded38fffcb613f5cf1f017df763974b741b6",
     "python/pkg-v12/callable_types.py": "403e4bc3a2186c803407ba1192a3551209d5b3659435d67633b49c30b256c5a3",
     "language_examples/integer_quantiles.ail": "f4fbb4396faa7f571470997a7fa1773f966f35de581da6604986411d3ba345e1",
-    "python/pkg-v12/cruntime.py": "e921fdc8ecb4f6e1967a1f90045ded6661e0bc9bdd938fe0e3b86649d51dec8e",
+    "python/pkg-v12/cruntime.py": "20fb7a3f4972fcecff5fc68cdae96deaf951b8d951ddf03229ad01a23827b6c4",
     "test_ail_string_field_mutation.py": "76683df6504ef82ce482a0cecef0bd5fd4c68066a7e9b349664e46d527f742c4",
     "test_ail_owned_type_details.py": "8d5c657a91b53c1e322d13686c5471f7185697d641738b26746405804286e1e5",
     "test_ail_list_expression_extend.py": "2835cffcac2a3a7c08606152c2441ad7d7c340967e94cb93b9ce9457d47e8784",
@@ -1226,7 +1226,7 @@
     "test_ail_optional_locals.py": "aa1bfbde7f5eefd181d3698629e6e6bad6583dfd6cb12ca6a1cf64f8fbe0bfff",
     "test_ail_raise_from.py": "4e66dd112d7845444f686238af999f174e91b29fb10c3d52a579cad5c54a2639",
     "test_ail_boolfield.py": "af635061d2bd405dfb2a127fb9ef50dc2335040ec6af864370e175a0e3f836f4",
-    "python/pkg-v12/dunderrt.py": "432503c679a29f8c43bb837e60d49a5dcac526157893c1a2f2e5114789d3dc1d",
+    "python/pkg-v12/dunderrt.py": "3af635d78c41a9d26661b3fcd20ff5af1dd61a8dc518752348d48802fb61b4be",
     "python/pkg-v12/enumlib.py": "743f20ac5c4e5cd9afcf633762e2f8c1b5b8a9ccc7b525d6d6a8e847ada1028f",
     "python/pkg-v12/ntlib.py": "01a9148313be99a12b173e85e1268088e49fcadc4558903402274704951e2962",
     "python/pkg-v12/prelude_array.py": "21d85806b20bde9bc6461edee51582fab194ff98208d0d2e28b23a576814c02e",
@@ -1248,7 +1248,7 @@
     "python/pkg-v12/typedforms.py": "fe3e53b8ed2252f679df37becf33c2aa138a7d5b8fe9d6f306cbfba3a43712d2",
     "test_ail_typed_blockers.py": "593dc347aa2b341b847447c429a59fb5dc3485b7b0cd9e3c4bfd17d9a2547363",
     "python/pkg-v12/prelude_bytes.py": "72a894beb1d7ec6601a2696cdb7751d27687285a0d7f75ef8ccdfa7185db3105",
-    "python/pkg-v12/safetyrt.py": "b2b799be2700eb5fa04f3a2ceb6635f2b15f7e4dbd6c223747df18e4d1103a56",
+    "python/pkg-v12/safetyrt.py": "d576aa90a69419a51c22e6aaca4ab6b53f21521778694edc15d6887e41e3406f",
     "python/pkg-v12/genlib.py": "c715c50099fb36ed537089e62ba2ce3fd773143242ae7562a22c56c49c2f3fa1",
     "python/pkg-v12/prelude_genlib.py": "3b576f3deab9e325deda129ab87c9cf9091b76c2f1dc6702987c2a0610999582",
     "test_ail_genlib.py": "23a9040671432a0f92b56904472ac6fc93ad57a131add0b1dbb51b0fa0c1c7b1",
@@ -1596,7 +1596,7 @@
     "test_ail_fuzz59.py": "d66394f07cebd6a5420af638e8e23617f1020198a5dc0a764810722232f2d69b",
     "test_ail_pre364.py": "2056a301b28313c3fce15c4044d197e87ee5566a18b7efeefeeb676a044d5330",
     "test_ail_pre371.py": "0849015b3cd485472e66409a6b62fc8c9f2e7b20cc44dcd84332216b66ea2cb4",
-    "test_ail_pre396.py": "2394e96a4ad9d100e22d16f94fcc13ecd85b2e25e38ff6226cace4a53e0ed094"
+    "test_ail_pre396.py": "61a884d2f8efab9070b38fa51b49a1cdc8a1c99b100ef7b42b830928db6fd21c"
   },
   "files": {
     "python/pkg-v12/pipeline.py": "d185d3cd067d1ca503f1fda8e2d8f415e93a0db26fbef6d4b919dd4c0b9a1251",
@@ -1641,7 +1641,7 @@
     "test_ail_owned_type_repair.py": "69c06613a1270419a92e7bbfbd18ded38fffcb613f5cf1f017df763974b741b6",
     "python/pkg-v12/callable_types.py": "403e4bc3a2186c803407ba1192a3551209d5b3659435d67633b49c30b256c5a3",
     "language_examples/integer_quantiles.ail": "f4fbb4396faa7f571470997a7fa1773f966f35de581da6604986411d3ba345e1",
-    "python/pkg-v12/cruntime.py": "e921fdc8ecb4f6e1967a1f90045ded6661e0bc9bdd938fe0e3b86649d51dec8e",
+    "python/pkg-v12/cruntime.py": "20fb7a3f4972fcecff5fc68cdae96deaf951b8d951ddf03229ad01a23827b6c4",
     "test_ail_string_field_mutation.py": "76683df6504ef82ce482a0cecef0bd5fd4c68066a7e9b349664e46d527f742c4",
     "test_ail_owned_type_details.py": "8d5c657a91b53c1e322d13686c5471f7185697d641738b26746405804286e1e5",
     "test_ail_list_expression_extend.py": "2835cffcac2a3a7c08606152c2441ad7d7c340967e94cb93b9ce9457d47e8784",
@@ -1889,7 +1889,7 @@
     "test_ail_optional_locals.py": "aa1bfbde7f5eefd181d3698629e6e6bad6583dfd6cb12ca6a1cf64f8fbe0bfff",
     "test_ail_raise_from.py": "4e66dd112d7845444f686238af999f174e91b29fb10c3d52a579cad5c54a2639",
     "test_ail_boolfield.py": "af635061d2bd405dfb2a127fb9ef50dc2335040ec6af864370e175a0e3f836f4",
-    "python/pkg-v12/dunderrt.py": "432503c679a29f8c43bb837e60d49a5dcac526157893c1a2f2e5114789d3dc1d",
+    "python/pkg-v12/dunderrt.py": "3af635d78c41a9d26661b3fcd20ff5af1dd61a8dc518752348d48802fb61b4be",
     "python/pkg-v12/enumlib.py": "743f20ac5c4e5cd9afcf633762e2f8c1b5b8a9ccc7b525d6d6a8e847ada1028f",
     "python/pkg-v12/ntlib.py": "01a9148313be99a12b173e85e1268088e49fcadc4558903402274704951e2962",
     "python/pkg-v12/prelude_array.py": "21d85806b20bde9bc6461edee51582fab194ff98208d0d2e28b23a576814c02e",
@@ -1911,7 +1911,7 @@
     "python/pkg-v12/typedforms.py": "fe3e53b8ed2252f679df37becf33c2aa138a7d5b8fe9d6f306cbfba3a43712d2",
     "test_ail_typed_blockers.py": "593dc347aa2b341b847447c429a59fb5dc3485b7b0cd9e3c4bfd17d9a2547363",
     "python/pkg-v12/prelude_bytes.py": "72a894beb1d7ec6601a2696cdb7751d27687285a0d7f75ef8ccdfa7185db3105",
-    "python/pkg-v12/safetyrt.py": "b2b799be2700eb5fa04f3a2ceb6635f2b15f7e4dbd6c223747df18e4d1103a56",
+    "python/pkg-v12/safetyrt.py": "d576aa90a69419a51c22e6aaca4ab6b53f21521778694edc15d6887e41e3406f",
     "python/pkg-v12/genlib.py": "c715c50099fb36ed537089e62ba2ce3fd773143242ae7562a22c56c49c2f3fa1",
     "python/pkg-v12/prelude_genlib.py": "3b576f3deab9e325deda129ab87c9cf9091b76c2f1dc6702987c2a0610999582",
     "test_ail_genlib.py": "23a9040671432a0f92b56904472ac6fc93ad57a131add0b1dbb51b0fa0c1c7b1",
@@ -2259,6 +2259,6 @@
     "test_ail_fuzz59.py": "d66394f07cebd6a5420af638e8e23617f1020198a5dc0a764810722232f2d69b",
     "test_ail_pre364.py": "2056a301b28313c3fce15c4044d197e87ee5566a18b7efeefeeb676a044d5330",
     "test_ail_pre371.py": "0849015b3cd485472e66409a6b62fc8c9f2e7b20cc44dcd84332216b66ea2cb4",
-    "test_ail_pre396.py": "2394e96a4ad9d100e22d16f94fcc13ecd85b2e25e38ff6226cace4a53e0ed094"
+    "test_ail_pre396.py": "61a884d2f8efab9070b38fa51b49a1cdc8a1c99b100ef7b42b830928db6fd21c"
   }
 }

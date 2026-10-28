@@ -558,6 +558,10 @@ def _edits(inplace=False):
     e.append(('    int seq_like = c.tag == AIL_T_STR || c.tag == AIL_T_TUPLE || c.tag == AIL_T_RANGE ||',
               '    if (c.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(c, AIL_D2_DELITEM); if (f) { ail_obj r; return f(cx, &r, c, key); } }\n'
               '    int seq_like = c.tag == AIL_T_STR || c.tag == AIL_T_TUPLE || c.tag == AIL_T_RANGE ||'))
+    # an instance key defining __index__ takes CPython's index-conversion path too
+    e.append(('    int index_key = key.tag == AIL_T_INT || key.tag == AIL_T_BOOL;\n',
+              '    int index_key = key.tag == AIL_T_INT || key.tag == AIL_T_BOOL ||\n'
+              '                    (key.tag == AIL_T_INST && ail_dun1(key, AIL_D1_INDEX));\n'))
     e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"',
               '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
               '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"'))

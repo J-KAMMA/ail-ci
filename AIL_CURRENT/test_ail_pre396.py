@@ -6,9 +6,11 @@ where CPython 3.12 says ``does not``.  CPython uses the ``doesn't`` form only on
 ``PySequence_DelItem``'s index-conversion path, which a sequence-like receiver (str, tuple,
 range, set, frozenset, a bytes value, a user instance) takes for an int/bool key; every
 other key uses ``PyObject_DelItem``'s ``does not``.  Both builds now pick the wording from
-the receiver kind and key, and name a builtin function / user instance as CPython does.
-List/dict deletion and a user ``__delitem__`` are unchanged; a class subscription (a
-different, untouched pre-existing item) is not covered here.
+the receiver kind and key, and name a builtin function / user instance as CPython does; an
+instance key defining ``__index__`` also takes the index path, and the message buffer sizes
+with the class name so a long name is not truncated.  List/dict deletion and a user
+``__delitem__`` are unchanged; a class subscription (a different, untouched pre-existing
+item) is not covered here.
 """
 import os
 import subprocess
@@ -226,6 +228,64 @@ try:
 except Exception as e:
     print(type(e).__name__, e)
 ''')
+
+    def test_index_instance_key(self):
+        self.check('index_instance_key', '''
+class Idx:
+    def __index__(self):
+        return 0
+
+
+class Sub(Idx):
+    pass
+
+
+class Plain:
+    pass
+
+
+def drop(o, k):
+    try:
+        del o[k]
+    except Exception as e:
+        print(type(e).__name__, e)
+
+
+for o in ["ab", (1, 2), range(2), {1}, frozenset([1]), b"ab", Plain()]:
+    drop(o, Idx())
+    drop(o, Sub())
+    drop(o, Plain())
+box = {"s": "ab", "t": (1, 2)}
+items = [range(2), {1}]
+drop(box["s"], Idx())
+drop(box["t"], Sub())
+drop(items[0], Idx())
+drop(items[1], Sub())
+
+
+class Holder:
+    pass
+
+
+h = Holder()
+h.v = b"ab"
+drop(h.v, Idx())
+''')
+
+    def test_long_class_name(self):
+        name = 'K' * 120
+        self.check('long_class_name', '''
+class %s:
+    pass
+try:
+    del %s()[0]
+except Exception as e:
+    print(type(e).__name__, e)
+try:
+    del %s()[0:1]
+except Exception as e:
+    print(type(e).__name__, e)
+''' % (name, name, name))
 
     def test_deletion_still_works(self):
         self.check('deletion_works', '''

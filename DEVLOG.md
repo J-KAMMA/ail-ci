@@ -1,3 +1,28 @@
+## 2026-10-28 -- pre396 review: index-key instances and unbounded deletion names (job-pre396-10281013)
+
+The pre396 review found two regressions from the first fix.  An instance key defining
+`__index__` takes CPython's index-conversion path, so a sequence-like receiver must still say
+`doesn't`; `ail_op_delitem` treated only an int/bool key as an index, so both builds said
+`does not` where CPython and the base tree said `doesn't`.  `dunderrt.py` now also marks a key
+instance with a `__index__` method (through `ail_dun1`) as an index key.  Second, the v2
+`ail_op_delitem` and `safetyrt.ail2s_setslice` buffers were 96 bytes, so a class name longer
+than about 55 characters truncated the whole message (including the closing quote and
+wording); both now size the message from `strlen(ail__tname_c(...))`.  A bad `__index__`
+return or an exception raised by it still differs (AIL does not call it during `del`); that
+was already true on the base tree and is unchanged here, as are the other recorded
+pre-existing items (an exception instance named `exception`, `A[0]` on a class).
+
+Probes in `/tmp/probes` on both builds (`cmp.sh`): `p_idx` (Idx / Sub / Plain keys through
+str, tuple, range, set, frozenset, bytes, an instance receiver, an argument, a list item, a
+dict value and an attribute), `p_long` (120-character class name with int and slice keys),
+`p_boundary` (bool- and negative-returning `__index__`, empty receivers, and argument / list
+item / dict value / attribute routes) and `p_long_routes` (130-character class name through
+those same routes and a slice) all match CPython; before this change the first two differed
+on both builds.  `test_ail_pre396.py` gained `test_index_instance_key` and
+`test_long_class_name` (9 tests).  Final-state tests: test_ail_pre396,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed,
+327 s).  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre396: `del` of an unsupported item uses CPython's `does not` wording (job-pre396-10281013)
 
 The pre377 review's first pre-existing item reproduced on both builds: `del None[0]`,

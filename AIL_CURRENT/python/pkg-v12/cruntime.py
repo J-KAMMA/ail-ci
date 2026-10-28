@@ -16125,11 +16125,16 @@ static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
                    c.tag == AIL_T_SET || c.tag == AIL_T_FROZENSET ||
                    c.tag == AIL_T_INST || c.tag == AIL_T_EXC;
     int index_key = key.tag == AIL_T_INT || key.tag == AIL_T_BOOL;
-    char buf[96];
-    snprintf(buf, sizeof buf, seq_like && index_key
+    const char *tn = ail__tname_c(c);
+    size_t n = strlen(tn) + 64;
+    char *buf = (char *)malloc(n);
+    if (!buf) ail_die("out of memory");
+    snprintf(buf, n, seq_like && index_key
              ? "'%s' object doesn't support item deletion"
-             : "'%s' object does not support item deletion", ail__tname_c(c));
-    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+             : "'%s' object does not support item deletion", tn);
+    ail_st st = ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    free(buf);
+    return st;
 }
 static inline ail_obj ail_range_new(ail_ctx *cx, int64_t start, int64_t stop, int64_t step); /* defined below */
 static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int has_lo, int64_t lo, int has_hi, int64_t hi, int has_step, int64_t step) {
