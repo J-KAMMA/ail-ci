@@ -4210,11 +4210,13 @@ def _refuse_load(error):
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False, ffi=None, prelower=None, int64_literals=False):
+                  notes=None, local_imports=False, ffi=None, prelower=None, int64_literals=False,
+                  postlower=None, merge_library=False):
     """Resolve source imports once and validate their shared declaration scope.
 
-    `prelower` rewrites the entry's text right after it is read (ail_export.lower for `--lib`); the
-    classes it leaves behind are then allowed in a module-only Python source.
+    `prelower` rewrites the entry's text right after it is read, `postlower` after the local modules are merged
+    into it (ail_export.lower for `--lib`); the classes they leave behind are then allowed in a module-only
+    Python source. `merge_library` lets a module-only (library) entry import its own local modules.
 
     `local_imports` lets a Python-syntax entry import sibling modules (ail_modules, stage G1): their
     bodies are merged into the entry's text before everything below sees it."""
@@ -4269,13 +4271,17 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
                 except (SyntaxError, ValueError):
                     entry_defs = None
-            if local_imports and entry and syntax == 'python' and not module_only:
+            if local_imports and entry and syntax == 'python' and (not module_only or merge_library):
                 merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
                 if merged is not None:
                     _MERGED_ENTRIES[str(path)] = merged
                     text = merged.text
                     for line in merged.notes:
                         print(line, file=sys.stderr)
+            if postlower is not None and entry:
+                text = postlower(text)
+                if merged is not None:
+                    merged.positions = {}       # the lowered text has other line numbers
             imports = []
             declarations = {}
             locations = {}
@@ -4413,7 +4419,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                                   for arg in fn.args.args):
                     contracts.append(path)
         if (module_only or not entry) and ((not tree.body and not imports) or any(not (isinstance(node, ast.FunctionDef)
-                or (syntax == 'ail' or prelower is not None) and isinstance(node, ast.ClassDef))
+                or (syntax == 'ail' or prelower is not None or postlower is not None) and isinstance(node, ast.ClassDef))
                 and not _module_constant(node) for node in tree.body)):
             raise ValueError(f'AIL module needs functions, structs, or literal constants only: {path}')
         if separate and not entry and any(
@@ -5613,9 +5619,11 @@ def main(argv=None):
             parser.error('source must be an existing .ail or .py file')
         notes = {}
         loading = native_build.loading(args) or {'source_map': {}}
-        ffi = None if library else _ffi_session(args)
+        ffi = None if library and not export_lib else _ffi_session(args)
         if export_lib and (separate or args.target):
             parser.error('--lib cannot be combined with --separate or --target')
+        if export_lib:
+            ffi.library_entry = source          # F1: local modules and @extern stubs; only the entry says @export
 
         def lower_exports(text):
             import ail_export
@@ -5624,20 +5632,32 @@ def main(argv=None):
         try:
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
-                module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,
-                prelower=lower_exports if export_lib else None, **loading)
+                module_paths=args.module_path, notes=notes, local_imports=not library or bool(export_lib), ffi=ffi,
+                postlower=lower_exports if export_lib else None, merge_library=bool(export_lib), **loading)
+            if export_lib:
+                ffi.extra_libs = list(getattr(args, 'link', None) or [])
+                ffi.refuse_shared_links(args.lib)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
         prelude_units = _PRELUDE_UNITS.get(str(source), ())
         if export_lib:
             if not output.is_dir():
                 parser.error('--lib output must be an existing directory (-o DIR)')
+            ffi_args = []
+            if ffi.decls:
+                try:
+                    ffi_object = ffi.build(ROOT / 'ail_chatgpt.py', c_api_name=args.lib + '_core')
+                except (OSError, ValueError, subprocess.SubprocessError) as error:
+                    return native_build.emit(args, {}, 2, 'ffi', str(error))
+                ffi_args = ['--object', str(ffi_object)]
+            ffi_args += ['--ffi-link=' + flag for flag in (ffi.link_args if ffi.decls else ffi._link_args())]
             with tempfile.TemporaryDirectory(prefix='ail-export-source-') as temporary:
                 prepared, manifest = Path(temporary) / 'library.py', Path(temporary) / 'exports.json'
                 prepared.write_text(source_text, encoding='utf8')
                 manifest.write_text(json.dumps(lowered['manifest']), encoding='utf8')
                 result = native_build.invoke(args, [sys.executable, '-B', str(ROOT/'python/pkg-v12/c_export.py'),
-                                       str(prepared), '--manifest', str(manifest), '--name', args.lib, '-o', str(output)],
+                                       str(prepared), '--manifest', str(manifest), '--name', args.lib, '-o', str(output),
+                                       *ffi_args],
                                       temporary, timeout=240)
                 if not native_build.enabled(args):
                     return result.returncode
