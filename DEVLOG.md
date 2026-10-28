@@ -1,3 +1,24 @@
+## 2026-10-28 -- pre422: an exception instance names its class in slice errors (job-pre422-10281644)
+
+The pre414 review recorded that its ``deletion ... of an item`` wording was too broad: slice
+deletion still took the old path, and ``del MyErr()[0:1]`` printed
+``'exception' object does not support item deletion`` on both builds where CPython prints
+``'MyErr' object does not support item deletion``.  The slice assignment/deletion path is
+``safetyrt.SLICE``'s ``ail2s_setslice``, whose non-list message used ``ail_type_name(c.tag)``
+(the tag name) instead of the object-to-name helper the item path took in pre414.  It now
+calls ``ail__raise_item_tname``, so exception instances and subclasses, ordinary instances and
+builtin names match CPython for deletion and assignment, directly and through an alias, an
+argument, a list item, an attribute and a dict value, with empty/``None``/negative bounds and
+CPython's 200-character name cap.  The item path itself is unchanged.
+
+Probes in ``/tmp/probes/pre422`` on both builds via ``cmp.sh``: ``p_slice_del.py``,
+``p_slice_routes.py``, ``p_slice_builtins.py``, ``p_slice_more.py``, ``p_slice_long.py`` and
+``p_slice_uncaught.py`` match CPython (the first two differed on both builds before the
+change).  Added ``AIL_CURRENT/test_ail_pre422.py`` (2 tests, 3 programs, both builds) and
+registered it in ``ail_check.MODULES`` and ``tools/ci_shards.json``.  Final-state tests:
+test_ail_pre422, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+``tools/update_manifest.py`` was run and ``--check`` passes.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
