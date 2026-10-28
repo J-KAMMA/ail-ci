@@ -1,3 +1,13 @@
+## 2026-10-28 -- stdlib batch 6: `struct` pack / unpack / unpack_from / calcsize (job-stdlib19-10290445)
+
+Added the `struct` lowering (`structlib.py`) onto a Python prelude (`prelude_struct.py`) and registered
+`test_ail_stdlib19.py`. Formats x c b B ? h H i I l L q Q n N P s are built in every byte order,
+including native alignment, zero repeat counts, str/bytes formats, bytearray `s` values and buffers,
+and CPython 3.12's negative `unpack_from` offsets and error texts. Float/Pascal formats, `Struct`,
+`pack_into` and a computed `unpack` format stay named compile-time refusals. The new module passes on
+both builds; the probes in /tmp/probes compare boundaries, zero-count alignment, buffers, offsets,
+routes and refusals with CPython 3.12. `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C

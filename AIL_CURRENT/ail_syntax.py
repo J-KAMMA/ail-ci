@@ -3406,7 +3406,7 @@ def python_surface(source, notes=None, library=False):
     if any(name in source for name in ("threading", "queue", "concurrent")):
         source = _threadlib().rewrite_text(source, notes)
     if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
-                                       "abc", "array", "Random", "string", "io", "statistics")):
+                                       "abc", "array", "Random", "string", "io", "statistics", "struct")):
         source = _stdlib5().rewrite_text(source, notes)
     if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "time", "zoneinfo")):
         source = _stdlib4().rewrite_text(source, notes)
@@ -3444,6 +3444,6 @@ def python_wording(message):
         return '`' + code + '`'
     message = re.sub(r'`([^`\n]*)`', snippet, message)
     message = re.sub(r'\ba let\b', 'an assignment', message)
-    message = re.sub(r'(?<!C )\bstructs\b', 'class instances', message)
-    message = re.sub(r'(?<!C )\bstruct\b', 'class', message)
+    message = re.sub(r'(?<!C )\bstructs\b(?!\.)', 'class instances', message)
+    message = re.sub(r'(?<!C )\bstruct\b(?!\.)', 'class', message)
     return message
