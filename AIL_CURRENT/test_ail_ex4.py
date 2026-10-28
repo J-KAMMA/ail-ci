@@ -25,15 +25,15 @@ def cpython(directory, source):
     return done.stdout.replace(b'\r\n', b'\n'), done.returncode
 
 
-def build(directory, name, mode):
+def build(directory, name, mode, argument=None):
     source = Path(directory, name + '.py')
-    exe = Path(directory, 'exe_' + name + ('_g' if mode == 'general' else '_d'))
+    exe = Path(directory, 'exe_' + name.replace('/', '_') + ('_g' if mode == 'general' else '_d'))
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
     env.pop('AIL_NO_GENERAL', None)
     env.pop('AIL_UNIFIED_FORCE', None)
     if mode == 'general':
         env['AIL_UNIFIED_FORCE'] = '1'
-    done = subprocess.run([sys.executable, '-B', CHATGPT, 'compile', source.name, '--syntax', 'python',
+    done = subprocess.run([sys.executable, '-B', CHATGPT, 'compile', argument or source.name, '--syntax', 'python',
                            '-o', exe.name], cwd=directory, capture_output=True, text=True, timeout=900, env=env)
     return exe, done
 
@@ -69,6 +69,21 @@ print(SOURCE.suffix)
 print(SOURCE.resolve().name)
 print(__file__ == str(SOURCE))
 ''')
+
+    def test_argument_spelling(self):
+        for argument in ('./sub/main.py', 'sub//main.py'):
+            with self.subTest(argument=argument), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory, 'sub', 'main.py')
+                path.parent.mkdir()
+                path.write_text('print(__file__)\n', encoding='utf-8')
+                want, want_status = cpython(directory, argument)
+                for mode in ('default', 'general'):
+                    with self.subTest(mode=mode):
+                        exe, built = build(directory, 'sub/main', mode, argument=argument)
+                        self.assertEqual(built.returncode, 0, (built.stdout + built.stderr)[-2000:])
+                        got = run([str(exe)], directory)
+                        self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want)
+                        self.assertEqual(got.returncode, want_status)
 
     def test_shadowed_name(self):
         self.check('shadow', '''def show(__file__):

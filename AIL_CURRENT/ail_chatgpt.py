@@ -4205,6 +4205,14 @@ def _refuse_load(error):
     raise SystemExit(2)
 
 
+class _SourcePathAction(argparse.Action):
+    """Keep a source argument's spelling so `__file__` can match CPython's argv text."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, Path(values))
+        setattr(namespace, self.dest + '_text', values)
+
+
 def _script_file_text(path):
     """CPython 3.12's `__file__` text for a script: the given path, made absolute without resolving it."""
     text = str(path)
@@ -4938,7 +4946,7 @@ def _source_check(args):
                 raise ValueError('invalid bundled API manifest: sdk_files must be a list of paths')
             if 'language_examples/' + name + '.ail' not in selected:
                 raise ValueError('unknown bundled API module: ' + name)
-        source_display = _script_file_text(source)
+        source_display = _script_file_text(getattr(args, 'source_text', source))
         source = source.resolve()
         original = source.read_bytes()
         report['source_sha256'] = hashlib.sha256(original).hexdigest()
@@ -5301,7 +5309,7 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     check_cmd = sub.add_parser('check', help='strict source/type check without a C build; exit 0 passed, 1 source error, 2 configuration/I/O/dependency')
-    check_cmd.add_argument('source', type=Path)
+    check_cmd.add_argument('source', action=_SourcePathAction)
     check_cmd.add_argument('--syntax', choices=('auto', 'ail', 'python'), default='auto')
     check_cmd.add_argument('-I', '--module-path', action='append', type=Path, default=[])
     check_cmd.add_argument('--module', action='append', type=Path, default=[])
@@ -5364,7 +5372,7 @@ def main(argv=None):
     build_http_cmd.add_argument('-o', '--output', required=True, type=Path)
     build_http_cmd.add_argument('--compare', action='store_true')
     compile_cmd = sub.add_parser('compile', help='compile AIL source to a standalone executable')
-    compile_cmd.add_argument('source', type=Path)
+    compile_cmd.add_argument('source', action=_SourcePathAction)
     compile_cmd.add_argument('-o', '--output', required=True, type=Path)
     compile_cmd.add_argument('--module', action='append', type=Path, default=[],
         help='additional .ail file containing functions and literal numeric constants')
@@ -5636,7 +5644,7 @@ def main(argv=None):
         lowered = {}
         objects = getattr(args, 'object', [])
         separate = getattr(args, 'separate', False)
-        source_display = _script_file_text(args.source)
+        source_display = _script_file_text(getattr(args, 'source_text', args.source))
         source = args.source.resolve()
         output = Path(os.path.abspath(args.output))
         if sys.version_info < (3, 10):

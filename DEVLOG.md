@@ -1,3 +1,13 @@
+## 2026-10-28 -- ex4 review: keep the source argument's spelling in `__file__` (job-ex4-10290218)
+
+The review found that `compile ./sub/main.py` reported a different `__file__` from CPython 3.12:
+`compile` declared its source as `type=Path`, so the leading `./` was already gone before
+`_script_file_text` saw the path.  The `compile` and `check` source arguments now use
+`_SourcePathAction`, which keeps the raw argument text beside the `Path`, and `__file__` is built
+from that spelling.  `./sub/main.py`, `sub//main.py`, `./link.py`, `sub/../sub/main.py` and an
+absolute path now all match CPython on both builds, including a package whose modules report their
+own path.  `test_ail_ex4.test_argument_spelling` pins `./sub/main.py` and `sub//main.py`.
+
 ## 2026-10-28 -- ex4: Python-syntax programs know `__file__` (job-ex4-10290218)
 
 The Python-syntax front end refused `__file__`, the refusal that blocked the most `.py` examples
