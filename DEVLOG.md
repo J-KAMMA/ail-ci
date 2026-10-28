@@ -1,3 +1,28 @@
+## 2026-10-28 -- pre415 review: routed powers in dead code and in mutated containers (job-pre415-10281318)
+
+The pre415 review found two false refusals in the routed-power check.  First, a parameter list
+mutated before the call (`a[1] = 3`, `a[:] = [2, 3]`, `alias[1] = 3`, `a.append(...)`, or a
+helper call such as `mutate(a)`) was still folded at its call-site value, so an in-range call
+was refused; the check now treats every call and every subscript store/delete in the function
+as an effect site and drops list/dict arguments whose effect runs before the call (the call
+itself and its enclosing calls are excluded, and a site in a loop counts for every node in that
+loop).  Tuples stay foldable, as they cannot change.  Second, a constant call that only sits in
+unreachable code was refused; a literal-false `if`/`while`/empty `for` body, the else branch of a
+literal-true `if`, the else of `while True`, and statements after `return`, `raise`, `break` or
+`continue` are now marked dead and skipped, at module scope and in function bodies.
+
+Probes in `/tmp/probes` on both builds: 5 refusal probes (original starred tuple, positional
+power, a call after the call-site mutation, a power inside an enclosing `print`, a power inside
+a loop) are refused by name; 15 matching probes cover item, slice, alias, method and helper-call
+mutation before the call, dead `if False`/`while False`/empty `for`/empty literals/after return,
+the true branch's else, in-range starred calls, container sources (list item, class attribute,
+dict value, wrapper argument), float/bool/negative operands and module-level mutation before the
+call.  One probe (a module list mutated after the call) traps on both this tree and the base
+build; that is the pre-existing item the review already recorded and is unchanged.  The new
+cases are in `test_ail_pre415`.  Final-state tests: test_ail_pre415, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-28 -- pre415: a power routed through a starred call argument is refused by name (job-pre415-10281318)
 
 The pre400 review's first pre-existing item, a `**kwargs` call, is already refused by name on

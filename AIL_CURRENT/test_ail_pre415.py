@@ -8,9 +8,11 @@ list item, a class attribute, a dict value or a wrapper argument) as well as ord
 and positional arguments, so an out-of-int64 constant result is refused by name.
 
 In-range starred calls, int64 boundaries, float/bool/negative exponents, safe bases, a mutation
-before the call, a callee that stores to its parameter before the power and a non-power call
-still match CPython.  The review's first item, a ``**kwargs`` call, is already refused by name
-on both builds and is pinned here.
+before the call (by item, by slice, by alias, by a mutating method or through a helper call), a
+callee that stores to its parameter before the power and a non-power call still match CPython.
+A constant call that only sits in code no execution can reach (``if False``, ``while False``,
+an empty ``for``, after a ``return``) is not refused, as on the base build.  The review's first
+item, a ``**kwargs`` call, is already refused by name on both builds and is pinned here.
 """
 import os
 import subprocess
@@ -106,6 +108,35 @@ def stored(a):
     return power(*a)
 
 
+def mutate(x):
+    x[1] = 3
+
+
+def item_mutated(a):
+    a[1] = 3
+    return power(*a)
+
+
+def slice_mutated(a):
+    a[:] = [2, 3]
+    return power(*a)
+
+
+def via_helper(a):
+    mutate(a)
+    return power(*a)
+
+
+def dead():
+    if False:
+        return power(2, 100)
+    while False:
+        pass
+    for unused in ():
+        power(2, 100)
+    return 'done'
+
+
 class Box:
     args = (2, 10)
 
@@ -125,6 +156,11 @@ print(power(*(0, 10 ** 6)), power(*(1, 10 ** 6)), power(*(-1, 10 ** 6)))
 print(power(*mutated))
 print(power(b=2, e=10), power(2, e=10))
 print(assign(2, 100), loop(2, 100), stored((2, 100)))
+print(item_mutated([2, 10]), slice_mutated([2, 10]), via_helper([2, 10]), dead())
+if False:
+    print(power(2, 100))
+for unused in ():
+    print(power(2, 100))
 '''
 
 
