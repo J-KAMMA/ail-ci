@@ -2086,29 +2086,37 @@ class _Surface:
             if text is not None and isinstance(text, bytes) != program.is_bytes:
                 self.re_refuse(node, name, 'a bytes pattern needs a bytes replacement and a str pattern a str one')
                 return None
-            if text is not None and (b'\\' if program.is_bytes else '\\') in text:
+            if text is not None:
+                if (b'\\' if program.is_bytes else '\\') in text:
+                    if counted:
+                        self.re_refuse(node, name, 'subn with a replacement template that has a backslash is not built')
+                        return None
+                    try:
+                        function = lib.sub_function(index, text)
+                    except _relib().ReRefused as exc:
+                        self.re_refuse(node, name, f'the replacement {text!r} is not built: {exc}')
+                        return None
+                    return call(function, subject, count)
                 if counted:
-                    self.re_refuse(node, name, 'subn with a replacement template that has a backslash is not built')
-                    return None
-                try:
-                    function = lib.sub_function(index, text)
-                except _relib().ReRefused as exc:
-                    self.re_refuse(node, name, f'the replacement {text!r} is not built: {exc}')
-                    return None
-                return call(function, subject, count)
-            if text is None and not (isinstance(repl, (ast.Name, ast.Attribute, ast.Subscript, ast.JoinedStr,
-                                                       ast.BinOp, ast.Call, ast.Lambda))):
-                self.re_refuse(node, name, 'a function (or lambda) as the replacement is not built')
-                return None
+                    return call(lib.sub_callable(index, True, True), subject, repl, count)
+                return call('_ail_re_sublit' + sfx, table, subject, repl, count)
             if isinstance(repl, ast.Name) and repl.id in self.ambiguous_names:
                 self.re_refuse(node, name, f'the replacement {repl.id!r} is both a function and a variable in this program')
+                return None
+            if isinstance(repl, ast.Attribute) and not (isinstance(repl.value, ast.Name)
+                                                        and repl.value.id in self.classes):
+                self.re_refuse(node, name, 'a replacement read through an attribute is not built: an attribute of an '
+                               'instance would have to bind the instance before it is called')
                 return None
             if isinstance(repl, ast.Lambda) or (isinstance(repl, ast.Name) and repl.id in self.callable_names):
                 # a callable replacement: called with each Match, its result is the replacement text
                 return call(lib.sub_callable(index, counted), subject, repl, count)
             if counted:
-                return call(lib.sub_callable(index, True, True), subject, repl, count)
-            return call('_ail_re_sublit' + sfx, table, subject, repl, count)
+                self.re_refuse(node, name, 'subn with a replacement whose kind is not known at build time is not built')
+                return None
+            # its kind is not known here (a name rebound to either, a list item, an argument, an attribute ...):
+            # the helper decides between a template and a callable at run time, as CPython does
+            return call(lib.sub_any(index), subject, repl, count)
         return None
 
     def re_call(self, node, name):

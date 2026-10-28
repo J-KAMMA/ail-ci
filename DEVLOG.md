@@ -1,3 +1,36 @@
+## 2026-10-28 -- fz196: re.sub callable replacement and negative re counts (job-fz196-10282142)
+
+The real-program check (`lab/profile/run.py programs`) compiled the corpus program
+`deepseek-v4.1-flash-free/t196.py` on its older compiler snapshot and got exit 1 with
+`TypeError: argument of type 'function' is not iterable` where CPython prints the masked
+lines.  The cause is a callable replacement annotated `re.Match[str]`: the re surface sent
+anything that was not a bare module-level `def` name to `_ail_re_sublit`, whose
+`"\\\\" in repl` test then iterated the function.  The exported integration tree already
+routes a bare def name through `sub_callable`, so t196 itself matches CPython on both
+builds here; the same path was still wrong for an alias, a list item, a dict value, an
+argument, a function result and a class attribute.
+
+`ail_syntax.py` now records a known template or a known callable as before, refuses an
+instance attribute by name (the runtime does not bind the instance for a function stored in
+a class body) and a `subn` whose replacement kind is unknown, and otherwise emits the new
+`relib.Library.sub_any` helper, which checks `callable(repl)` at run time and dispatches
+between the callable loop and `_ail_re_sublit`.  The same audit found that CPython leaves
+the subject alone for a negative `count` in `sub`/`subn` and a negative `maxsplit` in
+`split`; the four helpers tested `> 0` and treated negatives as unlimited.  They now test
+`!= 0`.
+
+Probes in `/tmp/probes/fz196` on both builds via `cmp.sh`: `p01_exact` (the t196 lines),
+`p02_direct/alias/item/dict/arg/localdef` (callable routes, all match), `p02f_classfunc`
+(class attribute, matches), `p02_classattr` (instance attribute, refused by name),
+`p03_none_count`, `p05_bytes`, `p06_phone_tricky`, `p07_receiver_sub`, `p09_counts_split`,
+`p11_bytes_dyn`, `p12_subn_routes` (alias subn, refused by name) all match CPython or are
+refused by name; `p04_groups_named` is refused by name for `.span()`, and `p10_dynamic_string`
+is refused by name for the bad template `\\\\1` (CPython exits 1 too).  Added
+`AIL_CURRENT/test_ail_fz196.py` (7 tests) and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`; `tools/update_manifest.py` and `--check` pass.  Final-state tests:
+test_ail_fz196, test_ail_re, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (5 modules, 0 failed).
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
