@@ -156,6 +156,38 @@ Added `AIL_CURRENT/test_ail_pre428.py` (7 tests, both builds) and registered it 
 `ail_check.MODULES` and `tools/ci_shards.json`.  `tools/update_manifest.py` and `--check` pass;
 `tools/ci_shards.py --check` passes.  Final-state tests: test_ail_pre428, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3, plus test_ail_left1 (multiplication errors).
+## 2026-10-28 -- pre429: the general path's wide `round()` is catchable (job-pre429-10281932)
+
+The fz2 review recorded, as pre-existing on both base and HEAD, that the general path's
+one-argument `round()` of a finite float outside int64 stopped through `ail_hit_limit`
+(AIL_LIMIT), which no `try` could see, while the typed path's `integer overflow` stop (fz2)
+is catchable as OverflowError when a handler is active.  `ail_bi_round` in the v2 runtime now
+raises `OverflowError("integer overflow")` through the ordinary status-based exception path
+instead of the AIL_LIMIT stop; `round(x, n)` and the typed path are unchanged, and a constant
+wide value keeps pre54's compile-time refusal.
+
+On both builds `except OverflowError`, `except Exception` and a bare `except` now catch the
+wide value; an `except` clause's `finally` runs; a `finally`-only handler runs and lets the
+exception propagate (exit 1); an unmatched `except ValueError` reports `OverflowError: integer
+overflow` (exit 1); and a value reaching through an argument, a list item, an attribute, a
+dict value, an alias and a runtime-grown float is caught alike.  In-range floats/int/bool and
+NaN/Infinity match CPython.  An uncaught wide value outside any try keeps exit 1 and the
+"integer overflow" text, which the general build now prefixes with `OverflowError:` (the
+typed build prints the bare text when no handler was active at the call); CPython's exact big
+integer is the declared int64 difference (C74/A1), so the wide probes are checked as the
+declared stop, not against CPython's value.
+
+Probes in `/tmp/probes/pre429` on both builds via `cmp.sh`: `q01`-`q13` and `t01`-`t07` cover
+caught/uncaught, except OverflowError/Exception/bare/ValueError, finally, negative, dynamic,
+argument/list/attribute/dict/alias routes, in-range floats/int/bool and NaN/Inf; every catch
+case is byte-identical between the two builds (stdout and exit 0), every uncaught case is
+exit 1 with "integer overflow" (and no `AIL limit`), and `p11` (`round(1e20)` constant) is
+refused by name on both builds.  Added `AIL_CURRENT/test_ail_pre429.py` (7 tests, four modes:
+default/IR and general/IR).  Registered it in `ail_check.MODULES` and `tools/ci_shards.json`,
+and added DIFFERENCES row `C?-job-pre429-10281932-1`.  Final-state tests: test_ail_pre429,
+test_ail_fz2, test_ail_pre104, test_ail_pre54, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (7 modules, 353 s, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --check` exits 0.
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
