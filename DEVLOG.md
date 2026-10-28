@@ -1,3 +1,26 @@
+## 2026-10-28 -- ex19: a definition-only Python module runs nothing (job-ex19-10290511)
+
+`AIL_CURRENT/language_examples/math.ail` (a module constant and `def sum_to(n)`) was the only
+Python-syntax example still refused by the default build: `not in the subset: the first parameter
+must be the sequence read from the file`, because the typed path treats the last definition as a
+file-reading entry point.  Running the example with CPython prints nothing and exits 0.  The
+typed `_main_for` now emits a no-op `main` when the entry's first parameter is not the array, and
+the general path (`pyboxed2.py`) uses the same signature inference before choosing its array
+entry, so an annotated scalar (`def increment(x: int)`) no longer prints `usage: tool FILE`.
+The sequence entry and top-level calls are unchanged; a zero-parameter last function keeps its
+old behaviour.
+
+Probes in `/tmp/probes/ex19` on both builds via `cmp.sh`: `p_const_scalar_def`,
+`p_scalar_def`, `p_float_def`, `p_str_def`, `p_scalar_def_after_const`, `p_two_defs_scalar`,
+`p_scalar_def_and_print` match CPython (exit 0, empty stdout for the definition-only ones).
+`p_scalar_def_then_assign` still refuses on the default build by name and `p_zero_def` keeps the
+pre-existing zero-parameter refusal/link failure.  Not changed: `integer_series.ail` still prints
+`usage: tool FILE` and exits 2 on both builds where CPython prints nothing (its last parameter is
+the input sequence, the legacy pipeline convention).  Final-state tests: test_ail_ex19,
+test_ail_python_syntax, test_ail_reference_examples, test_ail_lang_gaps, test_ail_short_style_traps,
+test_ail_fallback_note, test_ail_builtin_shadowing, test_ail_pre165, test_ail_pre218,
+test_ail_pre44, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

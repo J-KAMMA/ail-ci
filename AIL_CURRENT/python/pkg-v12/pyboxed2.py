@@ -2708,7 +2708,19 @@ class Compiler(boxclosure.ClosureMixin):
         # below) would compile such a source into a program that runs NO code at all (nothing
         # at module scope calls the function) -- silently printing nothing, exactly the
         # `test_io` "print() of a dict [general path]" failure this fixes.
-        array_entry = self.functions[fn_order[-1]] if (not has_toplevel_exec and fn_order) else None
+        array_entry = None
+        if not has_toplevel_exec and fn_order:
+            candidate = self.functions[fn_order[-1]]
+            try:
+                kinds = pyfunc._param_kinds(candidate['node'], set(self.classes))
+            except Exception:
+                kinds = None
+            # A first parameter that is a scalar says this source is a module, not a file-reading
+            # program (`math.ail`'s `def sum_to(n)`): CPython runs no function when the file is run
+            # directly, so call nothing.  No parameters keep the long-standing auto-call of a
+            # zero-argument last function, and an unreadable signature keeps the old behaviour.
+            if kinds is None or not kinds or kinds[0][1] == 'array':
+                array_entry = candidate
 
         main_ctx = Ctx('<module>')
         main_ctx.fn_node = tree
