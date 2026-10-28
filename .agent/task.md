@@ -1,6 +1,6 @@
-**Re-apply an accepted change on top of the current tree.** Job `pre406` was accepted, but its diff no longer applies here. Fetch it anonymously: `git fetch https://github.com/J-KAMMA/ail-ci.git job-pre406-10281122`. Its change is `git diff a17568a089bbefe26b075c290f9793fc478b3f2b FETCH_HEAD -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json'`.
+**Your change fails tests on top of the current integration branch.** Applied alone on today's integ, one or more of these test modules fail: test_ail_pre406 test_ail_safetynet.
 
-Apply the same change to this tree, resolving conflicts by keeping both sides' fixes. Then run `python3 tools/diff_ids.py` and `python3 tools/update_manifest.py`, run the test modules the change touches plus `test_ail_safetynet`, and commit. Change nothing else.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find why it fails here (another change may have altered behaviour or output your test expects), and fix it so they pass while keeping your fix and its test. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
