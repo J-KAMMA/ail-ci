@@ -11502,6 +11502,7 @@ class Compiler(boxclosure.ClosureMixin):
         has_finally = bool(node.finalbody)
         catch = ctx.new_label('catch')
         end = ctx.new_label('tryend')
+        else_label = ctx.new_label('tryelse') if node.orelse else None
         ctx.try_stack.append({'catch': catch})
         fin_label = None
         if has_finally:
@@ -11511,9 +11512,13 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('{')
         ctx.indent += 1
         self.block(node.body, ctx)
-        self.block(node.orelse, ctx)
         ctx.indent -= 1
-        if has_finally:
+        if else_label is not None:
+            # `else` runs only after the body completes normally, and an exception raised in
+            # it must reach an OUTER handler, never one of this try's own. Jump over the
+            # handler dispatch to the else label emitted below.
+            ctx.emit('goto %s;' % else_label)
+        elif has_finally:
             ctx.emit('comp = AIL_COMPLETE_NORMAL;')
             ctx.uses_comp = True
             ctx.emit('goto %s;' % fin_label)
@@ -11615,6 +11620,14 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('goto %s;' % fin_label)
         ctx.indent -= 1
 
+        if else_label is not None and not has_finally:
+            ctx.emit('goto %s;' % end)      # a matched handler does not run `else`
+            ctx.lines.append('%s: ;' % else_label)
+            ctx.indent += 1
+            self.block(node.orelse, ctx)
+            ctx.emit('goto %s;' % end)
+            ctx.indent -= 1
+
         if has_finally:
             ctx.try_stack.pop()  # the handler-body trampoline pushed above
             ctx.lines.append('%s: ;' % trampoline)
@@ -11623,6 +11636,17 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('comp = AIL_COMPLETE_EXC;')
             ctx.emit('goto %s;' % fin_label)
             ctx.indent -= 1
+            if else_label is not None:
+                # `finally` is still on the stack, so a return/break in the else body runs it;
+                # a new exception goes through the trampoline above (comp=EXC).
+                ctx.try_stack.append({'catch': trampoline})
+                ctx.lines.append('%s: ;' % else_label)
+                ctx.indent += 1
+                self.block(node.orelse, ctx)
+                ctx.emit('comp = AIL_COMPLETE_NORMAL;')
+                ctx.emit('goto %s;' % fin_label)
+                ctx.indent -= 1
+                ctx.try_stack.pop()
             ctx.finally_stack.pop()
             ctx.lines.append('%s: ;' % fin_label)
             ctx.indent += 1

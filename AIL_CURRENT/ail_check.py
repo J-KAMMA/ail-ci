@@ -296,6 +296,7 @@ MODULES = (
     'test_ail_utf8_stream_fuzz',
     'test_ail_pre75',
     'test_ail_pre57',
+    'test_ail_fz1',
 )
 
 
