@@ -429,6 +429,14 @@ class _KnownInstance:
         self.arguments = arguments or {}
 
 
+class _KnownBytearray:
+    """A bytearray built from a literal, kept as its bytes for constant ``int()`` checks."""
+    __slots__ = ('data',)
+
+    def __init__(self, data):
+        self.data = data
+
+
 class _KnownClassAttributes:
     def __init__(self, classes, aliases):
         self.classes = classes
@@ -599,6 +607,18 @@ def _known_class_attributes(tree, module_known):
                 setattr_names.add(node.args[1].value)
             else:
                 dynamic_setattr = True
+    mutated_attrs = set()
+    for node in ast.walk(tree):
+        base = None
+        if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            base = node.value
+        elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Attribute)):
+            base = node.func.value
+        while isinstance(base, ast.Subscript):
+            base = base.value
+        if isinstance(base, ast.Attribute):
+            mutated_attrs.add(base.attr)
     classes = {}
     for name, node in class_nodes.items():
         base = base_names[name]
@@ -636,7 +656,10 @@ def _known_class_attributes(tree, module_known):
             value = _constant_value(value_node, lambda n: module_known.get(n, _UNKNOWN),
                                     lambda unused: True, {})
             if value is not _UNKNOWN:
-                info['class'][target] = value
+                if isinstance(value, _KnownBytearray) and target in mutated_attrs:
+                    info['unsafe'].add(target)
+                else:
+                    info['class'][target] = value
         if init is not None:
             info['instance'] = {}
             info['instance_param'] = {}
@@ -683,6 +706,8 @@ def _known_class_attributes(tree, module_known):
             if parameter is not None:
                 info['instance_param'][attr] = parameter
             elif value is _UNKNOWN:
+                info['unsafe'].add(attr)
+            elif isinstance(value, _KnownBytearray) and attr in mutated_attrs:
                 info['unsafe'].add(attr)
             else:
                 info['instance'][attr] = value
@@ -811,6 +836,15 @@ def _constant_value(node, lookup, global_name, passthrough, attributes=None):
                                            attributes)
         return _UNKNOWN
     if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and isinstance(node.func.ctx, ast.Load) and node.func.id == 'bytearray'
+            and global_name(node.func.id) and not node.keywords and len(node.args) <= 1):
+        if not node.args:
+            return _KnownBytearray(b'')
+        value = _constant_value(node.args[0], lookup, global_name, passthrough, attributes)
+        if type(value) is bytes:
+            return _KnownBytearray(value)
+        return _UNKNOWN
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and isinstance(node.func.ctx, ast.Load) and not node.keywords
             and node.func.id.startswith('_AilT_')):
         values = []
@@ -850,6 +884,8 @@ def _outside_int64_float(value):
 def _int_conversion_outside_int64(value):
     if type(value) is int:
         return value if not _INT64_MIN <= value <= _INT64_MAX else None
+    if isinstance(value, _KnownBytearray):
+        value = value.data
     if isinstance(value, (str, bytes)):
         try:
             converted = int(value, 10)
@@ -1021,13 +1057,17 @@ def _escaped_constant_names(root, program_bound):
     pure builtin is decided against every binding in the program, not only this scope: a
     module or enclosing binding of ``len``/``print``/``str``/``repr`` may mutate its argument.
     """
-    pure_calls = {'len', 'print', 'str', 'repr'} - program_bound
+    pure_calls = {'len', 'print', 'str', 'repr', 'int'} - program_bound
     parents = {child: parent for parent in ast.walk(root) for child in ast.iter_child_nodes(parent)}
     escaped = set()
     for node in ast.walk(root):
         if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
             continue
         parent = parents.get(node)
+        if (isinstance(parent, (ast.Subscript, ast.Attribute))
+                and isinstance(parent.ctx, (ast.Store, ast.Del)) and parent.value is node):
+            escaped.add(node.id)
+            continue
         if (isinstance(parent, ast.Subscript) and isinstance(parent.ctx, ast.Load)
                 and (parent.value is node or parent.slice is node)):
             continue
@@ -1102,7 +1142,9 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
             continue
         value = _constant_value(value_node, lambda item: local.get(item, _UNKNOWN),
                                 lambda unused: True, {})
-        if _flat_constant_container(value):
+        if isinstance(value, _KnownBytearray):
+            local[name] = value
+        elif _flat_constant_container(value):
             local[name] = value
     add_scalars()
     return local
@@ -1129,6 +1171,12 @@ class _Int64CallChecker(ast.NodeVisitor):
         return _constant_value(node, self._lookup, self._global_name, self.passthrough,
                                self.attributes)
 
+    def _int_text_outside_int64(self, value):
+        # A program that binds its own bytearray may return any bytes from that name.
+        if isinstance(value, _KnownBytearray) and 'bytearray' in self.program_bound:
+            return None
+        return _int_conversion_outside_int64(value)
+
     def _refuse(self, node, value):
         error = ValueError(f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
         error.source_line = node.lineno
@@ -1141,7 +1189,7 @@ class _Int64CallChecker(ast.NodeVisitor):
             value = self._value(node.args[0])
             if _outside_int64_float(value):
                 self._refuse(node, value)
-            converted = _int_conversion_outside_int64(value)
+            converted = self._int_text_outside_int64(value)
             if converted is not None:
                 error = ValueError(
                     f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
@@ -1156,6 +1204,13 @@ class _Int64CallChecker(ast.NodeVisitor):
                     value = self._value(argument)
                     if _outside_int64_float(value):
                         self._refuse(node, value)
+                    converted = self._int_text_outside_int64(value)
+                    if converted is not None:
+                        error = ValueError(
+                            f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
+                        error.source_line = node.lineno
+                        error.source_column = node.col_offset
+                        raise error
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):

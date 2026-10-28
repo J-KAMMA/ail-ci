@@ -1,3 +1,32 @@
+## 2026-10-28 -- pre405: bytearray text outside int64 is refused by name (job-pre405-10281121)
+
+The pre392 review's first still-differing item was `int(bytearray(b"9999999999999999999"))` and
+the same value through a wrapper: both builds compiled the program and then stopped with
+`integer overflow`, while CPython prints the bignum.  The static `int()` pass could carry a str
+or bytes literal but not a `bytearray(...)` call, so the conversion stayed dynamic.  A
+`bytearray` built from a bytes literal is now carried as its bytes for that check, and the
+wrapper call-site check also applies the text conversion, so an out-of-int64 value is refused at
+compile time with `int64 constant expression out of range`.
+
+The fold follows a direct call, a positional or keyword wrapper, a list/tuple item, a dict
+value, a class attribute, a `self.attr` set in `__init__`, an alias and a module constant.  A
+bytearray name that is mutated through a subscript or attribute, or passed on, is not folded:
+the mutated alias and class/instance attribute forms match CPython, as do in-range text, empty
+and invalid text, the int64 boundaries, negative and whitespace/underscore forms, and the
+bytes/str controls.  A program that binds its own `bytearray` is refused by name by the existing
+front-end rule.  The other recorded pre392 items (r11 dict built by item stores, r13/r14 nested
+containers) are separate pre-existing causes and are unchanged.
+
+Probes in `/tmp/probes/pre405` on both builds via `cmp.sh`: r06 direct/negative/whitespace/
+boundary/list/tuple/dict/class/instance/alias/module and r09 positional/keyword wrapper are
+refused by name; m01-m07 (in-range, empty/invalid, routes, named/alias, mutated alias,
+mutated class/instance attribute) match CPython; `r06_str_source` (a bytearray of a str, a
+CPython TypeError) matches; m08 (a user-defined `bytearray`) is refused by the existing
+front-end rule.  r11 and r13/r14 still show the recorded pre-existing runtime overflow.
+Final-state tests: test_ail_pre405, test_ail_pre263, test_ail_pre338, test_ail_pre31,
+test_ail_pre39, test_ail_pre290, test_ail_pre322, test_ail_pre371, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (11 modules, 0 failed).  `tools/update_manifest.py`
+was run and `--check` passes.
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
