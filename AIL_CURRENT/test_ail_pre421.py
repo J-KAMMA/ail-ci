@@ -92,6 +92,10 @@ except Exception as e:
     print(type(e).__name__, e)
 ''',
     'builtin_keys': '''
+class Marker:
+    pass
+
+
 def show(recv, key):
     try:
         recv[key]
@@ -138,7 +142,7 @@ except Exception as e:
 ''' % (LONG_NAME, LONG_NAME)
 
 
-def build(directory, name, text, general):
+def build(directory, name, text, general, debug_dir=None):
     path = Path(directory) / (name + '.ail')
     path.write_text(text, encoding='utf-8')
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
@@ -146,8 +150,11 @@ def build(directory, name, text, general):
     if general:
         env['AIL_UNIFIED_FORCE'] = '1'
     exe = Path(directory) / (name + ('_g' if general else '_d'))
-    built = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', path.name,
-                            '--syntax', 'python', '-o', exe.name], cwd=directory,
+    command = [sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', path.name,
+               '--syntax', 'python', '-o', exe.name]
+    if debug_dir is not None:
+        command += ['--debug-dir', str(debug_dir)]
+    built = subprocess.run(command, cwd=directory,
                            capture_output=True, text=True, timeout=900, env=env)
     return built, exe
 
@@ -172,6 +179,56 @@ class Pre421(unittest.TestCase):
         for name, text in PROGRAMS.items():
             with self.subTest(name=name):
                 self.check(name, text)
+
+    def test_no_class_c_keeps_base_index_text(self):
+        """The class-name text is emitted only for a source that writes a class.
+
+        A no-class general-path program must keep base's C for list/tuple indexing; adding
+        it unconditionally changed the generated C of every such program (pre421 review).
+        """
+        no_class = '''
+def f(xs, i):
+    print(xs[i], xs[-1], len(xs))
+    xs[i] = 9
+    print(xs)
+    del xs[0]
+    print(xs)
+
+
+f([1, 2, 3], 1)
+'''
+        with_class = '''
+class Box:
+    pass
+
+
+def f(xs, i):
+    print(xs[i], xs[-1], len(xs))
+    xs[i] = 9
+    print(xs)
+    del xs[0]
+    print(xs)
+
+
+f([1, 2, 3], 1)
+print(Box)
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-pre421-c-') as directory:
+            for general in (True, False):
+                tag = 'g' if general else 'd'
+                debug = Path(directory) / ('noclass_' + tag)
+                built, _ = build(directory, 'noclass_' + tag, no_class, general, debug)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                text = (debug / 'program.c').read_text(encoding='utf-8')
+                self.assertIn('ail_type_name(key.tag)', text)
+                self.assertNotIn('snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(key));', text)
+
+                debug = Path(directory) / ('withclass_' + tag)
+                built, _ = build(directory, 'withclass_' + tag, with_class, general, debug)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                text = (debug / 'program.c').read_text(encoding='utf-8')
+                self.assertEqual(
+                    text.count('snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(key));'), 3)
 
 
 if __name__ == '__main__':

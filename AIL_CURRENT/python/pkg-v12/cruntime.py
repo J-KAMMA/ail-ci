@@ -16086,8 +16086,7 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
     switch (c.tag) {
         case AIL_T_LIST: case AIL_T_TUPLE:
             if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) {
-                char tnbuf[201], buf[280]; snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(key));
-                snprintf(buf, sizeof buf, "%s indices must be integers or slices, not %s", c.tag == AIL_T_LIST ? "list" : "tuple", tnbuf);
+                char buf[96]; snprintf(buf, sizeof buf, "%s indices must be integers or slices, not %s", c.tag == AIL_T_LIST ? "list" : "tuple", ail_type_name(key.tag));
                 return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
             }
             return ail_vec_getitem(cx, out, c, key.i);
@@ -16110,11 +16109,7 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
 }
 static inline ail_st ail_op_setitem(ail_ctx *cx, ail_obj c, ail_obj key, ail_obj val) {
     if (c.tag == AIL_T_LIST) {
-        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) {
-            char tnbuf[201], buf[280]; snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(key));
-            snprintf(buf, sizeof buf, "list indices must be integers or slices, not %s", tnbuf);
-            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
-        }
+        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) return ail_raise_c(cx, AIL_B_TYPEERROR, "list indices must be integers or slices");
         return ail_list_setitem(cx, c, key.i, val);
     }
     if (c.tag == AIL_T_DICT) return ail_dict_set(cx, c, key, val);
@@ -16122,11 +16117,7 @@ static inline ail_st ail_op_setitem(ail_ctx *cx, ail_obj c, ail_obj key, ail_obj
 }
 static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
     if (c.tag == AIL_T_LIST) {
-        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) {
-            char tnbuf[201], buf[280]; snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(key));
-            snprintf(buf, sizeof buf, "list indices must be integers or slices, not %s", tnbuf);
-            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
-        }
+        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) return ail_raise_c(cx, AIL_B_TYPEERROR, "list indices must be integers or slices");
         return ail_list_delitem(cx, c, key.i);
     }
     if (c.tag == AIL_T_DICT) return ail_dict_del(cx, c, key);

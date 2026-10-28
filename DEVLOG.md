@@ -1,3 +1,22 @@
+## 2026-10-28 -- pre421 review: keep no-class C byte-identical (job-pre421-10281638)
+
+The pre421 review found that the class-name index text was spliced into the v2 runtime
+unconditionally, so a no-class general-path program's `--debug-dir` C changed in the
+list/tuple getitem, setitem and delitem prelude.  The base runtime text is restored, and
+`pyboxed2` applies the three edits to the preamble only when the source itself contains a
+`class` statement (`source_has_class`, taken before the safety preludes inject their own
+classes).  No-class programs, including ones whose preludes add classes for slices, now
+emit C byte-identical to base; class-bearing programs keep the class-name messages.
+`test_ail_pre421` gains a C-text test that checks both sides, and its builtin-key program
+declares a class so it exercises the class-name text.  Probes in `/tmp/probes/pre421_fix`
+on both builds via `cmp.sh`: `p_class_routes` (instance, subclass, alias, argument, list
+item, attribute, dict value, exception instance, builtin function, list and tuple),
+`p_class_setdel`, `p_class_builtins` and `p_long` (200/210 characters) match CPython;
+`p_noclass` and `p_noclass_slice` stdout/exit match, and their `--debug-dir` C is
+byte-identical to `/tmp/base` (as is `p_nofeature_wrap`); `p_class_nofeature` differs
+from base only in the three index-error prelude hunks.  The `p_builtins` no-class
+bytes/bytearray/function names remain the base text, as the C-identity rule requires.
+
 ## 2026-10-28 -- pre421: list/tuple index errors name the key's class (job-pre421-10281638)
 
 The pre411 review listed as pre-existing that `Box(Bad())` as a list or tuple index said
