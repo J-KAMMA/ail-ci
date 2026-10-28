@@ -4205,9 +4205,55 @@ def _refuse_load(error):
     raise SystemExit(2)
 
 
+def _script_file_text(path):
+    """CPython 3.12's `__file__` text for a script: the given path, made absolute without resolving it."""
+    text = str(path)
+    return text if os.path.isabs(text) else os.path.join(os.getcwd(), text)
+
+
+def _rewrite_file_dunder(text, path_text):
+    """Replace a bare `__file__` load with the path the program was compiled from."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == '__file__' and not isinstance(node.ctx, ast.Load):
+            return text
+        if isinstance(node, ast.arg) and node.arg == '__file__':
+            return text
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == '__file__':
+            return text
+        if isinstance(node, ast.alias) and (node.asname == '__file__' or
+                                           node.asname is None and node.name == '__file__'):
+            return text
+        if isinstance(node, ast.ExceptHandler) and node.name == '__file__':
+            return text
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == '__file__':
+            return text
+        if isinstance(node, ast.MatchMapping) and node.rest == '__file__':
+            return text
+    uses = [node for node in ast.walk(tree) if isinstance(node, ast.Name) and node.id == '__file__']
+    names = [node for node in uses if isinstance(node.ctx, ast.Load)]
+    if not names:
+        return text
+    data = text.encode('utf8')
+    starts = [0]
+    for line in data.split(b'\n')[:-1]:
+        starts.append(starts[-1] + len(line) + 1)
+    literal = repr(path_text).encode('utf8')
+    for node in sorted(names, key=lambda n: (n.lineno, n.col_offset), reverse=True):
+        start = starts[node.lineno - 1] + node.col_offset
+        end = starts[node.end_lineno - 1] + node.end_col_offset
+        padding = data[start:end].count(b'\n')
+        replacement = b'(' + literal + b'\n' * padding + b')' if padding else literal
+        data = data[:start] + replacement + data[end:]
+    return data.decode('utf8')
+
+
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False, ffi=None, prelower=None):
+                  notes=None, local_imports=False, ffi=None, prelower=None, entry_path_text=None):
     """Resolve source imports once and validate their shared declaration scope.
 
     `prelower` rewrites the entry's text right after it is read (ail_export.lower for `--lib`); the
@@ -4231,6 +4277,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
 
     def load(path, *, entry=False):
         path = path.resolve()
+        display_path = entry_path_text if entry and entry_path_text is not None else str(path)
         if path in active:
             raise ValueError('AIL module cycle: ' + ' -> '.join(p.name for p in [*active, path]))
         if path in seen:
@@ -4260,7 +4307,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 # a file that does not mention ail_ffi is returned untouched
                 text = ffi.lower(path, text)
             if local_imports and entry and syntax == 'python' and not module_only:
-                merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
+                merged = ail_modules.merge_program(path, text, entry_path_text=display_path,
+                                                   **({} if ffi is None else {'read': ffi.read}))
                 if merged is not None:
                     _MERGED_ENTRIES[str(path)] = merged
                     text = merged.text
@@ -4283,6 +4331,10 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                      library=module_only)
             text = fold_constants(text)
             text = _fold_float_int_text(text)
+            if syntax == 'python':
+                rewritten = _rewrite_file_dunder(text, display_path)
+                if rewritten != text:
+                    text = rewritten
             tree = ast.parse(text, filename=str(path))
             if syntax == 'python' and entry and not module_only and not declarations_only:
                 _check_main_called(tree)
@@ -4886,6 +4938,7 @@ def _source_check(args):
                 raise ValueError('invalid bundled API manifest: sdk_files must be a list of paths')
             if 'language_examples/' + name + '.ail' not in selected:
                 raise ValueError('unknown bundled API module: ' + name)
+        source_display = _script_file_text(source)
         source = source.resolve()
         original = source.read_bytes()
         report['source_sha256'] = hashlib.sha256(original).hexdigest()
@@ -4898,7 +4951,7 @@ def _source_check(args):
         ffi = _ffi_session(args)
         text, _, _ = _load_sources(source, args.module, args.syntax,
                                   module_only=args.library, module_paths=args.module_path, origins=origins, source_map=source_map,
-                                  local_imports=True, ffi=ffi,
+                                  local_imports=True, ffi=ffi, entry_path_text=source_display,
                                   **({'source_bytes': snapshots} if snapshots is not None else {}))
         check_objects = list(args.object)
         if getattr(args, 'ffi', False):
@@ -5583,6 +5636,7 @@ def main(argv=None):
         lowered = {}
         objects = getattr(args, 'object', [])
         separate = getattr(args, 'separate', False)
+        source_display = _script_file_text(args.source)
         source = args.source.resolve()
         output = Path(os.path.abspath(args.output))
         if sys.version_info < (3, 10):
@@ -5603,7 +5657,7 @@ def main(argv=None):
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
                 module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,
-                prelower=lower_exports if export_lib else None, **loading)
+                prelower=lower_exports if export_lib else None, entry_path_text=source_display, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
         if export_lib:

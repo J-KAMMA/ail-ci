@@ -239,8 +239,9 @@ def _str_list(node):
 # ---------------------------------------------------------------- loading and analysis
 
 class Program:
-    def __init__(self, entry_path, read):
+    def __init__(self, entry_path, read, entry_path_text=None):
         self.entry_path = Path(entry_path).resolve()
+        self.entry_path_text = entry_path_text or str(self.entry_path)
         self.dir = self.entry_path.parent
         self.read = read
         self.roots = [self.dir]
@@ -1654,6 +1655,9 @@ class Rewriter(ast.NodeTransformer):
         self.frames = []              # one set of module globals to declare per function / class body
         self.comp = 0
 
+    def file_text(self, mod):
+        return self.program.entry_path_text if mod.entry else str(mod.path)
+
     def module_level(self, name):
         for position in range(len(self.scopes) - 1, -1, -1):
             kind, names, global_names = self.scopes[position]
@@ -1721,6 +1725,8 @@ class Rewriter(ast.NodeTransformer):
             return node
         if name == '__name__' and isinstance(node.ctx, ast.Load):
             return ast.copy_location(ast.Constant('__main__' if self.mod.entry else self.mod.name), node)
+        if name == '__file__' and isinstance(node.ctx, ast.Load) and name not in self.mod.first:
+            return ast.copy_location(ast.Constant(self.file_text(self.mod)), node)
         if name in self.mod.std:
             return node
         if name in self.mod.alias:
@@ -1769,6 +1775,8 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
+        if attr == '__file__' and not stored and attr not in target.first:
+            return ast.copy_location(ast.Constant(self.file_text(target)), node)
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
@@ -1914,12 +1922,12 @@ class Rewriter(ast.NodeTransformer):
 
 # ---------------------------------------------------------------- the merge
 
-def merge_program(entry_path, entry_text, read=None):
+def merge_program(entry_path, entry_text, read=None, entry_path_text=None):
     """None when the entry imports no local module; else a Merged program (see the module docstring)."""
     if read is None:
         def read(path):
             return Path(path).read_bytes().decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
-    program = Program(entry_path, read)
+    program = Program(entry_path, read, entry_path_text)
     try:
         tree = ast.parse(entry_text, filename=str(program.entry_path))
     except SyntaxError:

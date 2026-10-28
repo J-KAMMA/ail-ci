@@ -1,3 +1,21 @@
+## 2026-10-28 -- ex4: Python-syntax programs know `__file__` (job-ex4-10290218)
+
+The Python-syntax front end refused `__file__`, the refusal that blocked the most `.py` examples
+in `language_examples`: the direct name in the entry program and `module.__file__` for every
+imported module.  The entry program now sees the absolute path it was built from, as CPython 3.12
+does for a script; an imported module sees its own path, both as a bare `__file__` and as
+`module.__file__`, and a function that returns `__file__` returns its module's path.
+`_rewrite_file_dunder` replaces a load of `__file__` in the Python surface before parsing (a store,
+delete or other binding is left alone), and `ail_modules` answers the merged module's path unless
+that module binds the name itself.
+
+The corpus program is `language_examples/file_path.py`, which prints the path's name, suffix,
+resolved name and equality with the source string; HEAD refuses it (`not in the subset: name
+'__file__' is not defined`) and both builds match CPython.  Probes in `/tmp/probes` (`file_path.py`,
+`p_file2.py`, the package in `pkgfile/`, `file_assign.py`) match CPython on both builds.  Added
+`test_ail_ex4.py` (entry path, imported modules, the corpus example) and registered it in
+`ail_check.MODULES`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
