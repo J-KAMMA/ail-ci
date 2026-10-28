@@ -1,3 +1,31 @@
+## 2026-10-28 -- pre413: a constant power behind a name is refused by name (job-pre413-10281315)
+
+The first still-differing item from the pre367 record reproduced on this tree:
+`def f(x): return x ** 40; print(f(10))` (and the list-item, class/instance-attribute and
+dict-value routes) compiled on both builds and then stopped with `integer overflow`, where
+CPython prints the exact 41-digit integer; the module-level `x ** 40` was already refused by
+name here.  Re-applied the pre367 binpow preflight (`_check_int64_binpow_constants`, called from
+`_check_int64_literals`): it resolves `**` operands through module constants, a function's own
+int locals, a parameter unconditionally rebound to a constant, literal containers, class and
+instance attributes, and constant arguments to a module function, and refuses an exact result
+outside int64 with `int64 constant expression out of range`.  The final pre367 wording defers
+are kept (a maxsplit constant, a literal power that is the whole right-hand side of a plain
+assignment, and a syntactic constant base with an exponent the front end does not see as
+constant), so pre97/pre160/pre190/pre200/pre205/pre273 keep their own messages.  A value known
+only at run time keeps the documented `integer overflow` stop; the pre367-recorded default
+argument, literal container bound inside a function and instance created inside a function
+still stop at run time (unchanged).
+
+Probes in `/tmp/probes/pre413` on both builds via `cmp.sh` (41 programs): a01-a07, b05,
+b09-b17, b26 and b27 are refused by name; a14, b01, b02, b21 and b22 are already refused by
+name with their existing wording; a11-a13, a15, b03, b06-b08, b18-b20 and b23-b25 match
+CPython; a08-a10 still stop with `integer overflow` (the recorded unchanged variants).  Added
+`test_ail_pre413.py` (2 tests, 19 refused and 17 matching programs, both builds), registered in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests: test_ail_pre413,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3, test_ail_pre97,
+test_ail_pre160, test_ail_pre190, test_ail_pre200, test_ail_pre205 and test_ail_pre273
+(10 modules in 427 s, 0 failed).  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
