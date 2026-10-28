@@ -103,6 +103,24 @@ def _is_brace_or_sexpr(text):
     return ail_sexpr.detect(text) or detect(text)
 
 
+def _uses_file_dunder(tree):
+    return any((isinstance(n, ast.Name) and n.id == '__file__')
+               or (isinstance(n, ast.Attribute) and n.attr == '__file__') for n in ast.walk(tree))
+
+
+def _file_dunder_assignment(mod):
+    """CPython's implicit module-level `__file__`, as a normal assignment at the start of the body.
+
+    The value is the module's own absolute path (a namespace package has None, as CPython sets
+    it); a later user assignment rebinds it and a function-local name shadows it exactly as the
+    interpreter's binding does."""
+    value = None if mod.kind == 'namespace' else str(mod.path)
+    node = ast.Assign(targets=[ast.Name(id='__file__', ctx=ast.Store())], value=ast.Constant(value))
+    node.lineno, node.col_offset = 1, 0
+    ast.fix_missing_locations(node)
+    return node
+
+
 class Mod:
     def __init__(self, name, path, tree, entry, kind='module', dirs=None):
         self.name = name                # dotted name; '__main__' for the entry
@@ -1769,7 +1787,7 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
-        if attr in MODULE_DUNDERS and not stored:
+        if attr in MODULE_DUNDERS and not stored and not (attr == '__file__' and attr in target.merged):
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
         if attr.startswith('_') and not (attr.startswith('__') and attr.endswith('__')):
@@ -1933,6 +1951,9 @@ def merge_program(entry_path, entry_text, read=None):
     program.prepare_entry(entry)
     program.discover(entry)
     program.check_star_packages()
+    if any(_uses_file_dunder(mod.tree) for mod in program.mods.values()):
+        for mod in program.mods.values():
+            mod.tree.body.insert(0, _file_dunder_assignment(mod))
     order = program.analyse_all(entry)
     reachable = [m for m in order if m is not entry]
     if not reachable:

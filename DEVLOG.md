@@ -1,3 +1,29 @@
+## 2026-10-28 -- ex18: a Python-syntax program's `__file__` matches CPython (job-ex18-10290510)
+
+Building the 14 Python-syntax files under `AIL_CURRENT/language_examples` left `__file__` as the
+first refusal of five (`row_codec_compare`, `row_decimal_quad`, `row_state_quad_compare`,
+`row_store_identity_compare`, `test_row_cpu_profile`; all reached through `row_locals_compare.py`),
+the most of any cause.  `__file__` is now the absolute path of the source file recorded at build
+time, set before the module body runs exactly as CPython 3.12 sets it.  The general path inserts a
+normal module-level assignment (`_inject_source_file`, from `AIL_SOURCE_FILE`), so a read before a
+user assignment sees the path, a later assignment rebinds it, `del` removes it, a function-local
+parameter shadows it, and `global __file__` works.  The module merge inserts one assignment per
+merged module (`_file_dunder_assignment`), so an imported module gets its own path, its own later
+assignment is visible at the import site, and a namespace package gets `None`; `m.__file__` is
+allowed only for those modules.  The typed path turns top-level statements into locals, so it
+refuses `__file__` when `AIL_SOURCE_FILE` is set and the default build takes the general path,
+which is byte-exact.  `AIL_SOURCE_FILE` is part of the build-cache front-end key.
+
+After the change the five examples advance to their next independent refusal (a function-level
+import with effects, a name collision, `.row` read through a module, and a name bound to two
+imports); no example is silently accepted with different output.  Probes in `/tmp/probes18` on
+both builds via `cmp.sh`: `p_basic`, `p_rebind_before`, `p_rebind_after`, `p_function`,
+`p_function_local`, `p_global_decl`, `p_list`, `p_dict`, `p_arg`, `p_classattr`, `p_method`,
+`p_classbody`, `p_del`, `p_branch`, `p_fstring`, `p_len`, `p_path`, `p_aug`, `p_scope_leak`,
+`p_comp` all match; `/tmp/imp18`, `/tmp/imp18b`, `/tmp/imp18c` and `/tmp/imp18d` (imported module,
+`import ... as`, `from ... import __file__`, package, namespace package, module self-rebind) match
+on both builds.  Added `test_ail_ex18.py`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

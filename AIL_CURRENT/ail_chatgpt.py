@@ -5702,6 +5702,7 @@ def main(argv=None):
                                                 for key, value in loading['source_map'].items()}), encoding='utf-8')
                 debug_env = {'AIL_DEBUG': '1', 'AIL_LINE_MAP': str(line_map)}
             environment = _surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
+                                                'AIL_SOURCE_FILE': os.path.abspath(os.fspath(args.source)),
                                                 **({'AIL_NO_GENERAL': '1'} if contracts or strict else {}), **ffi_env, **debug_env})
             if prelude_units:
                 environment['AIL_PRELUDE_UNITS'] = '\n'.join(prelude_units)
@@ -5717,6 +5718,7 @@ def main(argv=None):
                         hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
                         if Path(str(object_path) + '.json').is_file() else '-')],
                     environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
+                    environment.get('AIL_SOURCE_FILE', ''),
                     *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
                     *(['link', ffi_env['AIL_FFI_LINK']] if link else []),
                     *(['debug', hashlib.sha256(line_map.read_bytes()).hexdigest()] if debug else []))
