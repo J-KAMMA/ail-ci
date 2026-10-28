@@ -1,3 +1,46 @@
+## 2026-10-28 -- pre411 review: a user `_AilIntEnum` is refused, not read as an enum member (job-rbpre411-10281757)
+
+The pre411 review found that dunderrt.py detects an IntEnum/IntFlag member by the class name
+`_AilIntEnum` on its base chain.  A program that does not import `enum` may define a class of that
+name, and its instances were then used as list indices (the review's p11/p13/p17).  The name is now
+reserved: ail_syntax.py refuses a user class `_AilIntEnum` by name before the enum prelude is
+added, so the name match can only see the prelude class.  Probes on both builds:
+`p_reserved_direct.py` (p13: CPython raises `TypeError ... not _AilIntEnum`; both builds refuse by
+name), `p_reserved_index.py` (p11: CPython prints 30; both builds refuse), `p_reserved_chain.py`
+(p17: CPython raises `__index__ returned non-int`; both builds refuse), `p_reserved_routes.py` (the
+class reaching the subscript through an argument, a list item, an attribute and a dict value; both
+refuse) and `p_reserved_nested.py` (a nested class; both refuse).  The earlier probes
+p1/p6/p10/p14/p15, p_index_nonint and p_pre411_testprog still match CPython on both builds; p2 keeps
+the pre-existing `not instance` wording; p_nested and p_slice_bounds keep the pre-existing slice
+divergence.  Final-state tests: test_ail_pre411, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (4 modules, 0 failed).  `tools/update_manifest.py` was run and `--check`
+passes.  The full suite was not run.
+
+## 2026-10-28 -- pre411: a non-int `__index__` result on a subscript names CPython's TypeError (job-rbpre411-10281757)
+
+Re-applied on the integ tree, keeping pre412's float/str IntEnum normalisation: the value kept by
+an IntEnum/IntFlag member is converted through `int()` (float truncates, a decimal str parses, a
+nested member unwraps) before it is used as the index.  The pre397 review recorded r4: an
+`__index__` returning a non-int raised `list indices must be integers or slices, not ...` (with the
+tuple/str wording) instead of CPython's `__index__ returned non-int (type ...)`.  Reproduced on
+both builds.  The general path's instance-key branch now validates the `__index__` result, and an
+IntEnum/IntFlag member is used by its value as CPython's int-subclass fast path does: a direct
+member ignores an overridden `__index__` (a member whose `__index__` returns 2 still indexes its
+value 1), and a member returned by `__index__` is accepted by its value (one-level unwrap).  This
+also fixes the recorded direct IntEnum (r5) and nested-member (r6) indexing cases.  The
+slice-bound part of r5/r12 is a separate pre-existing cause and still differs.
+
+Probes in `/tmp/probes` with `bash ~/tools/cmp.sh <probe> $PWD` on both builds:
+`p_index_nonint.py` was DIFF on 12 bad-result routes before and matches CPython after;
+`p_nested.py` now matches for a direct member, an argument, a list item, an attribute, a str
+index and a member chain, while its slice cases still DIFF; `p_slice.py` still DIFFs (not
+changed); `p_pre411_testprog.py` matches CPython (bad str/float/None/list results, bool,
+negative, good `__index__`, direct IntEnum/IntFlag with an overridden `__index__`, a chain
+member result and a bad instance result); `p_pre412_values.py` keeps pre412's float/str/nested
+member values matching CPython.  Final-state tests: test_ail_pre411 (new), test_ail_pre412,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (5 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.  The full suite was not run.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
