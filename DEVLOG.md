@@ -1,3 +1,25 @@
+## 2026-10-28 -- cov3 review: the enclosing generator's consumer must be eager too (job-cov3-10290147)
+
+The review of the nested-generator support found that only the *inner* consumer was checked.  The
+eager lowering materialises the enclosing generator where it is written, so a for-loop source, a
+tuple unpacking, an assignment or a call that evaluates another argument first still differed:
+`for v in (sum(state.append(w) or w for w in row) for row in rows): break` printed `[1, 2, 3]`
+instead of `[1]`, and `sum((sum(tag(...)) for ...), tag(100, "start"))` printed the start tag
+last instead of first, on both builds (the base refused both).  `_nested_genexps_are_eager` now
+also requires the enclosing generator to be the single positional argument (no keywords) of the
+same eager, unbound-name consumers (or `str.join` on a string literal / f-string); anything else
+keeps the named refusal.  The generator-expression parent map is collected once in `compile`.
+
+Re-verified: the three corpus nested-generator programs (t172 and t432, both models) still
+compile and match CPython 3.12 on inputs 0-2 on both builds; the 219-program census still shows
+21 refused by both paths (24 before the feature).  Probes `/tmp/probes/m01`-`m05` (every eager
+outer consumer, empty/negative/alias, routes through an argument, a list item, an attribute and a
+dict value, 3-deep nesting, side effects of fully consumed elements) match CPython on both builds;
+`/tmp/probes/r01`-`r08` (for-loop with `break`, `sum(outer, start)`, tuple unpacking, assignment,
+user callee, `next`, `sorted(key=)`, `any`) are refused by name on the unified build, and r08
+compiles on the default build and matches.  `test_ail_cov3.py` gains `outer_consumers`,
+`deep_nesting` and four outer-consumer refusals.
+
 ## 2026-10-28 -- cov3: a nested generator expression under an eager consumer (job-cov3-10290147)
 
 A census of all 219 programs under `lab/corpus/programs` (compiled in-process with the same

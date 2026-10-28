@@ -4,11 +4,14 @@ The general path used to refuse every nested generator.  The inner generator is 
 eagerly, which is observationally the same point in the program when its immediate consumer reads
 every element: `sum(inner)`, `" ".join(inner)`, the list constructors, `sorted`, `min`/`max`,
 `bytes` and `dict` (a plain name that is not bound anywhere in the module, as the single
-positional argument and with no keywords), and `str.join` on a string literal or f-string.  Any
-other nesting keeps the named refusal (a user callee, a nested generator used as an iterable, a
-local binding that hides the builtin, a variable `.join` receiver, a second argument such as
-`sum(inner, start)`, `next()`), because materialising it early would run (or skip) side effects
-CPython only runs at iteration time.
+positional argument and with no keywords), and `str.join` on a string literal or f-string.  The
+enclosing generator must be consumed by the *same* kind of call: the eager lowering computes it in
+full where it is written, so a for-loop source, a tuple unpacking, an assignment or a call that
+evaluates another argument first (`sum(outer, start)`) would run side effects CPython defers or
+runs in a different order.  Any other nesting keeps the named refusal (a user callee, a nested
+generator used as an iterable, a local binding that hides the builtin, a variable `.join` receiver,
+a second argument such as `sum(inner, start)`, `next()`), because materialising it early would run
+(or skip) side effects CPython only runs at iteration time.
 
 PROGRAMS are compiled with AIL_UNIFIED_FORCE=1 (the general path) and with the default build (which
 falls back to it), and must print what CPython prints.
@@ -89,6 +92,25 @@ print("|".join(str(sum(v for v in row) if len(row) > 1 else -1) for row in rows)
 print("|".join(str(sum(v for v in row)) for row in rows if sum(w for w in row) > 1))
 print("|".join(str(sum(v for v in row)) for row in rows for _ in range(2)))
 ''',
+    'outer_consumers': r'''
+rows = [[3, 1, 2], [5], [], [-4, 5]]
+print(list(sum(x for x in r) for r in rows))
+print(tuple(sum(x for x in r) for r in rows))
+print(sorted(sum(x for x in r) for r in rows))
+print(sum(sum(x for x in r) for r in rows))
+print(min(sum(x for x in r) for r in rows))
+print(max(sum(x for x in r) for r in rows))
+print(sorted(dict((i, sum(x for x in r)) for i, r in enumerate(rows)).items()))
+state = []
+print(list(sum(state.append(w) or w for w in row) for row in rows[1:3]))
+print(state)
+''',
+    'deep_nesting': r'''
+rows = [[1, 2], [3], []]
+print(list(list(x for x in r) for r in rows))
+print(list(tuple(sum(y for y in row) for row in group) for group in [[[1, 2]], [[3], []]]))
+print(sum(sum(sum(z for z in pair) for pair in group) for group in [[[-1, -2]], [[]]]))
+''',
 }
 
 REFUSED = {
@@ -128,6 +150,30 @@ print(next(sum(v for v in row) for row in rows))
     'extra_argument': r'''
 rows = [[1, 2], [3]]
 print("|".join(str(sum((v for v in row), start=0)) for row in rows))
+''',
+    'outer_for_break': r'''
+state = []
+rows = [[1], [2], [3]]
+for v in (sum(state.append(w) or w for w in row) for row in rows):
+    break
+print(state)
+''',
+    'outer_extra_argument': r'''
+def tag(x, name):
+    print(name, x)
+    return x
+rows = [[1, 2], [3]]
+print(sum((sum(tag(v, "in") for v in row) for row in rows), tag(100, "start")))
+''',
+    'outer_assignment': r'''
+rows = [[1], [2]]
+g = (sum(x for x in r) for r in rows)
+print(next(g))
+''',
+    'outer_unpacking': r'''
+rows = [[1], [2]]
+a, b = (sum(x for x in r) for r in rows)
+print(a, b)
 ''',
 }
 
