@@ -200,6 +200,75 @@ c = C()
 c.d["k"] = 1e300
 print(int(c.d["k"]))
 ''',
+    'read_before_subscript_store': '''
+class C:
+    def __init__(self):
+        self.v = [1e300]
+
+c = C()
+print(int(c.v[0]))
+c.v[0] = 1.5
+''',
+    'read_before_attribute_rebind': '''
+class C:
+    def __init__(self):
+        self.v = [1e300]
+
+c = C()
+print(int(c.v[0]))
+c.v = [1.5]
+''',
+    'read_before_class_store': '''
+class C:
+    v = [1e300]
+
+print(int(C.v[0]))
+C.v[0] = 1.5
+''',
+    'read_before_untaken_store': '''
+class C:
+    def __init__(self):
+        self.v = [1e300]
+
+c = C()
+print(int(c.v[0]))
+if False:
+    c.v[0] = 1.5
+''',
+    'read_before_function_store': '''
+class C:
+    def __init__(self):
+        self.v = [1e300]
+
+c = C()
+
+
+def show():
+    print(int(c.v[0]))
+
+
+show()
+c.v[0] = 1.5
+''',
+    'read_before_dynamic_store': '''
+class C:
+    def __init__(self):
+        self.v = [1e300]
+
+c = C()
+print(int(c.v[0]))
+i = 0
+c.v[i] = 1.5
+''',
+    'read_before_append': '''
+class C:
+    def __init__(self):
+        self.v = [1e300]
+
+c = C()
+print(int(c.v[0]))
+c.v.append(1.5)
+''',
     'module_constant_value': '''
 X = 1e300
 
@@ -353,6 +422,16 @@ class C:
 
 c = C()
 c.v[0] = "42"
+print(int(c.v[0]))
+''',
+    'read_before_in_range_store': '''
+class C:
+    def __init__(self):
+        self.v = [1.5]
+
+c = C()
+print(int(c.v[0]))
+c.v[0] = 2.5
 print(int(c.v[0]))
 ''',
 }
