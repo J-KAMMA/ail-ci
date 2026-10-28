@@ -54,34 +54,59 @@ def failures() -> None:
     try:
         struct.pack('>B', 300)
         print('pack no error')
-    except struct.error:
-        print('pack range')
+    except struct.error as exc:
+        print('pack range', exc)
+    try:
+        struct.pack('<b', 128)
+        print('pack no error')
+    except struct.error as exc:
+        print('pack signed range', exc)
     try:
         struct.unpack('>I', b'\x00')
         print('unpack no error')
-    except struct.error:
-        print('unpack short')
+    except struct.error as exc:
+        print('unpack short', exc)
     try:
         struct.pack_into('>I', bytearray(2), 0, 1)
         print('into no error')
-    except struct.error:
-        print('into short')
+    except struct.error as exc:
+        print('into short', exc)
     try:
         struct.unpack_from('>I', b'\x00\x00\x00\x01', -1)
         print('offset no error')
-    except struct.error:
-        print('offset negative')
+    except struct.error as exc:
+        print('offset negative', exc)
+    try:
+        struct.unpack_from('>I', b'\x00' * 4, -5)
+        print('offset no error')
+    except struct.error as exc:
+        print('offset range', exc)
+    try:
+        struct.pack_into('>I', bytearray(8), -1, 1)
+        print('into offset no error')
+    except struct.error as exc:
+        print('into offset negative', exc)
+    try:
+        struct.pack('c', bytearray(b'a'))
+        print('char no error')
+    except struct.error as exc:
+        print('char bytearray', exc)
     try:
         struct.pack('0s', 'x')
         print('zero s no error')
-    except struct.error:
-        print('zero s text')
+    except struct.error as exc:
+        print('zero s text', exc)
 
 
 def main() -> None:
     data = struct.pack('>bBhHiIlLqQ', -1, 255, -2, 65535, -3, 4000000000, -4, 3000000000, -5, 9000000000000000000)
     print(list(data))
     print(struct.unpack('>bBhHiIlLqQ', data))
+    print(struct.unpack('>q', b'\x00\x00\x00\x00\x00\x00\x00\xff'))
+    print(struct.unpack('>Q', struct.pack('>Q', 9223372036854775807)))
+    print(struct.unpack('>q', struct.pack('>q', 255)))
+    print(struct.unpack('>q', b'\xff\xff\xff\xff\xff\xff\xff\xff'))
+    print(struct.unpack('<q', b'\xff\xff\xff\xff\xff\xff\xff\xff'))
     print(list(struct.pack('<bBhHiIlLqQ', -1, 255, -2, 65535, -3, 4000000000, -4, 3000000000, -5, 9000000000000000000)))
     print(struct.calcsize('>bBhHiIlLqQ'), struct.calcsize(''), struct.calcsize('@ci'), struct.calcsize('@0i'))
     print(list(struct.pack('')), struct.unpack('', b''))
@@ -105,6 +130,9 @@ def main() -> None:
     buf2 = bytearray(12)
     struct.pack_into('<I', buf2, offset(), 7)
     print(list(buf2), struct.unpack_from('<I', buf2, offset()))
+    print(struct.unpack_from('<I', buf2, -4), struct.unpack_from('>H', buf2, -12))
+    struct.pack_into('<I', buf2, -4, 16909060)
+    print(list(buf2))
     print(list(pack_value(-3)), struct.unpack('<i', pack_value(1234)))
     print(list(struct.pack('<i', [10, 20][1])), list(pack_box(Box(99))))
     values = {'x': -7}

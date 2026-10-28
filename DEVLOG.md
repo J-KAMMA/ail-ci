@@ -1,3 +1,22 @@
+## 2026-10-28 -- library batch 11 review: struct endianness, char and error text (job-stdlib11-10290224)
+
+The review found three defects, all fixed in `prelude_struct.py` / `structlib.py`:
+
+- a big-endian signed 64-bit `unpack` tested the wrong byte for the sign bit, so `struct.unpack('>q',
+  struct.pack('>q', 255))` stopped with `integer overflow`; the high byte is now `raw[start]` for `>`/`!` and
+  `raw[start + width - 1]` for `<`/`@`/`=`, for both the signed and unsigned overflow checks.
+- `struct.pack('c', bytearray(b'a'))` was accepted; the `c` field now requires a `bytes` object of length 1,
+  as CPython 3.12 does.
+- range, short-buffer and offset errors used AIL's own wording; `prelude_struct.py` now raises CPython's exact
+  text (`'B' format requires 0 <= number <= 255`, `not enough data to unpack 4 bytes at offset -1`, ...). While
+  fixing that, negative `pack_into` / `unpack_from` offsets now count from the end and report CPython's
+  out-of-range / no-space messages, and native `P` accepts negative values by wrapping like CPython.
+
+`test_ail_stdlib11.py` now prints the caught messages and covers big-endian `>q`/`>Q`, the `c` bytearray
+error, negative offsets and offset-range errors; the format layout list grew from five to seven fields (code and
+precomputed CPython range message). Probes in `/tmp/probes` (`p_be`, `p_err`, `p_neg`, `p_misc`) match CPython
+on both builds, apart from the documented unsigned 64-bit high-bit `integer overflow`.
+
 ## 2026-10-28 -- library batch 11: struct (job-stdlib11-10290224)
 
 The next most-imported still-refused module was `struct`: 2 files in `lab/corpus/programs` and 4 in

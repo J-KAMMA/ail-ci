@@ -9,7 +9,9 @@ returns a real tuple, so printing and unpacking are CPython's.
 Not built, refused by name: float32 / half / double floats (`f`, `e`, `d`), a zero-size `p` field (CPython 3.12's
 `unpack` raises SystemError for it), `Struct`, `iter_unpack`, a format known only at run time, keyword
 arguments, and the other attributes of the module.  `struct.error` is RuntimeError (the same
-mapping the compiler uses for zlib.error), because the helper raises RuntimeError; its message is CPython's.
+mapping the compiler uses for zlib.error), because the helper raises RuntimeError; range, short-buffer, char
+and `unpack_from` / `pack_into` offset errors use CPython 3.12's message text (a negative offset counts from
+the end, as in CPython), except for the documented unsigned 64-bit unpack limit.
 """
 import ast
 import struct as _cstruct
@@ -90,7 +92,17 @@ def _layout(fmt, node, name):
         offset = _cstruct.calcsize(prefix)
         if endian == '@' and align > 1 and offset % align:
             offset += align - offset % align
-        ops.extend([kind, width, signed, big, offset])
+        code = text[-1]
+        message = ''
+        if kind == 0:
+            if signed:
+                low = -(1 << (8 * width - 1))
+                high = (1 << (8 * width - 1)) - 1
+            else:
+                low = 0
+                high = (1 << (8 * width)) - 1
+            message = "'%s' format requires %d <= number <= %d" % (code, low, high)
+        ops.extend([kind, width, signed, big, offset, code, message])
         prefix += text
     return ops, _cstruct.calcsize(prefix), len(pieces) - sum(1 for p in pieces if p[1] == 4)
 
@@ -123,7 +135,7 @@ def run(tree, text):
             signed = ops[index + 2]
             big = ops[index + 3]
             position = ops[index + 4]
-            index += 5
+            index += 7
             if kind == 0:
                 fields.append('_ail_struct_unpack_int(data, %s, %d, %d, %d, %d)'
                               % (offset, position, width, signed, big))
@@ -138,7 +150,7 @@ def run(tree, text):
         result = '()' if not fields else '(%s,)' % ', '.join(fields)
         if offset_call:
             source = ('def %s(data, offset):\n'
-                      '    _ail_struct_unpack_check(data, offset, %d, 0)\n'
+                      '    offset = _ail_struct_unpack_check(data, offset, %d, 0)\n'
                       '    return %s\n') % (name, size, result)
         else:
             source = ('def %s(data):\n'

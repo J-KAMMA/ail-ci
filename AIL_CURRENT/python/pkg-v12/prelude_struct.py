@@ -46,7 +46,9 @@ def _ail_struct_pack(ops, expected, values):
         signed = ops[oi + 2]
         big = ops[oi + 3]
         pos = ops[oi + 4]
-        oi += 5
+        code = ops[oi + 5]
+        message = ops[oi + 6]
+        oi += 7
         while len(out) < pos:
             out.append(0)
         if kind == 4:
@@ -62,8 +64,8 @@ def _ail_struct_pack(ops, expected, values):
                 raise RuntimeError("required argument is not an integer")
             number = value
             if width >= 8:
-                if not signed and number < 0:
-                    raise RuntimeError("argument out of range")
+                if not signed and code != 'P' and number < 0:
+                    raise RuntimeError(message)
             else:
                 lo = 0
                 hi = (1 << (8 * width)) - 1
@@ -71,7 +73,7 @@ def _ail_struct_pack(ops, expected, values):
                     lo = -(1 << (8 * width - 1))
                     hi = (1 << (8 * width - 1)) - 1
                 if number < lo or number > hi:
-                    raise RuntimeError("argument out of range")
+                    raise RuntimeError(message)
                 if number < 0:
                     number += 1 << (8 * width)
             i = 0
@@ -90,7 +92,7 @@ def _ail_struct_pack(ops, expected, values):
             else:
                 out.append(0)
         elif kind == 2:
-            if not (isinstance(value, bytes) or isinstance(value, bytearray)) or len(value) != 1:
+            if not isinstance(value, bytes) or len(value) != 1:
                 raise RuntimeError("char format requires a bytes object of length 1")
             out.append(value[0])
         elif kind == 3:
@@ -121,21 +123,30 @@ def _ail_struct_pack(ops, expected, values):
 
 def _ail_struct_unpack_check(data, offset, size, exact):
     raw = _ail_struct_buffer(data)
-    if offset < 0:
-        raise RuntimeError("offset must be non-negative")
+    length = len(raw)
     if exact:
-        if len(raw) != size:
+        if length != size:
             raise RuntimeError("unpack requires a buffer of " + str(size) + " bytes")
-    elif len(raw) < offset + size:
+        return 0
+    if offset < 0:
+        if offset < -length:
+            raise RuntimeError("offset " + str(offset) + " out of range for " + str(length) + "-byte buffer")
+        start = offset + length
+        if start + size > length:
+            raise RuntimeError("not enough data to unpack " + str(size) + " bytes at offset " + str(offset))
+        return start
+    if offset + size > length:
         raise RuntimeError("unpack_from requires a buffer of at least " + str(offset + size) + " bytes for unpacking "
                            + str(size) + " bytes at offset " + str(offset) + " (actual buffer size is "
-                           + str(len(raw)) + ")")
+                           + str(length) + ")")
+    return offset
 
 
 def _ail_struct_unpack_int(data, offset, pos, width, signed, big):
     raw = _ail_struct_buffer(data)
     start = offset + pos
-    if width >= 8 and signed and raw[start + width - 1] >= 128:
+    high = start if big else start + width - 1
+    if width >= 8 and signed and raw[high] >= 128:
         number = -1
         if big:
             i = 0
@@ -148,7 +159,7 @@ def _ail_struct_unpack_int(data, offset, pos, width, signed, big):
                 number = (number << 8) | raw[start + i]
                 i -= 1
         return number
-    if width >= 8 and not signed and raw[start + width - 1] >= 128:
+    if width >= 8 and not signed and raw[high] >= 128:
         raise RuntimeError("integer overflow")
     number = 0
     if big:
@@ -193,14 +204,20 @@ def _ail_struct_unpack_pascal(data, offset, pos, width):
 def _ail_struct_pack_into(ops, expected, size, buffer, offset, values):
     if not isinstance(buffer, bytearray):
         raise TypeError("argument must be read-write bytes-like object, not " + _ail_struct_tname(buffer))
+    length = len(buffer)
+    start = offset
     if offset < 0:
-        raise RuntimeError("offset must be non-negative")
-    if offset + size > len(buffer):
+        if offset < -length:
+            raise RuntimeError("offset " + str(offset) + " out of range for " + str(length) + "-byte buffer")
+        start = offset + length
+        if start + size > length:
+            raise RuntimeError("no space to pack " + str(size) + " bytes at offset " + str(offset))
+    elif offset + size > length:
         raise RuntimeError("pack_into requires a buffer of at least " + str(offset + size) + " bytes for packing "
                            + str(size) + " bytes at offset " + str(offset) + " (actual buffer size is "
-                           + str(len(buffer)) + ")")
+                           + str(length) + ")")
     packed = _ail_struct_pack(ops, expected, values)
     i = 0
     while i < size:
-        buffer[offset + i] = packed[i]
+        buffer[start + i] = packed[i]
         i += 1
