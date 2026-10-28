@@ -44,6 +44,26 @@ CPython; `p06_class_getitem` still differs identically to the base and is unchan
 test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
 `tools/update_manifest.py` was run and `--check` passes.
 
+## 2026-10-28 -- re-apply pre378 on the integration tree (job-rbpre378-10281427)
+
+Re-applied the accepted pre378 fix (an instance subscript without `__getitem__` names its
+class) on top of the current integration tree.  The code conflict was already resolved by the
+tree's newer pre377 follow-up: `ail__raise_item_tname` is called by the getitem and getslice
+fallbacks and by `dunderrt`'s string-matched patches, and it uses `ail__tname_c` with a
+dynamically sized message capped at 200 characters as CPython's `%.200s` does.  That helper and
+the call sites were kept instead of adding the older `ail__raise_not_subscriptable`, so the
+class name, subclass name, long-name and builtin-name behaviour are all preserved.  The
+incoming `test_ail_pre378.py` was added and registered in `ail_check.MODULES` and
+`tools/ci_shards.json` (weight 33.5).  `tools/diff_ids.py` is not present on this tree.
+
+Probes in `/tmp/probes` (6 programs, both builds via `cmp.sh`): `p_basic` (int, negative, bool,
+float, str, `None` and tuple keys; int and negative slices; subclass), `p_routes` (argument,
+alias, attribute, dict value, list item; int and slice), `p_boundaries` (class-name lengths 1,
+32, 33, 34, 40, 200, 201 and 210), `p_uncaught` (exit 1, identical stderr), `p_dunder`
+(`__getitem__` control and `__eq__`-only class) and `p_builtins` (int, `None`, float, bool and
+a builtin function object) all match CPython.  Final-state tests: test_ail_pre378,
+test_ail_pre377, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (30 tests,
+0 failed, 1 skipped for no zig).  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
@@ -629,6 +649,48 @@ of a non-Exception class name (prints `C: x`, CPython `TypeError`).
 Tests run on the final tree: `test_ail_pre381.py` (new), `test_ail_safetynet`, `test_ail_files`
 and `test_ail_corpus_findings3`, all pass.  `test_ail_pre381.py` is registered in
 `tools/ci_shards.json` with weight 81.5, and `tools/update_manifest.py` was run.
+## 2026-10-27 -- pre378 review follow-up: long class names print whole (job-pre378-10280656)
+
+The pre378 review found the new fallbacks still formatted into ``char buf[64]``: the message is
+the name plus 31 bytes, so names longer than 33 characters were cut off (a 34- or 40-character
+class printed ``... object is not subscriptabl``).  Both sites now raise through
+``ail__raise_not_subscriptable``, which sizes its buffer from the class name the way
+``ail__tname_c`` grows its own and frees it after ``ail_raise_c`` copies the text;
+``dunderrt``'s two string-matched patches (getitem default, getslice fallback) were updated to
+the new text.  The v1 emitter (``AIL_GENERAL=v1``, outside the two ``cmp.sh`` builds) still
+says ``'instance'``.
+
+Probes in ``/tmp/probes`` (9 programs, both builds): ``p_long_int``, ``p_long_slice``,
+``p_long_routes`` (argument, alias, attribute, dict value, list item), ``p_boundary`` (1, 33
+and 34 characters), ``p_subclass_long``, ``p_builtins``, ``p_dunder_slice``, ``p_dunder_ops``
+and the uncaught ``p_long_uncaught`` (exit 1, identical stderr) all match CPython.
+``test_ail_pre378.py`` gained the long-name int/slice cases, the 33/34 boundary, long
+route/subclass programs and a long-name uncaught run.  Final-state tests: test_ail_pre378,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3; ``tools/update_manifest.py``
+was run and ``--check`` passes.
+## 2026-10-27 -- pre378: a subscript of an instance names its class (job-pre378-10280656)
+
+The pre354 review's first still-differing item reproduced on both builds: ``A()[1]`` (a class
+with no ``__getitem__``) raised ``TypeError: 'instance' object is not subscriptable`` where
+CPython names the class (``'A' object is not subscriptable``); the slice spelling
+(``A()[1:2]``) differed the same way.  The v2 runtime's ``ail_op_getitem`` /
+``ail_op_getslice`` fallbacks asked the tag table, which knows only the generic instance tag;
+they now call ``ail__tname_c``, the class-name helper attribute errors already use, and
+``dunderrt``'s string-matched patch of the getslice fallback was updated to match.  A subclass
+names the subclass, and builtin values keep their type names.  The review's other items are
+unchanged: ``p08`` (a dict with a slice key) already matches CPython on this tree, and the
+nested ``def slice`` / ``class slice`` programs are still refused by name.  The class object
+itself (``A[1]``) is a separate pre-existing difference and is untouched.
+
+Probes in ``/tmp/probes/pre378`` (13 programs, both builds via ``cmp.sh``): ``p08_dict_slice``,
+``p09_instance_name``, ``p09_routes``, ``p09_slice_routes``, ``p09_uncaught``,
+``p09_control_getitem`` and ``r11_nested_def_module`` match CPython; ``p11``, ``r12``-``r16``
+are refused by name (``a slice object the general path could not build`` or ``a nested class
+definition (slice)``).  Added ``AIL_CURRENT/test_ail_pre378.py`` (9 caught programs plus an
+uncaught one, both builds) and registered it in ``ail_check.MODULES`` and
+``tools/ci_shards.json``.  Final-state tests: test_ail_pre378, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  ``tools/update_manifest.py`` was run and
+``--check`` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
