@@ -4207,7 +4207,7 @@ def _refuse_load(error):
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False, ffi=None, prelower=None):
+                  notes=None, local_imports=False, ffi=None, prelower=None, entry_file=None):
     """Resolve source imports once and validate their shared declaration scope.
 
     `prelower` rewrites the entry's text right after it is read (ail_export.lower for `--lib`); the
@@ -4259,6 +4259,12 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
                 # a file that does not mention ail_ffi is returned untouched
                 text = ffi.lower(path, text)
+            if syntax == 'python':
+                # CPython 3.12 binds __file__ before the body runs; a merged program has no file at
+                # run time, so each read becomes a string constant. The entry keeps the path as spelled
+                # on the command line (made absolute), exactly as CPython's main module does.
+                text = ail_modules.file_dunder_text(
+                    text, path, value=entry_file if entry and entry_file is not None else None)
             if local_imports and entry and syntax == 'python' and not module_only:
                 merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
                 if merged is not None:
@@ -5244,6 +5250,16 @@ def _compile_freestanding(args, parser, native_build):
     return native_build.emit(args, report)
 
 
+class _GivenPath(type(Path('.'))):
+    """A Path that still remembers the spelling given on the command line (for `__file__`)."""
+
+
+def _source_path(value):
+    path = _GivenPath(value)
+    path.given = value
+    return path
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
@@ -5311,7 +5327,7 @@ def main(argv=None):
     build_http_cmd.add_argument('-o', '--output', required=True, type=Path)
     build_http_cmd.add_argument('--compare', action='store_true')
     compile_cmd = sub.add_parser('compile', help='compile AIL source to a standalone executable')
-    compile_cmd.add_argument('source', type=Path)
+    compile_cmd.add_argument('source', type=_source_path)
     compile_cmd.add_argument('-o', '--output', required=True, type=Path)
     compile_cmd.add_argument('--module', action='append', type=Path, default=[],
         help='additional .ail file containing functions and literal numeric constants')
@@ -5349,7 +5365,7 @@ def main(argv=None):
         help='typed dependency objects; entry linking requires their full object closure')
     object_cmd.add_argument('--c-api-name', help='build a dependency dedicated to this C library name')
     library_cmd = sub.add_parser('compile-library', help='build a C callable library with owned results and error returns')
-    library_cmd.add_argument('source', type=Path)
+    library_cmd.add_argument('source', type=_source_path)
     library_cmd.add_argument('--name', required=True)
     library_cmd.add_argument('-o', '--output', required=True, type=Path)
     library_cmd.add_argument('--syntax', choices=('auto', 'python', 'ail'), default='auto')
@@ -5584,6 +5600,11 @@ def main(argv=None):
         objects = getattr(args, 'object', [])
         separate = getattr(args, 'separate', False)
         source = args.source.resolve()
+        # CPython 3.12's main-module __file__ is the path as spelled, made absolute from the cwd
+        # without normalising `.`/`..` or resolving symlinks; keep that spelling for AIL too.
+        entry_file = getattr(args.source, 'given', os.fspath(args.source))
+        if not os.path.isabs(entry_file):
+            entry_file = os.path.join(os.getcwd(), entry_file)
         output = Path(os.path.abspath(args.output))
         if sys.version_info < (3, 10):
             parser.error('AIL compilation requires Python 3.10 or newer')
@@ -5603,7 +5624,7 @@ def main(argv=None):
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
                 module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,
-                prelower=lower_exports if export_lib else None, **loading)
+                prelower=lower_exports if export_lib else None, entry_file=entry_file, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
         if export_lib:

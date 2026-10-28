@@ -54,6 +54,69 @@ MODULE_DUNDERS = frozenset(('__file__', '__package__', '__path__', '__spec__', '
 NEVER = 10 ** 9
 _UNKNOWN = object()                     # a module-level name bound to something the compiler cannot evaluate
 
+_FILE_BOUND = ("`__file__` is assigned or shadowed here. A read of `__file__` becomes this module's "
+               "build-time path (a string constant), so a program that binds the name itself has no "
+               "single value the compiler can give it.\n"
+               "  write instead: use a different name for your own value; the path stays in `__file__`")
+
+
+def _file_binding(node):
+    """The node that binds the name `__file__` (assignment, parameter, import alias, ...), or None."""
+    if isinstance(node, ast.Name) and node.id == '__file__' and not isinstance(node.ctx, ast.Load):
+        return node
+    if isinstance(node, ast.arg) and node.arg == '__file__':
+        return node
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == '__file__':
+        return node
+    if isinstance(node, ast.alias) and (node.asname == '__file__' or node.name.split('.')[0] == '__file__'):
+        return node
+    if isinstance(node, ast.ExceptHandler) and node.name == '__file__':
+        return node
+    if isinstance(node, (ast.MatchAs, ast.MatchStar)) and getattr(node, 'name', None) == '__file__':
+        return node
+    if isinstance(node, ast.MatchMapping) and node.rest == '__file__':
+        return node
+    if isinstance(node, getattr(ast, 'TypeVar', ())) and node.name == '__file__':
+        return node
+    return None
+
+
+def file_dunder_text(text, path, value=None):
+    """Replace each read of `__file__` by the module's absolute path, the value CPython 3.12 binds
+    before the module body runs. A merged program has no file at run time, so the constant is the
+    only exact spelling. A program that also binds `__file__` is refused by name (a named refusal,
+    never a silent difference). `value` overrides the replacement for the entry, whose CPython
+    `__file__` keeps the path as spelled on the command line (made absolute without normalisation)."""
+    if '__file__' not in text:
+        return text
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text                     # a brace-syntax module: not Python, nothing to replace
+    spans = [(node.lineno, node.col_offset, node.end_col_offset)
+             for node in ast.walk(tree)
+             if isinstance(node, ast.Name) and node.id == '__file__' and isinstance(node.ctx, ast.Load)]
+    if not spans:
+        return text                     # only binds or mentions the name: leave the program alone
+    for node in ast.walk(tree):
+        binding = _file_binding(node)
+        if binding is not None:
+            raise ModuleRefusal(path, getattr(binding, 'lineno', 1) or 1,
+                                (getattr(binding, 'col_offset', 0) or 0) + 1, _FILE_BOUND)
+    replacement = repr(str(path) if value is None else value).encode('utf-8')
+    lines = text.splitlines(keepends=True)
+    by_line = collections.defaultdict(list)
+    for line, start, end in spans:
+        if end is None:
+            end = start + len('__file__')
+        by_line[line].append((start, end))
+    for line, items in by_line.items():
+        raw = lines[line - 1].encode('utf-8')
+        for start, end in sorted(items, reverse=True):
+            raw = raw[:start] + replacement + raw[end:]
+        lines[line - 1] = raw.decode('utf-8')
+    return ''.join(lines)
+
 
 class _Unfoldable(Exception):
     pass
@@ -1769,6 +1832,14 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
+        if attr == '__file__':
+            if stored:
+                self.program.refuse(self.mod, node, "`%s.__file__` is assigned here; a module's `__file__` is "
+                                    "its build-time path, so a program that rebinds it is not modelled.\n"
+                                    "  write instead: use another attribute name for your own value"
+                                    % target.name)
+            # CPython's module.__file__ is the absolute file the import found; a namespace package has None
+            return ast.copy_location(ast.Constant(None if target.kind == 'namespace' else str(target.path)), node)
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
@@ -1919,7 +1990,14 @@ def merge_program(entry_path, entry_text, read=None):
     if read is None:
         def read(path):
             return Path(path).read_bytes().decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
-    program = Program(entry_path, read)
+    base_read = read
+
+    def read_module(path):
+        # each imported module reads its own `__file__`; its CPython value is the absolute file the
+        # search path found (CPython's sys.path[0] is the canonical directory of the entry)
+        return file_dunder_text(base_read(path), Path(path).resolve())
+
+    program = Program(entry_path, read_module)
     try:
         tree = ast.parse(entry_text, filename=str(program.entry_path))
     except SyntaxError:

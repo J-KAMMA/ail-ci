@@ -1,3 +1,34 @@
+## 2026-10-28 -- ex5: read `__file__` as the module's build-time path (job-ex5-10290219)
+
+Surveyed the 20 Python-syntax examples under `AIL_CURRENT/language_examples` (the 14 `.py` files
+plus the six `.ail` files that `ail_syntax.detect` reads as Python): 5 build
+(`c_export/geometry.py`, `c_headers_workflow/table_crc.py`, `hello.ail`, `sum.ail`,
+`stdin_sum.ail`) and 15 refuse. The largest single cause was `__file__`: 5 examples
+(`row_codec_compare`, `row_decimal_quad`, `row_state_quad_compare`,
+`row_store_identity_compare`, `test_row_cpu_profile`) stopped at
+`row_locals_compare.py:16:13: __file__ is not available`.
+
+That read is now supported exactly. A merged Python program has no file at run time, so each read
+of `__file__` becomes a build-time string constant: the entry keeps the command-line spelling made
+absolute from the cwd without normalising `.`/`..` or resolving symlinks (CPython 3.12's
+main-module rule), an imported module gets its resolved absolute path, `m.__file__` is the same
+path and `None` for a namespace package. A binding of the name (`__file__ = ...`, a parameter, an
+import alias, a def/class name, an except or match target) and a write of `m.__file__` are refused
+by name; a program that never reads the name is byte-identical to before.
+
+The five examples do not newly build: with `__file__` resolved they stop at other pre-existing
+refusals (the runtime `sys.path.insert` plus `import benchmark_current_rows` in
+row_locals_compare, the `row` standard-library-name collision that import causes in
+row_cpu_profile/row_codec_controls, a function-level import of row_codec_controls, a double
+`candidate_module` import, `2**64`), and the other programmes each have their own cause, so the
+count is unchanged: 5 build, 15 refused. The worst cases cannot be supported exactly: those
+examples import the compiler itself at run time through a computed search path.
+
+`test_ail_ex5.py` (5 tests, both builds) covers the minimal reproducer, command-line spellings
+(`./x.py`, `sub/../x.py`, a symlink), imported modules, a namespace package and the binding
+refusal. Probes `/tmp/probes/ex5/p_*.py` (9 programs): 6 match CPython on both builds and 3 (a
+binding and two shadowing parameters) are refused by name on both.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
