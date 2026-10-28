@@ -257,6 +257,80 @@ def main() -> None:
 main()
 """
 
+PROGRAMS['fz'] = r"""from fractions import Fraction
+
+
+class Holder:
+    def __init__(self, v: Fraction) -> None:
+        self.v = v
+
+
+def div(a: Fraction, b: Fraction) -> Fraction:
+    return a / b
+
+
+def show(label: str, a: Fraction, b: Fraction) -> None:
+    try:
+        print(label, div(a, b))
+    except ZeroDivisionError as e:
+        print(label, "ZeroDivisionError", str(e))
+
+
+def main() -> None:
+    show("direct", Fraction(2, 1), Fraction(0, 1))
+    show("intzero", Fraction(-3, 4), Fraction(0, 7))
+    show("normalized", Fraction(0, 5), Fraction(0, 9))
+    show("unitnum", Fraction(1, 1), Fraction(0, 3))
+    show("neg", Fraction(-7, 2), Fraction(0, 1))
+    vals = [Fraction(5, 6), Fraction(0, 1)]
+    show("list", vals[0], vals[1])
+    d = {"a": Fraction(9, 2), "b": Fraction(0, 4)}
+    show("dict", d["a"], d["b"])
+    h = Holder(Fraction(4, 3))
+    z = Holder(Fraction(0, 1))
+    show("attr", h.v, z.v)
+    try:
+        print("op", Fraction(3, 2) / 0)
+    except ZeroDivisionError as e:
+        print("op", "ZeroDivisionError", str(e))
+
+
+main()
+"""
+
+PROGRAMS['ntf'] = r"""from collections import namedtuple
+from typing import NamedTuple
+
+P = namedtuple("P", "x")
+Q = namedtuple("Q", "a b c")
+E = namedtuple("E", "")
+
+
+class T(NamedTuple):
+    k: int
+
+
+class Sub(namedtuple("Sub", "u v")):
+    def total(self) -> int:
+        return self.u + self.v
+
+
+def main() -> None:
+    p = P(7)
+    q = Q(1, 2, 3)
+    e = E()
+    t = T(9)
+    s = Sub(4, 5)
+    print(P._fields, repr(P._fields), len(P._fields))
+    print(Q._fields, E._fields, repr(E._fields))
+    print(p._fields, q._fields, e._fields, t._fields, s._fields)
+    print(Sub._fields, s.total())
+    print(P._fields == ("x",), Q._fields == ("a", "b", "c"), E._fields == ())
+
+
+main()
+"""
+
 PROGRAMS['r1'] = r"""import random
 import sys
 
@@ -790,8 +864,10 @@ def dunder_inputs():
 
 CASES = [
     ("fraction", PROGRAMS["f1"], fraction_inputs),
+    ("fraction_zero_divisor", PROGRAMS["fz"], lambda: [""]),
     ("enum", PROGRAMS["e1"], enum_inputs),
     ("namedtuple_chainmap", PROGRAMS["nt1"], namedtuple_inputs),
+    ("namedtuple_fields", PROGRAMS["ntf"], lambda: [""]),
     ("random", PROGRAMS["r1"], random_inputs),
     ("small_modules", PROGRAMS["k1"], small_inputs),
     ("operator_methods", PROGRAMS["d1"], dunder_inputs),
@@ -1075,6 +1151,7 @@ class Refusals(unittest.TestCase):
             "mixin": ("from enum import Enum\n\nclass P(str, Enum):\n    A = 'a'\n\nprint(P.A)\n", "mixed-in"),
             "unseeded": ("import random\n\nr = random.Random()\nprint(r.random())\n", "seed"),
             "rename": ("from collections import namedtuple\n\nP = namedtuple('P', 'x y', rename=True)\nprint(P(1, 2))\n", "namedtuple"),
+            "underscore": ("from collections import namedtuple\n\nP = namedtuple('P', 'x _fields')\nprint(P(1, 2))\n", "_fields"),
             "calendar": ("import calendar\n\nprint(calendar.calendar(2024))\n", "calendar.calendar"),
             "bytesio": ("import io\n\nb = io.BytesIO(b'x')\nprint(b.read())\n", "io.BytesIO"),
         }

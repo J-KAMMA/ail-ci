@@ -1,3 +1,25 @@
+## 2026-10-28 -- stdlib5: namedtuple `_fields` and the Fraction zero-divisor message (job-stdlib5-10290155)
+
+Library batch 5 (`fractions`, `enum`, `collections.namedtuple` / `typing.NamedTuple` / `ChainMap`,
+`random.Random`, `keyword`, `string` constants, `calendar`, `abc`, `array`, `io.StringIO`,
+`statistics.fmean`, `stdlib5.py`) ships with `test_ail_stdlib5.py` registered in `ail_check.py`
+MODULES. Two behaviours the differential test exposed were wrong:
+
+* the generated namedtuple class had no class-level `_fields`, so `Point._fields`, `Pt3._fields` and
+  `p._fields` raised `AttributeError` where CPython returns the tuple of field names. `ntlib.generate`
+  now emits `_fields = (...)` (`('x',)` for one field, `()` for none, so the repr matches CPython);
+* `_ail_fr_div` raised `ZeroDivisionError("Fraction(%s, 0)" % da)` with the dividend's
+  numerator; CPython 3.12's `Fraction._div` formats the divisor's denominator, and a zero Fraction is
+  always `0/1`, so the message is `Fraction(1, 0)` for every divisor. It now uses `db`.
+
+`test_ail_stdlib5.py` gained `fraction_zero_divisor` (the message through a direct call, an int zero,
+a normalised zero, a unit numerator, a negative dividend, a list item, a dict value, an attribute and
+the operator form) and `namedtuple_fields` (single, multi, empty, `typing.NamedTuple`, a subclass,
+class and instance access) as compiled cases compared with CPython on both builds, plus an
+`underscore` refusal (`namedtuple('P', 'x _fields')`). Probes in `/tmp/probes/stdlib5fix` on both
+builds via `cmp.sh`: `p_fdiv_routes` and `p_nt_fields` match CPython on the general and default builds,
+`p_nt_underscore` is refused by name, and `p_plain` (no batch-5 module) matches.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
