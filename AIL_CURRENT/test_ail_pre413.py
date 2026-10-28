@@ -10,9 +10,10 @@ exact result outside int64 is refused with `int64 constant expression out of ran
 
 A value that exists only at run time keeps the documented run-time `integer overflow`
 stop.  In-range powers, the int64 boundary `(-2) ** 63`, negative/float/bool operands,
-dynamic values, shadowed locals and containers, and a closure that shadows a module
-constant still match CPython.  Programs are built with the general path forced and with
-the default build; stdout and the exit status must match CPython.
+dynamic values, shadowed locals and containers, a closure that shadows a module
+constant, and a lambda parameter that shadows a module or local constant still match
+CPython.  Programs are built with the general path forced and with the default build;
+stdout and the exit status must match CPython.
 """
 import os
 import subprocess
@@ -77,6 +78,8 @@ class Pre413(unittest.TestCase):
         'fdiv_nested': 'def f(x):\n    return x ** 40 // 1\nprint(f(10))\n',
         'closure_out_of_range': ('x = 2\ndef outer():\n    x = 10\n    def inner():\n'
                                  '        return x ** 62\n    return inner()\nprint(outer())\n'),
+        'lambda_free_module': 'x = 10\nprint((lambda: x ** 40)())\n',
+        'lambda_unshadowed_module': 'x = 10\nprint((lambda y: x ** 40)(2))\n',
     }
 
     MATCH = {
@@ -109,6 +112,22 @@ class Pre413(unittest.TestCase):
         'no_power': 'print(1 + 2)\n',
         'float_base': 'x = 10.0\nprint(x ** 40)\n',
         'pow_call_in_range': 'def f(x):\n    return pow(x, 2)\nprint(f(10))\n',
+        'lambda_shadow_module': 'x = 10\nprint((lambda x: x ** 40)(2))\n',
+        'lambda_shadow_local': ('def f():\n    x = 10\n'
+                                '    return (lambda x: x ** 40)(2)\nprint(f())\n'),
+        'lambda_exponent_shadow': 'x = 10\nn = 40\nprint((lambda n: x ** n)(2))\n',
+        'lambda_in_method': ('class C:\n    def m(self):\n        x = 10\n'
+                             '        return (lambda x: x ** 40)(2)\nprint(C().m())\n'),
+        'lambda_walrus_shadow': 'x = 10\nprint((lambda: (x := 2) ** 40)())\n',
+        'lambda_nested_shadow': 'x = 10\nprint((lambda x: (lambda: x ** 40)())(2))\n',
+        'lambda_default_param': 'x = 10\nprint((lambda x=2: x ** 40)())\n',
+        'lambda_shadow_in_list': 'x = 10\nf = lambda x: [x ** 40]\nprint(f(2)[0])\n',
+        'lambda_argument_shadow': ('def g(x):\n    return (lambda x: x ** 40)(x)\n'
+                                   'print(g(2))\n'),
+        'lambda_alias_shadow': ('x = 10\nprint((lambda x: (lambda y: y ** 40)(x))(2))\n'),
+        'lambda_shadow_attribute': ('class Box:\n    v = 10\n    def m(self):\n'
+                                    '        return (lambda v: v ** 40)(2)\n'
+                                    'print(Box().m())\n'),
     }
 
     def test_out_of_range_powers_are_refused_by_name(self):

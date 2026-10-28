@@ -1,3 +1,21 @@
+## 2026-10-28 -- pre413 review fix: lambda parameters are bindings (job-pre413-10281315)
+
+The review found that the binpow preflight treated only `FunctionDef`/`AsyncFunctionDef` as
+scopes, so a lambda parameter did not shadow a same-named module or local constant.  In-range
+programs such as `x = 10; print((lambda x: x ** 40)(2))`, the local and exponent variants, and
+a lambda with a shadowing parameter inside a method were refused with `int64 constant expression
+out of range` on both builds, while the base build and CPython print `1099511627776` / `100`.
+`_check_int64_binpow_constants.visit` now handles `ast.Lambda`: its defaults are visited in the
+enclosing scope, and its parameters plus any name it stores (a walrus target) are unknown
+bindings for the body, including nested lambdas.  An unshadowed module constant read inside a
+lambda is still refused by name.
+
+Probes in `/tmp/probes/pre413-review` (18 programs) on both builds via `cmp.sh`: r01-r05,
+r09-r18 match CPython (r15 is the pre-existing comprehension shadow), and r16/r17 are refused
+by name; r06-r08 (positional-only, keyword-only and vararg lambda signatures) are already
+refused by the subset before the power check.  Added 11 matching and 2 refused lambda cases to
+`test_ail_pre413.py`.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre413: a constant power behind a name is refused by name (job-pre413-10281315)
 
 The first still-differing item from the pre367 record reproduced on this tree:

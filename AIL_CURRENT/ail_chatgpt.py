@@ -2833,6 +2833,20 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
             for statement in node.body:
                 visit(statement, inner_lookup, inner_global, inner_params, inner_enclosing)
             return
+        if isinstance(node, ast.Lambda):
+            for default in (*node.args.defaults, *[item for item in node.args.kw_defaults
+                                                   if item is not None]):
+                visit(default, lookup, global_name, param_constants, enclosing)
+            shadowed = _scope_parameters(node) | set(_function_scope_stores(node))
+
+            def inner_lookup(name, shadowed=shadowed, lookup=lookup):
+                return _UNKNOWN if name in shadowed else lookup(name)
+
+            def inner_global(name, shadowed=shadowed, global_name=global_name):
+                return name not in shadowed and global_name(name)
+
+            visit(node.body, inner_lookup, inner_global, param_constants, enclosing)
+            return
         if isinstance(node, ast.ClassDef):
             for item in (*node.decorator_list, *node.bases, *node.keywords):
                 visit(item, lookup, global_name, param_constants, enclosing)
