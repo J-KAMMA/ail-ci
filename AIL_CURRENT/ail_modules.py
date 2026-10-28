@@ -1524,6 +1524,11 @@ class Program:
             for stmt in copy.deepcopy(mod.tree.body):
                 finder.visit(stmt)
         for (target, attr), (writer, node) in list(self.ext.items()):
+            if attr == '__file__':
+                self.refuse(writer, node, "assignment to %s.__file__: __file__ cannot be rebound or deleted: "
+                            "CPython lets a module replace its own file path, and this compiler writes the "
+                            "path at build time.\n  write instead: use another name for your own value"
+                            % target.name)
             what = ('an import of %s' % target.name if attr in target.alias else
                     'a submodule' if self.child(target, attr) is not None else
                     'a standard-library import of %s' % target.name if attr in target.std else None)

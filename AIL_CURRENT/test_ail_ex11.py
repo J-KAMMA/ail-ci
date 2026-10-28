@@ -6,8 +6,9 @@ row_store_identity_compare and test_row_cpu_profile all reach it through row_loc
 A module now reads its own source path, and `imported.__file__` reads the imported module's path;
 a namespace package has None.  The entry keeps the spelling CPython uses: an absolute argument is
 kept, a relative one is joined to the compile-time working directory, so `./name.py`, `../name.py`
-and a symlink name match.  Rebinding or deleting `__file__` is refused by name (CPython would let
-the module replace its own path, which a compiled program cannot follow).
+and a symlink name match.  Rebinding or deleting `__file__`, including `module.__file__` on an imported module, is refused
+by name (CPython would let the module replace its own path, which a compiled program cannot
+follow).
 """
 import os
 import subprocess
@@ -75,6 +76,13 @@ REFUSED_PROGRAMS = {
     'module_assign': '__file__ = "changed"\nprint(__file__)\n',
     'delete': 'del __file__\n',
     'global_assign': 'def f():\n    global __file__\n    __file__ = "changed"\n\nf()\nprint(__file__)\n',
+}
+
+MODULE_STORE_PROGRAMS = {
+    'mod_assign': 'import helper\nhelper.__file__ = "changed"\nprint(helper.__file__)\n',
+    'mod_augassign': 'import helper\nhelper.__file__ += ".bak"\nprint(helper.__file__)\n',
+    'mod_delete': 'import helper\ndel helper.__file__\nprint(hasattr(helper, "__file__"))\n',
+    'mod_store_only': 'import helper\nhelper.__file__ = "changed"\n',
 }
 
 
@@ -146,6 +154,30 @@ class Ex11Tests(unittest.TestCase):
                     output = built.stdout + built.stderr
                     self.assertNotEqual(built.returncode, 0, (slug, general, output[-1200:]))
                     self.assertIn(REFUSED, output, (slug, general, output[-1200:]))
+
+    def test_module_attribute_rebinding_is_refused_by_name(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex11-mod-refuse-') as directory:
+            helper = 'H = __file__\n\ndef h():\n    return __file__\n'
+            for slug, text in MODULE_STORE_PROGRAMS.items():
+                for general in (True, False):
+                    (Path(directory) / 'helper.py').write_text(helper, encoding='utf-8')
+                    built, _ = build(directory, '%s_%s.py' % (slug, 'g' if general else 'd'),
+                                     text, general, path=directory)
+                    output = built.stdout + built.stderr
+                    self.assertNotEqual(built.returncode, 0, (slug, general, output[-1200:]))
+                    self.assertIn(REFUSED, output, (slug, general, output[-1200:]))
+
+    def test_instance_attribute_named_file_still_matches(self):
+        text = 'class C:\n    pass\n\nc = C()\nc.__file__ = "instance-file"\nprint(c.__file__)\n'
+        with tempfile.TemporaryDirectory(prefix='ail-ex11-inst-') as directory:
+            for general in (True, False):
+                name = 'instance_%s.py' % ('g' if general else 'd')
+                want = cpython(directory, name, text)
+                built, exe = build(directory, name, text, general)
+                self.assertEqual(built.returncode, 0, (general, built.stdout + built.stderr))
+                got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+                self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0], (general, got.stderr[-800:]))
+                self.assertEqual(got.returncode, want[1], (general, got.stderr[-800:]))
 
 
 if __name__ == '__main__':

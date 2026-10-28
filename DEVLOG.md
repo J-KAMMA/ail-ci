@@ -1,3 +1,30 @@
+## 2026-10-28 -- ex11 review: `module.__file__` stores refused; coverage note
+
+The review found `helper.__file__ = "changed"` and `helper.__file__ += ".bak"` silently accepted:
+the first kept the build-time path, the second compiled and then crashed with `NameError`, while
+the base refused both by name. `Program.prepare_stores` now refuses every assignment to a module's
+`__file__` (plain, augmented or `del`) by name before a merged name is made; an instance attribute
+called `__file__` is still allowed. Probes in `/tmp/probes/ex11def` on both builds: `mod_assign`,
+`mod_aug`, `mod_del` and `mod_store_only` are refused by name (`__file__ cannot be rebound or
+deleted`); `inst_assign` and `mod_read` match CPython. The earlier `/tmp/probes/ex11`,
+`ex11mod` and `ex11ns` probes were re-run and still match or refuse by name.
+
+Coverage: no formerly refused `language_examples` Python program newly builds. After the `__file__`
+reads work, ten of the eleven top-level `.py` files stop at the first refusal "import of a local
+module or package below the top level (inside a try block ...)" inside the compiler's own modules
+(`ail_chatgpt.py:4689` for the row files, `pyfunc.py:1402` for `ordinary_join_price.py`);
+`row_cpu_sampler_probe.py` stops at an out-of-int64 constant. A temporary worktree that allowed
+those function-level `try` imports then stopped at `from iterlower import _name` (a private-name
+import) in `python/pkg-v12/stdlib3.py`, so at least two different compiler-internal refusals and
+more remain. In the subdirectory examples, `c_export/geometry.py` needs user decorators (its
+`@dataclass` / `@export`), `c_headers_workflow/build_crc_library.py` needs the absent
+`slicing_crc` helper in a non-default branch, and `table_crc.py` already built on base. Thus no
+single refusal can move any `language_examples` Python program from refused to building.
+
+Final-state tests: `test_ail_ex11` (61 s), `test_ail_modules`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`. `tools/update_manifest.py --check` and
+`tools/ci_shards.py --check` pass.
+
 ## 2026-10-28 -- ex11: `__file__` and `module.__file__` read the source path (job-ex11-10290429)
 
 Building the Python-syntax examples under `AIL_CURRENT/language_examples` found `__file__ is not
