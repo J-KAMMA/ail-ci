@@ -652,12 +652,16 @@ def _known_class_attributes(tree, module_known):
             required = [arg for arg in (*args.posonlyargs, *args.args) if arg.arg != 'self']
             info['constructible'] = len(required) <= len(args.defaults)
             for stmt in init.body:
-                if not isinstance(stmt, ast.Assign):
+                if isinstance(stmt, ast.Assign):
+                    targets, value_node = stmt.targets, stmt.value
+                elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                    targets, value_node = [stmt.target], stmt.value
+                else:
                     continue
-                for target in stmt.targets:
+                for target in targets:
                     if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
                             and target.value.id == 'self'):
-                        allowed.setdefault(target.attr, []).append((target, stmt.value))
+                        allowed.setdefault(target.attr, []).append((target, value_node))
         allowed_ids = {id(target) for entries in allowed.values() for target, _value in entries}
         for attr, entries in allowed.items():
             if (len(entries) != 1 or attr in methods or attr in setattr_names

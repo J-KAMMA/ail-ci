@@ -1,3 +1,28 @@
+## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
+
+The pre357 review's first other pre-existing item was the annotated constructor store:
+`class Box: def __init__(self, v): self.v: float = v` with `int(Box(1e300).v)` overflowed on
+both builds while CPython prints the exact 301-digit integer.  `_known_class_attributes`
+collected only plain `self.attr = value` statements from `__init__`, so an annotated store
+left the attribute unknown and the conversion ran at run time.  It now collects an
+`ast.AnnAssign` with a value like a plain `ast.Assign`; an annotation without a value is not a
+store and stays ignored.  The conversion is refused by name on both builds through a keyword, a
+default, a second positional parameter, a module constant, a list item, a dict value, a class
+attribute, an instance alias, a list/dict item, a function argument and a wrapper; an
+out-of-int64 string parameter is refused as `int64 constant expression out of range`.
+In-range int/float/string/bool values (negative, 9e18 and the int64 boundary), a later field
+store, a dynamic value, a non-conversion read and an annotation-only store match CPython on
+both builds.  The reviewer's other recorded item (`v = int(v)` rebound before the store) still
+stops with `integer overflow`; it is a separate pre-existing cause and not changed here.  An
+instance held in a plain object's attribute is still not folded, with a plain store as well
+(pre-existing).
+
+Probes in `/tmp/probes/pre371` on both builds: 16 refusal probes (r01-r16) are refused by name
+(r15 as `int64 constant expression out of range`); 10 match probes (m01-m10) match CPython.
+r17 (value through a plain instance attribute) keeps the runtime `integer overflow`, identical
+with a plain store on the base copy, so it is pre-existing.  Final-state tests: test_ail_pre371,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
