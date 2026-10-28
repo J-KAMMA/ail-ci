@@ -12,9 +12,10 @@ components), move the elements. This module rewrites such a site, in the AST, in
     _ail_sort_apply(ys, _ail_sk1_p)           ownership rules
 
 and pyfunc.py compiles `_ail_sort_perm` / `_ail_sort_apply` to the KEYSORT runtime in cruntime.py.
-A dict's `.items()` never becomes a tuple value: `for k, v in sorted(d.items(), ...)` walks the
-permutation over the dict's `keys()` and `values()` snapshots, and `kv[0]` / `kv[1]` inside the key
-read those two lists.
+A dict's `.items()` becomes a tuple value only when this lowering is not used: `for k, v in
+sorted(d.items(), ...)` walks the permutation over the dict's `keys()` and `values()` snapshots,
+and `kv[0]` / `kv[1]` inside the key read those two lists. Any other `sorted(d.items(), ...)` is
+left to the ordinary tuple / dict-view lowering.
 
 The rewrite runs only when the plain compile fails (see `to_c`), so every program that compiled
 before compiles to the same C as before. Stage 1 rewrites the sites no existing path can take;
@@ -356,10 +357,7 @@ class _Rewriter:
             return call
         source = call.args[0]
         if _items_receiver(source) is not None:
-            raise self.Unsupported('sorted(d.items()) is supported only as the iterable of '
-                                   '`for k, v in sorted(d.items(), ...)`; this language has no '
-                                   'tuple values (use sorted(d.keys(), key=lambda k: ...) and '
-                                   'index d[k])')
+            return call
         key, reverse = self.options(call, what)
         if key is None:
             if self.stage >= 1 and isinstance(source, ast.Name) and source.id in self.dicts:

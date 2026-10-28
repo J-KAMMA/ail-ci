@@ -295,7 +295,7 @@ MODULES = (
     'test_ail_pre309',
     'test_ail_ascii_char_compare', 'test_ail_binary_cursor_cli', 'test_ail_borrowed_element_fields', 'test_ail_bytearray_adjacent', 'test_ail_bytearray_receiver',
     'test_ail_c_objects', 'test_ail_callable_owned_results', 'test_ail_chunk_loop_release', 'test_ail_contracts', 'test_ail_corpus_findings3',
-    'test_ail_cov2', 'test_ail_cross_target', 'test_ail_ctor_list_args', 'test_ail_exception_resources', 'test_ail_fastlib2',
+    'test_ail_cov2', 'test_ail_cov30', 'test_ail_cross_target', 'test_ail_ctor_list_args', 'test_ail_exception_resources', 'test_ail_fastlib2',
     'test_ail_finally', 'test_ail_float64_codec', 'test_ail_fuzz29', 'test_ail_fuzz35', 
     'test_ail_last_use_free', 'test_ail_left1',
     'test_ail_link_mode', 'test_ail_map_field_moves', 'test_ail_map_fields', 'test_ail_method_object_contracts', 'test_ail_multifile',

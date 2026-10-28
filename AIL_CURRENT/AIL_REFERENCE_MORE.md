@@ -314,8 +314,9 @@ A `lambda` (or a function name such as `len`) giving an int, float or str, or a 
 of them: `key=lambda g: (-g.total, g.key)` (negate the numeric part; a str cannot be negated).
 The key may read other lists: sort indexes with `idx.sort(key=lambda i: (-w[i], names[i]))`
 instead of writing a merge sort. `reverse=` is literally `True` or `False`.
-`sorted(d.items(), key=lambda kv: (-kv[1], kv[0]))` works only as the iterable of `for k, v in`
-(Word count).
+In the Python syntax, `sorted(d.items())` and `sorted(d.items(), key=lambda kv: ...)` build a list
+of `(key, value)` tuples (the general path; the default build falls back). The iterable form
+`for k, v in sorted(d.items(), ...)` is also lowered directly on the typed path (Word count).
 
 ## Nested lists: `list[list[T]]`
 

@@ -1,3 +1,18 @@
+## 2026-10-28 -- cov30: `sorted(d.items())` as a value (job-cov30-10290642)
+
+The default-build corpus census refused 24 of 219 programs; 2 of them (t456, t467) reported
+`sorted(d.items()) is supported only as the iterable of for k, v in sorted(d.items(), ...)`.  The
+key-column lowering now leaves any `sorted(d.items(), ...)` that is not a `for` iterable to the
+ordinary tuple / dict-view lowering, so the construct builds on the general path and the default
+build falls back.  After the change the default census is still 24/219, with 0 on
+`sorted(d.items())` (t456 now refuses inheritance, t467 `None`); the unified census is 24/219
+before and after.  Added `test_ail_cov30.py` (5 compared programs on both builds plus a kept-view
+refusal) and registered it in `ail_check.MODULES`.  Probes cover empty/one dicts, int/float/bool/
+tuple/list/object values, tuple keys, negative and 2**62 values, reverse, key= by value and by
+tuple component, slicing/indexing, `dict()`, function return and argument/list-item/attribute/
+dict-value routes, and mutation after sorting; all match CPython on both builds.  A kept
+`d.items()` view and the pre-existing set-repr / generator-key differences are unchanged.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
