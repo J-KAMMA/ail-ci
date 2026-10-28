@@ -529,7 +529,8 @@
   "test_json_pointer_batch": 5.0,
   "test_json_pointer_scan": 30.1,
   "test_json_query_cli": 69.3,
-  "test_json_query_file": 40.3
+  "test_json_query_file": 40.3,
+  "test_ail_pre392": 38.8
  },
  "assignment": [
   [
@@ -926,7 +927,8 @@
    "test_ail_pre372",
    "test_ail_sdk_environment",
    "test_ail_spec_fixes",
-   "test_ail_typed_blockers"
+   "test_ail_typed_blockers",
+   "test_ail_pre392"
   ],
   [
    "test_ail_bugs7",
