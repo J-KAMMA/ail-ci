@@ -128,9 +128,22 @@ class Mod:
         self.bound_partial = set()
         self.analysed = False
         self.done = False
+        self.file_defined = self._binds_file()   # a module that rebinds __file__ keeps the ordinary global
         self.lazy = {}                  # id(synthetic top-level import) -> the function-level import it stands for
         self.lazy_only = set()          # names bound only by function-level local imports (not module attributes)
         self.pure_cache = False
+
+    def _binds_file(self):
+        """True when the module's own code rebinds __file__ (then reads must stay ordinary global reads)."""
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Name) and node.id == '__file__' and not isinstance(node.ctx, ast.Load):
+                return True
+            if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name == '__file__':
+                return True
+            if isinstance(node, (ast.Import, ast.ImportFrom)) and any(
+                    (alias.asname or alias.name.split('.')[0]) == '__file__' for alias in node.names):
+                return True
+        return False
 
 
 class Imp:
@@ -1721,6 +1734,16 @@ class Rewriter(ast.NodeTransformer):
             return node
         if name == '__name__' and isinstance(node.ctx, ast.Load):
             return ast.copy_location(ast.Constant('__main__' if self.mod.entry else self.mod.name), node)
+        if name == '__file__' and isinstance(node.ctx, ast.Load):
+            if self.mod.file_defined:
+                if not self.dry:
+                    self.program.refuse(self.mod, node, "this module both rebinds __file__ and reads it, so CPython "
+                                        "keeps the value the rebinding gave it; the compiler fixes __file__ to the "
+                                        "module's path only in a module that never rebinds it.\n"
+                                        "  write instead: rename the variable, or read __file__ in another module")
+                return node
+            # CPython 3.12: the script's absolute path; an imported module's file found on the search path
+            return ast.copy_location(ast.Constant(None if self.mod.kind == 'namespace' else str(self.mod.path)), node)
         if name in self.mod.std:
             return node
         if name in self.mod.alias:

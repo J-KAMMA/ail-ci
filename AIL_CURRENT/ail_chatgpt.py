@@ -4280,7 +4280,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 # Python spellings of built-ins and result contracts (ail_syntax.python_surface);
                 # every statement stays on its own line, so positions below are unchanged.
                 text = python_surface(text, None if notes is None else notes.setdefault(str(path), []),
-                                     library=module_only)
+                                     library=module_only, path=None if merged is not None else path)
             text = fold_constants(text)
             text = _fold_float_int_text(text)
             tree = ast.parse(text, filename=str(path))

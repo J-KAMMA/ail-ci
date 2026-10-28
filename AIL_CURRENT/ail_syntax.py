@@ -1621,6 +1621,8 @@ class _SurfaceExpr(ast.NodeTransformer):
         surface = self.surface
         if not isinstance(node.ctx, ast.Load):
             return node
+        if node.id == '__file__' and surface.file_path is not None and not surface.file_rebound:
+            return self.replaced(ast.Constant(value=surface.file_path), node)
         if node.id in surface.re_subst:
             match, number = surface.re_subst[node.id]
             self.changed = True
@@ -1660,7 +1662,10 @@ def _annotation_target_parts(target):
 
 
 class _Surface:
-    def __init__(self, source):
+    def __init__(self, source, path=None):
+        self.file_path = None if path is None else str(path)
+        self.stored = {}
+        self.file_rebound = True
         self.data = source.encode('utf8')
         self.starts = _byte_offsets(self.data)
         self.tree = ast.parse(source)
@@ -1815,6 +1820,22 @@ class _Surface:
                      else [node.name] if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else [])
             for name in names:
                 stored[name] = stored.get(name, 0) + 1
+        self.stored = stored
+        self.file_rebound = '__file__' in stored or any(
+            (alias.asname or alias.name.split('.')[0]) == '__file__'
+            for node in ast.walk(self.tree) if isinstance(node, (ast.Import, ast.ImportFrom))
+            for alias in node.names)
+        if self.file_path is not None and self.file_rebound:
+            loads = [node for node in ast.walk(self.tree)
+                     if isinstance(node, ast.Name) and node.id == '__file__' and isinstance(node.ctx, ast.Load)]
+            if loads:
+                first = min(loads, key=lambda node: (node.lineno, node.col_offset))
+                raise SyntaxErrorAIL(
+                    'this module both rebinds __file__ (an assignment, import, parameter or definition) and '
+                    'reads it, so CPython keeps the value the rebinding gave it; the compiler fixes __file__ '
+                    'to the source path only in a module that never rebinds it.\n'
+                    '  write instead: rename the variable, or read __file__ in another module',
+                    lineno=first.lineno, offset=first.col_offset + 1)
         if self.re_on:
             self.collect_re(stored)
         for node in ast.walk(self.tree):
@@ -3374,9 +3395,10 @@ def _inline_type_aliases(source):
     return source
 
 
-def python_surface(source, notes=None, library=False):
+def python_surface(source, notes=None, library=False, path=None):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
-    the constructs left as written."""
+    the constructs left as written. `path` is the source file: a read of `__file__` in a module
+    that never rebinds it is replaced by that absolute path, CPython 3.12's value for the script."""
     source = _inline_type_aliases(source)
     if "raise" in source and " from " in source:
         source = _raisefrom().rewrite(source, notes)
@@ -3405,7 +3427,7 @@ def python_surface(source, notes=None, library=False):
         source = _modtables().rewrite_text(source, library, notes)
     source = _tuplib().rewrite(source, notes)
     try:
-        surface = _Surface(source)
+        surface = _Surface(source, path)
     except (SyntaxError, ValueError):
         return source                          # the caller's own parse reports it
     text = surface.run()
