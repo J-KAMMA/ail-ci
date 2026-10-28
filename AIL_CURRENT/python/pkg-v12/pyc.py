@@ -646,6 +646,35 @@ def _has_main_entry(source):
     return any(isinstance(n, ast.FunctionDef) and n.name == 'main' for n in tree.body)
 
 
+def _runs_no_module_body(source):
+    """A Python-surface whole program whose top level executes nothing observable: no `main`, at
+    least one top-level statement, and every one of them is a definition, an import, a docstring,
+    `pass`, or a module-constant assignment. CPython runs such a file (the definitions do not
+    execute) and prints nothing, and the general path already runs only the empty module body for
+    it (a top-level statement makes `pyboxed2` skip the last-def array entry). Pure definitions
+    with no top-level statement stay the last-def entry point, so this rule never touches that
+    convention."""
+    if os.environ.get('AIL_SURFACE') != 'python':
+        return False
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    if any(isinstance(n, ast.FunctionDef) and n.name == 'main' for n in tree.body):
+        return False
+    statement = False
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
+            continue
+        if _is_docstring_stmt(node) or isinstance(node, ast.Pass):
+            continue
+        if isinstance(node, ast.Assign) and _is_module_const_assign(node):
+            statement = True
+            continue
+        return False            # CPython executes this statement (a call, control flow, a computed value)
+    return statement
+
+
 def _general_failure(typed, use_typed, failure):
     """The exception to report when the general (boxed) path cannot build a program the typed
     path refused. For a program with a `main` entry that is the TYPED refusal: it names the
@@ -934,7 +963,12 @@ def _build_unshadowed(source, out, strict, report, force_general):
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
+    if _runs_no_module_body(source):
+        # CPython executes nothing for this shape; the general path likewise runs only the empty
+        # module body. Emit a main that runs nothing instead of inventing an entry call.
+        main = '\nint main(void) { return 0; }\n'
+    else:
+        main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
