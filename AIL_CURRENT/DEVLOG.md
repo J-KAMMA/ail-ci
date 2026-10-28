@@ -1,3 +1,18 @@
+## 2026-10-28 -- pre409: class-object subscript TypeError names the class (job-pre409-10281141)
+
+The pre378 review recorded as pre-existing that `A[1]` on a user class said
+`'type' object is not subscriptable` on both builds, where CPython 3.12 says
+`type 'A' is not subscriptable`.  The v2 runtime's index and slice read paths now format
+the message from the class value's own name (including subclasses, aliases and values
+reaching it through an argument, list item, attribute or dict value); the internal
+`_AilDeque_` name special case is not used here.  Assignment and deletion keep CPython's
+bare `'type' object ...` wording, and instance `__getitem__` is unchanged.
+
+Probes `/tmp/probes/p409_classobj_{index,slice,store,controls}.py` match CPython on both
+builds; `p409_classobj_unicode.py` is refused by name because the v2 runtime is
+ASCII-only.  Added `test_ail_pre409.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES`.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
