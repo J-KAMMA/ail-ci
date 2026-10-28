@@ -1,3 +1,16 @@
+## 2026-10-28 -- pre390: the pre372 Speed items do not differ on this tree (job-pre390-10280851)
+
+Re-ran `bash ~/tools/cmp.sh` against CPython on both builds for the two recorded programs:
+`corpus/gdev/g00_012.py` and `corpus/gdev/g12_036.py` both exit 0 with identical stdout, and the
+general and default binaries are byte-identical (148240 and 268680 bytes).  The recorded
+3.87 vs 3.88 s and 9.02 vs 9.05 s are compile-time deltas with identical generated C, so no
+behaviour differs and there is nothing to fix or refuse.  The review's unverified modules pass
+on this tree: test_ail_safetynet (5), test_ail_files (18, 1 skipped), test_ail_globals (32) and
+test_ail_corpus_findings3 (2).  Six probes in `/tmp/probes/pre390` match CPython on both builds:
+p01 vigenere empty/non-ASCII-key/punctuation boundaries, p02 argument/list-item/attribute/dict
+routes, p03 dataclass ordering/Enum auto/heap ties, p04 Random/heapq/deque, p05 optional float
+and property ValueError with an empty summary, p06 Final plus isalpha/isascii/isupper.  No code,
+test or DIFFERENCES change.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
