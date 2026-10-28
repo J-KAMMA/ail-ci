@@ -4212,19 +4212,24 @@ def _bind_file_constant(text, path):
     """Replace a read of the module-level `__file__` with this file's path, as CPython supplies it.
 
     A file that binds `__file__` itself is left untouched, so its name still goes through the
-    ordinary rules (and is refused by name if unsupported)."""
+    ordinary rules (and is refused by name if unsupported).
+
+    An f-string debug form (`f"{__file__=}"`) echoes the source text of the expression, so replacing
+    just the name would change that echo.  The whole debug field is rebuilt with the echo kept as
+    literal text; a debug expression that spans a newline, or a raw f-string whose echo contains a
+    quote or a backslash, is refused by name rather than rewritten wrongly."""
     try:
         tree = ast.parse(text, filename=str(path))
     except (SyntaxError, ValueError):
         return text
-    loads = []
+    names = []
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
             if node.id != '__file__':
                 continue
             if not isinstance(node.ctx, ast.Load):
                 return text
-            loads.append((node.lineno, node.col_offset, node.end_lineno, node.end_col_offset))
+            names.append((node.lineno, node.col_offset, node.end_lineno, node.end_col_offset))
         elif isinstance(node, ast.arg) and node.arg == '__file__':
             return text
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == '__file__':
@@ -4236,19 +4241,84 @@ def _bind_file_constant(text, path):
             return text
         elif isinstance(node, ast.ExceptHandler) and node.name == '__file__':
             return text
-    if not loads:
+    if not names:
         return text
+    data = text.encode('utf-8')
+    starts = [0]
+    for line in data.splitlines(keepends=True):
+        starts.append(starts[-1] + len(line))
+
+    def at(lineno, column):
+        return starts[lineno - 1] + column
+
+    def start(node):
+        return at(node.lineno, node.col_offset)
+
+    def end(node):
+        return at(node.end_lineno, node.end_col_offset)
+
+    loads = [(at(node[0], node[1]), at(node[2], node[3])) for node in names]
     value = repr(str(path)).encode('utf-8')
-    lines = text.encode('utf-8').splitlines(keepends=True)
-    for line, start, _end_line, end in sorted(loads, reverse=True):
-        row = lines[line - 1]
-        lines[line - 1] = row[:start] + value + row[end:]
-    return b''.join(lines).decode('utf-8')
+    edits = []
+    covered = set()
+    for joined in (node for node in ast.walk(tree) if isinstance(node, ast.JoinedStr)):
+        values = joined.values
+        cursor = start(joined)
+        while cursor < len(data) and data[cursor:cursor + 1].isalpha():
+            cursor += 1
+        raw = b'r' in data[start(joined):cursor].lower()
+        for index, field in enumerate(values):
+            if not isinstance(field, ast.FormattedValue) or index == 0:
+                continue
+            before = values[index - 1]
+            if not isinstance(before, ast.Constant):
+                continue
+            field_start, field_end = start(field), end(field)
+            echo_end = end(before)
+            if echo_end <= field_start + 1:
+                continue                          # an ordinary field: the literal ends at the brace
+            value_start, value_end = start(field.value), end(field.value)
+            inner = [span for span in loads if value_start <= span[0] and span[1] <= value_end]
+            if not inner:
+                continue
+            echo = data[field_start + 1:echo_end]
+            if b'\n' in echo or b'\r' in echo or (raw and any(byte in echo for byte in (b'\\', b"'", b'"'))):
+                raise ail_modules.ModuleRefusal(
+                    str(path), field.lineno, field.col_offset + 1,
+                    'this f-string debug form of `__file__` is not supported: the compiler rewrites the '
+                    'expression text, and this one cannot be echoed as a literal.\n'
+                    '  write instead: assign `path = __file__` and use `f"{path=}"`')
+            if raw:
+                echo = echo.replace(b'{', b'{{').replace(b'}', b'}}')
+            else:
+                echo = echo.replace(b'\\', b'\\\\')
+                echo = echo.replace(b'{', b'{{').replace(b'}', b'}}')
+                echo = echo.replace(b"'", b"\\'").replace(b'"', b'\\"')
+            expression = data[value_start:value_end]
+            for first, last in sorted(inner, reverse=True):
+                expression = expression[:first - value_start] + value + expression[last - value_start:]
+            if field.format_spec is not None:
+                spec = data[start(field.format_spec):end(field.format_spec)]
+                conversion = data[echo_end:start(field.format_spec)]
+            else:
+                spec = b''
+                conversion = data[echo_end:field_end - 1]
+            if not conversion and field.conversion != -1:
+                conversion = b'!' + chr(field.conversion).encode('ascii')
+            edits.append((field_start, field_end, echo + b'{' + expression + conversion + spec + b'}'))
+            covered.update(inner)
+    for first, last in loads:
+        if (first, last) not in covered:
+            edits.append((first, last, value))
+    for first, last, replacement in sorted(edits, key=lambda edit: edit[0], reverse=True):
+        data = data[:first] + replacement + data[last:]
+    return data.decode('utf-8')
 
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False, ffi=None, prelower=None, int64_literals=False):
+                  notes=None, local_imports=False, ffi=None, prelower=None, int64_literals=False,
+                  entry_file=None):
     """Resolve source imports once and validate their shared declaration scope.
 
     `prelower` rewrites the entry's text right after it is read (ail_export.lower for `--lib`); the
@@ -4297,7 +4367,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             if path.suffix.lower() == '.py':
                 syntax = 'python'
             if syntax == 'python' and entry:
-                text = _bind_file_constant(text, path)
+                text = _bind_file_constant(text, entry_file if entry_file is not None else path)
             merged = None
             if ffi is not None and syntax == 'python':
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
@@ -4815,7 +4885,8 @@ def _strict_blockers(args, source, objects, python):
     """(blockers, incomplete): every typed-path blocker of the program, with file:line:col, ranked."""
     origins, source_map = {}, {}
     text, _, _ = _load_sources(source, args.module, args.syntax, module_paths=args.module_path,
-                               origins=origins, source_map=source_map, local_imports=True)
+                               origins=origins, source_map=source_map, local_imports=True,
+                               entry_file=os.path.abspath(args.source))
     names = _MERGED_ENTRIES[str(source)].names if str(source) in _MERGED_ENTRIES else None
 
     def reword(message):
@@ -4959,6 +5030,7 @@ def _source_check(args):
         text, _, _ = _load_sources(source, args.module, args.syntax,
                                   module_only=args.library, module_paths=args.module_path, origins=origins, source_map=source_map,
                                   local_imports=True, ffi=ffi, int64_literals=True,
+                                  entry_file=os.path.abspath(args.source),
                                   **({'source_bytes': snapshots} if snapshots is not None else {}))
         check_objects = list(args.object)
         if getattr(args, 'ffi', False):
@@ -5583,7 +5655,8 @@ def main(argv=None):
             parser.error('object output requires an existing directory and must differ from source')
         try:
             text = source.read_text(encoding='utf8') if is_c else _load_sources(
-                source, source_syntax=args.syntax, module_only=True, module_paths=args.module_path, **native_build.loading(args))[0]
+                source, source_syntax=args.syntax, module_only=True, module_paths=args.module_path,
+                entry_file=os.path.abspath(args.source), **native_build.loading(args))[0]
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             parser.error(str(error))
         with tempfile.TemporaryDirectory(prefix='ail-module-') as directory:
@@ -5665,7 +5738,8 @@ def main(argv=None):
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
                 module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,
-                prelower=lower_exports if export_lib else None, **loading)
+                prelower=lower_exports if export_lib else None,
+                entry_file=os.path.abspath(args.source), **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
         prelude_units = _PRELUDE_UNITS.get(str(source), ())

@@ -1772,7 +1772,7 @@ class Rewriter(ast.NodeTransformer):
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
         if attr == '__file__' and not stored and '__file__' not in target.kinds:
-            return ast.copy_location(ast.Constant(str(target.path)), node)
+            return ast.copy_location(ast.Constant(None if target.kind == 'namespace' else str(target.path)), node)
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))

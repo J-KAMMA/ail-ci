@@ -1,3 +1,30 @@
+## 2026-10-28 -- ex17 review: f-string debug `__file__`, namespace/symlink paths, unsafe `@export`
+
+Fixed the four defects in the ex17 review. `_bind_file_constant` now rebuilds an f-string debug
+field (`f"{__file__=}"`) with its original echo as literal text and the implicit `!r`, conversion
+and format spec kept, so the output is `__file__='/path'` rather than `'/path'='/path'`; the same
+rewrite covers expressions reached through a list item, dict value, attribute and call. A debug
+echo that needs a newline, or a quote/backslash in a raw f-string, is refused by name. The entry
+path for `__file__` is now `os.path.abspath(args.source)` (not `Path.resolve()`), so a symlinked
+entry keeps the link path, as CPython does. A namespace package's `m.__file__` is now `None` (its
+path is a directory), while its submodules keep their file path.
+
+`ail_ffi_lower` now resolves the `@export` marker the way CPython does at decoration time. It
+tracks top-level rebindings of `export`, `ail_ffi`, `dataclass`/`dataclasses`, the annotation
+builtins and the dataclass names. A genuine `dataclasses.dataclass` defined before the function
+still drops the marker; a forward-referenced dataclass (CPython `NameError`), a shadowed
+`dataclass` (`TypeError`) and a rebound `export` (`RuntimeError`) are refused by name on both
+builds instead of compiling and printing a result.
+
+Self-check probes in `/tmp/probes/ex17fix` via `cmp.sh` (unless noted) on both builds:
+`p_file_fdebug` (debug forms, conversions, format specs), `p_file_fdebug_expr` (upper call, list
+item, dict value, lambda, instance attribute, quoted expression), `p_file_fdebug_raw` (raw),
+`p_file_fdebug_quote` (quoted expression), `p_file_import_debug` (imported module debug and
+`helper.FILE=`), `ns/main.py` (namespace `pkg.__file__`/`pkg.a.__file__`) and `sym/link.py`
+(symlinked entry, run directly) all match CPython; `p_file_fdebug_raw_quote` is refused by name.
+`p_export_basic`, `p_export_alias` and `p_export_dc` match; `p_export_forward`, `p_export_shadow`
+and `p_export_rebind` are refused by name on both builds where CPython exits 1.
+
 ## 2026-10-28 -- ex17: `__file__` and valid `@export` in the Python examples (job-ex17-10290508)
 
 Scanned the 15 `*.py` files and the 6 `*.ail` files that parse as Python under

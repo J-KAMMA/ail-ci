@@ -187,50 +187,180 @@ class Session:
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
-        def is_export(decorator):
+        def looks_like_export(decorator):
             base = decorator.func if isinstance(decorator, ast.Call) else decorator
             return ((isinstance(base, ast.Name) and base.id == 'export' and 'export' in imported) or
                     (isinstance(base, ast.Attribute) and base.attr == 'export'
                      and isinstance(base.value, ast.Name) and base.value.id in module_names))
 
-        def is_dataclass(decorator):
+        def module_bindings(node):
+            """Names a top-level statement binds in the module namespace (nested scopes excluded)."""
+            names = set()
+
+            def walk(current):
+                if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    names.add(current.name)
+                    return
+                if isinstance(current, ast.Lambda):
+                    return
+                if isinstance(current, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                    return
+                if isinstance(current, ast.Import):
+                    for alias in current.names:
+                        names.add(alias.asname or alias.name.split('.')[0])
+                    return
+                if isinstance(current, ast.ImportFrom):
+                    for alias in current.names:
+                        if alias.name != '*':
+                            names.add(alias.asname or alias.name)
+                    return
+                if isinstance(current, ast.Name) and isinstance(current.ctx, (ast.Store, ast.Del)):
+                    names.add(current.id)
+                elif isinstance(current, ast.ExceptHandler) and current.name:
+                    names.add(current.name)
+                for child in ast.iter_child_nodes(current):
+                    walk(child)
+
+            walk(node)
+            return names
+
+        builtin_annotations = {'int', 'float', 'bool', 'str', 'bytes', 'list'}
+        live_builtins = set(builtin_annotations)
+        live_export = set()             # names bound to ail_ffi.export
+        live_ffi = set()                # module aliases bound to ail_ffi
+        live_dataclass = set()          # names bound to dataclasses.dataclass
+        live_dataclasses = set()        # module aliases bound to dataclasses
+        good_classes = {}               # class name -> it is a genuine int/float/bool dataclass
+        tainted = set()                 # names that lost a live meaning by a rebinding
+        later_bound = [set() for _ in tree.body]
+        future = set()
+        for index in range(len(tree.body) - 1, -1, -1):
+            later_bound[index] = set(future)
+            future |= module_bindings(tree.body[index])
+
+        def unbind(name):
+            if (name in live_builtins or name in live_export or name in live_ffi or
+                    name in live_dataclass or name in live_dataclasses or name in good_classes):
+                tainted.add(name)
+            live_builtins.discard(name)
+            live_export.discard(name)
+            live_ffi.discard(name)
+            live_dataclass.discard(name)
+            live_dataclasses.discard(name)
+            good_classes.pop(name, None)
+
+        def is_export_live(decorator):
             base = decorator.func if isinstance(decorator, ast.Call) else decorator
-            return ((isinstance(base, ast.Name) and base.id == 'dataclass')
-                    or (isinstance(base, ast.Attribute) and base.attr == 'dataclass'
-                        and isinstance(base.value, ast.Name) and base.value.id == 'dataclasses'))
+            if isinstance(base, ast.Name):
+                return base.id in live_export
+            return (isinstance(base, ast.Attribute) and base.attr == 'export'
+                    and isinstance(base.value, ast.Name) and base.value.id in live_ffi)
 
-        def allowed(annotation, result=False):
+        def is_dataclass_live(decorator):
+            base = decorator.func if isinstance(decorator, ast.Call) else decorator
+            if isinstance(base, ast.Name):
+                return base.id in live_dataclass
+            return (isinstance(base, ast.Attribute) and base.attr == 'dataclass'
+                    and isinstance(base.value, ast.Name) and base.value.id in live_dataclasses)
+
+        def good_class(node):
+            fields = [field.annotation for field in node.body if isinstance(field, ast.AnnAssign)]
+            return (bool(fields) and all(isinstance(field, ast.Name) and field.id in ('int', 'float', 'bool')
+                                         and field.id in live_builtins for field in fields)
+                    and any(is_dataclass_live(decorator) for decorator in node.decorator_list))
+
+        def annotation_status(annotation, index, result=False):
             if annotation is None:
-                return False
+                return 'invalid', None
             if isinstance(annotation, ast.Constant):
-                return result and annotation.value is None
+                return ('ok' if result and annotation.value is None else 'invalid'), None
             if isinstance(annotation, ast.Name):
-                return (annotation.id in ('int', 'float', 'bool', 'str', 'bytes')
-                        or not result and annotation.id in good_dataclasses)
-            return (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
-                    and annotation.value.id == 'list' and isinstance(annotation.slice, ast.Name)
-                    and annotation.slice.id in ('int', 'float'))
+                name = annotation.id
+                if name in live_builtins or (not result and good_classes.get(name) is True):
+                    return 'ok', name
+                if name in good_classes or name in tainted or name in later_bound[index]:
+                    return 'unsafe', name
+                return 'invalid', name
+            if (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
+                    and annotation.value.id == 'list' and 'list' in live_builtins
+                    and isinstance(annotation.slice, ast.Name) and annotation.slice.id in ('int', 'float')
+                    and annotation.slice.id in live_builtins):
+                return 'ok', None
+            return 'invalid', None
 
-        good_dataclasses = set()
-        for node in tree.body:
-            if isinstance(node, ast.ClassDef) and any(is_dataclass(d) for d in node.decorator_list):
-                fields = [field.annotation for field in node.body if isinstance(field, ast.AnnAssign)]
-                if fields and all(isinstance(f, ast.Name) and f.id in ('int', 'float', 'bool') for f in fields):
-                    good_dataclasses.add(node.name)
-
-        def export_ok(function):
+        def export_status(function, index):
             args = function.args
             if args.defaults or args.kw_defaults or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg:
-                return False
-            return (allowed(function.returns, result=True)
-                    and all(allowed(argument.annotation) for argument in args.args))
+                return 'invalid', None
+            checks = [annotation_status(function.returns, index, result=True)]
+            checks += [annotation_status(argument.annotation, index) for argument in args.args]
+            for status, name in checks:
+                if status == 'unsafe':
+                    return status, name
+            return ('ok' if all(status == 'ok' for status, _name in checks) else 'invalid'), None
 
         decls = []
-        for node in tree.body:
-            if isinstance(node, ast.FunctionDef) and node.decorator_list:
-                export = [decorator for decorator in node.decorator_list if is_export(decorator)]
-                if export and export_ok(node):
-                    blank.extend((decorator.lineno, decorator.end_lineno) for decorator in export)
+        for index, node in enumerate(tree.body):
+            binds = module_bindings(node)
+            if isinstance(node, ast.ClassDef):
+                good = good_class(node)      # decorators and fields are read before the name is bound
+                for name in binds:
+                    unbind(name)
+                good_classes[node.name] = good
+                continue
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                export = [decorator for decorator in node.decorator_list if is_export_live(decorator)]
+                if any(looks_like_export(decorator) for decorator in node.decorator_list) and not export:
+                    self._refuse(path, node, '@export %s: the name `export` is rebound before this decorator runs, '
+                                 'so it is not ail_ffi.export here.\n  write instead: keep '
+                                 '`from ail_ffi import export` and do not reuse the name `export`' % node.name)
+                if export:
+                    status, name = export_status(node, index)
+                    if status == 'ok':
+                        blank.extend((decorator.lineno, decorator.end_lineno) for decorator in export)
+                    elif status == 'unsafe':
+                        if name in good_classes:
+                            why = ('%s is not a dataclass of int/float/bool when the decorator runs, so '
+                                   'CPython raises TypeError' % name)
+                            hint = ('make %s a @dataclass with only int/float/bool fields, or use a '
+                                    'supported scalar annotation' % name)
+                        elif name in later_bound[index]:
+                            why = ('%s is defined after this function; CPython evaluates the annotations when '
+                                   'the decorator runs and raises NameError' % name)
+                            hint = 'define %s before %s' % (name, node.name)
+                        else:
+                            why = ('%s is rebound before this function, so CPython no longer sees the type '
+                                   'the AIL build would use' % name)
+                            hint = 'keep %s unchanged until after %s' % (name, node.name)
+                        self._refuse(path, node, '@export %s: %s.\n  write instead: %s' % (node.name, why, hint))
+                for name in binds:
+                    unbind(name)
+                continue
+            if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
+                for name in binds:
+                    unbind(name)
+                for alias in node.names:
+                    if alias.name == 'export':
+                        live_export.add(alias.asname or 'export')
+                continue
+            if isinstance(node, ast.Import):
+                for name in binds:
+                    unbind(name)
+                for alias in node.names:
+                    if alias.name == 'ail_ffi':
+                        live_ffi.add(alias.asname or 'ail_ffi')
+                    elif alias.name == 'dataclasses':
+                        live_dataclasses.add(alias.asname or 'dataclasses')
+                continue
+            if isinstance(node, ast.ImportFrom) and node.module == 'dataclasses' and node.level == 0:
+                for name in binds:
+                    unbind(name)
+                for alias in node.names:
+                    if alias.name == 'dataclass':
+                        live_dataclass.add(alias.asname or 'dataclass')
+                continue
+            for name in binds:
+                unbind(name)
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
                 self._link(path, node.value)
