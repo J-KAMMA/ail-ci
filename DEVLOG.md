@@ -1,3 +1,32 @@
+## 2026-10-28 -- stdlib8: argparse.ArgumentParser / add_argument / parse_args
+
+`argparse` was the next most-imported still-refused module (9 `language_examples` imports; none in
+`lab/corpus/programs`).  `arglib.py` lowers a parser assigned once per scope, its `add_argument`
+statements and `name = parser.parse_args([...])` / `parse_args()` to plain Python over a
+`list[str]`, so both builds run the parse with no runtime module.  It covers positionals and
+optionals, several option strings, long `--opt=value`, short `-cVALUE`/`-c=VALUE`, short clusters
+(`-vv`, `-qv`, `-vc7`), long abbreviations, `--`, negative numbers, `type=` str/int/float/Path,
+literal/expression defaults (string defaults converted as CPython does), required, choices,
+store/store_true/store_false and dest/help/metavar.  The other forms are named compile-time
+refusals: nargs, const, other actions, an optional with neither default nor required, a duplicate
+destination, non-default `prefix_chars`/`argument_default`, the namespace used as a value, the
+parser used outside those statements, a literal `-h`/`--help`, and an invalid string default.
+argparse's stderr usage/error text is not reproduced (stdout empty, exit 2), and runtime `-h` over
+`sys.argv` is not CPython's help; both are in the C?-job-stdlib8-10290216-1 row.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: matching CPython are `p_argparse_ok`,
+`p_argparse2`, `p_argparse_short`, `p_argparse_abbrev`, `p_argparse_cluster`, `p_argparse_two`,
+`p_argparse_from`, `p_argparse_alias`, `p_argparse_default_expr`, `p_argparse_defaults`,
+`p_argparse_choices_int`, `p_argparse_errors`, `p_argparse_routes`, `p_argparse_row`, and the
+boundary probes `p8_cluster`, `p8_cluster2`, `p8_clusterval`, `p8_empty`, `p8_negok`, `p8_negpos`,
+`p8_negjunk2`, `p8_negval`, `p8_nondash`, `p8_noneliteral`, `p8_repeat`, `p8_routes`,
+`p8_choice_default`, `p8_strdefault`, `p8_strdefault3`, `p8_strdefault4`, `p8_swallow`.  Refused
+by name: `p_argparse_append`, `p_argparse_dest`, `p_argparse_module`, `p_argparse_nested`,
+`p_argparse_nodefault`, `p_argparse_return`, `p_argparse_value`, `p_argparse_catch`,
+`p8_aliasparser`, `p8_cond`, `p8_condparse`, `p8_required_default`, `p8_strdefault2` and
+`p8_help` (the last now refuses the literal `-h`).  Added `test_ail_stdlib8.py` (both builds,
+CPython comparison, error exit statuses, refusals) and registered it in `ail_check.py`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
