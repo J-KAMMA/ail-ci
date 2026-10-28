@@ -1,3 +1,27 @@
+## 2026-10-28 -- pre414: an exception instance names its class in item errors (job-pre414-10281317)
+
+The first still-differing pre-existing item from the pre396 review was the exception
+instance name in item errors: ``del MyErr()[0]`` printed
+``'exception' object doesn't support item deletion`` on both builds where CPython prints
+``'MyErr' object doesn't support item deletion``.  The v2 object-to-name helper
+``ail__tname_c`` used by the item messages returned a class name only for ``AIL_T_INST``;
+an exception value has tag ``AIL_T_EXC`` and fell through to the tag name ``exception``.
+It now takes the same class-name path for exception values, so deletion, reading and
+assignment of an item name the custom class or its subclass.  The review's other
+pre-existing items (the ``A[0]`` class-subscript wording and the bad/raising ``__index__``
+case during ``del``) are separate causes and are unchanged.
+
+Probes in ``/tmp/probes/pre414`` on both builds via ``cmp.sh``: ``p_exc_name.py`` (the
+recorded ``del MyErr()[0]``) now matches CPython, where it differed on both builds before
+the change; ``e_all.py`` covers deletion with int and bool keys, a subclass, a built-in
+alias, an argument, a list item, an attribute, a dict value, and item reads/stores on the
+custom class and a subclass, and matches CPython on both builds.  ``p_class_sub.py``,
+``p_bad_index.py``, ``p_raise_index.py`` and ``p_inst_name.py`` were also checked; the
+first three belong to the review's separate pre-existing causes and still differ, while
+``p_inst_name.py`` already matched.  Final-state tests: test_ail_pre414, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed, 308s).
+``tools/update_manifest.py`` and ``--check`` pass.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
