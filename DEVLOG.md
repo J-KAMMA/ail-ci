@@ -1,3 +1,28 @@
+## 2026-10-28 -- ex22: `__file__` names the build-time source path (job-ex22-10290658)
+
+Built every Python-syntax example under `AIL_CURRENT/language_examples`: the 14 `.py` files and the
+six `.ail` files that parse as Python (`hello`, `integer_series`, `math`, `stdin_sum`, `sum`,
+`use_math`).  The most common refusal was `__file__ is not available: the program is built into
+one executable, so a module has no file`, which blocked five `.py` examples through
+`row_locals_compare.py`: `row_codec_compare`, `row_decimal_quad`, `row_state_quad_compare`,
+`row_store_identity_compare` and `test_row_cpu_profile`.  A read-only `__file__` now folds to the
+module's source path: `_bind_file_constant` replaces the loads in a single-file Python program,
+and the module rewriter uses each module's own resolved path (the entry path, an imported
+module's file, a package's `__init__.py`, or `None` for a namespace package).  A module that binds
+or deletes `__file__` keeps the ordinary name rules; an attribute read on such a module stays a
+named refusal, so nothing becomes silently wrong.
+
+After the change the five examples advance to their next named refusal (all still involve
+`row_locals_compare`'s import of `benchmark_current_rows` or a later merge rule), so none of the
+`.py` scripts fully builds yet; the minimal reproducer does.  Probes in `/tmp/probes` on both
+builds via `cmp.sh`: `p_file_basic`, `p_file_path`, `p_file_list`, `p_file_dict`, `p_file_attr`,
+`p_file_arg`, `p_file_alias`, `p_file_read`, `p_file_fstring`, `p_file_concat`, `p_file_default`,
+`p_file_global`, `p_file_assign`, `p_file_guard`, `p_file_import`, `p_file_from`, `p_file_ns`,
+`p_file_pkg`, `p_file_mod_alias`, `p_file_mod_routes`, `p_file_mod_arg`, `p_file_mod_global`
+match CPython; `p_file_del` and `p_file_mod_bind` are refused by name; `p_file_from_file` is
+refused by name (a `from module import __file__`).  Added `test_ail_ex22.py` (7 tests) and
+registered it in `ail_check.py`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

@@ -131,6 +131,8 @@ class Mod:
         self.lazy = {}                  # id(synthetic top-level import) -> the function-level import it stands for
         self.lazy_only = set()          # names bound only by function-level local imports (not module attributes)
         self.pure_cache = False
+        self.file_bound = any(isinstance(node, ast.Name) and node.id == '__file__'
+                              and isinstance(node.ctx, (ast.Store, ast.Del)) for node in ast.walk(tree))
 
 
 class Imp:
@@ -1721,6 +1723,9 @@ class Rewriter(ast.NodeTransformer):
             return node
         if name == '__name__' and isinstance(node.ctx, ast.Load):
             return ast.copy_location(ast.Constant('__main__' if self.mod.entry else self.mod.name), node)
+        if name == '__file__' and isinstance(node.ctx, ast.Load) and not self.mod.file_bound:
+            value = None if self.mod.kind == 'namespace' else str(self.mod.path)
+            return ast.copy_location(ast.Constant(value), node)
         if name in self.mod.std:
             return node
         if name in self.mod.alias:
@@ -1769,6 +1774,9 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
+        if attr == '__file__' and not stored and not target.file_bound:
+            value = None if target.kind == 'namespace' else str(target.path)
+            return ast.copy_location(ast.Constant(value), node)
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))

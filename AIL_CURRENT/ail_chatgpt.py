@@ -4208,6 +4208,41 @@ def _refuse_load(error):
     raise SystemExit(2)
 
 
+def _bind_file_constant(text, path):
+    """Replace a read-only `__file__` with this module's source path.
+
+    CPython sets `__file__` to the file a module was loaded from.  A compiled program has no
+    source file at run time, so the build-time path is the value.  A module that binds or deletes
+    `__file__` itself is left untouched: the ordinary name rules then decide, and a construct the
+    compiler cannot model stays a named refusal instead of silently reading the old path.
+    """
+    try:
+        tree = ast.parse(text)
+    except (SyntaxError, ValueError):
+        return text
+    if any(isinstance(node, ast.Name) and node.id == '__file__'
+           and isinstance(node.ctx, (ast.Store, ast.Del)) for node in ast.walk(tree)):
+        return text
+    edits = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Name) and node.id == '__file__' and isinstance(node.ctx, ast.Load)):
+            continue
+        if getattr(node, 'lineno', None) is None or node.end_lineno != node.lineno:
+            continue
+        edits.append((node.lineno, node.col_offset, node.end_col_offset))
+    if not edits:
+        return text
+    lines = text.splitlines(keepends=True)
+    for lineno, start_byte, end_byte in sorted(edits, reverse=True):
+        line = lines[lineno - 1]
+        start = len(line.encode('utf8')[:start_byte].decode('utf8'))
+        end = len(line.encode('utf8')[:end_byte].decode('utf8'))
+        if line[start:end] != '__file__':
+            continue
+        lines[lineno - 1] = line[:start] + repr(str(path)) + line[end:]
+    return ''.join(lines)
+
+
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
                   notes=None, local_imports=False, ffi=None, prelower=None, int64_literals=False):
@@ -4293,6 +4328,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                      library=module_only)
             text = fold_constants(text)
             text = _fold_float_int_text(text)
+            if syntax == 'python' and merged is None:
+                text = _bind_file_constant(text, path)
             tree = ast.parse(text, filename=str(path))
             if entry and entry_defs is not None and merged is None:
                 _PRELUDE_UNITS[str(path)] = sorted(
