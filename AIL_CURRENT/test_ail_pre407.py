@@ -333,6 +333,44 @@ class C:
 c = C()
 print(int(c.v[0]))
 ''',
+    'list_alias_subscript_after_store': '''
+class C:
+    pass
+
+c = C()
+c.v = [1e300]
+a = c.v
+a[0] = 1.5
+print(int(c.v[0]))
+''',
+    'nested_subscript_after_store': '''
+class C:
+    pass
+
+c = C()
+c.v = [[1e300]]
+c.v[0][0] = 1.5
+print(int(c.v[0][0]))
+''',
+    'tuple_target_after_store': '''
+class C:
+    pass
+
+c = C()
+c.v = [1e300]
+c.v[0], x = 1.5, 0
+print(int(c.v[0]))
+''',
+    'dict_alias_after_store': '''
+class C:
+    pass
+
+c = C()
+c.d = {"k": 1e300}
+a = c.d
+a["k"] = 1.5
+print(int(c.d["k"]))
+''',
 }
 
 

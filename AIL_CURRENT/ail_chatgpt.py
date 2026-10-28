@@ -906,13 +906,17 @@ class _KnownContainerStores:
     folded the construction value (or stopped with a run-time ``integer overflow`` when it did
     not fold).  A constant store updates the per-instance value, in source order, so a store
     only affects reads that follow it.  A store whose key or value is not static makes that
-    attribute unknown, so a stale value is never folded.
+    attribute unknown, so a stale value is never folded.  Module names that hold a container
+    alias share the instance or class value, so a later mutation through the alias is applied
+    too; when a store cannot be applied, the affected attribute is invalidated rather than
+    leaving the pre-store value to be folded.
     """
 
-    def __init__(self, resolve, attributes, int_shadowed):
+    def __init__(self, resolve, attributes, int_shadowed, module_scope):
         self.resolve = resolve
         self.attributes = attributes
         self.int_shadowed = int_shadowed
+        self.module_scope = module_scope
         self.instances = []
 
     def _target_of(self, node):
@@ -938,13 +942,71 @@ class _KnownContainerStores:
         else:
             self.attributes.overrides[(target.name, attr)] = value
 
-    @staticmethod
-    def _copy_container(value):
+    @classmethod
+    def _copy_container(cls, value):
         if type(value) is list:
-            return list(value)
+            return [cls._copy_container(item) for item in value]
         if type(value) is dict:
-            return dict(value)
+            return {key: cls._copy_container(item) for key, item in value.items()}
+        if type(value) is tuple:
+            return tuple(cls._copy_container(item) for item in value)
         return value
+
+    def _materialize_attribute(self, target, attr):
+        if isinstance(target, _KnownInstance):
+            if attr in target.overrides:
+                return target.overrides[attr]
+            value = self.attributes.instance_value(target.name, attr, target.arguments)
+            if type(value) in (list, dict, tuple):
+                value = self._copy_container(value)
+            if value is not _UNKNOWN:
+                target.overrides[attr] = value
+            return value
+        key = (target.name, attr)
+        if key in self.attributes.overrides:
+            return self.attributes.overrides[key]
+        value = self.attributes.class_value(target.name, attr)
+        if type(value) in (list, dict, tuple):
+            value = self._copy_container(value)
+        if value is not _UNKNOWN:
+            self.attributes.overrides[key] = value
+        return value
+
+    def _materialize(self, node):
+        """Resolve a module expression, giving an aliased container its own stored value."""
+        if isinstance(node, ast.Attribute):
+            target = self._target_of(node.value)
+            if target is not None:
+                return self._materialize_attribute(target, node.attr)
+            return self.resolve(node)
+        if isinstance(node, ast.Subscript):
+            container = self._materialize(node.value)
+            key = self.resolve(node.slice)
+            if isinstance(key, slice) or key is _UNKNOWN:
+                return _UNKNOWN
+            if type(container) in (list, tuple, dict):
+                try:
+                    return container[key]
+                except (IndexError, KeyError, TypeError):
+                    return _UNKNOWN
+            return _UNKNOWN
+        return self.resolve(node)
+
+    def _root_attribute(self, node):
+        while isinstance(node, ast.Subscript):
+            node = node.value
+        if isinstance(node, ast.Attribute):
+            target = self._target_of(node.value)
+            if target is not None:
+                return target, node.attr
+        return None
+
+    def _invalidate_subscript(self, node):
+        root = self._root_attribute(node)
+        if root is not None:
+            self._store(root[0], root[1], _UNKNOWN)
+        else:
+            self._clear(taint=True)
 
     def _stored_value(self, node):
         value = self.resolve(node)
@@ -980,47 +1042,37 @@ class _KnownContainerStores:
         target = self._target_of(node.value)
         if target is None:
             return
-        self._store(target, node.attr, self._copy_container(self._stored_value(value_node)))
+        value = self._stored_value(value_node)
+        if (value is not _UNKNOWN
+                and isinstance(value_node, (ast.Attribute, ast.Subscript, ast.Name))):
+            value = self._materialize(value_node)
+        self._store(target, node.attr, value)
 
     def _store_subscript(self, node, value_node):
-        base = node.value
-        if not isinstance(base, ast.Attribute):
+        self._store_subscript_value(node, self._stored_value(value_node))
+
+    def _store_subscript_value(self, node, value):
+        if value is _UNKNOWN:
+            self._invalidate_subscript(node)
             return
-        target = self._target_of(base.value)
-        if target is None:
-            return
-        attr = base.attr
         key = self.resolve(node.slice)
-        container = self._current(target, attr)
         if isinstance(key, slice) or key is _UNKNOWN:
-            self._store(target, attr, _UNKNOWN)
+            self._invalidate_subscript(node)
             return
+        container = self._materialize(node.value)
         if type(container) is list:
             if type(key) not in (int, bool) or not -len(container) <= key < len(container):
-                self._store(target, attr, _UNKNOWN)
+                self._invalidate_subscript(node)
                 return
-            value = self._stored_value(value_node)
-            if value is _UNKNOWN:
-                self._store(target, attr, _UNKNOWN)
-                return
-            updated = list(container)
-            updated[key] = value
-            self._store(target, attr, updated)
+            container[key] = value
             return
         if type(container) is dict:
-            value = self._stored_value(value_node)
-            if value is _UNKNOWN:
-                self._store(target, attr, _UNKNOWN)
-                return
-            updated = dict(container)
             try:
-                updated[key] = value
+                container[key] = value
             except TypeError:
-                self._store(target, attr, _UNKNOWN)
-                return
-            self._store(target, attr, updated)
+                self._invalidate_subscript(node)
             return
-        self._store(target, attr, _UNKNOWN)
+        self._invalidate_subscript(node)
 
     def _clear(self, taint=False):
         for value in self.instances:
@@ -1029,83 +1081,166 @@ class _KnownContainerStores:
         if taint:
             self.attributes.tainted = True
 
+    def _invalidate_call(self, func):
+        root = self._root_attribute(func)
+        if root is not None:
+            self._store(root[0], root[1], _UNKNOWN)
+        else:
+            self._clear(taint=True)
+
     def _store_call(self, node):
         func = node.func
-        if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Attribute):
+        if not isinstance(func, ast.Attribute):
             return False
         if func.attr not in _MUTATING_CONTAINER_METHODS:
             return False
-        base = func.value
-        target = self._target_of(base.value)
-        if target is None:
+        container = self._materialize(func.value)
+        if type(container) not in (list, dict):
+            if self._root_attribute(func.value) is not None:
+                self._invalidate_call(func.value)
+                return True
             return False
-        attr = base.attr
-        container = self._current(target, attr)
         if (func.attr == 'append' and len(node.args) == 1 and not node.keywords
                 and type(container) is list):
             value = self._stored_value(node.args[0])
             if value is _UNKNOWN:
-                self._store(target, attr, _UNKNOWN)
-                return
-            updated = list(container)
-            updated.append(value)
-            self._store(target, attr, updated)
+                self._invalidate_call(func.value)
+            else:
+                container.append(value)
             return True
         if (func.attr == 'extend' and len(node.args) == 1 and not node.keywords
                 and type(container) is list):
             value = self.resolve(node.args[0])
             if type(value) not in (list, tuple):
-                self._store(target, attr, _UNKNOWN)
-                return
-            updated = list(container)
-            updated.extend(value)
-            self._store(target, attr, updated)
+                self._invalidate_call(func.value)
+            else:
+                container.extend(value)
             return True
         if (func.attr == 'insert' and len(node.args) == 2 and not node.keywords
                 and type(container) is list):
             index = self.resolve(node.args[0])
             value = self._stored_value(node.args[1])
             if type(index) not in (int, bool) or value is _UNKNOWN:
-                self._store(target, attr, _UNKNOWN)
-                return
-            updated = list(container)
-            updated.insert(index, value)
-            self._store(target, attr, updated)
+                self._invalidate_call(func.value)
+            else:
+                container.insert(index, value)
             return True
-        self._store(target, attr, _UNKNOWN)
+        self._invalidate_call(func.value)
         return True
+
+    def _store_value(self, target, value):
+        if isinstance(target, ast.Name):
+            self.module_scope[target.id] = value
+        elif isinstance(target, ast.Attribute):
+            holder = self._target_of(target.value)
+            if holder is not None:
+                self._store(holder, target.attr, value)
+        elif isinstance(target, ast.Subscript):
+            self._store_subscript_value(target, value)
+        elif (isinstance(target, (ast.Tuple, ast.List))
+                and type(value) in (list, tuple) and len(value) == len(target.elts)):
+            for item, element in zip(target.elts, value):
+                self._store_value(item, element)
+        else:
+            self._clear(taint=True)
+
+    def _assign_one(self, target, value_node):
+        if isinstance(target, ast.Name):
+            self.module_scope[target.id] = self._materialize(value_node)
+        elif isinstance(target, ast.Attribute):
+            self._store_attribute(target, value_node)
+        elif isinstance(target, ast.Subscript):
+            self._store_subscript(target, value_node)
+        elif (isinstance(target, (ast.Tuple, ast.List))
+                and isinstance(value_node, (ast.Tuple, ast.List))
+                and len(value_node.elts) == len(target.elts)
+                and not any(isinstance(element, ast.Starred) for element in target.elts)):
+            for item, element in zip(target.elts, value_node.elts):
+                self._assign_one(item, element)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            self._store_value(target, self._materialize(value_node))
+        else:
+            self._clear(taint=True)
+
+    @staticmethod
+    def _augmented(op, left, right):
+        if type(left) in (int, float) and type(right) in (int, float):
+            try:
+                if isinstance(op, ast.Add):
+                    return left + right
+                if isinstance(op, ast.Sub):
+                    return left - right
+                if isinstance(op, ast.Mult):
+                    return left * right
+                if isinstance(op, ast.Div):
+                    return left / right
+                if isinstance(op, ast.FloorDiv):
+                    return left // right
+                if isinstance(op, ast.Mod):
+                    return left % right
+                if isinstance(op, ast.Pow):
+                    return left ** right
+            except (ArithmeticError, ValueError):
+                return _UNKNOWN
+        if isinstance(op, ast.Add) and type(left) is list and type(right) in (list, tuple):
+            return left + list(right)
+        if isinstance(op, ast.Add) and type(left) in (str, bytes) and type(right) is type(left):
+            return left + right
+        return _UNKNOWN
+
+    def _apply_augassign(self, node):
+        target = node.target
+        right = self.resolve(node.value)
+        if isinstance(target, ast.Attribute):
+            holder = self._target_of(target.value)
+            if holder is None:
+                return
+            left = self._materialize_attribute(holder, target.attr)
+            value = self._augmented(node.op, left, right)
+            self._store(holder, target.attr, value)
+            return
+        if isinstance(target, ast.Subscript):
+            container = self._materialize(target.value)
+            key = self.resolve(target.slice)
+            if isinstance(key, slice) or key is _UNKNOWN:
+                self._invalidate_subscript(target)
+                return
+            try:
+                left = container[key]
+            except (IndexError, KeyError, TypeError):
+                self._invalidate_subscript(target)
+                return
+            value = self._augmented(node.op, left, right)
+            if value is _UNKNOWN:
+                self._invalidate_subscript(target)
+            else:
+                container[key] = value
+            return
+        if isinstance(target, ast.Name):
+            left = self.resolve(target)
+            if type(left) is list and isinstance(node.op, ast.Add) and type(right) in (list, tuple):
+                left.extend(right)
+                return
+            self.module_scope[target.id] = self._augmented(node.op, left, right)
+            return
+        self._clear(taint=True)
 
     def apply_statement(self, node):
         """Apply one direct module-level statement, which has already been visited."""
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                if isinstance(target, ast.Attribute):
-                    self._store_attribute(target, node.value)
-                elif isinstance(target, ast.Subscript):
-                    self._store_subscript(target, node.value)
+                self._assign_one(target, node.value)
         elif isinstance(node, ast.AnnAssign) and node.value is not None:
-            if isinstance(node.target, ast.Attribute):
-                self._store_attribute(node.target, node.value)
-            elif isinstance(node.target, ast.Subscript):
-                self._store_subscript(node.target, node.value)
+            self._assign_one(node.target, node.value)
         elif isinstance(node, ast.AugAssign):
-            target = node.target
-            if isinstance(target, ast.Attribute):
-                holder = self._target_of(target.value)
-                if holder is not None:
-                    self._store(holder, target.attr, _UNKNOWN)
-            elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Attribute):
-                holder = self._target_of(target.value.value)
-                if holder is not None:
-                    self._store(holder, target.value.attr, _UNKNOWN)
+            self._apply_augassign(node)
         elif isinstance(node, ast.Delete):
             for target in node.targets:
-                if isinstance(target, ast.Subscript):
-                    base = target.value
-                    if isinstance(base, ast.Attribute):
-                        target_value = self._target_of(base.value)
-                        if target_value is not None:
-                            self._store(target_value, base.attr, _UNKNOWN)
+                root = self._root_attribute(target)
+                if root is not None:
+                    self._store(root[0], root[1], _UNKNOWN)
+                elif isinstance(target, (ast.Subscript, ast.Name)):
+                    self._clear(taint=True)
         elif isinstance(node, ast.Call):
             if not self._store_call(node):
                 self._clear(taint=True)
@@ -1395,7 +1530,8 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.program_bound = program_bound
         self.shadow = []
         self.value_scopes = [known]
-        self.stores = _KnownContainerStores(self._value, attributes, int_shadowed)
+        self.stores = _KnownContainerStores(self._value, attributes, int_shadowed,
+                                            self.value_scopes[0])
 
     def _global_name(self, name):
         return not any(name in scope for scope in self.shadow)

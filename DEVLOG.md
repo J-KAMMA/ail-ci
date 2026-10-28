@@ -1,3 +1,25 @@
+## 2026-10-28 -- pre407 review fix: aliased container mutations no longer leave a stale fold (job-pre407-10281133)
+
+The review of the pre407 change found that a module-level store value survived a later
+mutation the replay did not model, so a read after the mutation folded the stale value and was
+refused while base compiles and CPython prints `1`.  The four reported programs were a list
+alias (`a = c.v; a[0] = 1.5`), a tuple target (`c.v[0], x = 1.5, 0`), a nested subscript
+(`c.v[0][0] = 1.5`) and a dict alias (`a = c.d; a["k"] = 1.5`).
+`_KnownContainerStores` now gives an aliased container its own per-instance/per-class value
+(deep-copied when first materialized, so a second instance is not changed), records module name
+aliases in source order, and applies or invalidates stores through names, nested subscripts,
+tuple/list targets, augmented stores, container methods and slices.  A store that cannot be
+applied invalidates the affected attribute or taints the module replay, so a stale item is
+never folded.  Probes in `/tmp/probes` (26 programs, both builds) all match CPython or are
+refused by name: the four reviewer programs match, as do alias chains, aliases through a list
+item, attribute or dict value, class-held aliases, `__init__`-held aliases, nested dict
+aliases, negative/boundary values, deletion, dict `update`, empty-then-append, slice
+assignment and alternate instances; reads before a mutation and appends/augmented stores that
+leave the out-of-int64 item in place are refused by name.  `test_ail_pre407.py` gains the four
+reviewer programs as matching cases (14 matching, 16 refused).  Final-state tests:
+`test_ail_pre407`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+(4 modules, 0 failed).  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre407: an attribute-held container item read before a later store is refused (job-pre407-10281133)
 
 The pre388 reviewer recorded `r10` as the first still-differing pre-existing item:
