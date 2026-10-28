@@ -1011,7 +1011,8 @@ Lowered in the front end like batches 1 to 3 (stdlib4.py, csvlib.py, dtlib.py, s
 - `time`: `perf_counter() monotonic() time() time_ns() sleep(x) localtime([t]) gmtime([t]) strftime(fmt[, t]) mktime(t)`. The wall clock is a program input: `AIL_CLOCK=<seconds>[.<fraction>]` pins it for tests (every read returns that value, `sleep(x)` advances it without sleeping); local time is the OS time zone (`TZ` is respected). `localtime` and `gmtime` give an object with `tm_year tm_mon tm_mday tm_hour tm_min tm_sec tm_wday tm_yday tm_isdst tm_zone tm_gmtoff` only. Refused by name: `asctime ctime tzset altzone daylight timezone tzname struct_time(...)` and `strftime` of a tuple.
 - `statistics` on `list[int]`: `mean median median_low median_high mode multimode variance pvariance stdev pstdev`; `fmean`, `median`, `median_low`, `median_high`, `mode`, `multimode` also on `list[float]`. `StatisticsError` is `ValueError`. Mixed int/float results only where printed or used as floats.
 - Small forms: `int.bit_length()`, `int.bit_count()`, `max/min(..., default=)`, `max(d, key=d.get)` (and over a generator), `x in (constants)`, `itertools.product(x, repeat=n)` with a runtime `n`, unpacking a `tuple | None` after a None test.
-- Refused by name with a "write instead" hint: `decimal`, `unicodedata`, `string.Template`.
+- `unicodedata.category(ch)` from the generated `stdlib/unicodedata.py` (CPython 3.12's Unicode 15.0 data): the General_Category of one character, with CPython's `TypeError` for an empty or longer string and for a non-str value. `name`, `normalize`, `lookup` and the rest are refused by name.
+- Refused by name with a "write instead" hint: `decimal`, `string.Template`.
 
 ### Library batch 5 (fractions, enum, namedtuple, random.Random, keyword, calendar, abc, array, io.StringIO)
 
