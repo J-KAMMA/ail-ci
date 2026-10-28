@@ -1,3 +1,31 @@
+## 2026-10-28 -- pre431 review: sequential stores before a routed power are folded in order (job-pre431-10281945)
+
+The pre431 review found a false refusal introduced by the store tracking: the stores of
+one name were each folded against the call-site value instead of the previous store, so
+
+    def power(b, e):
+        b = -b
+        b = -b
+        return b ** e
+    print(power(-2, 63))
+
+was refused with `int64 constant expression out of range: 9223372036854775808` where
+CPython (and the base commit) print `-9223372036854775808`, which fits int64.  The stores
+of a name are now applied in source order, each seeing the value the previous one left.
+A store whose value reads another tracked parameter that an earlier (or, inside a loop,
+any) store may have changed is dropped instead of being folded against that stale value,
+so `b = 1; e = b; b = -2; return b ** e` is left to the run time and matches CPython
+rather than inventing a constant.
+
+Probes in `/tmp/probes/pre432` on both builds via `cmp.sh`: `seq_fix` matches CPython;
+`cross_name` and `cross_expr` match; `seq_inrange`, `arith_base`, `arith_mul`, `floordiv`,
+`aug_inrange`, `loop_seq`, `loop_neg`, `via_list`, `via_dict`, `via_attr`, `arg_seq`,
+`nested_pow_arg`, `float_store`, `bool_seq` match; `seq_refuse`, `seq_three`, `aug_seq`
+and `arith_exp` are refused by name with an exactly out-of-int64 result; `safe_early`
+keeps the accepted over-approximation refusal.  Tests: `test_ail_pre431` and
+`test_ail_safetynet`; `test_ail_files` and `test_ail_corpus_findings3` on the committed
+tree.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre431: a loop store before a routed power no longer hides an out-of-int64 result (job-pre431-10281945)
 
 The rbpre400 review recorded `p10` (loop-store-before) as pre-existing on both builds: a

@@ -3035,6 +3035,9 @@ def _check_int64_routed_power(tree):
         value = _constant_value(node, find, lambda unused: True, {}, attributes)
         if type(value) is int:
             return value
+        ints = {name: item for name, item in env.items() if type(item) is int}
+        if ints:
+            lookup = {**lookup, **ints}
         value = _pow_static_int(node, lookup)
         return value if type(value) is int else _UNKNOWN
 
@@ -3214,11 +3217,35 @@ def _check_int64_routed_power(tree):
                 current = parent
             return False
 
-        def store_value(store, name, value, current):
+        def stale_other_read(source, store, name, repeated):
+            """Whether a store's value reads another tracked parameter a store may have changed.
+
+            The stores of one name are folded in order, but each store of another name is folded
+            on its own, so a value read from that name may not be the value this store would see.
+            Dropping the binding keeps such a store from inventing a constant."""
+            position = _binding_position(store)
+            for inner in ast.walk(source):
+                if not (isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load)):
+                    continue
+                other = inner.id
+                if other == name or other not in env:
+                    continue
+                for item in stored_at.get(other, ()):
+                    if id(item) in dead:
+                        continue
+                    if repeated or _binding_position(item) < position:
+                        return True
+            return False
+
+        def store_value(store, name, value, current, repeated):
             """The constant a simple store leaves in the name, or _UNKNOWN."""
             if id(store) in dead:
                 return value
             parent = parents.get(store)
+            if (isinstance(parent, (ast.Assign, ast.AnnAssign, ast.AugAssign))
+                    and parent.value is not None
+                    and stale_other_read(parent.value, store, name, repeated)):
+                return _UNKNOWN
             if (isinstance(parent, ast.Assign) and len(parent.targets) == 1
                     and parent.targets[0] is store):
                 new = resolve(parent.value, current, scope_known, parameters)
@@ -3250,22 +3277,30 @@ def _check_int64_routed_power(tree):
             kept = {}
             for name, value in env.items():
                 stores = stored_at.get(name, ())
-                relevant = [store for store in stores
-                            if repeated or _binding_position(store) < position]
-                values = []
+                relevant = sorted((store for store in stores
+                                   if repeated or _binding_position(store) < position),
+                                  key=_binding_position)
+                running = value
+                values = [value] if repeated else []
                 failed = False
                 for store in relevant:
-                    new = store_value(store, name, value, env)
+                    steps = dict(env)
+                    steps[name] = running
+                    new = store_value(store, name, running, steps, repeated)
                     if new is _UNKNOWN:
                         failed = True
                         break
-                    values.append(new)
+                    running = new
+                    if repeated:
+                        values.append(new)
                 if failed:
                     continue
-                if not values:
+                if not relevant:
                     kept[name] = value
+                elif not repeated:
+                    kept[name] = running
                 elif len(set(values)) == 1:
-                    kept[name] = values[0]
+                    kept[name] = running
             return kept
 
         def follows_parameter(node, current):

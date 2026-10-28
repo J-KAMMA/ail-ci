@@ -7,7 +7,10 @@ power check now follows simple stores: a store that leaves the same value, a loo
 assigns one constant, and an unreachable branch or empty loop no longer hide the power.
 A different constant assigned by a loop that runs, and a module loop before the call, are
 folded the same way; a conditional or repeated store that may change the value keeps the
-pre-existing run-time stop.
+pre-existing run-time stop.  Sequential stores to one name are folded in order, so two
+stores that undo each other leave an in-range power alone (``sequential``); a store that
+reads another tracked name a store may have changed is dropped instead of being folded
+against the stale call-site value (``cross_name``, ``cross_expr``).
 """
 import os
 import subprocess
@@ -106,6 +109,13 @@ base = 2
 exponent = 100
 print(power(b=base, e=exponent))
 ''',
+    'sequential_stores': '''
+def power(b, e):
+    b = b - 1
+    b = b + 1
+    return b ** e
+print(power(2, 100))
+''',
 }
 
 SAFE = r'''
@@ -142,9 +152,31 @@ def plain(b, e):
     return b ** e
 
 
+def sequential(b, e):
+    b = -b
+    b = -b
+    return b ** e
+
+
+def cross_name(b, e):
+    b = 1
+    e = b
+    b = -2
+    return b ** e
+
+
+def cross_expr(b, e):
+    b = 1
+    e = b + 62
+    b = -2
+    return b ** e
+
+
 flag = False
 print(power(2, 2), empty(2, 2), conditional(2, 2), augmented(2, 2))
 print(stored_before(2, 100))
+print(sequential(-2, 63))
+print(cross_name(2000, 0), cross_expr(2, 0))
 print(plain(b=2, e=62), plain(b=-2, e=63), plain(b=0, e=100))
 print(plain(b=2.0, e=100), plain(b=True, e=100), plain(b=2, e=-3))
 print(plain(b=2, e=10), plain(e=10, b=2), plain(2, e=10))
