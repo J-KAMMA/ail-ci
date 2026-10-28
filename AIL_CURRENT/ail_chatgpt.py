@@ -2347,6 +2347,29 @@ def _annotation_reads(annotation, name):
             for default in defaults:
                 visit(default, shadowed)
             return
+        if isinstance(node, ast.IfExp):
+            visit(node.test, shadowed)
+            truth = _annotation_truth(node.test)
+            if truth is not False:
+                visit(node.body, shadowed)
+            if truth is not True:
+                visit(node.orelse, shadowed)
+            return
+        if isinstance(node, ast.BoolOp):
+            for index, operand in enumerate(node.values):
+                visit(operand, shadowed)
+                truth = _annotation_truth(operand)
+                if isinstance(node.op, ast.And):
+                    if truth is False:
+                        return
+                else:
+                    if truth is True:
+                        return
+                if truth is None:
+                    for rest in node.values[index + 1:]:
+                        visit(rest, shadowed)
+                    return
+            return
         if isinstance(node, ast.Call):
             consumer = _annotation_callee_name(node.func) in consumers
             if isinstance(node.func, ast.Lambda):
@@ -2400,6 +2423,40 @@ def _constant_truth(node):
             return not bool(node.operand.value)
         except Exception:
             return None
+    return None
+
+
+def _annotation_truth(node):
+    """The truth value of a statically known annotation expression, else ``None``.
+
+    ``_constant_truth`` covers constants used by the binding pass, but an annotation can also
+    short-circuit on an empty container, so an empty list, tuple, set or dict is falsey here.
+    """
+    truth = _constant_truth(node)
+    if truth is not None:
+        return truth
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        if any(isinstance(element, ast.Starred) for element in node.elts):
+            return None
+        return bool(node.elts)
+    if isinstance(node, ast.Dict):
+        if any(key is None for key in node.keys):
+            return None
+        return bool(node.keys)
+    if isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.Not):
+            inner = _annotation_truth(node.operand)
+            return None if inner is None else not inner
+        if isinstance(node.operand, ast.Constant):
+            try:
+                if isinstance(node.op, ast.USub):
+                    return bool(-node.operand.value)
+                if isinstance(node.op, ast.UAdd):
+                    return bool(+node.operand.value)
+                if isinstance(node.op, ast.Invert):
+                    return bool(~node.operand.value)
+            except Exception:
+                return None
     return None
 
 
@@ -3100,15 +3157,28 @@ def _check_binpow_constant(node, base, exponent):
     raise error
 
 
-def _binpow_function_lookup(function, module_known, module_int_known, enclosing=None):
-    """A name lookup for one function body: its own int constants, then a name bound by an
-    enclosing function scope, then the module's rich constant values for names the function
-    does not shadow.  ``enclosing`` maps a free name to the constant value the enclosing
-    scope binds (or ``_UNKNOWN``), the way a closure reads it at run time."""
+def _binpow_function_lookup(function, module_known, module_int_known, enclosing=None,
+                            program_bound=None):
+    """A name lookup for one function body: its own int constants and literal containers,
+    then a name bound by an enclosing function scope, then the module's rich constant values
+    for names the function does not shadow.  ``enclosing`` maps a free name to the constant
+    value the enclosing scope binds (or ``_UNKNOWN``), the way a closure reads it at run
+    time."""
     local = _function_local_int_constants(function, module_int_known)
     shadowed = set(_function_scope_stores(function))
     shadowed |= _scope_parameters(function)
     shadowed |= _scope_declared(function)
+    if program_bound is None:
+        program_bound = _all_bound_names(function)
+    local_scope = _scope_constant_map(function.body, function, module_known,
+                                      _binding_counts(function.body),
+                                      _function_bindings(function),
+                                      _scope_parameters(function), _scope_declared(function),
+                                      program_bound)
+    for name in shadowed:
+        value = local_scope.get(name)
+        if isinstance(value, (list, tuple, dict)):
+            local[name] = value
     own = {name: local[name] for name in shadowed if name in local}
     inherited = enclosing or {}
 
@@ -3161,12 +3231,15 @@ def _binpow_param_constants(function, lookup, global_name, attributes, passthrou
     return found
 
 
-def _binpow_power_parameters(tree, module_known, module_int_known, attributes, passthrough):
+def _binpow_power_parameters(tree, module_known, module_int_known, attributes, passthrough,
+                             program_bound=None):
     """Module functions whose parameter is the base of a power with a known int exponent.
 
     ``name -> {parameter: (argument index, [exponents])}``.  A parameter the function rebinds
     is left out: ``_binpow_param_constants`` folds that use instead."""
     counts = _binding_counts(tree.body)
+    if program_bound is None:
+        program_bound = _all_bound_names(tree)
     found = {}
     for function in tree.body:
         if (not isinstance(function, ast.FunctionDef) or function.decorator_list
@@ -3178,7 +3251,8 @@ def _binpow_power_parameters(tree, module_known, module_int_known, attributes, p
         mapped.update((name, None) for name in keyword_only)
         if not mapped:
             continue
-        lookup, global_name = _binpow_function_lookup(function, module_known, module_int_known)
+        lookup, global_name = _binpow_function_lookup(function, module_known, module_int_known,
+                                                       program_bound=program_bound)
         rebound = set(_function_scope_stores(function)) | _scope_declared(function)
         uses = {}
         for node in _walk_own_scope(function):
@@ -3213,8 +3287,9 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
     module_int_known = _known_module_constants(tree)
     module_lookup = lambda name: module_known.get(name, _UNKNOWN)
     module_global = lambda name: True
+    program_bound = _all_bound_names(tree)
     power_parameters = _binpow_power_parameters(tree, module_known, module_int_known,
-                                                attributes, passthrough)
+                                                attributes, passthrough, program_bound)
 
     def enclosing_constant_fits(node):
         root = node
@@ -3272,7 +3347,8 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
                                                    if item is not None]):
                 visit(default, lookup, global_name, param_constants, enclosing)
             inner_lookup, inner_global = _binpow_function_lookup(node, module_known,
-                                                                 module_int_known, enclosing)
+                                                                 module_int_known, enclosing,
+                                                                 program_bound)
             inner_params = _binpow_param_constants(node, inner_lookup, inner_global,
                                                    attributes, passthrough)
             inner_enclosing = _binpow_enclosing_scope(node, module_int_known, enclosing)

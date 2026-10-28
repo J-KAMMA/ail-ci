@@ -14579,6 +14579,30 @@ static inline const char *ail_type_name(uint8_t t) {
     }
 }
 
+/* `A[0]` on a class object names the class, as CPython does: type 'A' is not subscriptable.
+   An instance keeps the plain type name here (ail__tname_c names its class on other paths). */
+static inline ail_st ail__raise_class_not_subscriptable(ail_ctx *cx, ail_obj c) {
+    ail_str cn = ail_view_to_str(((ail_classobj *)c.o)->name);
+    char stackbuf[128];
+    char *nb = cn.n < (int64_t)sizeof stackbuf ? stackbuf : (char *)malloc((size_t)cn.n + 1);
+    if (!nb) ail_die("out of memory");
+    int64_t k = 0;
+    for (int64_t i = 0; i < cn.n; i++) {
+        uint32_t ch = (uint32_t)ail_chr(cn, i);
+        nb[k++] = ch < 128 ? (char)ch : '?';
+    }
+    if (k > 200) k = 200;
+    nb[k] = 0;
+    size_t need = (size_t)k + sizeof "type '' is not subscriptable";
+    char *msg = (char *)malloc(need);
+    if (!msg) ail_die("out of memory");
+    snprintf(msg, need, "type '%s' is not subscriptable", nb);
+    if (nb != stackbuf) free(nb);
+    ail_st st = ail_raise_c(cx, AIL_B_TYPEERROR, msg);
+    free(msg);
+    return st;
+}
+
 /* ===================================================================================
    Exceptions. Builtin classes are real CLASS objects (cx->builtin_cls[AIL_B_*]), each
    with `base` pointing at Exception for the legacy builtins; OS-error subclasses
@@ -16593,6 +16617,7 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
             if (i >= 0 ? ord >= n : (uint64_t)(~i) >= n) return ail_raise_c(cx, AIL_B_INDEXERROR, "range object index out of range");
             *out = ail_box_int(ail__range_at(r->start, r->step, ord)); return AIL_OK;
         }
+        case AIL_T_CLASS: return ail__raise_class_not_subscriptable(cx, c);
         default: { return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object is not subscriptable", c); }
     }
 }
@@ -16659,6 +16684,7 @@ static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int h
         *out = ail_range_new(cx, (int64_t)ns, (int64_t)ne, (int64_t)nd);
         return AIL_OK;
     }
+    if (c.tag == AIL_T_CLASS) return ail__raise_class_not_subscriptable(cx, c);
     return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object is not subscriptable", c);
 }
 

@@ -1,3 +1,48 @@
+## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
+
+The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
+literal whose contents are empty only after unpacking (`[*()]`, `(*(),)`, `{*()}`, `{**{}}`) was
+treated as truthy.  In a short-circuit position the live branch was then skipped and the deferred
+read was missed: `class C: x: ([*()] or (lambda: C)()) = 1` compiled and printed `1` on both
+builds where CPython raises `NameError`, and the base refused it by name.  A list/tuple/set
+literal with any `ast.Starred` element, and a dict literal with any `None` key (`**` unpacking),
+now has unknown truth, so the read stays refused by name.  Nested containers whose outer literal
+has no unpacking keep their static truth (`[[*()]]` is still truthy and matches CPython).
+
+Probes in `/tmp/probes/pre423fix` on both builds via `cmp.sh`: `p_star_list_or`,
+`p_star_tuple_or`, `p_star_set_or`, `p_star_dict_or`, `p_star_list_if`, `p_star_tuple_if`,
+`p_star_dict_if`, `p_star_list_notif`, `p_star_dict_notif`, `p_star_mixed_dict_or`,
+`p_star_nonempty_list_or`, `p_star_nonempty_dict_or` and the four container/argument routes
+(`p_via_list_item`, `p_via_attribute`, `p_via_dict_value`, `p_via_argument`) are refused by name
+(`a class body annotation reads the class name C before it is bound`); `p_star_nested_list_or`
+matches CPython on both builds.  Added the cases to `test_ail_pre423.py`.
+
+## 2026-10-28 -- pre423: a statically dead deferred read in a class annotation matches (job-pre423-10281734)
+
+The first still-differing case in the pre410 review's deferred-read area was a deferred lambda or
+generator-expression element behind a statically false branch: `class C: x: ((lambda: C)() if
+False else 1) = 1` and `class C: x: (0 and (lambda: C)()) = 1` were refused on both builds
+(`a class body annotation reads the class name C before it is bound`) where CPython never
+evaluates the read and prints `1`.  `_annotation_reads` now follows the statically known truth of
+an `if` expression and of `and`/`or` operands, including empty containers, `None`, the empty
+string and numeric unary forms, so a dead operand is not visited while a live one still is.  An
+unknown condition keeps the conservative refusal, as do lambda defaults and the first generator
+iterable.  The simple loop-target cases recorded by the pre410 review already matched CPython on
+this tree (`for C in [1, 2]`, `for C in range(10): break`, a tuple target and nested loops), as
+did bare deferred lambdas/generator expressions.
+
+Probes in `/tmp/probes/pre423` on both builds via `cmp.sh`: `u_if_false`, `u_and_false_0`,
+`u_and_false_empty`, `u_and_false_dict`, `u_and_false_none`, `u_and_false_str`, `u_or_true_1`,
+`u_or_true_list`, `u_or_true_dict`, `u_or_true_str`, `t_bool_chain`, `t_genexp_false`,
+`t_routes`, plus the original loop-target and deferred probes, match CPython; `u_if_true`,
+`u_and_true`, `u_or_false`, `t_if_true_read`, `t_genexp_true` and `t_unknown_cond` are refused by
+name where the first five raise CPython's `NameError` (the unknown condition is the conservative
+refusal).  Remaining pre-existing and unchanged: a `for` over a statically empty `range(0)` still
+lets its target hide the read (CPython raises `NameError`), and a generator expression passed to
+an unmodelled consumer that iterates it is still accepted.  Final-state tests: test_ail_pre423,
+test_ail_pre410, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (5 modules,
+0 failed).  `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py
+--update` added the module and `--check` exits 0.
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
@@ -64,6 +109,164 @@ alias, attribute, dict value, list item; int and slice), `p_boundaries` (class-n
 a builtin function object) all match CPython.  Final-state tests: test_ail_pre378,
 test_ail_pre377, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (30 tests,
 0 failed, 1 skipped for no zig).  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-28 -- pre421 review: keep no-class C byte-identical (job-pre421-10281638)
+
+The pre421 review found that the class-name index text was spliced into the v2 runtime
+unconditionally, so a no-class general-path program's `--debug-dir` C changed in the
+list/tuple getitem, setitem and delitem prelude.  The base runtime text is restored, and
+`pyboxed2` applies the three edits to the preamble only when the source itself contains a
+`class` statement (`source_has_class`, taken before the safety preludes inject their own
+classes).  No-class programs, including ones whose preludes add classes for slices, now
+emit C byte-identical to base; class-bearing programs keep the class-name messages.
+`test_ail_pre421` gains a C-text test that checks both sides, and its builtin-key program
+declares a class so it exercises the class-name text.  Probes in `/tmp/probes/pre421_fix`
+on both builds via `cmp.sh`: `p_class_routes` (instance, subclass, alias, argument, list
+item, attribute, dict value, exception instance, builtin function, list and tuple),
+`p_class_setdel`, `p_class_builtins` and `p_long` (200/210 characters) match CPython;
+`p_noclass` and `p_noclass_slice` stdout/exit match, and their `--debug-dir` C is
+byte-identical to `/tmp/base` (as is `p_nofeature_wrap`); `p_class_nofeature` differs
+from base only in the three index-error prelude hunks.  The `p_builtins` no-class
+bytes/bytearray/function names remain the base text, as the C-identity rule requires.
+
+## 2026-10-28 -- pre421: list/tuple index errors name the key's class (job-pre421-10281638)
+
+The pre411 review listed as pre-existing that `Box(Bad())` as a list or tuple index said
+`not instance` where CPython says `not Box`.  The v2 general runtime's list/tuple getitem
+built the message from the value tag (`ail_type_name`); it now uses the existing
+object-to-name helper (`ail__tname_c`) and caps the class name at 200 characters, as
+CPython's type-error text does.  A list item store and deletion with the same key now also
+name the class; they previously omitted the `not ...` part.  The other three recorded
+items (enum member `.value`, slice bounds and bytes/bytearray subscription through
+`__index__`) are separate causes and were left unchanged.
+
+Added `AIL_CURRENT/test_ail_pre421.py` (1 test, 4 programs, both builds) and registered it
+in `ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre421` on both
+builds via `cmp.sh`: `p2_a` (list/tuple through a constructor argument), `p2_c` (through a
+function value), `p2_routes` (subclass, alias, argument, list item, attribute, dict value,
+direct read), `p2_alias` (alias/attribute/list/dict routes and tuple), `p2_long2`
+(210-character class name, capped at 200), `p2_builtins` (float/str/None/list/dict/tuple/
+bytes/function keys and an empty list) and `p2_setdel` (list store and deletion) all match
+CPython.  `p2_b` (`Box.__index__` returning a non-int) still differs and is a separate
+pre-existing cause, not changed here.  Final-state tests: test_ail_pre421,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+## 2026-10-28 -- pre422: an exception instance names its class in slice errors (job-pre422-10281644)
+
+The pre414 review recorded that its ``deletion ... of an item`` wording was too broad: slice
+deletion still took the old path, and ``del MyErr()[0:1]`` printed
+``'exception' object does not support item deletion`` on both builds where CPython prints
+``'MyErr' object does not support item deletion``.  The slice assignment/deletion path is
+``safetyrt.SLICE``'s ``ail2s_setslice``, whose non-list message used ``ail_type_name(c.tag)``
+(the tag name) instead of the object-to-name helper the item path took in pre414.  It now
+calls ``ail__raise_item_tname``, so exception instances and subclasses, ordinary instances and
+builtin names match CPython for deletion and assignment, directly and through an alias, an
+argument, a list item, an attribute and a dict value, with empty/``None``/negative bounds and
+CPython's 200-character name cap.  The item path itself is unchanged.
+
+Probes in ``/tmp/probes/pre422`` on both builds via ``cmp.sh``: ``p_slice_del.py``,
+``p_slice_routes.py``, ``p_slice_builtins.py``, ``p_slice_more.py``, ``p_slice_long.py`` and
+``p_slice_uncaught.py`` match CPython (the first two differed on both builds before the
+change).  Added ``AIL_CURRENT/test_ail_pre422.py`` (2 tests, 3 programs, both builds) and
+registered it in ``ail_check.MODULES`` and ``tools/ci_shards.json``.  Final-state tests:
+test_ail_pre422, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+``tools/update_manifest.py`` was run and ``--check`` passes.
+## 2026-10-28 -- re-apply pre386: a routed-base `**` power outside int64 (job-rbpre386-10281433)
+
+Re-applied the accepted pre386 change on top of this tree.  The accepted diff no longer applied
+because the integration tree already carries the newer pre367 `**` resolution
+(`_check_int64_binpow_constants` / `_binpow_power_parameters`), which covers a parameter bound
+at a module call site (positional, keyword, alias, identity wrapper, tuple item), a
+function-local scalar, a module list item, a module dict value, `dict.get` and a
+class/instance attribute.  The accepted `AIL_CURRENT/test_ail_pre386.py` is added; its refusal
+assertion accepts both pre386's `does not fit in a 64-bit signed integer` and this tree's
+existing `int64 constant expression out of range`, and still rejects `integer overflow`.  It is
+registered in `ail_check.MODULES` and `tools/ci_shards.json` (weight 18.2).
+
+The pre386 review found one route pre367 did not cover: a literal container bound inside a
+function (`def f(): xs = [10]; print(xs[0] ** 40)`, and the dict mirror).  It compiled and then
+stopped with `integer overflow`, where the accepted pre386 refuses by name and CPython prints
+the exact integer.  `_binpow_function_lookup` now also resolves a function's own safe literal
+containers through `_scope_constant_map`, so the local list item, dict value, an alias of the
+container and the `2 ** 63` boundary are refused by name on both builds; a container mutated
+or rebound in the same body stays dynamic and keeps the run-time stop, as before.  The
+accepted test gained the two refusing local probes and two matching in-range local probes.
+
+Probes in `/tmp/probes/fix386` on both builds via `cmp.sh`: the local list item, local dict
+value, local alias and the `2 ** 63` boundary are refused by name; local in-range list/dict,
+safe bases -1/0/1, negative exponent, float/bool bases and a dynamic index match CPython.  A
+mutated or rebound local container, a function-local `dict.get` and a function-local tuple
+item still stop with `integer overflow`; all are pre-existing and the accepted pre386 leaves
+them too.  `tools/diff_ids.py` is not present on
+this tree.  Final-state tests: test_ail_pre386, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-28 -- pre392: int() of out-of-int64 text from a container through a wrapper (job-rbpre392-10281505)
+
+Re-applied the accepted pre392 change on the current integration tree.  Its behaviour was already
+carried here by later integration work: `_Int64CallChecker.visit_Call` applies `_check_conversion`
+(both the float check and `_int_conversion_outside_int64` for text/bytes) to arguments reaching
+`int(<parameter>)`, including values resolved through `argument_containers`.  No `ail_chatgpt.py`
+delta was needed; the accepted test and its registration are added.
+
+The accepted tests cover text read from a bound container and converted by a helper's `int(v)`:
+dict value, list item, tuple negative index, int key, class/instance attribute, alias, `dict.get`
+and its default, a keyword argument, a wrapper/passthrough chain and a function-local container,
+all refused by name (`int64 constant expression out of range`) on both builds.  In-range
+text/bytes, invalid text, dynamic text, a container mutated to an in-range value, a reassigned
+binding and a helper that does not convert match CPython; the float refusal is unchanged.  A
+nested container keeps the pre-existing run-time limit.
+
+Added `AIL_CURRENT/test_ail_pre392.py` (3 tests: 14 refused programs, 7 matching programs and the
+float control, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Direct run on this tree: 3 tests, 52.9 s, OK.  `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-28 -- pre395 review fix: cap the class name at 200 characters (job-rbpre395-10281537)
+
+The pre395 review found that `ail__raise_class_not_subscriptable` did not apply CPython's
+`%.200s` cap to the class name, so a 201-character class appeared in full (`len(str(e))` 229
+instead of 228) on both builds, for an index and a slice.  The helper now truncates its
+converted name to 200 characters, matching `ail__raise_item_tname`.  The same cap is applied
+to aliases and to values reaching the subscript through an argument, a list item, a dict
+value, an attribute or a return value.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p19_len1`, `p19_len199`, `p19_len200`,
+`p19_len201`, `p19_len250` and `p19_len300` (index, slice and negative index at each name
+length) and `p19_routes` (201-character class through alias, list item, dict value, attribute,
+argument and return value) all match CPython.  Final-state tests: test_ail_pre395,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3, 4 modules, 272 s, 0 failed.
+`tools/update_manifest.py` was run and `--check` passes.  Correction to the entry below: the
+earlier claim that plain instance `A()[0]` prints `'instance'` was wrong; HEAD and base print
+`'A'`, matching CPython, and only the exception instance `E()[0]` prints `'exception'`.
+
+## 2026-10-28 -- re-apply pre395: class object subscript names the class (job-rbpre395-10281537)
+
+Re-applied the accepted pre395 change on top of the current integration tree.  The pre377
+review's first still-differing pre-existing item reproduced on both builds: `class A: pass;
+A[0]` stopped with `TypeError: 'type' object is not subscriptable`, where CPython 3.12 says
+`TypeError: type 'A' is not subscriptable`.  The general-path runtime's `ail_op_getitem` and
+`ail_op_getslice` now name a class object's own class in that error
+(`ail__raise_class_not_subscriptable`), and the dunderrt patch fragments still match.  The
+message follows the class actually subscribed through an alias, a subclass, an argument, a
+list item, an attribute, a dict value and a return value, for int, negative, wide, bool,
+None, float, str, empty-str and tuple keys and full/open/step/negative/reverse slices.  Item
+assignment keeps CPython's `'type' object does not support item assignment` wording.  The
+recorded second item (`E()[0]`, an exception subclass) still prints `'exception'`, and an
+exploratory plain instance `A()[0]` still prints `'instance'`; an exploratory `del A[0]` also
+still says `doesn't support` against CPython's `does not support`.  Those three are
+pre-existing and unchanged here.
+
+Added `AIL_CURRENT/test_ail_pre395.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json` (weight 38.8).  Probes in `/tmp/probes` on
+both builds via `cmp.sh`: `p01_direct` (class-object index forms, including inherited,
+aliased and int/negative/wide/bool/None/float/str/empty/tuple keys), `p02_slices`
+(full/open/step/zero/negative/empty/reverse slices and a subclass), `p03_routes` (argument,
+list item, dict value, attribute, return value and slices, plus item assignment) and
+`p04_dunderpatch` (a class with `__add__`, so dunderrt's patch is applied) match CPython.
+All match CPython on both builds.  Final-state tests: test_ail_pre395 (17.9 s),
+test_ail_safetynet (132.8 s), test_ail_files (137.2 s) and test_ail_corpus_findings3
+(246.9 s), 4 modules, 380 s, 0 failed.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a

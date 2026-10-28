@@ -1212,6 +1212,32 @@ def _thread_preamble():
     return threadrt.patch_head(_PREAMBLE_HEAD) + threadrt.patch_tail(_PREAMBLE_TAIL)
 
 
+# The list/tuple index errors name the key's class when the program has a class: CPython says
+# "not Box", not "not instance". A no-class program keeps the base runtime's tag-based text
+# (and so its C) byte for byte; only a source that writes a class gets the class-name form.
+_INDEX_ERROR_CLASS_EDITS = (
+    ("""                char buf[96]; snprintf(buf, sizeof buf, "%s indices must be integers or slices, not %s", c.tag == AIL_T_LIST ? "list" : "tuple", ail_type_name(key.tag));
+                return ail_raise_c(cx, AIL_B_TYPEERROR, buf);""",
+     """                char tnbuf[201], buf[280]; snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(key));
+                snprintf(buf, sizeof buf, "%s indices must be integers or slices, not %s", c.tag == AIL_T_LIST ? "list" : "tuple", tnbuf);
+                return ail_raise_c(cx, AIL_B_TYPEERROR, buf);""", 1),
+    ("""        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) return ail_raise_c(cx, AIL_B_TYPEERROR, "list indices must be integers or slices");""",
+     """        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) {
+            char tnbuf[201], buf[280]; snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(key));
+            snprintf(buf, sizeof buf, "list indices must be integers or slices, not %s", tnbuf);
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }""", 2),
+)
+
+
+def _index_error_class_names(text):
+    for old, new, expected in _INDEX_ERROR_CLASS_EDITS:
+        if text.count(old) != expected:
+            raise AssertionError('list index error text changed; update _INDEX_ERROR_CLASS_EDITS')
+        text = text.replace(old, new)
+    return text
+
+
 # ---------------------------------------------------------------------------------------------
 def _assign_target_names(t):
     if isinstance(t, ast.Name):
@@ -2487,6 +2513,7 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _compile_cond(self, source):
         tree = ast.parse(source)
+        self.source_has_class = any(isinstance(n, ast.ClassDef) for n in ast.walk(tree))
         import exctext
         exctext.refuse_args_item_store(tree, Unsupported)
         # An instance attribute assignment shadows a class method of the same name (a method is a
@@ -2711,7 +2738,10 @@ class Compiler(boxclosure.ClosureMixin):
             self.boxed_names = [n for n in self.boxed_names if n != '<module>']
 
         ng = self.next_global_slot
-        parts = [_thread_preamble() if self.threads else PREAMBLE]
+        preamble = _thread_preamble() if self.threads else PREAMBLE
+        if self.source_has_class:
+            preamble = _index_error_class_names(preamble)
+        parts = [preamble]
         if self.reads_args:
             # A missing key's KeyError keeps the key as e.args[0] in CPython. The general runtime
             # raises it with only a repr message, so route every missing-key raise through the

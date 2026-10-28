@@ -141,9 +141,8 @@ static inline ail_st ail2s_indices(ail_ctx *cx, ail_obj *out, ail_obj lo, ail_ob
 /* lst[lo:hi:step] = value and del lst[lo:hi:step] (CPython's list_ass_subscript) */
 static inline ail_st ail2s_setslice(ail_ctx *cx, ail_obj c, ail_obj lo, ail_obj hi, ail_obj step, ail_obj value, int del) {
     if (c.tag != AIL_T_LIST) {
-        char buf[96];
-        snprintf(buf, sizeof buf, del ? "'%s' object does not support item deletion" : "'%s' object does not support item assignment", ail_type_name(c.tag));
-        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        return ail__raise_item_tname(cx, AIL_B_TYPEERROR,
+            del ? "'%s' object does not support item deletion" : "'%s' object does not support item assignment", c);
     }
     int hl, hh, hs; int64_t l, h, s; ail_st st;
     if ((st = ail2s_bound(cx, lo, &hl, &l)) != AIL_OK) return st;
