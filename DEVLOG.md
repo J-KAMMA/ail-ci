@@ -1,3 +1,29 @@
+## 2026-10-28 -- stdlib batch 22 follow-up: tempfile (job-stdlib22-10290509)
+
+The previous commit in this branch added `struct`, so this follow-up takes the next still-refused
+module with the highest supportable use count. Counting imports in `lab/corpus/programs` and
+`AIL_CURRENT/language_examples`: `argparse` 9, `tempfile` 7, `shutil` 3, `signal` 2, `resource` 2,
+`unittest` 2 and `decimal` 2. `argparse`, `signal`, `resource` and `unittest` need a parser or process
+surface, not a small lowering; `decimal` needs arbitrary-precision base-10 arithmetic. `tempfile` is
+the most used one that lowers onto the existing `os` file layer.
+
+`python/pkg-v12/tempfilelib.py`, called from `python_surface` after `structlib`, fills every call
+default at compile time and inserts `prelude_tempfile.py`. Built: `gettempdir`, `gettempprefix`,
+`gettempdirb`, `gettempprefixb`, `mkdtemp`, `mktemp`, `TemporaryDirectory` (`.name`, `.cleanup()`,
+`with`, `delete`, `ignore_cleanup_errors`) and `TMP_MAX`, with suffix / prefix / dir arguments,
+aliases and from-imports. `mkstemp`, `NamedTemporaryFile`, `TemporaryFile`, `SpooledTemporaryFile`
+and `tempfile.tempdir` are refused by name. Names keep CPython's 8-character alphabet, prefix, suffix
+and length, but their random text is not comparable between processes; `mkdtemp` returns an absolute
+path. `TemporaryDirectory.__enter__` returns the path text as CPython does; `cleanup()` is idempotent
+and, like CPython 3.12, still removes the directory of a `delete=False` manager when called
+explicitly, while `__exit__` respects `delete`.
+
+Probes in `/tmp/probes/tfprobe`: `p_basic`, `p_args`, `p_td`, `p_errors`, `p_long`,
+`p_default_dir` and `p_alias` match CPython on the default and general builds (`cmp.sh`, both IR
+settings) and on the typed build (`AIL_NO_GENERAL=1`, both IR settings); `p_refuse` is refused by
+name. Added the tempfile cases to `test_ail_stdlib22.py` (default and typed, both IR settings).
+Differences recorded as `C?-job-stdlib22-10290509-2`.
+
 ## 2026-10-28 -- stdlib batch 22: struct.pack / unpack / calcsize (job-stdlib22-10290509)
 
 The corpus scan still refused `struct` (two `t475.py` programs), so this batch adds a source-to-source

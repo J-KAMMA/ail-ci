@@ -1,8 +1,10 @@
-"""Library batch 22: struct.pack / unpack / calcsize over the standard-size integer formats.
+"""Library batch 22: struct integer formats, and the tempfile subset.
 
 Programs below are compiled with the Python syntax on the default build and on the typed path
 (AIL_NO_GENERAL=1), run on generated stdin, and must print the same bytes as CPython 3.12. The
-refusals name the unsupported format or use; a program without a struct import keeps its text.
+refusals name the unsupported format or use; a program without a struct or tempfile import keeps
+its text. tempfile names are random in both implementations, so the programs print the shape
+(prefix, suffix, length, existence) rather than the random text.
 """
 import os
 import random
@@ -120,6 +122,103 @@ def values():
     return out
 
 
+
+TEMPFILE_PROGRAM = r"""import os
+import tempfile
+
+
+class Holder:
+    def __init__(self, prefix: str):
+        self.prefix = prefix
+
+
+def make(prefix: str, suffix: str, where: str) -> str:
+    return tempfile.mkdtemp(suffix=suffix, prefix=prefix, dir=where)
+
+
+def main() -> None:
+    base = "tf-base"
+    os.mkdir(base)
+    print(tempfile.gettempprefix(), tempfile.gettempdirb().decode() == tempfile.gettempdir(),
+          tempfile.gettempprefixb().decode(), tempfile.TMP_MAX)
+    prefixes: list[str] = ["list-"]
+    values: dict[str, str] = {"k": "dict-"}
+    holder = Holder("attr-")
+    names = []
+    names.append((make("arg-", "-a", base), "arg-", "-a"))
+    names.append((make(prefixes[0], "-l", base), "list-", "-l"))
+    names.append((make(values["k"], "-d", base), "dict-", "-d"))
+    names.append((make(holder.prefix, "-t", base), "attr-", "-t"))
+    names.append((tempfile.mkdtemp("-p", "pos-", base), "pos-", "-p"))
+    names.append((tempfile.mktemp(prefix="empty-", suffix="", dir=base), "empty-", ""))
+    for name, prefix, suffix in names:
+        base_name = os.path.basename(name)
+        print(os.path.isdir(name), base_name.startswith(prefix),
+              base_name.endswith(suffix) if suffix else True,
+              len(base_name) == len(prefix) + 8 + len(suffix),
+              os.path.dirname(name) == os.path.abspath(base))
+    for name, _, _ in names[:5]:
+        os.rmdir(name)
+    td = tempfile.TemporaryDirectory(prefix="obj-", suffix="-s", dir=base)
+    print(td.name.startswith(os.path.abspath(base) + "/obj-"), td.name.endswith("-s"),
+          len(os.path.basename(td.name)) == 4 + 8 + 2, os.path.isdir(td.name))
+    td.cleanup()
+    td.cleanup()
+    print(os.path.exists(td.name))
+    with tempfile.TemporaryDirectory(prefix="with-", dir=base) as q:
+        print(q.startswith(os.path.abspath(base) + "/with-"), os.path.isdir(q),
+              len(os.path.basename(q)) == 5 + 8)
+        os.mkdir(os.path.join(q, "nested"))
+        with open(os.path.join(q, "nested", "x.txt"), "w") as f:
+            f.write("x")
+    print(os.path.exists(q))
+    with tempfile.TemporaryDirectory(dir=base, delete=False) as kept:
+        print(os.path.isdir(kept))
+    print(os.path.isdir(kept))
+    os.rmdir(kept)
+    try:
+        tempfile.mkdtemp(dir=os.path.join(base, "missing"))
+    except FileNotFoundError as e:
+        print(type(e).__name__)
+    os.rmdir(base)
+
+
+main()
+"""
+
+
+TEMPFILE_ALIASES = r"""import os
+import tempfile as tf
+from tempfile import TemporaryDirectory, mkdtemp, gettempdir, TMP_MAX
+
+
+def main() -> None:
+    base = "tf-alias"
+    os.mkdir(base)
+    p = mkdtemp(prefix="alias-", dir=base)
+    print(os.path.isdir(p), os.path.basename(p).startswith("alias-"), len(os.path.basename(p)) == 6 + 8)
+    q = tf.mkdtemp(prefix="mod-", dir=base)
+    print(os.path.isdir(q), os.path.basename(q).startswith("mod-"), len(os.path.basename(q)) == 4 + 8)
+    with TemporaryDirectory(prefix="ctx-", dir=base) as d:
+        print(os.path.isdir(d), os.path.basename(d).startswith("ctx-"))
+    print(os.path.exists(d), len(gettempdir()) > 0, TMP_MAX)
+    os.rmdir(p)
+    os.rmdir(q)
+    os.rmdir(base)
+
+
+main()
+"""
+
+
+TEMPFILE_REFUSALS = {
+    "named_file": ("import tempfile\n\nprint(tempfile.NamedTemporaryFile().name)\n", "NamedTemporaryFile"),
+    "mkstemp": ("from tempfile import mkstemp\n\nprint(mkstemp())\n", "mkstemp"),
+    "temporary_file": ("import tempfile\n\nprint(tempfile.TemporaryFile())\n", "TemporaryFile"),
+    "tempdir_value": ("import tempfile\n\nprint(tempfile.tempdir)\n", "tempfile.tempdir"),
+}
+
+
 class CompiledPrograms(unittest.TestCase):
     def check(self, name, text, inputs, ir, **env):
         with tempfile.TemporaryDirectory() as directory:
@@ -149,6 +248,21 @@ class CompiledPrograms(unittest.TestCase):
                 self.check("aliases_typed", ALIASES, [""], ir, AIL_NO_GENERAL="1")
 
 
+    def test_tempfile_program_matches_cpython(self):
+        for ir in (False, True):
+            with self.subTest(path="default", ir=ir):
+                self.check("tempfile", TEMPFILE_PROGRAM, [""], ir)
+            with self.subTest(path="typed", ir=ir):
+                self.check("tempfile_typed", TEMPFILE_PROGRAM, [""], ir, AIL_NO_GENERAL="1")
+
+    def test_tempfile_aliases_match_cpython(self):
+        for ir in (False, True):
+            with self.subTest(path="default", ir=ir):
+                self.check("tempfile_aliases", TEMPFILE_ALIASES, [""], ir)
+            with self.subTest(path="typed", ir=ir):
+                self.check("tempfile_aliases_typed", TEMPFILE_ALIASES, [""], ir, AIL_NO_GENERAL="1")
+
+
 class Refusals(unittest.TestCase):
     def refused(self, text, wanted):
         with tempfile.TemporaryDirectory() as directory:
@@ -162,6 +276,11 @@ class Refusals(unittest.TestCase):
             with self.subTest(name):
                 self.refused(text, wanted)
 
+    def test_tempfile_refusals_name_the_use(self):
+        for name, (text, wanted) in TEMPFILE_REFUSALS.items():
+            with self.subTest(name):
+                self.refused(text, wanted)
+
 
 class UnchangedPrograms(unittest.TestCase):
     PLAIN = [
@@ -172,10 +291,16 @@ class UnchangedPrograms(unittest.TestCase):
 
     def test_other_programs_keep_their_text(self):
         import structlib
+        import tempfilelib
         for text in self.PLAIN:
             with self.subTest(text[:30]):
                 notes = []
                 self.assertEqual(structlib.rewrite_text(text, notes), text)
+                self.assertEqual(notes, [])
+        for text in self.PLAIN + ["# tempfile is only mentioned here\nprint(1)\n"]:
+            with self.subTest(tempfile=text[:30]):
+                notes = []
+                self.assertEqual(tempfilelib.rewrite_text(text, notes), text)
                 self.assertEqual(notes, [])
 
 

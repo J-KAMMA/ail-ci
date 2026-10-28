@@ -179,6 +179,17 @@ def _structlib():
     return _structlib.module
 
 
+def _tempfilelib():
+    """python/pkg-v12/tempfilelib.py (library batch 22 follow-up: the tempfile subset)."""
+    if not hasattr(_tempfilelib, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import tempfilelib
+        _tempfilelib.module = tempfilelib
+    return _tempfilelib.module
+
+
 def _stdlib5():
     """python/pkg-v12/stdlib5.py (library batch 5: fractions, enum, namedtuple, random.Random, ... lowered first)."""
     if not hasattr(_stdlib5, "module"):
@@ -3418,6 +3429,8 @@ def python_surface(source, notes=None, library=False):
         source = _threadlib().rewrite_text(source, notes)
     if "struct" in source:
         source = _structlib().rewrite_text(source, notes)
+    if "tempfile" in source:
+        source = _tempfilelib().rewrite_text(source, notes)
     if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
                                        "abc", "array", "Random", "string", "io", "statistics")):
         source = _stdlib5().rewrite_text(source, notes)
