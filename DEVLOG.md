@@ -1,3 +1,26 @@
+## 2026-10-28 -- ex16: a module with a top-level statement falls back when main cannot be synthesised (job-ex16-10290507)
+
+`language_examples/math.ail` (a module constant `LIMIT` plus `def sum_to(n)`) built with
+`AIL_UNIFIED_FORCE=1`, but the default build refused it by name: the typed path built the
+function, then `_main_for` rejected its non-array first parameter, and that refusal was raised
+after the `try` whose `except Unsupported` tries the general path.  Main synthesis now happens
+inside that `try`, so the default build falls back; both builds match CPython (`python3
+math.ail` prints nothing, exit 0).  The fallback is gated on a top-level executable statement:
+a pure `def`/`class`/`import` source keeps the typed refusal, because the general path's
+array-entry main would turn it into a usage error where CPython does nothing (a new silent
+difference).  `language_examples/integer_series.ail` still refuses (its typed C arity bug,
+after main synthesis succeeded) and is unchanged.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `module_const` and `module_used` (the
+`math.ail` shape with and without a top-level `print`) match CPython, as does
+`language_examples/math.ail`.  The pure-defs guard is `/tmp/guard/pure_defs.py`: the default
+build still refuses by name (`the first parameter must be the sequence read from the file`).
+Final-state tests: test_ail_ex16, test_ail_fallback_note, test_ail_refusal_messages,
+test_ail_python_syntax, test_ail_pre170, test_ail_strict, test_ail_build_reports,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (10 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --update` added
+the module and `--check` exits 0.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

@@ -674,6 +674,21 @@ def _is_whole_program(source):
     return is_function(source) or not _is_single_expression(source)
 
 
+def _has_toplevel_exec(source):
+    """Whether the general path runs a top-level statement at module scope (so it will NOT take
+    the judge suite's array-entry convention). Only such a source may fall back when the typed
+    path cannot synthesise `main`: for a definitions-only source (`def`/`class`/`import` only)
+    the boxed emitter installs array entry, whose missing-file usage differs from CPython running
+    the module (which does nothing), and falling back would turn a by-name refusal into a silent
+    difference. Kept in step with pyboxed2's own `has_toplevel_exec` test."""
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    return any(not isinstance(n, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom))
+               for n in tree.body)
+
+
 # Substrings that mark a typed-path `Unsupported` as a DECLARED-BOUNDARY refusal (a capability
 # this project has never built a route to at all) rather than "cannot specialise this" -- see
 # `build`'s own comment at the catch site. Taken verbatim from pyfunc.py's own wording for each
@@ -1077,6 +1092,7 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
         info['_tint_legacy'] = True
     if native_diagnostics.enabled():
         info['_want_source_regions'] = True
+    main_refused = False
     try:
         if not force_general and not legacy_int and _is_whole_program(source):
             # B2b: an unproven int local is an `ail_tint` on the typed path, so only the hard
@@ -1088,10 +1104,32 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
         body = to_c(source, strict=strict, info=info)
         if force_general:
             raise Unsupported('general path explicitly requested')
+        # AIL_TASK_callconv_20260915.md: a NORET entry point (`info['ret']`) has no int64 return
+        # value at all -- `_main_for`'s own `printf(AIL_FMT "\n", AIL_CALL)` would hand a `void`
+        # expression to `printf`, which gcc rejects, name or no name -- so it always takes the
+        # `_io_main_for` path (call it, ignore the C-level return -- there is none -- and exit 0),
+        # the same one a program that calls `print()`/`assert` already takes, whether or not THIS
+        # entry happens to print anything itself.
+        try:
+            main = (_io_main_for(info) if (info.get('io') or info.get('ret') == NORET)
+                    else _main_for(info))
+        except Unsupported:
+            # Main synthesis can refuse by name (`_main_for`'s calling-convention rules). It sits
+            # inside the try so a source the boxed emitter builds as an ordinary script -- e.g.
+            # language_examples/math.ail, a module constant plus a function whose first parameter
+            # is not the file array -- gets the same general-path fallback as a `to_c` refusal
+            # instead of failing the default build. A definitions-only source must NOT take this
+            # route: the general path would install the judge suite's array-entry main there, and
+            # running it with no file argument is a usage error where CPython runs the module and
+            # does nothing (a new silent difference); keep the typed path's by-name refusal.
+            main_refused = True
+            raise
     except Unsupported as _typed_e:
         # AIL_NO_GENERAL=1: judges use it to ask the TYPED path alone (their negatives assert a
         # by-name refusal of the typed path; through the fallback that refusal would be invisible).
         if os.environ.get('AIL_NO_GENERAL') or legacy_int:
+            raise
+        if main_refused and not _has_toplevel_exec(source):
             raise
         # DESIGN_GENERAL_PATH_20260916.md's general path, first cut: the typed path refused
         # (named its own reason, already raised as `Unsupported` -- propagated below if this
@@ -1217,13 +1255,6 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             last_fallback_reason = str(_typed_e)
             last_fallback_line = getattr(_typed_e, 'source_line', None)
         return _finalize_output(out)
-    # AIL_TASK_callconv_20260915.md: a NORET entry point (`info['ret']`) has no int64 return value
-    # at all -- `_main_for`'s own `printf(AIL_FMT "\n", AIL_CALL)` would hand a `void` expression to
-    # `printf`, which gcc rejects, name or no name -- so it always takes the `_io_main_for` path
-    # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
-    # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
-    # anything itself.
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
