@@ -103,6 +103,54 @@ def _is_brace_or_sexpr(text):
     return ail_sexpr.detect(text) or detect(text)
 
 
+def substitute_file(text, path):
+    """Replace a read of `__file__` by the module's absolute source path, as CPython binds it.
+
+    A module that binds the name itself (an assignment, a parameter, an import alias, a loop or
+    `except` target, `global`/`nonlocal`) is left exactly as written, so its own binding wins and
+    a construct this compiler cannot model keeps its ordinary refusal.  Replacements keep every
+    line and column boundary, so diagnostics still point at the source."""
+    if '__file__' not in text:
+        return text
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    loads = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == '__file__':
+            if not isinstance(node.ctx, ast.Load):
+                return text
+            loads.append(node)
+        elif isinstance(node, ast.arg) and node.arg == '__file__':
+            return text
+        elif isinstance(node, ast.alias) and '__file__' in (node.name, node.asname):
+            return text
+        elif isinstance(node, ast.ExceptHandler) and node.name == '__file__':
+            return text
+        elif isinstance(node, (ast.Global, ast.Nonlocal)) and '__file__' in node.names:
+            return text
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == '__file__':
+            return text
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == '__file__':
+            return text
+        elif isinstance(node, ast.MatchMapping) and node.rest == '__file__':
+            return text
+    if not loads:
+        return text
+    literal = repr(os.path.abspath(os.fspath(path))).encode('utf-8')
+    lines = text.splitlines(keepends=True)
+    by_line = {}
+    for node in loads:
+        by_line.setdefault(node.lineno, []).append(node)
+    for lineno, nodes in by_line.items():
+        raw = lines[lineno - 1].encode('utf-8')
+        for node in sorted(nodes, key=lambda item: item.col_offset, reverse=True):
+            raw = raw[:node.col_offset] + literal + raw[node.end_col_offset:]
+        lines[lineno - 1] = raw.decode('utf-8')
+    return ''.join(lines)
+
+
 class Mod:
     def __init__(self, name, path, tree, entry, kind='module', dirs=None):
         self.name = name                # dotted name; '__main__' for the entry
@@ -1769,6 +1817,10 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
+        if (attr == '__file__' and not stored and '__file__' not in target.kinds
+                and '__file__' not in target.std and '__file__' not in target.alias):
+            return ast.copy_location(
+                ast.Constant(None if target.kind == 'namespace' else os.path.abspath(os.fspath(target.path))), node)
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
@@ -1919,7 +1971,13 @@ def merge_program(entry_path, entry_text, read=None):
     if read is None:
         def read(path):
             return Path(path).read_bytes().decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
+    raw_read = read
+
+    def read(path):
+        return substitute_file(raw_read(path), path)
+
     program = Program(entry_path, read)
+    entry_text = substitute_file(entry_text, program.entry_path)
     try:
         tree = ast.parse(entry_text, filename=str(program.entry_path))
     except SyntaxError:

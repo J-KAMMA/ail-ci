@@ -1,3 +1,28 @@
+## 2026-10-28 -- ex8: `__file__` is the module's absolute source path (job-ex8-10290227)
+
+Building every Python-syntax example under `AIL_CURRENT/language_examples` (14 files: 11 at the
+top level and 3 in subdirectories) refused 12; `geometry.py` and `table_crc.py` already built.
+The largest first refusal was `__file__` (5 files: `row_codec_compare`, `row_decimal_quad`,
+`row_state_quad_compare`, `row_store_identity_compare`, `test_row_cpu_profile`), then the `row`
+import/definition collision (2), and one each for `pyfunc`, `benchmark_current_rows`, a doubly
+bound `candidate_module`, the `2**64` literal in `row_cpu_sampler_probe`, and the package import
+in `c_headers_workflow/build_crc_library.py`.
+
+A read of `__file__` is now replaced, per module, by the absolute path of that module's source,
+which is CPython 3.12's value (the entry path is absolute too). Imported modules, packages and
+`m.__file__` use the same rule, and a namespace package is `None`. A module that binds the name
+itself (assignment, parameter, import alias, loop or `except` target, `global`/`nonlocal`, or a
+def/class name) is left exactly as written, so its own binding wins and an unmodelled binding
+keeps the previous named refusal. Replacements keep line and column boundaries. The five row
+examples now pass this refusal and stop at their next, pre-existing refusals (the compiler-only
+`benchmark_current_rows`/`pyfunc` import, or the function-level `row_codec_controls` import).
+
+Added `AIL_CURRENT/test_ail_ex8.py` (3 tests, both builds) and updated the `lib.__file__` case in
+`test_ail_modules.py`. Probes in `/tmp/probes` (`ex8_file_plain`, `ex8_file_func`,
+`ex8_file_routes`, `ex8_file_param`, `ex8_file_assign`, and the manual multi-file
+`/tmp/ex8multi/main.py` with a helper and a package) match CPython on both builds.
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

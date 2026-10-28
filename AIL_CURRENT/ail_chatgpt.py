@@ -4207,14 +4207,15 @@ def _refuse_load(error):
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False, ffi=None, prelower=None):
+                  notes=None, local_imports=False, ffi=None, prelower=None, file_path=None):
     """Resolve source imports once and validate their shared declaration scope.
 
     `prelower` rewrites the entry's text right after it is read (ail_export.lower for `--lib`); the
     classes it leaves behind are then allowed in a module-only Python source.
 
     `local_imports` lets a Python-syntax entry import sibling modules (ail_modules, stage G1): their
-    bodies are merged into the entry's text before everything below sees it."""
+    bodies are merged into the entry's text before everything below sees it.  `file_path` is the
+    entry path as the user wrote it (before symlink resolution), for `__file__`."""
     search_paths = tuple(dict.fromkeys(Path(path).resolve() for path in module_paths))
     if any(not path.is_dir() for path in search_paths):
         raise ValueError('each --module-path must name an existing directory')
@@ -4259,6 +4260,10 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
                 # a file that does not mention ail_ffi is returned untouched
                 text = ffi.lower(path, text)
+            if syntax == 'python':
+                text = ail_modules.substitute_file(
+                    text, (file_path if file_path is not None else os.path.abspath(os.fspath(source)))
+                    if entry else path)
             if local_imports and entry and syntax == 'python' and not module_only:
                 merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
                 if merged is not None:
@@ -5583,6 +5588,7 @@ def main(argv=None):
         lowered = {}
         objects = getattr(args, 'object', [])
         separate = getattr(args, 'separate', False)
+        file_path = os.path.abspath(os.fspath(args.source))
         source = args.source.resolve()
         output = Path(os.path.abspath(args.output))
         if sys.version_info < (3, 10):
@@ -5603,7 +5609,7 @@ def main(argv=None):
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
                 module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,
-                prelower=lower_exports if export_lib else None, **loading)
+                prelower=lower_exports if export_lib else None, file_path=file_path, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
         if export_lib:
