@@ -1881,6 +1881,66 @@ def _class_body_annotations(node):
                 yield stmt.returns
 
 
+def _annotation_target_names(target):
+    if isinstance(target, ast.Name):
+        return {target.id}
+    names = set()
+    for child in ast.iter_child_nodes(target):
+        names |= _annotation_target_names(child)
+    return names
+
+
+def _annotation_reads(annotation, name):
+    """The reads of ``name`` in ``annotation`` that an inner scope does not shadow."""
+    reads = []
+
+    def visit(node, shadowed):
+        if isinstance(node, ast.Name):
+            if not shadowed and isinstance(node.ctx, ast.Load) and node.id == name:
+                reads.append(node)
+            return
+        if isinstance(node, ast.Lambda):
+            args = node.args
+            parameters = {arg.arg for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
+            for arg in (args.vararg, args.kwarg):
+                if arg is not None:
+                    parameters.add(arg.arg)
+            for default in [*args.defaults, *args.kw_defaults]:
+                if default is not None:
+                    visit(default, shadowed)
+            visit(node.body, shadowed or name in parameters)
+            return
+        if isinstance(node, ast.ListComp):
+            visit(node.elt, _visit_generators(node.generators, shadowed))
+            return
+        if isinstance(node, (ast.SetComp, ast.GeneratorExp)):
+            visit(node.elt, _visit_generators(node.generators, shadowed))
+            return
+        if isinstance(node, ast.DictComp):
+            inner = _visit_generators(node.generators, shadowed)
+            visit(node.key, inner)
+            visit(node.value, inner)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, shadowed)
+
+    def _visit_generators(generators, shadowed):
+        # The first iterable is evaluated in the enclosing scope; the rest run inside the
+        # comprehension scope, where the targets (and only those) shadow the class name.
+        visit(generators[0].iter, shadowed)
+        inner = shadowed
+        for index, generator in enumerate(generators):
+            inner = inner or name in _annotation_target_names(generator.target)
+            if index:
+                visit(generator.iter, inner)
+            for condition in generator.ifs:
+                visit(condition, inner)
+        return inner
+
+    visit(annotation, False)
+    return reads
+
+
 def _check_class_body_annotations(tree):
     """Refuse a class body annotation that reads the class name before it is bound, by name.
 
@@ -1912,10 +1972,7 @@ def _check_class_body_annotations(tree):
     for node in (item for item in ast.walk(tree) if isinstance(item, ast.ClassDef)):
         name = node.name
         for annotation in _class_body_annotations(node):
-            for read in ast.walk(annotation):
-                if not (isinstance(read, ast.Name) and isinstance(read.ctx, ast.Load)
-                        and read.id == name):
-                    continue
+            for read in _annotation_reads(annotation, name):
                 if any(bound == name and line < read.lineno and owner is not node
                        for bound, line, owner in bindings):
                     continue

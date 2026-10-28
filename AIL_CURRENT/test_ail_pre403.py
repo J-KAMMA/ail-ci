@@ -6,9 +6,12 @@ builds where CPython evaluates the annotation while the class body runs and rais
 lost.  A class body annotation that reads the class name before any earlier binding of that name
 is now refused by name at compile time on both builds, including a method parameter or return
 annotation and a read reached through a subscript, a list item, a dict value, an argument or an
-attribute.  A plain/type annotation, a string annotation, ``from __future__ import
-annotations`` and an earlier module or class-body binding of the name keep CPython's result; a
-later binding after the read still leaves the read refused.
+attribute.  A comprehension target or a lambda parameter inside the annotation shadows the class
+name in its own scope, so the matching program is compiled, while the first comprehension
+iterable and a lambda default still read the class name and are refused.  A plain/type
+annotation, a string annotation, ``from __future__ import annotations`` and an earlier module or
+class-body binding of the name keep CPython's result; a later binding after the read still
+leaves the read refused.
 """
 import os
 import subprocess
@@ -98,6 +101,21 @@ class C:
     C = 5
 print(C.x)
 ''',
+    'comprehension_iterable': '''
+class C:
+    x: [v for v in C] = 1
+print(C.x)
+''',
+    'lambda_default': '''
+class C:
+    x: (lambda v=C: v)() = 1
+print(C.x)
+''',
+    'lambda_default_shadowed_parameter': '''
+class C:
+    x: (lambda C=C: C)() = 1
+print(C.x)
+''',
 }
 
 MATCHING = {
@@ -147,6 +165,37 @@ class C:
     x: () = 1
     y: -1 = 2
 print(C.x, C.y)
+''',
+    'comprehension_target_shadow': '''
+class C:
+    x: [C for C in range(3)][0] = 1
+print(C.x)
+''',
+    'lambda_parameter_shadow': '''
+class C:
+    x: (lambda C: C)(7) = 1
+print(C.x)
+''',
+    'nested_comprehension_shadow': '''
+class C:
+    x: [[C for C in range(2)] for C in range(1)][0][0] = 1
+print(C.x)
+''',
+    'dict_comprehension_shadow': '''
+class C:
+    x: {C: C for C in range(2)}[0] = 1
+print(C.x)
+''',
+    'nested_lambda_shadow': '''
+class C:
+    x: (lambda y: (lambda C: C)(y))(9) = 1
+print(C.x)
+''',
+    'earlier_binding_with_comprehension_shadow': '''
+class C:
+    C = 5
+    x: [C for C in range(2)] = 1
+print(C.x)
 ''',
 }
 

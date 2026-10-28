@@ -1,3 +1,23 @@
+## 2026-10-28 -- pre403 review fix: comprehension and lambda shadowing in class-body annotations (job-pre403-10281055)
+
+The pre403 review found two new false refusals: a comprehension target (`class C: x: [C for C
+in range(3)][0] = 1`) and a lambda parameter (`class C: x: (lambda C: C)(7) = 1`) named like the
+class were mistaken for reads of the class name, though CPython compiles both and prints `1`.
+`_class_body_annotations` now scans each annotation with `_annotation_reads`, which carries the
+inner scopes: a lambda parameter and a comprehension target shadow the class name in the body,
+while the first comprehension iterable, later iterables, conditions and lambda defaults keep the
+enclosing scope.  The direct and method-annotation refusals are unchanged, and a first iterable
+or lambda default that really reads the class name is still refused by name.  Added the matching
+comprehension/lambda cases and the refusal boundaries to `test_ail_pre403.py`.
+
+Probes in `/tmp/probes403` on both builds via `cmp.sh`: `comprehension_iterable`,
+`lambda_default` and `lambda_param_shadowing_default` are refused by name; `rp5_comprehension`,
+`rp6_lambda`, `nested_comprehension`, `dict_comprehension`, `set_comprehension`, `genexp`,
+`lambda_nested`, `comprehension_two_targets` and `prior_binding_comprehension` match CPython.
+Final-state tests: test_ail_pre403, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (4 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes.
+
 ## 2026-10-28 -- pre403: a class-body annotation that reads the class name is refused by name (job-pre403-10281055)
 
 The pre381 review's first still-differing pre-existing item outside the class-name runtime fix was
