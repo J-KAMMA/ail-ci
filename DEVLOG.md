@@ -1,3 +1,26 @@
+## 2026-10-28 -- re-apply pre386: a routed-base `**` power outside int64 (job-rbpre386-10281433)
+
+Re-applied the accepted pre386 change on top of this tree.  The accepted diff no longer applied
+because the integration tree already carries the newer pre367 `**` resolution
+(`_check_int64_binpow_constants` / `_binpow_power_parameters`), which covers every route pre386
+added: a parameter bound at a module call site (positional, keyword, alias, identity wrapper,
+tuple item), a function-local constant, a list item, a dict value, `dict.get` and a
+class/instance attribute.  No compiler change was needed, so both sides' fixes are kept by
+leaving pre367 in place.  The accepted `AIL_CURRENT/test_ail_pre386.py` is added; its refusal
+assertion accepts both pre386's `does not fit in a 64-bit signed integer` and this tree's
+existing `int64 constant expression out of range`, and still rejects `integer overflow`.  It is
+registered in `ail_check.MODULES` and `tools/ci_shards.json` (weight 18.2).
+
+Probes in `/tmp/probes/pre386` on both builds via `cmp.sh`: 14 routed powers are refused by name
+(argument, keyword, alias, identity wrapper, tuple item, assigned power, local, list item, dict
+value, `dict.get`, class and instance attribute, the 2**63 boundary and a negative base); 11
+programs match CPython (in-range argument/list/dict/attribute, safe bases -1/0/1, negative
+exponents, float/bool bases, zero/one exponents, int64 boundaries, a dynamic base/exponent,
+empty containers and the exponent types); the pre273 constant-base control (`10 ** es[0]`) is
+refused by name as before.  `tools/diff_ids.py` is not present on this tree.  Final-state
+tests: test_ail_pre386, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
