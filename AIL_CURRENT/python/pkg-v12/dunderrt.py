@@ -555,9 +555,9 @@ def _edits(inplace=False):
     e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object does not support item assignment", ail_type_name(c.tag));',
               '    if (c.tag == AIL_T_INST) { ail_d3_fn f = ail_dun3(c, AIL_D3_SETITEM); if (f) { ail_obj r; return f(cx, &r, c, key, val); } }\n'
               '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object does not support item assignment", ail_type_name(c.tag));'))
-    e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object doesn\'t support item deletion", ail_type_name(c.tag));',
+    e.append(('    int seq_like = c.tag == AIL_T_STR || c.tag == AIL_T_TUPLE || c.tag == AIL_T_RANGE ||',
               '    if (c.tag == AIL_T_INST) { ail_d2_fn f = ail_dun2(c, AIL_D2_DELITEM); if (f) { ail_obj r; return f(cx, &r, c, key); } }\n'
-              '    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object doesn\'t support item deletion", ail_type_name(c.tag));'))
+              '    int seq_like = c.tag == AIL_T_STR || c.tag == AIL_T_TUPLE || c.tag == AIL_T_RANGE ||'))
     e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"',
               '        case AIL_T_INST: { ail_d2_fn f = ail_dun2(c, AIL_D2_GETITEM); if (f) return f(cx, out, c, key); }\n        /* fall through */\n'
               '        default: { char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object is not subscriptable"'))

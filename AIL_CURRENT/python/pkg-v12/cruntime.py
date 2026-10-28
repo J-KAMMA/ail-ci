@@ -10333,7 +10333,16 @@ static inline void ail_obj_delitem(ail_obj c, ail_obj key) {
         ail_list_delitem(c, key.i); return;
     }
     if (c.tag == AIL_DICT) { ail_dict_del(c, key); return; }
-    char buf[64]; snprintf(buf, sizeof buf, "'%s' object doesn't support item deletion", ail_type_name(c.tag));
+    /* CPython says "doesn't" only on PySequence_DelItem's index-conversion path, which a
+       sequence-like receiver takes for an int/bool key; every other key uses the
+       PyObject_DelItem wording "does not". */
+    int seq_like = c.tag == AIL_STR || c.tag == AIL_TUPLE || c.tag == AIL_SET ||
+                   c.tag == AIL_INST || c.tag == AIL_EXC;
+    int index_key = key.tag == AIL_INT || key.tag == AIL_BOOL;
+    char buf[64];
+    snprintf(buf, sizeof buf, seq_like && index_key
+             ? "'%s' object doesn't support item deletion"
+             : "'%s' object does not support item deletion", ail_type_name(c.tag));
     ail_raise_c(AIL_ERR_TYPE, buf);
 }
 
@@ -16109,7 +16118,17 @@ static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
         return ail_list_delitem(cx, c, key.i);
     }
     if (c.tag == AIL_T_DICT) return ail_dict_del(cx, c, key);
-    char buf[64]; snprintf(buf, sizeof buf, "'%s' object doesn't support item deletion", ail_type_name(c.tag));
+    /* CPython says "doesn't" only on PySequence_DelItem's index-conversion path, which a
+       sequence-like receiver takes for an int/bool key; every other key (including a slice
+       or tuple on a sequence) uses the PyObject_DelItem wording "does not". */
+    int seq_like = c.tag == AIL_T_STR || c.tag == AIL_T_TUPLE || c.tag == AIL_T_RANGE ||
+                   c.tag == AIL_T_SET || c.tag == AIL_T_FROZENSET ||
+                   c.tag == AIL_T_INST || c.tag == AIL_T_EXC;
+    int index_key = key.tag == AIL_T_INT || key.tag == AIL_T_BOOL;
+    char buf[96];
+    snprintf(buf, sizeof buf, seq_like && index_key
+             ? "'%s' object doesn't support item deletion"
+             : "'%s' object does not support item deletion", ail__tname_c(c));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 static inline ail_obj ail_range_new(ail_ctx *cx, int64_t start, int64_t stop, int64_t step); /* defined below */

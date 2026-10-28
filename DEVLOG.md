@@ -1,3 +1,35 @@
+## 2026-10-28 -- pre396: `del` of an unsupported item uses CPython's `does not` wording (job-pre396-10281013)
+
+The pre377 review's first pre-existing item reproduced on both builds: `del None[0]`,
+`del True[0]`, `del (1)[0]`, `del (1.0)[0]`, `del len[0]`, `del (lambda: 1)[0]`,
+`del "ab"[(1, 2)]` and `del A[0]` (a class) all said `doesn't support item deletion`, where
+CPython 3.12 says `does not`.  CPython reserves `doesn't` for `PySequence_DelItem`'s
+index-conversion path: a sequence-like receiver (str, tuple, range, set, frozenset, bytes, a
+user instance) takes it for an int/bool key; every other key goes through
+`PyObject_DelItem`, whose text is `does not`.  The v2 `ail_op_delitem` and the v1
+`ail_obj_delitem` fallbacks now choose the wording from the receiver tag and key instead of
+always using `doesn't`; the v2 message also uses `ail__tname_c`, so a builtin function is
+`builtin_function_or_method` (not `function`) and a user instance is its class (not
+`instance`).  The slice-deletion branch in `ail2s_setslice` uses the same naming for `del`;
+slice assignment keeps its previous text.  `dunderrt.py` now anchors its `__delitem__`
+dispatch on the new `seq_like` line.  List/dict deletion and a user `__delitem__` are
+unchanged.
+
+The second recorded item (a user exception instance named `exception`) already matches
+CPython on this tree (probe `e_name` same stdout on both builds), so it was not changed.  The
+third (`A[0]` on a class: `'type' object is not subscriptable` versus `type 'A' is not
+subscriptable`) still differs on both builds and is not changed here.
+
+Probes in `/tmp/probes/pre396` on both builds (`cmp.sh`): `d_none`, `d_bool`, `d_int`,
+`d_float`, `d_builtin`, `d_lambda`, `d_str_tuple`, `d_class`, `d_inst`, `d_str_int`,
+`d_tuple_int`, `d_range_int`, `d_set_int`, `e_name`, `p_alias`, `p_del_works`,
+`p_empty_neg`, `p_routes`, `p_slices` and `p_uncaught` match CPython; `c_subscript` (the
+untouched class-subscription item) still differs.  Added `AIL_CURRENT/test_ail_pre396.py`
+(6 tests, 52 s) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`; added
+DIFFERENCES row `C?-job-pre396-10281013-1`.  Final-state tests: test_ail_pre396,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:

@@ -138,7 +138,7 @@ static inline ail_st ail2s_indices(ail_ctx *cx, ail_obj *out, ail_obj lo, ail_ob
 static inline ail_st ail2s_setslice(ail_ctx *cx, ail_obj c, ail_obj lo, ail_obj hi, ail_obj step, ail_obj value, int del) {
     if (c.tag != AIL_T_LIST) {
         char buf[96];
-        snprintf(buf, sizeof buf, del ? "'%s' object does not support item deletion" : "'%s' object does not support item assignment", ail_type_name(c.tag));
+        snprintf(buf, sizeof buf, del ? "'%s' object does not support item deletion" : "'%s' object does not support item assignment", del ? ail__tname_c(c) : ail_type_name(c.tag));
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
     int hl, hh, hs; int64_t l, h, s; ail_st st;
