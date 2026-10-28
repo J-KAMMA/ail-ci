@@ -1,3 +1,31 @@
+## 2026-10-28 -- stdlib18: struct (job-stdlib18-10290433)
+
+The next still-refused stdlib import with a supportable surface was `struct`: two corpus programs
+(`t475` in both models) and four language examples import it, and the actual corpus refusals left by
+compiling the candidates were `unicodedata` (3), `decimal` (2) and `textwrap` (1), which need a Unicode
+database, decimal arithmetic or `textwrap.shorten`.  `argparse` (9) and `tempfile` (7) are imported more
+but need CLI/process runtime modelling, so `struct` was the deterministic next step.
+
+`python/pkg-v12/structlib.py` is a source pass called from `ail_syntax.python_surface` before the tuple
+pass (a program without the import is returned unchanged).  It lowers `pack`, `unpack`, `unpack_from`,
+`pack_into` and `calcsize` with a string-literal format that starts with `<`, `>` or `!` to helpers built
+on `int.to_bytes` / `int.from_bytes`; the built codes are `x b B h H i I l L q s c ?`, with CPython
+3.12's range checks, buffer checks and error text.  The native layouts (no prefix, `@`, `=`), floats
+`e/f/d`, pointers `n/N/P`, `p`, the unsigned 64-bit `Q` (it can exceed int64), `Struct`, `iter_unpack`, a
+non-literal format and any other attribute are refused by name.  `struct.error` is caught by name; an
+uncaught error prints `_AilStructError` instead of `struct.error`.
+
+Probes in `/tmp/probes/stdlib18` on both builds via `cmp.sh`: `p_basic`, `p_errors`, `p_bounds`,
+`p_routes` and `p_error_alias` match CPython's stdout and exit status on the general and default builds.
+The named refusals were checked for `>d`, native `I`, `>Q`, `Struct`, `iter_unpack`, a variable format,
+a starred argument, a keyword argument and `from struct import *`.  Both corpus `t475` programs now build
+(the big-int `int.to_bytes` path falls back to the general path) and match CPython on
+`5 0 1 255 256 4294967295`.
+
+Final-state tests: `test_ail_stdlib18` (new), `test_ail_python_syntax`, `test_ail_modules`,
+`test_ail_stdlib5`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (7 modules,
+0 failed).  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
