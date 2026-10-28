@@ -1336,6 +1336,43 @@ def _flow_mention_names(node):
     return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
 
 
+def _flow_function_header(statement):
+    """The expressions a def evaluates when the statement runs; its body does not run."""
+    args = statement.args
+    header = list(statement.decorator_list) + list(args.defaults)
+    header += [default for default in args.kw_defaults if default is not None]
+    for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+        if arg is not None and arg.annotation is not None:
+            header.append(arg.annotation)
+    if statement.returns is not None:
+        header.append(statement.returns)
+    return header
+
+
+def _flow_executed_nodes(statement):
+    """The subtrees that run when this statement runs; a def or method body waits for a call."""
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return _flow_function_header(statement)
+    if isinstance(statement, ast.ClassDef):
+        nodes = list(statement.decorator_list) + list(statement.bases)
+        nodes += [keyword.value for keyword in statement.keywords]
+        for inner in statement.body:
+            nodes.extend(_flow_executed_nodes(inner))
+        return nodes
+    return [statement]
+
+
+def _flow_decorator_names(statement):
+    """Decorators evaluated when this statement runs (a class body defines its methods)."""
+    if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return []
+    names = list(statement.decorator_list)
+    if isinstance(statement, ast.ClassDef):
+        for inner in statement.body:
+            names.extend(_flow_decorator_names(inner))
+    return names
+
+
 def _flow_container(value):
     """Whether value is a literal container tree of immutable scalars (possibly nested)."""
     if type(value) in _FLOW_SCALARS:
@@ -1408,8 +1445,12 @@ def _check_flow_int64_containers(tree, known, attributes, int_shadowed, program_
     that happens before the mutation was left to the run-time ``integer overflow`` trap.
     Walk the module statements in source order with a small read-only model (a flat literal
     container, a simple alias, or a scalar).  Any statement that is not modelled and mentions
-    a tracked name drops that name and its aliases first, so an unmodelled call, loop, dead
-    branch or mutation can cost a refusal but never invent one.
+    a tracked name drops that name and its aliases first.  An unmodelled call -- anything not
+    provably side-effect free for this module's globals (an unshadowed pure builtin, a method of
+    a tracked literal value, or a method of an imported module), including a user function or
+    method defined before the name was bound -- drops every tracked name, so a call, loop, dead
+    branch or mutation can cost a refusal but never invent one.  A def only evaluates its
+    header and a class only its class body.
     """
     if int_shadowed:
         return
@@ -1473,9 +1514,75 @@ def _check_flow_int64_containers(tree, known, attributes, int_shadowed, program_
             share[name] = token
             members[token].add(name)
 
+    import_counts = {}
+    for statement in tree.body:
+        if isinstance(statement, (ast.Import, ast.ImportFrom)):
+            for alias in statement.names:
+                imported = (alias.asname or alias.name).split('.')[0]
+                import_counts[imported] = import_counts.get(imported, 0) + 1
+
+    def import_only(name):
+        return (import_counts.get(name, 0) > 0
+                and module_counts.get(name, 0) == import_counts[name])
+
+    mutating = set()
+    for statement in tree.body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            mutating.add(statement.name)
+
+    def safe_call(call):
+        """Whether this call is known not to run code that can reach a module global.
+
+        Only an unshadowed pure builtin, a method of a tracked literal value and a method of
+        an imported module are cleared: code defined in this module (even a helper that looks
+        read-only) could mutate a global or hand out an alias to one.
+        """
+        func = call.func
+        if isinstance(func, ast.Name):
+            if func.id in pure_calls:
+                return True
+            if func.id in program_bound:
+                return False
+            # A higher-order builtin (map, sorted, ...) may invoke a callable argument.
+            return not any(isinstance(inner, ast.Name) and inner.id in mutating
+                           for argument in (*call.args, *[key.value for key in call.keywords])
+                           for inner in ast.walk(argument))
+        if not isinstance(func, (ast.Attribute, ast.Subscript)):
+            return False
+        root = func.value
+        while isinstance(root, (ast.Attribute, ast.Subscript)):
+            root = root.value
+        if isinstance(root, ast.Constant):
+            return True
+        if not isinstance(root, ast.Name):
+            return False
+        value = env.get(root.id, _UNKNOWN)
+        if root.id in env:
+            # A method of a known literal value only sees that value.
+            return type(value) in _FLOW_SCALARS or isinstance(value, (list, tuple, dict))
+        return import_only(root.id) or root.id not in program_bound
+
+    def opaque_call(nodes):
+        """Whether evaluating these nodes runs a call that can mutate an unknown global."""
+        for top in nodes:
+            for sub in ast.walk(top):
+                if isinstance(sub, ast.Call) and not safe_call(sub):
+                    return True
+        return False
+
+    def drop_all():
+        for name in tuple(set(env) | set(share)):
+            drop_group(name)
+
     def drop_mentions(node):
+        opaque = opaque_call((node,))
         for name in _flow_mention_names(node):
             drop_group(name)
+        if opaque:
+            # A user function, method or constructor can mutate any module global, including
+            # one bound after the call target was defined, so a name it does not mention is
+            # not safe to keep.
+            drop_all()
 
     def check_calls(node):
         for sub in ast.walk(node):
@@ -1503,6 +1610,20 @@ def _check_flow_int64_containers(tree, known, attributes, int_shadowed, program_
         elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
               and statement.value is not None):
             target, value_node = statement.target.id, statement.value
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            # Only what a def or class evaluates now is modelled; a call to it later is an
+            # unmodelled call at the call site.
+            executed = _flow_executed_nodes(statement)
+            decorated = any(isinstance(decorator, ast.Name) and decorator.id in program_bound
+                            and not import_only(decorator.id)
+                            for decorator in _flow_decorator_names(statement))
+            if decorated or opaque_call(executed):
+                drop_all()
+            else:
+                for part in executed:
+                    for name in _flow_mention_names(part):
+                        drop_group(name)
+            continue
         if (value_node is not None
                 and _flow_pure_expression(value_node, lookup, pure_calls, attributes)):
             check_calls(value_node)

@@ -12,11 +12,13 @@ compiles on both builds and then stops with ``integer overflow``, where CPython 
 integer.  ``_check_flow_int64_containers`` now walks the module statements in source order with
 a small read-only model (a flat or nested literal container, a simple alias, a scalar) and
 refuses the read by name.  Any statement it cannot model -- a call, loop, dead branch or
-mutation -- drops the names it mentions first, so a read after a mutation, a mutating sibling,
-a dead ``if`` expression or an escaping alias still matches CPython.  A call to a user function
-whose name has the compiler's ``_AilT_`` tuple-constructor shape is only treated as pure when
-none of its arguments is a tracked container.  No code is generated differently: the pass only
-raises.
+mutation -- drops the names it mentions first.  An unmodelled call that is not provably
+side-effect free for the module's globals -- a user function or method defined before the
+container was bound, reached directly, through an alias, a lambda, an instance, a list item, a
+dict value or a returned alias -- drops every tracked name, so such a call can no longer hide a
+mutation and cause a false refusal.  A def only evaluates its header and a class only its class
+body, so a method that is never called does not cost the refusal.  No code is generated
+differently: the pass only raises.
 """
 import os
 import subprocess
@@ -102,6 +104,53 @@ items = [1e300]
 a = items
 b = a
 print(int(b[0]))
+a[0] = 1.5
+''', FLOAT),
+    'read_before_deferred_call': ('''
+def f():
+    d["k"] = 1.5
+
+
+d = {"k": 1e300}
+print(int(d.get("k")))
+f()
+''', FLOAT),
+    'function_defined_after_read': ('''
+d = {"k": 1e300}
+
+
+def f():
+    d["k"] = 1.5
+
+
+print(int(d.get("k")))
+f()
+''', FLOAT),
+    'method_not_called': ('''
+d = {"k": 1e300}
+
+
+class C:
+    def go(self):
+        d["k"] = 1.5
+
+
+print(int(d.get("k")))
+d.update({"k": 1.5})
+''', FLOAT),
+    'other_container_method': ('''
+a = [1e300]
+d = {"x": 1}
+d.update({"x": 2})
+print(int(a[0]))
+a[0] = 1.5
+''', FLOAT),
+    'imported_method': ('''
+import math
+
+a = [1e300]
+x = math.floor(1.5)
+print(int(a[0]))
 a[0] = 1.5
 ''', FLOAT),
 }
@@ -275,6 +324,155 @@ items = [1e300]
 items = [1.5]
 items[0] = 2.5
 print(int(items[0]))
+''',
+    'function_defined_before_binding': '''
+def f():
+    d["k"] = 1.5
+
+
+d = {"k": 1e300}
+f()
+print(int(d.get("k")))
+''',
+    'class_defined_before_binding': '''
+class C:
+    @staticmethod
+    def go():
+        d["k"] = 1.5
+
+
+d = {"k": 1e300}
+C.go()
+print(int(d.get("k")))
+''',
+    'instance_method_before_binding': '''
+class C:
+    def go(self):
+        d["k"] = 1.5
+
+
+d = {"k": 1e300}
+c = C()
+c.go()
+print(int(d.get("k")))
+''',
+    'lambda_defined_before_binding': '''
+g = lambda: d.update({"k": 1.5})
+
+d = {"k": 1e300}
+g()
+print(int(d.get("k")))
+''',
+    'function_alias_call': '''
+def f():
+    d["k"] = 1.5
+
+
+g = f
+d = {"k": 1e300}
+g()
+print(int(d.get("k")))
+''',
+    'global_rebind_call': '''
+def f():
+    global d
+    d = {"k": 1.5}
+
+
+d = {"k": 1e300}
+f()
+print(int(d.get("k")))
+''',
+    'nested_dict_argument_call': '''
+def f(o):
+    o["x"]["k"] = 1.5
+
+
+d = {"k": 1e300}
+o = {"x": d}
+f(o)
+print(int(d.get("k")))
+''',
+    'list_item_argument_call': '''
+def f(a):
+    a["k"] = 1.5
+
+
+d = {"k": 1e300}
+boxes = [d]
+f(boxes[0])
+print(int(d.get("k")))
+''',
+    'callable_in_dict_call': '''
+def f():
+    d["k"] = 1.5
+
+
+d = {"k": 1e300}
+callbacks = {"f": f}
+callbacks["f"]()
+print(int(d.get("k")))
+''',
+    'returned_alias_call': '''
+def get():
+    return d
+
+
+d = {"k": 1e300}
+x = get()
+x["k"] = 1.5
+print(int(d.get("k")))
+''',
+    'constructor_attribute_call': '''
+class Box:
+    def __init__(self, v):
+        self.v = v
+
+
+d = {"k": 1e300}
+b = Box(d)
+b.v["k"] = 1.5
+print(int(d.get("k")))
+''',
+    'class_method_after_binding': '''
+d = {"k": 1e300}
+
+
+class C:
+    @staticmethod
+    def go():
+        d["k"] = 1.5
+
+
+C.go()
+print(int(d.get("k")))
+''',
+    'empty_dict_call': '''
+def f():
+    d["k"] = 1.5
+
+
+d = {}
+f()
+print(int(d.get("k", 1e300)))
+''',
+    'negative_index_call': '''
+def f():
+    items[0] = 1.5
+
+
+items = [1e300]
+f()
+print(int(items[-1]))
+''',
+    'negative_value_call': '''
+def f():
+    d["k"] = 1.5
+
+
+d = {"k": -1e300}
+f()
+print(int(d.get("k")))
 ''',
 }
 

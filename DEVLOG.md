@@ -1,3 +1,44 @@
+## 2026-10-28 -- pre387 review: a call defined before the binding no longer hides its mutation (job-pre387-10280823)
+
+The pre387 review found a false refusal: the flow model processed a ``def``/``class`` in source
+order, so one defined before the container was bound dropped nothing, and the later call did not
+mention the tracked name.  Both builds then refused
+
+    def f():
+        d["k"] = 1.5
+
+    d = {"k": 1e300}
+    f()
+    print(int(d.get("k")))
+
+where CPython (and the base) print ``1``.  ``_check_flow_int64_containers`` now drops every
+tracked name at an unmodelled call that is not provably side-effect free for the module's globals
+-- only an unshadowed pure builtin, a method of a tracked literal value and a method of an
+imported module are cleared; a higher-order builtin whose argument names a function or class
+defined here is not.  This covers a function, class method, instance method, lambda, alias,
+constructor and a call reached through a list item, a dict value, a nested dict value or a
+returned alias, including the ``global`` rebinding and constructor-attribute routes.  A ``def``
+now evaluates only its header (decorators, defaults, annotations) and a ``class`` only its class
+body, so an uncalled method and a read before a later call keep the refusal; a decorated
+definition and a class-body statement still drop the model.  The mention drop now happens after
+the call is classified, so a method of the tracked container (``d.update``) is still cleared and
+does not hide a read of a different container.  No codegen change.
+
+Probes in ``/tmp/probes/pre387b`` (33 programs, both builds via ``cmp.sh`` and a classifier):
+match CPython ``r02``-``r06``, ``m01``-``m07``, ``m11``-``m16`` (function/class/instance/lambda/
+alias/global-rebind/argument/nested-dict/list-item/dict-value/returned-alias/constructor-
+attribute routes, empty dict default, negative index and value); refused by name ``r07``-``r09``,
+``k01``-``k06`` (read before call, pure builtin between, method of another tracked container,
+imported method, uncalled mutating method, negative index).  ``m08``-``m10`` are refused by the
+pre-existing class-body/decorator subset rule on the base too.  All 49 recovered ``pre387``
+probes keep their recorded result, and the reviewer's 18 ``rprobes`` now give ``r02``/``r03``
+match instead of the false refusal (``r01``, ``r10``, ``r11``, ``r14``, ``r16`` refused by name;
+``r06``/``r12`` keep the pre-existing trap; ``r18`` keeps its pre-existing subset refusal).
+``test_ail_pre387.py`` now pins 17 refused and 39 matching programs on both builds.
+
+Final-state tests: test_ail_pre387 (147 s), test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  ``tools/update_manifest.py`` was run and ``--check`` passes.
+
 ## 2026-10-27 -- pre387: an int() read before a later container mutation is refused (job-pre387-10280823)
 
 The pre374 review left that job's worker probes p09-p20 unverified.  Recovered them from the
