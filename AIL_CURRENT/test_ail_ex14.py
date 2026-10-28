@@ -21,6 +21,27 @@ CLI = ROOT / 'ail_chatgpt.py'
 GEOMETRY = ROOT / 'language_examples' / 'c_export' / 'geometry.py'
 MATH = ROOT / 'language_examples' / 'math.ail'
 
+# A plain FFI program: the import is scaffolding for the @extern stub and must be blanked, not kept
+# at run time, so this keeps building on the typed path exactly as it did before `@export` support.
+FFI_PROGRAM = '''import ail_ffi
+ail_ffi.link("m")
+
+@ail_ffi.extern(header="math.h", symbol="sqrt")
+def c_sqrt(x: ail_ffi.c_double) -> ail_ffi.c_double: ...
+
+print(c_sqrt(9.0))
+'''
+
+IMPORT_ONLY_PROGRAM = '''import ail_ffi
+
+
+def main():
+    print(6 * 7)
+
+
+main()
+'''
+
 PROGRAM = '''from dataclasses import dataclass
 import ail_ffi
 from ail_ffi import export
@@ -120,7 +141,7 @@ def label(text: str) -> str:
 
 
 class ExportProgramTests(unittest.TestCase):
-    def build_and_run(self, source, directory):
+    def build_and_run(self, source, directory, typed=False):
         cpython_env = dict(os.environ)
         cpython_env['PYTHONPATH'] = str(ROOT) + (
             os.pathsep + cpython_env['PYTHONPATH'] if cpython_env.get('PYTHONPATH') else '')
@@ -130,7 +151,9 @@ class ExportProgramTests(unittest.TestCase):
         for label, general in (('default', False), ('general', True)):
             with self.subTest(build=label):
                 exe = Path(directory) / ('exe_' + label)
-                env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
+                env = dict(os.environ, AIL_NO_CACHE='1')
+                if not (typed and not general):
+                    env['AIL_QUIET_FALLBACK'] = '1'
                 env.pop('AIL_UNIFIED_FORCE', None)
                 if general:
                     env['AIL_UNIFIED_FORCE'] = '1'
@@ -138,6 +161,9 @@ class ExportProgramTests(unittest.TestCase):
                                         '-o', str(exe)], cwd=ROOT, capture_output=True, text=True,
                                        timeout=600, env=env)
                 self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                if typed and not general:
+                    self.assertNotIn('general path', built.stdout + built.stderr,
+                                     'the plain ail_ffi import must not force the general path')
                 ran = subprocess.run([str(exe)], cwd=directory, capture_output=True, text=True,
                                      timeout=60)
                 self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout),
@@ -147,6 +173,24 @@ class ExportProgramTests(unittest.TestCase):
         with tempfile.TemporaryDirectory(prefix='ail-ex14-') as directory:
             source = Path(directory) / 'export_program.py'
             source.write_text(PROGRAM, encoding='utf-8')
+            self.build_and_run(source, directory)
+
+    def test_plain_ffi_imports_stay_on_the_typed_path(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex14-ffi-') as directory:
+            for name, text in (('plain_ffi', FFI_PROGRAM), ('import_only', IMPORT_ONLY_PROGRAM)):
+                with self.subTest(program=name):
+                    work = Path(directory) / name
+                    work.mkdir()
+                    source = work / (name + '.py')
+                    source.write_text(text, encoding='utf-8')
+                    self.build_and_run(source, work, typed=True)
+
+    def test_export_with_an_unused_ffi_import_still_builds(self):
+        text = ('from ail_ffi import export, c_int\n\n@export\n'
+                'def add(a: int, b: int) -> int:\n    return a + b\n\nprint(add(1, 2))\n')
+        with tempfile.TemporaryDirectory(prefix='ail-ex14-extra-') as directory:
+            source = Path(directory) / 'extra_import.py'
+            source.write_text(text, encoding='utf-8')
             self.build_and_run(source, directory)
 
     def test_geometry_example_matches_cpython(self):

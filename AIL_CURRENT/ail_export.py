@@ -64,6 +64,30 @@ def has_export(text):
     return False
 
 
+def validate(text):
+    """Check the @export signatures of a normal program without treating it as a C library.
+
+    A normal program may import the other ail_ffi names for its @extern stubs; only the export
+    markers are relevant to the signature check, so `lower` sees a copy whose ail_ffi imports bind
+    `export` alone.  Everything else (decorators, dataclasses, parameter and result types) is still
+    checked exactly as the `--lib` build checks it.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError as error:
+        raise ExportError('@export needs Python syntax: %s' % error) from error
+    body = []
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
+            aliases = [alias for alias in node.names if alias.name == 'export']
+            if not aliases:
+                continue
+            node.names = aliases
+        body.append(node)
+    tree.body = body
+    lower(ast.unparse(ast.fix_missing_locations(tree)))
+
+
 def _kind(annotation, structs, *, result, where):
     if isinstance(annotation, ast.Constant) and annotation.value is None:
         if result:

@@ -170,7 +170,9 @@ class Session:
         imported = set()                # names bound by `from ail_ffi import`
         module_names = set()            # names bound by `import ail_ffi [as x]`
         blank = []                      # (first line, last line)
-        keep = {}                       # line -> import text `export` needs at run time (CPython metadata)
+        keep = {}                       # line -> import text an `export` decorator needs at run time
+        export_imports = {}             # bound name -> (line, from-import text) for `export`
+        module_imports = {}             # module alias -> (line, import text) for `import ail_ffi`
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
@@ -181,17 +183,32 @@ class Session:
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
                     imported.add(alias.name)
                     if alias.name == 'export':
-                        keep[node.lineno] = 'from ail_ffi import export' + (
-                            ' as ' + alias.asname if alias.asname else '')
+                        export_imports[alias.asname or alias.name] = (
+                            node.lineno,
+                            'from ail_ffi import export' + (' as ' + alias.asname if alias.asname else ''))
                 blank.append((node.lineno, node.end_lineno))
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == 'ail_ffi':
                         module_names.add(alias.asname or 'ail_ffi')
-                        keep[node.lineno] = 'import ail_ffi' + (' as ' + alias.asname if alias.asname else '')
+                        module_imports[alias.asname or 'ail_ffi'] = (
+                            node.lineno, 'import ail_ffi' + (' as ' + alias.asname if alias.asname else ''))
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
+        # Keep an import line only when an `export` decorator still spells its bound name: other
+        # ail_ffi imports are blanked like any other FFI scaffolding, so a plain FFI program keeps
+        # building on the typed path exactly as it did before `export` was accepted there.
+        for node in ast.walk(tree):
+            for dec in getattr(node, 'decorator_list', ()):
+                target = dec.func if isinstance(dec, ast.Call) else dec
+                if isinstance(target, ast.Name) and target.id in export_imports:
+                    line, import_text = export_imports[target.id]
+                    keep[line] = import_text
+                elif (isinstance(target, ast.Attribute) and target.attr == 'export'
+                      and isinstance(target.value, ast.Name) and target.value.id in module_imports):
+                    line, import_text = module_imports[target.value.id]
+                    keep[line] = import_text
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):

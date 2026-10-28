@@ -1,3 +1,34 @@
+## 2026-10-28 -- ex14 review: keep an `ail_ffi` import only when `@export` needs it (job-ex14-10290439)
+
+The review found that commit `37654bd` (the first half of this job: `@export` as CPython's identity
+decorator) restored every `import ail_ffi` line in the lowered source.  A plain FFI program
+(`import ail_ffi`, `ail_ffi.link(...)`, `@ail_ffi.extern`) was therefore refused on both builds
+with `not in the subset: import of 'ail_ffi' is not available` where the base built it and matched
+CPython, and a file that only imported the module fell back to the ~20x-slower general path.  The
+other half of the job is `d6152dc` (a definition-only module example runs like CPython); both
+commits remain in this branch.
+
+`ail_ffi_lower.py` now records the name bound by each `from ail_ffi import export [as x]` and
+`import ail_ffi [as x]`, and restores an import line only when an `export` decorator still spells
+that bound name.  Every other ail_ffi import is blanked as before, so plain FFI programs stay on the
+typed path.  `ail_export.validate` lets a normal program validate its `@export` signatures while
+also importing other ail_ffi names for its `@extern` stubs, so `from ail_ffi import export, c_int`
+with an unused `c_int` builds and matches CPython instead of being newly refused.  `typing.List[int]`
+and other non-C-core export types remain named refusals (the former was refused on the base too).
+
+Probes via `cmp.sh` with `PYTHONPATH=AIL_CURRENT` (reviewer's `/tmp/rprobes` and
+`/tmp/probes/ex14fix`): `x_ffi_sqrt_import`, `x_ffi_sqrt_from`, `x_from_import_only`,
+`x_import_only`, `x_export_call`, `x_export_extra_import`, `e_normal`, `e_alias`, `e_from_alias`,
+`ffi_import_alias`, `ffi_mixed_imports`, `ffi_from_only`, `export_from_only`, `export_module_only`,
+`export_both` and `export_extra_import` match CPython on both builds; the default build of the two
+plain-import probes keeps the typed path (same generated C as the base for `x_import_only`).
+`x_export_typing_list`, `e_invalid_nested` and `x_ffi_extern` are refused by name (`x_ffi_extern`
+also exits 1 under CPython, `OSError: cannot find library 'int abs(int)'`).  Added the plain-FFI,
+import-only and unused-extra-import cases to `test_ail_ex14.py` (now 8 tests).  Final-state tests:
+test_ail_ex14, test_ail_ffi, test_ail_c_export, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (0 failed).  `tools/update_manifest.py` ran and `--check` passes.  No
+DIFFERENCES rows were added.
+
 ## 2026-10-28 -- ex14 follow-up: a definition-only module example runs like CPython (job-ex14-10290439)
 
 Re-surveyed `AIL_CURRENT/language_examples` after the `@export` work.  The Python-syntax `.py`
