@@ -2709,6 +2709,20 @@ class Compiler(boxclosure.ClosureMixin):
         # at module scope calls the function) -- silently printing nothing, exactly the
         # `test_io` "print() of a dict [general path]" failure this fixes.
         array_entry = self.functions[fn_order[-1]] if (not has_toplevel_exec and fn_order) else None
+        if array_entry is not None and array_entry['params']:
+            # A scalar annotation cannot take the file's list.  CPython runs only the module body
+            # (the definitions) for such a source; the array-entry convention would pass a list to
+            # an int/float/str/bool/bytes parameter and fail at the C compiler.  Leave it to the
+            # module-body `main` below, exactly like `_main_for`'s inert entry on the typed path.
+            first = array_entry['params'][0]
+            annotation = None
+            for arg in list(array_entry['node'].args.posonlyargs) + list(array_entry['node'].args.args):
+                if arg.arg == first:
+                    annotation = arg.annotation
+                    break
+            if isinstance(annotation, ast.Name) and annotation.id in (
+                    'int', 'float', 'str', 'bool', 'bytes', 'bytearray', 'complex'):
+                array_entry = None
 
         main_ctx = Ctx('<module>')
         main_ctx.fn_node = tree

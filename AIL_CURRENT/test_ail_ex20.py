@@ -90,6 +90,14 @@ BYTES = r'''def reverse(b: bytes) -> bytes:
     return b[::-1]
 '''
 
+FLOAT = r'''def half(x: float) -> float:
+    return x / 2.0
+'''
+
+BOOL = r'''def flip(flag: bool) -> bool:
+    return not flag
+'''
+
 ARRAY = r'''def total(values: list[int]) -> int:
     return sum(values)
 '''
@@ -101,7 +109,7 @@ class Ex20Tests(Base):
         self.assertEqual(out, b"")
 
     def test_scalar_first_parameters_are_inert(self):
-        for src in (INT, STR, BYTES):
+        for src in (INT, STR, BYTES, FLOAT, BOOL):
             with self.subTest(src=src.splitlines()[-2]):
                 self.assertEqual(self.same(src), b"")
 

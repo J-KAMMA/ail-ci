@@ -3,9 +3,10 @@
 `language_examples/math.ail` (a constant plus `def sum_to(n)`) was refused on the typed path with
 "the first parameter must be the sequence read from the file"; CPython, and the general path, run
 the module body and exit 0 with no output.  `pyc._main_for` now returns an inert `main` when the
-first function's first parameter is not the file's int64 sequence.  An array first parameter keeps
-its existing file entry point.  Added `test_ail_ex20.py` (both builds against CPython, plus the
-array-entry regression); The probes cover int, str and bytes scalar parameters.
+first function's first parameter is not the file's int64 sequence, and the general path no longer
+uses its array entry for an annotated scalar first parameter.  An array first parameter keeps its
+existing file entry point.  Added `test_ail_ex20.py` (both builds against CPython, plus the
+array-entry regression); the probes cover int, float, bool, str and bytes scalar parameters.
 
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
