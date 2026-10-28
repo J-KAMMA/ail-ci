@@ -2,9 +2,13 @@
 """Measure the share of gcc -O2 time a generated program spends on its runtime prelude.
 
 For each sampled program in lab/corpus/programs the compiler runs once with --debug-dir,
-which keeps the generated C.  The C is split at the first program function body reported by
-native_report.json: everything before it is the runtime prelude (the includes, the
-cruntime.emit pieces and the helper declarations), the rest is the program's own code.
+which keeps the generated C.  The C is split into the runtime prelude (the includes, the
+runtime pieces and the helper declarations) and the program's own code.  The typed path
+reports a byte offset for every program function body in native_report.json, and the first
+one is the boundary.  A program the typed path refused is emitted by the general path
+(pyboxed2), whose report carries no mapped bodies (its regions describe the typed C that was
+refused), so its translation unit is split at the program-specific section comment that
+precedes the interned attribute ids / forward declarations / program functions.
 
 gcc -c is timed (median of REPEAT runs) for:
   full     the whole generated C
@@ -21,7 +25,6 @@ import json
 import os
 from pathlib import Path
 import random
-import re
 import statistics
 import subprocess
 import sys
@@ -58,26 +61,32 @@ def run_compile(source, work):
     return (generated, Path(generated['debug_path']), report), elapsed, None
 
 
+# the start of the program-specific text in a general-path unit: everything before the
+# interned ids, the module-lifetime root, the forward declarations and the program functions
+# is runtime (pyboxed2 v2 / pyboxed v1 emit their own wording)
+PROGRAM_SECTIONS = (
+    '/* ---- interned attribute-name ids ---- */',
+    '/* ---- attribute ids / module globals / default-argument slots ---- */',
+)
+GENERAL_PREAMBLES = ('pyboxed2.py generated preamble', 'pyboxed.py generated preamble')
+
+
+def emit_path(text):
+    """Which emitter produced the unit: the general path or the typed path."""
+    return 'general' if any(mark in text for mark in GENERAL_PREAMBLES) else 'typed'
+
+
 def split_generated(generated, text):
-    """(prelude, program): the split before the first program function body."""
+    """(prelude, program, how): the split before the program's own text."""
     starts = [f['c_start'] for f in generated['functions'] if f.get('mapped')]
     if starts:
         cut = min(starts)
-        return text[:cut], text[cut:]
-    # the report could not map a body: use the first non-static definition and its prototype
-    lines = text.splitlines(keepends=True)
-    for index, line in enumerate(lines):
-        match = re.match(r'^[A-Za-z_][A-Za-z0-9_ \t\*]*\s+([A-Za-z_]\w*)\s*\([^;]*\)\s*\{', line)
-        if match and not line.startswith('static') and not line.startswith('typedef'):
-            name = match.group(1)
-            cut_line = index
-            for back in range(index - 1, max(-1, index - 40), -1):
-                if re.search(r'\b%s\s*\([^;]*\)\s*;' % re.escape(name), lines[back]):
-                    cut_line = back
-                    break
-            cut = sum(len(item) for item in lines[:cut_line])
-            return text[:cut], text[cut:]
-    raise RuntimeError('no mapped function and no fallback split')
+        return text[:cut], text[cut:], 'mapped'
+    for marker in PROGRAM_SECTIONS:
+        cut = text.find(marker)
+        if cut > 0:
+            return text[:cut], text[cut:], 'section'
+    raise RuntimeError('no mapped function and no program section marker')
 
 
 def compile_flags(report, c_name):
@@ -142,7 +151,9 @@ def main():
             continue
         generated, c_path, report = data
         text = c_path.read_text()
-        prelude, _program = split_generated(generated, text)
+        prelude, _program, how = split_generated(generated, text)
+        if len(prelude) + len(_program) != len(text):
+            raise RuntimeError('%s: split lost bytes' % source)
         prelude_file = work / 'prelude.c'
         prelude_file.write_text(prelude)
         if flags is None:
@@ -156,10 +167,10 @@ def main():
             continue
         row = dict(name=source.name, corpus=source.parent.name, c_bytes=len(text),
                    prelude_bytes=len(prelude), build_seconds=seconds, full_ms=full_ms,
-                   prelude_ms=prelude_ms, path='general' if 'py_main' in text else 'typed')
+                   prelude_ms=prelude_ms, path=emit_path(text), split=how)
         rows.append(row)
-        print('%2d %-38s %-7s C=%7dB prelude=%5.1f%% full=%7.1fms prelude=%6.1fms'
-              % (len(rows), str(source.relative_to(CORPUS)), row['path'], row['c_bytes'],
+        print('%2d %-38s %-7s %-7s C=%7dB prelude=%5.1f%% full=%7.1fms prelude=%6.1fms'
+              % (len(rows), str(source.relative_to(CORPUS)), row['path'], how, row['c_bytes'],
                  100.0 * len(prelude) / len(text), full_ms, prelude_ms), flush=True)
 
     total_full = sum(row['full_ms'] for row in rows)
@@ -171,10 +182,17 @@ def main():
                   prelude_share=(total_prelude - floor) / (total_full - floor),
                   mean_share=statistics.mean(shares), median_share=statistics.median(shares),
                   per_program_shares=sorted(shares))
+    for path in ('typed', 'general'):
+        subset = [row for row in rows if row['path'] == path]
+        if subset:
+            full, prelude, base = (sum(row['full_ms'] for row in subset),
+                                   sum(row['prelude_ms'] for row in subset),
+                                   empty_ms * len(subset))
+            result[path] = dict(count=len(subset), pooled_share=(prelude - base) / (full - base))
     (work_root / 'result.json').write_text(json.dumps(result, indent=1))
     print(json.dumps({key: result[key] for key in (
         'flags', 'empty_ms', 'total_full_ms', 'total_prelude_ms', 'prelude_share',
-        'mean_share', 'median_share', 'skipped')}, indent=1))
+        'mean_share', 'median_share', 'typed', 'general', 'skipped')}, indent=1))
     print('rows and summary:', work_root)
 
 
