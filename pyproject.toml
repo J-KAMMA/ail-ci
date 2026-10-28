@@ -16,25 +16,7 @@ classifiers = [
 ail = "ail_lang.ail_chatgpt:main"
 
 [tool.setuptools]
+include-package-data = false
 package-dir = {ail_lang = "AIL_CURRENT"}
 packages = ["ail_lang"]
 license-files = ["LICENSE-APACHE", "LICENSE-MIT"]
-
-[tool.setuptools.package-data]
-ail_lang = [
-    "MANIFEST.json",
-    "python/pkg-v12/**/*.py",
-    "python/pkg-v12/**/*.h",
-    "python/pkg-v12/**/*.c",
-    "stdlib/*.py",
-    "stdlib/*.h",
-    "stdlib/*.c",
-    "language_examples/*",
-]
-
-[tool.setuptools.exclude-package-data]
-ail_lang = [
-    "python/pkg-v12/test_*.py",
-    "python/pkg-v12/bench.py",
-    "language_examples/test_*.py",
-]

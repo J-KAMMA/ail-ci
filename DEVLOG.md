@@ -1,3 +1,23 @@
+## 2026-10-28 -- packaging review fixes (job-rel2-10282133)
+
+Fixed the three packaging defects. The wheel build now derives its data list from `MANIFEST.json`
+`sdk_files`, omitting only the three compiler test/bench files (`python/pkg-v12/bench.py`,
+`test_all.py`, `test_pipeline.py`), and copies that exact selection instead of globbing whole
+directories. The wheel therefore carries `python/pkg-v12/SEMANTICS.md` and no longer carries the 13
+research/benchmark `language_examples` files. The build also writes an installed `MANIFEST.json`
+whose `sdk_files` and `sha256` pins describe only the packaged files, so the installed `ail
+integrity` verifies itself, and it copies `LICENSE-APACHE`/`LICENSE-MIT` into the package root so
+installed `ail export-sdk` can include them. `include-package-data` is off so a stale `egg-info`
+cannot add files. `test_ail_packaging` now checks the exact wheel selection and pins, the installed
+manifest, installed `api-builtin`/`integrity`/`export-sdk`, and compile/run outside the repository.
+
+Probes: `packaging_hello.py`, `packaging_types.py`, `packaging_zlib.py` via `cmp.sh` matched CPython
+on both builds; `/tmp/probes/packaging_review_probe.py` passed wheel selection (520 files),
+installed compile/run, `api-builtin abs`, `integrity` (520 checked, verified), and `export-sdk`
+(523 files). Final-state tests: `test_ail_packaging`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` (4 modules, 640 s, 0 failed). `tools/update_manifest.py` was run and
+`--check` exits 0.
+
 ## 2026-10-28 -- packaging: install the AIL compiler with pip (job-rel2-10282133)
 
 Added a repository-root `pyproject.toml` (setuptools backend, distribution `ail-lang`, Python >= 3.12,
