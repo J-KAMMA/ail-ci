@@ -23,6 +23,233 @@ r17 (value through a plain instance attribute) keeps the runtime `integer overfl
 with a plain store on the base copy, so it is pre-existing.  Final-state tests: test_ail_pre371,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
 `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- pre370 follow-up: unsound read-only functions refused valid programs (job-pre370-10280456)
+
+The pre370 review found four false compile-time refusals.  `_read_only_functions` marked a
+module function read-only whenever it did not store to a subscript named as the parameter, so a
+function that changed the container through another callee (`g(xs)`), a method call (`xs.pop()`
+/ `append`), a nested def, or returned it for the caller to mutate (`ident(XS)[0] = 5.0`) was
+still considered read-only.  `_call_argument_containers` then resolved the stale module constant
+and refused `int(xs[0])` in programs that print `5` on CPython and on the base build.  The pass
+is now a conservative fixed point (`_read_only_functions`, `_parameter_dependencies`,
+`_parameter_escapes`): a nested def/lambda/class, a yield, any item or attribute store, a
+rebinding, a return or other escape of the parameter, or a call that hands the parameter to
+anything but a pure builtin (or to another module function, followed transitively) disqualifies
+it.  A call to a builtin counts as pure only when the name is bound nowhere in the program, as
+`_escaped_constant_names` already does, so a shadowed `len`/`print` is not trusted.  A chain of
+read-only wrappers is still followed, so the module-container and two-level wrapper refusals are
+kept; the mutated/returned cases now compile and match CPython.  A module container passed to a
+function whose parameter escapes stays dynamic and keeps the pre-existing run-time trap instead
+of a false refusal; `DIFFERENCES.md` says so.
+
+Probes in `/tmp/probes/pre370fix` on both builds: p05 (callee), p06 (pop/append), p07 (nested
+def), p18 (identity return), p19/p25/p26 (local alias), p23 (mutual chain) and p24 (return chain)
+now match CPython (`5`); p20 (direct literal), q06 (two-level read-only wrapper), q08 (module
+alias), q09 (read-only loop) and q11 (loop/if reads) are still refused by name; q07 and q10
+(in-range) match CPython.  Added 6 cases to `test_ail_pre370.py` (five escapes plus the read-only
+wrapper chain).  Final-state tests: test_ail_pre370, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-27 -- pre370: int() of a parameter's list item is refused by name (job-pre370-10280456)
+
+The pre358 review's remaining pre-existing item reproduced on both builds:
+`def show(xs): print(int(xs[0])); show([1e300])` compiled and then stopped with `integer
+overflow`, where CPython prints the big integer (`t04_arg_list_item.py`).  The int64 call check
+(`_wrapper_int_params` / `_Int64CallChecker` in `ail_chatgpt.py`) now records a constant
+subscript path with each parameter that flows into `int()`: `_parameter_item_source` follows
+`xs[i]`, a single local alias of the parameter or of one of its items, and a key that is a
+literal or a module constant, and composes paths through wrapper functions.  At every call site
+`_constant_path_value` takes the item out of a constant list, tuple or dict argument and the two
+existing named refusals fire (`int() of a float outside int64`, `int64 constant expression out
+of range` for text and bytes).  A module container passed directly to a function that never
+stores to or deletes a parameter item is still resolved at the call site
+(`_call_argument_containers`); a parameter whose items the callee stores to or deletes stays
+dynamic, as does an empty call argument.  In-range values, INT64 and float boundaries, a dynamic
+argument and a program that does not call `int()` match CPython.
+
+Added `AIL_CURRENT/test_ail_pre370.py` (2 tests, 28 programs, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json` (weight 55.0).  Probes in `/tmp/probes/pre370` on
+both builds: p01-p13, p18, p21, p24, p26 and p27 are refused by name; p14-p17, p19-p20, p22-p23
+and p25 match CPython (p22 is the callee-overwrites-the-item route, p23 dynamic, p25 no `int()`
+use, p26 local alias, p27 module-constant index).  Final-state tests: test_ail_pre370,
+test_ail_pre358, test_ail_pre359, test_ail_pre331, test_ail_pre340, test_ail_pre351,
+test_ail_pre311, test_ail_pre322, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- pre372 review fix: a call between the binding and `x **= e` clears the fold (job-pre372-10280521)
+
+The review found a new false compile-time refusal.  In `b = 10` / `def set_small(): global b`
+/ `b = 2` / `set_small()` / `b **= 40`, `_check_augmented_power_scope` still saw the
+straight-line `b -> 10` because `_scope_binding_names` does not treat a call as rebinding, so
+it refused the program with `10 ** 40` although CPython (and the base tree) print
+`1099511627776`.  Every recorded binding is now dropped when a statement can run a call
+(`_call_runs_at_runtime`, which enters decorators, defaults and annotations but not a function
+or lambda body); the base load of the augmented statement itself precedes its own
+right-hand-side call, so that statement's fold stays valid.  A function that declares
+`global b` but is never called still leaves `b **= 40` refused by name, so the new refusal is
+not disabled wholesale.
+
+Added the global-rebinding case to the matching program of `test_ail_pre372.py`.  Probes in
+`/tmp/probes` (18 programs, both builds via `cmp.sh`): p02, p03, p06-p11, p13, p15-p18 match
+CPython; p01, p04, p05, p12, p14 are refused by name on both builds.  Final-state tests:
+test_ail_pre372, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules,
+27 tests, 0 failed, 1 skipped).  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-27 -- pre372: an augmented power beyond int64 is refused by name (job-pre372-10280521)
+
+The first still-differing item from the pre33 review on this tree was `b = 10; b **= 40`: both
+builds compiled it and then stopped with `integer overflow` where CPython prints the big
+integer (`b ** e` is already folded and `-(2 ** 63)` already matches here).  The module
+constant-power pass only looked at `Assign`/`AnnAssign`/expression values, so the augmented
+statement was never folded.  `_check_int64_augmented_powers` in `AIL_CURRENT/ail_chatgpt.py`
+now scans direct module and function body statements: when the target has one earlier
+straight-line constant binding and the exponent is statically known, the exact power is
+compared with int64 and refused with `int64 constant expression out of range`.  The base or
+exponent may come through a name, an alias, a list item, a dict value, a class attribute or a
+passthrough call; a later rebinding is allowed, while a binding in an earlier branch, loop or
+import leaves the pre-existing run-time trap.  In-range powers, the safe bases 0/1/-1,
+zero/negative exponents, bool/float bases and values known only at run time still match
+CPython.
+
+Added `AIL_CURRENT/test_ail_pre372.py` (2 tests, 16 refused and 1 matching program, both
+builds), registered in `ail_check.MODULES` and `tools/ci_shards.json` (weight 31.6).  Probes
+in `/tmp/probes` (34 programs, both builds via `cmp.sh`): q01-q17 are refused by name;
+m01-m17 match CPython.  Final-state tests: test_ail_pre372, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3 (4 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes.
+## 2026-10-27 -- pre375 follow-up: rebind shadowing and the p6 construction (job-pre375-10280558)
+
+The pre375 review found two defects.  (1) A new under-refusal: walrus and `for` bindings were in
+the plain assignment table, so `_classes_of` treated them as a local binding and stopped before
+consulting a module-level alias.  `p9` (`X = C` at module scope, `(X := pick())` in a function,
+`X().f()`) and `p1` (`X = C` module alias, `for X in ys` over a list mutated after its literal)
+compiled and stopped with `AttributeError` where the base refused by name.  Walrus and `for`
+bindings now live only in the rebinding table and are resolved as *additional* possible values:
+when their value resolves to nothing, the enclosing scopes (including the module alias) are
+still consulted; a plain local assignment still shadows, exactly as before.  Both probes are
+refused by name on both builds again.
+
+(2) The task's p6 (`y = C; y().g()`, and equally `C().g()`) was not fixed by the previous
+commit.  The failure is construction, not alias dispatch: `self.f = self.g` reads a method as a
+value, which this subset cannot build, so `__init__` raises `AttributeError` on both builds where
+CPython returns 55.  The field/method collision screen now refuses the construction of a class
+whose colliding field may hold a bound method (`_may_be_bound`), naming the class and the field;
+a colliding field holding a plain lambda/function is representable and still matches CPython.
+This also covers construction through an alias, a list item, a dict value, an attribute, an
+argument or a call in another function (all refused by name; the last is conservative).
+
+Probes in `/tmp/probes/pre375fix` on both builds via `cmp.sh`: `c1_p6_alias_g`, `c2_p6_direct_g`,
+`c3_p6_in_function`, `c5_bound_arg_refused`, `w1_walrus_outer_alias`, `w2_for_mutated_alias`,
+`w7_walrus_argument`, `w9_walrus_dict_value` are refused by name; `c4_lambda_field_match`,
+`c6_unrelated_construct`, `s1_param_shadows_class`, `s2_local_shadows_class`,
+`w3_walrus_local_unrelated`, `w4_plain_local_shadow`, `w5_plain_unknown_shadow`,
+`w6_for_local_unrelated`, `w8_for_empty` match CPython.  The 20 reviewer probes were re-run:
+every one is refused by name or matches except the two known pre-existing differences `p2`
+(module-level `for` over a mutated list) and `p13` (comprehension target), both unchanged.
+Final-state tests: test_ail_pre375 (74 s), test_ail_pre278 (72 s), test_ail_pre361 (34 s),
+test_ail_safetynet (82 s), test_ail_files (43 s, 1 skip) and test_ail_corpus_findings3 (89 s),
+all OK.  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-27 -- pre375: walrus and `for`-target class receivers are refused by name (job-pre375-10280558)
+
+Reproduced the first still-differing pre-existing item from the pre361 review on this tree.  Its
+p6 shape (``y = C; y().f()``) is already refused by name after pre361; the p15/p16 walrus and
+``for`` target shapes still compiled on both builds and stopped with ``AttributeError: 'C'
+object has no attribute 'g'`` where CPython prints 55.  ``refuse_field_method_call`` now puts a
+walrus target and each value a ``for`` iterable is seen to hold into its assignment table: a
+list/tuple/set literal, a name bound to one, an instance field, a subscript of one and an
+argument list (including a method argument and a keyword argument), with the same scope rules as
+the existing assignment pass.  A ``for`` target that rebinds a parameter is resolved through a
+separate walrus/loop rebinding table, so a plain reassignment still does not refactor the
+parameter's call-site resolution.  A comprehension target is deliberately left alone (adding it
+to the enclosing scope would make an unrelated later name look like a possible class), and the
+existing unrelated-class, direct-call and no-feature routes are unchanged.
+
+Probes in ``/tmp/probes/pre375`` on both builds via ``cmp.sh``: ``p06_alias``, ``p06_gcall``,
+``p15_walrus``, ``p15_walrus_g``, ``p16_for``, ``p16_for_tuple``, ``b01``-``b05``,
+``b08``, ``b11``, ``b12``, ``b13``, ``b14``, ``c01``-``c05``, ``c10``, ``c11``, ``c13``,
+``c17`` and ``c19`` are refused by name (``also stores an instance field named f``); ``b06``
+(empty iterable), ``b07``/``c06``-``c08``/``c14``/``c18`` (unrelated class), ``b09``, ``b10``,
+``b15``, ``c09``, ``c12``, ``c15`` (plain parameter reassignment), ``c16`` (other function) and
+``c18`` match CPython.  Final-state tests: test_ail_pre375, test_ail_pre361, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (5 modules, 255 s, 0 failed).
+``tools/update_manifest.py`` was run and ``--check`` passes.
+## 2026-10-27 -- pre377 follow-up: long class names in item-error messages
+
+The pre377 review found that the class name still went into a fixed `char buf[64]`, so a
+40-character class truncated the message mid-word (`...' object is not subscr`) on both
+builds, while base had printed a complete `'instance'` message.  `ail__raise_item_tname` now
+formats the six item-error sites (getitem default and dict-view, setitem, delitem, getslice
+default and dict-view) into a buffer sized from the message and name; no fixed buffer remains
+on that path.  Probes also showed CPython itself formats the name with `%.200s`: a
+300-character class prints its first 200 characters, so the helper caps the name at 200 to
+match.  The dunderrt patch anchors were updated to the helper calls.  Added 40- and
+210-character cases to `test_ail_pre377.py` (both builds), and corrected the DIFFERENCES row:
+a builtin function object now says `builtin_function_or_method` (CPython's text) instead of
+`'function'`; other builtin values are unchanged.
+
+Probes in `/tmp/probes` (both builds via `cmp.sh`): `p01_boundaries` (class-name lengths 1,
+20-25, 32-35, 40, 300; getitem, negative index, slice, setitem, delitem) matches, including
+the 200-character cap; `p02_uncaught_long` (40) and `p03_uncaught_short` match uncaught stderr;
+`p04_routes_long` (argument, alias, list item, attribute, dict value, subclass, setitem and
+delitem through an argument) matches; `p05_dunder_long` (long-named class with the item
+methods still works); `p06_builtins` (int, None, bool, float, bytes, builtin function, lambda,
+str key, tuple key) matches; `p07_empty_ok` matches.  Final-state tests:
+`par_check.py -j 2 test_ail_pre377 test_ail_safetynet test_ail_files
+test_ail_corpus_findings3` -- 4 modules, 0 failed (371 s).  `tools/update_manifest.py` was run
+and `--check` passes.
+
+## 2026-10-27 -- pre377: instance item errors name the class (job-pre377-10280635)
+
+The pre354 review's first recorded item no longer reproduces on this tree: `p08_dict_slice`
+(`d = {1: 2}; d[1:2]`, caught and uncaught) matches CPython's `KeyError: slice(1, 2, None)`
+on both builds, because pre353 already fixed dict slice keys.  The next recorded item did
+reproduce: `class A: pass; A()[0]` (and `A()[1:2]`) printed
+`TypeError: 'instance' object is not subscriptable` on both builds, where CPython names
+`'A'`.  The v2 general runtime's `ail_op_getitem`, `ail_op_setitem`, `ail_op_delitem` and
+`ail_op_getslice` built these messages from `ail_type_name(c.tag)`, which has only the tag;
+they now use `ail__tname_c(c)`, the runtime's existing object-to-name helper, so an instance
+shows its class (and a subclass its own name) while builtin values are unchanged.  The
+matching `dunderrt.patch` anchors were updated so the operator-method patch still applies.
+The review's `p11_lambda_comp` refusal (`a slice object the general path could not build`)
+was not reached by a probe and that path is unchanged.
+
+Probes in `/tmp/probes/pre377` (both builds via `cmp.sh`): match CPython `p08_dict_slice`,
+`p08b_uncaught`, `p08_dict_slice_control`, `p09_instance_name`, `p09b_plain`,
+`p09_uncaught`, `p09_routes` (argument, alias, list item, attribute, dict value, subclass,
+slice object), `p09_setdel`, `p09_init_class`, `p09_builtins` (int, None, bool, float,
+bytes, function) and `p09_dunder` (an instance with the item methods still works);
+`p11_lambda_comp` also matches.  Added `AIL_CURRENT/test_ail_pre377.py` (7 programs + an
+uncaught case, both builds) and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`; added DIFFERENCES row `C?-job-pre377-10280635-1`.  Final-state
+tests: test_ail_pre377 (2 tests, 49 s), test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (25 tests, 503 s, 1 skipped).  `tools/update_manifest.py` was run
+and `--check` passes.
+
+## 2026-10-27 -- pre380: a lambda body follows a renamed comprehension target (job-pre380-10280705)
+
+The pre363 review left two pre-existing items. The gdev instruction counts were not re-measured:
+`perf_event_paranoid` is 4 here. The module-level `[(lambda: x)() for x in range(3)]` body-read
+case still differed on both builds: with `x = 99` in the enclosing scope, `compscope.rename`
+renamed the comprehension target (because the name clashes) but never looked inside the nested
+lambda body, so the lambda kept reading the outer `x` and printed `[99, 99, 99]` where CPython
+prints `[0, 1, 2]`. `_Scope` now resolves the free loads of a lambda nested in a comprehension
+(parameters, walrus targets and nested-comprehension targets excluded) against the enclosing
+comprehension stack. In a function the lambda then captures the renamed target and matches
+CPython; at module scope the existing closure pass refuses the construct by name (`not in the
+subset: closures nested too deeply to settle their shared names`) instead of printing the wrong
+list. Argument defaults keep their pre363 handling, and the class-body guard still refuses a
+class-body target read by name.
+
+Added `AIL_CURRENT/test_ail_pre380.py` (2 tests, 16 matching and 6 refused programs, both
+builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Probes in `/tmp/probes/pre380` on both builds via `cmp.sh`: `r01`-`r14` (argument, list item,
+attribute, dict value, set/dict comprehension, consumed generator, if condition, nested
+comprehension with the same name, two targets, empty/negative/string, outer value after the
+comprehension, shadowed inner target) match CPython; `q01`-`q08` module-scope routes are refused
+by name; controls `c01`-`c04` (default, outer read, target passed as an argument, class-body
+default) match CPython. Final-state tests: test_ail_pre380, test_ail_pre363, test_ail_quirks
+(comprehension cases), test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --check` still
+reports the four shard entries duplicated on the base tree.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The

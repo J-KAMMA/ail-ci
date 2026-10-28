@@ -869,6 +869,78 @@ def _bound_argument(node, name, index):
     return None
 
 
+def _constant_subscript_key(node, constants=None, blocked=()):
+    """The exact key of a constant subscript, or _UNKNOWN when it is not one."""
+    if isinstance(node, ast.Constant) and type(node.value) in (bool, int, str, bytes):
+        return node.value
+    if (isinstance(node, ast.Name) and constants is not None and node.id not in blocked
+            and type(constants.get(node.id)) in (bool, int, str, bytes)):
+        return constants[node.id]
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _constant_subscript_key(node.operand, constants, blocked)
+        if type(value) is int:
+            return -value if isinstance(node.op, ast.USub) else value
+    return _UNKNOWN
+
+
+def _constant_path_value(value, path):
+    """Follow a constant subscript path into a statically known value."""
+    for key in path:
+        if not isinstance(value, (list, tuple, dict, str, bytes)):
+            return _UNKNOWN
+        try:
+            value = value[key]
+        except (IndexError, KeyError, TypeError):
+            return _UNKNOWN
+    return value
+
+
+def _parameter_item_source(node, mapped, passthrough, local, attributes=None, constants=None,
+                           blocked=(), aliases=None):
+    """The parameter and constant subscript path a value reads, or None.
+
+    `int(xs[0])` reads one item of parameter `xs`, so a call site that passes a constant list
+    can be checked the same way as `int(xs)` does for the whole value.  A name bound once to a
+    parameter (or one of its items) is followed; the key may be a literal or a module constant."""
+    if isinstance(node, ast.Name):
+        if node.id in mapped:
+            return node.id, ()
+        if aliases and node.id in aliases:
+            return aliases[node.id]
+    source = _parameter_source(node, mapped, passthrough, local, attributes)
+    if source is not None:
+        return source, ()
+    if isinstance(node, ast.Subscript) and isinstance(node.ctx, ast.Load):
+        key = _constant_subscript_key(node.slice, constants, blocked)
+        if key is _UNKNOWN:
+            return None
+        base = _parameter_item_source(node.value, mapped, passthrough, local, attributes,
+                                      constants, blocked, aliases)
+        if base is not None:
+            return base[0], base[1] + (key,)
+    return None
+
+
+def _parameter_aliases(fn, mapped, passthrough, local, attributes, constants):
+    """Names this scope binds once to a parameter (or an item of one) without touching items."""
+    counts = local
+    mutated = _mutated_parameters(fn)
+    blocked = set(mapped) | set(counts)
+    aliases = {}
+    for statement in fn.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if (not isinstance(target, ast.Name) or target.id in mapped
+                or counts.get(target.id) != 1 or target.id in mutated):
+            continue
+        source = _parameter_item_source(statement.value, mapped, passthrough, local,
+                                        attributes, constants, blocked, aliases)
+        if source is not None:
+            aliases[target.id] = source
+    return aliases
+
+
 def _passthrough_functions(tree, module_counts):
     functions = {}
     for fn in tree.body:
@@ -926,7 +998,19 @@ def _parameter_source(node, mapped, passthrough, local, attributes=None):
     return None
 
 
-def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes):
+def _mutated_parameters(fn):
+    """Parameters whose items this scope stores to or deletes (the call-site value it sees is
+    no longer the one the call passed)."""
+    names = set()
+    for sub in _shallow_walk(fn.body):
+        if (isinstance(sub, ast.Subscript) and isinstance(sub.ctx, (ast.Store, ast.Del))
+                and isinstance(sub.value, ast.Name)):
+            names.add(sub.value.id)
+    return names
+
+
+def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes,
+                        constants=None):
     candidates = {}
     for fn in tree.body:
         if (not isinstance(fn, ast.FunctionDef) or fn.decorator_list
@@ -939,42 +1023,60 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
         if not mapped:
             continue
         rebound = {name for name in mapped if _binding_counts(fn.body).get(name, 0)}
-        candidates[fn.name] = (fn, mapped, rebound)
+        candidates[fn.name] = (fn, mapped, rebound | _mutated_parameters(fn))
+
+    def add(used, source, index, path):
+        previous = used.get(source)
+        paths = set() if previous is None else set(previous[1])
+        paths.add(path)
+        used[source] = (index, paths)
 
     functions = {}
     for name, (fn, mapped, rebound) in candidates.items():
         used = {}
         local = _binding_counts(fn.body)
+        blocked = set(mapped) | set(local)
+        aliases = _parameter_aliases(fn, mapped, passthrough, local, attributes, constants)
         for sub in _shallow_walk(fn.body):
             if (not int_shadowed and isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
                     and sub.func.id == 'int' and len(sub.args) == 1 and not sub.keywords):
-                source = _parameter_source(sub.args[0], mapped, passthrough, local, attributes)
-                if source is not None and source not in rebound:
-                    used[source] = mapped[source]
+                source = _parameter_item_source(sub.args[0], mapped, passthrough, local,
+                                                attributes, constants, blocked, aliases)
+                if source is not None and source[0] not in rebound:
+                    add(used, source[0], mapped[source[0]], source[1])
         if used:
-            functions[name] = used
+            functions[name] = {parameter: (index, frozenset(paths))
+                               for parameter, (index, paths) in used.items()}
 
     changed = True
     while changed:
         changed = False
         for name, (fn, mapped, rebound) in candidates.items():
-            used = dict(functions.get(name, {}))
+            used = {}
+            for parameter, (index, paths) in functions.get(name, {}).items():
+                used[parameter] = (index, set(paths))
             local = _binding_counts(fn.body)
+            blocked = set(mapped) | set(local)
+            aliases = _parameter_aliases(fn, mapped, passthrough, local, attributes, constants)
             for sub in _shallow_walk(fn.body):
                 if not isinstance(sub, ast.Call) or not isinstance(sub.func, ast.Name):
                     continue
                 callee = sub.func.id
                 if callee in mapped or callee in local or callee not in functions:
                     continue
-                for parameter, index in functions[callee].items():
+                for parameter, (index, paths) in functions[callee].items():
                     argument = _bound_argument(sub, parameter, index)
                     if argument is None:
                         continue
-                    source = _parameter_source(argument, mapped, passthrough, local, attributes)
-                    if source is not None and source not in rebound:
-                        used[source] = mapped[source]
-            if used != functions.get(name, {}):
-                functions[name] = used
+                    source = _parameter_item_source(argument, mapped, passthrough, local,
+                                                    attributes, constants, blocked, aliases)
+                    if source is not None and source[0] not in rebound:
+                        for path in paths:
+                            add(used, source[0], mapped[source[0]], source[1] + path)
+            normalized = {parameter: (index, frozenset(paths))
+                          for parameter, (index, paths) in used.items()}
+            if normalized != functions.get(name, {}):
+                functions[name] = normalized
                 changed = True
     return functions
 
@@ -1109,13 +1211,15 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
 
 
 class _Int64CallChecker(ast.NodeVisitor):
-    def __init__(self, known, passthrough, int_params, int_shadowed, attributes, program_bound):
+    def __init__(self, known, passthrough, int_params, int_shadowed, attributes, program_bound,
+                 argument_containers=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
         self.int_shadowed = int_shadowed
         self.attributes = attributes
         self.program_bound = program_bound
+        self.argument_containers = argument_containers or {}
         self.shadow = []
         self.value_scopes = [known]
 
@@ -1135,27 +1239,35 @@ class _Int64CallChecker(ast.NodeVisitor):
         error.source_column = node.col_offset
         raise error
 
+    def _refuse_int64(self, node, converted):
+        error = ValueError(
+            f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def _check_conversion(self, node, value):
+        if _outside_int64_float(value):
+            self._refuse(node, value)
+        converted = _int_conversion_outside_int64(value)
+        if converted is not None:
+            self._refuse_int64(node, converted)
+
     def visit_Call(self, node):
         if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
                 and self._global_name('int') and len(node.args) == 1 and not node.keywords):
-            value = self._value(node.args[0])
-            if _outside_int64_float(value):
-                self._refuse(node, value)
-            converted = _int_conversion_outside_int64(value)
-            if converted is not None:
-                error = ValueError(
-                    f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
-                error.source_line = node.lineno
-                error.source_column = node.col_offset
-                raise error
+            self._check_conversion(node, self._value(node.args[0]))
         if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
                 and self._global_name(node.func.id)):
-            for name, index in self.int_params[node.func.id].items():
+            for name, (index, paths) in self.int_params[node.func.id].items():
                 argument = _bound_argument(node, name, index)
                 if argument is not None:
                     value = self._value(argument)
-                    if _outside_int64_float(value):
-                        self._refuse(node, value)
+                    if (value is _UNKNOWN and isinstance(argument, ast.Name)
+                            and self._global_name(argument.id)):
+                        value = self.argument_containers.get(argument.id, _UNKNOWN)
+                    for path in paths:
+                        self._check_conversion(node, _constant_path_value(value, path))
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
@@ -1265,11 +1377,12 @@ def _foldable_container(value):
     return False
 
 
-def _safe_module_containers(tree, module_counts, global_names, parents):
+def _safe_module_containers(tree, module_counts, global_names, parents, call_arguments=()):
     """Module names bound once to a literal container, or aliased from one, where every use is a
     subscript read or a module-level alias.  A mutation through the name or an alias, a call that
     could mutate the object, or any other use drops the whole alias group, so a value folded by
-    this pass is the one the program actually reads."""
+    this pass is the one the program actually reads.  `call_arguments` names the functions that
+    only read their arguments; passing the container to one of them is a read too."""
     module_assigns = {id(statement) for statement in tree.body
                       if isinstance(statement, ast.Assign)}
     declarations = set()
@@ -1324,12 +1437,152 @@ def _safe_module_containers(tree, module_counts, global_names, parents):
                 and id(parent) in module_assigns and len(parent.targets) == 1
                 and isinstance(parent.targets[0], ast.Name)):
             continue
+        owner = parents.get(parent) if isinstance(parent, ast.keyword) else parent
+        if (call_arguments and isinstance(owner, ast.Call)
+                and isinstance(owner.func, ast.Name) and owner.func.id in call_arguments
+                and (any(argument is node for argument in owner.args)
+                     or any(keyword is parent for keyword in owner.keywords))):
+            continue
         unsafe.add(node.id)
     safe = set()
     for members in groups.values():
         if not members & unsafe:
             safe |= members
     return safe
+
+
+_READ_ONLY_CALLS = frozenset({
+    'abs', 'all', 'any', 'bool', 'float', 'format', 'hash', 'int', 'len', 'list', 'max',
+    'min', 'print', 'repr', 'round', 'sorted', 'str', 'sum', 'tuple',
+})
+
+
+def _parameter_names(fn):
+    names = {argument.arg for argument in
+             (*fn.args.posonlyargs, *fn.args.args, *fn.args.kwonlyargs)}
+    if fn.args.vararg is not None:
+        names.add(fn.args.vararg.arg)
+    if fn.args.kwarg is not None:
+        names.add(fn.args.kwarg.arg)
+    return names
+
+
+def _callee_escapes(call, pure, local, dependencies):
+    func = call.func
+    if (isinstance(func, ast.Name) and isinstance(func.ctx, ast.Load)
+            and func.id not in local):
+        if func.id in pure:
+            return False
+        dependencies.add(func.id)
+        return False
+    return True
+
+
+def _parameter_escapes(node, parents, pure, local, dependencies):
+    """Whether a load of a parameter name lets the container escape a read.
+
+    A subscript read, iteration, a truth test or an argument to a pure builtin keeps the
+    original object reachable only for reading; anything else (assignment to another name,
+    a method call, a return, a non-pure call) lets the callee mutate it later."""
+    parent = parents.get(node)
+    if isinstance(parent, ast.Subscript) and parent.value is node:
+        return not isinstance(parent.ctx, ast.Load)
+    if isinstance(parent, (ast.For, ast.AsyncFor)) and parent.iter is node:
+        return False
+    if isinstance(parent, ast.comprehension) and parent.iter is node:
+        return False
+    if isinstance(parent, (ast.If, ast.While, ast.Assert, ast.BoolOp, ast.Compare,
+                          ast.UnaryOp)):
+        return False
+    if isinstance(parent, ast.Starred):
+        call = parents.get(parent)
+        if isinstance(call, ast.Call) and any(argument is parent for argument in call.args):
+            return _callee_escapes(call, pure, local, dependencies)
+        return True
+    if isinstance(parent, ast.keyword):
+        call = parents.get(parent)
+        if isinstance(call, ast.Call):
+            return _callee_escapes(call, pure, local, dependencies)
+        return True
+    if isinstance(parent, ast.Call) and any(argument is node for argument in parent.args):
+        return _callee_escapes(parent, pure, local, dependencies)
+    return True
+
+
+def _parameter_dependencies(fn, parents, pure):
+    """Callees that receive a parameter directly, or None when the parameter can escape.
+
+    Only a direct `f(param)`, `f(*param)` or `f(x=param)` makes another function able to
+    change the container; passing an item or a slice hands over a value the callee cannot
+    use to alter the parameter itself."""
+    parameters = _parameter_names(fn)
+    local = set(_binding_counts(fn.body)) | parameters
+    dependencies = set()
+    for sub in ast.walk(fn):
+        if (sub is not fn
+                and isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                     ast.Lambda, ast.Yield, ast.YieldFrom))):
+            return None
+    for sub in _shallow_walk(fn.body):
+        if isinstance(sub, ast.Name) and sub.id in parameters:
+            if isinstance(sub.ctx, (ast.Store, ast.Del)):
+                return None
+            if _parameter_escapes(sub, parents, pure, local, dependencies):
+                return None
+        elif isinstance(sub, ast.Subscript) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+            return None
+        elif isinstance(sub, ast.Attribute) and isinstance(sub.ctx, (ast.Store, ast.Del)):
+            base = sub.value
+            if isinstance(base, ast.Name) and base.id in parameters:
+                return None
+    return dependencies
+
+
+def _read_only_functions(tree, module_counts, parents):
+    """Module functions that only read a container passed to one of their parameters.
+
+    A nested def/lambda/class, a yield, an item or attribute store, a rebinding, a return of
+    the parameter or a call that hands the parameter to something unknown all disqualify the
+    function.  Calls to other module functions are followed to a fixed point, so a chain of
+    wrappers stays read-only while a callee that mutates removes every caller as well."""
+    rebound = _all_bound_names(tree)
+    pure = _READ_ONLY_CALLS - rebound
+    dependencies = {}
+    for fn in tree.body:
+        if (isinstance(fn, ast.FunctionDef) and not fn.decorator_list
+                and module_counts.get(fn.name) == 1):
+            calls = _parameter_dependencies(fn, parents, pure)
+            if calls is not None:
+                dependencies[fn.name] = calls
+    safe = set(dependencies)
+    while True:
+        removed = {name for name in safe
+                   if any(callee not in safe for callee in dependencies[name])}
+        if not removed:
+            return safe
+        safe -= removed
+
+
+def _call_argument_containers(tree, module_counts, global_names, parents, known):
+    """Constant containers a name passed to a read-only function still denotes.
+
+    The value is the one bound at module level; a subscript store or delete through the name or
+    an alias, a rebinding, or use by anything but a read disqualifies it."""
+    safe = _safe_module_containers(tree, module_counts, global_names, parents,
+                                   _read_only_functions(tree, module_counts, parents))
+    values = {}
+    for statement in tree.body:
+        if not isinstance(statement, ast.Assign) or len(statement.targets) != 1:
+            continue
+        target = statement.targets[0]
+        if not isinstance(target, ast.Name) or target.id not in safe:
+            continue
+        value = _constant_value(statement.value,
+                                lambda name: values.get(name, known.get(name, _UNKNOWN)),
+                                lambda unused: True, {})
+        if _flat_constant_container(value):
+            values[target.id] = value
+    return values
 
 
 def _fold_float_int_text(text):
@@ -1426,9 +1679,12 @@ def _check_int64_literals(tree):
                        or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
-    int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes)
+    int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes,
+                                     known)
+    argument_containers = _call_argument_containers(tree, module_counts, global_names, parents,
+                                                   known)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
-                      program_bound).visit(tree)
+                      program_bound, argument_containers).visit(tree)
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
     while nodes:
@@ -2129,6 +2385,169 @@ def _check_int64_pow_constants(tree, known):
                                    _function_scope_stores(function), parameters)
         for node in _walk_own_scope(function):
             check(node, local, scope_names, values)
+
+
+def _static_aug_pow_int(node, known, values, attributes, passthrough, global_name):
+    """The int a base or exponent expression denotes for the augmented-power check, or None.
+
+    ``known`` holds the int-only constants the arithmetic folders may use; ``values`` also
+    holds safe flat containers and class values, so the shared resolver can reach an int
+    through a list item, a dict value, a class attribute and a passthrough call."""
+    value = _constant_int(node, known, shifts=True)
+    if type(value) is int:
+        return value
+    try:
+        value = _const_expr_int(node, bounded=False)
+    except _Int64ConstantOverflow:
+        return None
+    if type(value) is int:
+        return value
+    value = _constant_value(node, lambda name: values.get(name, _UNKNOWN), global_name,
+                            passthrough, attributes)
+    return value if type(value) is int else None
+
+
+def _scope_binding_names(statement):
+    """Names a statement (or its nested blocks) binds in this scope, without entering nested
+    functions, classes or lambdas."""
+    stack = [statement]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            yield node.name
+            continue
+        if isinstance(node, ast.Lambda):
+            continue
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            yield node.id
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                yield (alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            yield node.name
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _call_runs_at_runtime(node):
+    """Whether executing ``node`` may call something.
+
+    A function or lambda body only runs when the value is called, so neither is entered;
+    decorators, defaults and annotations of a definition are evaluated at that point."""
+    stack = [node]
+    while stack:
+        current = stack.pop()
+        if isinstance(current, ast.Call):
+            return True
+        if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            stack.extend(current.decorator_list)
+            stack.extend(current.args.defaults)
+            stack.extend(default for default in current.args.kw_defaults if default is not None)
+            annotations = [argument.annotation for argument in
+                           current.args.posonlyargs + current.args.args + current.args.kwonlyargs]
+            annotations.append(current.args.vararg.annotation if current.args.vararg else None)
+            annotations.append(current.args.kwarg.annotation if current.args.kwarg else None)
+            annotations.append(current.returns)
+            stack.extend(annotation for annotation in annotations if annotation is not None)
+            continue
+        if isinstance(current, ast.Lambda):
+            stack.extend(current.args.defaults)
+            stack.extend(default for default in current.args.kw_defaults if default is not None)
+            continue
+        stack.extend(ast.iter_child_nodes(current))
+    return False
+
+
+def _check_augmented_power_scope(body, known, values, parameters, declared, attributes,
+                                 passthrough, global_name):
+    """Refuse `x **= e` in one scope body when the exact power leaves int64.
+
+    Only a direct body statement is considered: the target must have no binding at all before
+    the one straight-line constant assignment, so the base the statement sees is that value.
+    A target bound in a branch, a loop, an import or a nested definition, a parameter, or a
+    global/nonlocal declaration is left to the ordinary run-time stop.  A statement that can
+    run a call drops every recorded binding, since the callee may rebind a global or nonlocal
+    name between that assignment and the augmented statement."""
+    assigned = {}
+    for statement in body:
+        if (isinstance(statement, ast.AugAssign) and isinstance(statement.op, ast.Pow)
+                and isinstance(statement.target, ast.Name)):
+            name = statement.target.id
+            value = None
+            if (name not in parameters and name not in declared
+                    and isinstance(assigned.get(name), ast.AST)):
+                base = _static_aug_pow_int(assigned[name], known, values, attributes,
+                                           passthrough, global_name)
+                exponent = _static_aug_pow_int(statement.value, known, values, attributes,
+                                               passthrough, global_name)
+                if base is not None and exponent is not None:
+                    value = _exact_pow_or_too_big(base, exponent)
+            # An augmented target never keeps the earlier value for a later statement.
+            assigned[name] = _UNKNOWN
+            for other in _scope_binding_names(statement.value):
+                assigned[other] = _UNKNOWN
+            if _call_runs_at_runtime(statement):
+                # The base load precedes the call, so the fold above already used the right
+                # value; names for later statements are no longer known.
+                assigned.clear()
+            if value is None or (value is not _CONST_INT_TOO_BIG
+                                 and _INT64_MIN <= value <= _INT64_MAX):
+                continue
+            shown = 'too large' if value is _CONST_INT_TOO_BIG else _constant_diagnostic(value)
+            error = ValueError(f'int64 constant expression out of range: {shown}')
+            error.source_line = statement.lineno
+            error.source_column = statement.col_offset
+            raise error
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            # A direct statement runs unconditionally, so it replaces whatever an earlier
+            # binding left in the map.  A call in the value runs after the right-hand side
+            # is read but may still rebind other names for later statements.
+            if _call_runs_at_runtime(statement.value):
+                assigned.clear()
+            for name in _scope_binding_names(statement.value):
+                assigned[name] = _UNKNOWN
+            assigned[statement.targets[0].id] = statement.value
+        else:
+            if _call_runs_at_runtime(statement):
+                assigned.clear()
+            else:
+                for name in _scope_binding_names(statement):
+                    assigned[name] = _UNKNOWN
+
+
+def _check_int64_augmented_powers(tree, module_known):
+    """Refuse `b = 10; b **= 40` by name, on both build paths, before an emitter sees it.
+
+    The module-level power pass folds `b ** e`, but the augmented spelling is a separate
+    statement, so it compiled and then stopped with `integer overflow` where CPython prints
+    the unbounded integer.  The same direct-statement shape is checked in function bodies;
+    a computed base or exponent keeps the pre-existing run-time stop."""
+    attributes = _known_class_attributes(tree, module_known)
+    module_counts = _binding_counts(tree.body)
+    passthrough = _passthrough_functions(tree, module_counts)
+    program_bound = _all_bound_names(tree)
+    global_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            global_names.update(node.names)
+    module_values = _scope_constant_map(tree.body, tree, {}, module_counts,
+                                        set(module_counts), set(), global_names, program_bound)
+    _check_augmented_power_scope(tree.body, module_known, module_values, set(), set(),
+                                 attributes, passthrough, lambda unused: True)
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        parameters = _scope_parameters(function)
+        declared = _scope_declared(function)
+        local = _function_local_int_constants(function, module_known)
+        local_values = _scope_constant_map(function.body, function, module_values,
+                                           _binding_counts(function.body),
+                                           _function_bindings(function), parameters, declared,
+                                           program_bound)
+        local_names = set(_function_scope_stores(function)) | parameters | declared
+        _check_augmented_power_scope(function.body, local, local_values, parameters, declared,
+                                     attributes, passthrough,
+                                     lambda name, local_names=local_names: name not in local_names)
 
 
 def _check_int64_unary_constants(tree):
@@ -3054,7 +3473,9 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_unary_constants(tree)
                 _check_int64_local_cancellations(tree)
                 _check_int64_int_base_constants(tree)
-                _check_int64_pow_constants(tree, _known_module_constants(tree))
+                module_known = _known_module_constants(tree)
+                _check_int64_pow_constants(tree, module_known)
+                _check_int64_augmented_powers(tree, module_known)
                 _check_class_attribute_assignment(tree)
                 _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:
