@@ -279,6 +279,30 @@ Added `AIL_CURRENT/test_ail_pre432.py` (3 tests, both builds) and registered it 
 `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests: test_ail_pre432,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 233 s, 0 failed).
 `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-28 -- pre435: a default argument captured before a container mutation (job-pre435-10282045)
+
+The pre393 review recorded as pre-existing that a default parameter expression reading a
+module container was checked against the container's final value, after a later mutation had
+dropped it: `M = [1e300]; def f(x=M[0]): return int(x); M[0] = 1; print(f())` stopped with
+`integer overflow` on both builds where CPython prints the exact big integer, and the same
+held for `D["k"]`.  A default is evaluated once when the definition runs, so the int64 check
+now evaluates each top-level definition's parameter defaults with the names visible at that
+`def`, and the call-site int() wrapper check uses the default when a call omits the argument.
+A conversion written directly in a default is checked at the definition as well.  The value is
+refused by name on both builds (`int() of a float outside int64: ... (CPython makes a big
+integer)`, or `int64 constant expression out of range` for text/bytes) through a list, tuple,
+dict, alias, negative index, keyword-only parameter, container default, attribute, module
+constant and wrapper call, for floats at and beyond both int64 boundaries and for strings and
+bytes.  In-range defaults (including the minimum boundary and an empty container), a mutation
+before the definition, an explicit argument overriding the default, a dynamic default and an
+unused function match CPython.
+
+Probes in `/tmp/probes/pre435` (41 programs, both builds via `cmp.sh`): 23 out-of-range
+programs are refused by name, 16 in-range programs match CPython, and 2 already-named refusals
+(a first-class function with defaults and a class-attribute assignment) remain refused by name.
+`test_ail_pre435.py` pins the refusals and matches; `test_ail_pre417`, `test_ail_pre370`,
+`test_ail_pre358`, `test_ail_pre359` and `test_ail_pre340` also pass.  `tools/update_manifest.py`
+was run and `--check` passes; `tools/ci_shards.py --update` registered the new module.
 
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
