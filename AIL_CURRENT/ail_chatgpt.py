@@ -962,6 +962,88 @@ def _parameter_source(node, mapped, passthrough, local, attributes=None):
     return None
 
 
+def _parameter_aliases(fn):
+    """Local names that may refer to another name, including simple alias chains."""
+    aliases = {}
+    for sub in _shallow_walk(fn.body):
+        target = value = None
+        if (isinstance(sub, ast.Assign) and len(sub.targets) == 1
+                and isinstance(sub.targets[0], ast.Name) and isinstance(sub.value, ast.Name)):
+            target, value = sub.targets[0].id, sub.value.id
+        elif (isinstance(sub, ast.AnnAssign) and isinstance(sub.target, ast.Name)
+                and isinstance(sub.value, ast.Name)):
+            target, value = sub.target.id, sub.value.id
+        if target is not None:
+            aliases.setdefault(target, set()).add(value)
+    return aliases
+
+
+def _aliased_parameters(name, mapped, aliases):
+    found = set()
+    seen = set()
+    stack = [name]
+    while stack:
+        current = stack.pop()
+        if current in seen:
+            continue
+        seen.add(current)
+        if current in mapped:
+            found.add(current)
+        stack.extend(aliases.get(current, ()))
+    return found
+
+
+def _mutated_parameters(candidates):
+    """Wrapper parameters a function mutates, directly or through a helper.
+
+    A parameter whose bytearray is rewritten before ``int()`` cannot take its value from the
+    call-site argument.  Item and attribute stores, method calls, and passing the parameter to a
+    function that mutates its own parameter all count.  Unknown calls are treated as mutating so
+    the analysis never refuses a program CPython runs.
+    """
+    aliases = {name: _parameter_aliases(fn) for name, (fn, mapped, rebound) in candidates.items()}
+    mutated = {name: set() for name in candidates}
+    changed = True
+    while changed:
+        changed = False
+        for name, (fn, mapped, rebound) in candidates.items():
+            local = _binding_counts(fn.body)
+            found = set(mutated[name])
+            for sub in _shallow_walk(fn.body):
+                if (isinstance(sub, (ast.Subscript, ast.Attribute))
+                        and isinstance(sub.ctx, (ast.Store, ast.Del))):
+                    base = sub.value
+                    while isinstance(base, ast.Subscript):
+                        base = base.value
+                    if isinstance(base, ast.Name):
+                        found |= _aliased_parameters(base.id, mapped, aliases[name])
+                elif isinstance(sub, ast.Call):
+                    if isinstance(sub.func, ast.Attribute):
+                        base = sub.func.value
+                        while isinstance(base, ast.Subscript):
+                            base = base.value
+                        if isinstance(base, ast.Name):
+                            found |= _aliased_parameters(base.id, mapped, aliases[name])
+                    if not isinstance(sub.func, ast.Name):
+                        continue
+                    callee = sub.func.id
+                    if callee in candidates and callee not in local:
+                        callee_mapped = candidates[callee][1]
+                        for parameter in mutated[callee]:
+                            argument = _bound_argument(sub, parameter,
+                                                       callee_mapped.get(parameter))
+                            if isinstance(argument, ast.Name):
+                                found |= _aliased_parameters(argument.id, mapped, aliases[name])
+                    elif callee != 'int':
+                        for argument in (*sub.args, *(kw.value for kw in sub.keywords)):
+                            if isinstance(argument, ast.Name):
+                                found |= _aliased_parameters(argument.id, mapped, aliases[name])
+            if found != mutated[name]:
+                mutated[name] = found
+                changed = True
+    return mutated
+
+
 def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes):
     candidates = {}
     for fn in tree.body:
@@ -977,6 +1059,7 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
         rebound = {name for name in mapped if _binding_counts(fn.body).get(name, 0)}
         candidates[fn.name] = (fn, mapped, rebound)
 
+    mutated = _mutated_parameters(candidates)
     functions = {}
     for name, (fn, mapped, rebound) in candidates.items():
         used = {}
@@ -987,6 +1070,8 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
                 source = _parameter_source(sub.args[0], mapped, passthrough, local, attributes)
                 if source is not None and source not in rebound:
                     used[source] = mapped[source]
+        for parameter in mutated[name]:
+            used.pop(parameter, None)
         if used:
             functions[name] = used
 
@@ -1009,6 +1094,8 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
                     source = _parameter_source(argument, mapped, passthrough, local, attributes)
                     if source is not None and source not in rebound:
                         used[source] = mapped[source]
+            for parameter in mutated[name]:
+                used.pop(parameter, None)
             if used != functions.get(name, {}):
                 functions[name] = used
                 changed = True

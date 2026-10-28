@@ -82,6 +82,16 @@ print(take(bytearray(b"%s")))
 
 print(take(value=bytearray(b"%s")))
 ''' % BIG,
+    'wrapped_readonly_helper': '''def ident(value):
+    return value
+
+
+def take(value):
+    return int(ident(value))
+
+
+print(take(bytearray(b"%s")))
+''' % BIG,
     'negative': 'print(int(bytearray(b"-%s")))\n' % BIG,
     'whitespace_underscores': 'print(int(bytearray(b"  +9_999_999_999_999_999_999  ")))\n',
     'max_plus_one': 'print(int(bytearray(b"9223372036854775808")))\n',
@@ -207,6 +217,91 @@ main()
 
 
 main()
+''',
+    'mutated_wrapper_subscript': '''def take(value):
+    value[:] = b"1"
+    return int(value)
+
+
+print(take(bytearray(b"9999999999999999999")))
+''',
+    'mutated_wrapper_method': '''def take(value):
+    value.clear()
+    value.extend(b"2")
+    return int(value)
+
+
+print(take(bytearray(b"9999999999999999999")))
+''',
+    'mutated_wrapper_helper': '''def reset(value):
+    value[:] = b"3"
+
+
+def take(value):
+    reset(value)
+    return int(value)
+
+
+print(take(bytearray(b"9999999999999999999")))
+''',
+    'mutated_wrapper_nested_helper': '''def reset(value):
+    value[:] = b"8"
+
+
+def middle(value):
+    reset(value)
+
+
+def take(value):
+    middle(value)
+    return int(value)
+
+
+print(take(bytearray(b"9999999999999999999")))
+''',
+    'mutated_wrapper_alias': '''def take(value):
+    alias = value
+    alias[:] = b"5"
+    return int(value)
+
+
+print(take(bytearray(b"9999999999999999999")))
+''',
+    'mutated_wrapper_negative_and_boundary': '''def take(value):
+    value[:] = b"-7"
+    return int(value)
+
+
+def edge(value):
+    value[:] = b"9223372036854775807"
+    return int(value)
+
+
+print(take(bytearray(b"9999999999999999999")))
+print(edge(bytearray(b"9999999999999999999")))
+''',
+    'mutated_wrapper_empty_and_invalid': '''def take(value):
+    value.clear()
+    try:
+        print(int(value))
+    except ValueError as error:
+        print(type(error).__name__, error)
+
+
+take(bytearray(b"9999999999999999999"))
+''',
+    'mutated_wrapper_container_items': '''def take_dict(value):
+    value["k"][:] = b"7"
+    return int(value["k"])
+
+
+def take_list(value):
+    value[0][:] = b"4"
+    return int(value[0])
+
+
+print(take_dict({"k": bytearray(b"9999999999999999999")}))
+print(take_list([bytearray(b"9999999999999999999")]))
 ''',
 }
 

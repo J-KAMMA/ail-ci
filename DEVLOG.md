@@ -1,3 +1,21 @@
+## 2026-10-28 -- pre405 review: mutated wrapper parameters are not folded (job-pre405-10281121)
+
+The pre405 review found a new false refusal: the wrapper call-site text check reused the
+caller's argument value for a parameter even when the wrapper rewrote the bytearray first.
+`def take(value): value[:] = b"1"; return int(value); take(bytearray(b"999..."))` was refused
+as `int64 constant expression out of range`, although CPython prints `1`.  Wrapper candidates
+now screen parameters the function mutates: an item or attribute store, a method call on the
+parameter, an alias of it, or passing it to a helper whose own parameter is mutated all remove
+that parameter from the fold.  The analysis is conservative for unknown calls, so it can only
+miss a refusal, never invent one.  Read-only wrappers (including a read-only passthrough
+helper) still fold and refuse the out-of-int64 text by name.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: 13 wrapper programs; the read-only wrapper
+and the read-only helper are refused by name (`int64 constant expression out of range`), while
+subscript, method (`clear`/`extend`), direct helper, nested helper, alias, negative, int64
+boundary, empty/invalid, list-item and dict-value mutations match CPython.  Tests:
+`test_ail_pre405` and `test_ail_safetynet` were run on the final commit, with `test_ail_files`
+and `test_ail_corpus_findings3`.  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-28 -- pre405: bytearray text outside int64 is refused by name (job-pre405-10281121)
 
 The pre392 review's first still-differing item was `int(bytearray(b"9999999999999999999"))` and
