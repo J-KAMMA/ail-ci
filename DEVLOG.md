@@ -64,6 +64,48 @@ alias, attribute, dict value, list item; int and slice), `p_boundaries` (class-n
 a builtin function object) all match CPython.  Final-state tests: test_ail_pre378,
 test_ail_pre377, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (30 tests,
 0 failed, 1 skipped for no zig).  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-28 -- pre421 review: keep no-class C byte-identical (job-pre421-10281638)
+
+The pre421 review found that the class-name index text was spliced into the v2 runtime
+unconditionally, so a no-class general-path program's `--debug-dir` C changed in the
+list/tuple getitem, setitem and delitem prelude.  The base runtime text is restored, and
+`pyboxed2` applies the three edits to the preamble only when the source itself contains a
+`class` statement (`source_has_class`, taken before the safety preludes inject their own
+classes).  No-class programs, including ones whose preludes add classes for slices, now
+emit C byte-identical to base; class-bearing programs keep the class-name messages.
+`test_ail_pre421` gains a C-text test that checks both sides, and its builtin-key program
+declares a class so it exercises the class-name text.  Probes in `/tmp/probes/pre421_fix`
+on both builds via `cmp.sh`: `p_class_routes` (instance, subclass, alias, argument, list
+item, attribute, dict value, exception instance, builtin function, list and tuple),
+`p_class_setdel`, `p_class_builtins` and `p_long` (200/210 characters) match CPython;
+`p_noclass` and `p_noclass_slice` stdout/exit match, and their `--debug-dir` C is
+byte-identical to `/tmp/base` (as is `p_nofeature_wrap`); `p_class_nofeature` differs
+from base only in the three index-error prelude hunks.  The `p_builtins` no-class
+bytes/bytearray/function names remain the base text, as the C-identity rule requires.
+
+## 2026-10-28 -- pre421: list/tuple index errors name the key's class (job-pre421-10281638)
+
+The pre411 review listed as pre-existing that `Box(Bad())` as a list or tuple index said
+`not instance` where CPython says `not Box`.  The v2 general runtime's list/tuple getitem
+built the message from the value tag (`ail_type_name`); it now uses the existing
+object-to-name helper (`ail__tname_c`) and caps the class name at 200 characters, as
+CPython's type-error text does.  A list item store and deletion with the same key now also
+name the class; they previously omitted the `not ...` part.  The other three recorded
+items (enum member `.value`, slice bounds and bytes/bytearray subscription through
+`__index__`) are separate causes and were left unchanged.
+
+Added `AIL_CURRENT/test_ail_pre421.py` (1 test, 4 programs, both builds) and registered it
+in `ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre421` on both
+builds via `cmp.sh`: `p2_a` (list/tuple through a constructor argument), `p2_c` (through a
+function value), `p2_routes` (subclass, alias, argument, list item, attribute, dict value,
+direct read), `p2_alias` (alias/attribute/list/dict routes and tuple), `p2_long2`
+(210-character class name, capped at 200), `p2_builtins` (float/str/None/list/dict/tuple/
+bytes/function keys and an empty list) and `p2_setdel` (list store and deletion) all match
+CPython.  `p2_b` (`Box.__index__` returning a non-int) still differs and is a separate
+pre-existing cause, not changed here.  Final-state tests: test_ail_pre421,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
