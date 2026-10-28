@@ -1,3 +1,34 @@
+## 2026-10-28 -- stdlib26: `struct` pack / unpack / unpack_from / calcsize with a literal format (job-stdlib26-10290642)
+
+The most-imported standard module still refused in `lab/corpus/programs` and
+`AIL_CURRENT/language_examples` after the earlier batches was `struct` (six imports; the corpus
+program `t475.py` needs `struct.pack(">I", value)`).  `structlib.py` now lowers a literal format in
+`struct.pack`, `struct.calcsize` and `a, b, ... = struct.unpack(fmt, data)` /
+`struct.unpack_from(fmt, data[, offset])` onto ordinary byte, int and list operations, with
+`stdlib/struct.py` and its C glue supplying only the IEEE-754 bit conversions.  Supported codes are
+`x c b B ? h H i I l L q Q e f d s p P` with `@ = < > !`; native `@` alignment and padding are
+laid out explicitly, a zero repeat (`0x`, `0i`, `0c`, `0s`) is honoured, explicit `x` bytes are
+emitted, `P` is limited to the native mode as in CPython, and unpack requires exactly the format
+size.  Unpack data is converted through `bytes()`, so a `bytearray` works; `unpack_from` handles
+negative offsets with CPython's three messages (`out of range`, `not enough data`, `unpack_from
+requires ...`).  `?` accepts any numeric truth value (the argument is compared with zero), `c`
+checks for a one-byte bytes object, and a finite float too large for `f`/`e` raises CPython's
+`OverflowError` instead of silently packing infinity.  `struct.error` is spelled `RuntimeError`
+through the existing bundled-name table.  A computed format, `Struct`, `pack_into`, `iter_unpack`,
+an unpack result used as a value, a wrong value count and a wrong number of target names are
+refused at compile time with a message naming the use.  `Q`/`P` values above `INT64_MAX` remain the
+declared 64-bit integer difference (the reader stops with `integer overflow`).
+
+Probes in `/tmp/probes/stdlib26c` on both `cmp.sh` builds: 16 supported programs
+(`ints`, `order`, `float`, `float_over`, `str`, `bool_pad`, `fixed_mixed`, `unpack_from_ok`,
+`unpack_error`, `pack_error`, `calc`, `routes`, `alias`, `bytearray`, `empty`, `field_route`)
+match CPython; 8 refusal programs (`computed`, `struct`, `pack_into`, `iter_unpack`,
+`unpack_value`, `bad`, `count`, `names`) fail to compile with the named message.  The corpus
+program `t475.py` matches on both builds for input `4 0 1 255 65535`.  Tests: `test_ail_stdlib26`
+(2), `test_ail_modules` (66), `test_ail_zlib` (10), `test_ail_stdlib5` (10), `test_ail_files`
+(18, 1 skipped), `test_ail_corpus_findings3` (2) and `test_ail_safetynet` (5), all 0 failed.
+`tools/update_manifest.py` and `--check` are run on the committed files.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

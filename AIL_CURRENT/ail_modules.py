@@ -68,7 +68,7 @@ class _Raises(Exception):
 BUNDLED_DIR = Path(__file__).resolve().parent / 'stdlib'
 # module attributes of a bundled module that name an exception kind the typed path can raise; CPython's
 # zlib.error is a class of its own, the compiler spells it RuntimeError (as csv.Error is ValueError)
-BUNDLED_NAMES = {('zlib', 'error'): 'RuntimeError'}
+BUNDLED_NAMES = {('zlib', 'error'): 'RuntimeError', ('struct', 'error'): 'RuntimeError'}
 
 
 class ModuleRefusal(ValueError):
