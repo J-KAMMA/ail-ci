@@ -422,28 +422,41 @@ class _KnownClassValue:
 
 class _KnownInstance:
     """An instance of a class whose literal class and __init__ attributes this pass can read."""
-    __slots__ = ('name', 'arguments')
+    __slots__ = ('name', 'arguments', 'overrides')
 
     def __init__(self, name, arguments=None):
         self.name = name
         self.arguments = arguments or {}
+        self.overrides = {}
 
 
 class _KnownClassAttributes:
     def __init__(self, classes, aliases):
         self.classes = classes
         self.aliases = aliases
+        self.overrides = {}
+        self.deferred_unsafe = set()
+        self.deferred = False
+        self.tainted = False
 
     def class_of(self, name):
         return self.aliases.get(name)
 
     def class_value(self, cls, attr):
+        if (cls, attr) in self.overrides:
+            return self.overrides[(cls, attr)]
         info = self.classes.get(cls)
-        return _UNKNOWN if info is None else info['class'].get(attr, _UNKNOWN)
+        if info is None or ((self.deferred or self.tainted)
+                            and attr in self.deferred_unsafe):
+            return _UNKNOWN
+        return info['class'].get(attr, _UNKNOWN)
 
     def instance_value(self, cls, attr, arguments=None):
+        if (cls, attr) in self.overrides:
+            return self.overrides[(cls, attr)]
         info = self.classes.get(cls)
-        if info is None or attr in info['unsafe']:
+        if (info is None or attr in info['unsafe']
+                or ((self.deferred or self.tainted) and attr in self.deferred_unsafe)):
             return _UNKNOWN
         if attr in info['instance']:
             return info['instance'][attr]
@@ -585,9 +598,23 @@ def _known_class_attributes(tree, module_known):
         return _KnownClassAttributes({}, {})
     aliases = {name: name for name in class_nodes}
     aliases.update(alias_targets)
+    module_stores = set()
+    module_store_names = set()
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign):
+            targets = statement.targets
+        elif isinstance(statement, ast.AnnAssign) and statement.value is not None:
+            targets = [statement.target]
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Attribute):
+                module_stores.add(id(target))
+                module_store_names.add(target.attr)
     stores = {}
     for node in ast.walk(tree):
-        if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        if (isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del))
+                and id(node) not in module_stores):
             stores.setdefault(node.attr, []).append(node)
     setattr_names = set()
     dynamic_setattr = False
@@ -695,7 +722,9 @@ def _known_class_attributes(tree, module_known):
             info['unsafe'].update(info['instance'])
             info['unsafe'].update(info['instance_param'])
         classes[name] = info
-    return _KnownClassAttributes(classes, aliases)
+    result = _KnownClassAttributes(classes, aliases)
+    result.deferred_unsafe = module_store_names
+    return result
 
 
 def _constant_value(node, lookup, global_name, passthrough, attributes=None):
@@ -774,6 +803,8 @@ def _constant_value(node, lookup, global_name, passthrough, attributes=None):
         if attributes is not None and isinstance(base, _KnownClassValue):
             return attributes.class_value(base.name, node.attr)
         if attributes is not None and isinstance(base, _KnownInstance):
+            if node.attr in base.overrides:
+                return base.overrides[node.attr]
             return attributes.instance_value(base.name, node.attr, base.arguments)
         if node.attr.startswith('f') and node.attr[1:].isdigit() and isinstance(base, tuple):
             index = int(node.attr[1:])
@@ -840,6 +871,252 @@ def _constant_value(node, lookup, global_name, passthrough, attributes=None):
                 return _constant_value(argument, lookup, global_name, passthrough, attributes)
         return _UNKNOWN
     return _UNKNOWN
+
+
+_MUTATING_CONTAINER_METHODS = frozenset({
+    'append', 'extend', 'insert', 'pop', 'remove', 'clear', 'sort', 'reverse',
+    'update', 'setdefault', 'popitem',
+})
+
+
+def _without_instance_overrides(value):
+    """A module value with no source-order attribute overrides, for a deferred body.
+
+    A function or lambda body runs when it is called, not where it is defined, so a module
+    statement after the definition may still change an instance attribute before the call.
+    The safe class/__init__ values stay available; only the module-level stores this pass
+    applies in source order are dropped.
+    """
+    if isinstance(value, _KnownInstance):
+        return _KnownInstance(value.name, dict(value.arguments))
+    if type(value) is list:
+        return [_without_instance_overrides(item) for item in value]
+    if type(value) is tuple:
+        return tuple(_without_instance_overrides(item) for item in value)
+    if type(value) is dict:
+        return {key: _without_instance_overrides(item) for key, item in value.items()}
+    return value
+
+
+class _KnownContainerStores:
+    """Apply module-level stores to the literal containers of known instances.
+
+    ``_known_class_attributes`` only sees plain ``self.attr = value`` stores, so a later
+    ``c.attr[index] = value`` or ``c.attr = value`` was invisible and ``int(c.attr[index])``
+    folded the construction value (or stopped with a run-time ``integer overflow`` when it did
+    not fold).  A constant store updates the per-instance value, in source order, so a store
+    only affects reads that follow it.  A store whose key or value is not static makes that
+    attribute unknown, so a stale value is never folded.
+    """
+
+    def __init__(self, resolve, attributes, int_shadowed):
+        self.resolve = resolve
+        self.attributes = attributes
+        self.int_shadowed = int_shadowed
+        self.instances = []
+
+    def _target_of(self, node):
+        value = self.resolve(node)
+        if isinstance(value, _KnownInstance):
+            if not any(value is seen for seen in self.instances):
+                self.instances.append(value)
+            return value
+        if isinstance(value, _KnownClassValue):
+            return value
+        return None
+
+    def _current(self, target, attr):
+        if isinstance(target, _KnownInstance):
+            if attr in target.overrides:
+                return target.overrides[attr]
+            return self.attributes.instance_value(target.name, attr, target.arguments)
+        return self.attributes.class_value(target.name, attr)
+
+    def _store(self, target, attr, value):
+        if isinstance(target, _KnownInstance):
+            target.overrides[attr] = value
+        else:
+            self.attributes.overrides[(target.name, attr)] = value
+
+    @staticmethod
+    def _copy_container(value):
+        if type(value) is list:
+            return list(value)
+        if type(value) is dict:
+            return dict(value)
+        return value
+
+    def _stored_value(self, node):
+        value = self.resolve(node)
+        if value is not _UNKNOWN or self.int_shadowed:
+            return value
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'int' and len(node.args) == 1 and not node.keywords):
+            return value
+        argument = self.resolve(node.args[0])
+        if argument is _UNKNOWN:
+            return _UNKNOWN
+        if _outside_int64_float(argument):
+            error = ValueError(
+                f'int() of a float outside int64: {argument!r} (CPython makes a big integer)')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+        converted = _int_conversion_outside_int64(argument)
+        if converted is not None:
+            error = ValueError(
+                f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+        if type(argument) in (bool, int, float, str, bytes):
+            try:
+                return int(argument)
+            except (TypeError, ValueError, OverflowError):
+                return _UNKNOWN
+        return _UNKNOWN
+
+    def _store_attribute(self, node, value_node):
+        target = self._target_of(node.value)
+        if target is None:
+            return
+        self._store(target, node.attr, self._copy_container(self._stored_value(value_node)))
+
+    def _store_subscript(self, node, value_node):
+        base = node.value
+        if not isinstance(base, ast.Attribute):
+            return
+        target = self._target_of(base.value)
+        if target is None:
+            return
+        attr = base.attr
+        key = self.resolve(node.slice)
+        container = self._current(target, attr)
+        if isinstance(key, slice) or key is _UNKNOWN:
+            self._store(target, attr, _UNKNOWN)
+            return
+        if type(container) is list:
+            if type(key) not in (int, bool) or not -len(container) <= key < len(container):
+                self._store(target, attr, _UNKNOWN)
+                return
+            value = self._stored_value(value_node)
+            if value is _UNKNOWN:
+                self._store(target, attr, _UNKNOWN)
+                return
+            updated = list(container)
+            updated[key] = value
+            self._store(target, attr, updated)
+            return
+        if type(container) is dict:
+            value = self._stored_value(value_node)
+            if value is _UNKNOWN:
+                self._store(target, attr, _UNKNOWN)
+                return
+            updated = dict(container)
+            try:
+                updated[key] = value
+            except TypeError:
+                self._store(target, attr, _UNKNOWN)
+                return
+            self._store(target, attr, updated)
+            return
+        self._store(target, attr, _UNKNOWN)
+
+    def _clear(self, taint=False):
+        for value in self.instances:
+            value.overrides.clear()
+        self.attributes.overrides.clear()
+        if taint:
+            self.attributes.tainted = True
+
+    def _store_call(self, node):
+        func = node.func
+        if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Attribute):
+            return False
+        if func.attr not in _MUTATING_CONTAINER_METHODS:
+            return False
+        base = func.value
+        target = self._target_of(base.value)
+        if target is None:
+            return False
+        attr = base.attr
+        container = self._current(target, attr)
+        if (func.attr == 'append' and len(node.args) == 1 and not node.keywords
+                and type(container) is list):
+            value = self._stored_value(node.args[0])
+            if value is _UNKNOWN:
+                self._store(target, attr, _UNKNOWN)
+                return
+            updated = list(container)
+            updated.append(value)
+            self._store(target, attr, updated)
+            return True
+        if (func.attr == 'extend' and len(node.args) == 1 and not node.keywords
+                and type(container) is list):
+            value = self.resolve(node.args[0])
+            if type(value) not in (list, tuple):
+                self._store(target, attr, _UNKNOWN)
+                return
+            updated = list(container)
+            updated.extend(value)
+            self._store(target, attr, updated)
+            return True
+        if (func.attr == 'insert' and len(node.args) == 2 and not node.keywords
+                and type(container) is list):
+            index = self.resolve(node.args[0])
+            value = self._stored_value(node.args[1])
+            if type(index) not in (int, bool) or value is _UNKNOWN:
+                self._store(target, attr, _UNKNOWN)
+                return
+            updated = list(container)
+            updated.insert(index, value)
+            self._store(target, attr, updated)
+            return True
+        self._store(target, attr, _UNKNOWN)
+        return True
+
+    def apply_statement(self, node):
+        """Apply one direct module-level statement, which has already been visited."""
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Attribute):
+                    self._store_attribute(target, node.value)
+                elif isinstance(target, ast.Subscript):
+                    self._store_subscript(target, node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            if isinstance(node.target, ast.Attribute):
+                self._store_attribute(node.target, node.value)
+            elif isinstance(node.target, ast.Subscript):
+                self._store_subscript(node.target, node.value)
+        elif isinstance(node, ast.AugAssign):
+            target = node.target
+            if isinstance(target, ast.Attribute):
+                holder = self._target_of(target.value)
+                if holder is not None:
+                    self._store(holder, target.attr, _UNKNOWN)
+            elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Attribute):
+                holder = self._target_of(target.value.value)
+                if holder is not None:
+                    self._store(holder, target.value.attr, _UNKNOWN)
+        elif isinstance(node, ast.Delete):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript):
+                    base = target.value
+                    if isinstance(base, ast.Attribute):
+                        target_value = self._target_of(base.value)
+                        if target_value is not None:
+                            self._store(target_value, base.attr, _UNKNOWN)
+        elif isinstance(node, ast.Call):
+            if not self._store_call(node):
+                self._clear(taint=True)
+        elif isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            if not self._store_call(node.value):
+                self._clear(taint=True)
+        elif isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.Try,
+                               ast.With, ast.AsyncWith)):
+            self._clear(taint=True)
+        elif isinstance(node, ast.ClassDef):
+            self._clear()
 
 
 def _outside_int64_float(value):
@@ -1118,6 +1395,7 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.program_bound = program_bound
         self.shadow = []
         self.value_scopes = [known]
+        self.stores = _KnownContainerStores(self._value, attributes, int_shadowed)
 
     def _global_name(self, name):
         return not any(name in scope for scope in self.shadow)
@@ -1134,6 +1412,11 @@ class _Int64CallChecker(ast.NodeVisitor):
         error.source_line = node.lineno
         error.source_column = node.col_offset
         raise error
+
+    def visit_Module(self, node):
+        for statement in node.body:
+            self.visit(statement)
+            self.stores.apply_statement(statement)
 
     def visit_Call(self, node):
         if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
@@ -1171,16 +1454,26 @@ class _Int64CallChecker(ast.NodeVisitor):
         self._visit_outer_arguments(node.args)
         if node.returns is not None:
             self.visit(node.returns)
-        local = _scope_constant_map(node.body, node, self.value_scopes[-1],
-                                    _binding_counts(node.body), _function_bindings(node),
-                                    _scope_parameters(node), _scope_declared(node),
-                                    self.program_bound)
-        self.shadow.append(_function_bindings(node))
-        self.value_scopes.append(local)
-        for statement in node.body:
-            self.visit(statement)
-        self.value_scopes.pop()
-        self.shadow.pop()
+        base = {name: _without_instance_overrides(value)
+                for name, value in self.value_scopes[-1].items()}
+        saved_overrides = self.attributes.overrides
+        saved_deferred = self.attributes.deferred
+        self.attributes.overrides = {}
+        self.attributes.deferred = True
+        try:
+            local = _scope_constant_map(node.body, node, base,
+                                        _binding_counts(node.body), _function_bindings(node),
+                                        _scope_parameters(node), _scope_declared(node),
+                                        self.program_bound)
+            self.shadow.append(_function_bindings(node))
+            self.value_scopes.append(local)
+            for statement in node.body:
+                self.visit(statement)
+            self.value_scopes.pop()
+            self.shadow.pop()
+        finally:
+            self.attributes.overrides = saved_overrides
+            self.attributes.deferred = saved_deferred
 
     def visit_FunctionDef(self, node):
         self._visit_function(node)
@@ -1196,13 +1489,22 @@ class _Int64CallChecker(ast.NodeVisitor):
         if node.args.kwarg is not None:
             names.append(node.args.kwarg.arg)
         bindings = set(names) | set(_binding_counts([node.body]))
-        local = {name: value for name, value in self.value_scopes[-1].items()
-                 if name not in bindings}
-        self.shadow.append(bindings)
-        self.value_scopes.append(local)
-        self.visit(node.body)
-        self.value_scopes.pop()
-        self.shadow.pop()
+        saved_overrides = self.attributes.overrides
+        saved_deferred = self.attributes.deferred
+        self.attributes.overrides = {}
+        self.attributes.deferred = True
+        try:
+            local = {name: _without_instance_overrides(value)
+                     for name, value in self.value_scopes[-1].items()
+                     if name not in bindings}
+            self.shadow.append(bindings)
+            self.value_scopes.append(local)
+            self.visit(node.body)
+            self.value_scopes.pop()
+            self.shadow.pop()
+        finally:
+            self.attributes.overrides = saved_overrides
+            self.attributes.deferred = saved_deferred
 
     def visit_ClassDef(self, node):
         for decorator in node.decorator_list:

@@ -1,3 +1,28 @@
+## 2026-10-28 -- pre407: an attribute-held container item read before a later store is refused (job-pre407-10281133)
+
+The pre388 reviewer recorded `r10` as the first still-differing pre-existing item:
+`class C: pass; c = C(); c.a = [1e300]; print(int(c.a[0])); c.a[0] = 1.5` compiled on both
+builds and then stopped with `integer overflow`, where CPython prints the 301-digit big
+integer.  Attribute-held containers were not folded, so the read did not see the literal item.
+`_KnownContainerStores` now replays module-level instance and class attribute stores in source
+order; a read before a later subscript store, rebind, append/insert, extend or deletion folds
+the literal item and the conversion is refused by name.  Class-held containers and instances
+reached through an alias, a list/dict item, a dict value or an identity/wrapper argument use the
+same path.  Function, lambda and method bodies clear the source-order values and treat
+module-level attribute-store names as unsafe there, so a later module store cannot cause a
+false refusal (`q2`/`q3` still match CPython; the pre401 final patch's false refusal is not
+repeated).  In-range and already-mutated values match CPython.
+
+Added `test_ail_pre407.py` (16 refused, 10 matching programs, both builds) and registered it in
+`ail_check.MODULES`; `tools/ci_shards.py --update` added its 42.6 weight to shard 4.  Probes in
+`/tmp/probes/pre407` (39 runs, 38 unique; `case_r10` duplicates `p01`): 15 match CPython, 22 are
+refused by name (including the existing `c_func_local` and `c_class_func_after_rebind`
+refusals), and 2 keep the pre-existing run-time `integer overflow` (`p05`, a list literal passed
+as an ordinary function parameter; `p07`, a local alias of the attribute-held list).  Final-state
+tests: `test_ail_pre407`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` (4 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
