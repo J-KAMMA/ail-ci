@@ -414,6 +414,7 @@
   "test_ail_pre417": 0.2,
   "test_ail_pre419": 70.1,
   "test_ail_pre42": 55.9,
+  "test_ail_pre432": 10.0,
   "test_ail_pre44": 28.0,
   "test_ail_pre47": 94.5,
   "test_ail_pre48": 44.8,
@@ -1088,6 +1089,7 @@
    "test_ail_pre215",
    "test_ail_pre254",
    "test_ail_pre267",
+   "test_ail_pre432",
    "test_ail_sets_general",
    "test_ail_tcp_poll"
   ],
