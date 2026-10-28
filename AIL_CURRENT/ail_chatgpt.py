@@ -4226,6 +4226,24 @@ def _rewrite_file_dunder(text, path_text):
     except SyntaxError:
         return text
     for node in ast.walk(tree):
+        if isinstance(node, ast.Delete) and any(
+                isinstance(target, ast.Name) and target.id == '__file__' for target in node.targets):
+            raise ValueError('not in the subset: del __file__ (the program is built into one executable)')
+        if isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name) \
+                and node.target.id == '__file__':
+            raise ValueError('not in the subset: __file__ is read before it is assigned '
+                             '(the program is built into one executable)')
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                and node.target.id == '__file__':
+            raise ValueError('not in the subset: an annotation binds __file__ '
+                             '(the program is built into one executable)')
+        if isinstance(node, (ast.Assign, ast.NamedExpr)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if any(isinstance(target, ast.Name) and target.id == '__file__' for target in targets) \
+                    and any(isinstance(child, ast.Name) and child.id == '__file__'
+                            and isinstance(child.ctx, ast.Load) for child in ast.walk(node.value)):
+                raise ValueError('not in the subset: __file__ is read before it is assigned '
+                                 '(the program is built into one executable)')
         if isinstance(node, ast.Name) and node.id == '__file__' and not isinstance(node.ctx, ast.Load):
             return text
         if isinstance(node, ast.arg) and node.arg == '__file__':

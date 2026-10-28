@@ -71,11 +71,14 @@ print(__file__ == str(SOURCE))
 ''')
 
     def test_argument_spelling(self):
-        for argument in ('./sub/main.py', 'sub//main.py'):
+        spellings = ('./sub/main.py', 'sub/main.py', 'sub//main.py', 'sub/../sub/main.py',
+                     './link.py', 'link.py')
+        for argument in spellings:
             with self.subTest(argument=argument), tempfile.TemporaryDirectory() as directory:
                 path = Path(directory, 'sub', 'main.py')
                 path.parent.mkdir()
                 path.write_text('print(__file__)\n', encoding='utf-8')
+                os.symlink('sub/main.py', Path(directory, 'link.py'))
                 want, want_status = cpython(directory, argument)
                 for mode in ('default', 'general'):
                     with self.subTest(mode=mode):
@@ -84,6 +87,39 @@ print(__file__ == str(SOURCE))
                         got = run([str(exe)], directory)
                         self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want)
                         self.assertEqual(got.returncode, want_status)
+
+    def test_absolute_argument_spelling(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory, 'sub', 'main.py')
+            path.parent.mkdir()
+            path.write_text('print(__file__)\n', encoding='utf-8')
+            argument = os.path.join(directory, 'sub', '.', 'main.py')
+            want, want_status = cpython(directory, argument)
+            for mode in ('default', 'general'):
+                with self.subTest(mode=mode):
+                    exe, built = build(directory, 'sub/main', mode, argument=argument)
+                    self.assertEqual(built.returncode, 0, (built.stdout + built.stderr)[-2000:])
+                    got = run([str(exe)], directory)
+                    self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want)
+                    self.assertEqual(got.returncode, want_status)
+
+    def test_binding_refusals(self):
+        cases = {
+            'delete': 'del __file__\nprint(__file__)\n',
+            'augassign': '__file__ += ".x"\nprint(__file__)\n',
+            'assign_read': '__file__ = __file__ + ".x"\nprint(__file__)\n',
+            'annotation': '__file__: str\nprint(__file__)\n',
+        }
+        for name, text in cases.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                Path(directory, name + '.py').write_text(text, encoding='utf-8')
+                for mode in ('default', 'general'):
+                    with self.subTest(mode=mode):
+                        _, built = build(directory, name, mode)
+                        self.assertNotEqual(built.returncode, 0)
+                        output = built.stdout + built.stderr
+                        self.assertIn('not in the subset', output)
+                        self.assertIn('__file__', output)
 
     def test_shadowed_name(self):
         self.check('shadow', '''def show(__file__):

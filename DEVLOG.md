@@ -1,3 +1,13 @@
+## 2026-10-28 -- ex4 review: pin every source spelling the review probed (job-ex4-10290218)
+
+The spelling fix now has a test for the exact forms the review compared: `./sub/main.py`,
+`sub/main.py`, `sub//main.py`, `sub/../sub/main.py`, `./link.py`, `link.py` and an absolute
+argument containing `./`.  Both builds were re-probed against CPython 3.12 in `/tmp/probes/rel`,
+including a package whose modules report their own `__file__`, and all matched.  Probing the
+binding cases also found that `del __file__` crashed the compiler with a `KeyError` and that an
+augmented assignment, an annotation or a store reading `__file__` ended in a runtime `NameError`
+where CPython succeeds; those forms now give a named `not in the subset` refusal instead.
+
 ## 2026-10-28 -- ex4 review: keep the source argument's spelling in `__file__` (job-ex4-10290218)
 
 The review found that `compile ./sub/main.py` reported a different `__file__` from CPython 3.12:
