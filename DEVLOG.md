@@ -1,19 +1,41 @@
+## 2026-10-28 -- ex12 review: do not swallow a side-effecting import (job-ex12-10290431)
+
+The ex12 review found that the module-only classification accepted every top-level import as
+effect-free.  `import this` (or `from this import d`) plus one `def` therefore built and ran with
+empty stdout and exit 0, where CPython prints the 21-line Zen.  Imports are now checked against
+`_SIDE_EFFECT_FREE_IMPORTS`; a module outside it is refused by name (`import of 'this' can run
+code when the module loads; ...`) instead of being dropped.  Safe imports (`math`, `sys`, `os`,
+`collections`, ...) still build, including aliases, from-imports and dotted names; an unavailable
+or optional module keeps its existing named refusal.  `test_ail_ex12` now covers `import this`
+and `from this import d` on both builds, plus `import math as m`, `from collections import
+Counter` and `import os.path`.
+
+The review's counts are right: 17 Python-syntax examples (6 `.ail` + 11 `.py`); 5 build on both
+builds after this change (`hello.ail`, `integer_series.ail`, `math.ail`, `stdin_sum.ail`,
+`sum.ail`) and 4 did before (all but `math.ail`, whose default build was refused).  Probes in
+`/tmp/probes` on both builds via `cmp.sh`: `p_ex12_math`, `p_ex12_safe_import_math_example`,
+`p_safe_import`, `p_safe_import_alias`, `p_import_from_os_path` and `p_import_safe_call` match
+CPython; `p_import_this`, `p_from_this`, `p_import_this_alias`, `p_import_mixed_unsafe`,
+`p_import_hello` and `p_import_missing` are refused by name.  Final-state tests: test_ail_ex12,
+test_ail_python_syntax, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0
+failed).  `tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- ex12: a definitions-only Python module is not a program (job-ex12-10290431)
 
-Every Python-syntax example was built.  Of the six `.ail` examples that parse as Python, `math.ail`
-(and the fragment `use_math.ail`, which CPython also cannot run alone) was refused; the fourteen
-`.py` benchmark helpers are refused earlier for unrelated module-import shapes.  `math.ail` is
-`LIMIT = 6` plus `def sum_to(n)` and nothing else: CPython runs nothing and exits 0, but `pyc`
-treated the last top-level `def` as the entry point and refused with `the first parameter must be
-the sequence read from the file`.
+Every Python-syntax example was built.  There are 17 (six `.ail` + eleven `.py`).  Before this
+change 4 built on both builds; `math.ail` was also refused on the default build (`the first
+parameter must be the sequence read from the file`).  The other eleven `.py` benchmark helpers and
+the fragment `use_math.ail` are refused for unrelated shapes.  `math.ail` is `LIMIT = 6` plus
+`def sum_to(n)` and nothing else: CPython runs nothing and exits 0, but `pyc` treated the last
+top-level `def` as the entry point.
 
 `_python_module_only` now recognises a Python-surface entry whose top level is only effect-free
-definitions, imports, a docstring and literal module constants, and gives it an empty entry point
-(no output, exit 0).  A class body, a decorator, an annotation or a non-constant default can run
-code while the module loads, so those shapes are deliberately not classified and keep the old
-path.  The general (boxed) path has its own last-def entry convention (`pyboxed2`); it receives a
-no-op module statement for the same classification, so both builds match.  A script with top-level
-statements and the existing uncalled-`main()` refusal are unchanged.
+definitions, side-effect-free imports, a docstring and literal module constants, and gives it an
+empty entry point (no output, exit 0).  A class body, a decorator, an annotation or a non-constant
+default can run code while the module loads, so those shapes are deliberately not classified and
+keep the old path.  The general (boxed) path has its own last-def entry convention (`pyboxed2`); it
+receives a no-op module statement for the same classification, so both builds match.  A script
+with top-level statements and the existing uncalled-`main()` refusal are unchanged.
 
 Probes in `/tmp/probes` on both builds via `cmp.sh`: `p_ex12_math_example`, `p_ex12_defs_basic`,
 `p_ex12_defs_docstring`, `p_ex12_defs_import`, `p_ex12_defs_const`,
@@ -21,9 +43,7 @@ Probes in `/tmp/probes` on both builds via `cmp.sh`: `p_ex12_math_example`, `p_e
 match CPython; `p_ex12_only_pass` (default build), `p_ex12_empty_docstring` and
 `p_ex12_uncalled_main` are refused by name.  `p_ex12_class_body_effect`, `p_ex12_default_effect`,
 `p_ex12_decorator_effect` and `p_ex12_annotation_effect` show the same output on the base tree and
-are pre-existing, not changed here.  Final-state tests: test_ail_ex12, test_ail_python_syntax,
-test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was
-run and `--check` passes.
+are pre-existing, not changed here.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 

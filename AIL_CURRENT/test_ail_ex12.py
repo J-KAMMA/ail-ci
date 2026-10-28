@@ -3,10 +3,12 @@
 The most common refusal left in `language_examples` was `the first parameter must be the sequence
 read from the file`: `math.ail` defines `LIMIT` and `sum_to()` and nothing else, so CPython runs
 nothing, but the compiler treated the last function as the program entry and demanded an input
-file.  A Python-surface entry whose top level is effect-free definitions, imports, a docstring and
-literal module constants now builds with an empty entry point (no output, exit 0).  A class body,
-a decorator, an annotation or a non-constant default can run code while the module loads, so those
-keep the old path rather than dropping the effect.  A script with top-level statements, and the
+file.  A Python-surface entry whose top level is effect-free definitions, side-effect-free imports, a
+docstring and literal module constants now builds with an empty entry point (no output, exit 0).
+A class body, a decorator, an annotation or a non-constant default can run code while the module
+loads, so those keep the old path rather than dropping the effect.  An import outside the known
+side-effect-free modules (for example `this`, which prints the Zen of Python) is refused by name
+instead of silently losing its load-time effect.  A script with top-level statements, and the
 existing refusal of an uncalled `main()`, are unchanged.
 """
 import os
@@ -47,6 +49,15 @@ import math
 def volume(radius):
     return 4.0 / 3.0 * math.pi * radius ** 3
 ''',
+    'safe_imports_alias': '''
+import math as m
+from collections import Counter
+import os.path
+
+
+def area(radius):
+    return m.pi * radius ** 2
+''',
 }
 
 SCRIPTS = {
@@ -60,10 +71,24 @@ print(bump(2))
 }
 
 REFUSED = {
-    'uncalled_main': '''
+    'uncalled_main': ('''
 def main():
     print(7)
-''',
+''', 'main() is defined but never called'),
+    'import_this': ('''
+import this
+
+
+def noop():
+    pass
+''', "import of 'this' can run code when the module loads"),
+    'from_this': ('''
+from this import d
+
+
+def noop():
+    pass
+''', "import of 'this' can run code when the module loads"),
 }
 
 
@@ -107,17 +132,16 @@ class Ex12Tests(unittest.TestCase):
                     self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
                     self.assertEqual(got, want, '%s (general=%s)\n%s' % (slug, general, build_err))
 
-    def test_an_uncalled_main_is_still_refused_by_name(self):
+    def test_unsupported_shapes_are_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-ex12-main-') as directory:
             directory = Path(directory)
-            for slug, text in REFUSED.items():
+            for slug, (text, expected) in REFUSED.items():
                 source = directory / (slug + '.py')
                 source.write_text(text, encoding='utf-8')
                 for general in (True, False):
                     built = _build(directory, source, directory / ('%s_%s' % (slug, 'g' if general else 'd')), general)
                     self.assertNotEqual(built.returncode, 0, 'general=%s' % general)
-                    self.assertIn('main() is defined but never called', built.stdout + built.stderr,
-                                  'general=%s' % general)
+                    self.assertIn(expected, built.stdout + built.stderr, 'general=%s' % general)
 
 
 if __name__ == '__main__':

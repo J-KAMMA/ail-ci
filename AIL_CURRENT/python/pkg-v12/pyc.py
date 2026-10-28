@@ -367,15 +367,34 @@ def _reads_global(fn, name):
     return loads and name not in bound
 
 
+# Module roots whose import CPython evaluates without writing anything or otherwise making an
+# observable change.  The module-only path skips the import entirely, so a module outside this set
+# (for example `this`, which prints the Zen of Python, or an optional dependency that can fail) is
+# refused by name instead of silently losing its load-time effect.
+_SIDE_EFFECT_FREE_IMPORTS = frozenset({
+    '__future__', 'abc', 'array', 'base64', 'bisect', 'calendar', 'cmath', 'collections', 'csv',
+    'datetime', 'enum', 'fractions', 'functools', 'hashlib', 'heapq', 'hmac', 'io', 'itertools',
+    'json', 'keyword', 'math', 'os', 'pathlib', 'random', 're', 'secrets', 'socket', 'sqlite3',
+    'statistics', 'string', 'struct', 'subprocess', 'sys', 'threading', 'time', 'typing', 'zlib',
+})
+
+
+def _import_roots(node):
+    """The top-level module names an import statement names."""
+    if isinstance(node, ast.Import):
+        return [alias.name.split('.')[0] for alias in node.names]
+    if isinstance(node, ast.ImportFrom) and not node.level and node.module:
+        return [node.module.split('.')[0]]
+    return ['<relative import>']
+
+
 def _definition_has_no_effect(node):
-    """A top-level import or function definition CPython evaluates without an observable effect.
+    """A top-level function definition CPython evaluates without an observable effect.
 
     A class body, a decorator, an annotation and a non-constant default all run code while the
     module loads, which the compiled entry does not; those shapes keep the old path instead of
     silently dropping the effect.
     """
-    if isinstance(node, (ast.Import, ast.ImportFrom)):
-        return True
     if not isinstance(node, ast.FunctionDef):
         return False
     if node.decorator_list or node.returns is not None or getattr(node, 'type_params', None):
@@ -394,9 +413,11 @@ def _python_module_only(source):
 
     `to_c` treats any `def` as a function program and calls its last function.  That is the AIL
     convention (a block program is a `main`), but a Python module -- effect-free definitions,
-    imports, a docstring and literal module constants only -- is not run: importing it has no
-    output.  The entry's own uncalled `main` already refuses in `ail_chatgpt.py`; this covers a
-    module whose last function is an ordinary library function (`math.ail`'s `sum_to`).  Restricted
+    side-effect-free imports, a docstring and literal module constants only -- is not run:
+    importing it has no output.  The entry's own uncalled `main` already refuses in
+    `ail_chatgpt.py`; this covers a module whose last function is an ordinary library function
+    (`math.ail`'s `sum_to`).  An import outside `_SIDE_EFFECT_FREE_IMPORTS` is refused by name,
+    because skipping it would silently drop whatever it does while the module loads.  Restricted
     to the Python surface so a block-syntax file keeps its `fn`/function-program behaviour.
     """
     if os.environ.get('AIL_SURFACE') != 'python' or not is_function(source):
@@ -405,12 +426,24 @@ def _python_module_only(source):
         tree = ast.parse(source.strip())
     except SyntaxError:
         return False
+    effectful = []
     for node in tree.body:
-        if _is_docstring_stmt(node) or _definition_has_no_effect(node):
+        if _is_docstring_stmt(node):
+            continue
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            effectful.extend(root for root in _import_roots(node)
+                             if root not in _SIDE_EFFECT_FREE_IMPORTS)
+            continue
+        if _definition_has_no_effect(node):
             continue
         if isinstance(node, ast.Assign) and _is_module_const_assign(node):
             continue
         return False
+    if effectful:
+        names = ', '.join(repr(name) for name in sorted(set(effectful)))
+        raise Unsupported(
+            'import of %s can run code when the module loads; a definitions-only Python module '
+            'would drop that effect, so remove the import or make the effect explicit' % names)
     return True
 
 
