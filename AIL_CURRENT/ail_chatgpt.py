@@ -652,12 +652,16 @@ def _known_class_attributes(tree, module_known):
             required = [arg for arg in (*args.posonlyargs, *args.args) if arg.arg != 'self']
             info['constructible'] = len(required) <= len(args.defaults)
             for stmt in init.body:
-                if not isinstance(stmt, ast.Assign):
+                if isinstance(stmt, ast.Assign):
+                    targets, value_node = stmt.targets, stmt.value
+                elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                    targets, value_node = [stmt.target], stmt.value
+                else:
                     continue
-                for target in stmt.targets:
+                for target in targets:
                     if (isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name)
                             and target.value.id == 'self'):
-                        allowed.setdefault(target.attr, []).append((target, stmt.value))
+                        allowed.setdefault(target.attr, []).append((target, value_node))
         allowed_ids = {id(target) for entries in allowed.values() for target, _value in entries}
         for attr, entries in allowed.items():
             if (len(entries) != 1 or attr in methods or attr in setattr_names
@@ -1931,6 +1935,113 @@ def _walk_module_scope(tree):
         stack.extend(ast.iter_child_nodes(node))
 
 
+def _pow_base_is_runtime_int(node, known, values):
+    """Whether a pow() base the int folders reject could still be an integer outside -1..1.
+
+    A statically known bool, float or non-number base keeps its ordinary run-time behaviour
+    (bool promotion, a float power, or CPython's TypeError), so only an unknown or int base
+    justifies the compile-time refusal below.  ``values`` holds parameter constants that are
+    not ints, which the int maps deliberately do not carry."""
+    if isinstance(node, ast.Name) and node.id in values:
+        return False
+    if _pow_static_int(node, known) is not None:
+        return False
+    value = _constant_value(node, lambda name: _UNKNOWN, lambda unused: True, {})
+    return value is _UNKNOWN or type(value) is int
+
+
+def _pow_call_value(node, known):
+    """A call-site argument's constant value (any scalar), or _UNKNOWN."""
+    value = _pow_static_int(node, known)
+    if value is not None:
+        return value
+    return _constant_value(node, lambda name: known.get(name, _UNKNOWN),
+                           lambda unused: True, {})
+
+
+def _pow_parameter_bindings(tree, known):
+    """Constant values reaching a plain function's parameters from module-level call sites.
+
+    A parameter is bound only when the function is not used as a value, is never called
+    outside module scope, every module-level call site agrees on its constant value, and the
+    body never stores it; anything less stays unknown.  A call inside a function, lambda or
+    the function's own body could pass a different value, so it disqualifies the function
+    instead of being folded away.  The result splits ints (the folding map) from other
+    scalars (the safe-base map)."""
+    definitions = {}
+    duplicates = set()
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and not node.decorator_list:
+            if node.name in definitions:
+                duplicates.add(node.name)
+            else:
+                definitions[node.name] = node
+    for name in duplicates:
+        definitions.pop(name, None)
+    if not definitions:
+        return {}
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    module_scope = {id(node) for node in _walk_module_scope(tree)}
+    escaped = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in definitions:
+            parent = parents.get(node)
+            if not (isinstance(parent, ast.Call) and parent.func is node
+                    and id(parent) in module_scope):
+                escaped.add(node.id)
+    calls = {}
+    for node in _walk_module_scope(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id in definitions and node.func.id not in escaped):
+            calls.setdefault(node.func.id, []).append(node)
+    result = {}
+    for name, function in definitions.items():
+        sites = calls.get(name)
+        if not sites:
+            continue
+        signature = function.args
+        positional = [argument.arg for argument in signature.posonlyargs + signature.args]
+        keyword = [argument.arg for argument in signature.kwonlyargs]
+        if signature.vararg is not None or signature.kwarg is not None:
+            continue
+        bound = {}
+        failed = set()
+        for site in sites:
+            if (any(isinstance(argument, ast.Starred) for argument in site.args)
+                    or any(item.arg is None for item in site.keywords)
+                    or len(site.args) > len(positional)):
+                failed.update(positional + keyword)
+                continue
+            values = {parameter: _pow_call_value(argument, known)
+                      for parameter, argument in zip(positional, site.args)}
+            for item in site.keywords:
+                if item.arg not in positional and item.arg not in keyword:
+                    failed.update(positional + keyword)
+                else:
+                    values[item.arg] = _pow_call_value(item.value, known)
+            for parameter in positional + keyword:
+                if parameter in failed:
+                    continue
+                value = values.get(parameter, _UNKNOWN)
+                if value is _UNKNOWN:
+                    failed.add(parameter)
+                elif (parameter in bound
+                      and (bound[parameter] != value
+                           or type(bound[parameter]) is not type(value))):
+                    failed.add(parameter)
+                else:
+                    bound[parameter] = value
+        stores = _function_scope_stores(function)
+        for parameter in list(bound):
+            if parameter in failed or stores.get(parameter):
+                del bound[parameter]
+        ints = {parameter: value for parameter, value in bound.items() if type(value) is int}
+        others = {parameter: value for parameter, value in bound.items() if type(value) is not int}
+        if ints or others:
+            result[id(function)] = (ints, others)
+    return result
+
+
 def _check_int64_pow_constants(tree, known):
     """Refuse ``pow(base, exp)`` on constant ints whose exact result leaves int64, by name.
 
@@ -1940,12 +2051,16 @@ def _check_int64_pow_constants(tree, known):
     a negative exponent (CPython's float answer) and a program that binds its own ``pow``
     are left alone.  A constant integer base with |base| >= 2 and an exponent computed at
     run time is refused too: its value cannot be compared with int64 while compiling, and
-    the run-time power can leave the range (the pre273 rule for ``**``)."""
+    the run-time power can leave the range (the pre273 rule for ``**``).  The symmetric
+    shape -- an exponent of at least 63 (2**63 already leaves int64) with a base computed
+    at run time -- is refused as well, so a constant base that reaches the call through a
+    parameter, list item, attribute or dict value cannot stop with ``integer overflow``."""
     names = _pow_alias_names(tree)
     if not names:
         return
+    bindings = _pow_parameter_bindings(tree, known)
 
-    def check(node, scope_known, scope_names):
+    def check(node, scope_known, scope_names, scope_values):
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id in scope_names):
             return
@@ -1978,6 +2093,17 @@ def _check_int64_pow_constants(tree, known):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
+        if (exponent is not None and exponent >= 63
+                and _pow_base_is_runtime_int(base_node, scope_known, scope_values)):
+            error = ValueError(
+                'pow() with the integer constant exponent %d and a base computed at run time '
+                'can leave the signed 64-bit range of an AIL int, so it is refused by name at '
+                'compile time; CPython computes it exactly with an unbounded int. Write the '
+                "base as a constant, or use float(base) ** exponent for CPython's float answer"
+                % exponent)
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
 
     functions = [node for node in ast.walk(tree)
                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
@@ -1986,9 +2112,13 @@ def _check_int64_pow_constants(tree, known):
         function_nodes.update(id(node) for node in _walk_own_scope(function))
     for node in ast.walk(tree):
         if id(node) not in function_nodes:
-            check(node, known, names)
+            check(node, known, names, {})
     for function in functions:
         local = _function_local_int_constants(function, known)
+        ints, values = bindings.get(id(function), ({}, {}))
+        if ints:
+            local = dict(local)
+            local.update(ints)
         parameters = {argument.arg for argument in
                       function.args.posonlyargs + function.args.args + function.args.kwonlyargs}
         if function.args.vararg is not None:
@@ -1998,7 +2128,7 @@ def _check_int64_pow_constants(tree, known):
         scope_names = _pow_aliases(function.body, names,
                                    _function_scope_stores(function), parameters)
         for node in _walk_own_scope(function):
-            check(node, local, scope_names)
+            check(node, local, scope_names, values)
 
 
 def _check_int64_unary_constants(tree):
