@@ -102,6 +102,14 @@ class Server:
         self._counter = 0
 
     def close(self):
+        for doc in self.documents.values():
+            path = doc.get('path')
+            if path is not None:
+                try:
+                    path.unlink()
+                except OSError:
+                    pass
+        self.documents.clear()
         shutil.rmtree(self.temp, ignore_errors=True)
 
     def send(self, message):
@@ -209,10 +217,17 @@ class Server:
         if doc.get('path') is None:
             self._counter += 1
             source = _path_from_uri(uri)
-            stem = re.sub(r'[^A-Za-z0-9_.-]+', '_', source.stem) or 'document'
-            if not stem.endswith('.py'):
-                stem += '.py'
-            doc['path'] = self.temp / ('%d_%s' % (self._counter, stem))
+            # The compiler resolves sibling imports from the entry file's directory, so the
+            # temporary copy must live beside the document.  Fall back to the private directory
+            # only when there is no writable document directory (an untitled buffer, say).
+            directory = source.parent if source.is_absolute() and source.parent.is_dir() else self.temp
+            prefix = '.ail-lsp-%d-%d-' % (os.getpid(), self._counter)
+            try:
+                handle, name = tempfile.mkstemp(prefix=prefix, suffix='.py', dir=str(directory))
+            except OSError:
+                handle, name = tempfile.mkstemp(prefix=prefix, suffix='.py', dir=str(self.temp))
+            os.close(handle)
+            doc['path'] = Path(name)
         return doc['path']
 
     def check_and_publish(self, uri):

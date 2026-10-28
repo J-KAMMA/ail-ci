@@ -1,3 +1,20 @@
+## 2026-10-28 -- LSP: resolve sibling imports from the document directory (job-tool1-10282131)
+
+The review found that `tools/ail_lsp.py` wrote each buffer into a private `tempfile.mkdtemp()`
+directory, so a valid project file importing a sibling module was reported as an unavailable
+import at 0:0 instead of passing (and its real diagnostic was lost). The temporary copy now lives
+in the document's own directory via `mkstemp`, falling back to the private directory only for an
+untitled buffer with no writable directory; the copy is still removed on close and on server exit.
+`AIL_CURRENT/test_ail_lsp.py` now opens a clean file with a sibling `helper.py` (expects no
+diagnostics) and then changes it to the alias refusal (expects the diagnostic at zero-based line
+5), so the local-import path and its position are covered.
+
+Probes: `/tmp/probes/lsp_local_probe.py` published `[]` for the sibling import, one `ail` Error at
+0:5 for the alias refusal, `[]` for a package import, left no temp files after close, and exited 0;
+the earlier `/tmp/probes/lsp_probe.py` cases were unchanged. The two-file program also matched
+CPython on both builds. Final-state tests: test_ail_lsp, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-10-28 -- an LSP server for check diagnostics (job-tool1-10282131)
 
 Added `tools/ail_lsp.py`, a standard-library-only Language Server Protocol server over stdio. It

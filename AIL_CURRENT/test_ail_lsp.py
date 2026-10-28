@@ -26,6 +26,18 @@ REFUSAL = ("def main():\n"
            "    print(xs)\n"
            "\n\n"
            "main()\n")
+LOCAL_HELPER = "def f():\n    return 7\n"
+LOCAL_CLEAN = "from helper import f\n\n\ndef main():\n    print(f())\n\n\nmain()\n"
+# The same alias refusal, but after a sibling import: its line must survive the module merge.
+LOCAL_REFUSAL = ("from helper import f\n"
+                 "\n\n"
+                 "def main():\n"
+                 "    xs = [1, 2]\n"
+                 "    ys = xs\n"
+                 "    ys.append(3)\n"
+                 "    print(xs)\n"
+                 "\n\n"
+                 "main()\n")
 
 
 class Client:
@@ -138,6 +150,17 @@ class LspTests(unittest.TestCase):
         self.assertEqual(item['severity'], 1)
         self.assertEqual(item['source'], 'ail')
         self.assertEqual(item['range']['start']['line'], 2)
+        self.assertIn('second name for the same container', item['message'])
+
+    def test_local_import_resolves_beside_the_document(self):
+        (self.dir / 'helper.py').write_text(LOCAL_HELPER, encoding='utf-8')
+        _, uri = self.open('local_clean.py', LOCAL_CLEAN)
+        self.assertEqual(self.client.diagnostics(uri), [])
+        self.client.notify('textDocument/didChange', {
+            'textDocument': {'uri': uri, 'version': 2},
+            'contentChanges': [{'text': LOCAL_REFUSAL}]})
+        (item,) = self.client.diagnostics(uri, version=2)
+        self.assertEqual(item['range']['start']['line'], 5)
         self.assertIn('second name for the same container', item['message'])
 
     def test_change_is_debounced_and_save_and_close_republish(self):
