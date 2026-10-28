@@ -1,3 +1,16 @@
+## 2026-10-28 -- packaging: install the AIL compiler with pip (job-rel2-10282133)
+
+Added a repository-root `pyproject.toml` (setuptools backend, distribution `ail-lang`, Python >= 3.12,
+`MIT OR Apache-2.0`, console script `ail`) and a small `setup.py` that keeps the wheel to the
+`MANIFEST.json` `sdk_files` selection, so the tests, `benchmark_current_rows.py`, docs, `bench/` and
+`lab/` are not packaged.  The wheel carries `AIL_CURRENT`'s compiler modules plus `python/pkg-v12`,
+`stdlib`, `language_examples` and `MANIFEST.json` under `ail_lang/`; compiler-internal test and
+benchmark files are excluded from the package data.  `ail_chatgpt.py` now puts its own directory on
+`sys.path` before importing its sibling modules, which is a no-op in a source checkout and lets the
+installed `ail_lang.ail_chatgpt` run from any working directory.  `test_ail_packaging.py` builds the
+wheel with `pip wheel --no-deps --no-build-isolation`, installs it into a fresh venv, and compiles
+and runs hello world from outside the repository.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};

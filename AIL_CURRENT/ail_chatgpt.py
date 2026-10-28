@@ -14,15 +14,18 @@ import shutil
 import subprocess
 import sys
 import tempfile
+
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 from ail_syntax import SyntaxErrorAIL, detect, fold_constants, python_surface, python_wording, translate
 import ail_sexpr
 import ail_modules
 
-sys.path.append(str(Path(__file__).resolve().parent / 'python/pkg-v12'))
+sys.path.append(str(ROOT / 'python/pkg-v12'))
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every walk this process makes
-
-ROOT = Path(__file__).resolve().parent
 _BUILDCACHE = []
 
 
