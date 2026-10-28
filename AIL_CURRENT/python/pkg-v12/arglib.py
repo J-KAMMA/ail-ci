@@ -12,8 +12,10 @@ dest, help, metavar.  Positionals, several option strings for one argument, long
 `--opt=value`, short `-cVALUE` / `-c=VALUE`, short clusters (-vv, -qv), `--`, and a
 negative number used as a positional are understood.  Not built (named refusal): nargs,
 const, action other than the three above, an optional argument with neither a default nor
-required=True, and any other keyword.  The help text is not reproduced (`-h` prints a
-usage line only); the parse itself is exact for the forms above.
+required=True, any other keyword, a second parse_args on the same parser, and help.  A
+parser with add_help=True is only lowered when the argv is a literal list/tuple with no
+help token anywhere before `--`; a runtime argv (sys.argv) or a literal `-h`/`--help`
+(including an abbreviation such as `--he`) is refused, so no approximate help is printed.
 """
 import ast
 
@@ -286,15 +288,19 @@ def _expand_lines(parser, base):
     pairs = [pair for pair, _ in shorts]
     full = [name for arg in parser.args if not arg.positional for name in arg.names
             if not name.startswith('--') and len(name) > 2]
-    condition = ['%s_t.startswith("-") and not %s_t.startswith("--") and len(%s_t) > 2' % (base, base, base)]
+    condition = ['not %s_dd' % base,
+                 '%s_t.startswith("-") and not %s_t.startswith("--") and len(%s_t) > 2' % (base, base, base)]
     condition.append('(' + ' or '.join('%s_t[0:2] == %r' % (base, pair) for pair in pairs) + ')')
     if full:
         condition.append('not (' + ' or '.join('%s_t == %r' % (base, name) for name in full) + ')')
     lines = ['%s_argv0: list[str] = %s_argv' % (base, base),
              '%s_expanded: list[str] = []' % base,
+             '%s_dd: int = 0' % base,
              '%s_j: int = 0' % base,
              'while %s_j < len(%s_argv0):' % (base, base),
              '    %s_t: str = %s_argv0[%s_j]' % (base, base, base),
+             '    if %s_t == "--":' % base,
+             '        %s_dd = 1' % base,
              '    if %s:' % ' and '.join(condition),
              '        %s_k: int = 1' % base,
              '        while %s_k < len(%s_t):' % (base, base),
@@ -305,12 +311,8 @@ def _expand_lines(parser, base):
         word = 'if' if index == 0 else 'elif'
         if arg.action == 'store':
             body += ['%s %s_c == %r:' % (word, base, char),
-                     '    %s_expanded.append(%r)' % (base, name),
                      '    %s_rest: str = %s_t[%s_k + 1:]' % (base, base, base),
-                     '    if %s_rest.startswith("="):' % base,
-                     '        %s_expanded.append(%s_rest[1:])' % (base, base),
-                     '    elif len(%s_rest) > 0:' % base,
-                     '        %s_expanded.append(%s_rest)' % (base, base),
+                     '    %s_expanded.append(%r + %s_rest)' % (base, name, base),
                      '    %s_k = len(%s_t)' % (base, base)]
         else:
             body += ['%s %s_c == %r:' % (word, base, char),
@@ -342,6 +344,29 @@ def _positional_lines(parser, token, ind):
     return lines
 
 
+def _static_argv(argv):
+    """The tokens of a literal list/tuple argv, or None when the argv is computed at runtime."""
+    if not isinstance(argv, (ast.List, ast.Tuple)):
+        return None
+    tokens = []
+    for item in argv.elts:
+        if not (isinstance(item, ast.Constant) and isinstance(item.value, str)):
+            return None
+        tokens.append(item.value)
+    return tokens
+
+
+def _help_like(token):
+    """True when CPython's parser could take this literal token as -h/--help (or an abbreviation)."""
+    if token == '--':
+        return False
+    if token.startswith('--'):
+        return len(token) >= 3 and '--help'.startswith(token)
+    if token.startswith('-') and token != '-':
+        return 'h' in token[1:]
+    return False
+
+
 def _parse_lines(parser, args_name, call):
     if len(call.args) > 1 or (call.args and call.keywords):
         refuse(call, 'argparse: parse_args() takes no argument or one list')
@@ -353,10 +378,18 @@ def _parse_lines(parser, args_name, call):
         argv = call.args[0]
     else:
         argv = ast.parse('sys.argv[1:]', mode='eval').body
-    if parser.add_help and isinstance(argv, (ast.List, ast.Tuple)):
-        for item in argv.elts:
-            if isinstance(item, ast.Constant) and item.value in ('-h', '--help'):
-                refuse(item, 'argparse: help output (-h/--help) is not built')
+    if parser.add_help:
+        tokens = _static_argv(argv)
+        if tokens is None:
+            refuse(argv, 'argparse: help output (-h/--help) is not built; add_help=True needs a '
+                         'literal argv with no help token')
+        after_dash = False
+        for token in tokens:
+            if token == '--':
+                after_dash = True
+                continue
+            if not after_dash and _help_like(token):
+                refuse(call, 'argparse: help output (-h/--help) is not built')
     base = '_ail_argparse_%s' % parser.name
     ind = {'pos': base + '_pos'}
     lines = ['%s_argv: list[str] = %s' % (base, ast.unparse(argv))]
@@ -367,10 +400,7 @@ def _parse_lines(parser, args_name, call):
     inner = ['%s_tok: str = %s_argv[%s_i]' % (base, base, base)]
     positionals = [a for a in parser.args if a.positional]
     branches = []
-    if parser.add_help:
-        branches.append(('if', ['%s_tok == "-h" or %s_tok == "--help"' % (base, base)],
-                         ['print("usage: " + sys.argv[0])', 'sys.exit(0)']))
-    branches.append(('elif' if branches else 'if', ['%s_tok == "--"' % base], None))
+    branches.append(('if', ['%s_tok == "--"' % base], None))
     long_names = [name for arg in parser.args if not arg.positional
                   for name in arg.names if name.startswith('--')]
     for arg in parser.args:
@@ -509,6 +539,7 @@ def _parse_lines_ast(parser, args_name, call):
 def process_body(body):
     parsers = {}
     argmaps = {}
+    parsed = set()
     out = []
     for stmt in body:
         handled = False
@@ -522,6 +553,10 @@ def process_body(body):
                 handled = True
             elif _is_parse_call(stmt.value, parsers):
                 parser = parsers[stmt.value.func.value.id]
+                if parser in parsed:
+                    refuse(stmt, 'argparse: parse_args() is called twice on the parser %r; '
+                                 'only one parse per parser is built' % parser.name)
+                parsed.add(parser)
                 argmaps[name] = parser
                 out.extend(_parse_lines_ast(parser, name, stmt.value))
                 handled = True

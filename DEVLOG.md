@@ -1,3 +1,21 @@
+## 2026-10-28 -- stdlib8 review: repeated parse_args refused, attached short values, `--`, help refusal
+
+The review found four defects in the argparse lowering.  `parse_args()` is now refused by name when
+it is called twice on the same parser in one scope (previously both calls shared the hidden
+variables, so the second call aliased the first and kept stale defaults/flags).  A short option's
+attached value is kept in the same token during cluster expansion, so `-s-vv` / `-s=-vv` pass
+`-vv` as the value instead of being rejected as an option.  Cluster expansion stops at `--`, so a
+token such as `-vv` after `--` is the positional it is in CPython.  Help is no longer approximated:
+the runtime usage-line branch is gone, and `add_help=True` is refused by name unless the argv is a
+literal list/tuple with no `-h`/`--help` token or abbreviation before `--` (a runtime argv such as
+`sys.argv[1:]` is refused too).  `test_ail_stdlib8.py` now covers the attached-value, `--` and
+scope cases and the new refusals (variable-list help, `--he`, runtime help, a second parse).
+
+Probes in `/tmp/probes/p8fix_*.py` on both builds via `cmp.sh`: matching CPython are
+`p8fix_short_negvalue`, `p8fix_dash_cluster`, `p8fix_cluster_after_dash`, `p8fix_routes`,
+`p8fix_empty`, `p8fix_negative`, `p8fix_types`, `p8fix_scopes`, `p8fix_help_after_dash`; refused
+by name are `p8fix_multi`, `p8fix_twice_help`, `p8fix_help_var2`, `p8fix_help_abbrev`.
+
 ## 2026-10-28 -- stdlib8: argparse.ArgumentParser / add_argument / parse_args
 
 `argparse` was the next most-imported still-refused module (9 `language_examples` imports; none in
@@ -8,11 +26,14 @@ optionals, several option strings, long `--opt=value`, short `-cVALUE`/`-c=VALUE
 (`-vv`, `-qv`, `-vc7`), long abbreviations, `--`, negative numbers, `type=` str/int/float/Path,
 literal/expression defaults (string defaults converted as CPython does), required, choices,
 store/store_true/store_false and dest/help/metavar.  The other forms are named compile-time
-refusals: nargs, const, other actions, an optional with neither default nor required, a duplicate
-destination, non-default `prefix_chars`/`argument_default`, the namespace used as a value, the
-parser used outside those statements, a literal `-h`/`--help`, and an invalid string default.
-argparse's stderr usage/error text is not reproduced (stdout empty, exit 2), and runtime `-h` over
-`sys.argv` is not CPython's help; both are in the C?-job-stdlib8-10290216-1 row.
+refusals: nargs, const, other actions, an optional with neither default nor required, a second
+`parse_args()` on the same parser, a duplicate destination, non-default
+`prefix_chars`/`argument_default`, the namespace used as a value, the parser used outside those
+statements, help, and an invalid string default.  Help is never approximated: a parser with
+`add_help=True` is only lowered for a literal argv with no help token (or abbreviation) before
+`--`; runtime `-h` over `sys.argv` is refused by name, as recorded in the
+C?-job-stdlib8-10290216-1 row.  argparse's stderr usage/error text is not reproduced (stdout
+empty, exit 2).
 
 Probes in `/tmp/probes` on both builds via `cmp.sh`: matching CPython are `p_argparse_ok`,
 `p_argparse2`, `p_argparse_short`, `p_argparse_abbrev`, `p_argparse_cluster`, `p_argparse_two`,

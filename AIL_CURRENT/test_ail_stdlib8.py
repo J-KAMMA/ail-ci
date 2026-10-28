@@ -6,13 +6,15 @@ written directly in the program, so the parse becomes a loop over a list[str] (a
 sys.argv[1:]); there is no runtime module.  Uses outside that shape are refused by name at compile time.
 
 Covered here: positional and optional arguments, one or several option strings (-c / --count), long
---name=value, short -cVALUE / -c=VALUE and short clusters (-vv, -qv, -vc7), `--`, a negative number as
-a positional or an option value, type str / int / float / Path, literal and expression defaults (a
-string default is converted as CPython does), required, choices, store_true / store_false, and the
-error exits (invalid int, invalid choice, missing required, unrecognized option, an option with no
-value).  Not built (named refusals): nargs, append and the other actions, an optional with neither
-default= nor required=True, a literal -h / --help, an invalid string default, the namespace used as a
-value, and a parse result returned from a function.
+--name=value, short -cVALUE / -c=VALUE and short clusters (-vv, -qv, -vc7), an attached short value
+that begins with `-` (-s-vv), `--` (whose following tokens are never cluster-expanded), a negative
+number as a positional or an option value, type str / int / float / Path, literal and expression
+defaults (a string default is converted as CPython does), required, choices, store_true /
+store_false, and the error exits (invalid int, invalid choice, missing required, unrecognized option,
+an option with no value).  Not built (named refusals): nargs, append and the other actions, an
+optional with neither default= nor required=True, a second parse_args on the same parser, help
+(a literal -h / --help / a help abbreviation, or add_help=True over a runtime argv), an invalid
+string default, the namespace used as a value, and a parse result returned from a function.
 """
 import os
 import subprocess
@@ -35,7 +37,7 @@ HERE = Path("/tmp")
 
 
 def show(argv: list[str]) -> None:
-    parser = argparse.ArgumentParser(description="demo")
+    parser = argparse.ArgumentParser(description="demo", add_help=False)
     parser.add_argument("name")
     parser.add_argument("out", type=Path)
     parser.add_argument("--count", "-c", type=int, default=1)
@@ -49,7 +51,7 @@ def show(argv: list[str]) -> None:
 
 
 def second(argv: list[str]) -> None:
-    parser = ArgumentParser()
+    parser = ArgumentParser(add_help=False)
     parser.add_argument("--root", type=Path, default=HERE / "x")
     parser.add_argument("--label", default="a" + "b")
     parser.add_argument("--n", type=int, choices=(1, 2, 3), default=1)
@@ -58,7 +60,7 @@ def second(argv: list[str]) -> None:
 
 
 def third(argv: list[str]) -> None:
-    parser = ArgumentParser()
+    parser = ArgumentParser(add_help=False)
     parser.add_argument("-v", "--verbose", action="store_true")
     parser.add_argument("-q", "--quiet", action="store_false")
     parser.add_argument("--count", type=int, default=1)
@@ -125,6 +127,47 @@ def main() -> None:
 main()
 '''
 
+PROGRAMS["argparse_short_value"] = r'''import argparse
+
+
+def show(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("-s", "--say", default="d")
+    args = parser.parse_args(argv)
+    print(repr(args.say))
+
+
+def main() -> None:
+    show(["-s-vv"])
+    show(["-s=-vv"])
+    show(["-s", "-5"])
+    show(["-s-5"])
+    show(["-s="])
+
+
+main()
+'''
+
+PROGRAMS["argparse_dashdash"] = r'''import argparse
+
+
+def show(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser(add_help=False)
+    parser.add_argument("-v", action="store_true")
+    parser.add_argument("val")
+    args = parser.parse_args(argv)
+    print(args.val, args.v)
+
+
+def main() -> None:
+    show(["--", "-vv"])
+    show(["--", "-c7"])
+    show(["-v", "--", "-vv"])
+
+
+main()
+'''
+
 PROGRAMS["argparse_bad_value"] = r'''import argparse
 
 parser = argparse.ArgumentParser(add_help=False)
@@ -171,6 +214,8 @@ CASES = [
     ("argparse", PROGRAMS["argparse"], [""]),
     ("argparse_noargs", PROGRAMS["argparse_noargs"], [""]),
     ("argparse_forms", PROGRAMS["argparse_forms"], [""]),
+    ("argparse_short_value", PROGRAMS["argparse_short_value"], [""]),
+    ("argparse_dashdash", PROGRAMS["argparse_dashdash"], [""]),
     ("argparse_bad_value", PROGRAMS["argparse_bad_value"], [""]),
     ("argparse_bad_int", PROGRAMS["argparse_bad_int"], [""]),
     ("argparse_bad_choice", PROGRAMS["argparse_bad_choice"], [""]),
@@ -243,6 +288,14 @@ class Refusals(unittest.TestCase):
                         "a = p.parse_args([])\nprint(a.n)\n", "default='bad' is not a valid int"),
             "help": ("import argparse\n\np = argparse.ArgumentParser()\np.add_argument('--name', default='x')\n"
                      "a = p.parse_args(['-h'])\nprint(a.name)\n", "help output (-h/--help) is not built"),
+            "help_var": ("import argparse\n\np = argparse.ArgumentParser()\np.add_argument('--name', default='x')\n"
+                         "argv = ['-h']\na = p.parse_args(argv)\nprint(a.name)\n", "help output (-h/--help) is not built"),
+            "help_abbrev": ("import argparse\n\np = argparse.ArgumentParser()\np.add_argument('--name', default='x')\n"
+                            "a = p.parse_args(['--he'])\nprint(a.name)\n", "help output (-h/--help) is not built"),
+            "help_runtime": ("import argparse\n\np = argparse.ArgumentParser()\np.add_argument('--name', default='x')\n"
+                             "a = p.parse_args()\nprint(a.name)\n", "help output (-h/--help) is not built"),
+            "twice": ("import argparse\n\np = argparse.ArgumentParser(add_help=False)\np.add_argument('--x', default='a')\n"
+                      "a = p.parse_args([])\nb = p.parse_args([])\nprint(a.x, b.x)\n", "parse_args() is called twice"),
         }
         for name, (text, wanted) in cases.items():
             with self.subTest(name):
