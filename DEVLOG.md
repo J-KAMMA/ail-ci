@@ -1,3 +1,27 @@
+## 2026-10-28 -- re-apply accepted pre366 on the current tree (job-rbrbpre366-10281613)
+
+Re-applied the accepted pre366 alias/wrapper change (job-rbpre366-10281113) on this tree.  The
+only source conflict was `_wrapper_int_params`: this tree keeps its `constants` argument and
+`_mutated_parameters`, and now also returns `_add_function_aliases(...)` so an aliased `int()`
+wrapper is checked like the wrapper itself.  The pow hunks applied around the existing
+`_pow_parameter_bindings` and symmetric constant-exponent (>= 63) rule, which stay: the
+symmetric rule remains on the builtin `pow` path, while the new wrapper/alias call-site checks
+cover `q = power` and alias chains.  Added `AIL_CURRENT/test_ail_pre366.py`, registered it in
+`ail_check.MODULES` and `tools/ci_shards.json` (weight 10.0), and added DIFFERENCES row
+`C?-job-rbrbpre366-10281613-1`.  `tools/diff_ids.py` is not present on this tree, so it could
+not be run; `tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes` (24 programs, both builds via `cmp.sh`): the 15 refused ones are `r01`-`r05`
+with `int64 constant expression out of range`, `r06`-`r10` and `m09` with the aliased-wrapper
+wording, and `r11`-`r14` with `int() of a float outside int64`; the other 9 (`m01`-`m08`,
+`m10`) match CPython.  Coverage includes `**` and `pow()` wrapper bodies, negative base,
+alias chain, module constants, argument/list-item/attribute/dict-value routes, a float base,
+and an aliased `int()` reached directly, through an alias chain, a list item and a dict value.
+
+Final tests on the committed tree: `test_ail_pre366`, `test_ail_pre160`, `test_ail_pre273`,
+`test_ail_pre371`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+pass.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
