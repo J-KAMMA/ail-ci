@@ -6,6 +6,11 @@ AIL is a small statically typed language that compiles to C. This repository hol
 the compiler (`AIL_CURRENT/`), its runtime, the language reference, and the test modules, so the
 suite can run on GitHub Actions. Development happens elsewhere; this tree is updated by export.
 
+## Documentation
+
+- [docs/INSTALL.md](docs/INSTALL.md): requirements, setup check, first compile and common problems.
+- [docs/QUICKSTART.md](docs/QUICKSTART.md): a 10-minute English tour with complete, tested programs.
+
 ## Running the tests
 
 Requirements: Python 3.10 or newer and `gcc` on `PATH`.
