@@ -1,3 +1,100 @@
+## 2026-10-28 -- re-apply pre366 on the integration tree (job-rbpre366-10281113)
+
+Re-applied the accepted pre366 alias/wrapper fix (job-pre366-10280649) on top of the current
+integration tree.  The conflict was in `_check_int64_pow_constants`: this tree already carried
+`_pow_parameter_bindings` (constant arguments bound at module-level call sites) and the
+symmetric constant-exponent (>= 63) refusal, so both are kept alongside the new wrapper/alias
+checks; the symmetric rule stays on the builtin `pow` path.  `_wrapper_int_params` keeps its
+`attributes` argument and now returns `_add_function_aliases(...)`.  Because the parameter
+binding makes a single constant argument route match CPython, the pre366 `argument` test now
+calls the wrapper from inside another function (still refused by name) and a new
+`argument_constants` case pins the matching behaviour.  Added `test_ail_pre366.py`, registered
+it in `ail_check.MODULES` and `tools/ci_shards.json` (weight 10.0), and added DIFFERENCES row
+`C?-job-rbpre366-10281113-1`.  `tools/diff_ids.py` is not present on this tree.
+
+Probes in `/tmp/probes/pre366reapply` (34 programs, both builds via `cmp.sh`): 21 are refused
+by name -- `r01`-`r05`, `r07`-`r15`, `r17`-`r20` with the pre366/pre273/int() wording and
+`m08`, `m10`, `m11` with the aliased-wrapper or constant-base pow wording; the other 13
+(`m01`-`m07`, `m09`, `m12`, `m13`, `m15`, `m16`, `r06`) match CPython.  Two int-alias routes
+outside this change still stop with the pre-existing `integer overflow`: a string outside
+int64 (`q("9223372036854775808")`) and a value passed through a non-wrapper argument
+(`run(1e300)` -> `q(v)`); the accepted pre366 change does not follow either.
+
+Final tests on the committed tree: `test_ail_pre160`, `test_ail_pre366`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`python3 tools/update_manifest.py --check` passes.
+
+## 2026-10-27 -- pre366 follow-up 2: gate the pre273 skip on pyfront's own folder (job-pre366-10280649)
+
+The reviewer's `/tmp/rprobes/p3.py` showed the previous skip was too broad: it used
+`_const_fold_int`, which folds a `~` operand (`(~3) ** n`) and bool leaves, while pyfront's
+pre273 rule uses `pyfront.int_constant`, which does not.  Such wrappers then lost both the
+call-site checks and the definition refusal, so `q = w; q(40)` compiled and stopped with
+`integer overflow` where CPython prints the exact value.  `_pow_body_refused_by_pre273` now
+mirrors pre273 exactly: only a `base ** exponent` BinOp (not a `pow()` body) whose base folds
+with `pyfront.int_constant` to an int64 value of |base| >= 2 and whose exponent is not written
+as a constant is skipped.  `~const` and bool-leaf bases get the pre366 wording again
+(`int64 constant expression out of range` for a constant call, the aliased refusal for a
+run-time one), and a `pow(10, n)` body also keeps the call-site checks.  The pre160 case
+(`return 10 ** n`) still reports the pre273 wording, and `(5 * 2) ** n` / `(2 ** 62) ** n` /
+`(-4) ** n` are still refused by pre273, as before.
+
+Probes `/tmp/probes/p01`-`p22` (both builds): p09, p10, p11, p13, p19 and p22 match CPython;
+p01, p03, p07, p15, p16, p17, p18 and p21 are refused with the aliased-wrapper wording;
+p02, p08, p14 and p20 with `int64 constant expression out of range`; p04, p05, p06 and p12
+with the pre273 wording.  Every probe matches CPython or is refused by name.  No DIFFERENCES
+row.  Final tests on the committed tree: `test_ail_pre160`, `test_ail_pre366`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`python3 tools/update_manifest.py --check` passes.
+
+## 2026-10-27 -- pre366 follow-up: keep the pre273 wording for a constant-base wrapper body (job-pre366-10280649)
+
+`test_ail_pre160` failed with the pre366 change: its `huge` wrapper (`def huge(n): return 10 ** n`)
+is called from `__index__`, and the new call-site check fired first with
+`int64 constant expression out of range` where the test expects the pre273 diagnostic
+(`a power with the integer constant base 10 and an exponent computed at run time ...`).
+That body is already refused by the pre273 rule at the definition, whatever the call site, so
+`check_wrapper` now skips a wrapper whose body base is a constant int with |base| >= 2 and whose
+exponent is not written as a constant; the earlier diagnostic is used again on both builds.
+Wrappers with a parameter base and constant operands are unchanged (`q(2, 63)` and `q(3, 40)`
+still say `int64 constant expression out of range`), as is the aliased run-time-operand refusal.
+No DIFFERENCES row: both spellings remain refused by name.
+
+Probes `/tmp/probes/pre366fix/p01`-`p22`: `p06`, `p09`, `p10`, `p13`, `p19`, `p20` and `p21`
+match CPython on both builds; `p01`-`p03`, `p05`, `p07`, `p11`, `p12` and `p14`-`p17` are
+refused by name with the pre273 wording; `p04`, `p08`, `p18` and `p22` are refused by name with
+the pre366 wording. Final tests on the committed tree: `test_ail_pre160`, `test_ail_pre366`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` pass;
+`python3 tools/update_manifest.py --check` passes.
+
+## 2026-10-27 -- pre366: a wrapper reached through an alias is followed by the constant checks (job-pre366-10280408)
+
+The pre349 reviewer's `r12` reproduced on both builds: a wrapper called through an alias
+variable (`q = power`) compiled and then stopped with `integer overflow` where CPython keeps
+the exact unbounded result.  The same shape reproduced for a wrapper returning
+`base ** exponent`, one returning `pow(base, exponent)`, and an `int()` wrapper.
+
+`ail_chatgpt._add_function_aliases` now adds module-level `q = wrapper` names to the int()/float
+wrapper map, so an out-of-int64 value reaching an aliased `int()` wrapper is refused by name
+with the existing `int() of a float outside int64` wording.  `_pow_wrapper_functions` and
+`_pow_wrapper_scope` follow a module function whose body is exactly one returned `**`/`pow`
+through direct and aliased calls (and alias chains), in module and function scopes.  Constant
+operands whose exact result leaves int64 are refused with `int64 constant expression out of
+range`; an aliased power wrapper whose operands are not statically known is refused by name
+because its result can leave int64.  Safe constants, `q(2, 62)`, a negative exponent, the safe
+base -1 with a run-time exponent and an in-range aliased `int()` conversion still match CPython.
+A direct wrapper call with a run-time operand keeps its previous behaviour.
+
+Added `AIL_CURRENT/test_ail_pre366.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`; added DIFFERENCES row `C?-job-pre366-10280408-1`.  Probes in
+`/tmp/probes/pre366` on both builds: `p01`, `p05`, `p07`, `p09`, `p15`, `p16`, `p22`, `p23`
+and `p24` match CPython; `p03`, `p04`, `p06`, `p08`, `p10`, `p13`, `p17`-`p21` and `p25` are
+refused by name; `p02`, `p11`, `p12` and `p14` are refused by name as aliased wrappers with
+run-time operands.  Final
+tests: `test_ail_pre366`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+and the related power/wrapper modules.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
