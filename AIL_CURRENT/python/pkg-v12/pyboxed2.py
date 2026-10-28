@@ -12454,15 +12454,14 @@ _GENEXP_SAFE_METHODS = frozenset({
 })
 
 
-# Builtins that read every element of their argument before returning.  A nested generator
-# expression that is their sole argument is materialised at the same point CPython consumes it,
-# so the eager lowering is exact.  next()/any()/all() are absent: they may stop before the inner
-# generator is exhausted.  The name must be unbound in the program, so a user function that
-# shares a builtin's name keeps the refusal.
-_GENEXP_FULL_CALLS = frozenset({
-    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max', 'bytes',
-    'bytearray',
-})
+# Builtins that read every element of their argument without any element-based check before the
+# end.  A nested generator expression that is their sole argument is materialised at the same
+# point CPython consumes it, so the eager lowering is exact.  Consumers that can raise while
+# reading (sum type-checks, min/max compare, bytes/bytearray range-check, set/frozenset/dict
+# hash) and consumers that stop early (next/any/all) are absent: the eager lowering would run
+# later elements' side effects after the point CPython raised or stopped.  The name must be
+# unbound in the program, so a user function that shares a builtin's name keeps the refusal.
+_GENEXP_FULL_CALLS = frozenset({'list', 'tuple', 'sorted'})
 
 
 def _genexp_fully_consumed(node, parents, counts):

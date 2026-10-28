@@ -1,11 +1,12 @@
 """cov28: a nested generator expression consumed whole at the point it is written.
 
-The general path materialises generator expressions eagerly.  That is exact while the reader
-consumes every element immediately, so an inner generator that is the sole argument of a
-fully-consuming builtin (sum/list/tuple/set/dict/sorted/min/max/bytes/Counter/... or
-join/extend/update) no longer keeps the nested-generator refusal.  A generator used as a
-loop/comprehension source, by next() or by any()/all() can stop early and stays a named
-refusal on both builds.  Every program is compared with CPython 3.12.
+The general path materialises generator expressions eagerly.  That is exact only while the reader
+consumes every element without an element-based failure before the end, so an inner generator that
+is the sole argument of list/tuple/sorted, or of join on a string literal, no longer keeps the
+nested-generator refusal.  A consumer that can raise mid-iteration (sum, min, max, bytes,
+bytearray, set, frozenset, dict) and a generator used as a loop/comprehension source, by next()
+or by any()/all() stays a named refusal on both builds.  Every program is compared with CPython
+3.12.
 """
 import os
 import subprocess
@@ -20,34 +21,28 @@ REFUSAL = 'a generator expression nested inside another generator expression'
 CASES = {}
 
 CASES['core'] = r'''def main():
-    rows = [[1, 2], [3], []]
-    print(sum(sum(v for v in row) for row in rows))
-    print([sum(v for v in row) for row in rows])
-    print("|".join("".join(str(v) for v in row) for row in rows))
-    print(list(list(v for v in row) for row in rows))
+    rows = [[3, 1, 2], [5], []]
+    print([list(v for v in row) for row in rows])
+    print([tuple(v for v in row) for row in rows])
+    print([sorted(v for v in row) for row in rows])
+    print(len(list(list(v for v in row) for row in rows)))
     print(tuple(tuple(v for v in row) for row in rows))
     print(sorted(sorted(v for v in row) for row in rows))
-    print(len(set(frozenset(v for v in row) for row in rows)))
-    print(dict((str(i), dict((j, j) for j in range(i))) for i in range(3)))
-    print(min(min(v for v in row) for row in rows if row))
-    print(max(max(v for v in row) for row in rows if row))
+    print("\n".join(" ".join(str(v) for v in row) for row in rows))
+    print("|".join("".join(str(v) for v in row) for row in [["a", "b"], ["c"]]))
+    print(list(sorted(str(v) for v in row) for row in rows))
+    print(tuple(list(v * 2 for v in row) for row in rows))
 
 
 main()
 '''
 
 CASES['empty_negative'] = r'''def main():
-    print(sum(sum(v for v in []) for _ in range(3)))
-    print(sum(sum(v for v in range(-3, 0)) for _ in range(2)))
-    print(sum(sum(v for v in range(0)) for _ in range(0)))
-    try:
-        print(min(min(v for v in []) for _ in range(1)))
-    except ValueError as e:
-        print("ValueError", e)
-    try:
-        print(max(max(v for v in []) for _ in range(1)))
-    except ValueError as e:
-        print("ValueError", e)
+    print([list(v for v in []) for _ in range(3)])
+    print([tuple(v for v in range(-3, 0)) for _ in range(2)])
+    print([sorted(v for v in range(0)) for _ in range(0)])
+    print("\n".join(" ".join(str(v) for v in row) for row in [[], [], []]))
+    print(list(list(v for v in range(-2, 0)) for _ in range(2)))
 
 
 main()
@@ -59,11 +54,16 @@ CASES['effects'] = r'''def tick(x):
 
 
 def main():
-    print(sum(sum(tick(v) for v in row) for row in [[1, 2], [3]]))
+    print(list(list(tick(v) for v in row) for row in [[1, 2], [3]]))
     try:
-        print(sum(sum(int(s) for s in row) for row in [["1"], ["x"]]))
-    except ValueError as e:
-        print("caught", e)
+        print(list(list(int(s) for s in row) for row in [["1"], ["x"], ["3"]]))
+    except ValueError:
+        print("caught ValueError")
+    try:
+        print(sorted(sorted(int(s) for s in row) for row in [["2"], ["x"], ["3"]]))
+    except ValueError:
+        print("caught ValueError")
+    print("\n".join(" ".join(str(tick(v)) for v in row) for row in [[1], [2]]))
     print("after")
 
 
@@ -75,38 +75,38 @@ CASES['routes'] = r'''class Box:
         self.rows = rows
 
 
-def total(rows):
-    return sum(sum(v for v in row) for row in rows)
+def reshape(rows):
+    return [sorted(v for v in row) for row in rows]
 
 
 def main():
-    rows = [[1, 2], [3]]
+    rows = [[3, 1], [2]]
     box = Box(rows)
     d = {"k": rows}
     items = [rows]
-    print(total(rows))
-    print(total(items[0]))
-    print(total(box.rows))
-    print(total(d["k"]))
+    print(reshape(rows))
+    print(reshape(items[0]))
+    print(reshape(box.rows))
+    print(reshape(d["k"]))
     alias = rows
-    print(total(alias))
-    rows.append([4])
-    print(total(rows))
-    print(total(items[0]))
-    print(total(box.rows))
-    print(total(d["k"]))
+    print(reshape(alias))
+    rows.append([4, 0])
+    print(reshape(rows))
+    print(reshape(items[0]))
+    print(reshape(box.rows))
+    print(reshape(d["k"]))
 
 
 main()
 '''
 
 CASES['corpus_shapes'] = r'''def main():
-    quarters = ("q1", "q2")
-    data = {"a": {"q1": 1, "q2": 2}, "b": {"q1": 3, "q2": 4}}
-    print("".join(f"{sum(data[r][q] for r in data):>7}" for q in quarters))
     rows = [[1, 2], [3, 4]]
     print("\n".join(" ".join(str(v) for v in row) for row in rows))
-    print([sum(a * b for a, b in zip(row, row)) for row in rows])
+    data = {"a": [[1, 2], [3]], "b": [[4]]}
+    print("\n".join("\n".join(" ".join(str(v) for v in row) for row in data[k])
+                    for k in sorted(data)))
+    print(list(list(v for v in row) for row in rows))
 
 
 main()
@@ -115,10 +115,16 @@ main()
 REFUSED = {
     'list_source': 'print(list(x for x in (y for y in [1, 2])))\n',
     'next': 'print(next(x for x in (y for y in [1, 2])))\n',
-    'shadowed_sum': 'def sum(x):\n    return 0\n\n\n'
-                    'print(list(sum(x for x in (y for y in [1, 2])) for _ in range(1)))\n',
+    'shadowed_sorted': 'def sorted(x):\n    return x\n\n\n'
+                       'print(list(sorted(x for x in (y for y in [1, 2])) for _ in range(1)))\n',
     'user_join': 'class J:\n    def join(self, x):\n        return "j"\n\n\n'
                  'print(list(J().join(x for x in (y for y in [1, 2])) for _ in range(1)))\n',
+    'sum_mid_iteration': 'def f(v):\n    print("f", v)\n    return str(v)\n\n\n'
+                         'print(list(sum(f(v) for v in row) for row in [[1], [2]]))\n',
+    'min_mid_iteration': 'print(list(min(v for v in row) for row in [[1, 2]]))\n',
+    'set_mid_iteration': 'print(list(set(v for v in row) for row in [[1, [2]]]))\n',
+    'bytes_mid_iteration': 'print(list(bytes(v for v in row) for row in [[65, 300]]))\n',
+    'dict_mid_iteration': 'print(list(dict(v for v in row) for row in [[(1, 2)]]))\n',
 }
 
 
