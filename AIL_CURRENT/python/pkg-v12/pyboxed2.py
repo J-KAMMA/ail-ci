@@ -2541,10 +2541,11 @@ class Compiler(boxclosure.ClosureMixin):
             for child in ast.iter_child_nodes(parent):
                 parents[child] = parent
         self._genexp_parents = parents
+        self._genexp_bound_names = _bound_names(tree)
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
                     any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)) and \
-                    not _nested_genexps_safe(gen, parents):
+                    not _nested_genexps_safe(gen, parents, self._genexp_bound_names):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6502,7 +6503,8 @@ class Compiler(boxclosure.ClosureMixin):
 
     def expr_GeneratorExp(self, node, ctx):
         if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)) and \
-                not _nested_genexps_safe(node, getattr(self, '_genexp_parents', {})):
+                not _nested_genexps_safe(node, getattr(self, '_genexp_parents', {}),
+                                         getattr(self, '_genexp_bound_names', {})):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -9427,6 +9429,30 @@ class Compiler(boxclosure.ClosureMixin):
         if not args or len(args) > 2 or (kwargs and set(kwargs) - {'start'}) or \
                 (len(args) == 2 and 'start' in kwargs):
             raise Unsupported('sum() with other than (iterable[, start])')
+        if isinstance(args[0], ast.GeneratorExp) and len(args) == 1 and not kwargs:
+            # Consume the generator one element at a time (as any()/all() already do) instead of
+            # materialising it first: a bad element stops before CPython would have evaluated the
+            # later ones.  With a start argument the old eager path stays, because the extra
+            # argument is part of a call the nested-generator screen refuses anyway.
+            gen = args[0]
+            first = gen.generators[0]
+            src = self._resolve_iter_src(first.iter, ctx)
+            opened = ctx.tmp()
+            ctx.emit('st = ail_iter(cx, &%s, %s);' % (opened, src))
+            ctx.check()
+            acc = ctx.tmp()
+            ctx.emit('%s = ail_box_int(0);' % acc)
+            sst = "sumst_" + "".join(ch for ch in acc if ch.isalnum())
+            ctx.emit('ail_sumst %s; ail_sum_begin(&%s, %s);' % (sst, sst, acc))
+
+            def add(n, c, _t):
+                v = self.expr(n.elt, c)
+                c.emit('st = ail_sum_step(cx, &%s, &%s, %s);' % (acc, sst, v))
+                c.check()
+
+            self._emit_comp_generators(gen.generators, 0, gen, ctx, acc, add, set(), opened=opened)
+            ctx.emit('ail_sum_end(cx, &%s, &%s);' % (acc, sst))
+            return acc
         src = self._resolve_iter_src(args[0], ctx)
         acc = ctx.tmp()
         start_node = args[1] if len(args) == 2 else kwargs.get('start')
@@ -12440,14 +12466,17 @@ _GENEXP_EAGER_CALLS = frozenset({
     'next', 'bytes', 'bytearray', 'Counter', 'array',
 })
 _GENEXP_EAGER_METHODS = frozenset({'join', 'extend', 'update', 'array'})
-# Consumers that read every element of their argument before returning.  A nested generator
-# expression passed to one of these can be materialised eagerly: the elements are evaluated at
-# the same point, in the same order, as CPython's lazy generator would evaluate them.
-_GENEXP_FULLY_CONSUMING_CALLS = frozenset({
-    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max',
-    'bytes', 'bytearray', 'Counter', 'array',
-})
-_GENEXP_FULLY_CONSUMING_METHODS = frozenset({'join', 'extend', 'update', 'array'})
+# Consumers a nested generator expression may be handed to under the eager lowering.  `list` and
+# `tuple` never stop early because of an element's value, and `sorted` with no key reads every
+# element before it compares any (a key would run while the generator is still producing, so it
+# is excluded below).  `sum` has its own fused, one-element-at-a-time path in _b_sum.  `str.join`
+# only qualifies on a string literal receiver with a provably-str element (see
+# _genexp_element_is_str), so it cannot abort on a non-str value: then it too reads every element.
+# Consumers that can abort on the first bad element (`set`, `dict`, `min`, `max`, `bytes`,
+# `Counter`, `array`, ...) are not here: eager materialisation would evaluate the later elements
+# that CPython never reaches.  Nor is any other method name: `x.update(...)` or `x.join(...)` may
+# be a method of the program.
+_GENEXP_SAFE_CONSUMER_CALLS = frozenset({'list', 'tuple', 'sorted', 'sum'})
 # Builtins whose call cannot raise one of the five catchable traps this compiler models, so a
 # generator element that only uses them keeps the existing eager lowering.
 _GENEXP_SAFE_CALLS = frozenset({
@@ -12463,31 +12492,66 @@ _GENEXP_SAFE_METHODS = frozenset({
 })
 
 
-def _genexp_consumed_fully(node, parents):
-    """True iff `node` is an argument to a consumer that reads every element before returning
-    (or a starred element), so materialising it at that point cannot be observed."""
-    par = parents.get(node)
-    if isinstance(par, ast.Starred):
+def _genexp_str_literal(node):
+    """True for a string literal receiver, so `.join` is the builtin str.join, not a method of the
+    program with that name."""
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _genexp_element_is_str(node, bound):
+    """True when `node` is syntactically a str, so str.join cannot reject it (and stop before
+    CPython would have evaluated the later elements)."""
+    if isinstance(node, (ast.Constant, ast.JoinedStr)):
+        return isinstance(node, ast.JoinedStr) or isinstance(node.value, str)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and \
+            node.func.id == 'str' and bound.get('str', 0) == 0:
         return True
-    if isinstance(par, ast.Call) and node in par.args:
-        f = par.func
-        if isinstance(f, ast.Name) and f.id in _GENEXP_FULLY_CONSUMING_CALLS:
-            return True
-        if isinstance(f, ast.Attribute) and f.attr in _GENEXP_FULLY_CONSUMING_METHODS:
-            return True
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and \
+            node.func.attr == 'join' and _genexp_str_literal(node.func.value):
+        return True
     return False
 
 
-def _nested_genexps_safe(node, parents):
+def _genexp_consumer(node, parents, bound):
+    """The call whose sole positional argument is `node`, when eager materialisation at that call
+    cannot change which elements are evaluated or their order; None otherwise."""
+    par = parents.get(node)
+    if not isinstance(par, ast.Call) or len(par.args) != 1 or par.keywords or par.args[0] is not node:
+        return None
+    f = par.func
+    if isinstance(f, ast.Name) and f.id in _GENEXP_SAFE_CONSUMER_CALLS and \
+            bound.get(f.id, 0) == 0:
+        return f.id
+    if isinstance(f, ast.Attribute) and f.attr == 'join' and _genexp_str_literal(f.value):
+        return 'join'
+    return None
+
+
+def _genexp_consumed_fully(node, parents, bound):
+    """True iff `node` is an argument to a consumer that reads every element before returning,
+    and the call has no other argument (or starred expansion) whose evaluation the eager
+    materialisation would move after the elements."""
+    consumer = _genexp_consumer(node, parents, bound)
+    if consumer is None:
+        return False
+    if consumer == 'join':
+        return _genexp_element_is_str(node.elt, bound)
+    return True
+
+
+def _nested_genexps_safe(node, parents, bound=None):
     """True when `node` itself is fully consumed in place and every generator expression inside
     it is too: the eager lowering then evaluates exactly the elements CPython would, at the same
-    point.  A saved outer generator, `next()` (it reads only the first element) or a
-    short-circuiting `any()`/`all()` is not fully consumed, so a nested generator there keeps the
-    by-name refusal."""
-    if not _genexp_consumed_fully(node, parents):
+    point.  A saved outer generator, `next()` (it reads only the first element), a
+    short-circuiting `any()`/`all()`, a method that may be the program's own, or a call with
+    other arguments (CPython evaluates those before it consumes the generator) is not fully
+    consumed, so a nested generator there keeps the by-name refusal."""
+    if bound is None:
+        bound = {}
+    if not _genexp_consumed_fully(node, parents, bound):
         return False
     return all(n is node or not isinstance(n, ast.GeneratorExp)
-               or _genexp_consumed_fully(n, parents) for n in ast.walk(node))
+               or _genexp_consumed_fully(n, parents, bound) for n in ast.walk(node))
 
 
 def _genexp_consumed_in_place(node, parents):

@@ -2,12 +2,17 @@
 
 The general path materialises a generator expression eagerly.  That is only observable when the
 generator is saved (created now, walked later) or when a consumer stops early, so a nested
-generator expression was refused wholesale.  When the OUTER generator is an argument to a consumer
-that reads every element (`str.join`, `sum`, `list`, `tuple`, `sorted`, ...) and every INNER one is
-too, the eager lowering evaluates exactly the same elements at the same point as CPython: the two
-programs below (the corpus shapes: a join of joins, and a join whose element sums an inner
-generator) now match on both builds.  A saved outer generator, `next()` (which reads one element),
-`any()`/`all()` (which short-circuit) and an inner generator that is only handed on keep the named
+generator expression was refused wholesale.  A nested generator is now accepted only where eager
+materialisation cannot change which elements run at which point: the OUTER generator is the sole
+argument of `list`/`tuple`/`sorted`/`sum`, or of `str.join` on a string literal with a provably-str
+element, and every INNER one is too.  `sum` consumes element by element (not materialised), and
+`join` with str elements cannot abort mid-way, so the corpus shapes (a join of joins, and a join
+whose element sums an inner generator) match on both builds.
+
+A saved outer generator, `next()` (one element), `any()`/`all()` (short-circuit), an inner
+generator only handed on, a consumer that aborts on a bad element (`set`, `dict`, ...), a method
+that may be the program's own (`.update`, `.join` on a non-literal), a call with extra arguments
+(CPython evaluates them before it consumes the generator) and a join of a non-str keep the named
 compile-time refusal.
 """
 import unittest
@@ -28,7 +33,6 @@ print(sum(sum(j * i for j in range(3)) for i in range(0)))
     'containers_inner': r'''print(list(list(j for j in range(i)) for i in range(4)))
 print(tuple(tuple(j for j in range(i)) for i in range(3)))
 print(sorted(sorted(j for j in range(i)) for i in range(3)))
-print(set(sum(j for j in range(i)) for i in range(3)))
 ''',
     'argument_route': r'''def render(rows):
     return "\n".join(" ".join(str(v) for v in row) for row in rows)
@@ -66,6 +70,16 @@ try:
 except ZeroDivisionError as e:
     print("caught", e)
 ''',
+    'inner_sum_aborts_at_first_element': r'''def val(y):
+    print("elem", y)
+    return str(y)
+
+
+try:
+    print(":".join(f"{sum(val(y) for y in [x])}" for x in [1, 2]))
+except TypeError as e:
+    print("caught", e)
+''',
 }
 
 REFUSED = {
@@ -99,6 +113,86 @@ print("\n".join(str(keep(y for y in [1, 2])) for _ in range(2)))
 
 
 print(sum(y for x in [1, 2] for y in (z for z in src(x))))
+''',
+    'set_outer_aborts_on_bad_element': r'''def val(x):
+    print("elem", x)
+    return x
+
+
+try:
+    print(set((sum(val(y) for y in [x]) for x in [[1], [2]])))
+except TypeError as e:
+    print("caught", e)
+''',
+    'dict_outer_aborts_on_bad_element': r'''def val(x):
+    print("elem", x)
+    return (x,)
+
+
+try:
+    print(dict((sum(val(y) for y in [x]) for x in [1, 2])))
+except (TypeError, ValueError) as e:
+    print("caught", e)
+''',
+    'update_may_be_the_program_method': r'''class Acc:
+    def __init__(self):
+        self.items = []
+
+    def update(self, it):
+        for x in it:
+            self.items.append(x)
+            break
+
+
+acc = Acc()
+acc.update((y for y in [x]) for x in [1, 2])
+print(acc.items)
+''',
+    'join_may_be_the_program_method': r'''class Acc:
+    def __init__(self):
+        self.items = []
+
+    def join(self, it):
+        for x in it:
+            self.items.append(x)
+            break
+        return ""
+
+
+acc = Acc()
+print(acc.join((y for y in [x]) for x in [1, 2]))
+print(acc.items)
+''',
+    'sum_with_extra_argument': r'''def note(tag, v):
+    print("arg", tag)
+    return v
+
+
+def val(x):
+    print("elem", x)
+    return x
+
+
+print(sum((sum(val(y) for y in [x]) for x in [1, 2]), note("start", 10)))
+''',
+    'join_of_non_str': r'''def val(x):
+    print("elem", x)
+    return x
+
+
+print("".join((y for y in [x]) for x in [1, 2]))
+''',
+    'starred_with_another_argument': r'''def tail(tag, v):
+    print("arg", tag)
+    return v
+
+
+def val(x):
+    print("elem", x)
+    return [x]
+
+
+print(*(sum(y for y in val(x)) for x in [1, 2]), tail("tail", 9))
 ''',
 }
 

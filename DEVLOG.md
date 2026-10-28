@@ -1,30 +1,41 @@
-## 2026-10-28 -- cov26: nested generator expressions consumed at once (job-cov26-10290509)
+## 2026-10-28 -- cov26: nested generator expressions consumed at once, review fixes (job-cov26-10290509)
 
 The corpus profile (219 programs, compiled the way `lab/profile/run.py` does; imports excluded)
 had 24 refusals on both builds. The most common non-import construct on the general path was
 `a generator expression nested inside another generator expression` (3 programs: deepseek t172,
-deepseek t432, glm t432). The outer generator in each is an argument to `str.join`, and the inner
-one is consumed at once by `str.join` or `sum`, so eager materialisation evaluates exactly the
-same elements in the same order as CPython.
+deepseek t432, glm t432). The corpus shapes are an outer `str.join` whose elements are an inner
+`str.join` or an f-string holding an inner `sum`.
 
-`pyboxed2.py` now accepts a nested generator only when the outer generator is fully consumed
-(`str.join`/`extend`/`update`, `sum`/`min`/`max`, `list`/`tuple`/`set`/`frozenset`/`dict`/`sorted`,
-`bytes`/`bytearray`, `Counter`/`array`, or a starred element) and every inner one is too. A saved
-outer generator, `next()` (reads one element), `any()`/`all()` (short-circuit) and an inner
-generator merely handed to a function keep the named refusal; `test_ail_pre42`'s refused cases
-still refuse. The v1 general emitter is unchanged and keeps its named refusal.
+The first cut accepted any nested generator whose outer consumer was in a broad list of
+"fully consuming" calls/methods. The review found three defects: extra call arguments were
+evaluated after the generator body; consumers that abort on a bad element (`set`, `dict`) left
+later elements unevaluated in CPython; and matching any attribute named `update`/`join` also
+matched the program's own method. The safe set is now narrower and observable:
 
-After the change the same profile has 21 refusals (from 24) on both the default and
-`AIL_UNIFIED_FORCE=1` builds; the three programs compile and match CPython on all three inputs.
-Probes in `/tmp/probes/cov26` (19 programs; both builds via `cmp.sh`): `p_join_join`,
-`p_join_sum_empty`, `p_sum_inner_negative`, `p_arg_route`, `p_list_item_route`,
-`p_attribute_route`, `p_dict_value_route`, `p_alias_route`, `p_side_effects`, `p_exception`,
-`p_types`, `p_nested_containers`, `p_widths`, `p_deep_nested` match CPython;
-`p_saved_outer_refused`, `p_next_refused`, `p_any_refused`, `p_inner_handed_on_refused` are
-refused by name. Added `test_ail_cov26.py`
-(8 matching programs, 5 refusals). Final-state tests: test_ail_cov26, test_ail_pre42,
-test_ail_pre116, test_ail_pre166, test_ail_safetynet, test_ail_files and
-test_ail_corpus_findings3. `tools/update_manifest.py` was run and `--check` passes.
+- `list`, `tuple`, `sorted` (sole positional argument, no keywords, builtin not rebound in the
+  module) or `sum` in the same shape. `sum(genexp)` now consumes one element at a time (like
+  `any`/`all`) instead of materialising it, so a bad element stops at the same point as CPython.
+- `str.join` only on a *string literal* receiver with an element syntactically proven to be a
+  str (`str(...)`, an f-string, a nested literal `.join`), so it cannot abort on a non-str value.
+- No method-name whitelist beyond that literal `str.join`; no `set`/`dict`/`min`/`max`/`bytes`/
+  `bytearray`/`Counter`/`array` for a nested generator, since those can abort before the later
+  elements CPython never evaluates. Calls with extra arguments, `next()`, `any()`/`all()`, a
+  saved/handed-on generator and an inner generator in a later `for` clause keep the named refusal.
+
+Profile after the fix: 24 -> 21 refusals on both builds; nested-generator refusals 3 -> 0. The
+three programs match CPython 3.12 on all three generated corpus inputs on both builds. Probes in
+`/tmp/probes/cov26` (30 programs, both builds via `cmp.sh`): 17 match CPython (`p_alias_route`,
+`p_arg_route`, `p_attribute_route`, `p_deep_nested`, `p_dict_value_route`, `p_exception`,
+`p_join_join`, `p_join_str_order`, `p_join_sum_empty`, `p_list_item_route`,
+`p_list_tuple_sorted_order`, `p_nested_containers`, `p_side_effects`, `p_sum_abort`,
+`p_sum_abort_toplevel`, `p_sum_inner_negative`, `p_widths`); 13 are refused by name
+(`p_any_refused`, `p_inner_handed_on_refused`, `p_next_refused`, `p_rev_dict_unhashable`,
+`p_rev_join_nonstr`, `p_rev_set_unhashable`, `p_rev_shadow_join`, `p_rev_shadow_update`,
+`p_rev_sorted_key`, `p_rev_starred_extra`, `p_rev_sum_extra`, `p_saved_outer_refused`, `p_types`
+-- its element is a method call whose receiver is not syntactically a str). Added
+`test_ail_cov26.py` (9 matching programs, 12 refusals). Final-state tests: test_ail_cov26, test_ail_pre42, test_ail_pre116,
+test_ail_pre166, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
