@@ -2001,6 +2001,117 @@ def _check_int64_pow_constants(tree, known):
             check(node, local, scope_names)
 
 
+def _own_scope_store_nodes(scope):
+    """name -> Store/Del Name nodes in one scope, ignoring nested functions, classes and lambdas."""
+    nodes = {}
+
+    def visit(node):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                continue
+            if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+                nodes.setdefault(child.id, []).append(child)
+            visit(child)
+
+    visit(scope)
+    return nodes
+
+
+def _check_int64_augmented_pow_constants(tree):
+    """Refuse `x = 10; ...; x **= 40`, whose known base is hidden by the augmented store.
+
+    The constant-power checks treat a name as a module constant only when it is stored once,
+    and `x **= 40` is itself a store, so `x` never reaches them; the program compiled and then
+    stopped with `integer overflow` where CPython prints the exact bignum.  When the only other
+    binding of the name is one plain module/function-level assignment whose value is a known
+    int, and no binding anywhere in the program can change it (a second store, a `global` /
+    `nonlocal` declaration, a parameter, import, definition, handler or match capture), the base
+    at the augmented statement is that value: a call between the two cannot rebind a name no
+    code assigns.  A constant exponent whose exact result leaves int64 is then refused here, by
+    name, on both builds.  In-range powers, bases -1/0/1, negative or float exponents and a name
+    that is rebound or written through another store are left to their existing behaviour."""
+    module_known = _known_module_constants(tree)
+    program_stores = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            program_stores.setdefault(node.id, []).append(node)
+    blocked = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            blocked.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            blocked.update(node.names)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            blocked.update((alias.asname or alias.name).split('.')[0] for alias in node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            blocked.add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            blocked.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            blocked.add(node.rest)
+
+    def check(aug, binding, stores, known, skip):
+        name = aug.target.id
+        if name in blocked or name in skip:
+            return
+        target, value_node = binding
+        if len(stores) != 2 or aug.target not in stores:
+            return
+        other = stores[1] if stores[0] is aug.target else stores[0]
+        if other is not target or (target.lineno, target.col_offset) >= (aug.lineno, aug.col_offset):
+            return
+        base = _pow_static_int(value_node, known)
+        if type(base) is not int or not _INT64_MIN <= base <= _INT64_MAX:
+            return
+        exponent = _pow_static_int(aug.value, known)
+        if type(exponent) is not int or exponent < 0:
+            return
+        result = _exact_pow_or_too_big(base, exponent)
+        if result is None or _int64_holds(result):
+            return
+        shown = 'too large' if result is _CONST_INT_TOO_BIG else _constant_diagnostic(result)
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = aug.lineno
+        error.source_column = aug.target.col_offset
+        raise error
+
+    module_bindings = {}
+    for statement in tree.body:
+        if isinstance(statement, ast.Assign) and len(statement.targets) == 1 \
+                and isinstance(statement.targets[0], ast.Name):
+            module_bindings.setdefault(statement.targets[0].id,
+                                       (statement.targets[0], statement.value))
+        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+              and statement.value is not None):
+            module_bindings.setdefault(statement.target.id, (statement.target, statement.value))
+    for node in _walk_module_scope(tree):
+        if (isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Pow)
+                and isinstance(node.target, ast.Name) and node.target.id in module_bindings):
+            check(node, module_bindings[node.target.id],
+                  program_stores.get(node.target.id, []), module_known, ())
+
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        own_stores = _own_scope_store_nodes(function)
+        local_known = _function_local_int_constants(function, module_known)
+        skip = _scope_parameters(function) | _scope_declared(function)
+        bindings = {}
+        for statement in function.body:
+            if isinstance(statement, ast.Assign) and len(statement.targets) == 1 \
+                    and isinstance(statement.targets[0], ast.Name):
+                bindings.setdefault(statement.targets[0].id,
+                                    (statement.targets[0], statement.value))
+            elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+                  and statement.value is not None):
+                bindings.setdefault(statement.target.id, (statement.target, statement.value))
+        for node in _walk_own_scope(function):
+            if (isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Pow)
+                    and isinstance(node.target, ast.Name) and node.target.id in bindings):
+                check(node, bindings[node.target.id],
+                      own_stores.get(node.target.id, []), local_known, skip)
+
+
 def _check_int64_unary_constants(tree):
     """Refuse a statically known unary integer constant expression outside int64 by name.
     `-MIN` on a module constant or a nested literal compiles to the fixed-width trap on the
@@ -2925,6 +3036,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_local_cancellations(tree)
                 _check_int64_int_base_constants(tree)
                 _check_int64_pow_constants(tree, _known_module_constants(tree))
+                _check_int64_augmented_pow_constants(tree)
                 _check_class_attribute_assignment(tree)
                 _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:

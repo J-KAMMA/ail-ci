@@ -1,3 +1,32 @@
+## 2026-10-28 -- pre391: an augmented power with a known base is refused by name (job-pre391-10280854)
+
+The pre372 review's first pre-existing item was `x = 10; print("hello"); x **= 40`: both builds
+compiled it and then stopped with `integer overflow`, where CPython prints the exact bignum.
+The constant-power checks in `ail_chatgpt.py` (`_check_int64_constant_positions` and the plain
+`**` path) resolve a module or local name only when it is stored once; the augmented target is
+itself a store, so the `x = 10` binding never reached them, although `print(x ** 40)` was
+already refused even across a call. New `_check_int64_augmented_pow_constants` looks at a
+`**=` on a name whose only other binding is one plain module/function-level assignment with a
+known int value, and whose name no other construct can rebind: a second store, a
+`global`/`nonlocal` declaration, a parameter, import, definition, exception handler or match
+capture makes it skip. Program-wide store counting is what makes a call in between safe: no
+code assigns the name, so no call can change it. A constant exponent whose exact result leaves
+int64 is refused by name (`int64 constant expression out of range`, the same wording as the
+plain form). Bases -1/0/1, negative or float exponents, in-range results, a later rebinding and
+a name a function rebinds through `global` keep their CPython behaviour; the reviewer's other
+items (an unpacking target `b, = [10]; b **= 40` and constructs outside the subset) are
+unchanged.
+
+Added `AIL_CURRENT/test_ail_pre391.py` (8 refused, 7 matching programs, both builds) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json` (weight 38.8); added DIFFERENCES
+row `C?-job-pre391-10280854-1`. Probes in `/tmp/probes/pre391` on both builds via `cmp.sh`:
+`a01` (the recorded call case), `a02`, `a03` (function-local), `a04` (negative base), `a05`
+(computed exponent from a known name), `a06` (alias binding), `a07` (annotated binding), `a08`
+(`global` rebind before an in-range power), `a09` (augmented zero followed by a power), `a10`
+(boundaries: 2**62, (-2)**63, 1/-1/0 with huge exponents, float and negative exponent), `a11`
+(later rebinding), `a12` (2**63), `a14` (loop) and `a15` (unrelated parameter) are refused or
+match CPython; `a13` ((-2)**63 == INT64_MIN) matches. `b1_unpack`, `c1_global`, `c2_decorator`
+and `c3_globals` are unchanged. `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
