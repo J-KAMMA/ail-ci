@@ -2482,6 +2482,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.names_library = _load_names('NAMES_library.json')
         self.from_imports = {}     # bare name -> (module, attr)
         self.module_aliases = {}   # bare name -> module (import X as Y / import X)
+        self.future_annotations = False  # `from __future__ import annotations` keeps field types as strings
         # BRIEF_mixed_mode.md: python name -> {'mangled','params','ret','is_bool_ret','sig'} for
         # every candidate this integration step actually wired (see `_setup_mix`). `mix_units` is
         # [(mangled_csym, python_name, c_source_text), ...], one per wired candidate's own
@@ -2513,6 +2514,9 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _compile_cond(self, source):
         tree = ast.parse(source)
+        self.future_annotations = any(
+            isinstance(n, ast.ImportFrom) and n.module == '__future__'
+            and any(a.name == 'annotations' for a in n.names) for n in tree.body)
         self.source_has_class = any(isinstance(n, ast.ClassDef) for n in ast.walk(tree))
         import exctext
         exctext.refuse_args_item_store(tree, Unsupported)
@@ -3832,7 +3836,8 @@ class Compiler(boxclosure.ClosureMixin):
                 return True
             if ann.id in ('None', '__ail_checked_void__', '__ail_checked_flist__'):
                 return result
-            return (not result and ann.id in self.classes and self.classes[ann.id].get('dc')
+            return (not result and not self.future_annotations
+                    and ann.id in self.classes and self.classes[ann.id].get('dc')
                     and self._export_dataclass_ok(ann.id))
         if (isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
                 and ann.value.id in ('list', '__ail_checked_list')):
@@ -3840,6 +3845,8 @@ class Compiler(boxclosure.ClosureMixin):
         return False
 
     def _export_dataclass_ok(self, name):
+        if self.classes.get(name, {}).get('dc_future'):
+            return False       # field types stay strings under `from __future__ import annotations`
         init = self.classes.get(name, {}).get('methods', {}).get('__init__')
         if not init:
             return False
@@ -3848,6 +3855,32 @@ class Compiler(boxclosure.ClosureMixin):
             if not isinstance(ann, ast.Name) or ann.id not in ('int', 'float', 'bool'):
                 return False
         return True
+
+    def _export_binding_kept(self, stmt, name, module):
+        """Whether `stmt` is the import that brought the decorator name in (not a rebinding)."""
+        if module:
+            return (isinstance(stmt, ast.Import)
+                    and any(a.name == 'ail_ffi' and (a.asname or 'ail_ffi') == name
+                            for a in stmt.names))
+        return (isinstance(stmt, ast.ImportFrom) and stmt.module == 'ail_ffi'
+                and any(a.name == 'export' and (a.asname or a.name) == name
+                        for a in stmt.names))
+
+    def _export_rebound_before(self, node, name, module):
+        for stmt in self._module_tree.body:
+            if stmt is node:
+                return False
+            if self._export_binding_kept(stmt, name, module):
+                continue
+            if name in _store_linenos([stmt]):
+                return True
+        return False
+
+    def _check_export_decorator(self, node, name, module):
+        if self._export_rebound_before(node, name, module):
+            raise Unsupported('@export %s: %s is rebound before the decorator '
+                              '(CPython calls the rebound value)' % (node.name, name))
+        self._check_export(node)
 
     def _check_export(self, node):
         args = node.args
@@ -3895,13 +3928,16 @@ class Compiler(boxclosure.ClosureMixin):
             if nm == 'lru_cache' or nm == 'cache':
                 lru = True
             elif (not is_method
-                  and ((isinstance(dec_bare, ast.Name)
-                        and self.from_imports.get(dec_bare.id) == ('ail_ffi', 'export'))
-                       or (isinstance(dec_bare, ast.Attribute) and dec_bare.attr == 'export'
-                           and isinstance(dec_bare.value, ast.Name)
-                           and self.module_aliases.get(dec_bare.value.id) == 'ail_ffi'))):
-                self._check_export(node)  # ail_ffi.export is the identity on CPython; it only marks
-                                         # a function for `ail build --lib`
+                  and isinstance(dec_bare, ast.Name)
+                  and self.from_imports.get(dec_bare.id) == ('ail_ffi', 'export')):
+                self._check_export_decorator(node, dec_bare.id, False)
+            elif (not is_method
+                  and isinstance(dec_bare, ast.Attribute) and dec_bare.attr == 'export'
+                  and isinstance(dec_bare.value, ast.Name)
+                  and self.module_aliases.get(dec_bare.value.id) == 'ail_ffi'):
+                self._check_export_decorator(node, dec_bare.value.id, True)
+                # ail_ffi.export is the identity on CPython; it only marks
+                # a function for `ail build --lib`
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'staticmethod':
                 is_static = True
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'property' and len(node.decorator_list) == 1:
@@ -3984,6 +4020,8 @@ class Compiler(boxclosure.ClosureMixin):
         dc = 0
         marker = getattr(self, 'source_lines', None)
         hide = 0
+        dc_future = bool(marker and 2 <= node.lineno <= len(marker) + 1
+                         and ' future' in marker[node.lineno - 2])
         if (marker and 2 <= node.lineno <= len(marker) + 1
                 and marker[node.lineno - 2].strip().startswith('# ail:dataclass')
                 and '__repr__' not in methods and ' norepr' not in marker[node.lineno - 2]
@@ -4014,7 +4052,8 @@ class Compiler(boxclosure.ClosureMixin):
         for kind, what in body_order:
             class_body.append((kind,) + (class_attrs[what] if kind == 'a' else (what,)))
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
-                                   'class_body': class_body, 'dc': dc, 'dc_hide': hide}
+                                   'class_body': class_body, 'dc': dc, 'dc_hide': hide,
+                                   'dc_future': dc_future}
         self.class_order.append(node.name)
 
     def _class_definition(self, cname, attr):

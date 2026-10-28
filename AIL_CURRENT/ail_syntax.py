@@ -2767,7 +2767,8 @@ class _Surface:
         # ` nocmp=` for fields declared compare=False, both written before ` hide=`)
         # ` norepr` for repr=False (the marker is written all the same: the general path's generated __eq__ reads it)
         marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (' frozen' if frozen else '') + (' norepr' if repr_off else '') + (
-            ' nocmp=' + ','.join(sorted(uncompared)) if uncompared else '')
+            ' nocmp=' + ','.join(sorted(uncompared)) if uncompared else '') + (
+            ' future' if self._future_annotations() else '')
         self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset), marker, False))
         # a dataclass that extends another one: its fields come after the base's (a field of the same
         # name keeps the base's position)

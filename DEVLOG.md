@@ -1,3 +1,24 @@
+## 2026-10-28 -- ex21 review: unused `export` import stays typed; future annotations and rebinding refused (job-ex21-10290616)
+
+The review found three defects in the `@export` change.  `ail_ffi_lower` kept `from ail_ffi import
+export` whenever the name was imported, so an unused import forced the default build through the
+general path (`program.c` 111,976 bytes, fallback note) where the base used the typed path (16,792
+bytes, no note); it now keeps the line only when `@export` / `@export()` is actually written (and an
+`import ail_ffi as x` only for `@x.export`).  Under `from __future__ import annotations` a dataclass
+parameter's field types stay strings, so CPython's `@export` raises `TypeError`; `ail_syntax` now
+writes ` future` into its `# ail:dataclass` marker and the general path refuses the decorator by name.
+Rebinding the imported decorator (or the module alias) before the decorated `def` is also refused by
+name instead of accepting the stale import; a rebinding after the decorator still matches CPython.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh` with `PYTHONPATH=AIL_CURRENT`: `p24_unused_main`,
+`ex21_unused_module`, `ex21_used_call`, `ex21_module_alias`, `ex21_dataclass_ok`, `ex21_future_scalar`,
+`ex21_future_list`, `ex21_future_dataclass_plain`, `ex21_ann_only`, `ex21_rebind_after`, `ex21_routes`
+and the example `ex21_geometry` match CPython; `p13_future_dc`, `p23_reassign`, `ex21_rebind_ann`,
+`ex21_rebind_loop`, `ex21_rebind_module_alias`, `ex21_walrus_rebind`, `ex21_bad_type`,
+`ex21_bad_dataclass`, `ex21_no_return`, `ex21_default`, `ex21_method` and `ex21_alias_import` are
+refused by name.  The unused from-import has no fallback note and `program.c` is 16,792 bytes again
+(111,976 before).  Added the cases to `test_ail_ex21.py`.
+
 ## 2026-10-28 -- ex21: `@export` compiles as the identity it is on CPython (job-ex21-10290616)
 
 Surveying the Python-syntax examples, `c_export/geometry.py` was refused with "the decorator on def

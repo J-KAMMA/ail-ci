@@ -64,10 +64,58 @@ table = {'h': halves([1.0, 2.0])}
 print(values[0], table['h'], weight(Pair(2, 1.5, True)), note(1))
 '''
 
+FUTURE = '''from __future__ import annotations
+from dataclasses import dataclass
+from ail_ffi import export
+
+@dataclass
+class P:
+    x: int
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+@export
+def total(xs: list[int]) -> int:
+    return sum(xs)
+
+print(add(2, 3), total([1, 2, 3]), P(4).x)
+'''
+
+REBIND_AFTER = '''from ail_ffi import export
+
+@export
+def f(x: int) -> int:
+    return x
+
+export = 5
+print(f(2), export)
+'''
+
+ANNOTATION_ONLY = '''from ail_ffi import export
+export: int
+@export
+def f(x: int) -> int:
+    return x
+print(f(2))
+'''
+
+UNUSED_IMPORTS = (
+    'from ail_ffi import export\n\ndef main() -> None:\n    xs = [3, 1, 2]\n    xs.sort()\n    print(xs[0] + xs[-1])\n\nmain()\n',
+    'import ail_ffi\n\ndef main() -> None:\n    xs = [3, 1, 2]\n    xs.sort()\n    print(xs[0] + xs[-1])\n\nmain()\n',
+)
+
 INVALID = (
     'from ail_ffi import export\n\n@export\ndef add(a: int, b: int):\n    return a + b\n\nprint(add(2, 3))\n',
     'from ail_ffi import export\n\n@export\ndef inc(x: int = 1) -> int:\n    return x + 1\n\nprint(inc())\n',
     'from ail_ffi import export\n\n@export\ndef keys(d: dict) -> int:\n    return len(d)\n\nprint(keys({"a": 1}))\n',
+    'from __future__ import annotations\nfrom dataclasses import dataclass\nfrom ail_ffi import export\n\n@dataclass\nclass P:\n    x: int\n\n@export\ndef w(p: P) -> int:\n    return p.x\n\nprint(w(P(2)))\n',
+    'from ail_ffi import export\n\nexport = 5\n\n@export\ndef f(x: int) -> int:\n    return x\n\nprint(f(2))\n',
+    'from ail_ffi import export\n\nexport: int = 5\n\n@export\ndef f(x: int) -> int:\n    return x\n\nprint(f(2))\n',
+    'from ail_ffi import export\n\nfor export in [5]:\n    pass\n\n@export\ndef f(x: int) -> int:\n    return x\n\nprint(f(2))\n',
+    'import ail_ffi as ffi\n\nffi = 5\n\n@ffi.export\ndef f(x: int) -> int:\n    return x\n\nprint(f(2))\n',
+    'from ail_ffi import export\n\n(export := 5)\n\n@export\ndef f(x: int) -> int:\n    return x\n\nprint(f(2))\n',
 )
 
 
@@ -76,11 +124,14 @@ def python_path():
     return str(ROOT) if not old else str(ROOT) + os.pathsep + old
 
 
-def build(directory, source, general):
+def build(directory, source, general, quiet=True):
     path = Path(directory, 'p.py')
     path.write_text(source, encoding='utf-8')
     exe = Path(directory, 'exe_g' if general else 'exe_d')
-    env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
+    env = dict(os.environ, AIL_NO_CACHE='1')
+    env.pop('AIL_QUIET_FALLBACK', None)
+    if quiet:
+        env['AIL_QUIET_FALLBACK'] = '1'
     env.pop('AIL_UNIFIED_FORCE', None)
     if general:
         env['AIL_UNIFIED_FORCE'] = '1'
@@ -123,6 +174,29 @@ class ExportDecorator(unittest.TestCase):
 
     def test_export_annotation_boundaries_match_cpython(self):
         self.run_both(BOUNDARIES)
+
+    def test_future_annotations_matches_cpython(self):
+        self.run_both(FUTURE)
+
+    def test_rebound_after_the_decorator_matches_cpython(self):
+        self.run_both(REBIND_AFTER)
+
+    def test_annotation_without_a_value_does_not_rebind(self):
+        self.run_both(ANNOTATION_ONLY)
+
+    def test_unused_export_import_keeps_the_typed_path(self):
+        for source in UNUSED_IMPORTS:
+            expected = cpython(self.dir, source)
+            self.assertEqual(expected.returncode, 0, expected.stderr)
+            for general in (False, True):
+                (self.dir / ('exe_g' if general else 'exe_d')).unlink(missing_ok=True)
+                built, exe = build(self.dir, source, general, quiet=False)
+                where = 'general' if general else 'default'
+                self.assertEqual(built.returncode, 0, where + ':\n' + built.stdout + built.stderr)
+                self.assertNotIn('built on the general path', built.stdout + built.stderr, where)
+                ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
+                self.assertEqual(ran.returncode, expected.returncode, where + ':\n' + ran.stderr)
+                self.assertEqual(ran.stdout, expected.stdout, where)
 
     def test_invalid_export_is_refused_named(self):
         for source in INVALID:
