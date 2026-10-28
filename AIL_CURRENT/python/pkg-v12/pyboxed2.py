@@ -2533,6 +2533,18 @@ class Compiler(boxclosure.ClosureMixin):
         self.assigned_attrs = frozenset(assigned_attrs)
         genexp_parents = {child: parent for parent in ast.walk(tree)
                           for child in ast.iter_child_nodes(parent)}
+        genexp_bound = _bound_names(tree)
+        genexp_strs = {n.targets[0].id for n in tree.body
+                       if isinstance(n, ast.Assign) and len(n.targets) == 1
+                       and isinstance(n.targets[0], ast.Name)
+                       and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str)}
+        genexp_strs.update(n.target.id for n in tree.body
+                           if isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+                           and isinstance(n.value, ast.Constant) and isinstance(n.value.value, str))
+        genexp_modules = {a.name.split('.')[0] for n in ast.walk(tree) if isinstance(n, ast.Import)
+                          for a in n.names}
+        genexp_modules.update(n.module.split('.')[0] for n in ast.walk(tree)
+                              if isinstance(n, ast.ImportFrom) and n.module)
         for gen in ast.walk(tree):
             if not isinstance(gen, ast.GeneratorExp):
                 continue
@@ -2540,10 +2552,11 @@ class Compiler(boxclosure.ClosureMixin):
                       if n is not gen and isinstance(n, ast.GeneratorExp)]
             if not nested:
                 continue
-            if not _genexp_fully_consumed(gen, genexp_parents):
+            args = (genexp_bound, genexp_strs, genexp_modules)
+            if not _genexp_fully_consumed(gen, genexp_parents, *args):
                 _refuse_nested_genexp(gen)
             for inner in nested:
-                if not _genexp_fully_consumed(inner, genexp_parents):
+                if not _genexp_fully_consumed(inner, genexp_parents, *args):
                     _refuse_nested_genexp(inner)
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
@@ -12474,16 +12487,99 @@ def _genexp_consumed_in_place(node, parents):
 _GENEXP_FULL_CALLS = _GENEXP_EAGER_CALLS - {'any', 'all', 'next'}
 
 
-def _genexp_fully_consumed(node, parents):
-    """True iff `node` is an argument of a call that reads every element before returning."""
+_GENEXP_STR_METHODS = frozenset({
+    'upper', 'lower', 'strip', 'lstrip', 'rstrip', 'zfill', 'ljust', 'rjust', 'center', 'replace',
+    'format', 'title', 'capitalize', 'swapcase', 'casefold', 'join', 'removeprefix', 'removesuffix',
+})
+_GENEXP_STR_CALLS = frozenset({'str', 'repr', 'chr', 'input', 'format', 'ascii', 'hex', 'oct', 'bin'})
+_GENEXP_LIST_CALLS = frozenset({'list', 'sorted'})
+_GENEXP_DICT_CALLS = frozenset({'dict'})
+_GENEXP_SET_CALLS = frozenset({'set', 'frozenset'})
+
+
+def _genexp_expr_kind(node, bound, module_strs, imported_modules):
+    """The builtin value type `node` provably produces, or None.  Only literals and the calls that
+    return an exact builtin type qualify; a name is trusted only when its single module-level
+    binding is a string constant.  Anything a user class could override stays unknown."""
+    if isinstance(node, ast.Constant):
+        return 'str' if isinstance(node.value, str) else None
+    if isinstance(node, ast.JoinedStr):
+        return 'str'
+    if isinstance(node, (ast.List, ast.ListComp)):
+        return 'list'
+    if isinstance(node, (ast.Dict, ast.DictComp)):
+        return 'dict'
+    if isinstance(node, (ast.Set, ast.SetComp)):
+        return 'set'
+    if isinstance(node, ast.Name):
+        return 'str' if bound.get(node.id) == 1 and node.id in module_strs else None
+    if isinstance(node, ast.Call):
+        f = node.func
+        if isinstance(f, ast.Name) and not bound.get(f.id):
+            if f.id in _GENEXP_STR_CALLS:
+                return 'str'
+            if f.id in _GENEXP_LIST_CALLS:
+                return 'list'
+            if f.id in _GENEXP_DICT_CALLS:
+                return 'dict'
+            if f.id in _GENEXP_SET_CALLS:
+                return 'set'
+            return None
+        if (isinstance(f, ast.Attribute) and f.attr in _GENEXP_STR_METHODS
+                and _genexp_expr_kind(f.value, bound, module_strs, imported_modules) == 'str'):
+            return 'str'
+        return None
+    if isinstance(node, ast.BinOp):
+        left = _genexp_expr_kind(node.left, bound, module_strs, imported_modules)
+        right = _genexp_expr_kind(node.right, bound, module_strs, imported_modules)
+        if isinstance(node.op, ast.Add):
+            return left if left == right and left in ('str', 'list') else None
+        if isinstance(node.op, ast.Mod) and left == 'str':
+            return 'str'
+        if (isinstance(node.op, ast.Mult) and left == 'str'
+                and isinstance(node.right, ast.Constant) and isinstance(node.right.value, int)
+                and not isinstance(node.right.value, bool)):
+            return 'str'
+        return None
+    if isinstance(node, ast.IfExp):
+        body = _genexp_expr_kind(node.body, bound, module_strs, imported_modules)
+        orelse = _genexp_expr_kind(node.orelse, bound, module_strs, imported_modules)
+        return body if body == orelse else None
+    if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+        kind = _genexp_expr_kind(node.value, bound, module_strs, imported_modules)
+        return kind if kind in ('str', 'list') else None
+    return None
+
+
+def _genexp_method_receiver_ok(attr, recv, bound, module_strs, imported_modules):
+    """True iff `recv.attr` is provably the builtin method of that name.  A user class may define
+    `join`/`extend`/... that stops early, so an attribute is trusted only on a receiver whose
+    builtin type is known statically."""
+    kind = _genexp_expr_kind(recv, bound, module_strs, imported_modules)
+    if attr == 'join':
+        return kind == 'str'
+    if attr == 'extend':
+        return kind == 'list'
+    if attr == 'update':
+        return kind in ('dict', 'set')
+    if attr == 'array':
+        return (isinstance(recv, ast.Name) and recv.id == 'array'
+                and 'array' in imported_modules and bound.get('array') == 1)
+    return False
+
+
+def _genexp_fully_consumed(node, parents, bound, module_strs, imported_modules):
+    """True iff `node` is an argument of a call that reads every element before returning and the
+    callee is provably the builtin (a local binding of its name disables the shortcut)."""
     par = parents.get(node)
     if not (isinstance(par, ast.Call) and node in par.args):
         return False
     f = par.func
     if isinstance(f, ast.Name):
-        return f.id in _GENEXP_FULL_CALLS
+        return not bound.get(f.id) and f.id in _GENEXP_FULL_CALLS
     if isinstance(f, ast.Attribute):
-        return f.attr in _GENEXP_EAGER_METHODS
+        return f.attr in _GENEXP_EAGER_METHODS and \
+            _genexp_method_receiver_ok(f.attr, f.value, bound, module_strs, imported_modules)
     return False
 
 

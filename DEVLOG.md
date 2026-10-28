@@ -1,3 +1,26 @@
+## 2026-10-28 -- cov27 review: resolve the consumer callee before trusting it
+
+The review of `2ca6562` found that the nested-generator relaxation trusted a bare callee name and
+any attribute name.  A local `sum = mysum` and a user class with a partial `join` were therefore
+built and printed `[1, 2, 3, 4]` where CPython (and the base) gave `[1, 3]`.  The screen now asks
+`_bound_names` whether the name is bound anywhere (module-level shadowing definitions are already
+renamed by `shadowing.rename_all`), so a local, parameter, comprehension target or import of a
+consumer name keeps the named refusal.  An attribute consumer is trusted only on a receiver whose
+builtin type is provable (a str literal, `str(...)`, a module-level str constant, a list/dict/set
+literal, ...); `c.join(...)` on a user instance is refused by name.
+
+Re-ran the whole census (221 programs, both builds, 442 compiles): refusals stay 24 -> 21 on the
+default build and 24 -> 21 with `AIL_UNIFIED_FORCE=1`; nested-generator refusals go 3 -> 0 and the
+three programs (deepseek t172, deepseek t432, glm t432) match CPython on all three inputs on both
+builds.  No DIFF appeared; the limit classes are unchanged.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p_good_sum`, `p_good_join`, `p_good_sorted`
+(values through an argument, a list item, an attribute, a dict value, empty/negative/int64-width
+inputs, a module-level str separator) match CPython.  `p_shadow_sum`, `p_shadow_max`,
+`p_shadow_list`, `p_shadow_param`, `p_shadow_join`, `p_user_extend` and `p_inner_value` are
+refused by name on both builds; `p_any_inner` is refused on the unified build and matches on the
+default build.  `test_ail_cov27.py` now also pins the local-shadowing and user-method boundaries.
+
 ## 2026-10-28 -- cov27: a nested generator expression whose elements a call consumes
 
 The current corpus census (all 221 programs in `lab/corpus/programs`, both builds, 442 compiles)

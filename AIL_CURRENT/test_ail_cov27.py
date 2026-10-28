@@ -81,6 +81,36 @@ REFUSED = r'''def main():
 main()
 '''
 
+SHADOWED_SUM = r'''def main():
+    log = []
+    def side(i):
+        log.append(i); return i
+    def mysum(it):
+        for v in it: return v
+        return 0
+    sum = mysum
+    rows = [[1, 2], [3, 4]]
+    print(list(sum(side(v) for v in row) for row in rows))
+    print(log)
+main()
+'''
+
+SHADOWED_JOIN = r'''log = []
+def side(i):
+    log.append(i); return str(i)
+class C:
+    def __init__(self): self.first = ""
+    def join(self, it):
+        for v in it:
+            self.first = v; return v
+        return "z"
+def main():
+    c = C()
+    print(list(c.join(side(v) for v in row) for row in [[1,2],[3,4]]))
+    print(log)
+main()
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -126,13 +156,23 @@ class NestedGeneratorCoverage(unittest.TestCase):
             with self.subTest(slug):
                 self.check(slug, text, True)
 
-    def test_nested_generator_value_is_refused(self):
+    def assert_refused(self, slug, text, substring=None):
         with tempfile.TemporaryDirectory(prefix='ail-cov27-') as directory:
             for general in (True, False):
-                got, message = _build_and_run(directory, 'refuse%d' % general, REFUSED, general)
-                self.assertIsNone(got, 'built (general=%s)\n%s' % (general, message))
-                self.assertIn('generator expression', message)
-                self.assertIn('nested', message)
+                got, message = _build_and_run(directory, '%s%d' % (slug, general), text, general)
+                self.assertIsNone(got, '%s built (general=%s)\n%s' % (slug, general, message))
+                self.assertIn('not in the subset', message)
+                if substring is not None:
+                    self.assertIn(substring, message)
+
+    def test_nested_generator_value_is_refused(self):
+        self.assert_refused('refuse', REFUSED, 'nested')
+
+    def test_local_shadowing_of_a_consumer_name_is_refused(self):
+        self.assert_refused('shadow_sum', SHADOWED_SUM)
+
+    def test_user_method_named_like_a_consumer_is_refused(self):
+        self.assert_refused('shadow_join', SHADOWED_JOIN)
 
 
 if __name__ == '__main__':
