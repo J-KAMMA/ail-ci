@@ -15,7 +15,9 @@ a saved generator expression sees the class and a generator whose outermost iter
 ``any``/``next`` consume in place -- reads the class raises ``NameError``.
 
 Every program is built with the general path forced and with the default build; stdout and the
-exit status must match CPython.
+exit status must match CPython.  A name re-bound earlier in the class body wins over the busy
+class, and a class named after a builtin (`class id: x = id`) resolves to the builtin inside its
+own body.
 """
 import os
 import subprocess
@@ -56,6 +58,52 @@ class B:
 class C:
     x = B
 print(C.x is B)
+''',
+    'class_body_name_shadows_class_attribute': '''
+class D:
+    v = 7
+class C:
+    C = D
+    x = C.v
+print(C.x)
+''',
+    'class_body_name_shadows_class_method': '''
+class D:
+    def m(self):
+        return 42
+class C:
+    C = D()
+    x = C.m()
+print(C.x)
+''',
+    'class_body_name_shadows_from_container': '''
+class D:
+    v = 7
+    def m(self):
+        return 42
+class C:
+    C = [D][0]
+    x = C.v
+print(C.x)
+class E:
+    E = {"d": D()}["d"]
+    y = E.m()
+print(E.y)
+''',
+    'class_body_name_shadows_through_argument': '''
+class D:
+    v = 7
+class C:
+    C = D
+    x = (lambda c: c.v)(C)
+print(C.x)
+''',
+    'class_body_name_builtin_fallback': '''
+class id:
+    x = id
+    y = id(7)
+print(id.x is id)
+print(type(id.y) is int)
 ''',
     'earlier_attribute': '''
 x = 99

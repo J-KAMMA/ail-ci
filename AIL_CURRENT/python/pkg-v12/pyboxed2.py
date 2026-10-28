@@ -5132,7 +5132,7 @@ class Compiler(boxclosure.ClosureMixin):
     # builtins usable as function values, with the one arity they are called with through the value
     _BUILTIN_VALUE_ARITY = {'len': 1, 'abs': 1, 'ord': 1, 'chr': 1, 'bool': 1, 'repr': 1, 'sorted': 1, 'sum': 1,
                             'any': 1, 'all': 1, 'reversed': 1, 'iter': 1, 'hex': 1, 'oct': 1, 'bin': 1,
-                            'divmod': 2, 'pow': 2, 'isinstance': 2}
+                            'id': 1, 'divmod': 2, 'pow': 2, 'isinstance': 2}
     # builtins in _BUILTIN_VALUE_ARITY that are classes, so CPython's type name is `type`
     _BUILTIN_TYPE_NAMES = frozenset({'bool'})
 
@@ -5873,8 +5873,11 @@ class Compiler(boxclosure.ClosureMixin):
         # base chain finds.  A method or property of the same name shadows a base class attribute,
         # but is not a value the general path can hand out, so refuse it by name (it used to fall
         # through to the base attribute).
+        class_local = (isinstance(node.value, ast.Name) and ctx.class_locals
+                       and node.value.id in ctx.class_locals)
         direct = (isinstance(node.value, ast.Name) and node.value.id in self.classes
-                  and node.value.id not in ctx.slot_of and node.value.id not in self.module_names)
+                  and node.value.id not in ctx.slot_of and node.value.id not in self.module_names
+                  and not class_local)
         if direct and ctx.busy_class == node.value.id:
             self._emit_busy_class_check(node.value.id, ctx)
         value_kind = self.infer_kind(node.value, ctx)
@@ -7729,6 +7732,20 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.indent -= 1
         ctx.emit('}')
 
+    def _b_id(self, args, kwargs, ctx):
+        if len(args) != 1 or kwargs:
+            raise Unsupported('id() with other than one argument')
+        v = self.expr(args[0], ctx)
+        t = ctx.tmp()
+        addr = ctx.new_cvar('aid')
+        ctx.emit('int64_t %s;' % addr)
+        ctx.emit('if (%s.tag == AIL_T_STR) { %s = (int64_t)(uintptr_t)(%s).sv.backing + (%s).sv.off; } '
+                 'else if (%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL) { %s = (%s).i; } '
+                 'else { %s = (int64_t)(uintptr_t)(%s).o; }'
+                 % (v, addr, v, v, v, v, addr, v, addr, v))
+        ctx.emit('%s = ail_box_int(%s);' % (t, addr))
+        return t
+
     def _b_hash(self, args, kwargs, ctx):
         if len(args) != 1 or kwargs:
             raise Unsupported('hash() with other than one argument')
@@ -9063,7 +9080,8 @@ class Compiler(boxclosure.ClosureMixin):
     def _call_attribute(self, f, args, kwargs, ctx):
         recv = f.value
         if (isinstance(recv, ast.Name) and recv.id == ctx.busy_class
-                and recv.id not in ctx.slot_of and recv.id not in self.module_names):
+                and recv.id not in ctx.slot_of and recv.id not in self.module_names
+                and not (ctx.class_locals and recv.id in ctx.class_locals)):
             self._emit_busy_class_check(recv.id, ctx)
         # sys.stdin.read() / .readline(): the only sys.stdin surface this emitter models
         # (B046/B047 -- glue in the preamble, see the module docstring's stdin note).

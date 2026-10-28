@@ -186,10 +186,14 @@ def _params(args):
 class _Collector:
     """Every ast.Name that Python resolves to a module-level binding in `targets`."""
 
-    def __init__(self, targets, Unsupported):
+    def __init__(self, targets, Unsupported, unbound_class_names=()):
         self.targets = targets
         self.Unsupported = Unsupported
         self.names = []
+        # A class name is not bound inside its own body.  When this class is the first
+        # module-level binding of a shadowed built-in, references to that name in the body
+        # still resolve to the built-in, so they must keep their original spelling.
+        self.unbound_class_names = set(unbound_class_names)
 
     def visit(self, node, chain, class_locals=None):
         if isinstance(node, ast.Name):
@@ -225,6 +229,8 @@ class _Collector:
             for item in node.decorator_list + node.bases + [k.value for k in node.keywords]:
                 self.visit(item, chain, class_locals)
             local = _bound_names(node.body)
+            if node.name in self.unbound_class_names:
+                local = local | {node.name}
             for statement in node.body:
                 self.visit(statement, chain, local)
             return
@@ -275,7 +281,14 @@ def rename(source, Unsupported, extra_names=()):
             candidate, number = 'py_%s_%d' % (name, number), number + 1
         used.add(candidate)
         fresh[name] = candidate
-    collector = _Collector(set(targets), Unsupported)
+    earlier = set()
+    unbound_class_names = set()
+    for name, kind, node in found:
+        if (kind == 'struct' and name in targets and name not in earlier
+                and name not in extra_names):
+            unbound_class_names.add(name)
+        earlier.add(name)
+    collector = _Collector(set(targets), Unsupported, unbound_class_names)
     for statement in tree.body:
         collector.visit(statement, [])
     lines = stripped.split('\n')

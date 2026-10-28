@@ -1,3 +1,22 @@
+## 2026-10-28 -- pre399 review: class-body shadowing and builtin fallback (job-pre399-10281027)
+
+The pre399 review found three change-caused defects in the busy-class gate.  A class-body
+binding that reuses the class name (`class C: C = D; x = C.v`, and a method call through a
+`C = D()` binding) was still treated as the busy class, so both builds raised `NameError` where
+CPython and the base print `7`/`42`; `expr_Attribute` and `_call_attribute` now skip the gate
+when `ctx.class_locals` supplies the name.  A class named after a builtin (`class id: x = id`)
+was renamed together with the builtin's uses inside its own body; the shadowing renamer now
+leaves those body references as the builtin when the class is the first module-level binding of
+that name, so the program matches CPython (`False`) instead of raising `NameError`.  The general
+path also gained `id` as a value and a call (`_b_id`), needed by that case.
+
+The old row's claim that `next()`/`any()` over a saved generator stay gated was corrected: those
+are pre-existing differences (both builds print the class, CPython raises `NameError`), not part
+of this fix.  Probes in `/tmp/probes/pre399fix` (14 programs) match CPython on both builds; the
+two busy-name controls still exit 1 with `NameError`.  Final-state tests: test_ail_pre399,
+test_ail_builtin_shadowing, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre399: a class name is not bound inside its own body (job-pre399-10281027)
 
 The pre382 review recorded that its DIFFERENCES/DEVLOG rows and test docstring described the base
@@ -15,8 +34,9 @@ Ported pre382's busy-class flag to this integration tree: `_init_class_attrs` le
 it.  A read through a direct name, list/tuple/dict item, argument, alias, class attribute,
 comprehension element, immediate lambda, lambda default or `map`/`sorted` callback now raises
 CPython's `NameError`.  A lambda or method stored in the body and called later still returns the
-class; a saved generator expression's body is lowered lazily, so only its outermost iterable and
-in-place `any`/`next` consumption stay gated.
+class; a saved generator expression's body is lowered lazily. (The earlier claim that `next()`/
+`any()` over a saved generator stay gated was wrong: they print the class on both builds where
+CPython raises `NameError`; that pre-existing gap is unchanged.)
 
 Probes in `/tmp/probes/pre399` on both builds via `cmp.sh`: 8 match programs (`m01`-`m08`) match
 CPython, and 12 NameError programs (`n01`-`n12`: immediate lambda, construct, direct, list item,
