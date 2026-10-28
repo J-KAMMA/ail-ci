@@ -41,7 +41,7 @@ def build(directory, src, general, ail_path=None):
 
 
 class Ex22Tests(unittest.TestCase):
-    def same(self, files, entry='main.py', ail_path=None, run_dir=None):
+    def same(self, files, entry='main.py', ail_path=None, run_dir=None, expect_success=True):
         with tempfile.TemporaryDirectory(prefix='ail-ex22-') as directory:
             directory = Path(directory)
             for name, text in files.items():
@@ -50,8 +50,9 @@ class Ex22Tests(unittest.TestCase):
                 path.write_text(text, encoding='utf-8')
             src = directory / entry
             want = cpython(directory, src)
-            self.assertEqual(want.returncode, 0, want.stderr.decode())
-            self.assertTrue(want.stdout)
+            if expect_success:
+                self.assertEqual(want.returncode, 0, want.stderr.decode())
+                self.assertTrue(want.stdout)
             where = directory
             if run_dir is not None:
                 where = directory / run_dir
@@ -145,8 +146,71 @@ print(nsmod.__file__)
         self.refused({'helper.py': "__file__ = 'custom'\n", 'main.py': 'import helper\nprint(helper.__file__)\n'},
                      'helper.__file__ is not available', ail_path='.')
 
-    def test_deleting_file_is_refused_by_name(self):
-        self.refused({'main.py': 'x = __file__\ndel __file__\nprint(x)\n'}, "name '__file__' is not defined")
+    def test_deleting_file_after_a_read(self):
+        out = self.same({'main.py': 'x = __file__\ndel __file__\nprint(x)\n'})
+        self.assertTrue(out.endswith('/main.py\n'), out)
+
+    def test_a_parameter_or_lambda_argument_shadows_the_path(self):
+        self.same({'main.py': '''def f(__file__):
+    return __file__
+print(f('arg-value'))
+print(__file__)
+g = lambda __file__: __file__
+print(g('lambda-value'))
+print(__file__)
+'''})
+
+    def test_an_except_alias_keeps_the_ordinary_name_rules(self):
+        self.same({'main.py': '''try:
+    raise ValueError('boom')
+except ValueError as __file__:
+    print(__file__)
+print(__file__)
+'''}, expect_success=False)
+
+    def test_a_read_before_a_later_assignment_sees_the_path(self):
+        self.same({'main.py': '''def f():
+    return __file__
+print(f())
+__file__ = 'custom'
+print(__file__)
+'''})
+        self.same({'main.py': '''def g():
+    global __file__
+    __file__ = 'custom'
+print(__file__)
+g()
+print(__file__)
+'''})
+
+    def test_an_imported_module_reads_before_rebinding_file(self):
+        self.same({
+            'helper.py': '''def f():
+    return __file__
+print(f())
+__file__ = 'custom'
+print(__file__)
+''',
+            'main.py': 'import helper\n'}, ail_path='.')
+
+    def test_a_local_binding_does_not_hide_the_module_path(self):
+        self.same({
+            'helper.py': '''def f():
+    __file__ = 'local'
+    return __file__
+print(f())
+print(__file__)
+''',
+            'main.py': 'import helper\n'}, ail_path='.')
+
+    def test_from_an_imported_module_file_when_it_binds_one(self):
+        self.same({'helper.py': "__file__ = 'custom'\n",
+                   'main.py': 'from helper import __file__\nprint(__file__)\n'}, ail_path='.')
+
+    def test_assigning_a_module_file_attribute_is_refused_by_name(self):
+        self.refused({'helper.py': 'X = 1\n',
+                      'main.py': "import helper\nhelper.__file__ = 'Z'\nprint(helper.__file__)\n"},
+                     'helper.__file__` is assigned', ail_path='.')
 
 
 if __name__ == '__main__':

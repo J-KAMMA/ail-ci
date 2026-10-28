@@ -103,6 +103,40 @@ def _is_brace_or_sexpr(text):
     return ail_sexpr.detect(text) or detect(text)
 
 
+def _file_binds(tree):
+    """Whether a module-level `__file__` can be rebound, or a function declares it global."""
+    stores, globals_, _, _ = _scan_scope(tree.body)
+    if '__file__' in stores or '__file__' in globals_:
+        return True
+    return any(isinstance(node, ast.Global) and '__file__' in node.names for node in ast.walk(tree))
+
+
+def _file_import_bound(tree):
+    """Whether `__file__` is bound by an import, which the module analysis handles itself."""
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if (alias.asname or alias.name.split('.')[0]) == '__file__':
+                    return True
+    return False
+
+
+def _install_file_initial(tree, path):
+    """Give a module that binds `__file__` its CPython initial value."""
+    body = tree.body
+    index = 0
+    if (body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        index = 1
+    while (index < len(body) and isinstance(body[index], ast.ImportFrom)
+           and body[index].module == '__future__'):
+        index += 1
+    assign = ast.Assign(targets=[ast.Name('__file__', ast.Store())], value=ast.Constant(str(path)))
+    ast.copy_location(assign, body[index] if index < len(body) else (body[-1] if body else tree))
+    ast.fix_missing_locations(assign)
+    body.insert(index, assign)
+
+
 class Mod:
     def __init__(self, name, path, tree, entry, kind='module', dirs=None):
         self.name = name                # dotted name; '__main__' for the entry
@@ -131,8 +165,9 @@ class Mod:
         self.lazy = {}                  # id(synthetic top-level import) -> the function-level import it stands for
         self.lazy_only = set()          # names bound only by function-level local imports (not module attributes)
         self.pure_cache = False
-        self.file_bound = any(isinstance(node, ast.Name) and node.id == '__file__'
-                              and isinstance(node.ctx, (ast.Store, ast.Del)) for node in ast.walk(tree))
+        self.file_bound = _file_binds(tree)
+        if self.file_bound and kind != 'namespace' and not _file_import_bound(tree):
+            _install_file_initial(tree, path)
 
 
 class Imp:
@@ -1772,6 +1807,10 @@ class Rewriter(ast.NodeTransformer):
             self.program.refuse(self.mod, node, "`del %s.%s` removes a module attribute; the compiler fixes every "
                                 "module's names at build time.\n  write instead: assign a placeholder value "
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
+        if attr == '__file__' and stored:
+            self.program.refuse(self.mod, node, "`%s.__file__` is assigned; the compiler fixes a module's source "
+                                "path at build time.\n  write instead: keep the value in an ordinary attribute "
+                                "of %s" % (target.name, target.name))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
         if attr == '__file__' and not stored and not target.file_bound:

@@ -1,3 +1,27 @@
+## 2026-10-28 -- ex22 review: every `__file__` binding keeps the ordinary name rules (job-ex22-10290658)
+
+The review found that `_bind_file_constant` only looked for `ast.Name` stores, so a parameter,
+lambda argument, import alias or `except ... as` binding still had its loads rewritten to the
+path (a function parameter `__file__` printed the path instead of its argument, and an
+`except ValueError as __file__` body printed the path twice where CPython prints the exception
+then raises `NameError`).  A source that binds `__file__` in any form now gets the path installed
+as the initial module value instead of textual folding, so the ordinary name rules decide: a
+read before a later assignment sees the path, and `del __file__` matches CPython.  The merged
+rewriter uses the same module-level binding test (a local binding inside a function no longer
+disables folding), installs the initial value for a binding module, and refuses
+`module.__file__ = value` by name instead of silently folding later reads to the path.
+
+Probes in `/tmp/probes` and `/tmp/probes/mprobes` on both builds: `p_param`, `p_lambda`,
+`p_except`, `p_before_assign`, `p_global_assign`, `p_del`, `p_from_alias`, `p_future_bind`,
+`p_docstring_bind`, `p_empty_bind`, `p_containers_bind` and the earlier
+`p_file_basic`/`p_file_path`/`p_file_list`/`p_file_dict`/`p_file_attr`/`p_file_arg`/
+`p_file_read`/`p_file_fstring`/`p_file_concat`/`p_file_default`/`p_file_guard` match CPython;
+`p_import_alias` is refused by name (a module used as a value), as are the merged probes
+`m_import_alias` and `m_attr_store`; `m_param`, `m_except`, `m_before_assign`,
+`m_global_assign`, `m_del`, `m_localbind`, `m_future` and `m_from_bind` match CPython.
+`test_ail_ex22.py` now covers the parameter/lambda, `except as`, read-before-assignment,
+module rebinding, local binding, from-import and attribute-assignment cases.
+
 ## 2026-10-28 -- ex22: `__file__` names the build-time source path (job-ex22-10290658)
 
 Built every Python-syntax example under `AIL_CURRENT/language_examples`: the 14 `.py` files and the

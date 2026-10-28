@@ -4208,21 +4208,65 @@ def _refuse_load(error):
     raise SystemExit(2)
 
 
+def _file_is_bound(tree):
+    """Whether the source binds `__file__` in any way, so a load is not always the module path."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == '__file__' and isinstance(node.ctx, (ast.Store, ast.Del)):
+            return True
+        if isinstance(node, ast.arg) and node.arg == '__file__':
+            return True
+        if isinstance(node, ast.alias) and (node.asname or node.name.split('.')[0]) == '__file__':
+            return True
+        if isinstance(node, ast.ExceptHandler) and node.name == '__file__':
+            return True
+        if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == '__file__':
+            return True
+        if isinstance(node, ast.MatchMapping) and node.rest == '__file__':
+            return True
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == '__file__':
+            return True
+        if isinstance(node, (ast.Global, ast.Nonlocal)) and '__file__' in node.names:
+            return True
+    return False
+
+
+def _install_file_constant(text, tree, path):
+    """Give `__file__` its CPython initial value as an ordinary module name."""
+    body = tree.body
+    after = 0
+    index = 0
+    if (body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant)
+            and isinstance(body[0].value.value, str)):
+        after = body[0].end_lineno or body[0].lineno
+        index = 1
+    while (index < len(body) and isinstance(body[index], ast.ImportFrom)
+           and body[index].module == '__future__'):
+        after = max(after, body[index].end_lineno or body[index].lineno)
+        index += 1
+    lines = text.splitlines(keepends=True)
+    if after and not lines[after - 1].endswith('\n'):
+        lines[after - 1] += '\n'
+    lines.insert(after, '__file__ = %s\n' % repr(str(path)))
+    return ''.join(lines)
+
+
 def _bind_file_constant(text, path):
     """Replace a read-only `__file__` with this module's source path.
 
     CPython sets `__file__` to the file a module was loaded from.  A compiled program has no
-    source file at run time, so the build-time path is the value.  A module that binds or deletes
-    `__file__` itself is left untouched: the ordinary name rules then decide, and a construct the
-    compiler cannot model stays a named refusal instead of silently reading the old path.
+    source file at run time, so the build-time path is the value.  When the source binds
+    `__file__` itself (assignment, `del`, parameter, import alias, `except ... as`, ...), the
+    path is installed as the initial module value instead, so the ordinary name rules decide.
     """
     try:
         tree = ast.parse(text)
     except (SyntaxError, ValueError):
         return text
-    if any(isinstance(node, ast.Name) and node.id == '__file__'
-           and isinstance(node.ctx, (ast.Store, ast.Del)) for node in ast.walk(tree)):
+    if not any(isinstance(node, ast.Name) and node.id == '__file__' and isinstance(node.ctx, ast.Load)
+               for node in ast.walk(tree)):
         return text
+    if _file_is_bound(tree):
+        return _install_file_constant(text, tree, path)
     edits = []
     for node in ast.walk(tree):
         if not (isinstance(node, ast.Name) and node.id == '__file__' and isinstance(node.ctx, ast.Load)):
