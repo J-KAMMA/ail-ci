@@ -1,3 +1,12 @@
+## 2026-10-28 -- ex15 full-suite follow-up: detect a usable rustc (job-ex15-10290445)
+
+`test_ail_c_export` and `test_ail_cratebridge` failed in the full suite because `shutil.which`
+found the rustup proxy while no default toolchain was visible (the session HOME is a fresh
+directory), so the Rust hosts were attempted and the proxy exited 1.  `ail_testenv.rustc()` now
+probes `rustc --version` and both modules use it; the Rust cases skip when there is no usable
+toolchain and still run, unchanged, when one is installed.  The ex15 fix and its tests are
+unchanged.
+
 ## 2026-10-28 -- ex15 review fix: refuse non-finite module constants by name (job-ex15-10290445)
 
 The review found that the new no-op entry path bypassed the typed entry refusal for a module

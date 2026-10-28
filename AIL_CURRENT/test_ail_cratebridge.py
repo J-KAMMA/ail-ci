@@ -22,9 +22,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from test_ail_ffi import CC, compile_cli, run_cpython  # noqa: E402
+from ail_testenv import rustc  # noqa: E402
 
 BINDGEN = ROOT / "ail_bindgen.py"
-RUSTC = shutil.which("rustc")
+RUSTC = rustc()
 
 
 def have_header(name):
@@ -556,7 +557,7 @@ class CratebridgeTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ Rust crates
 
-    @unittest.skipUnless(RUSTC, "rustc required")
+    @unittest.skipUnless(RUSTC, "rustc required (with a toolchain)")
     def test_rust_crate_cdylib_and_staticlib(self):
         rdir = self.dir / "rust"
         rdir.mkdir()
