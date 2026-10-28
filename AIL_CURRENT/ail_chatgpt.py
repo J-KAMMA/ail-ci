@@ -4286,14 +4286,23 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             text = fold_constants(text)
             text = _fold_float_int_text(text)
             tree = ast.parse(text, filename=str(path))
-            file_insert = 0
+            file_insert = None
             if syntax == 'python' and merged is None and not declarations_only and ail_modules.file_uses(tree):
-                # bind CPython's __file__ before the body (after the docstring and the __future__
-                # imports); one added line, so the source map below shifts the lines after it
+                # bind CPython's __file__ before its first read (after the docstring and the
+                # __future__ imports); one added line, so the source map below shifts the lines
+                # after it. A docstring sharing its line with the read has no line boundary, so
+                # the binding is prefixed to that line instead and no line is added.
                 value = entry_file_value if entry else os.path.abspath(str(path))
-                file_insert = ail_modules.file_insert_line(tree)
+                place = ail_modules.file_place(tree)
                 lines = text.split('\n')
-                lines.insert(file_insert, '__file__ = %r' % (value,))
+                if place[0] == 'line':
+                    file_insert = place[1]
+                    lines.insert(file_insert, '__file__ = %r' % (value,))
+                else:
+                    _, lineno, offset = place
+                    row = lines[lineno - 1]
+                    at = len(row.encode('utf8')[:offset].decode('utf8'))
+                    lines[lineno - 1] = row[:at] + '__file__ = %r; ' % (value,) + row[at:]
                 text = '\n'.join(lines)
                 tree = ast.parse(text, filename=str(path))
             if syntax == 'python' and entry and not module_only and not declarations_only:
@@ -4314,13 +4323,14 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
-            if source_map is not None or file_insert:
+            if source_map is not None or file_insert is not None:
                 if syntax == 'python' and merged is None:
                     for node in ast.walk(tree):
                         if isinstance(node, ast.stmt):
-                            if file_insert and node.lineno == file_insert + 1:
+                            if file_insert is not None and node.lineno == file_insert + 1:
                                 continue                    # the __file__ line added above
-                            line = node.lineno - 1 if file_insert and node.lineno > file_insert + 1 else node.lineno
+                            line = (node.lineno - 1 if file_insert is not None and node.lineno > file_insert + 1
+                                    else node.lineno)
                             position = (line, len(text.splitlines()[node.lineno - 1].encode('utf8')[:node.col_offset].decode('utf8')) + 1)
                             locations[node.lineno] = None if node.lineno in locations else position
                     locations = {line: position for line, position in locations.items() if position is not None}

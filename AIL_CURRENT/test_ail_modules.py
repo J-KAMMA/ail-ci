@@ -1256,7 +1256,20 @@ class PackageRefusals(ModulesBase):
                       "pkg/b.py": "X = 1\n", "main.py": "import pkg.a\nprint(pkg.a.f())\n"}), "1\n")
 
     def test_module_file_attributes_and_dynamic_imports(self):
-        self.refused({"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__file__)\n"}, "not available")
+        # `__file__` is bound at build time: an imported module's own absolute path, as in CPython.
+        # (It used to be refused here because no module had a file at run time.)
+        files = {"lib.py": "X = 1\n",
+                 "main.py": "import lib\nprint(lib.__file__.endswith('lib.py'), type(lib.__file__).__name__)\n"}
+        write(self.dir, files)
+        expected = subprocess.run([sys.executable, "-B", "main.py"], cwd=self.dir, capture_output=True,
+                                  text=True, timeout=60)
+        self.assertEqual(expected.returncode, 0, expected.stderr)
+        for ir in ("0", "1"):
+            built, exe = compile_program(self.dir, "main.py", ir)
+            self.assertEqual(built.returncode, 0, built.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+            self.assertEqual(ran.stdout, expected.stdout, "AIL_IR=%s" % ir)
+            self.assertEqual(ran.returncode, 0)
         # the front end refuses these (exit 3) by name, with the same hint
         for source, needle in (("import importlib\nm = importlib.import_module('math')\nprint(m)\n", "importlib"),
                                ("m = __import__('math')\nprint(m)\n", "__import__")):

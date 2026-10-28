@@ -90,20 +90,39 @@ def file_uses(tree):
     return False
 
 
-def file_insert_line(tree):
-    """The line count before the body's first statement: a module docstring and `__future__` imports
-    stay first (CPython requires the latter), so a text-level `__file__` line goes after them."""
+FILE_SIMPLE = (ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign, ast.Return, ast.Raise, ast.Delete,
+               ast.Assert, ast.Import, ast.ImportFrom, ast.Global, ast.Nonlocal, ast.Pass, ast.Break,
+               ast.Continue)
+
+
+def file_place(tree):
+    """Where a text-level `__file__ = ...` goes. A module docstring and `__future__` imports stay
+    first (CPython requires the latter), so the binding normally becomes its own line after them:
+    `('line', index)` inserts it at that 0-based line index. A docstring or `__future__` import that
+    shares its last line with the next statement has no line boundary to use, so the binding goes
+    inline before that statement instead: `('inline', lineno, col_offset)`. An inline insertion is
+    only possible before a simple statement; a compound statement there puts the binding on a line
+    of its own before the docstring, or is refused when a `__future__` import comes first."""
     index = 0
     body = tree.body
     if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
             and isinstance(body[0].value.value, str):
         index = 1
+    future = index
     while index < len(body) and isinstance(body[index], ast.ImportFrom) and body[index].module == '__future__':
         index += 1
+    has_future = index > future
     if not index:
-        return 0
-    last = body[index - 1]
-    return last.end_lineno or last.lineno
+        return ('line', 0)
+    end = body[index - 1].end_lineno or body[index - 1].lineno
+    if index < len(body) and (body[index].lineno or 1) <= end:
+        if isinstance(body[index], FILE_SIMPLE):
+            return ('inline', body[index].lineno, body[index].col_offset)
+        if not has_future:
+            return ('line', 0)
+        raise ValueError("`__file__` is read on the same line as a `__future__` import and a "
+                         "compound statement; give that statement its own line")
+    return ('line', end)
 
 
 def define_file(tree, value):

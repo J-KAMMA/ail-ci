@@ -1,3 +1,31 @@
+## 2026-10-28 -- ex2 fix: docstring-line `__file__`, records, and one more language example (job-ex2-10290158)
+
+Review fixes for the `__file__` work. The text-level binding now goes inline before the first
+statement when a docstring (or a `__future__` import) shares its last line with that statement:
+`"""doc"""; print(__file__)` used to get `__file__ = ...` inserted *after* the print, so the general
+path exited 1 with `NameError` while CPython printed the path and exited 0. Both builds match
+CPython for that reproducer now, plus a multiline docstring sharing its close line and
+`"""d"""; from __future__ import annotations; print(__file__)`.
+
+Coverage: `language_examples/math.ail` (module constant `LIMIT = 6` plus `sum_to`, never called) was
+refused by the default build with `not in the subset: the first parameter must be the sequence read
+from the file`; CPython runs its module body and prints nothing (exit 0). `pyc._main_for` /
+`_io_main_for` ran *outside* the typed path's fallback, so a source whose body the typed path could
+compile but whose entry convention it could not call never reached the general path. The entry
+`main` is now selected inside the fallback: a source with a top-level statement (so CPython runs its
+module body) falls back to the general path, while a def-only source keeps the function-entry
+convention's by-name refusal (`pyc._defs_only`). math.ail builds on both builds and matches CPython
+(exit 0, empty stdout).
+
+The other refusals in `language_examples/*.py` are unchanged and by name (unavailable third-party or
+sys.path-only imports, a name rebound twice, module re-export reads, an int64-overflowing constant);
+those research harnesses need external toolchains and are not one-refusal programs.
+
+New `test_ail_ex2.py` (registered in `ail_check.py` MODULES) builds `__file__` programs and math.ail
+on both paths and compares stdout and exit code with CPython. Probes: `b1`-`b14` plus
+`imp1`-`imp6` in /tmp/probes, all matching CPython on both builds or refused by name
+(`from helper import __file__`, and the pre-existing def-only exit-2 convention). Manifest updated.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C

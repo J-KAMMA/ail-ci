@@ -218,6 +218,32 @@ def _is_single_expression(source):
                 and value.func.id == 'print')
 
 
+class _EntryShapeRefusal(Unsupported):
+    """The typed path compiled the body but the `main` its entry convention needs does not fit this
+    function (its first parameter is not the input sequence, or an extra one is not an int). A
+    source with top-level statements runs its module body in CPython, so the general path can build
+    it there; a def-only source keeps the refusal of the function-entry convention."""
+
+
+def _defs_only(source):
+    """True when the top level holds only def/class/import (plus a docstring): the judge suite's
+    function-entry shape, where a `_main_for` refusal is the program's answer, not a reason to try
+    the general path's module body (which would run no code at all)."""
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import,
+                             ast.ImportFrom, ast.Pass)):
+            continue
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
+                and isinstance(node.value.value, str):
+            continue
+        return False
+    return True
+
+
 def _cc(command, phase, **kwargs):
     """Run a C compiler step through the build cache (a no-op unless `--cache` activated it and no
     native-build report is being recorded)."""
@@ -591,15 +617,15 @@ def _main_for(info):
         # compiled function does not have, which built a `main` calling `run(src, n)` against a
         # `run(void)` -- caught only at the C compiler, not by name, and only because the mismatch
         # happens to be an arity gcc itself checks.
-        raise Unsupported('a function with no parameters and no print()/assert has no way to '
-                          'show its return value.\n'
-                          '  write instead: print the result inside the function (`print(total)`), '
-                          'or give it a parameter')
+        raise _EntryShapeRefusal('a function with no parameters and no print()/assert has no way to '
+                                 'show its return value.\n'
+                                 '  write instead: print the result inside the function (`print(total)`), '
+                                 'or give it a parameter')
     if kinds[0] != 'array':
-        raise Unsupported('the first parameter must be the sequence read from the file')
+        raise _EntryShapeRefusal('the first parameter must be the sequence read from the file')
     extra = kinds[1:]
     if any(k != 'int' for k in extra):
-        raise Unsupported('a standalone program can read only one sequence, from the file')
+        raise _EntryShapeRefusal('a standalone program can read only one sequence, from the file')
     args = ['src', 'n'] + ['(int64_t)strtoll(argv[%d], 0, 10)' % (i + 2)
                            for i in range(len(extra))]
     usage = 'usage: tool FILE' + ''.join(' N%d' % (i + 1) for i in range(len(extra)))
@@ -621,11 +647,11 @@ def _io_main_for(info):
     kinds = info.get('kinds') or []
     has_array = bool(kinds) and kinds[0] == 'array'
     if 'array' in kinds[1:]:
-        raise Unsupported('a standalone program can read only one sequence, from the file')
+        raise _EntryShapeRefusal('a standalone program can read only one sequence, from the file')
     extra = kinds[1:] if has_array else kinds
     if any(k != 'int' for k in extra):
-        raise Unsupported('a standalone program can only take extra int arguments from the '
-                          'command line')
+        raise _EntryShapeRefusal('a standalone program can only take extra int arguments from the '
+                                 'command line')
     nfixed = 1 if has_array else 0
     args = (['src', 'n'] if has_array else []) + [
         '(int64_t)strtoll(argv[%d], 0, 10)' % (1 + nfixed + i) for i in range(len(extra))]
@@ -809,9 +835,20 @@ def _build_unshadowed(source, out, strict, report, force_general):
         body = to_c(source, strict=strict, info=info)
         if force_general:
             raise Unsupported('general path explicitly requested')
+        # A NORET entry point (`info['ret']`) has no int64 return value at all -- `_main_for`'s own
+        # `printf(AIL_FMT "\n", AIL_CALL)` would hand a `void` expression to `printf`, which gcc
+        # rejects, name or no name -- so it always takes the `_io_main_for` path (call it, ignore
+        # the C-level return -- there is none -- and exit 0), the same one a program that calls
+        # `print()`/`assert` already takes, whether or not THIS entry happens to print anything
+        # itself. Selected here, inside the try, so a shape the typed entry convention cannot call
+        # falls back to the general path like any other typed refusal (a top-level statement means
+        # CPython runs the module body; only a def-only source keeps the refusal).
+        main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
     except Unsupported as _typed_e:
         # AIL_NO_GENERAL=1: judges use it to ask the TYPED path alone (their negatives assert a
         # by-name refusal of the typed path; through the fallback that refusal would be invisible).
+        if isinstance(_typed_e, _EntryShapeRefusal) and _defs_only(source):
+            raise
         if os.environ.get('AIL_NO_GENERAL'):
             raise
         # DESIGN_GENERAL_PATH_20260916.md's general path, first cut: the typed path refused
@@ -928,13 +965,6 @@ def _build_unshadowed(source, out, strict, report, force_general):
             last_fallback_reason = str(_typed_e)
             last_fallback_line = getattr(_typed_e, 'source_line', None)
         return _finalize_output(out)
-    # AIL_TASK_callconv_20260915.md: a NORET entry point (`info['ret']`) has no int64 return value
-    # at all -- `_main_for`'s own `printf(AIL_FMT "\n", AIL_CALL)` would hand a `void` expression to
-    # `printf`, which gcc rejects, name or no name -- so it always takes the `_io_main_for` path
-    # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
-    # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
-    # anything itself.
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
