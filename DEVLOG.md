@@ -1,3 +1,26 @@
+## 2026-10-28 -- stdlib batch 22: struct.pack / unpack / calcsize (job-stdlib22-10290509)
+
+The corpus scan still refused `struct` (two `t475.py` programs), so this batch adds a source-to-source
+pass, `python/pkg-v12/structlib.py`, called from `python_surface` before the other library passes. It
+parses a literal format at compile time and lowers each call to a small helper written in the Python
+subset: `int.to_bytes` / `int.from_bytes` produce the bytes. Built: `pack`, `unpack`, `calcsize` and
+`error` for the standard-size integer formats `b B h H i I l L q Q` and the pad `x`, with a leading
+`<`, `>` or `!` byte order and an optional repeat count. `struct.error` is spelt `ValueError` (like
+`csv.Error`); `pack` range checks keep CPython's message text. Floats, chars, strings, bools, `@` /
+native alignment, `=`, the `Struct` class, `unpack_from`, `pack_into`, `iter_unpack`, a run-time
+format and an empty `unpack` result are refused by name. `list(struct.pack(...))` is lowered to a
+list-returning helper because the typed path cannot walk a bytes call inline; `unpack` helpers name
+each field with an `int` annotation so the typed path can build the tuple. The typed path has int64
+only, so an unsigned `Q` value or literal above `INT64_MAX` needs the general path.
+
+Both corpus `t475.py` programs match CPython with `struct.pack(">I", ...)`: the glm variant on both
+builds; the deepseek variant on the general build (its `str(list(...))` is refused by the typed path
+for an unrelated reason). Probes in `/tmp/probes/stdlib22`: `s_pack` matches on the general and
+default builds via `cmp.sh` (the typed-only build refuses its `Q` maximum literal, as documented);
+`s_typed` matches via `cmp.sh` and with `AIL_NO_GENERAL=1`. Added `test_ail_stdlib22.py` (default
+and typed paths, both IR settings, aliases, boundaries, errors, refusals, unchanged programs) and
+registered it in `ail_check.py`. Differences recorded as `C?-job-stdlib22-10290509-1`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
