@@ -11,7 +11,12 @@ buffer-length messages (`struct.error` is spelt `ValueError` in an `except` clau
 mapping csv.Error uses, so only that exception's type name differs).  Floats, `s/p/c/?`,
 pointer/size codes, `@`/native layouts, `unpack_from`/`pack_into`/`iter_unpack`, a format that
 is not a string literal, starred/keyword arguments and a function used as a value stay named
-compile-time refusals.
+compile-time refusals.  The review of this change found two runtime leaks, both fixed: the
+format parser now accepts only ASCII `0-9`, the six ASCII whitespace characters and format
+characters, so `\x1c`, Arabic-Indic digits and non-ASCII spaces are named compile-time refusals
+(CPython raises `struct.error`/`UnicodeEncodeError`), and `unpack` now requires `bytes` or
+`bytearray`, raising CPython's `TypeError: a bytes-like object is required, not '<type>'`
+instead of accepting any sized iterable of ints.
 
 Probes in `/tmp/probes/stdlib15` on both builds via `cmp.sh`: `p_basic` (all ten integer codes,
 both byte orders, `=`, `!`, repeat counts, `x`, empty/zero formats, `bytes`/`bytearray` input,
@@ -19,8 +24,12 @@ values through an argument, a list item, an alias, an attribute and a dict value
 `p_errors` (20 count/range/buffer/type errors with CPython's text), `p_roundtrip`,
 `p_from_import`, and the refusals `p_refuse_dynamic`, `p_refuse_float`, `p_refuse_native`,
 `p_refuse_unpack_from` (each refused by name).  `p_type_name` matches CPython except the
-declared `struct.error` -> `ValueError` type name.  Added `test_ail_stdlib15.py` (5 tests, the
-general path and AIL_IR=0/1) and registered it in `ail_check.MODULES`.
+declared `struct.error` -> `ValueError` type name.  The review probes were rerun and the new
+ones added: `p_bad1c`, `p_bad0661`, `p_bad00a0`, `p_badz` (each a named refusal), `p_whitespace`
+(ASCII whitespace forms, both builds) and `p_unpack_types` (tuple/list/range/str/int rejected
+with CPython's message; bytes/bytearray/slice/empty format accepted, both builds).  Added
+`test_ail_stdlib15.py` (6 tests, the general path and AIL_IR=0/1) and registered it in
+`ail_check.MODULES`.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 

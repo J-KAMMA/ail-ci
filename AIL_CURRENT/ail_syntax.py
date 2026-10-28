@@ -1448,6 +1448,8 @@ _MATH_HELPERS['struct'] = (
     '\n'
     '\n'
     'def _ail_struct_unpack(fields, raw: bytes, little: bool) -> list:\n'
+    '    if not isinstance(raw, (bytes, bytearray)):\n'
+    '        raise TypeError("a bytes-like object is required, not \'" + type(raw).__name__ + "\'")\n'
     '    size = 0\n'
     '    for field in fields:\n'
     '        size += field[1] * field[2]\n'
@@ -1508,11 +1510,11 @@ def _struct_format(fmt):
     index = 0
     while index < len(rest):
         char = rest[index]
-        if char.isspace():
+        if char in ' \t\n\r\v\f':
             index += 1
             continue
         start = index
-        while index < len(rest) and rest[index].isdigit():
+        while index < len(rest) and rest[index] in '0123456789':
             index += 1
         count = int(rest[start:index]) if index > start else 1
         if index == len(rest):

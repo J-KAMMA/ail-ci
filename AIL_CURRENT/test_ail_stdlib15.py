@@ -94,6 +94,18 @@ def main() -> None:
         struct.pack(">I")
     except struct.error as e:
         print("caught", e)
+    try:
+        struct.unpack(">I", (0, 1, 0, 2))
+    except TypeError as e:
+        print("tuple", e)
+    try:
+        struct.unpack(">I", [0, 0, 0, 1])
+    except TypeError as e:
+        print("list", e)
+    try:
+        struct.unpack(">I", range(4))
+    except TypeError as e:
+        print("range", e)
     print("end")
 
 
@@ -252,6 +264,12 @@ class StructTests(unittest.TestCase):
                      "needs a string-literal format")
         self.refused('import struct\n\n\ndef main():\n    print(struct.unpack_from(">I", b"\\0\\0\\0\\1"))\n\n\nmain()\n',
                      "struct.unpack_from() with these arguments is not built")
+
+    def test_bad_format_characters_are_refused_by_name(self):
+        self.refused(r'import struct' + '\n\n\ndef main():\n    print(struct.calcsize(">\x1cI"))\n\n\nmain()\n',
+                     "bad char")
+        self.refused(r'import struct' + '\n\n\ndef main():\n    print(struct.pack(">\u0661I", 7))\n\n\nmain()\n',
+                     "bad char")
 
 
 if __name__ == "__main__":
