@@ -348,6 +348,27 @@ assignment and instance controls).  Final-state tests: test_ail_pre409,
 test_ail_pre419, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
 (5 modules, 0 failed).  `tools/update_manifest.py` was run and `--check` passes;
 `tools/ci_shards.py --update` added the module and `--check` exits 0.
+## 2026-10-28 -- install guide and checked English quickstart (job-rel1-10282135)
+
+Added `docs/INSTALL.md` (Python 3.10+, gcc, cloning, `doctor`, `doctor --check`, first compile/run,
+common problems, short macOS and WSL notes) and `docs/QUICKSTART.md` (hello world, a function with
+loops/lists/dicts, a class, `--syntax python`, and a real named refusal). The three complete
+Python-syntax programs are in `AIL_CURRENT/language_examples/quickstart/` (`hello.py`,
+`word_counts.py`, `counter.py`); `README.md` links both documents. The refusal message in the
+quickstart was produced by compiling its `outside_subset.py` program (exit 3, `not in the subset:
+a match statement`). No compiler code was changed.
+
+Added `AIL_CURRENT/test_ail_quickstart_docs.py` and registered it in `ail_check.MODULES`. It finds
+every fenced `python` block by its `<!-- example: NAME -->` marker, requires the block to equal
+the named file exactly, then compiles it with `ail_chatgpt.py compile --syntax python` and compares
+stdout and exit code with CPython. The files directory must contain exactly the documented
+examples. `tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes/quickstart` through `bash ~/tools/cmp.sh`: `hello.py`, `word_counts.py` and
+`counter.py` each match CPython stdout on both the general (`g`) and default (`d`) builds;
+`outside_subset.py` is refused by name with exit 3 on the default build. Final-state tests:
+test_ail_quickstart_docs (4 s), test_ail_safetynet (144 s), test_ail_files (212 s) and
+test_ail_corpus_findings3 (336 s), all with `-j 2`, 0 failed.
 
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
