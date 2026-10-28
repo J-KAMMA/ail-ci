@@ -16167,6 +16167,7 @@ static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
         return ail_list_delitem(cx, c, key.i);
     }
     if (c.tag == AIL_T_DICT) return ail_dict_del(cx, c, key);
+    if (c.tag == AIL_T_CLASS) return ail_raise_c(cx, AIL_B_TYPEERROR, "'type' object does not support item deletion");
     return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object doesn't support item deletion", c);
 }
 static inline ail_obj ail_range_new(ail_ctx *cx, int64_t start, int64_t stop, int64_t step); /* defined below */
