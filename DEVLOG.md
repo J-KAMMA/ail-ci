@@ -1,3 +1,25 @@
+## 2026-10-28 -- library batch 11: struct (job-stdlib11-10290224)
+
+The next most-imported still-refused module was `struct`: 2 files in `lab/corpus/programs` and 4 in
+`AIL_CURRENT/language_examples` import it (6 together, behind argparse/tempfile but supportable without a
+Unicode database, random temp names or a tool-command model).  `struct.pack` / `unpack` / `pack_into` /
+`unpack_from` / `calcsize` are lowered by `structlib.py` onto `prelude_struct.py` for literal formats made of
+`x c b B ? h H i I l L q Q n N P s p`, with `@ = < > !` and the `@`/`=` native size and alignment rules.
+CPython's own `struct` validates every format, computes the byte layout at compile time (so `calcsize` is a
+constant), and the generated `unpack` wrappers return real fixed tuples.  Not built, refused by name:
+`Struct`, `iter_unpack`, a run-time format, `f`, `e`, `d`, keyword/starred arguments and all other attributes.
+
+Probes in `/tmp/probes` (both builds via `cmp.sh`, g and d identical stdout and exit status): `p_types`
+(every integer width/endianness, negative values), `p_misc` (empty, zero counts, x pad, s, p, c, ?, native
+alignment), `p_native` (`@`/`=`/`<`/`>` sizes and mixed fields), `p_into` (pack_into/unpack_from aliasing),
+`p_offsets` (offset evaluated once), `p_values` (argument, list item, attribute, dict value), `p_imports`
+(plain, `as`, and `from ... import`), and `p_full` (the test program, including a caught struct.error and a
+read-back of bytes written earlier).  Both corpus `t475.py` files match CPython on both builds as well.
+
+`test_ail_stdlib11.py` runs the combined program with `AIL_IR=0` and `AIL_IR=1` and refuses eight spellings by
+name (including a zero-size `p`, whose CPython 3.12 `unpack` raises SystemError).  `struct.error` is RuntimeError as with the existing `zlib.error` mapping; an unsigned 64-bit unpack
+whose high bit is set stops with `integer overflow` because AIL's int is int64 (DIFFERENCES row).
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
