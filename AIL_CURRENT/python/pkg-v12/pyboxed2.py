@@ -2338,6 +2338,9 @@ class Compiler(boxclosure.ClosureMixin):
             and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
             and isinstance(n.args[1].value, str))
         self.assigned_attrs = frozenset(assigned_attrs)
+        # Names bound anywhere (a local or parameter can hide an eager builtin): a nested
+        # generator is only materialised under a name that is certainly the builtin.
+        self._genexp_bound_names = frozenset(_bound_names(tree))
         any_all_genargs = set()
         for call in ast.walk(tree):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
@@ -2345,7 +2348,8 @@ class Compiler(boxclosure.ClosureMixin):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)) \
+                    and not _nested_genexps_are_eager(gen, self._genexp_bound_names):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6122,7 +6126,8 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)) \
+                and not _nested_genexps_are_eager(node, self._genexp_bound_names):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -11860,6 +11865,43 @@ def _genexp_consumed_in_place(node, parents):
         if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
             return True
     return False
+
+
+# The eager calls that may receive a *nested* generator.  any()/all()/next() consume only part
+# of their argument (short-circuit / one element), so materialising their inner generator first
+# would add side effects CPython does not run; their own fused paths refuse a nested generator.
+_NESTED_GENEXP_EAGER_CALLS = _GENEXP_EAGER_CALLS - {'any', 'all', 'next'}
+
+
+def _genexp_eager_call_argument(node, parents, bound):
+    """True iff `node` is a positional argument of a call that reads every element before
+    returning, and the callee is provably that builtin (not a local binding).  Materialising it
+    at the call is then the same point in the program as CPython's lazy consumption.  For a
+    method only `str.join` on a string literal or f-string is trusted: a user object's `join`
+    could keep the generator as a value."""
+    par = parents.get(node)
+    if not (isinstance(par, ast.Call) and node in par.args):
+        return False
+    f = par.func
+    if isinstance(f, ast.Name):
+        return f.id in _NESTED_GENEXP_EAGER_CALLS and f.id not in bound
+    if isinstance(f, ast.Attribute) and f.attr == 'join' and not par.keywords \
+            and len(par.args) == 1:
+        recv = f.value
+        return (isinstance(recv, ast.Constant) and isinstance(recv.value, str)) or \
+            isinstance(recv, ast.JoinedStr)
+    return False
+
+
+def _nested_genexps_are_eager(node, bound=()):
+    """True iff every generator expression inside `node` is a positional argument of an eager
+    call (`sum(inner)`, `" ".join(inner)`, ...).  Any other nesting keeps the eager lowering
+    observably different from CPython's lazy generator, so the caller must refuse it."""
+    nested = [n for n in ast.walk(node) if isinstance(n, ast.GeneratorExp) and n is not node]
+    if not nested:
+        return True
+    parents = {child: par for par in ast.walk(node) for child in ast.iter_child_nodes(par)}
+    return all(_genexp_eager_call_argument(n, parents, bound) for n in nested)
 
 
 def _bound_names(tree):
