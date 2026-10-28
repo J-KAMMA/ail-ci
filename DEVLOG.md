@@ -1,3 +1,27 @@
+## 2026-10-28 -- pre402 review fix: no refusal for uncalled or dead code or an aliased callback (job-pre402-10281051)
+
+The review of the first pre402 commit found two false compile-time refusals introduced by the
+new scope flow pass.  `safe_call` treated `sorted`/`list`/`map` as harmless because a mutator
+reached them through an alias (`h = g`; `h` was not in `mutating`), so the tracked container
+was not dropped and a later `int()` read was refused after the callback had already changed
+it.  Call arguments are now checked for any name that is not a known scalar/literal container
+(and for lambdas/comprehensions), so an aliased or indirect callable drops the tracked names.
+The pass also analysed every function body and every statement, so a function that is never
+called, a function bound but not called, and statements after `return`/`raise` produced
+refusals for code CPython never runs.  It now follows only functions called by name from
+reachable executed code (nested bodies only when their enclosing function is called) and
+stops a function body at its first `return`/`raise`.  A missed indirect call can only lose a
+refusal, never invent one.
+
+Probes in `/tmp/probes/pre402fix` on both builds via `cmp.sh`: the callback alias through
+`sorted`/`map`, a direct callback, a callback held in a list item or a dict value, a callback
+passed to another function, an uncalled function, a merely referenced function, an uncalled
+nested function, statements after `return` and after `raise` all match CPython; the
+read-before-mutation list/dict cases are still refused by name.  The attribute spelling is
+refused by the existing subset message before the pass runs, so it neither matches nor reaches
+the pass.  Final-state tests on this commit: test_ail_pre402, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3, plus `tools/update_manifest.py --check`.
+
 ## 2026-10-28 -- pre402: a function-local int() read before a later mutation is refused (job-pre402-10281051)
 
 The pre387 review's first pre-existing item was `b03`, a function-local container read before

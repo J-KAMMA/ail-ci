@@ -1343,11 +1343,63 @@ def _scope_flow_refuse(node, value):
     raise error
 
 
+def _scope_flow_reachable_functions(tree):
+    """Ids of the function definitions that reachable code calls by name.
+
+    Only a call runs a function; binding its name (a list of handlers, an attribute, a
+    callback that is never invoked) does not.  Calls in an unreachable function body do not
+    count until that function itself is called.  Lambda bodies are skipped because defining a
+    lambda does not run it.  A missed indirect call can only lose a refusal, never invent one.
+    """
+    definitions = {}
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            definitions.setdefault(node.name, []).append(node)
+    pending = []
+    seen = set()
+
+    def mention(node):
+        stack = [node]
+        while stack:
+            current = stack.pop()
+            if isinstance(current, ast.Lambda):
+                stack.extend(current.args.defaults)
+                stack.extend(default for default in current.args.kw_defaults
+                             if default is not None)
+                continue
+            if (isinstance(current, ast.Call) and isinstance(current.func, ast.Name)
+                    and current.func.id in definitions):
+                pending.append(current.func.id)
+            stack.extend(ast.iter_child_nodes(current))
+
+    def mention_statement(statement):
+        for part in _scope_flow_executed_nodes(statement):
+            mention(part)
+
+    for statement in tree.body:
+        mention_statement(statement)
+    while pending:
+        name = pending.pop()
+        for function in definitions.get(name, ()):
+            if id(function) in seen:
+                continue
+            seen.add(id(function))
+            for statement in function.body:
+                mention_statement(statement)
+    return seen
+
+
 def _check_scope_flow_int64_containers(body, known, attributes, int_shadowed, program_bound,
                                       scope_counts, declared):
     """Refuse a function-local int() read of a known out-of-int64 value before a later mutation."""
     if int_shadowed:
         return
+    executable = []
+    for statement in body:
+        executable.append(statement)
+        if isinstance(statement, (ast.Return, ast.Raise)):
+            break
+    body = executable
     pure_calls = _SCOPE_FLOW_PURE_CALLS - program_bound
     env = dict(known)
     share = {}
@@ -1424,29 +1476,45 @@ def _check_scope_flow_int64_containers(body, known, attributes, int_shadowed, pr
         if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             mutating.add(statement.name)
 
+    def argument_risk(node):
+        for sub in ast.walk(node):
+            if isinstance(sub, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp,
+                                ast.GeneratorExp)):
+                return True
+            if isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Load):
+                if sub.id in mutating:
+                    return True
+                if sub.id not in pure_calls and sub.id not in env:
+                    return True
+        return False
+
     def safe_call(call):
         func = call.func
+        arguments = (*call.args, *[key.value for key in call.keywords])
         if isinstance(func, ast.Name):
             if func.id in pure_calls:
                 return True
-            if func.id in program_bound:
+            if func.id in program_bound or func.id in mutating:
                 return False
-            return not any(isinstance(inner, ast.Name) and inner.id in mutating
-                           for argument in (*call.args, *[key.value for key in call.keywords])
-                           for inner in ast.walk(argument))
+            return not any(argument_risk(argument) for argument in arguments)
         if not isinstance(func, (ast.Attribute, ast.Subscript)):
             return False
         root = func.value
         while isinstance(root, (ast.Attribute, ast.Subscript)):
             root = root.value
         if isinstance(root, ast.Constant):
-            return True
+            return not any(argument_risk(argument) for argument in arguments)
         if not isinstance(root, ast.Name):
             return False
         value = env.get(root.id, _UNKNOWN)
         if root.id in env:
-            return type(value) in _SCOPE_FLOW_SCALARS or isinstance(value, (list, tuple, dict))
-        return import_only(root.id) or root.id not in program_bound
+            if not (type(value) in _SCOPE_FLOW_SCALARS
+                    or isinstance(value, (list, tuple, dict))):
+                return False
+            return not any(argument_risk(argument) for argument in arguments)
+        if not (import_only(root.id) or root.id not in program_bound):
+            return False
+        return not any(argument_risk(argument) for argument in arguments)
 
     def opaque_call(nodes):
         for top in nodes:
@@ -1714,8 +1782,10 @@ def _check_int64_literals(tree):
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
                       program_bound).visit(tree)
+    reachable = _scope_flow_reachable_functions(tree)
     for node in ast.walk(tree):
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and id(node) in reachable):
             _check_scope_flow_int64_containers(
                 node.body, {}, attributes, int_shadowed, program_bound,
                 _binding_counts(node.body), _scope_declared(node))

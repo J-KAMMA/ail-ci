@@ -201,6 +201,121 @@ def f():
 
 f()
 ''',
+    'callback_alias_sorted': '''
+def f():
+    d = {"k": 1e300}
+
+    def g(x):
+        d["k"] = 1.5
+        return x
+
+    h = g
+    sorted([1, 2], key=h)
+    print(int(d.get("k")))
+
+
+f()
+''',
+    'callback_alias_map': '''
+def f():
+    d = {"k": 1e300}
+
+    def g(x):
+        d["k"] = 1.5
+        return x
+
+    h = g
+    list(map(h, [1, 2]))
+    print(int(d.get("k")))
+
+
+f()
+''',
+    'callback_list_item': '''
+def f():
+    d = {"k": 1e300}
+
+    def g(x):
+        d["k"] = 1.5
+        return x
+
+    handlers = [g]
+    handlers[0](1)
+    print(int(d.get("k")))
+
+
+f()
+''',
+    'callback_dict_value': '''
+def f():
+    d = {"k": 1e300}
+
+    def g(x):
+        d["k"] = 1.5
+        return x
+
+    handlers = {"h": g}
+    handlers["h"](1)
+    print(int(d.get("k")))
+
+
+f()
+''',
+    'uncalled_local': '''
+def f():
+    items = [1e300]
+    print(int(items[0]))
+    items[0] = 1.5
+
+
+print("ok")
+''',
+    'referenced_not_called': '''
+def f():
+    items = [1e300]
+    print(int(items[0]))
+    items[0] = 1.5
+
+
+handlers = [f]
+print("ok")
+''',
+    'uncalled_nested': '''
+def outer():
+    d = {"k": 1e300}
+
+    def inner():
+        print(int(d.get("k")))
+        d["k"] = 1.5
+
+    inner()
+
+
+print("ok")
+''',
+    'dead_after_return': '''
+def f():
+    items = [1e300]
+    return 0
+    print(int(items[0]))
+    items[0] = 1.5
+
+
+print(f())
+''',
+    'dead_after_raise': '''
+def f():
+    d = {"k": 1e300}
+    raise ValueError("stop")
+    print(int(d.get("k")))
+    d["k"] = 1.5
+
+
+try:
+    f()
+except ValueError:
+    print("caught")
+''',
 }
 
 
