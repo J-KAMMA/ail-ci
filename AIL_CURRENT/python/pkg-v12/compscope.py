@@ -42,14 +42,15 @@ class _Scope(ast.NodeVisitor):
         self.scope_names = set()    # names used in the enclosing scope proper
         self.class_bodies = []      # class definitions whose body is analysed separately
 
-    def visit_Name(self, node):
-        owner = None
+    def _resolve(self, node):
         for comp in reversed(self.stack):
             if node.id in self.bound[id(comp)]:
-                owner = comp
-                break
-        self.resolved.append((node, owner))
-        if owner is None:
+                self.resolved.append((node, comp))
+                return True
+        return False
+
+    def visit_Name(self, node):
+        if not self._resolve(node):
             self.scope_names.add(node.id)
 
     def visit_arg(self, node):
@@ -93,6 +94,12 @@ class _Scope(ast.NodeVisitor):
     def visit_Lambda(self, node):
         for expr in node.args.defaults + [d for d in node.args.kw_defaults if d is not None]:
             self.visit(expr)
+        # A lambda nested in a comprehension reads the target by closure.  When a clash renames
+        # that target, the body has to follow the rename too; otherwise it keeps reading the
+        # enclosing scope's variable of the same name.
+        if self.stack:
+            for loaded in _free_loads(node):
+                self._resolve(loaded)
 
     def visit_ClassDef(self, node):
         self.scope_names.add(node.name)
@@ -146,6 +153,73 @@ def _free_body(fn):
 
     walk(fn.body, set())
     return found - own
+
+
+def _params(fn):
+    args = fn.args
+    own = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
+    if args.vararg:
+        own.add(args.vararg.arg)
+    if args.kwarg:
+        own.add(args.kwarg.arg)
+    return own
+
+
+def _walrus_names(node):
+    """Names a walrus binds in this scope (a nested lambda owns its own)."""
+    names = set()
+
+    def walk(n):
+        if isinstance(n, ast.Lambda):
+            return
+        if isinstance(n, ast.NamedExpr):
+            names.update(t.id for t in ast.walk(n.target) if isinstance(t, ast.Name))
+        for child in ast.iter_child_nodes(n):
+            walk(child)
+
+    walk(node)
+    return names
+
+
+def _free_loads(fn, hidden=()):
+    """Name nodes a lambda body reads from outside it; `fn`'s own defaults are excluded because
+    they are evaluated in the enclosing scope.  `hidden` names bindings from the caller."""
+    inner = set(hidden) | _params(fn) | _walrus_names(fn.body)
+    found = []
+
+    def walk(n, hidden):
+        if isinstance(n, ast.Name):
+            if isinstance(n.ctx, ast.Load) and n.id not in hidden:
+                found.append(n)
+            return
+        if isinstance(n, ast.NamedExpr):
+            walk(n.value, hidden)
+            return
+        if isinstance(n, ast.Lambda):
+            for d in n.args.defaults + [d for d in n.args.kw_defaults if d is not None]:
+                walk(d, hidden)
+            found.extend(_free_loads(n, hidden))
+            return
+        if isinstance(n, _COMPS):
+            walk(n.generators[0].iter, hidden)
+            scope = set(hidden)
+            for index, generator in enumerate(n.generators):
+                if index:
+                    walk(generator.iter, scope)
+                scope |= {t.id for t in ast.walk(generator.target) if isinstance(t, ast.Name)}
+                for condition in generator.ifs:
+                    walk(condition, scope)
+            if isinstance(n, ast.DictComp):
+                walk(n.key, scope)
+                walk(n.value, scope)
+            else:
+                walk(n.elt, scope)
+            return
+        for child in ast.iter_child_nodes(n):
+            walk(child, hidden)
+
+    walk(fn.body, inner)
+    return found
 
 
 def _lambda_loads(node):
