@@ -1,3 +1,22 @@
+## 2026-10-28 -- cov12 review: same-type conditional arms are not str()-wrapped refusals
+
+The review found that the new coercion wrapped *every* non-obvious arm when the other arm was an
+obvious str, including an arm that is already statically a str. `s = "hi"; c = True;
+print(s if c else "none")` therefore became `str(s) if c else "none"` and the typed path refused
+`str() of a str` (exit 3) where CPython and the base typed path print `hi`. The same regression
+reproduced for the mirror, an f-string field, `sep`/`end`, a `list[str]` item, a str attribute,
+`s.upper()`, a `-> str` return and a `str` argument.
+
+`str()` of a str is the identity (`str(s) is s` in CPython), so `_str_value` now returns the value
+of its argument instead of refusing that case. The early AST coercion cannot see an arm's static
+type, and this keeps a same-typed conditional exact wherever the arm is reached through a name,
+argument, list item, attribute, slice, concatenation or method call. Non-str, non-number arms
+(list, dict, `None`) still stop with their existing named refusals, and `!r`/a format spec still
+stay refused by name. Probes in `/tmp/probes/cov12` (`bothstr`, `routes`, `same_type`, `direct`,
+`yesno`, `spec`, `conv`, `listarm`, `none_arm`, `shadow`) match CPython on the default and
+`AIL_UNIFIED_FORCE=1` builds, and the typed path matches on every feature probe; the refusal
+probes stop by name. `test_ail_cov12.py` now covers the same-type program on all three builds.
+
 ## 2026-10-28 -- cov12: a str/number conditional in print and f-strings (job-cov12-10290216)
 
 The corpus census (219 programs, first refusal by the typed path) put `a str constant 'none' used

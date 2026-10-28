@@ -7926,7 +7926,11 @@ def _str_value(node, ctx, *, owned_join_return=False):
             raise Unsupported("str() of bytes is not built (Python gives its b'...' repr); "
                               'to get the text, decode it: `b.decode()`')
         if at == STR:
-            raise Unsupported('str() of a str: the value already is a str; drop the str() call')
+            # `str(s)` is the identity on a str: CPython returns the same object. This shape is
+            # built by iterlower's mixed print/f-string coercion, which cannot see a str-typed
+            # arm's type at that early pass, so accepting it keeps `s if c else "none"` correct
+            # where the arm is already a str instead of refusing the coercion it just made.
+            return _str_value(arg, ctx)
         if at == EXCEPTION:
             _exc_text_parts(ctx)
             return 'ail_exc_text(%s, &%s)' % (_exception_value(arg, ctx), ctx.sarena())

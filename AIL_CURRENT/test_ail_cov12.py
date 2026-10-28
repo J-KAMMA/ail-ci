@@ -89,6 +89,49 @@ print(f"{'yes' if v else 'no'}")
 print(v)
 print("unchanged")
 '''
+PROGRAMS['same_type'] = r'''class B:
+    def __init__(self):
+        self.s = "attr"
+
+def same(v: str, c: bool):
+    print(v if c else "none")
+
+def upper(s: str, c: bool):
+    print(s.upper() if c else "none")
+
+def ret(c: bool) -> str:
+    return "ret" if c else "none"
+
+s = "hi"
+e = ""
+c = True
+b = B()
+xs = ["item", ""]
+print(s if c else "none")
+print("none" if c else s)
+print(e if c else "none")
+print("none" if c else e)
+print(f"{s if c else 'none'}")
+print(f"{'none' if c else s}")
+print(s if c else "none", sep="-")
+print(s if c else "none", end="!\n")
+print(s.upper() if c else "none")
+same("arg", c)
+same("", c)
+same(xs[0], c)
+same(xs[1], c)
+same(b.s, c)
+upper(s, c)
+print(ret(c))
+print(str(s))
+print(str("literal"))
+print(str(e))
+print(str(s.upper()))
+print(str(s + "!"))
+print(str(s[1:3]))
+print(str(f"{s}-{e}"))
+print(str(str(s)))
+'''
 PROGRAMS['nonnumber'] = r'''class U:
     def __init__(self, v):
         self.v = v
@@ -143,6 +186,16 @@ class Cov12Tests(unittest.TestCase):
                     self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0],
                                      (slug, general, got.stderr[-800:]))
                     self.assertEqual(got.returncode, want[1], (slug, general, got.stderr[-800:]))
+
+    def test_same_type_conditionals_typed(self):
+        with tempfile.TemporaryDirectory(prefix='ail-cov12-') as directory:
+            text = PROGRAMS['same_type']
+            want = cpython(directory, 'same_type_typed', text)
+            exe, built = build(directory, 'same_type_typed', text, False, typed_only=True)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+            self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0], got.stderr[-800:])
+            self.assertEqual(got.returncode, want[1], got.stderr[-800:])
 
     def test_format_spec_and_conversion_stay_refused(self):
         with tempfile.TemporaryDirectory(prefix='ail-cov12-') as directory:
