@@ -6563,6 +6563,23 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(v, ast.FormattedValue):
                 val = self.expr(v.value, ctx)
                 cname = self._inst_class(v.value, ctx)
+                if (v.conversion == -1 and v.format_spec is None
+                        and any('__format__' in c['methods'] for c in self.classes.values())
+                        and self.infer_kind(v.value, ctx) not in ('int', 'float', 'str', 'bool', 'none')):
+                    # f"{x}" is format(x, ""): a user __format__ is called with the empty spec
+                    t = ctx.tmp()
+                    ctx.emit('if (%s.tag == AIL_T_INST && ail_dun2(%s, AIL_D2_FORMAT)) {' % (val, val))
+                    ctx.indent += 1
+                    ctx.emit('st = ail_obj_format(cx, &%s, %s, %s);' % (t, val, self._str_lit_slot('', ctx)))
+                    ctx.check()
+                    ctx.indent -= 1
+                    ctx.emit('} else {')
+                    ctx.indent += 1
+                    ctx.emit('%s = %s;' % (t, self._to_str_slot(val, cname, ctx)))
+                    ctx.indent -= 1
+                    ctx.emit('}')
+                    pieces.append(t)
+                    continue
                 if v.conversion in (-1, ord('s')) and v.format_spec is None:
                     pieces.append(self._to_str_slot(val, cname, ctx))
                     continue
