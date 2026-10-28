@@ -4210,7 +4210,7 @@ def _refuse_load(error):
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False, ffi=None, prelower=None, int64_literals=False):
+                  notes=None, local_imports=False, ffi=None, prelower=None, int64_literals=False, entry_file=None):
     """Resolve source imports once and validate their shared declaration scope.
 
     `prelower` rewrites the entry's text right after it is read (ail_export.lower for `--lib`); the
@@ -4270,7 +4270,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 except (SyntaxError, ValueError):
                     entry_defs = None
             if local_imports and entry and syntax == 'python' and not module_only:
-                merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
+                merged = ail_modules.merge_program(path, text, entry_file=entry_file,
+                                                    **({} if ffi is None else {'read': ffi.read}))
                 if merged is not None:
                     _MERGED_ENTRIES[str(path)] = merged
                     text = merged.text
@@ -5267,6 +5268,7 @@ def _compile_freestanding(args, parser, native_build):
 
 
 def main(argv=None):
+    raw_argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command', required=True)
     check_cmd = sub.add_parser('check', help='strict source/type check without a C build; exit 0 passed, 1 source error, 2 configuration/I/O/dependency')
@@ -5606,6 +5608,10 @@ def main(argv=None):
         objects = getattr(args, 'object', [])
         separate = getattr(args, 'separate', False)
         source = args.source.resolve()
+        raw_source = next((value for value in raw_argv
+                           if not value.startswith('-') and Path(value) == args.source), str(args.source))
+        entry_file = (raw_source if os.path.isabs(raw_source)
+                      else os.path.join(os.getcwd(), raw_source))
         output = Path(os.path.abspath(args.output))
         if sys.version_info < (3, 10):
             parser.error('AIL compilation requires Python 3.10 or newer')
@@ -5625,7 +5631,7 @@ def main(argv=None):
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
                 module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,
-                prelower=lower_exports if export_lib else None, **loading)
+                prelower=lower_exports if export_lib else None, entry_file=entry_file, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
         prelude_units = _PRELUDE_UNITS.get(str(source), ())

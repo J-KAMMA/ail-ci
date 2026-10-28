@@ -103,6 +103,13 @@ def _is_brace_or_sexpr(text):
     return ail_sexpr.detect(text) or detect(text)
 
 
+def _module_file(mod):
+    """The `__file__` CPython gives a module: the source path, or None for a namespace package."""
+    if mod.kind == 'namespace':
+        return None
+    return getattr(mod, 'file', str(mod.path))
+
+
 class Mod:
     def __init__(self, name, path, tree, entry, kind='module', dirs=None):
         self.name = name                # dotted name; '__main__' for the entry
@@ -1721,6 +1728,12 @@ class Rewriter(ast.NodeTransformer):
             return node
         if name == '__name__' and isinstance(node.ctx, ast.Load):
             return ast.copy_location(ast.Constant('__main__' if self.mod.entry else self.mod.name), node)
+        if name == '__file__':
+            if isinstance(node.ctx, ast.Load):
+                return ast.copy_location(ast.Constant(_module_file(self.mod)), node)
+            self.program.refuse(self.mod, node, "__file__ cannot be rebound or deleted: CPython lets a module "
+                                "replace its own file path, and this compiler writes the path at build time.\n"
+                                "  write instead: use another name for your own value")
         if name in self.mod.std:
             return node
         if name in self.mod.alias:
@@ -1769,6 +1782,8 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
+        if attr == '__file__' and not stored:
+            return ast.copy_location(ast.Constant(_module_file(target)), node)
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
@@ -1914,8 +1929,9 @@ class Rewriter(ast.NodeTransformer):
 
 # ---------------------------------------------------------------- the merge
 
-def merge_program(entry_path, entry_text, read=None):
-    """None when the entry imports no local module; else a Merged program (see the module docstring)."""
+def merge_program(entry_path, entry_text, read=None, entry_file=None):
+    """None when the entry imports no local module and does not read __file__; else a Merged program
+    (see the module docstring)."""
     if read is None:
         def read(path):
             return Path(path).read_bytes().decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
@@ -1924,10 +1940,14 @@ def merge_program(entry_path, entry_text, read=None):
         tree = ast.parse(entry_text, filename=str(program.entry_path))
     except SyntaxError:
         return None                    # the caller's own parse reports it
-    if not any(isinstance(node, (ast.Import, ast.ImportFrom)) and program.is_local_import(node)
-               for node in ast.walk(tree)):
+    uses_file = any((isinstance(node, ast.Name) and node.id == '__file__')
+                    or (isinstance(node, ast.Attribute) and node.attr == '__file__')
+                    for node in ast.walk(tree))
+    if not uses_file and not any(isinstance(node, (ast.Import, ast.ImportFrom)) and program.is_local_import(node)
+                                 for node in ast.walk(tree)):
         return None
     entry = Mod('__main__', program.entry_path, tree, True)
+    entry.file = entry_file if entry_file is not None else str(program.entry_path)
     program.entry = entry
     program.mods['__main__'] = entry
     program.prepare_entry(entry)
@@ -1935,7 +1955,7 @@ def merge_program(entry_path, entry_text, read=None):
     program.check_star_packages()
     order = program.analyse_all(entry)
     reachable = [m for m in order if m is not entry]
-    if not reachable:
+    if not reachable and not uses_file:
         return None
     mods = [entry] + reachable
     program.prepare_stores(mods)

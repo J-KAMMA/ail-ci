@@ -1,3 +1,29 @@
+## 2026-10-28 -- ex11: `__file__` and `module.__file__` read the source path (job-ex11-10290429)
+
+Building the Python-syntax examples under `AIL_CURRENT/language_examples` found `__file__ is not
+available` as the first refusal of five of the eleven top-level `.py` files (`row_codec_compare`,
+`row_decimal_quad`, `row_state_quad_compare`, `row_store_identity_compare`, `test_row_cpu_profile`,
+all through `row_locals_compare`), the most of any one refusal; `table_crc.py` and the four
+Python-syntax `.ail` examples already build, while the remaining files stop at a missing sibling
+import, a decorator, a name collision or file-I/O modules. `ail_modules.py` now rewrites a
+module-level `__file__` read to that module's source path and `mod.__file__` to the imported
+module's path (a namespace package is `None`); a module no longer needs a local import for this.
+The entry keeps CPython's spelling: an absolute argument verbatim, a relative one joined to the
+compile-time working directory, so `./name.py`, `../name.py` and a symlink name match CPython.
+Rebinding or deleting `__file__` is refused by name (CPython lets a module replace its own path,
+which a built executable cannot follow). The five research examples still stop at later
+imports/try/`subprocess` refusals, so no complete research example builds; the minimal reproducer
+and the imported-module path are in `test_ail_ex11.py`.
+
+Probes in `/tmp/probes/ex11` on both builds via `cmp.sh`: `p_basic`, `p_repr`, `p_func`, `p_alias`
+(argument, list item, dict value, attribute), `p_local`, `p_class`, `p_path`, `p_nested`,
+`p_dict_comp` match CPython; `p_module_assign`, `p_del`, `p_global_assign` are refused by name.
+The imported-module/`helper.__file__` directory (`/tmp/probes/ex11mod`) and a namespace package
+(`/tmp/probes/ex11ns`) match CPython; `/tmp/probes/ex11/pathtest.sh` matches `./`, `../` and a
+symlink entry spelling. Final-state tests: test_ail_ex11, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (4 modules, 0 failed). `tools/update_manifest.py --check` and
+`tools/ci_shards.py --check` pass.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
