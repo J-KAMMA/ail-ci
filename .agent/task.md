@@ -1,12 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `pre362` recorded these as already present before that job:
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_multifile.
 
-- `rp22`/`rp27` (`class C: y = (lambda: C)()` / comp form): CPython NameError; base compile-crash, HEAD exits 0 printing the class. The underlying read of the class name in its own body is pre-existing — `rp28` (`class C: y = C`) prints the class with exit 0 on **both** base and HEAD.
-- `rp38` genexp + lambda: base `(99, [99, 99, 99])`, HEAD `(99, [2, 2, 2])`, CPython `(99, [0, 1, 2])` — genexp consumption/late-binding difference, pre-existing; the change only moves the value.
-- `rp40` (`class A: x = A()`, direct name call) crashes with `RecursionError` identically on base and HEAD; `rp17` (class-local through lambda) and `rp19` are refused identically on base.
-
-**Unverified:** instruction counts/speed — the change is compile-time only and generated C is identical for non-feature probes; no gdev icount comparison was run.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre381.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
