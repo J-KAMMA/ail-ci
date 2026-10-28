@@ -1009,6 +1009,12 @@ def _mutated_parameters(fn):
     return names
 
 
+class _IntParams(dict):
+    """Wrapper parameter paths plus the constant defaults each wrapper passes to int()."""
+
+    defaults = {}
+
+
 def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes,
                         constants=None):
     candidates = {}
@@ -1078,7 +1084,9 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
             if normalized != functions.get(name, {}):
                 functions[name] = normalized
                 changed = True
-    return functions
+    result = _IntParams(functions)
+    result.defaults = _wrapper_int_defaults(tree, result, constants or {}, passthrough, attributes)
+    return result
 
 
 def _wrapper_int_defaults(tree, int_params, known, passthrough, attributes):
@@ -1245,12 +1253,12 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
 
 
 class _Int64CallChecker(ast.NodeVisitor):
-    def __init__(self, known, passthrough, int_params, int_defaults, int_shadowed,
-                 attributes, program_bound, argument_containers=None):
+    def __init__(self, known, passthrough, int_params, int_shadowed, attributes, program_bound,
+                 argument_containers=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
-        self.int_defaults = int_defaults
+        self.int_defaults = getattr(int_params, 'defaults', {})
         self.int_shadowed = int_shadowed
         self.attributes = attributes
         self.program_bound = program_bound
@@ -1722,8 +1730,7 @@ def _check_int64_literals(tree):
                                      known)
     argument_containers = _call_argument_containers(tree, module_counts, global_names, parents,
                                                    known)
-    int_defaults = _wrapper_int_defaults(tree, int_params, known, passthrough, attributes)
-    _Int64CallChecker(known, passthrough, int_params, int_defaults, int_shadowed, attributes,
+    _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
                       program_bound, argument_containers).visit(tree)
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]

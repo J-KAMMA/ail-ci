@@ -1,3 +1,28 @@
+## 2026-10-28 -- rbpre393 integration: wrapper defaults ride the parameter map (job-rbpre393-10281957)
+
+The pre393 change passed on its own export but its diff did not fit today's integ: the new
+`_Int64CallChecker(int_defaults=...)` argument changed a call site that integ now follows with
+its `module_checker`, so the merged tree built that checker with `int_defaults` omitted and
+`visit_Call` raised `AttributeError: 'bool' object has no attribute 'get'`; `git apply` of the
+old diff also failed its context at that call.  The defaults are now carried on the wrapper
+parameter map itself: `_wrapper_int_params` returns an `_IntParams` dict whose `defaults`
+attribute holds the per-function constant defaults, and the checker reads
+`getattr(int_params, 'defaults', {})`.  The checker signature and the `_check_int64_literals`
+call site stay exactly as integ has them, so both a patch application and a three-way merge
+keep the defaults working through the added `module_checker`.  Behaviour is unchanged, so the
+DIFFERENCES row `C?-job-rbpre393-10281532-1` still describes it and no row was added.
+
+Verified on a fresh worktree of `origin/integ` (25ba1b2): the branch diff applies cleanly and
+`test_ail_pre393` passes 2 tests (71 s) and `test_ail_safetynet` 5 tests (132 s); the same two
+pass (71 s / 132 s) after a three-way merge of the fix branch.  On this branch the required
+modules also pass: test_ail_pre393 2, test_ail_safetynet 5, test_ail_files 18 (1 skip),
+test_ail_corpus_findings3 2.  Probes in `/tmp/probes/rbpre393fix` (both builds via `cmp.sh`):
+p01-p06, p09, p12 and p13 (positional, keyword-only negative, string, list-item, dict-value,
+attribute, shadowed out-of-range and chained defaults, plus a module constant passed as the
+argument) are refused by name; p07, p08, p10 and p11 (in-range defaults and overrides, a
+shadowed in-range constant, int64 boundaries, empty-string default) match CPython.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- rbpre393 suite review: test_ail_pre393 and test_ail_safetynet pass (job-rbpre393-10281743)
 
 The suite job reported `test_ail_pre393` and `test_ail_safetynet` failing on today's integration
