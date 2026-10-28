@@ -28,7 +28,7 @@ ROOT = Path(__file__).resolve().parent
 
 BRACE = {}
 
-# grid_life-ail-2's shape: ga = gb with gb rebuilt and read in the next round
+# scar_life-ail-2's shape: ga = gb with gb rebuilt and read in the next round
 BRACE['double_buffer'] = ('''
 fn main() {
     let ga = [1, 0, 1, 0, 1, 1];

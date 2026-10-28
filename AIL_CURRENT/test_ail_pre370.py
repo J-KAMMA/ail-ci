@@ -1,18 +1,17 @@
-"""Pre370: int() of a statically known item of a function parameter is refused when it is out of int64.
+"""Pre370: int() of a statically known item of a function parameter outside int64 matches CPython.
 
 A reviewer of pre358 left ``def show(xs): print(int(xs[0])); show([1e300])`` open: both builds
-compiled it and then stopped with ``integer overflow`` where CPython prints the big integer.  The
-int64 call check now follows a constant subscript of a function parameter to the call sites, so
-the conversion is refused by name (``int() of a float outside int64`` for a float, ``int64
-constant expression out of range`` for text or bytes).  Covered: a list, tuple, dict key, nested
-item, negative index and keyword-only parameter; a single local alias of the parameter; an index
-held in a module constant; the argument reaching the call as a list item, a dict value, a class
-attribute or a module container alias; a wrapper function; and two call sites where one is out of
-range.  In-range values, int64 boundaries, an empty list, a callee that overwrites the item and a
-dynamic argument keep the run-time route and match CPython.  A module container passed to a
-function whose parameter escapes -- mutated through another callee, a method call, a nested def,
-a mutual chain, or returned and then mutated -- also keeps the run-time route, so the check never
-refuses a value the program changed first; a chain of read-only wrappers is still followed.
+compiled it and then stopped with ``integer overflow`` where CPython prints the big integer.  For
+the int64 era the call was refused by name (``int() of a float outside int64`` for a float,
+``int64 constant expression out of range`` for text or bytes); under exact ints both builds
+compile it and print the exact integer.  Covered: a list, tuple, dict key, nested item, negative
+index; a single local alias of the parameter; an index held in a
+module constant; the argument reaching the call as a list item, a dict value, a class attribute
+or a module container alias; a wrapper function; and two call sites where one is out of range.
+In-range values, int64 boundaries, an empty list, a callee that overwrites the item and a
+dynamic argument match CPython.  A module container passed to a function whose parameter
+escapes -- mutated through another callee, a method call, a nested def, a mutual chain, or
+returned and then mutated -- also matches, as does a chain of read-only wrappers.
 """
 import os
 import subprocess
@@ -45,16 +44,6 @@ def build(directory, name, text, general):
                                 '-o', exe.name], cwd=directory, capture_output=True, text=True, timeout=900, env=env)
 
 
-def check_refused(test, name, text, needle):
-    with tempfile.TemporaryDirectory(prefix='ail-pre370-') as directory:
-        for general in (True, False):
-            _, built = build(directory, name + ('g' if general else 'd'), text, general)
-            test.assertNotEqual(built.returncode, 0, (name, general))
-            message = built.stdout + built.stderr
-            test.assertIn(needle, message, (name, general, message[-1200:]))
-            test.assertNotIn('integer overflow', message, (name, general, message[-1200:]))
-
-
 def check_program(test, name, text):
     with tempfile.TemporaryDirectory(prefix='ail-pre370-') as directory:
         want = cpython(directory, name, text)
@@ -66,7 +55,7 @@ def check_program(test, name, text):
             test.assertEqual(got.returncode, want[1], (name, general, got.stderr[-800:]))
 
 
-FLOAT_REFUSED = {
+FLOAT_EXACT = {
     'arg_list_float': '''
 def show(xs):
     print(int(xs[0]))
@@ -141,12 +130,6 @@ def show(xs):
 
 show([1e300])
 ''',
-    'keyword_only': '''
-def show(*, xs):
-    print(int(xs[0]))
-
-show(xs=[1e300])
-''',
     'wrapper_chain_module_container': '''
 XS = [1e300]
 
@@ -176,7 +159,7 @@ show([9223372036854775808.0])
 ''',
 }
 
-INT_REFUSED = {
+INT_EXACT = {
     'arg_list_text': '''
 def show(xs):
     print(int(xs[0]))
@@ -204,6 +187,13 @@ def show(xs):
 show([d["k"]])
 ''',
 }
+
+KEYWORD_ONLY = '''
+def show(*, xs):
+    print(int(xs[0]))
+
+show(xs=[1e300])
+'''
 
 MATCH = {
     'float_in_range': '''
@@ -360,13 +350,20 @@ show([1e300])
 
 
 class Pre370Tests(unittest.TestCase):
-    def test_parameter_item_outside_int64_is_refused(self):
-        for slug, text in FLOAT_REFUSED.items():
+    def test_parameter_item_outside_int64_matches_cpython(self):
+        for slug, text in FLOAT_EXACT.items():
             with self.subTest(case=slug):
-                check_refused(self, slug, text, 'int() of a float outside int64')
-        for slug, text in INT_REFUSED.items():
+                check_program(self, slug, text)
+        for slug, text in INT_EXACT.items():
             with self.subTest(case=slug):
-                check_refused(self, slug, text, 'int64 constant expression out of range')
+                check_program(self, slug, text)
+
+    def test_required_keyword_only_parameter_is_still_outside_the_subset(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre370-') as directory:
+            for general in (True, False):
+                _, built = build(directory, 'kwonly' + ('g' if general else 'd'), KEYWORD_ONLY, general)
+                self.assertNotEqual(built.returncode, 0, general)
+                self.assertIn('required keyword-only parameter', built.stdout + built.stderr, general)
 
     def test_in_range_empty_mutated_and_dynamic_routes_match_cpython(self):
         for slug, text in MATCH.items():

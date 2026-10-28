@@ -21,10 +21,12 @@ REFUSALS = (
     'int() of a float outside int64',
 )
 
-OUT_OF_RANGE = {
+BEYOND_INT64 = {
     'positive': 'print(int(1e300))\n',
     'negative': 'print(int(-1e300))\n',
     'two_to_63': 'print(int(9223372036854775808.0))\n',
+}
+OUT_OF_RANGE = {
     'infinity_literal': 'print(int(1e400))\n',
 }
 IN_RANGE = '''print(int(1e18))
@@ -88,7 +90,21 @@ def build(directory, name, text, ir, general):
 
 
 class Pre9(unittest.TestCase):
-    def test_out_of_int64_float_literals_are_refused_by_name(self):
+    def test_beyond_int64_float_literals_build_and_match_cpython(self):
+        # exact ints: int(1e300) is CPython's exact big integer on both builds
+        with tempfile.TemporaryDirectory(prefix='ail-pre9-') as directory:
+            for name, text in BEYOND_INT64.items():
+                want = cpython(directory, name, text)
+                self.assertEqual(want.returncode, 0, want.stderr.decode('utf-8', 'replace'))
+                for mode, general, ir in MODES:
+                    with self.subTest(case=name, mode=mode, ir=ir):
+                        exe, built = build(directory, name, text, ir, general)
+                        self.assertEqual(built.returncode, 0, (built.stdout + built.stderr)[-1500:])
+                        got = subprocess.run([str(exe)], capture_output=True, timeout=60, cwd=directory)
+                        self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want.stdout, got.stderr[-500:])
+                        self.assertEqual(got.returncode, want.returncode, got.stderr[-500:])
+
+    def test_infinity_float_literal_is_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre9-') as directory:
             for name, text in OUT_OF_RANGE.items():
                 for mode, general, ir in MODES:

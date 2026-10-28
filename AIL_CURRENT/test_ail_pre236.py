@@ -116,11 +116,13 @@ class Pre236Tests(unittest.TestCase):
                 self.assertEqual(got, (want, rc), '%s (%s)\n%s' % (text[:2000], mode, build_err))
 
     def check_refused(self, slug, text, needle):
+        # exact ints (bigint): built on both paths, same (stdout, returncode) as CPython
         with tempfile.TemporaryDirectory(prefix='ail-pre236-') as directory:
+            want, rc, _err = _cpython(directory, slug, text)
             for mode, extra in MODES:
                 got, build_err = _build_and_run(directory, '%s_%s' % (slug, mode), text, extra)
-                self.assertIsNone(got, '%s (%s) built but should be refused' % (text[:200], mode))
-                self.assertIn(needle, build_err, '%s (%s)' % (text[:200], mode))
+                self.assertIsNotNone(got, '%s (%s)\n%s' % (text[:200], mode, build_err))
+                self.assertEqual(got, (want, rc), '%s (%s)\n%s' % (text[:200], mode, build_err))
 
     def test_special_exponent_and_zero_reductions(self):
         self.check('special_reductions', SPECIAL_REDUCTIONS)

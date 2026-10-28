@@ -1,4 +1,4 @@
-"""Idioms the rep5 AIL sessions hit (an audit program, a tree-folding program, a ranking program, a packing program, a tally program).
+"""Idioms the rep5 AIL sessions hit (ticket_audit, tree_fold, term_rank, echo_pack, tally_lang).
 
 Accepted programs are ordinary Python: CPython runs each as the oracle and the compiled program (the typed
 path only, AIL_NO_GENERAL=1) must print the same bytes.

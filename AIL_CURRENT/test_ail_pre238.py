@@ -78,18 +78,17 @@ NAMED = (
 
 class Pre238Tests(unittest.TestCase):
     def refused(self, slug, text):
+        # exact ints (bigint): builds and matches CPython (stdout, exit code)
         with tempfile.TemporaryDirectory(prefix='ail-pre238-') as directory:
+            ref = Path(directory) / (slug + '_cpython.py')
+            ref.write_text(text, encoding='utf-8')
+            want = subprocess.run([sys.executable, '-B', str(ref)], capture_output=True, timeout=120)
             for general in (True, False):
-                name = '%s_%s' % (slug, 'g' if general else 'd')
-                built, exe = _build(directory, name, text, general)
-                output = built.stdout + built.stderr
-                self.assertIn(built.returncode, (2, 3),
-                              '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
-                self.assertFalse(exe.exists(), '%s (general=%s) built an executable' % (slug, general))
-                self.assertNotIn('Exceeds the limit', output,
-                                 '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
-                self.assertTrue(any(marker in output for marker in NAMED),
-                                '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
+                got, build_err = _run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                      text, general)
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
+                self.assertEqual(got, (want.stdout.replace(b'\r\n', b'\n'), want.returncode),
+                                 '%s (general=%s)\n%s' % (slug, general, build_err))
 
     def matches(self, slug, text):
         with tempfile.TemporaryDirectory(prefix='ail-pre238-') as directory:

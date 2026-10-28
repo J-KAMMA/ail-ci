@@ -101,15 +101,15 @@ class Pre97Tests(unittest.TestCase):
 
     def check_refused(self, slug, text, needle):
         with tempfile.TemporaryDirectory(prefix='ail-pre97-') as directory:
-            _, got_rc, err = _cpython(directory, slug, text)
+            # exact ints (bigint): built, and the OverflowError comes at run time as in CPython
+            want, got_rc, err = _cpython(directory, slug, text)
             self.assertNotEqual(got_rc, 0, 'CPython was expected to raise:\n%s' % text)
             self.assertIn(b'OverflowError', err, err)
             for general in (True, False):
                 got, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
                                                 text, general)
-                self.assertIsNone(got, 'built and ran instead of refusing (general=%s):\n%s\n%s'
-                                  % (general, text, build_err))
-                self.assertIn(needle, build_err, 'general=%s\n%s' % (general, build_err))
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (text, general, build_err))
+                self.assertEqual(got, (want, got_rc), '%s (general=%s)\n%s' % (text, general, build_err))
 
     def test_constant_maxsplit_in_range(self):
         self.check('in_range', IN_RANGE)
@@ -123,7 +123,7 @@ class Pre97Tests(unittest.TestCase):
 
     def test_maxsplit_literal_above_int64_refused(self):
         self.check_refused('literal_over', 'print("a b c".split(" ", 9223372036854775808))\n',
-                           'int64 literal out of range')
+                           'maxsplit constant does not fit in a 64-bit signed integer')
 
 
 if __name__ == '__main__':

@@ -15,6 +15,10 @@ therefore use an intermediate beyond 2**20 bits.  A final value outside int64, o
 intermediate above the fold limit, is still refused by name.  The value reaches split/rsplit as
 a literal expression, an argument, a list item, an attribute, a dict value and a local, on both
 builds.
+
+With exact ints (bigint, BIGINT.md) the Python surface no longer refuses by name: a final value
+outside int64, an intermediate above the fold limit and a giant constant all build on both builds
+and end like CPython (output, exit code, and the OverflowError line for an oversized maxsplit).
 """
 import os
 import subprocess
@@ -70,7 +74,8 @@ OVER_INT64 = [
 NEEDLE = 'maxsplit constant does not fit in a 64-bit signed integer'
 
 GIANT_OUT_OF_INT64 = [
-    ('giant_default', 'def f(x=2**20000):\n    return x\n', ':1:9:'),
+    # a def-only program is built as a file "tool" (exit 2, usage); call f so it is a script
+    ('giant_default', 'def f(x=2**20000):\n    return x\n\n\nprint(f() > 0)\n', ':1:9:'),
     ('giant_module', 'M = 1 << 20000\n', ':1:5:'),
     ('giant_class', 'class C:\n    n = 2**20000\n', ':2:9:'),
     ('giant_negative', 'M = -(2**20000)\n', ':1:5:'),
@@ -117,18 +122,21 @@ class Pre200Tests(unittest.TestCase):
 
     def check_refused(self, slug, text, cpython_raises):
         with tempfile.TemporaryDirectory(prefix='ail-pre200-') as directory:
-            _, got_rc, err = _cpython(directory, slug, text)
+            # exact ints (bigint): builds and matches CPython (stdout, exit code)
+            want, want_rc, err = _cpython(directory, slug, text)
             if cpython_raises:
-                self.assertNotEqual(got_rc, 0, 'CPython was expected to raise:\n%s' % text)
+                self.assertNotEqual(want_rc, 0, 'CPython was expected to raise:\n%s' % text)
                 self.assertIn(b'OverflowError', err, err)
             else:
-                self.assertEqual(got_rc, 0, err)
+                self.assertEqual(want_rc, 0, err)
             for general in (True, False):
                 got, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
                                                 text, general)
-                self.assertIsNone(got, 'built and ran instead of refusing (general=%s):\n%s\n%s'
-                                  % (general, text, build_err))
-                self.assertIn(NEEDLE, build_err, 'general=%s\n%s' % (general, build_err))
+                self.assertIsNotNone(got, 'general=%s\n%s' % (general, build_err))
+                self.assertEqual(got, (want, want_rc), 'general=%s\n%s' % (general, build_err))
+                if cpython_raises:
+                    last = err.decode('utf-8', 'replace').strip().splitlines()[-1]
+                    self.assertIn(last, build_err, 'general=%s\n%s' % (general, build_err))
 
     def test_wide_intermediate_folded(self):
         self.check('folded', FOLDED)
@@ -142,16 +150,16 @@ class Pre200Tests(unittest.TestCase):
             self.check_refused(slug, text, cpython_raises)
 
     def test_wide_final_value_refused_by_name(self):
+        # exact ints (bigint): a giant constant builds and ends like CPython (stdout, exit code)
         for slug, text, where in GIANT_OUT_OF_INT64:
             with tempfile.TemporaryDirectory(prefix='ail-pre200-') as directory:
+                want, want_rc, err = _cpython(directory, slug, text)
+                self.assertEqual(want_rc, 0, err)
                 for general in (True, False):
                     got, build_err = _build_and_run(
                         directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
-                    self.assertIsNone(got, 'built and ran instead of refusing (general=%s):\n%s'
-                                      % (general, build_err))
-                    self.assertIn('int64 constant expression out of range: too large', build_err,
-                                  'general=%s\n%s' % (general, build_err))
-                    self.assertIn(where, build_err, 'general=%s\n%s' % (general, build_err))
+                    self.assertIsNotNone(got, 'general=%s\n%s' % (general, build_err))
+                    self.assertEqual(got, (want, want_rc), 'general=%s\n%s' % (general, build_err))
                     self.assertNotIn('Exceeds the limit', build_err,
                                      'general=%s\n%s' % (general, build_err))
 

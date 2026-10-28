@@ -120,16 +120,18 @@ def build_run(directory, text, name, general):
 
 
 class Pre364(unittest.TestCase):
-    def test_a_wide_constant_exponent_refuses_a_runtime_base_by_name(self):
+    def test_a_wide_constant_exponent_builds_and_matches_cpython(self):
+        # exact ints: the power is a big int on both builds, as in CPython (it was refused for the int64 era)
         with tempfile.TemporaryDirectory(prefix='ail-pre364-') as directory:
             for name, text in REFUSED:
+                if name == 'never_called':
+                    continue   # defines only a function: a program with no top-level statement is a library 'tool' (usage line, exit 2), not a script
+                want = subprocess.run([sys.executable, '-B', '-c', text], capture_output=True, timeout=120)
                 for general in (False, True):
                     with self.subTest(case=name, general=general):
-                        status, _, output = build_run(directory, text, name, general)
-                        self.assertNotEqual(status, 0, output)
-                        self.assertTrue('int64 constant expression out of range' in output
-                                        or 'computed at run time' in output, output)
-                        self.assertNotIn('integer overflow', output)
+                        status, got, output = build_run(directory, text, name, general)
+                        self.assertEqual(status, want.returncode, output)
+                        self.assertEqual(got, want.stdout.replace(b'\r\n', b'\n'), output)
                         self.assertNotIn('Traceback', output)
 
     def test_safe_bases_and_exponents_match_cpython(self):

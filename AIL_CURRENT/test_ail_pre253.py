@@ -267,8 +267,9 @@ class Pre253Tests(unittest.TestCase):
                                  '%s (general=%s)\n%s' % (slug, general, build_err))
 
     def test_out_of_int64_constant_int_base_is_refused(self):
+        # exact ints (bigint)
         for slug, text in OUT_OF_RANGE.items():
-            self.refused(slug, text)
+            self.matches(slug, text)
 
     def test_in_range_constant_int_base_matches_cpython(self):
         self.matches('in_range', IN_RANGE)

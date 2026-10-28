@@ -324,7 +324,7 @@ print(outer(b[0]), outer(d["v"]))
 class IntFloatOutsideInt64WrapperChain(unittest.TestCase):
     def test_refused_by_name(self):
         for name, text in sorted(REFUSED.items()):
-            check_refused(self, 'refuse_' + name, text)
+            check_program(self, 'refuse_' + name, text)      # exact ints (bigint): builds, CPython's big integer
 
     def test_conversions_that_fit_are_cpython(self):
         for name, text in sorted(MATCH.items()):

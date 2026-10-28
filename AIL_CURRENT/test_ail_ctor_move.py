@@ -2,7 +2,7 @@
 
 `T(a0, ..., a12)` with thirteen 3M-element list locals held every list three times: the caller
 snapshotted each argument, the constructor snapshotted it again, and the locals stayed alive
-(a tree-folding program: 943 MB peak against C's 215 MB). A numeric list or dict parameter whose only use in
+(tree_fold: 943 MB peak against C's 215 MB). A numeric list or dict parameter whose only use in
 `__init__` is `self.f = p` is now taken by pointer and moved into the field, and the call site
 hands over either the local itself -- when liveness on the AST shows nothing can read it again --
 or one private copy.

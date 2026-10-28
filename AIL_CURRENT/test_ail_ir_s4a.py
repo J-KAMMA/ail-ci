@@ -808,8 +808,12 @@ class ProgramTests(unittest.TestCase):
             self.assertIn('_nb', Path(tmp, 'mixed.legacy.d', 'program.c').read_text())
 
     def test_a_name_that_may_hold_either_kind_where_it_is_read_stays_legacy(self):
-        results, built = self.check('ambiguous', AMBIGUOUS, ['main'], [(1,), (5,)], cpython=False,
-                                    must_stay_legacy=['pick'])
+        # (typed path alone: the default build now gives such a function to the general path, which prints
+        # CPython's `2` where the typed path prints `2.0`)
+        import unittest.mock
+        with unittest.mock.patch.dict(os.environ, {'AIL_NO_GENERAL': '1'}):
+            results, built = self.check('ambiguous', AMBIGUOUS, ['main'], [(1,), (5,)], cpython=False,
+                                        must_stay_legacy=['pick'])
         self.assertIn('int-or-float', built.fallback['ir']['pick'])
 
     def test_text_values_and_arenas_across_try_except(self):
@@ -877,7 +881,7 @@ class ProgramTests(unittest.TestCase):
                 san = Path(tmp, name + '.' + tag + '.san')
                 cc = subprocess.run(['gcc', '-O1', '-g', '-fsanitize=address,undefined', '-fno-sanitize-recover=undefined',
                                      '-fno-omit-frame-pointer', '-pthread',
-                                     str(Path(tmp, '%s.%s.d' % (name, tag), 'program.c')), '-lm', '-o', str(san)],
+                                     *map(str, sorted(Path(tmp, '%s.%s.d' % (name, tag)).glob('program*.c'))), '-lm', '-o', str(san)],
                                     capture_output=True, text=True)
                 self.assertEqual(cc.returncode, 0, cc.stderr[-2000:])
                 env_run = {'ASAN_OPTIONS': ASAN_DETECT_LEAKS + ':abort_on_error=0',

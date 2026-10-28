@@ -1,15 +1,15 @@
 """Paths sped up for the three largest losses to C in the 2026-10-18 all-language comparison.
 
 * `if <test> { x += K }` on an int local is compiled as `x += K if <test> else 0` (a conditional move,
-  not an unpredictable branch; a grid-life program's neighbour count): the legacy path (`pyfunc._if_add_fusion`)
+  not an unpredictable branch; scar_life's neighbour count): the legacy path (`pyfunc._if_add_fusion`)
   and the IR path (`ir/ifadd.py`) must give CPython's results, evaluate the test exactly once, and
   still raise OverflowError exactly when the add would overflow and the test holds.
 * dict[int, T] / set[int] in HASH mode keep key and value in one entry and take an inline path for
-  `d[k] = v` on a key already present (a packing program's match finder): results, order and deletions must be
+  `d[k] = v` on a key already present (echo_pack's match finder): results, order and deletions must be
   CPython's, including keys at both ends of int64 and re-inserted deleted keys.
 * `out.append(n % 256)`, `out.append(n // 256)`, `out.append(n >> 8)` on a named bytearray take the
   no-retain path (the divisor is a positive literal, so the argument cannot fail or free anything).
-* A list field read through the span fast path (a tally program's interpreter) keeps Python's negative
+* A list field read through the span fast path (tally_lang's interpreter) keeps Python's negative
   indices and still fails on an empty or short list.
 
 Programs are ordinary Python (`--syntax python`): CPython is the oracle, in both AIL_IR=0 and AIL_IR=1.
@@ -313,6 +313,10 @@ class LossPathTests(unittest.TestCase):
         self.check_oracle(COUNTERS, "counters")
 
     def test_if_add_still_traps_on_overflow(self):
+        # (the legacy int64 emitter, AIL_IR=0, traps; the IR build has exact ints, so it prints what CPython prints:
+        # no OverflowError at all)
+        python = subprocess.run([sys.executable, "-c", OVERFLOW], capture_output=True, text=True, timeout=60)
+        self.assertEqual(python.stdout, "0 9223372036854775812" + chr(10) + "no" + chr(10) + "5" + chr(10))
         with tempfile.TemporaryDirectory() as directory:
             for ir in ("0", "1"):
                 with self.subTest(ir=ir):
@@ -320,7 +324,7 @@ class LossPathTests(unittest.TestCase):
                     self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                     ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
                     self.assertEqual(ran.returncode, 0, ran.stderr)
-                    self.assertEqual(ran.stdout, OVERFLOW_EXPECTED)
+                    self.assertEqual(ran.stdout, OVERFLOW_EXPECTED if ir == "0" else python.stdout)
 
     def test_int_dict_and_set_hit_paths_match_cpython(self):
         self.check_oracle(DICTS, "dicts")

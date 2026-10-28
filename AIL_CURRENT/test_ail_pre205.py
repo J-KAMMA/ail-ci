@@ -114,14 +114,14 @@ class Pre205Tests(unittest.TestCase):
 
     def refused(self, slug, text, message):
         """No executable in either build, and the refusal is the maxsplit one."""
+        # exact ints (bigint): built, and the OverflowError comes at run time as in CPython
         with tempfile.TemporaryDirectory(prefix='ail-pre205-') as directory:
+            want, rc, err = _cpython(directory, slug, text)
             for general in (True, False):
-                name = '%s_%s' % (slug, 'g' if general else 'd')
-                built, exe = _build(directory, name, text, general)
-                output = built.stdout + built.stderr
-                self.assertNotEqual(built.returncode, 0, '%s (general=%s)\n%s' % (text[:2000], general, output[-3000:]))
-                self.assertFalse(exe.exists(), '%s (general=%s) built an executable' % (slug, general))
-                self.assertIn(message, output, '%s (general=%s)\n%s' % (slug, general, output[-3000:]))
+                got, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                                text, general)
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (text[:2000], general, build_err))
+                self.assertEqual(got, (want, rc), '%s (general=%s)\n%s' % (text[:2000], general, build_err))
 
     def test_wider_intermediate_matches_cpython(self):
         self.check('wider', PROGRAM)

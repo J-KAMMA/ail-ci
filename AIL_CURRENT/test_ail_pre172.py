@@ -106,16 +106,15 @@ def _run(directory, name, text, general):
 class Pre172Tests(unittest.TestCase):
     def test_statically_known_unary_overflow_is_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre172-') as directory:
+            # exact ints (bigint): builds and matches CPython (stdout, exit code)
             for label, text in OUT_OF_RANGE.items():
+                want, want_rc, _err = _cpython(directory, label, text)
                 for general in (True, False):
                     with self.subTest(label + ('_g' if general else '_d')):
-                        built, _ = _build(directory, '%s_%s' % (label, 'g' if general else 'd'),
-                                          text, general)
-                        self.assertNotEqual(built.returncode, 0, label)
-                        message = built.stdout + built.stderr
-                        self.assertIn('int64 constant expression out of range', message, label)
-                        self.assertNotIn('integer overflow', message, label)
-                        self.assertNotIn('Traceback', message, label)
+                        got, build_err = _run(directory, '%s_%s' % (label, 'g' if general else 'd'),
+                                              text, general)
+                        self.assertIsNotNone(got, build_err)
+                        self.assertEqual(got, (want, want_rc), label + '\n' + build_err)
 
     def test_in_range_unary_expressions_still_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre172-') as directory:

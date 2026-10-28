@@ -249,16 +249,18 @@ class Pre246Tests(unittest.TestCase):
         self.check_index('flow', INDEX_FLOW)
 
     def test_out_of_int64_index_still_refused_by_name(self):
+        # exact ints (bigint): built on both paths, same (stdout, returncode) as CPython
         with tempfile.TemporaryDirectory(prefix='ail-pre246-') as directory:
             for slug, text in INDEX_REFUSED.items():
+                want, want_rc, _err = _cpython(directory, slug, text)
                 for mode in ('g', 'd'):
                     with self.subTest(slug=slug, mode=mode):
                         built, exe = _build(directory, '%s_%s' % (slug, mode), text, mode)
                         output = built.stdout + built.stderr
-                        self.assertEqual(built.returncode, 2, '%s (%s)\n%s' % (slug, mode, output[-4000:]))
-                        self.assertFalse(exe.exists(), '%s (%s) built an executable' % (slug, mode))
-                        self.assertIn('int64 index out of range', output,
-                                      '%s (%s)\n%s' % (slug, mode, output[-4000:]))
+                        self.assertEqual(built.returncode, 0, '%s (%s)\n%s' % (slug, mode, output[-4000:]))
+                        got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+                        self.assertEqual((got.stdout.replace(b'\r\n', b'\n'), got.returncode),
+                                         (want, want_rc), slug + ' ' + mode)
 
 
 if __name__ == '__main__':

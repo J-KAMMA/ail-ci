@@ -1,5 +1,10 @@
 # -*- coding: utf-8 -*-
-"""pre19: `del` with a constant bound whose *exact final value* leaves int64 is refused by name.
+"""pre19: `del` with a constant bound whose *exact final value* leaves int64 behaves like CPython.
+
+With exact ints (docs/design/BIGINT.md) such a bound is no longer refused at compile time: the
+program builds on both paths and, as in CPython, stops with the same IndexError/ValueError at the
+`del` (stdout, exit code and the exception's last stderr line are compared).  The history below
+describes the int64-era rule the cases came from.
 
 CPython's int is unbounded, so a constant `del` index or slice bound can pass through an
 out-of-int64 intermediate and still name a valid element, e.g. `del a[2**63 * 0]` or
@@ -80,25 +85,20 @@ class DeleteBoundBeyondInt64(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_constant_bound_that_overflows_int64_is_refused_by_name(self):
-        for source in REFUSED:
+    def test_constant_bound_that_overflows_int64_matches_cpython(self):
+        for index, source in enumerate(REFUSED):
+            ref = Path(self.dir, 'big%d.py' % index)
+            ref.write_text(source, encoding='utf-8')
+            expected = subprocess.run([sys.executable, str(ref)], capture_output=True, text=True, timeout=60)
+            want_err = (expected.stderr.strip().splitlines() or [''])[-1]
             for general in (False, True):
-                built, _ = build(self.dir, source, general)
-                where = 'general' if general else 'default'
-                self.assertNotEqual(built.returncode, 0, where + ' built:\n' + source)
-                text = built.stdout + built.stderr
-                # This tree's earlier constant checks already refuse some of these cases by name
-                # (`int64 index out of range` / `int64 constant out of range`); both sides' fixes
-                # are kept, so accept either named refusal and never a run-time overflow trap.
-                self.assertTrue(any(named in text for named in (
-                    '64-bit signed integer range of an AIL int',
-                    'int64 index out of range',
-                    'int64 constant out of range',
-                    'outside the signed 64-bit range',
-                )), where + ':\n' + text)
-                self.assertNotIn('integer overflow', text, where)
-                if '64-bit signed integer range of an AIL int' in text:
-                    self.assertIn('del ', text, where)
+                built, exe = build(self.dir, source, general, 'b%d' % index)
+                where = ('general' if general else 'default') + ':\n' + source
+                self.assertEqual(built.returncode, 0, where + built.stdout + built.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+                self.assertEqual((ran.stdout, ran.returncode), (expected.stdout, expected.returncode), where)
+                self.assertIn(want_err, ran.stderr, where)
+                self.assertNotIn('integer overflow', ran.stderr, where)
 
     def test_representable_constant_bounds_still_build_and_match(self):
         sources = [IN_RANGE] + list(REPRESENTABLE_EDGES)

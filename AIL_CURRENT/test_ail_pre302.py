@@ -7,8 +7,8 @@ whose conversion is finite to a float literal, so both builds match CPython.  A 
 negative value is parenthesized, so a following ``**`` still applies to the call result
 rather than binding tighter than the unary minus.  A value
 that reaches ``float()`` through an argument, a list item, an attribute, a dict value,
-a local or a module constant is still refused by name (the int itself does not fit
-int64), as is a conversion that overflows a double.  The second recorded item,
+a local or a module constant is now an exact big integer (bigint, BIGINT.md) and matches
+CPython too, as does a conversion that overflows a double (OverflowError, exit 1).  The second recorded item,
 out-of-range intermediates that reduce to an in-range value, already matches CPython,
 including a 2**20-bit intermediate shifted back down.
 """
@@ -150,10 +150,10 @@ def build(directory, name, text, mode):
 
 
 class Pre302Tests(unittest.TestCase):
-    def check_match(self, name, text):
+    def check_match(self, name, text, rc=0):
         with tempfile.TemporaryDirectory(prefix='ail-pre302-') as directory:
             want, want_rc = cpython(directory, name, text)
-            self.assertEqual(want_rc, 0)
+            self.assertEqual(want_rc, rc)
             for mode in ('g', 'd'):
                 with self.subTest(name=name, mode=mode):
                     exe, built = build(directory, name + '_' + mode, text, mode)
@@ -183,15 +183,10 @@ main()
                     self.assertIn('complex number', built.stdout + built.stderr, mode)
 
     def test_values_that_cannot_be_an_int64_are_refused_by_name(self):
-        with tempfile.TemporaryDirectory(prefix='ail-pre302-') as directory:
-            for name, text in REFUSED.items():
-                for mode in ('g', 'd'):
-                    with self.subTest(name=name, mode=mode):
-                        _, built = build(directory, name + '_' + mode, text, mode)
-                        self.assertNotEqual(built.returncode, 0, (name, mode))
-                        message = built.stdout + built.stderr
-                        self.assertTrue(any(item in message for item in REFUSALS), (name, mode, message))
-                        self.assertNotIn('integer overflow', message, (name, mode))
+        # exact ints (bigint): builds and matches CPython (stdout, exit code); float(10**400)
+        # ends with CPython's OverflowError (exit 1)
+        for name, text in REFUSED.items():
+            self.check_match(name, text, rc=1 if name == 'overflow' else 0)
 
 
 if __name__ == '__main__':

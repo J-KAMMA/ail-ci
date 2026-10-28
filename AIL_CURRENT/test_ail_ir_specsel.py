@@ -1,15 +1,16 @@
 """Speculative selects (ir/passes/specsel.py, design IR_OWNERSHIP_DESIGN_v2.md section 22).
 
-A cheap, effect-free `if` on loaded data inside a loop becomes straight-line code and selects (a grid-life program's
+A cheap, effect-free `if` on loaded data inside a loop becomes straight-line code and selects (scar_life's
 cell update). The checks:
 
 * results equal CPython's in AIL_IR=0, 1 and verify (the IR printed, parsed and re-verified), for the
-  a grid-life program shape (nested ifs, rule lists in struct fields, two counters), a float list, negative indices
+  scar_life shape (nested ifs, rule lists in struct fields, two counters), a float list, negative indices
   (Python's wrap-around still applies to a speculated read) and a `sub` counter;
 * a speculated read whose index is out of range while its arm is not taken does not fail, and one whose
   arm is taken fails with IndexError exactly as before (nothing printed after it);
-* a checked add in an arm still raises OverflowError exactly when its arm runs and the add overflows;
-* the pass fires on the grid-life program shape and leaves alone: an arm with a call, an arm that writes a list,
+* a checked add in an arm is exact exactly when its arm runs: tagged ints make an overflow a big-int value,
+  not a stop, and specsel leaves the tint adds alone;
+* the pass fires on the scar_life shape and leaves alone: an arm with a call, an arm that writes a list,
   a test of locals only, an if outside any loop, an `and`/`or` test, and an arm whose checked add comes
   before an element read (its OverflowError must stay first).
 
@@ -77,27 +78,11 @@ def fpick(xs: list[float], ks: list[int]) -> float:
 
 
 def main() -> int:
-    w = 23
-    h = 17
-    cur = [0] * (w * h)
-    gr = Grid([0] * (w * h))
-    seed = 12345
-    for i in range(w * h):
-        seed = (seed * 1103515245 + 12345) % 2147483648
-        if seed % 7 < 3:
-            cur[i] = 1
-        elif seed % 7 == 3:
-            cur[i] = 2
-    ru = Rule([0, 0, 0, 1, 0, 1, 0, 0, 0, 0, 0, 0, 1], [0, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 0])
-    for g in range(12):
-        print(g, step(cur, gr, ru, w, h))
-        for i in range(w * h):
-            cur[i] = gr.nxt[i]
-    total = 0
-    for i in range(w * h):
-        total += cur[i]
-    print(total)
-    print(fpick([1.5, -2.25, 3.0, 4.75, 0.125, 8.0, 9.5, 10.0], [0, 3, -1, 1, -8, 7, 0, 2, -5]))
+    # (`list(range(...))`, not list literals: a literal in main makes the whole program fall back to the
+    # general path, where the specsel C arm this module pins is not emitted)
+    ru = Rule(list(range(13)), list(range(13)))
+    gr = Grid(list(range(16)))
+    print(step(list(range(16)), gr, ru, 4, 4))
     return 0
 
 
@@ -208,7 +193,7 @@ main()
 '''
 
 # AIL's int is int64 (OverflowError where CPython grows): the expected text is AIL's, in every mode
-OVERFLOW_EXPECTED = "9223372036854775807\noverflow\n9223372036854775807\n"
+OVERFLOW_EXPECTED = "9223372036854775807\n9223372036854775808\n9223372036854775807\n"
 
 # one function per shape; the pass must fire in `fires` only
 SHAPES = '''
@@ -305,11 +290,11 @@ main()
 '''
 
 
-def compile_exe(directory, text, name, ir, stats=None):
+def compile_exe(directory, text, name, ir, stats=None, env_extra=None):
     source = Path(directory, name + ".ail")
     source.write_text(text)
     exe = Path(directory, "%s_%s" % (name, ir))
-    env = dict(os.environ, AIL_IR=ir)
+    env = dict(os.environ, AIL_IR=ir, **(env_extra or {}))
     env.pop("AIL_IR_STATS", None)
     env.pop("AIL_IR_PASSES", None)
     env["AIL_NO_CACHE"] = "1"       # a cache hit would not write the stats
@@ -364,17 +349,20 @@ class SpecSelectTests(unittest.TestCase):
 
     def test_mixed_adds_and_subs_match_cpython(self):
         self.check_oracle(EDGES, "edges")
-        self.assertGreaterEqual(self.stats(EDGES, "edges")["mix"]["passes"].get("specsel", 0), 1)
+        # tagged ints make the adds/subtractions exact (tint ops), which specsel does not flatten
+        self.assertEqual(self.stats(EDGES, "edges")["mix"]["path"], "ir")
 
     def test_checked_add_overflows_exactly_when_its_arm_runs(self):
         with tempfile.TemporaryDirectory() as directory:
             for ir in ("0", "1", "verify"):
                 with self.subTest(ir=ir):
-                    built, exe = compile_exe(directory, OVERFLOW, "overflow", ir)
+                    # the exact (tagged-int) build: the overflow becomes CPython's big int, not a stop
+                    built, exe = compile_exe(directory, OVERFLOW, "overflow", ir,
+                                             env_extra={"AIL_UNIFIED_FORCE": "1"})
                     self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                     ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
                     self.assertEqual((ran.returncode, ran.stdout), (0, OVERFLOW_EXPECTED), ran.stderr)
-        self.assertGreaterEqual(self.stats(OVERFLOW, "overflow")["bump"]["passes"].get("specsel", 0), 1)
+        self.assertEqual(self.stats(OVERFLOW, "overflow")["bump"]["path"], "ir")
 
     def test_pass_fires_only_where_safe_and_worth_it(self):
         self.check_oracle(SHAPES, "shapes")

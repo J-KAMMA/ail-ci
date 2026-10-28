@@ -88,16 +88,17 @@ def build_run(directory, text, name, general):
 
 
 class Pre331(unittest.TestCase):
-    def test_wide_constant_exponent_is_refused_by_name(self):
+    def test_a_wide_constant_exponent_builds_and_matches_cpython(self):
+        # exact ints: the power is a big int on both builds, as in CPython (it was refused for the int64 era)
         with tempfile.TemporaryDirectory(prefix='ail-pre331-') as directory:
             for name, text in REFUSED:
+                want = subprocess.run([sys.executable, '-B', '-c', text], capture_output=True, timeout=120)
                 for general in (False, True):
                     with self.subTest(case=name, general=general):
-                        status, _, output = build_run(directory, text, name, general)
-                        self.assertNotEqual(status, 0, output)
-                        self.assertIn('int64 constant expression out of range', output)
+                        status, got, output = build_run(directory, text, name, general)
+                        self.assertEqual(status, want.returncode, output)
+                        self.assertEqual(got, want.stdout.replace(b'\r\n', b'\n'), output)
                         self.assertNotIn('Traceback', output)
-                        self.assertNotIn('integer overflow', output)
 
     def test_in_range_and_shadowed_pow_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre331-') as directory:

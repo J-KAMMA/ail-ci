@@ -4,7 +4,7 @@ The pre9 reviewer recorded as already present before that job: the pre290 finite
 float-literal refusals (a value outside int64 reached ``int()`` directly, through a
 unary sign, a constant conditional, a constant, a list/tuple/dict item, an alias or a
 wrapper argument), the infinity literal refusal, and the int-shadowing refusal.  CPython
-prints the exact big integer for the finite values and raises OverflowError for infinity.
+prints the exact big integer for the finite values (which these builds now print too, under exact ints; only the infinity literals stay refused) and raises OverflowError for infinity.
 
 Reproducing them on this tree shows that both builds already refuse every out-of-range
 program at compile time with a named message (``int() of a float outside int64`` or
@@ -31,43 +31,43 @@ REFUSALS = ('int() of a float outside int64',
 CASES = {
     'direct': ('''
 print(int(1e300))
-''', 'refused'),
+''', 'ran'),
     'negative': ('''
 print(int(-1e300))
-''', 'refused'),
+''', 'ran'),
     'exact_two_to_63': ('''
 print(int(9223372036854775808.0))
-''', 'refused'),
+''', 'ran'),
     'next_below_int64_min': ('''
 print(int(-9223372036854777856.0))
-''', 'refused'),
+''', 'ran'),
     'unary_paren': ('''
 print(int(-(1e300)))
-''', 'refused'),
+''', 'ran'),
     'constant_conditional': ('''
 print(int(1e300 if True else 0.0))
-''', 'refused'),
+''', 'ran'),
     'module_constant': ('''
 X = 1e300
 print(int(X))
-''', 'refused'),
+''', 'ran'),
     'list_item': ('''
 xs = [1e300]
 print(int(xs[0]))
-''', 'refused'),
+''', 'ran'),
     'tuple_item': ('''
 xs = (1e300, 1.5)
 print(int(xs[0]))
-''', 'refused'),
+''', 'ran'),
     'dict_value': ('''
 d = {"v": 1e300}
 print(int(d["v"]))
-''', 'refused'),
+''', 'ran'),
     'aliased_list': ('''
 a = [1e300]
 b = a
 print(int(b[0]))
-''', 'refused'),
+''', 'ran'),
     'wrapper_positional': ('''
 def take(x):
     return int(x)
@@ -76,19 +76,19 @@ def outer(y):
     return take(y)
 
 print(outer(1e300))
-''', 'refused'),
+''', 'ran'),
     'wrapper_keyword': ('''
 def take(x):
     return int(x)
 
 print(take(x=1e300))
-''', 'refused'),
+''', 'ran'),
     'identity_positional_only': ('''
 def take(x, /):
     return int(x)
 
 print(take(1e300))
-''', 'refused'),
+''', 'ran'),
     'infinity_literal': ('''
 print(int(1e400))
 ''', 'refused'),
@@ -122,7 +122,7 @@ def g():
     return int(1e300)
 
 print(f(), g())
-''', 'refused'),
+''', 'ran'),
     'module_function_int': ('''
 def int(x):
     return 7

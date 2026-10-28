@@ -30,6 +30,7 @@ no division helper -- the same property the rest of the layer has.
 Strict is not the default because it costs time and the cost should be measured, not assumed.
 """
 import ast
+import os
 
 from pipeline import PipelineError, shared_object
 
@@ -176,6 +177,9 @@ def fold_int_constants(source):
     Plain in-range arithmetic and non-constant expressions are left exactly as written, so the
     typed/general path choice and the context-specific diagnostics still see them.
     """
+    # exact ints (BIGINT.md): a constant outside int64 is left as written and computed exactly, not refused;
+    # INT64_MIN is folded only from an out-of-int64 intermediate (`-(2**63)`)
+    exact = os.environ.get('AIL_SURFACE') == 'python'
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -255,15 +259,26 @@ def fold_int_constants(source):
             try:
                 value = const_value(node)
             except _IntConstTooLarge:
+                if exact:
+                    return
                 refuse(node)
             if value is not None:
                 if not _INT64_MIN <= value <= _INT64_MAX:
+                    if exact:
+                        return
                     refuse(node)
                 # Fold only when the arithmetic would overflow an int64 intermediate (as in
                 # `2**63 - 1`) or when the value itself does not fit (refused above). Ordinary
                 # in-range constants are left as written so the typed/general path choice and
                 # context-specific diagnostics that read the expression tree are unchanged.
                 if value != _INT64_MIN and not overflows_inside(node):
+                    return
+                # exact ints: INT64_MIN spelled without a big intermediate (`-9223372036854775807 - 1`) stays as written
+                # and computes in int64; only `-(2**63)` and the like become the literal, which bigcap routes to the exact
+                # build (abs() of it traps on the typed path, pre214; the plain spelling keeps the typed sort, u14)
+                # (`-1 << 63` is still folded: the pipeline emitter's shift helper does not build there, pre47)
+                if exact and isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub)) \
+                        and not overflows_inside(node):
                     return
                 start = starts[node.lineno - 1] + node.col_offset
                 end = starts[node.end_lineno - 1] + node.end_col_offset
@@ -525,6 +540,9 @@ def _int_constant_with_overflow(node):
 
 def refuse_unrepresentable_delete_bounds(target):
     """Refuse a `del` whose constant index or slice bound cannot be evaluated as an AIL int64."""
+    import biggate
+    if biggate.ON:
+        return                    # exact ints (BIGINT.md): the run time raises CPython's IndexError
     if isinstance(target.slice, ast.Slice):
         bounds = (target.slice.lower, target.slice.upper, target.slice.step)
         what = 'slice bound'
@@ -553,7 +571,16 @@ def refuse_int_float_literal(node):
     compile-time outcome an out-of-range integer literal already gets. Values that fit int64
     take the ordinary conversion, and a non-literal argument is unaffected.
     """
+    import biggate
     value = _number_constant(node)
+    if biggate.ON:
+        # exact ints (BIGINT.md): int(1e300) is a big int, not a program to refuse. An infinity or NaN
+        # literal has no value to build (CPython raises at run time), so it is still refused, by name.
+        if isinstance(value, float) and (value != value or value in (float('inf'), float('-inf'))):
+            raise Unsupported(
+                'int() of a float outside int64: the literal %r converted with int() is an infinity or a '
+                'NaN, which has no exact integer value (CPython raises OverflowError or ValueError)' % value)
+        return
     if isinstance(value, float) and not (-9223372036854775808.0 <= value < 9223372036854775808.0):
         raise Unsupported(
             'the float literal %r converted with int() does not fit in a 64-bit signed integer, '
@@ -1187,6 +1214,9 @@ def refuse_variable_int_pow(node):
     because every int64 exponent keeps their result in range."""
     if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
         return
+    import biggate
+    if biggate.ON:
+        return                        # exact ints (BIGINT.md): the power is a big int, not a program to refuse
     base = int_constant(node.left)
     if base is None or abs(base) < 2 or not -(1 << 63) <= base < (1 << 63):
         return
@@ -1201,14 +1231,17 @@ def refuse_variable_int_pow(node):
     raise refusal
 
 
-INT_POW_DIFF = 'C?-job-rbrbrbrbpre33-10271808-1'
+INT_POW_DIFF = 'C426'
 
 
 def refuse_int_pow_overflow(node):
     """`10 ** 40`: CPython's int is unbounded, this language's is int64 (DIFFERENCES
-    C?-job-rbrbrbrbpre33-10271808-1). A constant integer power whose exact result does not fit is refused
+    C426). A constant integer power whose exact result does not fit is refused
     here, before any emitter sees it, rather than wrapping or stopping at run time. Bases -1, 0 and
     1 are always in range, so a huge exponent on one of them is not even evaluated."""
+    import biggate
+    if biggate.ON:
+        return                        # exact ints (BIGINT.md): the power is a big int, not a program to refuse
     base, exponent = _number_constant(node.left), _number_constant(node.right)
     if type(base) is not int or type(exponent) is not int or exponent < 0 or -1 <= base <= 1:
         return

@@ -115,9 +115,10 @@ class Pre195Tests(unittest.TestCase):
             for general in (True, False):
                 got, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
                                                 text, general)
-                self.assertIsNone(got, 'built and ran instead of refusing (general=%s):\n%s\n%s'
-                                  % (general, text, build_err))
-                self.assertIn(NEEDLE, build_err, 'general=%s\n%s' % (general, build_err))
+                # exact ints (bigint): built, and the OverflowError comes at run time as in CPython
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (text, general, build_err))
+                want = _cpython(directory, slug, text)
+                self.assertEqual(got, (want[0], want[1]), '%s (general=%s)\n%s' % (text, general, build_err))
 
     def test_power_folded_before_rejection(self):
         self.check('folded', FOLDED)
@@ -126,8 +127,19 @@ class Pre195Tests(unittest.TestCase):
         for slug, text in OUT_OF_RANGE:
             self.check_refused(slug, text)
 
-    def test_intermediate_above_fold_limit_refused(self):
-        self.check_refused('over_fold_limit', OVER_FOLD_LIMIT, cpython_raises=False)
+    def test_intermediate_above_fold_limit_refused_or_exact(self):
+        # pre195 refused a 4096-bit intermediate by name; rbpre190/rbpre205 (imported later)
+        # fold it, so either the named refusal or CPython's exact output is correct.
+        with tempfile.TemporaryDirectory(prefix='ail-pre195-') as directory:
+            want, want_rc, err = _cpython(directory, 'over_fold_limit', OVER_FOLD_LIMIT)
+            self.assertEqual(want_rc, 0, err)
+            for general in (True, False):
+                got, build_err = _build_and_run(directory, 'over_fold_limit_%s' % ('g' if general else 'd'),
+                                                OVER_FOLD_LIMIT, general)
+                if got is None:
+                    self.assertIn(NEEDLE, build_err, 'general=%s\n%s' % (general, build_err))
+                else:
+                    self.assertEqual(got, (want, want_rc), 'general=%s' % general)
 
 
 if __name__ == '__main__':

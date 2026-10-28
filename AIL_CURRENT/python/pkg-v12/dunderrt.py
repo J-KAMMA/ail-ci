@@ -257,7 +257,14 @@ __attribute__((noinline)) static ail_st ail_dun_hash(ail_ctx *cx, int64_t *out, 
     ail_d1_fn hf = ail_dun1(x, AIL_D1_HASH);
     if (hf) {
         ail_obj hr; ail_st hst = hf(cx, &hr, x); if (hst != AIL_OK) return hst;
-        if (hr.tag == AIL_T_INT || hr.tag == AIL_T_BOOL) { *out = hr.i == -1 ? -2 : hr.i; return AIL_OK; }
+        if (hr.tag == AIL_T_INT || hr.tag == AIL_T_BOOL) {
+            if (hr.i == -1) hr.i = -2;
+            /* an IntEnum / IntFlag member IS an int (has __int__): it must land in the slot of the plain int, so {Flag.ONE: v}[1]
+               finds it -- the table hash of that int.  Any other class keeps CPython's raw hash(), so its probe / collision order
+               (and with it the __eq__ calls) is CPython's. */
+            if (ail_dun1(x, AIL_D1_INT)) return ail_obj_hash(cx, out, hr);
+            *out = hr.i; return AIL_OK;
+        }
         if (!(hr.tag == AIL_T_INST && hr.o == x.o)) return ail_obj_hash(cx, out, hr);
     } else if (ail_dun2(x, AIL_D2_EQ) || ((ail_classobj *)((ail_instobj *)x.o)->cls.o)->dc) {
         char hb[120], hn[80]; ail__dun_tname(hn, sizeof hn, x);
@@ -272,13 +279,13 @@ __attribute__((noinline)) static ail_st ail_dun_hash(ail_ctx *cx, int64_t *out, 
 
 # runtime functions that only some programs carry (the formatter of safetyrt.py)
 OPTIONAL = (
-            '            uint16_t ch;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n',
+            '            uint16_t ch;\n',
             
             '"%%%c format: a real number is required, not %s", (char)t, ail_type_name(arg.tag)',
             '"%%%c format: an integer is required, not %s", (char)t, ail_type_name(arg.tag)',
             '"must be real number, not %s", ail_type_name(arg.tag)',
             'static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
-            '            int64_t iv;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n',
+            '            int64_t iv;\n',
             '            double d;\n            if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);\n')
 
 
@@ -304,8 +311,10 @@ def _edits(inplace=False):
     # tables in the class object
     e.append(('typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;',
               enums + 'typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;'))
-    e.append(('ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */ } ail_classobj;',
-              'ail_st (*lt_fn)(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* user __lt__ (self, other), or 0 */\n'
+    e.append(('                 ail_attr *attrs; /* class attributes: one table per class, shared by every instance */\n'
+              '                 int64_t n, cap; } ail_classobj;',
+              '                 ail_attr *attrs; /* class attributes: one table per class, shared by every instance */\n'
+              '                 int64_t n, cap;\n'
               '                 ail_st (*d1[AIL_ND1])(ail_ctx *, ail_obj *, ail_obj); /* operator methods (self), dunderrt.py */\n'
               '                 ail_st (*d2[AIL_ND2])(ail_ctx *, ail_obj *, ail_obj, ail_obj); /* operator methods (self, other) */\n'
               '                 ail_st (*d3[AIL_ND3])(ail_ctx *, ail_obj *, ail_obj, ail_obj, ail_obj); /* (self, key, value) */ } ail_classobj;'))
@@ -360,6 +369,9 @@ def _edits(inplace=False):
               '        return ail_raise_c(cx, AIL_B_NOTIMPLEMENTEDERROR, "slicing an instance through __getitem__ is not supported: this path has no slice objects");\n'
               '    return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "\'%s\' object is not subscriptable", c);\n}\n\n/* ===='))
     # hashing
+    import biggate
+    big = '            if (x.tag == AIL_T_BIG) { *out = (int64_t)ail_big_hash(x); return AIL_OK; }\n' if biggate.ON else ''   # bigint: a big int in the default arm
+    big_ret = ' || cv.tag == AIL_T_BIG' if biggate.ON else ''   # AIL_T_BIG exists only in a big int build
     genexpr_hash_refusal = (
         '            /* A materialised generator expression is a LIST here; CPython hashes the generator\n'
         '               object by identity and shows its address-bearing repr, so no hash bucket or repr\n'
@@ -367,7 +379,7 @@ def _edits(inplace=False):
         '            if (x.tag == AIL_T_LIST && ((ail_vecobj *)x.o)->from_generator)\n'
         '                return ail_raise_c(cx, AIL_B_TYPEERROR,\n'
         '                    "a generator expression used as a hash key is not supported: AIL stores it as a list (no generator identity hash or repr)");\n')
-    default_hash = ('        default: {\n' + genexpr_hash_refusal +
+    default_hash = ('        default: {\n' + big + genexpr_hash_refusal +
                     '            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
                     '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp_op(')
     e.append((default_hash, HASH_CASE + default_hash))
@@ -408,18 +420,15 @@ def _edits(inplace=False):
                   '    ' + _binop_guard(fwd, rev, sym) + 'return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym))
     # divmod(): CPython asks __divmod__, then the reflected method; __floordiv__/__mod__
     # alone do not make divmod work on a user class (Fraction/IntEnum define __divmod__).
+    # (only the head of the type-error arm is replaced: the arms after it differ between the plain and the big-int text)
     e.append(('''    } else if (a.tag != AIL_T_INST && b.tag != AIL_T_INST) {
         char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for divmod(): '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
-        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
-    }
-    /* an instance operand falls through to ail_op_floordiv/ail_op_mod, whose dunderrt
-       dispatch serves classes (Fraction, IntEnum) that define __floordiv__/__mod__ */''',
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);''',
               '''    } else if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) {
         return ail_dun_binop(cx, out, a, b, AIL_D2_DIVMOD, AIL_D2_RDIVMOD, "divmod()");
     } else {
         char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for divmod(): '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
-        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
-    }'''))
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);'''))
     # bitwise operators and ~ on an instance (Flag / IntFlag classes, user __or__ ...)
     e.append(('static inline ail_st ail__bit_logic(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, char op) {\n',
               'static inline ail_st ail__bit_logic(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, char op) {\n'
@@ -452,20 +461,46 @@ def _edits(inplace=False):
               'static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n'
               '    if (x.tag == AIL_T_INST) { ail_d2_fn ff = ail_dun2(x, AIL_D2_FORMAT); if (ff) return ff(cx, out, x, specobj); }\n'))
     # `%d` / `%x` / `%f` of an instance (an IntEnum / IntFlag member): int() / index() / float() of it, as PyUnicode_Format does
-    e.append(('            int64_t iv;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n',
+    # The anchor is `int64_t iv;` alone, not the line after it: the big int build puts its
+    # own AIL_T_BIG/AIL_T_FLOAT arm between the declaration and the plain int arm.  A dunder
+    # that returns something other than an int is ignored (CPython's % formatting then
+    # reports the original object), and d/i/u use __int__ alone when it exists -- __index__
+    # is only the fallback when there is no __int__ (CPython: "%d" of int()!=int class).
+    e.append(('            int64_t iv;\n',
               '            int64_t iv;\n'
               '            if (arg.tag == AIL_T_INST) {\n'
               '                int dec = t == \'d\' || t == \'i\' || t == \'u\';\n'
-              '                ail_d1_fn cf = dec ? ail_dun1(arg, AIL_D1_INT) : 0;\n'
-              '                if (!cf) cf = ail_dun1(arg, AIL_D1_INDEX);\n'
-              '                if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; }\n'
-              '            }\n'
-              '            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;\n'))
+              '                ail_d1_fn cf = ail_dun1(arg, dec ? AIL_D1_INT : AIL_D1_INDEX);\n'
+              '                if (!cf && dec) cf = ail_dun1(arg, AIL_D1_INDEX);\n'
+              '                if (cf) {\n'
+              '                    ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail;\n'
+              '                    if (cv.tag == AIL_T_INT || cv.tag == AIL_T_BOOL' + big_ret + ') arg = cv;\n'
+              '                }\n'
+              '            }\n'))
     e.append(('            double d;\n            if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);\n',
               '            double d;\n'
               '            if (arg.tag == AIL_T_INST) {\n'
-              '                ail_d1_fn cf = ail_dun1(arg, AIL_D1_FLOAT); if (!cf) cf = ail_dun1(arg, AIL_D1_INDEX);\n'
-              '                if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; }\n'
+              '                ail_d1_fn cf = ail_dun1(arg, AIL_D1_FLOAT);\n'
+              '                if (cf) {\n'
+              '                    ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail;\n'
+              '                    if (cv.tag != AIL_T_FLOAT) {\n'
+              '                        char cb[96], tb[96];\n'
+              '                        snprintf(cb, sizeof cb, "%s", ail__tname_c(arg));\n'
+              '                        snprintf(tb, sizeof tb, "%s", ail__tname_c(cv));\n'
+              '                        snprintf(msg, sizeof msg, "%.50s.__float__ returned non-float (type %.50s)", cb, tb);\n'
+              '                        st = ail_raise_c(cx, AIL_B_TYPEERROR, msg); goto fail;\n'
+              '                    }\n'
+              '                    arg = cv;\n'
+              '                } else if ((cf = ail_dun1(arg, AIL_D1_INDEX))) {\n'
+              '                    ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail;\n'
+              '                    if (!(cv.tag == AIL_T_INT || cv.tag == AIL_T_BOOL' + big_ret + ')) {\n'
+              '                        char tb[256], mb[240];\n'
+              '                        snprintf(tb, sizeof tb, "%s", ail__tname_c(cv));\n'
+              '                        snprintf(mb, sizeof mb, "__index__ returned non-int (type %.200s)", tb);\n'
+              '                        st = ail_raise_c(cx, AIL_B_TYPEERROR, mb); goto fail;\n'
+              '                    }\n'
+              '                    arg = cv;\n'
+              '                }\n'
               '            }\n'
               '            if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);\n'))
     e.append(('"%%%c format: a real number is required, not %s", (char)t, ail_type_name(arg.tag)',
@@ -474,8 +509,14 @@ def _edits(inplace=False):
               '"%%%c format: an integer is required, not %s", (char)t, ail__dun_tname_s(arg)'))
     e.append(('"must be real number, not %s", ail_type_name(arg.tag)',
               '"must be real number, not %s", ail__dun_tname_s(arg)'))
-    e.append(('            uint16_t ch;\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n',
-              '            uint16_t ch;\n            if (arg.tag == AIL_T_INST) { ail_d1_fn cf = ail_dun1(arg, AIL_D1_INDEX); if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; arg = cv; } }\n            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {\n'))
+    # Same anchor note as `int64_t iv;`: in the big int build the AIL_T_BIG check sits between
+    # the declaration and the int arm.  __index__ must return an int to be used.
+    e.append(('            uint16_t ch;\n',
+              '            uint16_t ch;\n'
+              '            if (arg.tag == AIL_T_INST) {\n'
+              '                ail_d1_fn cf = ail_dun1(arg, AIL_D1_INDEX);\n'
+              '                if (cf) { ail_obj cv; st = cf(cx, &cv, arg); if (st != AIL_OK) goto fail; if (cv.tag == AIL_T_INT || cv.tag == AIL_T_BOOL' + big_ret + ') arg = cv; }\n'
+              '            }\n'))
     # the add in front of the dispatch helpers: they must be visible before ail_op_add
     e.append(('/* sum(): CPython 3.12 builtin_sum_impl.', '/* sum(): CPython 3.12 builtin_sum_impl.'))
     # unary and builtin conversions
@@ -529,7 +570,7 @@ def _edits(inplace=False):
               '            ail_obj r; ail_st st = f(cx, &r, nobj);\n'
               '            if (st != AIL_OK) return st;\n'
               '            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = r.i; return AIL_OK; }\n'
-              '            { char buf[96]; snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__dun_tname_s(r)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n'
+              '            { char tb[256], buf[240]; snprintf(tb, sizeof tb, "%s", ail__tname_c(r)); snprintf(buf, sizeof buf, "__index__ returned non-int (type %.200s)", tb); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n'
               '        }\n'
               '    }\n'
               '    { char buf[96]; snprintf(buf, sizeof buf, "\'%s\' object cannot be interpreted as an integer", ail__dun_tname_s(nobj)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n'))

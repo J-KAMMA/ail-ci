@@ -31,7 +31,7 @@ _LISTS = (I.T('obj', I.T('list', I.I64)), I.T('obj', I.T('list', I.F64)))
 DST_OPS = ('list.reset', 'list.lit', 'list.repeat', 'list.move', 'list.call', 'list.copy', 'list.share', 'list.rt', 'list.sortperm')
 WRITE_OPS = ('list.set', 'list.push', 'list.pop', 'list.clear', 'list.reserve', 'list.sort', 'list.permute',
              'rec.push', 'rec.up', 'rec.pop')
-CALLS = ('call', 'list.call', 'ba.call')
+CALLS = ('call', 'list.call', 'ba.call', 'obj.call')
 
 
 class NeedsBox(Exception):
@@ -283,7 +283,7 @@ class Resolver(object):
                 raise
             if any(T[0] == 'F' and T[2] not in self.fn.params for T in (D, X)):
                 # the IR does not hoist the field lists of a struct local yet (the copy, and the loop
-                # reading them, cost more than the legacy emitter's in-place moves: grid_life-ail-3
+                # reading them, cost more than the legacy emitter's in-place moves: scar_life-ail-3
                 # +5% instructions); the function stays on the legacy emitter, which has value semantics
                 raise NeedsBox('%s (a field list of a struct local is left to the legacy emitter)' % box)
             differs = isinstance(box, ValueDiffers) or self.copy_differs(flow, s)
@@ -423,7 +423,7 @@ class Resolver(object):
                 continue
             if n.op == 'try' or self.reads_field(flow, n, key) or self.may_raise(flow, n):
                 return False
-            if holder is not base and n.op in ('store', 'obj.copyref', 'obj.init') and n.operands[0] is holder:
+            if holder is not base and n.op in ('store', 'obj.copyref', 'obj.init', 'obj.call') and n.operands[0] is holder:
                 return False        # the struct local names another object before the field is rebound
             if n.op in ('return', 'raise', 'reraise', 'unreachable') or not flow.succ[n]:
                 return False
@@ -512,7 +512,7 @@ class Resolver(object):
                 # a struct local: it must keep naming the same object (and so keep it alive) while
                 # the second name is in use
                 for n in reach:
-                    if n is not s and n.op in ('store', 'obj.copyref', 'obj.init') and n.operands[0] is holder \
+                    if n is not s and n.op in ('store', 'obj.copyref', 'obj.init', 'obj.call') and n.operands[0] is holder \
                             and (Dp in flow.live_in[n] or Dp in flow.live_out[n]):
                         raise NeedsBox('%s: the struct local is reassigned while the second name is still used'
                                        % names)

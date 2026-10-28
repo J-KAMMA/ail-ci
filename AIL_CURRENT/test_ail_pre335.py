@@ -1,12 +1,9 @@
 """pre335: the rbrbrbrbpre33 review's first pre-existing difference, ``999... ** 0``.
 
-CPython has unbounded ints, so the 20-digit base is exact and raising it to 0 gives 1; an
-AIL int is int64 (SEMANTICS section 1), so the base literal itself has no representation.
-This tree already refuses the construct by name at compile time on both builds (the generic
-int64 literal/constant checks from pre121/pre177), which is the allowed resolution, so no
-compiler change is needed.  The module-assignment spelling folds the whole expression to 1
-and matches CPython.  The test locks the named refusal for the direct form and the routes,
-the in-range power boundaries that must still match CPython, and the other two items the
+CPython has unbounded ints, so the 20-digit base is exact and raising it to 0 gives 1.  With the
+int64 ints this tree refused the construct by name on both builds; under exact ints both builds
+build the program and match CPython's stdout, exit code and last stderr line.  The test covers
+the direct form and the routes, the in-range power boundaries, and the other two items the
 review recorded (``float(10 ** 400)`` and huge powers inside f-strings/maxsplit).
 """
 import os
@@ -41,13 +38,6 @@ def run_cpython(directory, name, source):
     return ran.stdout.replace('\r\n', '\n'), ran.returncode
 
 
-REFUSALS = ('int64 literal out of range',
-            'int64 constant out of range',
-            'int64 constant expression out of range',
-            'does not fit in a 64-bit signed integer',
-            'outside the signed 64-bit range',
-            'not in the subset')
-
 BIG = '99999999999999999999'
 
 
@@ -77,32 +67,38 @@ class Pre335(unittest.TestCase):
         ('maxsplit_power', 'print("a b c".split(" ", 10 ** 40))\n'),
     )
 
-    def test_first_item_is_refused_by_name(self):
+    def assert_matches_cpython(self, prefix, name, source, general):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / (prefix + name + '_ref.py')
+            path.write_text(source, encoding='utf-8')
+            done = subprocess.run([sys.executable, '-B', path.name], cwd=directory, capture_output=True, timeout=120)
+            lines = done.stderr.decode('utf-8', 'replace').strip().splitlines()
+            built, exe = compile_source(directory, prefix + name, source, general=general)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, timeout=120)
+            err = ran.stderr.decode('utf-8', 'replace')
+            self.assertEqual(ran.returncode, done.returncode, err)
+            self.assertEqual(ran.stdout.replace(b'\r\n', b'\n'), done.stdout.replace(b'\r\n', b'\n'), err)
+            if lines:
+                self.assertIn(lines[-1], err)
+
+    def test_first_item_matches_cpython(self):
         for general in (False, True):
             for name, source in self.CASES:
-                with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
-                    built, exe = compile_source(directory, 'pre335_' + name, source, general=general)
-                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
-                    self.assertFalse(exe.exists())
-                    self.assertTrue(any(message in built.stderr for message in REFUSALS), built.stderr)
+                with self.subTest(name=name, general=general):
+                    self.assert_matches_cpython('pre335_', name, source, general)
 
-    def test_first_item_through_routes_is_refused_by_name(self):
+    def test_first_item_through_routes_matches_cpython(self):
         for general in (False, True):
             for name, source in self.ROUTES:
-                with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
-                    built, exe = compile_source(directory, 'pre335_route_' + name, source, general=general)
-                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
-                    self.assertFalse(exe.exists())
-                    self.assertTrue(any(message in built.stderr for message in REFUSALS), built.stderr)
+                with self.subTest(name=name, general=general):
+                    self.assert_matches_cpython('pre335_route_', name, source, general)
 
-    def test_other_recorded_items_are_refused_by_name(self):
+    def test_other_recorded_items_match_cpython(self):
         for general in (False, True):
             for name, source in self.OTHER_CASES:
-                with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
-                    built, exe = compile_source(directory, 'pre335_other_' + name, source, general=general)
-                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
-                    self.assertFalse(exe.exists())
-                    self.assertTrue(any(message in built.stderr for message in REFUSALS), built.stderr)
+                with self.subTest(name=name, general=general):
+                    self.assert_matches_cpython('pre335_other_', name, source, general)
 
     def test_module_assignment_and_in_range_boundaries_match_cpython(self):
         source = '''VALUE = %s ** 0

@@ -1,11 +1,11 @@
-"""Pre306: int() of a float outside int64 reached through an attribute is refused by name.
+"""Pre306: int() of a float outside int64 reached through an attribute matches CPython under exact ints.
 
 CPython has unbounded integers, so ``int(C().v)`` with a class attribute ``v = 1e300`` prints a
-301-digit integer.  AIL integers are signed int64, so such a conversion has no answer here.  The
-front end now folds a literal class attribute, a literal ``self.attr`` set in ``__init__``, and
+301-digit integer.  AIL integers were signed int64, so such a conversion used to be refused.  The
+front end folds a literal class attribute, a literal ``self.attr`` set in ``__init__``, and
 those values reached through a class alias, a module constant, a module instance, a list/tuple or
-dict item, an argument or a keyword argument, and refuses them with ``int() of a float outside
-int64 ... big integer`` on both builds.  In-range attributes, shadowed class names and values
+dict item, an argument or a keyword argument, and, under exact ints, builds them on both builds with CPython's output
+(they were refused for the int64 era).  In-range attributes, shadowed class names and values
 mutated after construction are unchanged and still compared with CPython.
 """
 import os
@@ -41,14 +41,29 @@ def build(directory, name, text, general):
                                 '-o', exe.name], cwd=directory, capture_output=True, text=True, timeout=900, env=env)
 
 
-def check_refused(test, name, text):
+def cpython_last_line(directory, name, text):
+    src = Path(directory) / (name + '_cpython_full.py')
+    src.write_text(text, encoding='utf-8')
+    done = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, timeout=120,
+                          env=dict(os.environ, PYTHONUTF8='1', PYTHONWARNINGS='ignore'))
+    lines = done.stderr.decode('utf-8', 'replace').strip().splitlines()
+    return done.stdout.replace(b'\r\n', b'\n'), done.returncode, (lines[-1] if lines else '')
+
+
+def check_exact(test, name, text):
+    """Exact ints: a value beyond int64 builds on both builds and matches CPython's stdout, exit code
+    and last stderr line."""
     with tempfile.TemporaryDirectory(prefix='ail-pre306-') as directory:
+        want = cpython_last_line(directory, name, text)
         for general in (True, False):
-            _, built = build(directory, name + ('g' if general else 'd'), text, general)
-            test.assertNotEqual(built.returncode, 0, (name, general))
-            message = built.stdout + built.stderr
-            test.assertIn('int() of a float outside int64', message, (name, general, message[-1200:]))
-            test.assertIn('big integer', message, (name, general, message[-1200:]))
+            exe, built = build(directory, name, text, general)
+            test.assertEqual(built.returncode, 0, (name, general, (built.stdout + built.stderr)[-1200:]))
+            got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+            err = got.stderr.decode('utf-8', 'replace')
+            test.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0], (name, general, err[-800:]))
+            test.assertEqual(got.returncode, want[1], (name, general, err[-800:]))
+            if want[2]:
+                test.assertIn(want[2], err, (name, general))
 
 
 def check_program(test, name, text):
@@ -255,9 +270,9 @@ print(int(x.v * 0), int(x.v - x.v))
 
 @unittest.skipUnless(HAVE_CC, 'gcc is required')
 class IntFloatAttributeOutsideInt64(unittest.TestCase):
-    def test_refused_by_name(self):
+    def test_values_beyond_int64_build_on_both_builds_and_match_cpython(self):
         for name, text in sorted(REFUSED.items()):
-            check_refused(self, 'refuse_' + name, text)
+            check_exact(self, 'big_' + name, text)
 
     def test_conversions_that_fit_are_cpython(self):
         for name, text in sorted(MATCH.items()):

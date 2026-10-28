@@ -1,11 +1,10 @@
-"""Pre31: int() of a float outside int64 is refused by name, not stopped as a generic overflow.
+"""Pre31: int() of a float outside int64 is computed exactly like CPython.
 
-CPython has unbounded integers, so `int(1e300)` prints a 301-digit integer. This language's ints
-are signed int64 (SEMANTICS.md), so a float whose truncation does not fit has no answer here. The
-front end now refuses such a conversion when the float is a literal, a module constant or a literal
-reached through an argument, a list item, a tuple item or a dict value, naming the construct and the
-value instead of compiling a program that dies with `integer overflow`. Values that fit int64, and
-conversions whose float only reaches int() at run time, are unchanged and still compared with CPython.
+CPython has unbounded integers, so `int(1e300)` prints a 301-digit integer. With exact ints
+(bigint, BIGINT.md) the Python surface builds such a conversion, whether the float is a literal, a
+module constant or a literal reached through an argument, a list item, a tuple item or a dict value,
+and prints the same integer. (It used to be refused by name while ints were signed int64.) Values that
+fit int64, and conversions whose float only reaches int() at run time, are still compared with CPython.
 """
 import os
 import shutil
@@ -41,13 +40,8 @@ def build(directory, name, text, general):
 
 
 def check_refused(test, name, text):
-    with tempfile.TemporaryDirectory(prefix='ail-pre31-') as directory:
-        for general in (True, False):
-            _, built = build(directory, name + ('g' if general else 'd'), text, general)
-            test.assertNotEqual(built.returncode, 0, (name, general))
-            message = built.stdout + built.stderr
-            test.assertIn('int() of a float outside int64', message, (name, general, message[-1200:]))
-            test.assertIn('big integer', message, (name, general, message[-1200:]))
+    # exact ints (bigint): builds and matches CPython (stdout, exit code)
+    check_program(test, name, text)
 
 
 def check_program(test, name, text):

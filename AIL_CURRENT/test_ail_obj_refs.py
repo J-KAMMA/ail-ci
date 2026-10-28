@@ -2,8 +2,8 @@
 runtime).
 
 Binding a struct element to a name (`e = s.evs[i]`), storing it in a field and releasing it at the end of a scope each
-called an out-of-line function: a quarter of the instructions of an LLM-written ticket validator (audit-2, 6.39 G ->
-6.19 G, -3.1%; 6.09 G, -4.7%, with the release inline too, which added 9% to the text of route_search-3). `ail_obj_retain`
+called an out-of-line function: a quarter of the instructions of an LLM-written ticket validator (ticket_audit-2, 6.39 G ->
+6.19 G, -3.1%; 6.09 G, -4.7%, with the release inline too, which added 9% to the text of rail_transfer-3). `ail_obj_retain`
 is now inline (one compare and an increment; a count of 0 or a wrapped UINT32_MAX still aborts), the per-class
 `ail_obj_store_<C>` is inline, and `ail_obj_release` is one out-of-line function whose first test is the release that does
 not free. What this module pins, against CPython in the legacy

@@ -104,20 +104,16 @@ def _run(directory, name, text, general):
 
 class Pre201Tests(unittest.TestCase):
     def test_out_of_int64_shifts_are_refused_by_name(self):
+        # exact ints (bigint): built on both paths, same (stdout, returncode) as CPython
         with tempfile.TemporaryDirectory(prefix='ail-pre201-') as directory:
             for label, text in OUT_OF_RANGE.items():
+                want, want_rc, _err = _cpython(directory, label, text)
                 for general in (True, False):
                     with self.subTest(label + ('_g' if general else '_d')):
-                        built, _ = _build(directory, '%s_%s' % (label, 'g' if general else 'd'),
-                                          text, general)
-                        self.assertNotEqual(built.returncode, 0, label)
-                        message = built.stdout + built.stderr
-                        named = ('int64 constant out of range',
-                                 'int64 constant expression out of range',
-                                 'outside the signed 64-bit range')
-                        self.assertTrue(any(item in message for item in named), label)
-                        self.assertNotIn('integer overflow', message, label)
-                        self.assertNotIn('Traceback', message, label)
+                        got, build_err = _run(directory, '%s_%s' % (label, 'g' if general else 'd'),
+                                              text, general)
+                        self.assertIsNotNone(got, build_err)
+                        self.assertEqual(got, (want, want_rc), build_err)
 
     def test_in_range_shifts_still_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre201-') as directory:

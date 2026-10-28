@@ -651,7 +651,7 @@ PART_EDITS = {
         ('static void ail_file_fail(int err) {\n', 'static void ail_exc_os_fail(int err, ail_str path);\nstatic void ail_file_fail(int err) {\n'),
         ('    if (!f) ail_file_fail(open_errno);\n    return f;', '    if (!f) ail_exc_os_fail(open_errno, path);\n    return f;'),
         ('free(buf); ail_file_fail(read_errno); }', 'free(buf); ail_exc_os_fail(read_errno, path); }'),
-        ('    if (rc == 1) ail_raise_named(AIL_EXC_VALUE);\n    if (rc == 2) ail_die("integer overflow");\n    if (rc == 3) ail_raise_named(AIL_EXC_VALUE);\n    return v;\n}\n/* `float(<str>)`',
+        ('    if (rc == 1) ail__str_to_int_fail(s);\n    if (rc == 2) ail_die("integer overflow");\n    if (rc == 3) {\n        char text[192];\n        int n = snprintf(text, sizeof text, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);\n        ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, n, 1));\n    }\n    return v;\n}\n/* `float(<str>)`',
          '    if (rc == 1) ail_exc_int_fail(s);\n    if (rc == 2) ail_die("integer overflow");\n    if (rc == 3) ail_exc_int_limit_fail(ndigits);\n    return v;\n}\n/* `float(<str>)`'),
         ('    int rc = ail__asc_to_float(b, len, &v);\n    if (b != stackbuf) free(b);\n    if (rc) ail_raise_named(AIL_EXC_VALUE);\n    return v;\n}\n/* AIL_TASK_strops_20260915.md Part A',
          '    int rc = ail__asc_to_float(b, len, &v);\n    if (b != stackbuf) free(b);\n    if (rc) ail_exc_float_fail(s);\n    return v;\n}\n/* AIL_TASK_strops_20260915.md Part A'),
@@ -1022,6 +1022,12 @@ static ail_exception *ail_exception_new_args(int code, int nargs, const ail_exar
     }
     ail__exc_set_message(v);
     return v;
+}
+/* an exception raised with one explicit str message, even an empty one: `raise E(m)` has e.args == (m,),
+   while `raise E()` (no argument) has none */
+static ail_exception *ail_exception_new_msg(int code, const uint8_t *p, int64_t n, _Bool ascii) {
+    ail_exarg a = ail_exarg_s((ail_str){p, n, ascii});
+    return ail_exception_new_args(code, 1, &a);
 }
 /* OSError(errno, strerror[, filename]) and its subclasses: "[Errno N] strerror" and ": 'filename'" in str(e), and
    (errno, strerror) as e.args.  OSError(...) itself becomes the subclass CPython picks for the errno. */

@@ -134,21 +134,15 @@ def _run(directory, name, text, general):
 class Pre191Tests(unittest.TestCase):
     def test_out_of_int64_constants_are_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre191-') as directory:
+            # exact ints (bigint): builds and matches CPython (stdout, exit code)
             for label, text in OUT_OF_RANGE.items():
+                want, want_rc, _err = _cpython(directory, label, text)
                 for general in (True, False):
                     with self.subTest(label + ('_g' if general else '_d')):
-                        built, _ = _build(directory, '%s_%s' % (label, 'g' if general else 'd'),
-                                          text, general)
-                        self.assertNotEqual(built.returncode, 0, label)
-                        message = built.stdout + built.stderr
-                        # The integration tree's general constant-expression rule may refuse a
-                        # list/dict element or a default tuple before this pass sees it, with its
-                        # own named message; accept that as well as this pass's wording.
-                        named = ('int64 constant expression out of range',
-                                 'outside the signed 64-bit range')
-                        self.assertTrue(any(item in message for item in named), label)
-                        self.assertNotIn('integer overflow', message, label)
-                        self.assertNotIn('Traceback', message, label)
+                        got, build_err = _run(directory, '%s_%s' % (label, 'g' if general else 'd'),
+                                              text, general)
+                        self.assertIsNotNone(got, build_err)
+                        self.assertEqual(got, (want, want_rc), label + '\n' + build_err)
 
     def test_function_body_unary_shifts_still_match_cpython(self):
         # The integration tree's general constant-expression rule now refuses an out-of-int64

@@ -196,7 +196,9 @@ def _raise_site_exc(node):
     or `None`. Mirrors `to_c`'s own `EXC_NAMES`/`ail_exc_kind_of` (cruntime.py), plus the shift
     guards' ValueError, nothing invented here."""
     if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Call) and isinstance(node.exc.func, ast.Name):
-        return node.exc.func.id if node.exc.func.id in EXC_TYPE_NAMES else None
+        # any `raise Name(...)`, not only the five trap names: `raise RuntimeError("x") from e` in a handler
+        # left a typed clone's RuntimeError past the caller's `except RuntimeError` (test_ail_nest f9..f12)
+        return node.exc.func.id
     if isinstance(node, ast.Raise) and isinstance(node.exc, ast.Name):
         return node.exc.id if node.exc.id in EXC_TYPE_NAMES else None
     if isinstance(node, ast.BinOp) and type(node.op) in _TRAP_EXC and not _provably_nonzero(node.right):

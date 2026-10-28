@@ -864,7 +864,7 @@ fn main() {
 
 - Group edges by source once (`out`); never scan every edge for each popped node (O(V*E)).
 - Many S-to-T queries on one big graph: stop when T is popped, and search from both ends (a heap
-  per side, stop once the two tops add up to at least the best meeting found): on a route-search program
+  per side, stop once the two tops add up to at least the best meeting found): on rail_transfer
   175x fewer relaxations than a one-sided search, which made AIL 40x slower than C there.
 
 ## BFS: graph, grid DP, buckets (example)
@@ -955,8 +955,8 @@ Line-oriented input and output (best wall time of several runs, peak RSS, instru
 | the 12M ints on one line | 0.73 s, 411 MB, 5.2 G | scanner 0.47 s, 233 MB, 4.2 G |
 
 `"\n".join(out)` of the 3M lines: 0.56 s but 366 MB. `for w in data.split()` on bytes builds every
-token first: 2.2 s, 1.1 GB. Whole programs written this way (three record- and log-processing
-programs) were 23 to 58% shorter than byte-scanner versions; 2.8M log lines each split into
+token first: 2.2 s, 1.1 GB. Whole programs written this way (berth_sim, ticket_audit, term_rank
+of tasks-novel) were 23 to 58% shorter than byte-scanner versions; 2.8M log lines each split into
 fields and checked one field kind at a time took 3.3x the instructions of a byte scanner (22 G
 versus 6.8 G), a 3M-line simulation 1.2x. So: lines and `split` for text; a byte scanner for
 binary data, one huge line, or when per-field checks of a huge file dominate and speed matters

@@ -185,10 +185,12 @@ class DebugLines(unittest.TestCase):
         if not shutil.which("objdump"):
             self.skipTest("neither gdb nor objdump is installed")
         calls = objdump_calls(self.dir / "debug", "pydiv")
-        self.assertIn(7, [line for line, _ in calls], calls)       # `return scaled // n`
+        # (`//` of tagged ints is an inline runtime function: its own die call carries the runtime's lines, the
+        # statement keeps its line in the line table below and in the crash report)
         self.assertTrue(all(name.endswith("divide.py") for line, name in calls if line == 7), calls)
         lines = dwarf_lines(self.dir / "debug", "divide.py")
-        self.assertEqual(sorted(lines), [2, 6, 7, 12, 13, 14, 17])      # no statement on a neighbouring line
+        # no statement on a neighbouring line (11 is `def main`: the zero-initialised tagged locals sit on it)
+        self.assertEqual(sorted(lines), [2, 6, 7, 11, 12, 13, 14, 17])
 
     def test_the_second_c_line_of_a_statement_keeps_its_line(self):
         # `xs = [..]` is several C lines (free, push, push, ...): none may fall on the next source line
@@ -197,7 +199,8 @@ class DebugLines(unittest.TestCase):
         out = self.dir / "dbg"
         self.compile(source, out, "--debug", "--debug-dir", str(self.dir / "d"))
         text = (self.dir / "d" / "program.c").read_text()
-        body = text[text.index("int64_t f(int64_t v_n)"):]
+        # (f's int parameter is not proven to fit int64, so it is tagged: `ail_tint f(ail_tint v_n)`)
+        body = text[re.search(r"(int64_t|ail_tint) f\((int64_t|ail_tint) v_n\)", text).start():]
         body = body[:body.index("\n}\n")]
         after = re.findall(r'#line (\d+) "[^"]*multi\.py"\n([^\n#]*)', body)
         for number, code in after:

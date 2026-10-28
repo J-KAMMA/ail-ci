@@ -17,7 +17,7 @@ INT_SCALARS = ('i1', 'i8', 'i16', 'i32', 'i64', 'u8', 'u16', 'u32', 'u64')
 FLOAT_SCALARS = ('f32', 'f64')
 SCALARS = INT_SCALARS + FLOAT_SCALARS
 TEXT = ('str', 'strv', 'bytes', 'bytesv')
-LEAVES = SCALARS + TEXT + ('exc',)
+LEAVES = SCALARS + TEXT + ('exc', 'tint')
 # head -> number of type arguments (None: any number)
 HEADS = dict({h: 0 for h in LEAVES}, tup=None, opt=1, obj=1, list=1, dict=2, set=1, bytearray=0,
              cell=1, fn=2, closure=2, place=1, span=1, plist=1)
@@ -94,6 +94,7 @@ def fn_type(params, results, closure=False):
 
 
 I1, I64, F64 = T('i1'), T('i64'), T('f64')
+TINT = T('tint')
 STRV, BYTES = T('strv'), T('bytes')
 
 
@@ -277,6 +278,16 @@ def _op(name, nmin, nmax, regions=0, terminator=False):
 
 
 _op('const', 0, 0)
+for _name in ('tint.from', 'tint.i64', 'tint.i64sat', 'tint.f64', 'tint.nonzero', 'tint.neg', 'tint.inv'):
+    _op(_name, 1, 1)
+for _name in ('tint.add', 'tint.sub', 'tint.mul', 'tint.floordiv', 'tint.floormod', 'tint.shl', 'tint.shr',
+              'tint.pow', 'tint.and', 'tint.or', 'tint.xor', 'tint.eq', 'tint.ne', 'tint.lt', 'tint.le'):
+    _op(_name, 2, 2)
+for _name in ('tint.eq_i64', 'tint.ne_i64', 'tint.lt_i64', 'tint.le_i64', 'tint.floordiv_i64', 'tint.mod_i64',
+              'tint.add_i64', 'tint.sub_i64', 'tint.mul_i64', 'tint.mod_i64_i64',
+              'tint.mod_pos_i64', 'tint.mod_pos_i64_i64'):
+    _op(_name, 2, 2)
+
 for _name in INT_BINARY + FLOAT_BINARY:
     _op(_name, 2, 2)
 for _name in ('neg', 'inv', 'fneg', 'fabs', 'zext', 'sitofp', 'fptosi'):
@@ -304,7 +315,7 @@ _op('unreachable', 0, 0, terminator=True)
 # is `raise E()`) and `reraise` (the exception being handled) end a region like `return`. `try`
 # (attrs: kind = "catch" | "finally") has a body region and then one region per handler (catch;
 # attrs codes lists the exception codes of each) or the finally region (finally); none has results.
-_op('raise', 0, 0, terminator=True)
+_op('raise', 0, 1, terminator=True)
 _op('reraise', 0, 0, terminator=True)
 _op('try', 0, 0, regions=-1)
 # S1: read-only bytes views, numeric lists (obj<list<i64|f64>> through a place or a borrow),
@@ -361,6 +372,7 @@ _op('field.ba', 1, 1)             # a struct field holding a bytearray: the refe
 # Places of objects are released at every exit, and by the cleanup frame.
 _op('obj.init', 1, None)
 _op('obj.copyref', 2, 2)
+_op('obj.call', 1, None)          # (place, args...): the place adopts the object a callee returns (a +1 reference)
 _op('ba.extend', 2, 2)            # (bytearray, bytes): `b.extend(x)` with x a bytes view (S4a)
 # S4a: text. `str.lit` (attr value) is a static `ail_str`, `bytes.lit` (attr data) a static `ail_bytes`;
 # `print` (attrs kinds, stream, sep, end, parts) writes its operands as the legacy print does. Every other

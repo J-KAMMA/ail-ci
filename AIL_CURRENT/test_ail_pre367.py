@@ -1,17 +1,14 @@
-"""pre367: a constant integer power that only reaches `**` through a name is refused by name.
+"""pre367: a constant integer power that only reaches `**` through a name matches CPython.
 
-CPython's int is unbounded, so `x = 10; print(x ** 40)` prints the exact 41-digit value; an
-AIL int is int64 (SEMANTICS section 1), and before this the power compiled and then stopped
-with `integer overflow` on both builds.  Module-level local constants were already folded
-(pre351); this job resolves the value behind the power inside a function body (its own int
-locals and a parameter it unconditionally rebinds to a constant), through a literal list,
-tuple or dict read by subscript, through a class or instance attribute, and through a
-constant argument to a function that raises it to a constant exponent.  The exact result is
-compared with int64 while compiling, so an out-of-range power is refused with the usual name
-and an in-range power keeps matching CPython.  A nested function's free name resolves to the
-value the enclosing function scope binds, not to a same-named module constant, so a closure
-that shadows a module constant is neither wrongly refused nor wrongly folded.  A value that
-only exists at run time still uses the language's documented run-time `integer overflow` stop.
+CPython's int is unbounded, so `x = 10; print(x ** 40)` prints the exact 41-digit value.  For the
+int64 era the power was refused by name at compile time; under exact ints it builds on both builds
+and prints the exact integer.  The cases resolve the value behind the power inside a function body
+(its own int locals and a parameter it unconditionally rebinds to a constant), through a literal
+list, tuple or dict read by subscript, through a class or instance attribute, and through a
+constant argument to a function that raises it to a constant exponent.  A nested function's free
+name resolves to the value the enclosing function scope binds, not to a same-named module
+constant, so a closure that shadows a module constant is neither wrongly folded nor wrongly
+computed.  In-range powers, boundaries and run-time-only values match CPython as well.
 """
 import os
 import subprocess
@@ -45,15 +42,8 @@ def run_cpython(directory, name, source):
     return ran.stdout.replace('\r\n', '\n'), ran.returncode
 
 
-REFUSALS = ('int64 constant out of range',
-            'int64 constant expression out of range',
-            'does not fit in a 64-bit signed integer',
-            'outside the signed 64-bit range',
-            'not in the subset')
-
-
 class Pre367(unittest.TestCase):
-    REFUSED = {
+    EXACT = {
         'argument': 'def f(x):\n    return x ** 40\nprint(f(10))\n',
         'keyword_argument': 'def f(x):\n    return x ** 40\nprint(f(x=10))\n',
         'local': 'def f():\n    x = 10\n    print(x ** 40)\nf()\n',
@@ -130,19 +120,8 @@ class Pre367(unittest.TestCase):
                                     'print(outer())\n'),
     }
 
-    def test_out_of_range_powers_are_refused_by_name(self):
-        for general in (False, True):
-            for name, source in self.REFUSED.items():
-                with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
-                    built, exe = compile_source(directory, 'pre367_' + name, source, general=general)
-                    message = built.stdout + built.stderr
-                    self.assertNotEqual(built.returncode, 0, message)
-                    self.assertFalse(exe.exists())
-                    self.assertTrue(any(item in message for item in REFUSALS), message)
-                    self.assertNotIn('integer overflow', message)
-
-    def test_in_range_powers_match_cpython(self):
-        for name, source in self.MATCH.items():
+    def check_cases(self, cases):
+        for name, source in cases.items():
             with tempfile.TemporaryDirectory() as directory:
                 expected, status = run_cpython(directory, 'pre367_' + name, source)
             for general in (False, True):
@@ -152,6 +131,12 @@ class Pre367(unittest.TestCase):
                     ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
                     self.assertEqual(ran.returncode, status, ran.stderr)
                     self.assertEqual(ran.stdout.replace('\r\n', '\n'), expected)
+
+    def test_out_of_range_powers_match_cpython(self):
+        self.check_cases(self.EXACT)
+
+    def test_in_range_powers_match_cpython(self):
+        self.check_cases(self.MATCH)
 
 
 if __name__ == '__main__':

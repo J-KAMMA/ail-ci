@@ -86,16 +86,17 @@ def build_run(directory, text, name, general):
 
 class Pre273(unittest.TestCase):
     def test_computed_exponent_is_refused_by_name(self):
+        # exact ints (bigint): a constant base with a computed exponent builds and matches CPython
         with tempfile.TemporaryDirectory(prefix='ail-pre273-') as directory:
             for name, text, wording in REFUSED:
+                src = Path(directory) / ('%s_cpython.py' % name)
+                src.write_text(text, encoding='utf-8')
+                want = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, timeout=120,
+                                      env=dict(os.environ, PYTHONUTF8='1'))
                 for general in (False, True):
                     with self.subTest(case=name, general=general):
-                        status, _, output = build_run(directory, text, name, general)
-                        self.assertNotEqual(status, 0, output)
-                        self.assertIn(wording, output)
-                        self.assertIn('computed at run time', output)
-                        self.assertNotIn('Traceback', output)
-                        self.assertNotIn('integer overflow', output)
+                        status, got, output = build_run(directory, text, name, general)
+                        self.assertEqual((status, got), (want.returncode, want.stdout.replace(b'\r\n', b'\n')), output)
 
     def test_constant_exponent_and_safe_bases_still_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre273-') as directory:

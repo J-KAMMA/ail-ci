@@ -2,7 +2,7 @@
 
 A stack kept in a struct field (`st.stack.append(x)` ... `st.stack.pop()`) paid, for every pop, an out-of-line call, the
 negative-index slow path (`pop()` is `pop(-1)`) and the layout check behind it: 34% of the instructions of an LLM-written
-expression interpreter (a tally program, 36.6 G to 24.3 G). The last element of a live list is now one compare and a decrement;
+expression interpreter (tally_lang, 36.6 G to 24.3 G). The last element of a live list is now one compare and a decrement;
 every other case (an index in the middle, an empty list, an index out of range, a damaged layout) takes the unchanged full
 path. What this module pins, against CPython and in the legacy build and both IR modes:
 

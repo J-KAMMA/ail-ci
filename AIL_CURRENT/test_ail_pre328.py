@@ -13,7 +13,7 @@ tag: an instance gets a slice object, everything else keeps the ordinary slice p
 bounds are evaluated exactly once, in whichever branch runs.  Both builds match CPython
 for direct instances after for/with/tuple rebinding and for every route, including empty,
 negative and dynamic (None) bounds and bounds with side effects.  A constant index or
-slice step outside int64 is still refused by name.
+slice step outside int64 builds and matches CPython under exact ints.
 """
 import os
 import shutil
@@ -199,16 +199,24 @@ class InstanceSliceAfterRebinding(unittest.TestCase):
                 self.assertEqual(ran.returncode, expected.returncode, where + '\n' + source)
                 self.assertEqual(ran.stdout, expected.stdout, where + '\n' + source)
 
-    def test_out_of_int64_bounds_are_still_refused_by_name(self):
+    def test_out_of_int64_bounds_build_and_match_cpython(self):
+        # Exact ints: a constant index or slice step beyond int64 builds on both builds and its
+        # stdout, exit code and last stderr line match CPython.
         for name, source in REFUSED.items():
+            ref = Path(self.dir, name + '_ref.py')
+            ref.write_text(source, encoding='utf-8')
+            expected = subprocess.run([sys.executable, '-B', str(ref)], capture_output=True, timeout=60)
+            want_err = expected.stderr.decode('utf-8', 'replace').strip().splitlines()
             for general in (False, True):
                 where = '%s %s' % (name, 'general' if general else 'default')
-                built, _ = build(self.dir, source, general, name)
-                self.assertNotEqual(built.returncode, 0, where + ' built:\n' + source)
-                text = built.stdout + built.stderr
-                self.assertIn('int64', text, where + ':\n' + text)
-                self.assertNotIn('integer overflow', text, where)
-                self.assertNotIn('internal error', text, where)
+                built, exe = build(self.dir, source, general, name)
+                self.assertEqual(built.returncode, 0, where + ': ' + built.stdout + built.stderr + ' ' + source)
+                ran = subprocess.run([str(exe)], capture_output=True, timeout=60)
+                err = ran.stderr.decode('utf-8', 'replace')
+                self.assertEqual(ran.stdout.replace(b'\r\n', b'\n'), expected.stdout.replace(b'\r\n', b'\n'), where + ' ' + err[-800:])
+                self.assertEqual(ran.returncode, expected.returncode, where + ' ' + err[-800:])
+                if want_err:
+                    self.assertIn(want_err[-1], err, where)
 
 
 if __name__ == '__main__':

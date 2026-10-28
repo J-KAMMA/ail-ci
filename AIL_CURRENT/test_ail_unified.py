@@ -1225,7 +1225,7 @@ show("f4", ev[:12] + ev[-6:])
 desc = [(100.0 - i, i) for i in range(50)]
 desc.sort(key=lambda e: e[0])
 show("f5", desc[:5] + desc[-3:])
-mixed = [(5.0 - (i % 7) * 0.25 * ((-1) ** i), i) for i in range(60)]
+mixed = [(5.0 - (i % 7) * 0.25 * (1 - 2 * (i % 2)), i) for i in range(60)]   # not `** i`: a variable exponent can need a big int (BIGINT.md), which leaves the plan off
 mixed.sort(key=lambda e: e[0])
 show("f6", mixed)
 # ints
@@ -1432,7 +1432,12 @@ class Unified(unittest.TestCase):
                     self.assertEqual(run([sys.executable, str(src)])[:2], outs['unified'][:2], name)
 
     def test_u5_step2_plan(self):
-        """The element types and the draws are proven where they should be, and nothing of them without the flag."""
+        """The element types and the draws are proven where they should be, and nothing of them without the flag.
+
+        This is the type-inference plan (the base behavior), so the unified build runs with AIL_BIGINT=off. On this
+        branch the plan boxes an unproven int (BIGINT.md section 6): get() keeps its int index parameters as int64 but
+        its list element, make()'s `r * n + c` and the random draws stay boxed, so the old `_uv` in-place forms are
+        gone."""
         import json
         text = (STEP2['grid'].replace('\nmain()\n', '\n') + '\n'
                 + STEP2['random'].replace('def main()', 'def main2()').replace('\nmain()\n', '\n')
@@ -1441,7 +1446,7 @@ class Unified(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             cs = {}
             for mode, env in (('plain', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '0'}),
-                              ('unified', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '1',
+                              ('unified', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '1', 'AIL_BIGINT': 'off',
                                            'AIL_UNIFIED_STATS': str(Path(d, 'stats.jsonl'))})):
                 source = Path(d, 'p_%s.py' % mode)
                 source.write_text(text, encoding='utf-8')
@@ -1458,13 +1463,19 @@ class Unified(unittest.TestCase):
         plain, c = cs['plain'], cs['unified']
         for form in ('_uv->p[', 'ail2r_rand(_urp', 'ail2r_gauss_u', 'for (int64_t _uvk'):
             self.assertNotIn(form, plain)
-            self.assertIn(form, c)
-        self.assertIn('get', stats['closed'])
+            self.assertNotIn(form, c)
+        self.assertIn('static ail_st pfu_get(ail_ctx', c)
+        self.assertNotIn('static ail_st pfu_get(ail_ctx', plain)
+        self.assertIn('get', stats['specialised'])
+        self.assertNotIn('get', stats['closed'])                 # the closed-list plan stays off for these shapes
         self.assertIn('random', stats['draws'])
         self.assertGreater(stats['typed_elements'], 0)
         get = c.split('static ail_st pfu_get(ail_ctx')[2].split('\n}\n')[0]
-        self.assertIn('int64_t *out', get.split('\n')[0])       # g[r][c] of a list[list[int]] is a C int64
-        self.assertNotIn('ail_op_getitem', get.split('if (!')[0])
+        head = get.split('\n')[0]
+        self.assertIn('ail_obj *out', head)                      # g[r][c] is still an unproven int: boxed
+        self.assertIn('int64_t pv_r', head)                      # the index parameters stay int64
+        self.assertIn('int64_t pv_c', head)
+        self.assertIn('ail_op_getitem', get)                     # the element read goes through the runtime
 
     def test_u6_step3_programs(self):
         """Tuples: pairs read in place, zip and enumerate loops, unpacking, tuples holding lists, the wrong shapes:
@@ -1485,7 +1496,8 @@ class Unified(unittest.TestCase):
                     self.assertEqual(run([sys.executable, str(src)])[:2], outs['unified'][:2], name)
 
     def test_u7_step3_plan(self):
-        """The loops over tuples are proven where they should be, and nothing of them without the flag."""
+        """The unannotated tuple loops have unproven int locals, so the plan boxes them: the unified build is the
+        general build's C, with none of the old in-place `_utk` loops."""
         text = STEP3['enum'].replace('\nmain()\n', '\n') + STEP3['zip'].replace('def main()', 'def main2()') \
             + '\nmain()\nmain2()\n'
         with tempfile.TemporaryDirectory() as d:
@@ -1504,10 +1516,20 @@ class Unified(unittest.TestCase):
                 self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
                 cs[mode] = Path(d, 'd_' + mode, 'program.c').read_text(encoding='utf-8')
         plain, c = cs['plain'], cs['unified']
-        for form in ('for (int64_t _utk', 'a tuple component of another type than unified.py proved'):
+        for form in ('for (int64_t _utk', 'a tuple component of another type than unified.py proved',
+                     'for (int64_t _uvk', '_uv->p['):
             self.assertNotIn(form, plain)
-            self.assertIn(form, c)
-        self.assertNotIn('ail_iter_zip', c.split('static ail_st pf_f(ail_ctx')[-1].split('\n}\n')[0])
+            self.assertNotIn(form, c)
+        # the unannotated tuple loops are boxed: no unboxed local; only the run-time changes every plan gets (section 15) differ
+        sys.path[:0] = [str(PKG)]
+        try:
+            import safetyrt
+            plain = safetyrt.patch_tuples(safetyrt.patch_sortprim(plain))
+        finally:
+            sys.path.remove(str(PKG))
+        self.assertEqual(plain, c)
+        self.assertIn('static ail_st pf_f(ail_ctx *cx, ail_obj *out, ail_obj pv_xs, ail_obj pv_ys)', c)
+        self.assertIn('ail_iter_zip', c.split('static ail_st pf_f(ail_ctx')[-1].split('\n}\n')[0])
 
     def test_u8_bytearray_plan(self):
         """`b[i]` of a bytearray is read in C (exact prelude class, `_a` list, int index in range) only with the flag."""

@@ -983,6 +983,7 @@ _MATH_HELPERS = {
             out[k] = d[k]
     return out''',
     'sqrt': '''def _ail_math_sqrt(x: float) -> float:
+    x = float(x)
     if x < 0.0:
         raise ValueError("math domain error")
     if x == 0.0:
@@ -994,12 +995,24 @@ _MATH_HELPERS = {
         raise ValueError("isqrt() argument must be nonnegative")
     if n < 2:
         return n
-    x = int(float(n) ** 0.5)
-    while x > n // x:
-        x -= 1
-    while x + 1 <= n // (x + 1):
-        x += 1
-    return x
+    if n < 4503599627370496:
+        x = int(float(n) ** 0.5)
+        while x > n // x:
+            x -= 1
+        while x + 1 <= n // (x + 1):
+            x += 1
+        return x
+    x = 1
+    k = n
+    while k >= 4:
+        k = k // 4
+        x = x * 2
+    x = x * 2
+    while True:
+        y = (x + n // x) // 2
+        if y >= x:
+            return x
+        x = y
 ''',
     'gcd': '''def _ail_math_gcd(a: int, b: int) -> int:
     x = abs(a)

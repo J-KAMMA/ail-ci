@@ -42,6 +42,7 @@ come from unified_lists.py, solved again in every round of the fixed point, and 
 """
 import ast
 import os
+import biggate
 
 import pyfunc
 
@@ -764,12 +765,193 @@ class Plan(object):
         self.stats = {}
 
 
+def proven_ints():
+    """BIGINT.md section 6: an unboxed int local is kept only where its range is proven (AIL_UNIFIED_PROVEN=1); the default
+    is chosen by the measurement recorded there."""
+    return os.environ.get('AIL_UNIFIED_PROVEN', '').strip().lower() in ('1', 'on', 'yes', 'true')
+
+
+_INF = 1 << 20
+_STEP_MAX = 1 << 16
+
+
+def _module_int_consts(tree):
+    out, stores = {}, {}
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            stores[n.id] = stores.get(n.id, 0) + 1
+    for st in tree.body:
+        if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Name) \
+                and stores.get(st.targets[0].id) == 1:
+            v = _int_const(st.value)
+            if v is not None:
+                out[st.targets[0].id] = v
+    return out
+
+
+def unproven_ints(plan, fp, tree):
+    """The unboxed int locals of `fp` whose value is not proven to fit int64 (a bit bound below 63): everything that is not a
+    literal, a len(), a loop index over range() of bounded values, a counter with a constant step of at most 2**16 (a loop of
+    2**47 steps takes days), or bounded arithmetic of those (a sum of two bounded values has one bit more, a product the sum of the
+    bits, `//` `>>` `&` `%` no more than the left operand). Parameters, calls, subscripts and attributes are unbounded.
+    The rest stay boxed so that an overflow promotes to a big int (docs/design/BIGINT.md section 6)."""
+    consts = getattr(plan, '_mconsts', None)
+    if consts is None:
+        consts = plan._mconsts = _module_int_consts(tree)
+    ints = [v for v in fp.locals if fp.unboxed(v) and fp.vtype.get(v) == INT]
+    if not ints:
+        return []
+    B, _bits = _bounds(plan, fp, tree, ints)
+    return [v for v in ints if B[v] > 62]
+
+
+def fn_bits(plan, fp):
+    """The bit-bound function of `fp` (see _bounds) over every local of the function: `bits(expr)` is a bound on the bit length of
+    an int expression, `_INF` where nothing is known. Computed once per function (the answer does not depend on the types)."""
+    got = getattr(fp, '_gbits', None)
+    if got is None:
+        tree = getattr(plan, '_tree', None)
+        got = fp._gbits = _bounds(plan, fp, tree, sorted(fp.locals))[1]
+    return got
+
+
+def _bounds(plan, fp, tree, ints):
+    consts = getattr(plan, '_mconsts', None)
+    if consts is None:
+        consts = plan._mconsts = _module_int_consts(tree)
+    B = {v: 0 for v in ints}
+    for v in fp.params:
+        if v in B:
+            B[v] = _INF
+    assigns = []                    # (name, value expr or None, kind)
+    for n in fp.own:
+        if isinstance(n, ast.Assign):
+            for t in n.targets:
+                if isinstance(t, ast.Name):
+                    assigns.append((t.id, n.value, 'set'))
+                else:
+                    for x in ast.walk(t):
+                        if isinstance(x, ast.Name):
+                            if isinstance(t, ast.Tuple) and isinstance(n.value, ast.Tuple) and len(t.elts) == len(n.value.elts) \
+                                    and all(isinstance(e, ast.Name) for e in t.elts):
+                                pass
+                            else:
+                                assigns.append((x.id, None, 'set'))
+                    if isinstance(t, ast.Tuple) and isinstance(n.value, ast.Tuple) and len(t.elts) == len(n.value.elts):
+                        for e, val in zip(t.elts, n.value.elts):
+                            if isinstance(e, ast.Name):
+                                assigns.append((e.id, val, 'set'))
+        elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name):
+            assigns.append((n.target.id, n.value, 'set'))
+        elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
+            assigns.append((n.target.id, n, 'aug'))
+        elif isinstance(n, ast.For):
+            tg = n.target
+            names = [x.id for x in ast.walk(tg) if isinstance(x, ast.Name)]
+            if isinstance(tg, ast.Name) and _is_range_call(n.iter, plan.fn_names):
+                assigns.append((tg.id, n.iter, 'range'))
+            else:
+                for nm in names:
+                    assigns.append((nm, None, 'set'))
+        elif isinstance(n, (ast.NamedExpr,)):
+            if isinstance(n.target, ast.Name):
+                assigns.append((n.target.id, n.value, 'set'))
+        elif isinstance(n, ast.comprehension):
+            for x in ast.walk(n.target):
+                if isinstance(x, ast.Name):
+                    assigns.append((x.id, None, 'set'))
+
+    def bits(e):
+        if isinstance(e, ast.Constant):
+            return abs(e.value).bit_length() if type(e.value) is int else (1 if isinstance(e.value, bool) else _INF)
+        if isinstance(e, ast.Name):
+            if e.id in B:
+                return B[e.id]
+            return abs(consts[e.id]).bit_length() if e.id in consts else _INF
+        if isinstance(e, ast.UnaryOp):
+            return bits(e.operand) if isinstance(e.op, (ast.USub, ast.UAdd, ast.Invert)) else _INF
+        if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in ('len', 'ord') and e.func.id not in plan.fn_names:
+            return 40 if e.func.id == 'len' else 21
+        if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in ('abs', 'min', 'max') and e.args \
+                and e.func.id not in plan.fn_names and not e.keywords:
+            return max(bits(a) for a in e.args)
+        if isinstance(e, ast.BinOp):
+            a, b = bits(e.left), bits(e.right)
+            op = e.op
+            if isinstance(op, (ast.Add, ast.Sub)):
+                return max(a, b) + 1
+            if isinstance(op, ast.Mult):
+                return a + b
+            if isinstance(op, (ast.FloorDiv, ast.RShift)):
+                return a
+            if isinstance(op, ast.Mod):
+                return b if b < _INF else a
+            if isinstance(op, ast.BitAnd):
+                return min(a, b) if isinstance(e.right, ast.Constant) or isinstance(e.left, ast.Constant) else max(a, b)
+            if isinstance(op, (ast.BitOr, ast.BitXor)):
+                return max(a, b)
+            if isinstance(op, ast.LShift):
+                c = _int_const(e.right)
+                return a + c if c is not None and c >= 0 else _INF
+            return _INF
+        if isinstance(e, ast.IfExp):
+            return max(bits(e.body), bits(e.orelse))
+        return _INF
+
+    def counter(name, n):
+        """`x += c` / `x -= c` / `x = x + c` with a literal c of at most 2**16"""
+        if isinstance(n, ast.AugAssign):
+            c = _int_const(n.value)
+            return isinstance(n.op, (ast.Add, ast.Sub)) and c is not None and abs(c) <= _STEP_MAX
+        return False
+
+    for _ in range(80):
+        changed = False
+        for name, e, kind in assigns:
+            if name not in B:
+                continue
+            if kind == 'aug':
+                if counter(name, e):
+                    v = 47
+                else:
+                    v = _INF if e is None else bits(ast.BinOp(left=ast.Name(id=name), op=e.op, right=e.value))
+            elif kind == 'range':
+                # the index is start + k*step with k below the trip count (2**47 at most in any run that ends): a stop
+                # that is not bounded does not matter, a start or a step that is not bounded does; with every argument bounded the
+                # index is within the larger of start and stop
+                args = e.args
+                ab = [bits(a) for a in args]
+                if max(ab) < _INF:
+                    v = max(ab)
+                elif len(args) == 1:
+                    v = 47
+                elif len(args) == 2:
+                    v = max(bits(args[0]), 47) + 1
+                else:
+                    st = _int_const(args[2])
+                    v = max(bits(args[0]), 47) + 17 if st is not None and abs(st) <= _STEP_MAX else _INF
+            elif e is None:
+                v = _INF
+            else:
+                v = bits(e)
+                if isinstance(e, ast.BinOp) and isinstance(e.op, (ast.Add, ast.Sub)) and isinstance(e.left, ast.Name) \
+                        and e.left.id == name and (_int_const(e.right) is not None and abs(_int_const(e.right)) <= _STEP_MAX):
+                    v = 47               # the counter pattern `x = x + c`
+            if v > B[name]:
+                B[name] = min(v, _INF)
+                changed = True
+        if not changed:
+            break
+    return B, bits
+
+
 def analyze(comp, tree, demote, nofloat=False):
     """`comp` is the pyboxed2 Compiler with every function and class registered.
     `nofloat`: no value is proven float (C118: see `float_search_risk`)."""
     plan = Plan()
     plan.nofloat = nofloat
     plan.float_guard = ('<float>', 'search') in (demote or ())       # C118: searched lists / tuples keep their floats boxed
+    plan._tree = tree
     names_all = set(comp.functions)
     plan.fn_names = set(comp.functions)
     plan.module_names = (set(comp.module_names) | set(comp.from_imports) | set(comp.module_aliases)
@@ -777,6 +959,59 @@ def analyze(comp, tree, demote, nofloat=False):
     plan.draws = _native_draws(comp) if os.environ.get('AIL_UNIFIED_DRAWS') != '0' else {}
     plan.not_receivers = set(comp.module_aliases) | set(comp.from_imports) | {'math', 'sys', 'dict'} | set(comp.classes)
     demote = set(demote or ())
+    # BIGINT.md section 6: a function that can need a big int (bigcap) keeps every int boxed: the unboxed int64 of this pass
+    # stops loudly on an overflow, a boxed int promotes.  B2b: a function whose int parameters are all
+    # annotated is the typed-int case and may keep the plain/int64 representation (the measured typed
+    # benchmarks); an unannotated function with a local-proof failure keeps the boxed representation.
+    import bigcap
+    _defined = bigcap._Defined({_n.name for _n in ast.walk(tree)
+                                if isinstance(_n, (ast.FunctionDef, ast.AsyncFunctionDef))})
+    _defined.classes = frozenset(_n.name for _n in ast.walk(tree) if isinstance(_n, ast.ClassDef))
+    _ann_nodes = {}
+    for _n in ast.walk(tree):
+        if isinstance(_n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _ps = list(_n.args.posonlyargs) + list(_n.args.args)
+            if _ps and all(a.annotation is not None and isinstance(a.annotation, ast.Name)
+                           and a.annotation.id in ('int', '__ail_checked_int__') for a in _ps):
+                _ann_nodes.setdefault(_n.name, _n)
+    # Keep an annotated function on the typed path when its own ints are locally proven, or when
+    # it returns something other than an int (the measured bytearray/container benchmarks). An
+    # annotated int-returning function that needs a big int must go to the boxed general path:
+    # its typed clone keeps an int64 result ABI and cannot promote.
+    def _returns_int(node):
+        r = getattr(node, 'returns', None)
+        return isinstance(r, ast.Name) and r.id in ('int', '__ail_checked_int__')
+    # A forced general build is the soundness check: there an annotated int-returning function
+    # whose own proof fails must be boxed (its int64 typed clone cannot promote). The mixed
+    # default build keeps the measured typed clones.
+    _force = bool(os.environ.get('AIL_UNIFIED_FORCE'))
+    _ann = {n for n, node in _ann_nodes.items()
+            if not (_force and _returns_int(node)
+                    and bigcap._lp_reason([node], None, _defined))}
+    _prelude = set(getattr(comp, 'prelude_names', ()))
+    _prelude |= {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
+    _marks = {k: v for k, v in bigcap.marked(tree).items()
+              if k not in _prelude and not k.startswith(('_ail', '_Ail'))}
+    _local_demote = any(
+        k != '<module>' and k not in _ann
+        and not v.startswith(('it calls ', 'it contains '))
+        for k, v in _marks.items())
+    _demote_names = {k for k in bigcap.marked(tree, local=False)
+                     if k not in _prelude and not k.startswith(('_ail', '_Ail'))}
+    if _local_demote:
+        _demote_names |= set(_marks)
+    for _name in _demote_names:
+        if _name == '<module>':
+            continue
+        demote.add((_name, '*'))
+        demote.add(('pfu_' + _name, '*'))
+        for _key, _info in comp.functions.items():
+            if _key == _name:
+                demote.add((_info['cname'], '*'))
+        for _c in comp.class_order:
+            _info = comp.classes[_c]['methods'].get(_name)
+            if _info is not None:
+                demote.add((_info['cname'], '*'))
     plan.id_callees = _identity_callees(tree, names_all)     # C101
 
     # ---- module constants: one top-level `NAME = <int/float/bool literal>`, never stored elsewhere
@@ -1359,6 +1594,66 @@ def analyze(comp, tree, demote, nofloat=False):
         again = analyze(comp, tree, demote, True)
         again.stats['floats_kept_boxed'] = risk
         return again
+    # B2b: box the unproven int locals of an UNANNOTATED function; an explicitly annotated int
+    # keeps the typed int64 representation (its arithmetic is overflow-checked as before).
+    def _annotated(fp):
+        try:
+            args = fp.node.args
+        except Exception:
+            return False
+        ps = list(args.posonlyargs) + list(args.args)
+        return bool(ps) and all(a.annotation is not None and isinstance(a.annotation, ast.Name)
+                                and a.annotation.id in ('int', '__ail_checked_int__') for a in ps)
+    more = {(fp.name, v) for fp in plan.fns.values() if not _annotated(fp)
+            for v in unproven_ints(plan, fp, tree)} - demote
+    if more:
+        return analyze(comp, tree, demote | more, nofloat)
+    # A square compared with an int64 value in a loop condition cannot exceed it when the
+    # condition holds: `while i * i <= n` proves `i * i <= n <= INT64_MAX` on the taken edge, so the
+    # product is non-negative and fits, and the fast multiply never takes its overflow arm.
+    plan.mul_fits = set()
+    plan.positive = {}
+    for _fp in plan.fns.values():
+        _env = env_of(_fp)
+        for _n in _fp.own:
+            if not (isinstance(_n, ast.Compare) and len(_n.ops) == 1
+                    and isinstance(_n.ops[0], (ast.Lt, ast.LtE, ast.Gt, ast.GtE))):
+                continue
+            _op = _n.ops[0]
+            _pairs = [(_n.left, _n.comparators[0], _op), (_n.comparators[0], _n.left, _op)]
+            for _side, _other, _op in _pairs:
+                _upper = (isinstance(_op, (ast.Lt, ast.LtE)) and _side is _n.left) or \
+                         (isinstance(_op, (ast.Gt, ast.GtE)) and _side is _n.comparators[0])
+                if _upper and isinstance(_side, ast.BinOp) and isinstance(_side.op, ast.Mult) \
+                        and ast.dump(_side.left) == ast.dump(_side.right) \
+                        and etype(plan, _fp, _side.left, _env) == INT \
+                        and etype(plan, _fp, _other, _env) == INT:
+                    plan.mul_fits.add(id(_side))
+        # A divisor that is always positive needs only the one sign test for a negative dividend.
+        _pos = set()
+        for _n in _fp.own:
+            if isinstance(_n, ast.Assign) and len(_n.targets) == 1 and isinstance(_n.targets[0], ast.Name):
+                _v = _int_const(_n.value)
+                if _v is not None and _v > 0:
+                    _pos.add(_n.targets[0].id)
+            elif isinstance(_n, ast.For) and isinstance(_n.target, ast.Name) \
+                    and _is_range_call(_n.iter, plan.fn_names):
+                _args = _n.iter.args
+                _start = 0 if len(_args) == 1 else _int_const(_args[0])
+                _step = 1 if len(_args) < 3 else _int_const(_args[2])
+                if _start is not None and _start > 0 and _step is not None and _step > 0:
+                    _pos.add(_n.target.id)
+        for _round in range(8):
+            _before = len(_pos)
+            for _n in _fp.own:
+                if isinstance(_n, ast.AugAssign) and isinstance(_n.target, ast.Name) \
+                        and _n.target.id in _pos and isinstance(_n.op, (ast.Add, ast.Sub)):
+                    _c = _int_const(_n.value)
+                    if _c is not None and (_c >= 0 if isinstance(_n.op, ast.Add) else _c <= 0):
+                        _pos.add(_n.target.id)
+            if len(_pos) == _before:
+                break
+        plan.positive[_fp.name] = _pos
     plan.stats = {
         'functions': len(plan.fns),
         'generic_bodies_kept': sorted(plan.need_generic),
@@ -1776,6 +2071,9 @@ def _etype(plan, fp, n, env):
             return BOT if OBJ not in (a, b) else OBJ
         op = n.op
         if a == INT and b == INT:
+            if isinstance(op, ast.Mult) and biggate.ON and fp is not None and fn_bits(plan, fp)(n) > 62 \
+                    and id(n) not in getattr(plan, 'mul_fits', ()):
+                return OBJ        # a product that nothing proves to fit int64 stays a boxed int: an overflow promotes (BIGINT.md section 6)
             if isinstance(op, _ARITH + _BITS + (ast.FloorDiv, ast.Mod)):
                 return INT
             if isinstance(op, ast.Div):
@@ -1988,15 +2286,31 @@ def box(comp, ctx, v, t):
 
 def _unbox_rv(s, t):
     if t == FLOAT:
-        return '((%s).tag == AIL_T_FLOAT ? ail_float_val(%s) : (double)(%s).i)' % (s, s, s)
+        if not biggate.ON:
+            return '((%s).tag == AIL_T_FLOAT ? ail_float_val(%s) : (double)(%s).i)' % (s, s, s)
+        return 'ail__as_dbl_ck(cx, %s)' % s
     if t == BOOL:
         return '((%s).i != 0)' % s
     return '(%s).i' % s
 
 
+def _big_stop(ctx, s):
+    """A boxed int that was proven an int64 but is a big int: the unboxed path cannot hold it. The program stops with the typed
+    path's "integer overflow" (exit 1, stdout flushed): AIL_UNBOX_CHK, one compare and a cold noreturn call. Never reached by a
+    program that stays inside int64 (docs/design/BIGINT.md section 6). A program that cannot make a big int has no check."""
+    if biggate.ON:
+        ctx.emit('AIL_UNBOX_CHK(%s);' % s)
+
+
 def unbox(ctx, s, t):
+    if t == INT:
+        _big_stop(ctx, s)
     r = utmp(ctx, t)
-    ctx.emit('%s = %s;' % (r, _unbox_rv(s, t)))
+    if t == FLOAT and biggate.ON:
+        ctx.emit('st = ail__math_double(cx, &%s, %s); if (st != AIL_OK) goto %s;'
+                 % (r, s, _err(ctx)))
+    else:
+        ctx.emit('%s = %s;' % (r, _unbox_rv(s, t)))
     return r
 
 
@@ -2118,9 +2432,16 @@ def _fallback(comp, ctx, fn, operands, rtype, r):
         ctx.emit('%s = %s;' % (s, _box_rv(t, v)))
         boxed.append(s)
     out = ctx.u_scratch[2]
-    ctx.emit('st = %s(cx, &%s%s);' % (fn, out, ''.join(', ' + b for b in boxed)))
+    # `/*U*/`: this arm stops on a big result and never keeps one, so the call alone does not make a program need the big ints
+    ctx.emit('st = %s%s(cx, &%s%s);' % ('/*U*/' if biggate.ON else '', fn, out, ''.join(', ' + b for b in boxed)))
     ctx.emit('if (st != AIL_OK) goto %s;' % _err(ctx))
-    ctx.emit('%s = %s;' % (r, _unbox_rv(out, rtype)))
+    if rtype == INT:
+        _big_stop(ctx, out)
+    if rtype == FLOAT and biggate.ON:
+        ctx.emit('st = ail__math_double(cx, &%s, %s); if (st != AIL_OK) goto %s;'
+                 % (r, out, _err(ctx)))
+    else:
+        ctx.emit('%s = %s;' % (r, _unbox_rv(out, rtype)))
 
 
 def _open(ctx, line):
@@ -2178,6 +2499,8 @@ def nexpr(comp, node, ctx):
         a = nexpr(comp, node.operand, ctx)
         if isinstance(node.op, ast.UAdd):
             return a
+        if biggate.ON and t == INT and isinstance(node.op, (ast.USub, ast.Invert)):
+            ctx.emit(biggate.IMARK)
         r = utmp(ctx, t)
         if isinstance(node.op, ast.Invert):
             ctx.emit('%s = ~%s;' % (r, a))
@@ -2499,6 +2822,11 @@ def _binop(comp, node, ctx, t):
         _close(ctx)
 
     if lt == INT and rt == INT:
+        if biggate.ON:
+            ctx.emit(biggate.IMARK)
+        plan = getattr(comp, 'uplan', None)
+        pos = (node.right.id in plan.positive.get(getattr(ctx.u, 'name', None), ())
+               if plan is not None and isinstance(node.right, ast.Name) and ctx.u is not None else False)
         c = node.right.value if isinstance(node.right, ast.Constant) and isinstance(node.right.value, int) \
             and not isinstance(node.right.value, bool) else None
         if c is not None and c > 0 and c & (c - 1) == 0 and isinstance(op, (ast.FloorDiv, ast.Mod)):
@@ -2510,17 +2838,30 @@ def _binop(comp, node, ctx, t):
                 ctx.emit('%s = %s & %dLL;' % (r, a, c - 1))
             return r
         if type(op) in _OVF:
-            _open(ctx, 'if (__builtin_%s_overflow(%s, %s, &%s)) {' % (_OVF[type(op)], a, b, r))
-            _fallback(comp, ctx, fn, ops, t, r)
-            _close(ctx)
+            if isinstance(op, ast.Mult) and plan is not None and id(node) in getattr(plan, 'mul_fits', ()):
+                ctx.emit('%s = %s * %s;' % (r, a, b))
+            else:
+                _open(ctx, 'if (__builtin_%s_overflow(%s, %s, &%s)) {' % (_OVF[type(op)], a, b, r))
+                _fallback(comp, ctx, fn, ops, t, r)
+                _close(ctx)
         elif isinstance(op, ast.FloorDiv):
-            guarded('%s == 0 || (%s == INT64_MIN && %s == -1)' % (b, a, b),
-                    ['%s = %s / %s;' % (r, a, b),
-                     'if ((%s %% %s != 0) && (((%s %% %s) < 0) != (%s < 0))) %s -= 1;' % (a, b, a, b, b, r)])
+            if pos:
+                guarded('%s == 0' % b,
+                        ['%s = %s / %s;' % (r, a, b),
+                         'if (%s %% %s < 0) %s -= 1;' % (a, b, r)])
+            else:
+                guarded('%s == 0 || (%s == INT64_MIN && %s == -1)' % (b, a, b),
+                        ['%s = %s / %s;' % (r, a, b),
+                         'if ((%s %% %s != 0) && (((%s %% %s) < 0) != (%s < 0))) %s -= 1;' % (a, b, a, b, b, r)])
         elif isinstance(op, ast.Mod):
-            guarded('%s == 0 || %s == -1' % (b, b),
-                    ['%s = %s %% %s;' % (r, a, b),
-                     'if (%s != 0 && ((%s < 0) != (%s < 0))) %s += %s;' % (r, r, b, r, b)])
+            if pos:
+                guarded('%s == 0' % b,
+                        ['%s = %s %% %s;' % (r, a, b),
+                         'if (%s < 0) %s += %s;' % (r, r, b)])
+            else:
+                guarded('%s == 0 || %s == -1' % (b, b),
+                        ['%s = %s %% %s;' % (r, a, b),
+                         'if (%s != 0 && ((%s < 0) != (%s < 0))) %s += %s;' % (r, r, b, r, b)])
         elif isinstance(op, (ast.BitAnd, ast.BitOr, ast.BitXor)):
             ctx.emit('%s = %s %s %s;' % (r, a, {ast.BitAnd: '&', ast.BitOr: '|', ast.BitXor: '^'}[type(op)], b))
         elif isinstance(op, ast.LShift):
@@ -2738,6 +3079,7 @@ def stmt_hook(comp, node, ctx):
                 ctx.emit('%s = (int64_t)((uint64_t)%s + %s * (uint64_t)(%dLL));' % (fp.cvar(tg.id), lo_v, k, step))
         else:
             val = comp._open_iter_loop(node.iter, ctx)
+            _big_stop(ctx, val)
             ctx.emit('%s = (%s).i;' % (fp.cvar(tg.id), val))
         comp.block(node.body, ctx)
         _close(ctx)

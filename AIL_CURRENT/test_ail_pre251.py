@@ -189,6 +189,16 @@ class Pre251Tests(unittest.TestCase):
                 self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
                 self.assertEqual(got, (want, want_rc), '%s (general=%s)\n%s' % (slug, general, build_err))
 
+    def matches_cpython(self, slug, text):
+        # exact ints (bigint): build on both paths and compare (stdout, returncode) with CPython
+        with tempfile.TemporaryDirectory(prefix='ail-pre251-') as directory:
+            want, want_rc, _err = _cpython(directory, slug, text)
+            for general in (True, False):
+                got, build_err = _run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
+                                      text, general)
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
+                self.assertEqual(got, (want, want_rc), '%s (general=%s)\n%s' % (slug, general, build_err))
+
     def test_bool_constant_shifts_match_cpython(self):
         self.matches('accepted', ACCEPTED)
 
@@ -205,8 +215,9 @@ class Pre251Tests(unittest.TestCase):
         self.matches('maxsplit', MAXSPLIT)
 
     def test_out_of_range_bool_expression_is_refused(self):
+        # exact ints (bigint)
         for slug, text in REFUSED.items():
-            self.refused(slug, text)
+            self.matches_cpython(slug, text)
 
 
 if __name__ == '__main__':

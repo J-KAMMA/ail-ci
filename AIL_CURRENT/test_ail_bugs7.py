@@ -9,7 +9,8 @@
 3. The typed path took `bin(n)`, `oct(n)`, `format(...)`, `ascii(...)` for ints, so `b: str = bin(n)` was refused as
    "assigning int" (C73). bin and oct are built like hex; format and ascii are str-valued and refused by name.
 4. An int64 overflow ended a typed clone (mixed mode) with exit 1 and `integer overflow`, and the boxed code with exit 3
-   and `AIL limit: int_overflow` (C74). A1 declares exit 1 and `integer overflow`; the general runtime ends so.
+   and `AIL limit: int_overflow` (C74). With big ints a result that does not fit int64 now promotes, so the default
+   (tint) build prints CPython's exact integer and exits 0; the boxed code does the same.
 5. UnboundLocalError's text was the pre-3.11 wording (C75). It is CPython 3.12's, and a name read from an
    enclosing function is a NameError with the free-variable wording.
 
@@ -213,25 +214,35 @@ main()
         print("except")
 main()
 '''
-        start = b"start {'k': [1, 2, 3]}\n59049\n"
-        for name, text, out, mixed in (
-                ('overflow_clone', clone_overflows, start, True),
-                ('overflow_boxed', boxed_overflows,
-                 start + b''.join(b'%d\n' % 3 ** (i + 2) for i in range(31, 38)), True),
-                ('overflow_in_try', in_try, start, True)):
-            self.check(name, text, want={'': (out, 1)}, mixed=mixed, stop=('',))
+        with tempfile.TemporaryDirectory(prefix='ail-bugs7-') as directory:
+            clone_exact = _cpython(directory, 'overflow_clone', clone_overflows, '')[0]
+            boxed_exact = _cpython(directory, 'overflow_boxed', boxed_overflows, '')[0]
+            try_exact = _cpython(directory, 'overflow_in_try', in_try, '')[0]
+        # the default build's clone promotes through the boxed body (fix10 restores the clone); the general
+        # build promotes directly: CPython's exact big int and exit 0 in both
+        self.check('overflow_clone', clone_overflows, want={'': (clone_exact, 0)}, mixed=True)
+        self.check('overflow_boxed', boxed_overflows, want={'': (boxed_exact, 0)}, mixed=True)
+        self.check('overflow_in_try', in_try, want={'': (try_exact, 0)}, mixed=True)
 
     def test_overflow_text(self):
-        """`integer overflow` on stderr, exit 1: the typed path, a typed clone and the boxed code say the same."""
+        """The tint/default build promotes a value beyond int64: CPython's exact text and exit 0, never `integer overflow`.
+        The legacy emitter (AIL_IR=0) has no tint lowering and keeps its old loud int64 stop."""
         text = 'def main():\n    d = {"k": 1}\n    x = 3\n    for i in range(100):\n        x = x * 3\n    print(x)\nmain()\n'
         with tempfile.TemporaryDirectory(prefix='ail-bugs7-') as directory:
+            exact = _cpython(directory, 'overflow_text', text, '')[0]
             for mode, general, ir in MODES:
                 exe, built = build(directory, 'overflow_text', text, ir, general)
                 self.assertEqual(built.returncode, 0, built.stderr[-1500:])
                 got = subprocess.run([str(exe)], capture_output=True, timeout=60, cwd=directory)
                 with self.subTest(mode=mode, ir=ir):
-                    self.assertEqual(got.returncode, 1, got.stderr)
-                    self.assertEqual(got.stderr.decode().strip(), 'integer overflow')
+                    if not general and ir == '0':
+                        # the legacy emitter has no tint: the typed int64 still stops loudly
+                        self.assertEqual(got.returncode, 1, got.stderr)
+                        self.assertEqual(got.stderr.decode().strip(), 'integer overflow')
+                    else:
+                        self.assertEqual(got.returncode, 0, got.stderr)
+                        self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), exact)
+                        self.assertNotIn(b'integer overflow', got.stderr)
 
     # ---- 5. UnboundLocalError's wording -------------------------------------------------------------------------
 

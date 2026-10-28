@@ -196,7 +196,7 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
             else:
                 eff = eff | UNKNOWN
         return eff
-    if op == 'ba.call':
+    if op in ('ba.call', 'obj.call'):
         names = places if places is not None else place_names(fn)
         sym = ins.attrs.get('callee')
         callee = program.functions.get(sym) if program is not None else None

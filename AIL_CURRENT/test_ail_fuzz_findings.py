@@ -531,9 +531,8 @@ def run_both(directory, text, name, env=None):
         return built, None, expected
     return built, subprocess.run([str(exe)], capture_output=True, timeout=60), expected
 
-# (round 3) an int64 overflow is a stop (`integer overflow`, exit 1 as A1 declares; it was `AIL limit`, exit 3), not an exception: no `except`
-# and no `finally` block may run on the way out. The general path used to run the `finally` bodies first,
-# printing lines CPython never prints (fuzz seed 2074400336). `v += [9]` after `a = v` forces that path.
+# (round 17) `9223372036854775807 - len(v) * -1` is 9223372036854775810, an exact big int now: no stop.
+# The try/finally/handler ordering is still checked against CPython (the earlier int64-stop version is obsolete).
 LIMIT_IN_TRY = '''
 def main() -> int:
     v: list[int] = [1, 2]
@@ -795,18 +794,19 @@ class FuzzFindings(unittest.TestCase):
                     self.assertEqual(expected.stdout, b'bad b\n4 2\n')
                     self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
 
-    # ---- C16: a limit stop does not run except/finally blocks ----
+    # ---- C16: the overflow value is exact and the handler/finally order is CPython's ----
     def test_int_overflow_stop_runs_no_finally_block(self):
         for text, label in ((LIMIT_IN_TRY, 'try'), (LIMIT_IN_HANDLER, 'handler')):
             for mode, env in (('default', None), ('ir', {'AIL_IR': '1'})):
                 with self.subTest(label + '_' + mode):
                     with tempfile.TemporaryDirectory() as directory:
-                        built, ran, _ = run_both(directory, text, 'limit_' + label + '_' + mode, env)
+                        built, ran, expected = run_both(directory, text, 'limit_' + label + '_' + mode, env)
                         self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
-                        self.assertEqual(ran.returncode, 1, ran.stderr)    # A1: exit 1 (C74; it was 3)
-                        self.assertEqual(ran.stdout.replace(b'\r\n', b'\n'), b'3\n')   # Windows text-mode stdout writes CRLF
-                        self.assertIn(b'integer overflow', ran.stderr)
-                        self.assertNotIn(b'AIL limit', ran.stderr)
+                        self.assertEqual(expected.returncode, 0, expected.stderr)
+                        self.assertEqual((ran.returncode, ran.stdout.replace(b'\r\n', b'\n')),
+                                         (expected.returncode, expected.stdout.replace(b'\r\n', b'\n')),
+                                         ran.stderr)
+                        self.assertIn(b'9223372036854775810', ran.stdout)
 
     def test_list_extend_with_itself_adds_the_items_once(self):
         for name, env in (('selfext', None), ('selfext_ir', {'AIL_IR': '1'})):

@@ -1,4 +1,4 @@
-"""pre417: a module-level container read before a later mutation is refused by name.
+"""pre417: a module-level container read before a later mutation matches CPython.
 
 The pre402 review recorded, as pre-existing, that a module-level
 ``d = {"k": 1e300}; print(int(d.get("k"))); d.update({"k": 1.5})`` compiled and
@@ -6,11 +6,12 @@ then stopped with ``integer overflow`` where CPython prints the exact big
 integer.  The module constant map kept only the final environment, so a
 container mutated later was dropped before the earlier read was checked.  The
 int() check now visits each top-level statement with the constants visible at
-that statement, and a ``dict.get`` read no longer makes the container dynamic;
-an out-of-int64 value read before a later mutation is refused by name on both
-builds, while a mutation that comes first still matches CPython.  Calls that
-may mutate a tracked container drop it, so a callback can only lose a refusal
-and never invent one.
+that statement, and a ``dict.get`` read no longer makes the container dynamic.
+For the int64 era a value outside int64 read before a later mutation was refused
+by name; under exact ints it builds on both builds and prints the exact integer,
+and a mutation that comes first still matches CPython.  Calls that may mutate a
+tracked container drop it, so a callback can only lose a refusal and never
+invent one.
 """
 import os
 import subprocess
@@ -81,7 +82,7 @@ d.update({"k": 3.5})
 ''',
 }
 
-REFUSALS = {
+EXACT = {
     'module_dict_get': '''
 d = {"k": 1e300}
 print(int(d.get("k")))
@@ -214,18 +215,16 @@ class Pre417Tests(unittest.TestCase):
                     self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
                     self.assertEqual(got, want, '%s (general=%s)\n%s' % (slug, general, build_err))
 
-    def test_out_of_int64_read_before_mutation_is_refused_by_name(self):
+    def test_out_of_int64_read_before_mutation_matches_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre417-') as directory:
-            for slug, text in REFUSALS.items():
-                self.assertEqual(_run_cpython(directory, slug, text)[1], 0, slug)
+            for slug, text in EXACT.items():
+                want = _run_cpython(directory, slug, text)
+                self.assertEqual(want[1], 0, slug)
                 for general in (True, False):
-                    _, built = _build(directory, '%s_%s' % (slug, 'g' if general else 'd'),
-                                      text, general)
-                    output = built.stdout + built.stderr
-                    self.assertNotEqual(built.returncode, 0, '%s (general=%s)\n%s' %
-                                        (slug, general, output))
-                    self.assertIn('int() of a float outside int64', output,
-                                  '%s (general=%s)\n%s' % (slug, general, output))
+                    got, build_err = _build_and_run(
+                        directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
+                    self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
+                    self.assertEqual(got, want, '%s (general=%s)\n%s' % (slug, general, build_err))
 
 
 if __name__ == '__main__':

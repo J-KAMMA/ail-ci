@@ -77,7 +77,11 @@ SLICE = r'''
 /* ---- slice objects, slices of instances, slice assignment (safetyrt.py SLICE) ---- */
 static inline ail_st ail2s_bound(ail_ctx *cx, ail_obj v, int *has, int64_t *out) {
     if (v.tag == AIL_T_NONE || v.tag == AIL_T_UNBOUND) { *has = 0; *out = 0; return AIL_OK; }
+/*B<*/
+    if (v.tag == AIL_T_INT || v.tag == AIL_T_BOOL || v.tag == AIL_T_BIG) { *has = 1; *out = v.i; return AIL_OK; }   /* a big int's .i is clamped to int64: the slice clips it as CPython does */
+/*B|*/
     if (v.tag == AIL_T_INT || v.tag == AIL_T_BOOL) { *has = 1; *out = v.i; return AIL_OK; }
+/*B>*/
     return ail_raise_c(cx, AIL_B_TYPEERROR, "slice indices must be integers or None or have an __index__ method");
 }
 /* c[lo:hi:step] with bounds that may be None at run time */
@@ -810,8 +814,17 @@ static inline ail_st ail2f_bad_spec(ail_ctx *cx, ail_obj specobj, ail_obj x) {
 /* body is the digits (and point / exponent) without sign; prefix is "0x" etc. Numbers: default align '>' */
 static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *prefix, const char *body, ail2f_spec *f) {
     /* grouping of the integer digits */
+/*B<*/
+    char grouped_stk[512]; char *grouped = grouped_stk; const char *b = body;
+    int64_t gcap = 500;
+/*B|*/
     char grouped[512]; const char *b = body;
+/*B>*/
     if (f->group) {
+/*B<*/
+        { int64_t bl0 = (int64_t)strlen(body), zw = f->width > 0 ? f->width : 0; gcap = 2 * bl0 + 2 * zw + 16; if (gcap > 500) grouped = (char *)ail_xmalloc((size_t)gcap + 16); else gcap = 500; }
+/*B|*/
+/*B>*/
         int64_t blen = (int64_t)strlen(body), ip = 0;
         while (ip < blen && ((body[ip] >= '0' && body[ip] <= '9') || ((f->type == 'x' || f->type == 'X' || f->type == 'b' || f->type == 'o')
                && ((body[ip] >= 'a' && body[ip] <= 'f') || (body[ip] >= 'A' && body[ip] <= 'F'))))) ip++;
@@ -829,11 +842,23 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
         }
         for (int64_t k = 0; k < total; k++) {
             int64_t from_right = total - k;
+/*B<*/
+            if (k > 0 && from_right % every == 0 && o < gcap) grouped[o++] = f->group;
+/*B|*/
             if (k > 0 && from_right % every == 0 && o < 500) grouped[o++] = f->group;
+/*B>*/
             int64_t src = k - (total - digits);
+/*B<*/
+            if (o < gcap) grouped[o++] = src >= 0 ? body[src] : '0';
+/*B|*/
             if (o < 500) grouped[o++] = src >= 0 ? body[src] : '0';
+/*B>*/
         }
+/*B<*/
+        for (int64_t k = ip; k < blen && o < gcap + 10; k++) grouped[o++] = body[k];
+/*B|*/
         for (int64_t k = ip; k < blen && o < 510; k++) grouped[o++] = body[k];
+/*B>*/
         grouped[o] = 0;
         b = grouped;
     }
@@ -850,6 +875,10 @@ static inline ail_obj ail2f_pad_num(ail_ctx *cx, const char *sign, const char *p
     for (int64_t k = 0; k < mid; k++) ail2f_put(&o, fill);
     ail2f_puts(&o, b);
     for (int64_t k = 0; k < right; k++) ail2f_put(&o, fill);
+/*B<*/
+    if (grouped != grouped_stk) free(grouped);
+/*B|*/
+/*B>*/
     return ail2f_done(cx, &o);
 }
 static inline ail_obj ail2f_pad_str(ail_ctx *cx, ail_str s, int64_t len, ail2f_spec *f, char dflt) {
@@ -882,6 +911,75 @@ static inline void ail2f_alt_point(char *out, size_t osz) {
         if (L + 3 <= osz) { out[L] = '.'; out[L + 1] = '0'; out[L + 2] = 0; }
     }
 }
+/*B<*/
+/* the heap form of ail2f_alt_point: room for the point (and ".0") is made first */
+static inline char *ail2f_alt_heap(char *out) {
+    size_t L = strlen(out);
+    char *p = (char *)realloc(out, L + 4);
+    if (!p) ail_die("out of memory");
+    ail2f_alt_point(p, L + 4);
+    return p;
+}
+/* the digits of a float in one of e E f F g G % or the repr form (type 0); the text is
+   sized from the requested precision (a fixed buffer truncates large precisions) */
+static inline char *ail2f_float_body(double v, ail2f_spec *f, char type) {
+    if (isinf(v) || isnan(v)) {
+        const char *t = isnan(v) ? "nan" : "inf";
+        int up = type == 'E' || type == 'F' || type == 'G';
+        char *out = (char *)ail_xmalloc(16);
+        snprintf(out, 16, "%s", up ? (isnan(v) ? "NAN" : "INF") : t);
+        if (type == '%') strcat(out, "%");
+        return out;
+    }
+    int64_t prec = f->has_prec ? f->prec : 6;
+    char fmt[16];
+    if (type == 0 && !f->has_prec) {
+        char *out = (char *)ail_xmalloc(400);
+        ail_fmt_float(out, 400, v);
+        if (f->alt) out = ail2f_alt_heap(out);
+        return out;
+    }
+    if (type == 0) {
+        int p = prec < 1 ? 1 : (int)prec;
+        int elen = snprintf(NULL, 0, "%.*e", p - 1, v);
+        if (elen < 0) elen = 0;
+        char *e = (char *)ail_xmalloc((size_t)elen + 1);
+        snprintf(e, (size_t)elen + 1, "%.*e", p - 1, v);
+        char *ep = strchr(e, 'e'); int x = atoi(ep + 1);
+        char *out;
+        if (x < -4 || x >= p - 1) {
+            /* exponent form: the digits without trailing zeros (unless #) */
+            *ep = 0;
+            if (!f->alt && strchr(e, '.')) { size_t L = strlen(e); while (L && e[L - 1] == '0') e[--L] = 0; if (L && e[L - 1] == '.') e[--L] = 0; }
+            size_t el = strlen(e);
+            out = (char *)ail_xmalloc(el + 32);
+            snprintf(out, el + 32, "%se%c%02d", e, x < 0 ? '-' : '+', x < 0 ? -x : x);
+        } else {
+            int fd = p - 1 - x < 0 ? 0 : p - 1 - x;
+            int n = snprintf(NULL, 0, "%.*f", fd, v);
+            if (n < 0) n = 0;
+            out = (char *)ail_xmalloc((size_t)n + 3);
+            snprintf(out, (size_t)n + 1, "%.*f", fd, v);
+            if (!f->alt && strchr(out, '.')) { size_t L = strlen(out); while (L && out[L - 1] == '0') out[--L] = 0; }
+            size_t L = strlen(out);
+            if (L && out[L - 1] == '.') { out[L] = '0'; out[L + 1] = 0; }
+            else if (!strchr(out, '.')) strcat(out, ".0");
+        }
+        free(e);
+        if (f->alt) out = ail2f_alt_heap(out);
+        return out;
+    }
+    if (type == 'n') type = 'g';
+    int need;
+    if (type == '%') { snprintf(fmt, sizeof fmt, "%%%s.*f", f->alt ? "#" : ""); need = snprintf(NULL, 0, fmt, (int)prec, v * 100.0); }
+    else { snprintf(fmt, sizeof fmt, "%%%s.*%c", f->alt ? "#" : "", type); need = snprintf(NULL, 0, fmt, (int)prec, v); }
+    if (need < 0) need = 0;
+    char *out = (char *)ail_xmalloc((size_t)need + 2);
+    if (type == '%') { snprintf(out, (size_t)need + 1, fmt, (int)prec, v * 100.0); strcat(out, "%"); }
+    else snprintf(out, (size_t)need + 1, fmt, (int)prec, v);
+    return out;
+}
+/*B|*/
 /* the digits of a float in one of e E f F g G % or the repr form (type 0) */
 static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec *f, char type) {
     if (isinf(v) || isnan(v)) {
@@ -928,6 +1026,7 @@ static inline void ail2f_float_body(char *out, size_t osz, double v, ail2f_spec 
     snprintf(fmt, sizeof fmt, "%%%s.*%c", f->alt ? "#" : "", type);
     snprintf(out, osz, fmt, (int)prec, v);
 }
+/*B>*/
 /* 1 when the mantissa of a formatted float body is all zeros (z: -0.0 after rounding becomes 0.0) */
 static inline int ail2f_body_zero(const char *b) {
     int digits = 0;
@@ -950,7 +1049,11 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
     if (spec.n == 0) { *out = ail_obj_str(cx, x); return AIL_OK; }
     /* object.__format__ accepts only an empty spec for every type without a formatter of its
        own (None, list, dict, bytes, a user instance without __format__ ...). */
+/*B<*/
+    if (x.tag != AIL_T_STR && x.tag != AIL_T_INT && x.tag != AIL_T_BOOL && x.tag != AIL_T_FLOAT && x.tag != AIL_T_BIG)
+/*B|*/
     if (x.tag != AIL_T_STR && x.tag != AIL_T_INT && x.tag != AIL_T_BOOL && x.tag != AIL_T_FLOAT)
+/*B>*/
         return ail2f_unsupported(cx, x);
     ail2f_spec f; char msg[160];
     if (ail2f_parse(spec, &f, msg, sizeof msg)) {
@@ -984,9 +1087,45 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         *out = ail2f_pad_str(cx, s, len, &f, '<');
         return AIL_OK;
     }
+/*B<*/
+    if (x.tag == AIL_T_BIG && !(type == 'e' || type == 'E' || type == 'f' || type == 'F' || type == 'g' || type == 'G' || type == '%' || type == 'c')) {
+        if (type && type != 'd' && type != 'n' && type != 'b' && type != 'o' && type != 'x' && type != 'X') {
+            snprintf(msg, sizeof msg, "Unknown format code '%c' for object of type 'int'", type);
+            return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+        }
+        if (f.has_prec) return ail_raise_c(cx, AIL_B_VALUEERROR, "Precision not allowed in integer format specifier");
+        if (f.group == ',' && (type == 'b' || type == 'o' || type == 'x' || type == 'X')) {
+            snprintf(msg, sizeof msg, "Cannot specify ',' with '%c'.", type); return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
+        }
+        if (f.group && type == 'n') { snprintf(msg, sizeof msg, "Cannot specify '%c' with 'n'.", f.group); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
+        int base = type == 'b' ? 2 : type == 'o' ? 8 : (type == 'x' || type == 'X') ? 16 : 10;
+        size_t blen; char *body = base == 10 ? ail_big_dec(x, &blen) : ail_big_radix(x, base == 16 ? 4 : base == 8 ? 3 : 1, &blen);
+        if (!body) return ail_raise_c(cx, AIL_B_VALUEERROR, AIL_MSG_STR_LIMIT);
+        int neg = AIL_BIG(x)->sign < 0;
+        char *digits = body + (base == 10 && neg ? 1 : 0);
+        if (type == 'X') for (char *q = digits; *q; q++) if (*q >= 'a' && *q <= 'f') *q = (char)(*q - 32);
+        const char *prefix = !f.alt ? "" : base == 2 ? "0b" : base == 8 ? "0o" : type == 'X' ? "0X" : base == 16 ? "0x" : "";
+        *out = ail2f_pad_num(cx, ail2f_signstr(neg, f.sign), prefix, digits, &f);
+        free(body);
+        return AIL_OK;
+    }
+    if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL || x.tag == AIL_T_BIG) {
+/*B|*/
     if (x.tag == AIL_T_INT || x.tag == AIL_T_BOOL) {
+/*B>*/
         if (f.has_wide_type) return ail2f_unknown_code(cx, f.wide_type, x.tag == AIL_T_BOOL ? "bool" : "int");
         if (type == 'e' || type == 'E' || type == 'f' || type == 'F' || type == 'g' || type == 'G' || type == '%') {
+/*B<*/
+            double d;
+            if (x.tag == AIL_T_BIG) {
+                int ovf; d = ail_big_to_double(x, &ovf);
+                if (ovf) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "int too large to convert to float");
+            } else d = (double)x.i;
+            char *body = ail2f_float_body(fabs(d), &f, type);
+            *out = ail2f_pad_num(cx, ail2f_signstr(d < 0, f.sign), "", body, &f);
+            free(body);
+            return AIL_OK;
+/*B|*/
             char bstack[512]; double d = (double)x.i;
             size_t bsz = ail2f_body_need(&f);
             char *body = bsz <= sizeof bstack ? bstack : (char *)malloc(bsz);
@@ -995,6 +1134,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
             *out = ail2f_pad_num(cx, ail2f_signstr(d < 0, f.sign), "", body, &f);
             if (body != bstack) free(body);
             return AIL_OK;
+/*B>*/
         }
         if (f.has_type && type != 'd' && type != 'n' && type != 'b' && type != 'o' && type != 'x' && type != 'X' && type != 'c')
             return ail2f_unknown_code(cx, (unsigned char)type, x.tag == AIL_T_BOOL ? "bool" : "int");
@@ -1003,6 +1143,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         if (type == 'c') {
             if (f.sign) return ail_raise_c(cx, AIL_B_VALUEERROR, "Sign not allowed with integer format specifier 'c'");
             if (f.alt) return ail_raise_c(cx, AIL_B_VALUEERROR, "Alternate form (#) not allowed with integer format specifier 'c'");
+            /*B<*/if (x.tag == AIL_T_BIG) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "Python int too large to convert to C long");/*B|*//*B>*/
             if (x.i < 0 || x.i > 0x10FFFF) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "%c arg not in range(0x110000)");
             if (x.i > 0xFFFF) ail_die("format 'c': a code point above U+FFFF in the 16-bit v2 runtime");
             uint16_t c = (uint16_t)x.i; ail_str s; s.p = &c; s.n = 1; s.bytes = 0;
@@ -1029,6 +1170,15 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         if (type && type != 'e' && type != 'E' && type != 'f' && type != 'F' && type != 'g' && type != 'G' && type != '%' && type != 'n')
             return ail2f_unknown_code(cx, (unsigned char)type, "float");
         if (f.group && type == 'n') { snprintf(msg, sizeof msg, "Cannot specify '%c' with 'n'.", f.group); return ail_raise_c(cx, AIL_B_VALUEERROR, msg); }
+/*B<*/
+        double d = ail_float_val(x);
+        int neg = signbit(d) && !isnan(d);
+        char *body = ail2f_float_body(fabs(d), &f, type);
+        if (f.z && neg && ail2f_body_zero(body)) neg = 0;
+        *out = ail2f_pad_num(cx, ail2f_signstr(neg, f.sign), "", body, &f);
+        free(body);
+        return AIL_OK;
+/*B|*/
         double d = ail_float_val(x);
         char bstack[512];
         size_t bsz = ail2f_body_need(&f);
@@ -1040,6 +1190,7 @@ static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj 
         *out = ail2f_pad_num(cx, ail2f_signstr(neg, f.sign), "", body, &f);
         if (body != bstack) free(body);
         return AIL_OK;
+/*B>*/
     }
     return ail2f_unsupported(cx, x);
 }
@@ -1122,9 +1273,37 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
             piece = ail2f_pad_str(cx, v, len, &f, '>');
         } else if (t == 'd' || t == 'i' || t == 'u' || t == 'o' || t == 'x' || t == 'X') {
             int64_t iv;
-            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;
             char *fdigits = NULL;
             int fneg = 0;
+/*B<*/
+            if (arg.tag == AIL_T_BIG || (arg.tag == AIL_T_FLOAT && (t == 'd' || t == 'i' || t == 'u') && (ail_float_val(arg) >= 9223372036854775808.0 || ail_float_val(arg) < -9223372036854775808.0) && isfinite(ail_float_val(arg)))) {
+                ail_obj bg = arg;
+                if (arg.tag == AIL_T_FLOAT) bg = ail_int_from_double(cx, ail_float_val(arg));
+                if (bg.tag == AIL_T_BIG) {
+                    fr.slots[2] = bg;
+                    int base = t == 'o' ? 8 : (t == 'x' || t == 'X') ? 16 : 10;
+                    size_t blen; char *bd = base == 10 ? ail_big_dec(bg, &blen) : ail_big_radix(bg, base == 16 ? 4 : 3, &blen);
+                    if (!bd) { st = ail_raise_c(cx, AIL_B_VALUEERROR, AIL_MSG_STR_LIMIT); goto fail; }
+                    int bneg = AIL_BIG(bg)->sign < 0;
+                    char *bdig = bd + (base == 10 && bneg ? 1 : 0);
+                    if (t == 'X') for (char *q = bdig; *q; q++) if (*q >= 'a' && *q <= 'f') *q = (char)(*q - 32);
+                    const char *bprefix = !f.alt ? "" : base == 8 ? "0o" : t == 'X' ? "0X" : base == 16 ? "0x" : "";
+                    f.type = 'd'; f.has_prec = 0;
+                    piece = ail2f_pad_num(cx, ail2f_signstr(bneg, f.sign), bprefix, bdig, &f);
+                    free(bd);
+                    goto have_piece;
+                }
+                iv = bg.i;
+            }
+            else if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;
+            else if (arg.tag == AIL_T_FLOAT && (t == 'd' || t == 'i' || t == 'u')) {
+                double d = ail_float_val(arg);
+                if (isnan(d)) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer"); goto fail; }
+                if (isinf(d)) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer"); goto fail; }
+                iv = (int64_t)d;
+            } else if (!(arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL)) {
+/*B|*/
+            if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) iv = arg.i;
             if (arg.tag == AIL_T_FLOAT && (t == 'd' || t == 'i' || t == 'u')) {
                 double d = ail_float_val(arg);
                 if (isnan(d)) { st = ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer"); goto fail; }
@@ -1137,6 +1316,7 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
                 if (!fdigits) { st = ail_hit_limit(cx, "format_int", "out of memory"); goto fail; }
                 snprintf(fdigits, (size_t)need + 1, "%.0f", it);
             } else if (!(arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL)) {
+/*B>*/
                 if (t == 'd' || t == 'i' || t == 'u') snprintf(msg, sizeof msg, "%%%c format: a real number is required, not %s", (char)t, ail_type_name(arg.tag));
                 else snprintf(msg, sizeof msg, "%%%c format: an integer is required, not %s", (char)t, ail_type_name(arg.tag));
                 st = ail_raise_c(cx, AIL_B_TYPEERROR, msg); goto fail;
@@ -1169,7 +1349,21 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
             double d;
             if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);
             else if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) d = (double)arg.i;
+/*B<*/
+            else if (arg.tag == AIL_T_BIG) {
+                int ovf; d = ail_big_to_double(arg, &ovf);
+                if (ovf) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "int too large to convert to float"); goto fail; }
+            }
+/*B|*/
+/*B>*/
             else { snprintf(msg, sizeof msg, "must be real number, not %s", ail_type_name(arg.tag)); st = ail_raise_c(cx, AIL_B_TYPEERROR, msg); goto fail; }
+/*B<*/
+            if (!f.has_prec) { f.has_prec = 1; f.prec = 6; }
+            char *body = ail2f_float_body(fabs(d), &f, (char)t);
+            f.type = (char)t; f.has_prec = 0;
+            piece = ail2f_pad_num(cx, ail2f_signstr(signbit(d) && !isnan(d), f.sign), "", body, &f);
+            free(body);
+/*B|*/
             char bstack[512];
             size_t bsz = ail2f_body_need(&f);
             char *body = bsz <= sizeof bstack ? bstack : (char *)malloc(bsz);
@@ -1179,8 +1373,10 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
             f.type = (char)t; f.has_prec = 0;
             piece = ail2f_pad_num(cx, ail2f_signstr(signbit(d) && !isnan(d), f.sign), "", body, &f);
             if (body != bstack) free(body);
+/*B>*/
         } else if (t == 'c') {
             uint16_t ch;
+            /*B<*/if (arg.tag == AIL_T_BIG) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "%c arg not in range(0x110000)"); goto fail; }/*B|*//*B>*/
             if (arg.tag == AIL_T_INT || arg.tag == AIL_T_BOOL) {
                 if (arg.i < 0 || arg.i > 0x10FFFF) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "%c arg not in range(0x110000)"); goto fail; }
                 if (arg.i > 0xFFFF) ail_die("%c: a code point above U+FFFF in the 16-bit v2 runtime");
@@ -1199,6 +1395,10 @@ static inline ail_st ail2f_percent(ail_ctx *cx, ail_obj *out, ail_obj fmtobj, ai
             st = ail_raise_c(cx, AIL_B_VALUEERROR, msg); goto fail;
         }
         (void)start;
+/*B<*/
+        have_piece:;
+/*B|*/
+/*B>*/
         ail_str pv = ail_view_to_str(piece);
         for (int64_t k = 0; k < pv.n; k++) ail2f_put(&o, ail_chr(pv, k));
     }
@@ -1530,6 +1730,14 @@ static inline int ail2a_find(ail_ctx *cx, ail_obj obj, const char *name, ail_obj
         int64_t nid = o->attrs[i].name_id;
         if (nid >= 0 && nid < cx->intern_n && strcmp(cx->intern_tab[nid], name) == 0) { *out = o->attrs[i].val; return 1; }
     }
+    /* no instance attribute: fall through to the class chain, most derived first, like `obj.name` */
+    for (ail_obj k = o->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *c = (ail_classobj *)k.o;
+        for (int64_t i = 0; i < c->n; i++) {
+            int64_t nid = c->attrs[i].name_id;
+            if (nid >= 0 && nid < cx->intern_n && strcmp(cx->intern_tab[nid], name) == 0) { *out = c->attrs[i].val; return 1; }
+        }
+    }
     return 0;
 }
 static inline ail_st ail2a_need_inst(ail_ctx *cx, ail_obj obj, const char *fn) {
@@ -1699,6 +1907,11 @@ static inline ail_st ail2x_raise_builtin(ail_ctx *cx, ail_obj cls, ail_obj msg, 
     cx->exc.value = fr.slots[2];
     AIL_FRAME_LEAVE(cx, fr);
     return AIL_EXC;
+}
+/* a missing dict key: CPython's KeyError holds the key itself as its one argument, and str(e) is its repr */
+static inline ail_st ail2x_raise_key(ail_ctx *cx, ail_obj key) {
+    ail_obj msg = ail_obj_repr(cx, key);
+    return ail2x_raise_builtin(cx, cx->builtin_cls[AIL_B_KEYERROR], msg, &key, 1);
 }
 /* e.args of any exception value: what it carries, else (message,) as CPython's builtins hold it */
 static inline ail_st ail2x_args(ail_ctx *cx, ail_obj *out, ail_obj e) {
@@ -2466,7 +2679,11 @@ def bytes_prelude():
     lines = open(path, encoding='utf-8').read().split('\n')
     out = []
     for line in lines:
-        if line.startswith('#@METHODS '):
+        if line.startswith('#@BIG '):         # a line of the program with big ints only (biggate.py)
+            import biggate
+            if biggate.ON:
+                out.append(line[6:])
+        elif line.startswith('#@METHODS '):
             _, cls, wrap, raw = line.split(' ', 3)
             out.append(_methods(wrap, raw))
         elif line.startswith('#') and not out:

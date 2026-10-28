@@ -179,14 +179,14 @@ class Pre121Tests(unittest.TestCase):
 
     def check_refused(self, slug, text):
         with tempfile.TemporaryDirectory(prefix='ail-pre121-') as directory:
-            _cpython(directory, slug, text)
+            # exact ints (bigint): builds and matches CPython (stdout, exit code)
+            want, want_rc, _err = _cpython(directory, slug, text)
             for general in (True, False):
                 got, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
                                                 text, general)
-                self.assertIsNone(got, 'built and ran instead of refusing (general=%s):\n%s\n%s'
-                                  % (general, text, build_err))
-                self.assertTrue(any(message in build_err for message in REFUSALS),
-                                'general=%s\n%s' % (general, build_err))
+                self.assertIsNotNone(got, '%s (general=%s)\n%s' % (text[:2000], general, build_err))
+                self.assertEqual(got, (want, want_rc), '%s (general=%s)\n%s'
+                                 % (text[:2000], general, build_err))
 
     def test_constant_int_expressions_in_range(self):
         self.check('in_range', IN_RANGE)

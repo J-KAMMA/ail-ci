@@ -238,8 +238,14 @@ class Pre190Tests(unittest.TestCase):
         self.assertEqual(pyfunc._CONST_INT_BITS, 1 << 22)
 
     def test_oversized_maxsplit_still_refused(self):
+        # exact ints (bigint): built, and the OverflowError comes at run time as in CPython
         for slug, text in OUT_OF_RANGE:
-            self.check_refused(slug, text, 'maxsplit constant does not fit in a 64-bit signed integer')
+            with tempfile.TemporaryDirectory(prefix='ail-pre190-') as directory:
+                want, rc, err = _cpython(directory, slug, text)
+                for mode, extra in MODES:
+                    got, build_err = _build_and_run(directory, '%s_%s' % (slug, mode), text, extra)
+                    self.assertIsNotNone(got, '%s (%s)\n%s' % (text[:200], mode, build_err))
+                    self.assertEqual(got, (want, rc), '%s (%s)\n%s' % (text[:200], mode, build_err))
 
 
 if __name__ == '__main__':

@@ -38,6 +38,31 @@ def build(directory, name, text, general):
                                 '-o', exe.name], cwd=directory, capture_output=True, text=True, timeout=900, env=env)
 
 
+def cpython_last_line(directory, name, text):
+    src = Path(directory) / (name + '_cpython_full.py')
+    src.write_text(text, encoding='utf-8')
+    done = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, timeout=120,
+                          env=dict(os.environ, PYTHONUTF8='1', PYTHONWARNINGS='ignore'))
+    lines = done.stderr.decode('utf-8', 'replace').strip().splitlines()
+    return done.stdout.replace(b'\r\n', b'\n'), done.returncode, (lines[-1] if lines else '')
+
+
+def check_exact(test, name, text):
+    """Exact ints: a value beyond int64 builds on both builds and matches CPython's stdout, exit code
+    and last stderr line (the int64-era tests refused these programs by name)."""
+    with tempfile.TemporaryDirectory(prefix='ail-pre358-') as directory:
+        want = cpython_last_line(directory, name, text)
+        for general in (True, False):
+            exe, built = build(directory, name, text, general)
+            test.assertEqual(built.returncode, 0, (name, general, (built.stdout + built.stderr)[-1200:]))
+            got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+            err = got.stderr.decode('utf-8', 'replace')
+            test.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0], (name, general, err[-800:]))
+            test.assertEqual(got.returncode, want[1], (name, general, err[-800:]))
+            if want[2]:
+                test.assertIn(want[2], err, (name, general))
+
+
 def check_refused(test, name, text, needle):
     with tempfile.TemporaryDirectory(prefix='ail-pre358-') as directory:
         for general in (True, False):
@@ -181,10 +206,10 @@ class Pre358Tests(unittest.TestCase):
     def test_static_dict_get_out_of_int64_is_refused(self):
         for slug, text in REFUSED.items():
             with self.subTest(case=slug):
-                check_refused(self, slug, text, 'int64 constant expression out of range')
+                check_exact(self, slug, text)
         for slug, text in FLOAT.items():
             with self.subTest(case=slug):
-                check_refused(self, slug, text, 'int() of a float outside int64')
+                check_exact(self, slug, text)
 
     def test_in_range_mutated_and_dynamic_routes_match_cpython(self):
         for slug, text in MATCH.items():

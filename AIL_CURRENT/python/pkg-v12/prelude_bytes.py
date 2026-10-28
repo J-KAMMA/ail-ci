@@ -500,6 +500,8 @@ def _ail_b_float(s, text):
 def _ail_b_idx(n, i, what):
     if not isinstance(i, int):
         raise TypeError(what + " indices must be integers or slices, not " + type(i).__name__)
+#@BIG     if i > 9223372036854775807 or i < -9223372036854775807 - 1:
+#@BIG         raise IndexError("cannot fit 'int' into an index-sized integer")
     if i < 0:
         i = i + n
     if i < 0 or i >= n:

@@ -36,6 +36,7 @@ from .lower_text import TextLowering, NotS0
 from .emit_text import allocates_bytes
 
 BYTES = I.T('bytes')
+TINT = I.TINT
 BYTEARRAY = I.T('obj', I.T('bytearray'))
 LIST_I64 = I.T('obj', I.T('list', I.I64))
 LIST_F64 = I.T('obj', I.T('list', I.F64))
@@ -55,9 +56,21 @@ def is_slist(t):
     return t == LIST_STR
 
 
+class _IRValue(ast.expr):
+    """An already lowered value standing where an expression node is expected (the right-hand sides of a
+    tuple assignment are evaluated before any target is written)."""
+    _fields = ()
+
+    def __init__(self, value, origin):
+        super().__init__()
+        self.irv = value
+        ast.copy_location(self, origin)
+
+
 class _Builder(object):
     def __init__(self):
         self.region = None
+        self.defs = {}
         self.where = None             # --debug: (file, line) of the statement being lowered
 
     def emit(self, op, operands=(), types=(), attrs=None, regions=()):
@@ -65,6 +78,8 @@ class _Builder(object):
         if self.where:
             I.SRC[id(ins)] = (ins, self.where)
         self.region.instrs.append(ins)
+        for value in ins.results:
+            self.defs[value] = ins
         return ins
 
     def value(self, op, operands, t, attrs=None, regions=()):
@@ -98,6 +113,7 @@ class Lowering(TextLowering):
         self.link_units = link_units
         self.summaries = summaries or {}
         self.handler_depth = 0        # enclosing except handlers (a bare `raise` needs one)
+        self.handler_names = []       # the name each enclosing handler binds (None for none), innermost last
         self.loop_depth = 0           # enclosing loops
         self.finally_loops = []       # loop_depth at the entry of each enclosing finally body
         self.alloc_end = 0            # leading local.alloc instructions of the body
@@ -170,6 +186,8 @@ class Lowering(TextLowering):
         except NotS0:
             want = None
         have = I.I64 if value.type == I.I1 else value.type
+        if have == TINT and kind == self.P.INT:
+            return
         if want != have:
             raise NotS0('type disagreement at line %s: legacy %r, IR %s'
                         % (getattr(node, 'lineno', '?'), kind, value.type))
@@ -191,9 +209,20 @@ class Lowering(TextLowering):
     def coerce(self, v, t):
         if v.type == t:
             return v
-        if v.type == I.I1 and t in (I.I64, I.F64):
+        if v.type == I.I1 and t in (I.I64, I.F64, TINT):
             v = self.b.value('zext', [v], I.I64)
             return self.coerce(v, t)
+        if v.type == TINT and t == I.I64:
+            _ins = self.b.defs.get(v)
+            if _ins is not None and _ins.op in ('tint.mod_i64', 'tint.mod_pos_i64'):
+                return self.b.value(_ins.op + '_i64', list(_ins.operands), I.I64)
+            return self.b.value('tint.i64', [v], I.I64)
+        if v.type == I.I64 and t == TINT:
+            return self.b.value('tint.from', [v], TINT)
+        if v.type == I.I1 and t == TINT:
+            return self.b.value('tint.from', [self.coerce(v, I.I64)], TINT)
+        if v.type == TINT and t == I.F64:
+            return self.b.value('tint.f64', [v], I.F64)
         if v.type == I.I64 and t == I.F64:
             return self.b.value('sitofp', [v], I.F64)
         raise NotS0('no implicit conversion from %s to %s' % (v.type, t))
@@ -230,11 +259,161 @@ class Lowering(TextLowering):
         if getattr(ctx, 'builders', None):
             raise NotS0('builder locals')
         ret_kind = ctx.ret
+        # B2b: the tagged-small-int view of this function.  A parameter or result the local proof cannot
+        # bound is an `ail_tint`; the entry keeps its plain int64 result (converted at each return).
+        _tint_on = os.environ.get('AIL_SURFACE') == 'python' and not getattr(P, 'TINT_DISABLED', False)
+        self.tint_on = _tint_on
+        self.tint_sig = getattr(P, 'TINT_SIGS', {}).get(fn.name, ((), 0)) if _tint_on else ((), 0)
+        if self.cname == 'run':
+            self.tint_sig = ((), 0)      # the C harness prints run()'s result as an int64
+        self.tint_params = set(n for (n, _), t in zip(ctx.params, self.tint_sig[0]) if t)
+        self.tint_result = bool(self.tint_sig[1])
+        try:
+            import bigcap as _bigcap
+            _d = _bigcap._Defined(set(getattr(ctx, 'funcs', {})) | set(getattr(ctx, 'classes', {})))
+            _d.classes = frozenset(getattr(ctx, 'classes', {}))
+            _d.module_ints = _bigcap.module_int_consts(getattr(ctx, 'modconsts', None) or {})
+            _proven = _bigcap.proven_int_names(fn, _d)
+            _bounds = _bigcap.local_int_bounds(fn, _d)
+            self.nonneg = {n for n, v in _bounds.items()
+                           if v is not None and v[0] in _bigcap._LP_INTS
+                           and v[1] is not None and v[1] >= 0}
+            self.nonneg |= _bigcap.range_nonneg_names(fn)
+        except Exception:
+            _proven, _bounds = set(), {}
+            self.nonneg = set()
+        self.tint_names = {n for n, k in getattr(ctx, 'types', {}).items()
+                           if k == P.INT and n not in _proven
+                           and n not in getattr(ctx, 'nlist', ())
+                           and n not in self.tracked
+                           and not getattr(ctx, 'numeric_tokens', None)}
+        if not _tint_on:
+            self.tint_names = set()
+        self.tint_names |= self.tint_params
+        # An unproven int parameter keeps the int64 C ABI and gets a tint place of its own, so every
+        # read inside the function is the tagged value (no boundary conversion at each use).
+        self.tint_names |= {n for n, k in ctx.params if k == P.INT and n not in _proven}
+        # An int counter is an int64: every value it holds starts at a small constant or a len() and only ever moves by a
+        # small constant step (`i += 1`, `j = i`, `i = j + 1`), so reaching 2**63 would take some 9e18 steps, far beyond
+        # any run. The arithmetic stays overflow-checked (ck_add), so a value that did not fit still stops loudly.
+        # (A name stored in any other way -- a tuple target, a loop target, an expression, a parameter -- is no counter.)
+        _stores = {}
+        _seen = set()
+        for _n in ast.walk(fn):
+            if isinstance(_n, ast.AugAssign) and isinstance(_n.target, ast.Name):
+                _seen.add(id(_n.target))
+                if isinstance(_n.op, (ast.Add, ast.Sub)):
+                    _stores.setdefault(_n.target.id, []).append(('aug', _n.value, _n.op))
+                else:
+                    _stores.setdefault(_n.target.id, []).append(('bad', _n.value, _n.op))
+            elif isinstance(_n, ast.Assign):
+                for _t in _n.targets:
+                    if isinstance(_t, ast.Name):
+                        _seen.add(id(_t))
+                        _stores.setdefault(_t.id, []).append(('set', _n.value, None))
+            elif isinstance(_n, ast.AnnAssign) and isinstance(_n.target, ast.Name) and _n.value is not None:
+                _seen.add(id(_n.target))
+                _stores.setdefault(_n.target.id, []).append(('set', _n.value, None))
+        for _n in ast.walk(fn):
+            if isinstance(_n, ast.Name) and isinstance(_n.ctx, (ast.Store, ast.Del)) and id(_n) not in _seen:
+                _stores.setdefault(_n.id, []).append(('bad', None, None))
+        _param_names = {n for n, _ in ctx.params}
+        _counters = {n for n, ss in _stores.items() if ss and n not in self.tint_params and n not in _param_names}
+
+        def _small(_v):
+            try:
+                _c = self.P._int_const(_v)
+            except Exception:
+                return None
+            return _c if isinstance(_c, int) and not isinstance(_c, bool) else None
+
+        def _counter_store(_kind, _val, _op):
+            if _kind == 'bad':
+                return False
+            if _kind == 'aug':
+                _c = _small(_val)
+                return _c is not None and abs(_c) <= 65536
+            _c = _small(_val)
+            if _c is not None:
+                return abs(_c) <= (1 << 40)
+            if isinstance(_val, ast.Name):
+                return _val.id in _counters
+            if isinstance(_val, ast.Call) and isinstance(_val.func, ast.Name) and _val.func.id == 'len' \
+                    and len(_val.args) == 1 and 'len' not in getattr(ctx, 'funcs', {}):
+                return True
+            if isinstance(_val, ast.BinOp) and isinstance(_val.op, (ast.Add, ast.Sub)):
+                for _a, _b in ((_val.left, _val.right), (_val.right, _val.left)):
+                    _c = _small(_b)
+                    if isinstance(_a, ast.Name) and _a.id in _counters and _c is not None and abs(_c) <= 65536 \
+                            and (isinstance(_val.op, ast.Add) or _b is _val.right):
+                        return True
+            return False
+        _changed = True
+        while _changed:
+            _changed = False
+            for _name in sorted(_counters):
+                if not all(_counter_store(*_st) for _st in _stores[_name]):
+                    _counters.discard(_name)
+                    _changed = True
+        for _name in _counters:
+            self.tint_names.discard(_name)
+        # A `for x in range(...)` target stays an int64 only when every bound is int64-shaped. A
+        # stop beyond int64 cannot be saturated: range(INT64_MAX-1, 2**70) still yields INT64_MAX,
+        # so an unproven start, stop or step makes the whole loop tagged (tint) instead.
+        def _may_tint(_e):
+            if _e is None or isinstance(_e, ast.Constant):
+                return False
+            if isinstance(_e, ast.UnaryOp):
+                return _may_tint(_e.operand)
+            if isinstance(_e, ast.BinOp):
+                return _may_tint(_e.left) or _may_tint(_e.right)
+            if isinstance(_e, ast.Name):
+                if _e.id in self.tint_names:
+                    return True
+                if getattr(self.P, 'GLOBAL_INT_TINT', False):
+                    _mods = getattr(getattr(self.ctx, 'modconsts', None), 'vars', {})
+                    return _e.id in _mods and _mods[_e.id][0] == self.P.INT
+                return False
+            if isinstance(_e, ast.Call):
+                if isinstance(_e.func, ast.Name):
+                    if _e.func.id in ('int', '_ail_int2') and _e.args:
+                        try:
+                            if self.P._etype(_e.args[0], self.ctx) in (self.P.STR, self.P.BYTES):
+                                return True
+                        except Exception:
+                            pass
+                    _sig = getattr(self.P, 'TINT_SIGS', {}).get(_e.func.id)
+                    if _sig is not None:
+                        return bool(_sig[1])
+                    return False
+                return False
+            return True
+        _tint_targets, _int_targets = set(), set()
+        for _n in ast.walk(fn):
+            if isinstance(_n, ast.For) and isinstance(_n.target, ast.Name) \
+                    and isinstance(_n.iter, ast.Call) and isinstance(_n.iter.func, ast.Name) \
+                    and _n.iter.func.id == 'range' and _n.iter.func.id not in getattr(ctx, 'funcs', {}):
+                _args = _n.iter.args
+                _lo = _args[0] if len(_args) >= 2 else None
+                _hi = _args[0] if len(_args) == 1 else _args[1] if len(_args) >= 2 else None
+                _step = _args[2] if len(_args) == 3 else None
+                if _may_tint(_lo) or _may_tint(_hi) or _may_tint(_step):
+                    _tint_targets.add(_n.target.id)
+                else:
+                    _int_targets.add(_n.target.id)
+        # (one name can be the target of several loops: it is tagged when any of them needs it)
+        self.tint_names -= (_int_targets - _tint_targets)
+        self.tint_names |= _tint_targets
         if ret_kind == 'bytearray':
             results = [BYTEARRAY]       # the owner's reference is handed to the caller (retained at the return)
+        elif ret_kind == P.NORET:
+            results = []
+        elif ret_kind == P.INT and self.tint_result:
+            results = [TINT]
         else:
-            results = [] if ret_kind == P.NORET else [self.kind_type(ret_kind, 'the result', owned=True)]
-        param_types = [self.kind_type(k, 'parameter %r' % n, views=True) for n, k in ctx.params]
+            results = [self.kind_type(ret_kind, 'the result', owned=True)]
+        param_types = [TINT if n in self.tint_params else self.kind_type(k, 'parameter %r' % n, views=True)
+                       for n, k in ctx.params]
         param_names = [n for n, _ in ctx.params]
         if param_names != [p.arg for p in a.args]:
             raise NotS0('parameter list differs from the source')
@@ -281,6 +460,7 @@ class Lowering(TextLowering):
         self.b.region = f.body
         self.split_struct_locals(param_names)
         assigned = self.assigned_names()
+        assigned |= {n for n in param_names if n in self.tint_names}
         for name, value in zip(param_names, params):
             if name not in assigned:
                 self.params[name] = value
@@ -304,7 +484,7 @@ class Lowering(TextLowering):
                 continue
             if name in param_names:
                 t = value_type = params[param_names.index(name)].type
-                if not t.is_scalar and t not in (I.STRV, BYTES):
+                if not t.is_scalar and t not in (I.STRV, BYTES, TINT):
                     raise NotS0('parameter %r of type %s is reassigned' % (name, t))
             else:
                 kind = ctx.types.get(name)
@@ -312,7 +492,10 @@ class Lowering(TextLowering):
                     self.check_list_local(name)
                 elif kind == P.SLIST:
                     self.check_slist_local(name)
-                t = value_type = self.kind_type(kind, 'local %r' % name, owned=True, local=True)
+                if kind == P.INT and name in self.tint_names:
+                    t = value_type = TINT
+                else:
+                    t = value_type = self.kind_type(kind, 'local %r' % name, owned=True, local=True)
             if name in getattr(ctx, 'optional', ()) or (name in getattr(ctx, 'stdin_unbound', ())
                                                          and not self.stdin_loop_only(name)):
                 raise NotS0('local %r is optional or special' % name)
@@ -343,7 +526,7 @@ class Lowering(TextLowering):
             f.attrs['frame'] = True
             if any(i.op == 'local.alloc' and is_slist(i.result.type.pointee) for i in ops) \
                     and self.try_in_loop(f.body, False):
-                # priced on tally-ail-4 `run` (an interpreter loop with a try in each iteration): the
+                # priced on tally_lang-ail-4 `run` (an interpreter loop with a try in each iteration): the
                 # outlined try body and the frame in memory cost +20% of the function against the legacy
                 # inline setjmp; the function stays legacy until the IR's try is cheaper (design section 17)
                 raise NotS0('a try inside a loop in a function with a list of str (the outlined try costs more '
@@ -434,6 +617,8 @@ class Lowering(TextLowering):
                 for t in targets:
                     if isinstance(t, (ast.Attribute, ast.Subscript)) and not isinstance(node, ast.For):
                         continue          # a field or element store (checked where it is lowered)
+                    if isinstance(t, (ast.Tuple, ast.List)) and isinstance(node, ast.Assign):
+                        continue          # tuple_assign checks every element where it is lowered
                     if not isinstance(t, ast.Name):
                         raise NotS0('assignment to %s' % type(t).__name__)
         modconsts = getattr(self.ctx, 'modconsts', {})
@@ -454,6 +639,10 @@ class Lowering(TextLowering):
             t = self.function.results[0]
             if is_list(t) or t == BYTEARRAY or t in (I.STRV, BYTES):
                 raise NotS0('a function returning a container or text that can fall off its end')
+            if t == TINT:
+                # (the same 0 the legacy path returns; a body whose every path returns never gets here)
+                self.b.emit('return', [self.b.value('tint.from', [self.const(I.I64, 0)], TINT)])
+                return
             self.b.emit('return', [self.const(t, 0.0 if t == I.F64 else 0)])
         else:
             self.b.emit('return', [])
@@ -488,7 +677,7 @@ class Lowering(TextLowering):
         """The numeric-list locals the S3a lowering owns: flat lists of int or float, none of the
         legacy path's special representations (handles, tuples, rows, bools, str)."""
         ctx = self.ctx
-        for attr in ('nlist', 'blist', 'strlist', 'bool_lists', 'tstride', 'srowtypes', 'rowof', 'rowparam',
+        for attr in ('nlist', 'blist', 'strlist', 'tstride', 'srowtypes', 'rowof', 'rowparam',
                      'trowsf', 'handles', 'dhandles', 'hstride', 'borrowed_aliases'):
             if name in (getattr(ctx, attr, None) or ()):
                 raise NotS0('list %r is a %s list' % (name, attr))
@@ -1020,18 +1209,18 @@ class Lowering(TextLowering):
             if not node.elts:
                 self.b.emit('list.reset', [ref_fn()])
                 return
-            vals = [self.field_value(self.expr(e), elem) for e in node.elts]
+            vals = [self.field_value(self.expr(e), elem, e) for e in node.elts]
             self.b.emit('list.lit', [ref_fn()] + vals)
             return
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
             for lst, cnt, first in ((node.left, node.right, True), (node.right, node.left, False)):
                 if isinstance(lst, ast.List) and len(lst.elts) == 1 and not isinstance(lst.elts[0], ast.Starred):
                     if first:
-                        v = self.field_value(self.expr(lst.elts[0]), elem)
+                        v = self.field_value(self.expr(lst.elts[0]), elem, lst.elts[0])
                         n = self.as_int(self.expr(cnt))
                     else:
                         n = self.as_int(self.expr(cnt))
-                        v = self.field_value(self.expr(lst.elts[0]), elem)
+                        v = self.field_value(self.expr(lst.elts[0]), elem, lst.elts[0])
                     self.b.emit('list.repeat', [ref_fn(), v, n])
                     return
             raise NotS0('a list product that is not [v] * n')
@@ -1067,20 +1256,27 @@ class Lowering(TextLowering):
         over_range = isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == 'range' \
             and not it.keywords and 1 <= len(it.args) <= 3 and self.is_builtin('range')
         over_list = isinstance(it, ast.Name) and (self.is_list_name(it.id) or self.is_slist_name(it.id))
-        if g.is_async or not isinstance(g.target, ast.Name) or not (over_range or over_list):
+        # a read-only numeric list parameter (a span) is read the same way, element by element
+        over_span = isinstance(it, ast.Name) and it.id in self.params and self.params[it.id].type.head == 'span' \
+            and self.params[it.id].type.args[0] in (I.I64, I.F64) and it.id not in self.places
+        if g.is_async or not isinstance(g.target, ast.Name) or not (over_range or over_list or over_span):
             raise NotS0('a comprehension that is not over range() or an owned list')
         name = g.target.id
         # (a comprehension has a scope of its own: an outer variable of the same name is another variable, as in
         # Python 3 and in the legacy build -- as long as the legacy types agree)
         if over_range:
             var_type, var_kind = I.I64, P.INT
+        elif over_span:
+            var_type = self.params[it.id].type.args[0]
+            var_kind = P.FLT if var_type == I.F64 else P.INT
         else:
             src_t = self.places[it.id].type.pointee
             var_type = src_t.args[0].args[0]
             var_kind = P.STR if var_type == I.STRV else P.FLT if var_type == I.F64 else P.INT
         outer = self.places.get(name)
         if name in self.params or name in self.scope_vars \
-                or (outer is not None and outer.type.pointee != var_type) \
+                or (outer is not None and outer.type.pointee != var_type
+                    and not (outer.type.pointee == TINT and var_type == I.I64)) \
                 or (outer is None and self.mentions_outside(name, node)) \
                 or name in self.tracked:
             raise NotS0('a comprehension variable that is also used outside it')
@@ -1098,7 +1294,8 @@ class Lowering(TextLowering):
             src = None
         else:
             src = self.container(it)
-            lo, hi, step = self.const(I.I64, 0), self.b.value('list.len', [src], I.I64), self.const(I.I64, 1)
+            lo, hi, step = (self.const(I.I64, 0), self.b.value('span.len' if over_span else 'list.len', [src], I.I64),
+                            self.const(I.I64, 1))
             nargs = 1
         ref = self.list_ref(tmp)
         if nargs < 3 and not g.ifs:
@@ -1109,7 +1306,7 @@ class Lowering(TextLowering):
         body = I.Region([index])
 
         def push():
-            v = self.field_value(self.expr(node.elt), elem)
+            v = self.field_value(self.expr(node.elt), elem, node.elt)
             self.b.emit('list.push', [ref, v])
 
         def conds(k):
@@ -1128,7 +1325,8 @@ class Lowering(TextLowering):
             if over_range:
                 self.scope_vars[name] = index
             else:
-                self.scope_vars[name] = self.b.value('list.get', [src, index], var_type, {'mode': 'nck', 'iter': True})
+                self.scope_vars[name] = self.b.value('span.get' if over_span else 'list.get', [src, index], var_type,
+                                                     {'mode': 'nck', 'iter': True})
             had = self.ctx.types.get(name)
             self.ctx.types[name] = var_kind
             try:
@@ -1206,10 +1404,13 @@ class Lowering(TextLowering):
             self.b.region = saved
 
     def global_type(self, name):
-        """The IR type of a module variable (an int or a float, as the legacy path typed it)."""
+        """The IR type of a module variable: `ail_tint` for an int when the whole program keeps
+        module ints in tint storage, otherwise the legacy int64 static (or a float)."""
         kind = self.ctx.modconsts.vars[name][0]
         if kind not in (self.P.INT, self.P.FLT):
             raise NotS0('the module variable %r is a %s' % (name, kind))
+        if kind == self.P.INT and getattr(self.P, 'GLOBAL_INT_TINT', False):
+            return TINT
         return I.I64 if kind == self.P.INT else I.F64
 
     def store(self, name, v):
@@ -1260,6 +1461,8 @@ class Lowering(TextLowering):
                 # is emitted by the legacy lowering; the IR has no stop operation
                 raise NotS0('list.count / index / remove of a float: NaN-argument stop (C119)')
             target = s.targets[0]
+            if isinstance(target, (ast.Tuple, ast.List)) and isinstance(s.value, (ast.Tuple, ast.List)):
+                return self.tuple_assign(target, s.value)
             if isinstance(target, (ast.Attribute, ast.Subscript)):
                 return self.store_target(target, s.value)
             if not isinstance(target, ast.Name):
@@ -1394,10 +1597,12 @@ class Lowering(TextLowering):
         if self.finally_loops and self.loop_depth <= self.finally_loops[-1]:
             raise NotS0('break/continue out of a finally body')
 
-    def exception_code(self, name):
+    def exception_code(self, name, handler=False):
         code = self.P.EXC_NAMES.get(name)
         if code is None or not self.is_builtin(name):
             raise NotS0('exception %r' % name)
+        if code >= 28 and handler:
+            return code            # `except Exception` and `except UserClass` take the codes derived from them
         if code >= 28:
             raise NotS0('the exception class %r (Exception and the user classes are caught by the legacy path)' % name)
         return code
@@ -1432,6 +1637,11 @@ class Lowering(TextLowering):
                     raise NotS0('a message that is not UTF-8')
                 self.b.emit('raise', [], [], {'code': code, 'name': e.func.id, 'form': 'msg',
                                               'msg': e.args[0].value})
+                return
+            if len(e.args) == 1 and not e.keywords and self.text_kind(e.args[0]) == 'str' \
+                    and e.func.id != 'KeyError':
+                self.b.emit('raise', [self.expr(e.args[0])], [],
+                            {'code': code, 'name': e.func.id, 'form': 'val'})
                 return
             raise NotS0('an exception message that is not a str literal')
         raise NotS0('raise of %s' % type(e).__name__)
@@ -1480,13 +1690,25 @@ class Lowering(TextLowering):
         codes = []
         for h in handlers:
             if h.name and any(isinstance(n, ast.Name) and n.id == h.name for st in h.body for n in ast.walk(st)):
-                raise NotS0('a named exception handler that reads the exception (stage S4e)')
+                # only the text forms exctext.py rewrites str(e) & co to are read (`e.__ail_text__`, ...)
+                allowed = {id(a.value) for st in h.body for a in ast.walk(st)
+                           if isinstance(a, ast.Attribute) and isinstance(a.value, ast.Name) and a.value.id == h.name
+                           and a.attr in self.EXC_FIELDS}
+                if not all(id(n) in allowed for st in h.body for n in ast.walk(st)
+                           if isinstance(n, ast.Name) and n.id == h.name):
+                    raise NotS0('a named exception handler that reads the exception (stage S4e)')
             types = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
             hc = []
             for t in types:
                 if not isinstance(t, ast.Name):
                     raise NotS0('except %s' % type(t).__name__)
-                hc.append(self.exception_code(t.id))
+                # a handler takes the classes derived from its own: the builtin family (OSError and its subclasses,
+                # URLError/HTTPError of the url prelude, ...) and the user classes derived from it
+                hc.extend(c for c in P._handler_codes(self.exception_code(t.id, handler=True)) if c not in hc)
+            # (the first handler that names a class takes it: a later handler's codes are the ones left)
+            hc = [c for c in hc if not any(c in earlier for earlier in codes)]
+            if not hc:
+                raise NotS0('a handler that an earlier handler of the same try always takes first')
             codes.append(hc)
         if not handlers:
             raise NotS0('a try with no handler')
@@ -1508,10 +1730,12 @@ class Lowering(TextLowering):
         for h in handlers:
             region = I.Region()
             self.handler_depth += 1
+            self.handler_names.append(h.name)
             try:
                 self.in_region(region, h.body, self._close_yield)
             finally:
                 self.handler_depth -= 1
+                self.handler_names.pop()
             regions.append(region)
         self.b.emit('try', [], [], {'kind': 'catch', 'codes': codes}, regions)
         if flag is not None:
@@ -1542,9 +1766,33 @@ class Lowering(TextLowering):
             self.finally_loops.pop()
         self.b.emit('try', [], [], {'kind': 'finally'}, [body_region, fin_region])
 
+    def range_bound(self, node):
+        """One range() bound, evaluated exactly when the int64 arithmetic could overflow.
+
+        A stop such as `INT64_MAX + 1` must reach the loop as the exact 2**63, not as an overflow
+        and not saturated back to INT64_MAX: the loop then runs tagged and still yields INT64_MAX.
+        Arithmetic the range pass proves safe keeps its int64 form (and the fast i64 loop)."""
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)) \
+                and not self.proven(node):
+            left = self.range_bound(node.left)
+            right = self.range_bound(node.right)
+            if left.type == I.F64 or right.type == I.F64:
+                value = self.binop_values(node, left, right)
+            else:
+                value = self.binop_values(node, self.coerce(left, TINT), self.coerce(right, TINT))
+            self.check_kind(node, value)
+            return value
+        return self.expr(node)
+
     def for_range(self, s):
         if s.orelse or getattr(s, 'par', None) is not None:
             raise NotS0('for ... else or a parallel for')
+        try:
+            fused = self.P.string_repeat_fusion.candidate(s, getattr(self.ctx, 'fn_node', None))
+        except Exception:
+            fused = None
+        if fused is not None:
+            raise NotS0('a loop of literal string appends that the legacy emitter fuses into one repeat')
         it = s.iter
         if isinstance(s.target, ast.Name) and isinstance(it, ast.Name) and it.id in self.params \
                 and self.params[it.id].type == BYTES:
@@ -1586,14 +1834,35 @@ class Lowering(TextLowering):
                 and isinstance(it.func, ast.Name) and it.func.id == 'range' and not it.keywords
                 and 1 <= len(it.args) <= 3 and self.is_builtin('range')):
             raise NotS0('for over something other than range(): %s' % self.src(it))
-        args = [self.as_int(self.expr(a)) for a in it.args]
-        if len(args) == 1:
-            lo, hi, step = self.const(I.I64, 0), args[0], self.const(I.I64, 1)
-        elif len(args) == 2:
-            lo, hi, step = args[0], args[1], self.const(I.I64, 1)
+        vals = [self.range_bound(a) for a in it.args]
+        if any(v.type == I.F64 for v in vals):
+            raise NotS0('a float range bound')
+        vals = [self.coerce(v, TINT) if v.type == TINT else v for v in vals]
+        if any(v.type == TINT for v in vals):
+            if len(vals) == 1:
+                lo, hi, step = self.const(I.I64, 0), vals[0], self.const(I.I64, 1)
+            elif len(vals) == 2:
+                lo, hi, step = vals[0], vals[1], self.const(I.I64, 1)
+            else:
+                lo, hi, step = vals
+            lo = self.coerce(lo, TINT)
+            hi = self.coerce(hi, TINT)
+            step = self.coerce(step, TINT)
+            itype = TINT
         else:
-            lo, hi, step = args
-        index = I.Value(I.I64, hint=s.target.id)
+            args = [self.as_int(v) for v in vals]
+            if len(args) == 1:
+                lo, hi, step = self.const(I.I64, 0), args[0], self.const(I.I64, 1)
+            elif len(args) == 2:
+                lo, hi, step = args[0], args[1], self.const(I.I64, 1)
+            else:
+                lo, hi, step = args
+            itype = I.I64
+        if itype == TINT:
+            _place = self.places.get(s.target.id)
+            if _place is None or _place.type.pointee != TINT:
+                raise NotS0('a range loop with a tagged start or step needs a tagged index (%s: place %s kind %r tint %s)' % (s.target.id, _place and _place.type, self.ctx.types.get(s.target.id), s.target.id in self.tint_names))
+        index = I.Value(itype, hint=s.target.id)
         body = I.Region([index])
 
         def fill():
@@ -1606,7 +1875,7 @@ class Lowering(TextLowering):
             self.in_region(body, fill=fill)
         finally:
             self.loop_depth -= 1
-        self.b.emit('for.range', [lo, hi, step], [], {'args': len(args)}, [body])
+        self.b.emit('for.range', [lo, hi, step], [], {'args': len(it.args)}, [body])
 
     def list_iterable(self, it, s):
         """(kind, container value) of a `for x in <name>` over a numeric list the loop cannot
@@ -1715,6 +1984,8 @@ class Lowering(TextLowering):
         if isinstance(node, ast.BoolOp):
             return self.boolop(node)            # a test, not a value: the plain bool
         v = self.expr(node)
+        if v.type == TINT:
+            return self.b.value('tint.nonzero', [v], I.I1)
         if not v.type.is_scalar:
             raise NotS0('truth value of %s' % v.type)
         if v.type == I.I1:
@@ -1723,6 +1994,8 @@ class Lowering(TextLowering):
         return self.b.value('cmp.ne', [v, zero], I.I1)
 
     def expr(self, node):
+        if isinstance(node, _IRValue):
+            return node.irv
         v = self._expr(node)
         self.check_kind(node, v)
         return v
@@ -1830,6 +2103,12 @@ class Lowering(TextLowering):
                 raise NotS0('a struct assigned from %s' % type(node).__name__)
             self.b.emit('obj.copyref', [place, src])
             return
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in self.ctx.funcs \
+                and node.func.id not in self.places and node.func.id not in self.params \
+                and self.ctx.funcs[node.func.id][1] == ('obj', cls):
+            # `q = make()`: the callee hands back a new reference to an object of the class; the place adopts it
+            self.user_call(node.func.id, node, False, obj_dst=place)
+            return
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == cls
                 and self.is_builtin(cls) is False and cls in getattr(self.ctx, 'classes', {})):
             raise NotS0('a struct built from %s' % type(node).__name__)
@@ -1922,6 +2201,30 @@ class Lowering(TextLowering):
     def is_list(self, v):
         return v.type.head == 'obj' and v.type.args[0].head == 'list'
 
+    def tuple_assign(self, target, value):
+        """`a, b = b, a + b` / `v[i], v[j] = v[j], v[i]`: every right-hand side is evaluated first, then the targets
+        are written left to right (Python's order).  Numeric values only (int, float, bool, tagged int); a
+        target is a plain scalar local, a numeric list element, a dict item or a scalar field."""
+        if len(target.elts) != len(value.elts) or any(isinstance(e, ast.Starred) for e in target.elts + value.elts):
+            raise NotS0('tuple assignment shape')
+        for t in target.elts:
+            if isinstance(t, ast.Name):
+                n = t.id
+                if self.is_dict_name(n) or n in self.recs or n in self.rec_lists or self.is_list_name(n) \
+                        or self.is_slist_name(n) or self.is_ba_name(n) or self.is_obj_name(n):
+                    raise NotS0('tuple assignment to the container %r' % n)
+            elif not isinstance(t, (ast.Subscript, ast.Attribute)):
+                raise NotS0('tuple assignment target %s' % type(t).__name__)
+        values = [self.expr(e) for e in value.elts]
+        for v in values:
+            if v.type not in (I.I64, I.F64, I.I1, TINT):
+                raise NotS0('tuple assignment of a %s value' % (v.type,))
+        for t, v, e in zip(target.elts, values, value.elts):
+            if isinstance(t, ast.Name):
+                self.store(t.id, v)
+            else:
+                self.store_target(t, _IRValue(v, e))
+
     def store_target(self, target, value_node):
         """`p.f = v` (scalar field) or `c[i] = v` (numeric list element). Python evaluates the
         right side first, then the target's parts."""
@@ -1933,6 +2236,8 @@ class Lowering(TextLowering):
             if isinstance(target.slice, ast.Slice):
                 raise NotS0('slice assignment')
             key = self.dict_key(target.slice)
+            if v.type == TINT and self.module_int_value(value_node):
+                raise NotS0('a module int stored in an int64 container')
             self.b.emit('dict.put', [self.places[target.value.id], key, self.as_int(v)])
             return
         if isinstance(target, ast.Attribute):
@@ -1940,7 +2245,7 @@ class Lowering(TextLowering):
             if kind not in (self.P.INT, self.P.FLT):
                 raise NotS0('store to field %s.%s of kind %r' % (cls, target.attr, kind))
             t = I.I64 if kind == self.P.INT else I.F64
-            self.b.emit('field.set', [obj, self.field_value(v, t)], [], {'cls': cls, 'name': target.attr})
+            self.b.emit('field.set', [obj, self.field_value(v, t, value_node)], [], {'cls': cls, 'name': target.attr})
             return
         if isinstance(target.slice, ast.Slice):
             raise NotS0('slice assignment')
@@ -1948,17 +2253,34 @@ class Lowering(TextLowering):
         self.guard_field_ba(base, target.slice)
         if base.type == BYTEARRAY:
             index = self.as_int(self.expr(target.slice))
-            self.b.emit('ba.set', [base, index, self.field_value(v, I.I64)], [], {'mode': 'ck'})
+            self.b.emit('ba.set', [base, index, self.field_value(v, I.I64, value_node)], [], {'mode': 'ck'})
             return
         if not self.is_list(base):
             raise NotS0('element store into %s' % base.type)
         index = self.as_int(self.expr(target.slice))
         elem = base.type.args[0].args[0]
-        self.b.emit('list.set', [base, index, self.field_value(v, elem)], [], {'mode': self.index_mode(target)})
+        self.b.emit('list.set', [base, index, self.field_value(v, elem, value_node)], [], {'mode': self.index_mode(target)})
 
-    def field_value(self, v, t):
+    def module_int_value(self, node):
+        """Whether this expression can carry a module int (a direct read or a call that returns
+        one); such a value must not be narrowed into an int64 container."""
+        if node is None or not getattr(self.P, 'GLOBAL_INT_TINT', False):
+            return False
+        mods = getattr(getattr(self.ctx, 'modconsts', None), 'vars', {})
+        for n in ast.walk(node):
+            if isinstance(n, ast.Name) and n.id in mods and mods[n.id][0] == self.P.INT:
+                return True
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name):
+                sig = getattr(self.P, 'TINT_SIGS', {}).get(n.func.id)
+                if sig is not None and sig[1]:
+                    return True
+        return False
+
+    def field_value(self, v, t, node=None):
         if v.type == I.F64 and t != I.F64:
             raise NotS0('a float stored into an int slot')
+        if node is not None and v.type == TINT and t == I.I64 and self.module_int_value(node):
+            raise NotS0('a module int stored in an int64 container')
         return self.coerce(v, t)
 
     def aug_target(self, s):
@@ -1972,7 +2294,7 @@ class Lowering(TextLowering):
             attrs = {'cls': cls, 'name': target.attr}
             old = self.b.value('field.get', [obj], t, dict(attrs))
             new = self.apply_binop(s, old, self.expr(s.value))
-            self.b.emit('field.set', [obj, self.field_value(new, t)], [], attrs)
+            self.b.emit('field.set', [obj, self.field_value(new, t, s.value)], [], attrs)
             return
         if isinstance(target.slice, ast.Slice):
             raise NotS0('slice augmented assignment')
@@ -1981,6 +2303,8 @@ class Lowering(TextLowering):
             key = self.dict_key(target.slice)
             old = self.b.value('dict.need', [place, key], I.I64)
             new = self.apply_binop(s, old, self.expr(s.value))
+            if new.type == TINT and self.module_int_value(s.value):
+                raise NotS0('a module int stored in an int64 container')
             self.b.emit('dict.put', [place, key, self.as_int(new)])
             return
         base = self.container(target.value)
@@ -1991,7 +2315,7 @@ class Lowering(TextLowering):
         mode = self.index_mode(target)
         old = self.b.value('list.get', [base, index], elem, {'mode': mode})
         new = self.apply_binop(s, old, self.expr(s.value))
-        self.b.emit('list.set', [base, index, self.field_value(new, elem)], [], {'mode': 'nck'})
+        self.b.emit('list.set', [base, index, self.field_value(new, elem, s.value)], [], {'mode': 'nck'})
 
     def apply_binop(self, s, left, right):
         """`left <op> right` for an augmented assignment, typed as the legacy path types the
@@ -2112,7 +2436,7 @@ class Lowering(TextLowering):
         if name == 'append' and len(node.args) == 1:
             if not statement:
                 raise NotS0('append() used as a value')
-            v = self.field_value(self.expr(node.args[0]), elem)
+            v = self.field_value(self.expr(node.args[0]), elem, node.args[0])
             self.b.emit('list.push', [base, v])
             return None
         if name == 'pop' and not node.args:
@@ -2136,6 +2460,8 @@ class Lowering(TextLowering):
             v = self.expr(operand)
             if v.type == I.F64:
                 return self.b.value('fneg', [v], I.F64)
+            if v.type == TINT:
+                return self.b.value('tint.neg', [v], TINT)
             v = self.coerce(v, I.I64)
             return self.b.value('neg', [v], I.I64, {'mode': 'ck' if self.strict else 'nsw'})
         if isinstance(op, ast.UAdd):
@@ -2144,9 +2470,27 @@ class Lowering(TextLowering):
             b = self.truthy(node.operand)
             return self.b.value('cmp.eq', [b, self.const(I.I1, False)], I.I1)
         if isinstance(op, ast.Invert):
-            v = self.as_int(self.expr(node.operand))
+            v = self.expr(node.operand)
+            if v.type == TINT:
+                return self.b.value('tint.inv', [v], TINT)
+            v = self.as_int(v)
             return self.b.value('inv', [v], I.I64)
         raise NotS0('unary %s' % type(op).__name__)
+
+    def nonneg_expr(self, node):
+        if isinstance(node, ast.Constant):
+            return type(node.value) is int and node.value >= 0
+        if isinstance(node, ast.Name):
+            return node.id in getattr(self, 'nonneg', ())
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.UAdd):
+            return self.nonneg_expr(node.operand)
+        if isinstance(node, ast.BinOp):
+            if isinstance(node.op, (ast.Add, ast.Mult)):
+                return self.nonneg_expr(node.left) and self.nonneg_expr(node.right)
+            if isinstance(node.op, (ast.Mod, ast.FloorDiv)):
+                _d = self.P._int_const(node.right)
+                return _d is not None and _d > 0 and self.nonneg_expr(node.left)
+        return False
 
     def binop(self, node):
         if isinstance(node.op, ast.Pow):
@@ -2155,14 +2499,56 @@ class Lowering(TextLowering):
 
     def binop_values(self, node, left, right):
         op = node.op
+        tint = (left.type == TINT or right.type == TINT) and I.F64 not in (left.type, right.type)
+        if tint and isinstance(op, (ast.FloorDiv, ast.Mod)):
+            try:
+                _d = self.P._int_const(node.right)
+            except Exception:
+                _d = None
+            if isinstance(_d, int) and not isinstance(_d, bool) and _d > 0 \
+                    and _d & (_d - 1) == 0 and _d.bit_length() <= 63:
+                _k = _d.bit_length() - 1
+                _l = self.coerce(left, TINT)
+                if isinstance(op, ast.Mod) and _d == 2:
+                    return self.rt('tint_mod2', [_l])
+                if isinstance(op, ast.FloorDiv):
+                    _kv = self.coerce(self.const(I.I64, _k), TINT)
+                    return self.b.value('tint.shr', [_l, _kv], TINT)
+            if isinstance(_d, int) and not isinstance(_d, bool) and _d != 0 \
+                    and -(1 << 63) <= _d < (1 << 63):
+                _l = self.coerce(left, TINT)
+                if isinstance(op, ast.Mod) and _d > 0 and self.nonneg_expr(node.left):
+                    return self.b.value('tint.mod_pos_i64', [_l, self.const(I.I64, _d)], TINT)
+                _op = 'tint.floordiv_i64' if isinstance(op, ast.FloorDiv) else 'tint.mod_i64'
+                return self.b.value(_op, [_l, self.const(I.I64, _d)], TINT)
+        if tint and isinstance(op, (ast.Add, ast.Sub, ast.Mult, ast.FloorDiv, ast.Mod,
+                                    ast.LShift, ast.RShift)):
+            name = {ast.Add: 'add', ast.Sub: 'sub', ast.Mult: 'mul', ast.FloorDiv: 'floordiv',
+                    ast.Mod: 'floormod', ast.LShift: 'shl', ast.RShift: 'shr'}[type(op)]
+            if isinstance(op, (ast.Add, ast.Sub, ast.Mult)) and left.type != right.type:
+                if left.type == TINT and right.type == I.I64:
+                    return self.b.value('tint.' + name + '_i64', [left, right], TINT)
+                if left.type == I.I64 and right.type == TINT and isinstance(op, (ast.Add, ast.Mult)):
+                    return self.b.value('tint.' + name + '_i64', [right, left], TINT)
+            return self.b.value('tint.' + name, [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
+        if tint and isinstance(op, (ast.BitAnd, ast.BitOr, ast.BitXor)):
+            name = {ast.BitAnd: 'and', ast.BitOr: 'or', ast.BitXor: 'xor'}[type(op)]
+            return self.b.value('tint.' + name, [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
         floating = I.F64 in (left.type, right.type)
         if isinstance(op, ast.Div):
-            return self.b.value('fdiv', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64)
+            f = {'f': 1} if (self.P.exctext.ACTIVE and I.F64 in (left.type, right.type)) else None
+            return self.b.value('fdiv', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64, f)
         if isinstance(op, ast.Pow):
             try:
                 kind = self.P._etype(node, self.ctx)
             except Exception as error:
                 raise NotS0('no legacy type for **: %s' % error)
+            if (left.type == TINT or right.type == TINT) and not floating:
+                e = self._const_int_value(right)
+                if kind == self.P.INT and e is not None and e >= 0:
+                    return self.b.value('tint.pow', [self.coerce(left, TINT), self.coerce(right, TINT)], TINT)
+                if kind == self.P.INT and e is None:
+                    raise NotS0('a power with an unproven exponent')
             if kind == self.P.INT and not floating:
                 return self.b.value('pow', [self.as_int(left), self.as_int(right)], I.I64, {'mode': 'ck'})
             return self.b.value('fpow', [self.coerce(left, I.F64), self.coerce(right, I.F64)], I.F64)
@@ -2182,9 +2568,57 @@ class Lowering(TextLowering):
             return self.b.value(name, [self.as_int(left), self.as_int(right)], I.I64)
         if isinstance(op, (ast.LShift, ast.RShift)):
             name = 'shl' if isinstance(op, ast.LShift) else 'shr'
+            if isinstance(op, ast.LShift) and not floating:
+                try:
+                    count = self.P._int_const(node.right)
+                except Exception:
+                    count = None
+                if isinstance(count, int) and not isinstance(count, bool) and count >= 0:
+                    value = None
+                    try:
+                        value = self.P._int_const(node.left)
+                    except Exception:
+                        value = None
+                    known = isinstance(value, int) and not isinstance(value, bool)
+                    if known and count >= 63:
+                        # Zero shifted any number of places stays zero: it fits int64 and is not a
+                        # shift beyond it, so the enclosing body can stay on the IR.
+                        if value == 0:
+                            return self.const(I.I64, 0)
+                        if count == 63 and value == -1:
+                            if not self.tint_on:
+                                return self.const(I.I64, -(1 << 63))
+                            # INT64_MIN, kept as a tagged value so that later arithmetic that
+                            # legitimately exceeds int64 still promotes (a plain int64 constant
+                            # would stop at the overflow check).
+                            return self.b.value(
+                                'tint.from', [self.const(I.I64, -(1 << 63))], TINT)
+                    beyond = count >= 63
+                    if not beyond and known:
+                        shifted = value << count
+                        beyond = not (-(1 << 63) <= shifted < (1 << 63))
+                    if beyond:
+                        if not self.tint_result:
+                            raise NotS0('a shift beyond int64')
+                        return self.b.value('tint.shl', [self.coerce(left, TINT),
+                                                         self.coerce(right, TINT)], TINT)
             return self.b.value(name, [self.as_int(left), self.as_int(right)], I.I64,
                                 {'mode': 'ck' if self.strict else 'nsw'})
         raise NotS0('binary %s' % type(op).__name__)
+
+    def _const_int_value(self, v):
+        """The Python int behind an i64/tint value when it was built from a literal, else None."""
+        for _ in range(4):
+            ins = self.b.defs.get(v)
+            if ins is None:
+                return None
+            if ins.op == 'tint.from':
+                v = ins.operands[0]
+                continue
+            if ins.op == 'const' and type(ins.attrs.get('value')) is int:
+                return ins.attrs['value']
+            return None
+        return None
 
     def cmp(self, op, a, b):
         if isinstance(op, (ast.In, ast.NotIn)) and a.type == I.STRV and b.type == I.STRV:
@@ -2195,6 +2629,20 @@ class Lowering(TextLowering):
             raise NotS0('comparison %s' % type(op).__name__)
         if a.type == I.STRV and b.type == I.STRV:
             return self.str_compare(op, a, b)
+        if a.type == BYTES and b.type == BYTES:
+            if pred in ('eq', 'ne'):
+                eq = self.rt('bytes_eq', [a, b])
+                return eq if pred == 'eq' else self.b.value('cmp.eq', [eq, self.const(I.I1, False)], I.I1)
+            return self.b.value('cmp.' + pred, [self.rt('bytes_cmp', [a, b]), self.const(I.I64, 0)], I.I1)
+        if a.type == TINT or b.type == TINT:
+            a, b = self.coerce(a, TINT), self.coerce(b, TINT)
+            if isinstance(op, (ast.Gt, ast.GtE)):
+                a, b, pred = b, a, 'lt' if isinstance(op, ast.Gt) else 'le'
+            if pred in ('eq', 'ne', 'lt', 'le'):
+                c = self._const_int_value(b)
+                if c is not None and -(1 << 63) <= c < (1 << 63):
+                    return self.b.value('tint.' + pred + '_i64', [a, self.const(I.I64, c)], I.I1)
+            return self.b.value('tint.' + pred, [a, b], I.I1)
         if not (a.type.is_scalar and b.type.is_scalar):
             raise NotS0('comparison of %s and %s' % (a.type, b.type))
         if {a.type, b.type} == {I.I64, I.F64}:
@@ -2277,7 +2725,7 @@ class Lowering(TextLowering):
         if types[0] == types[1] and types[0] in (I.STRV, BYTES):
             t = types[0]
         else:
-            t = I.F64 if I.F64 in types else I.I64 if I.I64 in types else I.I1
+            t = I.F64 if I.F64 in types else TINT if TINT in types else I.I64 if I.I64 in types else I.I1
         self.in_region(then, fill=lambda: self.b.emit('yield', [self.coerce(values['then'], t)]))
         self.in_region(other, fill=lambda: self.b.emit('yield', [self.coerce(values['else'], t)]))
         return self.b.value('if', [c], t, None, [then, other])
@@ -2290,6 +2738,9 @@ class Lowering(TextLowering):
         if not isinstance(node.func, ast.Name):
             raise NotS0('call of a non-name')
         f = node.func.id
+        if f == '_ail_int2' and len(node.args) == 2 and not node.keywords \
+                and os.environ.get('AIL_SURFACE') == 'python':
+            return self.int_text(node.args[0], node.args[1])
         if f in ctx.funcs and f not in self.places and f not in self.params:
             return self.user_call(f, node, statement)
         if not self.is_builtin(f):
@@ -2301,14 +2752,23 @@ class Lowering(TextLowering):
         if f in ('_ail_sort_perm', '_ail_sort_apply') and statement:
             return self.keyed_sort(f, node)
         if node.keywords:
+            if f == 'int' and len(args) == 1 and len(node.keywords) == 1 \
+                    and node.keywords[0].arg == 'base':
+                return self.int_text(args[0], node.keywords[0].value)
             raise NotS0('keywords to %s()' % f)
         if f == 'ord' and len(args) == 1 and isinstance(args[0], ast.Constant) \
                 and isinstance(args[0].value, str) and len(args[0].value) == 1:
             return self.const(I.I64, ord(args[0].value))
         if f == 'abs' and len(args) == 1:
             v = self.expr(args[0])
+            if v.type == I.I64 and int_constant(args[0]) == -(1 << 63):
+                v = self.coerce(v, TINT)          # abs(INT64_MIN) is 2**63: an exact int, not a trap
             if v.type == I.F64:
                 return self.b.value('fabs', [v], I.F64)
+            if v.type == TINT:
+                zero = self.b.value('tint.from', [self.const(I.I64, 0)], TINT)
+                c = self.b.value('tint.lt', [v, zero], I.I1)
+                return self.b.value('select', [c, self.b.value('tint.neg', [v], TINT), v], TINT)
             v = self.coerce(v, I.I64)
             neg = self.b.value('neg', [v], I.I64, {'mode': 'ck' if self.strict else 'nsw'})
             zero = self.const(v.type, 0)
@@ -2316,6 +2776,10 @@ class Lowering(TextLowering):
             return self.b.value('select', [c, neg, v], v.type)
         if f in ('min', 'max') and len(args) == 2:
             a, b = self.expr(args[0]), self.expr(args[1])
+            if a.type == TINT or b.type == TINT:
+                a, b = self.coerce(a, TINT), self.coerce(b, TINT)
+                c = self.b.value('tint.lt', [a, b] if f == 'max' else [b, a], I.I1)
+                return self.b.value('select', [c, b, a], TINT)
             t = I.F64 if I.F64 in (a.type, b.type) else I.I64
             a, b = self.coerce(a, t), self.coerce(b, t)
             if t == I.F64:
@@ -2341,7 +2805,9 @@ class Lowering(TextLowering):
             return self.b.value(f.split('_')[1], [a, b], I.I64, {'mode': 'wrap'})
         if f == 'ord' and len(args) == 1 and self.text_kind(args[0]) == 'str' \
                 and (isinstance(args[0], ast.Subscript)
-                     or (isinstance(args[0], ast.Name) and args[0].id in self.onecp)):
+                     or (isinstance(args[0], ast.Name) and args[0].id in self.onecp)
+                     or (isinstance(args[0], ast.Call) and isinstance(args[0].func, ast.Name)
+                         and args[0].func.id == 'chr')):
             return self.rt('str_point', [self.expr(args[0])])
         if f == 'float' and len(args) == 1:
             v = self.expr(args[0])
@@ -2350,13 +2816,24 @@ class Lowering(TextLowering):
             return self.coerce(v, I.F64)
         if f == 'int' and len(args) == 1:
             v = self.expr(args[0])
+            if v.type in (I.STRV, BYTES) and os.environ.get('AIL_SURFACE') == 'python':
+                return self.rt('tint_from_str' if v.type == I.STRV else 'tint_from_bytes', [v])
             if v.type == I.STRV:
                 return self.rt('str_to_int', [v])
             if v.type == BYTES:
                 return self.rt('bytes_to_int', [v])
             if v.type == I.F64:
                 return self.b.value('fptosi', [v], I.I64, {'mode': 'ck'})
+            if v.type == TINT:
+                return v
             return self.coerce(v, I.I64)
+        if f in ('int', '_ail_int2') and len(args) == 2:
+            return self.int_text(args[0], args[1])
+        if f in ('bin', 'oct', 'hex') and len(args) == 1:
+            v = self.expr(args[0])
+            if v.type == TINT:
+                return self.rt('tint_' + f, [v])
+            raise NotS0('%s() of a value not tagged as an int' % f)
         if f == 'write_stdout_bytes' and len(args) == 1 and statement and isinstance(args[0], ast.Call) \
                 and isinstance(args[0].func, ast.Name) and args[0].func.id in ctx.funcs \
                 and args[0].func.id not in self.places and args[0].func.id not in self.params \
@@ -2377,6 +2854,17 @@ class Lowering(TextLowering):
             self.b.emit('ba.write', [v])
             return None
         raise NotS0('builtin %s()' % f)
+
+    def int_text(self, text, base):
+        """`int(text)` / `int(text, base)` with a str or bytes first argument, on the Python
+        surface: a value beyond int64 is a big int, so this is the tagged-int parse."""
+        if os.environ.get('AIL_SURFACE') != 'python':
+            raise NotS0('int() of text and a base')
+        v = self.expr(text)
+        if v.type not in (I.STRV, BYTES):
+            raise NotS0('int() of a value that is not text')
+        b = self.coerce(self.expr(base), I.I64)
+        return self.rt('tint_from_str_base' if v.type == I.STRV else 'tint_from_bytes_base', [v, b])
 
     def keyed_sort(self, f, node):
         """The two statements sortkeys.py leaves for `xs.sort(key=...)` / `sorted(xs, key=...)`: the permutation
@@ -2409,7 +2897,7 @@ class Lowering(TextLowering):
         self.b.emit('list.permute', [self.container(xs), self.container(perm)])
         return None
 
-    def user_call(self, f, node, statement, list_dst=None, list_kind=None, ba_dst=None):
+    def user_call(self, f, node, statement, list_dst=None, list_kind=None, ba_dst=None, obj_dst=None):
         P, ctx = self.P, self.ctx
         try:
             arg_nodes = P._bind_call_args(f, node, ctx)
@@ -2427,7 +2915,9 @@ class Lowering(TextLowering):
                 symbol, params = variant[0], variant[1]
         if len(arg_nodes) != len(params):
             raise NotS0('%s() arity' % f)
-        param_types = [self.kind_type(k, '%s() parameter %r' % (f, n), views=True) for n, k in params]
+        _tsig = getattr(P, 'TINT_ACTIVE', {}).get(f) or getattr(P, 'TINT_ACTIVE', {}).get(symbol) or ((), 0)
+        param_types = [(TINT if (_tsig[0] and i < len(_tsig[0]) and _tsig[0][i]) else self.kind_type(k, '%s() parameter %r' % (f, n), views=True))
+                       for i, (n, k) in enumerate(params)]
         if ret == P.NORET:
             if not statement:
                 raise NotS0('void %s() used as a value' % f)
@@ -2436,6 +2926,12 @@ class Lowering(TextLowering):
             if ba_dst is None:
                 raise NotS0('the bytearray %s() returns is used as a value (stage S3b)' % f)
             results = [BYTEARRAY]
+        elif ret == P.INT and _tsig[1]:
+            results = [TINT]
+        elif obj_dst is not None:
+            results = [self.kind_type(ret, '%s() result' % f, owned=True, local=True)]
+            if results[0] != obj_dst.type.pointee:
+                raise NotS0('%s() does not return an object of the target\'s class' % f)
         else:
             results = [self.kind_type(ret, '%s() result' % f, owned=True)]
         if ba_dst is not None and results != [BYTEARRAY]:
@@ -2469,6 +2965,14 @@ class Lowering(TextLowering):
                     raise NotS0('the field list %s.%s is lent to %s(), which may resize or replace it'
                                 % (a.value.id, a.attr, f))
                 values[i] = self.container(a)
+            elif isinstance(a, ast.List) and params[i][1] in ('array', P.FLIST) and not self.list_display_names(a):
+                # a list display handed to a read-only list parameter: a temporary this call owns, lent to the
+                # callee and dropped once the call is over
+                tkind = P.LIST if params[i][1] == 'array' else P.FLIST
+                tmp = self.new_list_place(tkind, 'arg')
+                self.assign_list(lambda tmp=tmp: self.list_ref(tmp), a, tkind, dst='<arg>')
+                temps.append(tmp)
+                values[i] = self.list_ref(tmp)
             elif isinstance(a, ast.Call) and isinstance(a.func, ast.Name) and a.func.id in ctx.funcs                     and a.func.id not in self.places and a.func.id not in self.params                     and ctx.funcs[a.func.id][1] in (P.LIST, P.FLIST):
                 # the list a call returns, passed straight on: a temporary this call owns, lent to the
                 # callee and dropped once the call is over
@@ -2516,6 +3020,10 @@ class Lowering(TextLowering):
         attrs = {'callee': symbol}
         if any(x != 'value' for x in arg_abi):
             attrs['abi'] = arg_abi
+        if obj_dst is not None:
+            self.b.emit('obj.call', [obj_dst] + args, [], attrs)
+            self.drop_temps(temps)
+            return None
         if ba_dst is not None:
             if 'abi' in attrs:
                 raise NotS0('a bytearray result with list arguments')
@@ -2531,6 +3039,12 @@ class Lowering(TextLowering):
         ins = self.b.emit('call', args, results, attrs)
         self.drop_temps(temps)
         return ins.results[0] if results else None
+
+    def list_display_names(self, node):
+        """Whether a list display mentions a list or object name (then it is not a plain temporary)."""
+        return any(isinstance(n, ast.Name) and (self.is_list_name(n.id) or self.is_slist_name(n.id)
+                                                or self.is_obj_name(n.id) or n.id in self.recs)
+                   for n in ast.walk(node))
 
     def field_list_arg(self, node):
         """Whether `node` is `p.f` for a struct parameter `p` whose field `f` is a numeric list."""
@@ -2548,9 +3062,17 @@ class Lowering(TextLowering):
 def lower(P, fn, ctx, sig, recursive, cname, pending=(), link_units=False, summaries=None):
     """(IR function, its one-function program) for the S0 subset; NotS0 otherwise."""
     lowering = Lowering(P, fn, ctx, sig, recursive, cname, pending, link_units, summaries)
+    # the legacy front end has already checked where each handler's name is bound; the type queries of the
+    # lowering (`e.__ail_text__` inside the handler) must not trip that check, and the legacy emitter that
+    # takes the function over when this one refuses needs it as it was
+    scope_check = getattr(ctx, 'check_exception_scope', None)
+    if scope_check is not None:
+        ctx.check_exception_scope = False
     try:
         f = lowering.run()
     finally:
+        if scope_check is not None:
+            ctx.check_exception_scope = scope_check
         # the kinds the flow analysis put in the legacy context are the IR's own business
         for n, t in lowering.__dict__.get('saved_types', {}).items():
             if t is None:

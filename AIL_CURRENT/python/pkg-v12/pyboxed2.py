@@ -41,6 +41,7 @@ import hashlower
 import pyfunc
 import boxclosure
 import unified
+import bigcap
 import stararity
 try:
     import pymix
@@ -623,6 +624,10 @@ ARGCHK_C = r'''
 __attribute__((noinline, cold)) static ail_st ail2_argerr(ail_ctx *cx, ail_obj a, int style, const char *name, int n) {
     char buf[300];
     const char *tn = ail__tname_c(a);
+/*B<*/
+    if (a.tag == AIL_T_BIG && style == 8) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "Python int too large to convert to C ssize_t");
+/*B|*/
+/*B>*/
     switch (style) {
     case 0: snprintf(buf, sizeof buf, "must be str, not %s", tn); break;
     case 1: snprintf(buf, sizeof buf, "%s first arg must be str or a tuple of str, not %s", name, tn); break;
@@ -718,9 +723,11 @@ def _runtime_text():
         return ('#include <stdint.h>\n#define AIL_REPR_UNPRINTABLE_OVERRIDE 1\n'
                 + marker + table + '};\n' + headers)
     import cruntime
-    return cruntime.repr_runtime_for_host(cruntime.SOURCE['OBJ2']) + '\n'
+    return cruntime.repr_runtime_for_host(cruntime.OBJ2_COND) + '\n'
 
 
+import biggate
+USER_MARK = biggate.USER_MARK
 _PREAMBLE_HEAD = ('/* ============================ pyboxed2.py generated preamble (v2) ============ */\n'
                   + _runtime_text())
 _PREAMBLE_TAIL = r'''
@@ -797,6 +804,10 @@ static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_ob
     }
     ail_str_write(ail_view_to_str(end), f);
     ail2_text_stream_close(f, &buf, &sz);
+/*B<*/
+    if (__builtin_expect(cx->big_toolong, 0)) { free(buf); return ail__big_chk(cx); }
+/*B|*/
+/*B>*/
     ail_st st = ail_out_write(cx, buf, (size_t)sz);
     free(buf);
     return st;
@@ -826,6 +837,10 @@ static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsig
     }
     ail_str_write(ail_view_to_str(end), f);
     ail2_text_stream_close(f, &buf, &sz);
+/*B<*/
+    if (__builtin_expect(cx->big_toolong, 0)) { free(buf); return ail__big_chk(cx); }
+/*B|*/
+/*B>*/
     ail_st st = ail_out_write(cx, buf, (size_t)sz);
     free(buf);
     return st;
@@ -851,14 +866,48 @@ static inline int64_t ail2_fmt_ascii(ail_ctx *cx, ail_obj x, char *b) {
 static inline ail_obj ail2_str_catn(ail_ctx *cx, ail_obj *parts, const unsigned char *fmt,
                                     int64_t n) {
     int64_t total = 0;
+/*B<*/
+    for (int64_t i = 0; i < n; i++) {
+        if (__builtin_expect(fmt[i] && parts[i].tag == AIL_T_BIG, 0)) {
+            /* a big int has no 64-byte ASCII form: it becomes its str object, which is then copied as any str part.
+               Convert every big part under one root; the second loop copies a fmt part verbatim once it is a str. */
+            AIL_ROOT_N(cx, frb, parts, (int32_t)n);
+            for (int64_t k = 0; k < n; k++)
+                if (fmt[k] && parts[k].tag == AIL_T_BIG) parts[k] = ail_int_to_str(cx, parts[k]);
+            AIL_FRAME_LEAVE(cx, frb);
+            break;
+        }
+    }
+/*B|*/
+/*B>*/
+/*B<*/
+    for (int64_t i = 0; i < n; i++) {
+        if (fmt[i] && parts[i].tag != AIL_T_STR) { char tmp[64]; total += ail2_fmt_ascii(cx, parts[i], tmp); }
+        else total += ail_view_to_str(parts[i]).n;
+    }
+/*B|*/
     for (int64_t i = 0; i < n; i++) {
         if (fmt[i]) { char tmp[64]; total += ail2_fmt_ascii(cx, parts[i], tmp); }
         else total += ail_view_to_str(parts[i]).n;
     }
+/*B>*/
     AIL_ROOT_N(cx, fr, parts, (int32_t)n);
     ail_strback *b = ail_strback_alloc(cx, total);
     AIL_FRAME_LEAVE(cx, fr);
     int64_t k = 0;
+/*B<*/
+    for (int64_t i = 0; i < n; i++) {
+        if (fmt[i] && parts[i].tag != AIL_T_STR) {
+            char tmp[64];
+            int64_t m = ail2_fmt_ascii(cx, parts[i], tmp);
+            for (int64_t j = 0; j < m; j++) b->data[k++] = (int32_t)(unsigned char)tmp[j];
+        } else {
+            ail_str s = ail_view_to_str(parts[i]);
+            memcpy(b->data + k, s.p, (size_t)s.n * sizeof *b->data);
+            k += s.n;
+        }
+    }
+/*B|*/
     for (int64_t i = 0; i < n; i++) {
         if (fmt[i]) {
             char tmp[64];
@@ -870,6 +919,7 @@ static inline ail_obj ail2_str_catn(ail_ctx *cx, ail_obj *parts, const unsigned 
             k += s.n;
         }
     }
+/*B>*/
     return ail_str_view((ail_gcobj *)b, 0, total);
 }
 
@@ -2265,6 +2315,144 @@ class _StarC(ast.AST):
         self.n = n
 
 
+def _mix_overflow_fallback(csrc, mangled, overflow):
+    """Route a clone's own int64 overflow stops to its int64-ABI wrapper.
+
+    The tagged lowering does not turn every int64 operand into `ail_tint` (a list element, for
+    one, stays an int64), so a big-int clone can still reach the typed path's checked helpers,
+    whose `ail_die("integer overflow")` would exit instead of letting the boxed body answer.
+    Replace that stop with a longjmp to the wrapper, which then signals the call site to run the
+    boxed body. Only the clone's own typed unit is changed; other trap messages stay as they are.
+    The jump abandons the clone's C frames, so `hit` first releases every cleanup frame linked
+    since the wrapper was entered and restores whichever of the unit's own `ail_depth`,
+    `ail_cleanup_top` and `ail_exc_top` it declares. Otherwise repeated fallbacks leak recursion
+    depth and leave a dangling cleanup stack. Returns (the patched source, the set of state names
+    restored), or None when the unit has no place to declare the jump buffer.
+    """
+    marker = '#include <stdint.h>\n'
+    if marker not in csrc:
+        return None
+    jmp = mangled + '__mix_jmp'
+    hit = mangled + '__mix_overflow_hit'
+    save = mangled + '__mix_save'
+    savep = mangled + '__mix_savep'
+    state = {}
+    for name in ('ail_depth', 'ail_cleanup_top', 'ail_exc_top'):
+        state[name] = bool(re.search(r'^AIL_LINK_STATE\([^;\n]*\b' + name + r'\b', csrc, re.M))
+    fields = []
+    inits = []
+    restores = []
+    if state['ail_depth']:
+        fields.append('int64_t depth;')
+        inits.append('ail_depth')
+        restores.append('        ail_depth = s->depth;')
+    if state['ail_cleanup_top']:
+        fields.append('ail_cleanup_frame *cleanup;')
+        inits.append('ail_cleanup_top')
+        restores.extend((
+            '        while (ail_cleanup_top && ail_cleanup_top != s->cleanup) {',
+            '            ail_cleanup_frame *f = ail_cleanup_top;',
+            '            ail_cleanup_top = f->previous;',
+            '            f->release(f->resources);',
+            '        }',
+            '        ail_cleanup_top = s->cleanup;'))
+    if state['ail_exc_top']:
+        fields.append('int exc_top;')
+        inits.append('ail_exc_top')
+        restores.append('        ail_exc_top = s->exc_top;')
+    decl = ('\n#include <setjmp.h>\n'
+            'static jmp_buf %s;\n'
+            'extern int %s;\n'
+            'static inline void %s(void);\n'
+            % (jmp, overflow, hit))
+    if fields:
+        helper = ('\ntypedef struct { %s } %s;\n'
+                  'static %s *%s;\n'
+                  'static inline void %s(void) {\n'
+                  '    %s *s = %s;\n'
+                  '    if (s) {\n'
+                  '%s\n'
+                  '    }\n'
+                  '    %s = 1;\n'
+                  '    longjmp(%s, 1);\n'
+                  '}\n'
+                  % (' '.join(fields), save, save, savep, hit, save, savep,
+                     '\n'.join(restores), overflow, jmp))
+    else:
+        helper = ('\nstatic inline void %s(void) { %s = 1; longjmp(%s, 1); }\n'
+                  % (hit, overflow, jmp))
+    csrc = csrc.replace(marker, marker + decl, 1)
+    csrc = csrc.replace('ail_die("integer overflow")', hit + '()')
+    return csrc + helper, state
+
+
+def _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow, state=None):
+    """The int64-ABI wrapper around an int-returning clone.
+
+    `inner_sig` is the typed emitter's own prototype for `inner`. Its parameters are already the
+    boxed caller's int64/list forms; its result is `int64_t`, or `ail_tint` when the local proof
+    could not bound the ints. The wrapper keeps the caller's int64 result ABI and, for a tagged
+    result, signals a value that does not fit int64 instead of wrapping or stopping: the call site
+    then runs the boxed body, which has exact ints. An int64 overflow inside the inner clone
+    longjmps to the same signal (see `_mix_overflow_fallback`). Returns (the wrapper C, its
+    prototype).
+    """
+    inside = inner_sig[inner_sig.index('(') + 1:inner_sig.rindex(')')]
+    tinted_params = set(re.findall(r'\bail_tint\s+(v_\w+)', inside))
+    proto_args = []
+    args = []
+    for pname, kind in params:
+        cn = 'v_' + pname
+        if kind in (pymix.INT, pymix.BOOL):
+            proto_args.append('int64_t ' + cn)
+            args.append('ail_tint_from_int64(%s)' % cn if cn in tinted_params else cn)
+        elif kind == pymix.FLOAT:
+            proto_args.append('double ' + cn)
+            args.append(cn)
+        elif kind == pymix.STR:
+            proto_args.append('ail_str ' + cn)
+            args.append(cn)
+        elif kind in (pymix.LIST_INT, pymix.LIST_FLOAT):
+            elem = 'int64_t' if kind == pymix.LIST_INT else 'double'
+            proto_args.extend(('const %s *%s' % (elem, cn), 'int64_t %s_len' % cn))
+            args.extend((cn, cn + '_len'))
+        else:
+            return None, None
+    tagged = 'ail_tint ' in inner_sig[:inner_sig.index(inner)]
+    jmp = mangled + '__mix_jmp'
+    save = mangled + '__mix_save'
+    savep = mangled + '__mix_savep'
+    state = state or {}
+    inits = [name for name in ('ail_depth', 'ail_cleanup_top', 'ail_exc_top') if state.get(name)]
+    proto = 'int64_t %s(%s)' % (mangled, ', '.join(proto_args))
+    body = ['int %s = 0;\n' % overflow, proto + ' {\n',
+            '    %s = 0;\n' % overflow]
+    if inits:
+        body.extend((
+            '    %s saved = {%s};\n' % (save, ', '.join(inits)),
+            '    %s *previous = %s;\n' % (save, savep),
+            '    %s = &saved;\n' % savep,
+            '    if (setjmp(%s) != 0) { %s = previous; return 0; }\n' % (jmp, savep)))
+        restore = ' %s = previous;' % savep
+    else:
+        body.append('    if (setjmp(%s) != 0) return 0;\n' % jmp)
+        restore = ''
+    if tagged:
+        body.append('    ail_tint r = %s(%s);\n' % (inner, ', '.join(args)))
+        body.append('    int64_t v;\n')
+        body.append('    if (!ail_tint_to_int64(r, &v)) { %s = 1;%s return 0; }\n'
+                    % (overflow, restore))
+        body.append('%s\n' % ('    %s = previous;\n' % savep if inits else ''))
+        body.append('    return v;\n')
+    else:
+        body.append('    int64_t result = %s(%s);\n' % (inner, ', '.join(args)))
+        if inits:
+            body.append('    %s = previous;\n' % savep)
+        body.append('    return result;\n')
+    body.append('}\n')
+    return ''.join(body), proto
+
+
 class Compiler(boxclosure.ClosureMixin):
     def __init__(self, allow_mix=True):
         self.allow_mix = allow_mix
@@ -2319,6 +2507,11 @@ class Compiler(boxclosure.ClosureMixin):
 
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
+        # the named runtime pieces are resolved once more at the end of build(), after the patches
+        # (dunderrt, safetyrt, ...) have added their own references to the runtime
+        return biggate.resolve(self._compile_cond(source), biggate.ON, keep=True, pieces=False)
+
+    def _compile_cond(self, source):
         tree = ast.parse(source)
         self.source_has_class = any(isinstance(n, ast.ClassDef) for n in ast.walk(tree))
         import exctext
@@ -2461,7 +2654,15 @@ class Compiler(boxclosure.ClosureMixin):
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
         # call site is compiled (`_emit_function` below is where `_call_user_function` runs).
         self._setup_mix(source, mix_tree)
-        if unified.enabled() and ('<program>', '*') not in self.u_demote and not unified.nan_capable(mix_tree):
+        # The size gate uses only local proofs (BIGINT.md rules 2-4): no call-site, field or container scan.
+        _marks = bigcap.marked(mix_tree, local=False)
+        _prelude = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
+        if '<module>' in _marks and _prelude:
+            _own = copy.copy(mix_tree)
+            _own.body = [n for n in mix_tree.body if getattr(n, 'name', None) not in _prelude]
+            _marks = bigcap.marked(_own, local=False)
+        if unified.enabled() and ('<program>', '*') not in self.u_demote and not unified.nan_capable(mix_tree) \
+                and '<module>' not in _marks:     # the module code can need a big int: every int stays boxed
             self.uplan = unified.analyze(self, tree, self.u_demote)
 
         for name in self.functions:
@@ -2518,7 +2719,12 @@ class Compiler(boxclosure.ClosureMixin):
             self._module_global_slot(name)
         for n in tree.body:
             if isinstance(n, ast.ClassDef):
-                self._init_class_attrs(n.name, main_ctx)
+                self._ensure_class_attrs(n.name, main_ctx)
+                if n.name in self.module_names:
+                    # a module-level assignment to the class name rebinds the module slot: bind it HERE, at the
+                    # definition statement (after the class body, as CPython does)
+                    main_ctx.emit('g_slots_arr[%d] = g_slots_arr[%d];' %
+                                  (self._module_global_slot(n.name), self.global_slots['class:' + n.name]))
                 continue
             if isinstance(n, ast.FunctionDef):
                 if n.name in self.rebound_functions:
@@ -2536,6 +2742,36 @@ class Compiler(boxclosure.ClosureMixin):
         if self.source_has_class:
             preamble = _index_error_class_names(preamble)
         parts = [preamble]
+        if self.reads_args:
+            # A missing key's KeyError keeps the key as e.args[0] in CPython. The general runtime
+            # raises it with only a repr message, so route every missing-key raise through the
+            # exception-value helper (the EXC fragment) in a program that actually reads .args:
+            # dict getitem/augmented, pop, del, set.remove, and the empty popitem/set.pop cases
+            # (whose one argument is the plain message string, not its repr).
+            self.rt_needs.add('exc')
+            replacements = (
+                ('        if (!fac) return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], ail_obj_repr(cx, key));',
+                 '        if (!fac) return ail2x_raise_key(cx, key);'),
+                ('    if (!v) { if (has_default) { *out = dflt; return AIL_OK; } return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], ail_obj_repr(cx, key)); }',
+                 '    if (!v) { if (has_default) { *out = dflt; return AIL_OK; } return ail2x_raise_key(cx, key); }'),
+                ('    if (!found) return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], ail_obj_repr(cx, key));',
+                 '    if (!found) return ail2x_raise_key(cx, key);'),
+                ('    if (!found) { ail_obj msg = ail_obj_repr(cx, x); return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg); }',
+                 '    if (!found) return ail2x_raise_key(cx, x);'),
+                ('        ail_obj msg = ail_str_repr(cx, ail_str_from_cstr(cx, "popitem(): dictionary is empty"));\n'
+                 '        return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg);',
+                 '        return ail2x_raise_key(cx, ail_str_from_cstr(cx, "popitem(): dictionary is empty"));'),
+                ('        ail_obj msg = ail_str_repr(cx, ail_str_from_cstr(cx, "pop from an empty set"));\n'
+                 '        return ail_raise(cx, cx->builtin_cls[AIL_B_KEYERROR], msg);',
+                 '        return ail2x_raise_key(cx, ail_str_from_cstr(cx, "pop from an empty set"));'),
+            )
+            anchor = 'static inline ail_obj ail_dict_new(ail_ctx *cx) {'
+            if anchor in parts[0]:
+                for missing, replacement in replacements:
+                    parts[0] = parts[0].replace(missing, replacement)
+                parts[0] = parts[0].replace(
+                    anchor,
+                    'static inline ail_st ail2x_raise_key(ail_ctx *cx, ail_obj key);\n' + anchor, 1)
         if any(isinstance(n, ast.ExceptHandler) and n.type is not None
                and any(isinstance(m, ast.Name) and m.id == 'NameError' for m in ast.walk(n.type))
                for n in ast.walk(tree)):
@@ -2545,6 +2781,7 @@ class Compiler(boxclosure.ClosureMixin):
                       '? ail_box_none() : cx->builtin_cls[parent];\n')
             if anchor in parts[0]:
                 parts[0] = parts[0].replace(anchor, '        if (i == AIL_B_UNBOUNDLOCALERROR) parent = AIL_B_NAMEERROR;\n' + anchor, 1)
+        parts.append(USER_MARK)               # the end of the shared runtime (biggate.finalize)
         if self.uses_fileio:
             import filert
             parts.append(filert.general_text())
@@ -2577,6 +2814,11 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append(BISECTBOUND_C)
         if getattr(self, 'needs_stararity', False):
             parts.append(stararity.C)
+        if 'SYSINFO' in self.rt_needs:
+            import cruntime
+            parts.append(cruntime.SYSINFO.replace('ail_raise_named(AIL_EXC_OS)',
+                                                  'ail_die("clock unavailable")'))
+            self.rt_needs.discard('SYSINFO')
         if self.rt_needs:
             import safetyrt
             parts.append(safetyrt.text(self.rt_needs))
@@ -2592,6 +2834,8 @@ class Compiler(boxclosure.ClosureMixin):
             for mname, mix in sorted(self.mix_typed.items()):
                 parts.append('/* AIL_MIXED_TYPED: %s */\n' % mname)
                 parts.append('extern %s;\n' % mix['sig'])
+                if mix.get('overflow'):
+                    parts.append('extern int %s;\n' % mix['overflow'])
         parts.append('\n/* ---- interned attribute-name ids ---- */\n')
         for a in sorted(self.attr_names):
             parts.append('static int64_t g_attr_%s;\n' % a)
@@ -2680,7 +2924,7 @@ class Compiler(boxclosure.ClosureMixin):
         if array_entry is not None:
             if self.uses_argv:
                 raise Unsupported('sys.argv in a program whose entry is its last function')
-            parts.append(self._array_entry_main(array_entry, tree, setup, main_ctx))
+            parts.append(self._array_entry_main(array_entry, tree, setup))
             return ''.join(parts)
         parts.append('int main(int argc, char **argv) {\n' if self.uses_argv else 'int main(void) {\n')
         parts.append('    ail_ctx cxs, *cx = &cxs;\n    ail_ctx_init(cx);\n')
@@ -3365,7 +3609,7 @@ class Compiler(boxclosure.ClosureMixin):
     def _any_class_defines(self, mname):
         return any(mname in c['methods'] for c in self.classes.values())
 
-    def _array_entry_main(self, info, tree, setup_lines, class_init_ctx):
+    def _array_entry_main(self, info, tree, setup_lines):
         """The judge suite's own array/argv calling convention for a whole-program shape with
         NO top-level executable statement (only def/class/import) -- ported from pyboxed.py/v1's
         _array_entry_main (fixed there first for the identical failure this morning): argv[1] is
@@ -3407,12 +3651,16 @@ class Compiler(boxclosure.ClosureMixin):
         lines.append('    close(ail2_fd);\n')
         lines.append('    int64_t ail2_n = (int64_t)((size_t)ail2_st.st_size / sizeof *ail2_src);\n')
         lines.append('    ail_st st = AIL_OK; (void)st;\n')
-        nslots = max(2 + len(extra), class_init_ctx.next_slot)  # 0: xs list, 1: return value, 2..: extra int params
-        lines.append('    AIL_FRAME_ENTER(cx, f, %d);\n' % max(nslots, 1))
-        # No module body runs in this shape, so the class bodies' attributes (registered above
-        # against their module slots) would stay UNBOUND; evaluate them before the entry call.
-        lines.append(class_init_ctx.body_text())
-        lines.append('    if (st != AIL_OK) goto L_leave;\n')
+        nslots = 2 + len(extra)  # 0: xs list, 1: return value, 2..: extra int params
+        init_ctx = Ctx('<module>')
+        init_ctx.var_kind = self.global_var_kind
+        init_ctx.elem_kind = self.global_elem_kind
+        init_ctx.next_slot = nslots
+        for cname in self.class_order:
+            self._ensure_class_attrs(cname, init_ctx)
+        lines.append('    AIL_FRAME_ENTER(cx, f, %d);\n' % max(nslots, init_ctx.next_slot, 1))
+        if init_ctx.lines:
+            lines.append(init_ctx.body_text() + '\n')
         lines.append('    f.slots[0] = ail_list_new(cx);\n')
         lines.append('    for (int64_t ail2_i = 0; ail2_i < ail2_n; ail2_i++) '
                      'ail_list_append(cx, f.slots[0], ail_box_int(ail2_src[ail2_i]));\n')
@@ -3429,9 +3677,8 @@ class Compiler(boxclosure.ClosureMixin):
             lines.append('    st = ail_obj_print(cx, f.slots[1]);\n')
             lines.append('    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, f); '
                          'int rc = ail_main_finish(cx, st); ail_ctx_destroy(cx); return rc; }\n')
-        lines.append('    AIL_FRAME_LEAVE(cx, f);\n')
-        lines.append('    { int rc = ail_main_finish(cx, AIL_OK); ail_ctx_destroy(cx); return rc; }\n')
         lines.append('L_leave:\n')
+        lines.append('    AIL_FRAME_LEAVE(cx, f);\n')
         lines.append('    { int rc = ail_main_finish(cx, st); ail_ctx_destroy(cx); return rc; }\n')
         lines.append('}\n')
         return ''.join(lines)
@@ -3450,6 +3697,68 @@ class Compiler(boxclosure.ClosureMixin):
             self.global_slots[key] = self.next_global_slot
             self.next_global_slot += 1
         return self.global_slots[key]
+
+    def _class_ready_slot(self, cname):
+        key = 'cattr_ready:' + cname
+        if key not in self.global_slots:
+            self.global_slots[key] = self.next_global_slot
+            self.next_global_slot += 1
+        return self.global_slots[key]
+
+    def _ensure_class_attrs(self, cname, ctx):
+        """Install a class body's attributes into its ONE class object, once. The run time owns
+        the table, so `C.x`, `C().x` (unless shadowed) and subclasses all read the same binding,
+        and `C.x = v` updates it rather than treating the class as an instance."""
+        cls = self.classes.get(cname)
+        if cls is None:
+            return
+        if any(slot in self.evaluating_class_attrs for _a, _v, slot in cls.get('class_attrs', [])):
+            # a function value called inside a class-attribute value would build the class again and
+            # re-compile the attribute being compiled (call_value drops the class branch on this refusal)
+            raise Unsupported('a call through a function value while the class attribute '
+                              'value it constructs is still being compiled')
+        ref = 'g_slots_arr[%d]' % self._class_ready_slot(cname)
+        ctx.emit('if (%s.tag == AIL_T_UNBOUND) {' % ref)
+        ctx.indent += 1
+        ctx.emit('%s = ail_box_int(1);' % ref)
+        cref = 'g_slots_arr[%d]' % self.global_slots['class:' + cname]
+        saved_locals = ctx.class_locals
+        # the flag the class-name reads test: a read of the class's own name while its body runs is a NameError
+        index = self.class_init_index.get(cname)
+        own_init = index is not None and cname not in self.class_init_active
+        if own_init:
+            ctx.emit('g_class_init_arr[%d] = 1;' % index)
+            self.class_init_active.add(cname)
+        for aname, aval, slot in cls.get('class_attrs', []):
+            self.attr_names.add(aname)
+            # the class body runs in its own namespace: an earlier attribute is visible to a later one
+            # (for a comprehension, to its outermost iterable only)
+            ctx.class_locals = self._class_attr_locals(cname, slot)
+            self._refuse_class_name_genexp(aval)
+            self.evaluating_class_attrs.add(slot)
+            try:
+                v = self.expr(aval, ctx)
+            except Unsupported as exc:
+                # a class-body comprehension reads class-scope names the general path cannot resolve: name the
+                # construct instead of reporting the inner name as undefined (public pre-import refusal)
+                if (isinstance(aval, ast.Constant) or (isinstance(aval, ast.UnaryOp)
+                                                        and isinstance(aval.operand, ast.Constant))
+                        or getattr(exc, 'source_line', None) is not None
+                        or (str(exc).startswith("name '") and str(exc).endswith("is not defined"))):
+                    raise
+                raise self._class_attr_through_class_refusal(cname, aname)
+            finally:
+                self.evaluating_class_attrs.discard(slot)
+                ctx.class_locals = saved_locals
+            # the slot is the first binding (read by a class value that names the attribute: getattr(cls, name));
+            # the class object's table is the live one (`C.x = v` updates it)
+            ctx.emit('g_slots_arr[%d] = %s;' % (slot, v))
+            ctx.emit('ail_class_setattr(cx, %s, g_attr_%s, g_slots_arr[%d]);' % (cref, aname, slot))
+        if own_init:
+            self.class_init_active.discard(cname)
+            ctx.emit('g_class_init_arr[%d] = 0;' % index)
+        ctx.indent -= 1
+        ctx.emit('}')
 
     def _module_stmt(self, node, ctx):
         self.stmt(node, ctx)
@@ -4265,14 +4574,50 @@ class Compiler(boxclosure.ClosureMixin):
             recv_kind = self.get_kind(node.value.id, ctx)
             if recv_kind and recv_kind.startswith('instance:'):
                 cname = recv_kind.split(':', 1)[1]
-                for kls, kv, _slot in self.classes[cname].get('class_attrs', []):
+                for kls, kv, _slot in reversed(self.classes[cname].get('class_attrs', [])):
                     if kls == node.attr:
                         # a subclass may rebind the attribute to a value of another kind
                         if any(node.attr == a for d in self._descendants(cname)
                                for a, _v, _s in self.classes[d].get('class_attrs', [])):
                             return None
+                        # a later class-body assignment is the one copied onto the instance last
                         return self.infer_kind(kv, ctx)
         return None
+
+    def _gate_kind(self, node, ctx):
+        """The kind of an operand of a source int operator, from local evidence only (BIGINT.md rules 2-4): a literal or
+        a local whose kind the emitter itself followed; a parameter, an attribute, a container item and a call result are
+        unknown unless they are one of the rule-3 builtins.  Unknown counts as int arithmetic, which keeps the big runtime."""
+        if isinstance(node, ast.Attribute):
+            if node.attr in ('pi', 'e', 'tau') and isinstance(node.value, ast.Name) \
+                    and (node.value.id == 'math' or self.module_aliases.get(node.value.id) == 'math'):
+                return 'float'                       # a math constant is a float wherever it is read
+            return None                              # any other attribute is unproven, wherever it was stored
+        if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
+            return None                              # a container item is unproven
+        if isinstance(node, ast.Name) and node.id not in ctx.var_kind and node.id in self.module_names:
+            return None                              # a module global read from a function is not local evidence
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            f = node.func.id
+            if f in ('len', 'ord', 'int', 'bool', 'str'):
+                return 'int' if f in ('len', 'ord', 'int', 'bool') else 'str'
+            if f == 'float':
+                return 'float'
+            if f in ('abs', 'min', 'max') and node.args:
+                ks = {self._gate_kind(a, ctx) for a in node.args}
+                return next(iter(ks)) if len(ks) == 1 and None not in ks else None
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            attr = node.func.attr
+            if attr not in self.user_method_names:
+                if attr in bigcap._LP_MATH_FLOAT:
+                    return 'float'                   # math.sqrt/log/... return a float (or raise)
+                if attr in ('count', 'find', 'rfind', 'index', 'bit_length', 'bit_count'):
+                    return 'int'
+                if attr in ('lower', 'upper', 'strip', 'lstrip', 'rstrip', 'replace', 'join', 'format',
+                            'capitalize', 'title', 'swapcase', 'zfill', 'ljust', 'rjust', 'center',
+                            'removeprefix', 'removesuffix'):
+                    return 'str'
+        return self.infer_kind(node, ctx)
 
     def _builtin_method_proven(self, call, ctx):
         """`recv.m(...)` is the built-in method `m` (of str, list, dict, ...) unless a class of the program also
@@ -4990,7 +5335,10 @@ class Compiler(boxclosure.ClosureMixin):
 
     def stmt(self, node, ctx):
         where = pyfunc._debug_where(node)       # `ail build --debug` only: the C of the statement maps to its line
-        if where is None or where == ctx.where:
+        if where is None:
+            return self._stmt(node, ctx)
+        ctx.lines.append('    ' * ctx.indent + 'AIL_DBG_SITE("%s:%d");' % where)
+        if where == ctx.where:
             return self._stmt(node, ctx)
         outer, ctx.where, ctx.where_used = ctx.where, where, True
         try:
@@ -5031,6 +5379,21 @@ class Compiler(boxclosure.ClosureMixin):
         return method(node, ctx)
 
     # ------------------------------------------------------------------------------- expressions
+    def _big_literal(self, v, ctx):
+        """An int literal beyond int64: a static big object (no allocation, nothing to root), sign and base 2^32 limbs."""
+        m = abs(v)
+        limbs = []
+        while m:
+            limbs.append(m & 0xFFFFFFFF)
+            m >>= 32
+        lv = ctx.new_cvar('biglit')
+        if biggate.ON:
+            ctx.emit(biggate.IMARK)
+        ctx.emit('static struct { ail_gcobj h; int32_t sign; uint32_t n; uint32_t d[%d]; } %s = '
+                 '{ { AIL_K_BIG, 0, 0, 0, 0, NULL }, %d, %d, { %s } };'
+                 % (len(limbs), lv, -1 if v < 0 else 1, len(limbs), ', '.join('%dU' % x for x in limbs)))
+        return 'ail_big_static((ail_bigobj *)&%s)' % lv
+
     def expr_Constant(self, node, ctx):
         v = node.value
         if v is None:
@@ -5039,7 +5402,9 @@ class Compiler(boxclosure.ClosureMixin):
             return 'ail_box_bool(%d)' % (1 if v else 0)
         if isinstance(v, int):
             if v > 0x7FFFFFFFFFFFFFFF or v < -0x8000000000000000:
-                raise Unsupported('an integer literal outside int64 range')
+                if not biggate.ON:
+                    raise Unsupported('an integer literal outside int64 range')
+                return self._big_literal(v, ctx)
             return 'ail_box_int(%dLL)' % v
         if isinstance(v, float):
             if v != v or v in (float('inf'), float('-inf')):
@@ -5283,7 +5648,11 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node.op, ast.Pow):
             refuse_int_pow_overflow(node)
             refuse_complex_pow(node)
-            refuse_variable_int_pow(node)
+            if not biggate.ON:
+                refuse_variable_int_pow(node)
+        if biggate.ON and biggate.int_arith(type(node.op).__name__, self._gate_kind(node.left, ctx),
+                                           self._gate_kind(node.right, ctx)):
+            ctx.emit(biggate.IMARK)
         l = self.expr(node.left, ctx)
         r = self.expr(node.right, ctx)
         t = ctx.tmp()
@@ -5363,7 +5732,10 @@ class Compiler(boxclosure.ClosureMixin):
                 if width or prec:
                     raise Unsupported('%r with a width or precision')
                 t = ctx.tmp()
-                ctx.emit('%s = ail_obj_repr(cx, %s);' % (t, val))
+                if biggate.ON:
+                    ctx.emit('st = ail_obj_repr_st(cx, &%s, %s);' % (t, val)); ctx.check()
+                else:
+                    ctx.emit('%s = ail_obj_repr(cx, %s);' % (t, val))
                 pieces.append(t)
                 i = m.end()
                 continue
@@ -5445,6 +5817,8 @@ class Compiler(boxclosure.ClosureMixin):
                 and type(node.operand.value) is int and node.operand.value == 1 << 63):
             return 'ail_box_int(-9223372036854775807LL - 1)'
         v = self.expr(node.operand, ctx)
+        if biggate.ON and isinstance(node.op, (ast.USub, ast.Invert)) and biggate.unary_arith(self._gate_kind(node.operand, ctx)):
+            ctx.emit(biggate.IMARK)
         if isinstance(node.op, ast.USub):
             t = ctx.tmp()
             ctx.emit('st = ail_op_neg(cx, &%s, %s);' % (t, v))
@@ -5929,10 +6303,9 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node.value, ast.Name) and (node.value.id in self.module_aliases or
                                                   node.value.id == 'sys'):
             return self._module_attr_value(node.value.id, node.attr, ctx)
-        # `C.K` / `A.K` where A aliases a class: read the last definition the class body's own
-        # base chain finds.  A method or property of the same name shadows a base class attribute,
-        # but is not a value the general path can hand out, so refuse it by name (it used to fall
-        # through to the base attribute).
+        # `C.K` / `A.K` where A aliases a class: read the class's own attribute table (through its bases), the
+        # same binding an instance sees and `C.K = v` updates.  A method or property of the same name shadows a
+        # base class attribute, but is not a value the general path can hand out, so refuse it by name.
         direct = (isinstance(node.value, ast.Name) and node.value.id in self.classes
                   and node.value.id not in ctx.slot_of and node.value.id not in self.module_names)
         value_kind = self.infer_kind(node.value, ctx)
@@ -5941,20 +6314,20 @@ class Compiler(boxclosure.ClosureMixin):
             self._check_class_name_bound(cname, ctx)
         if cname is not None:
             owner, hit = self._class_chain_definition(cname, node.attr)
-            if hit is not None and (direct or hit[0] in ('m', 'p')):
-                if hit[0] == 'a':
-                    value, slot = hit[2], hit[3]
-                    if isinstance(value, ast.Constant) or (isinstance(value, ast.UnaryOp)
-                                                           and isinstance(value.operand, ast.Constant)):
-                        return self._cached_class_attr(slot, value, ctx, owner)
-                    try:
-                        return self._cached_class_attr(slot, value, ctx, owner)
-                    except Unsupported as exc:
-                        if getattr(exc, 'source_line', None) is not None:
-                            raise
-                        raise self._class_attr_through_class_refusal(cname, node.attr)
+            if hit is not None and (direct or hit[0] in ('m', 'p')) and hit[0] != 'a':
                 raise Unsupported("reading %s %s.%s through a class value" %
                                   ('property' if hit[0] == 'p' else 'method', owner, node.attr))
+            if direct or hit is not None:
+                # inside C's own body the name read above already raises NameError: the attributes are not re-installed
+                if not (direct and cname in self.class_init_active and not self._class_name_shadowed(cname, ctx)):
+                    self._ensure_class_attrs(cname, ctx)
+                obj = self.expr(node.value, ctx)
+                self.attr_names.add(node.attr)
+                t = ctx.tmp()
+                ctx.emit('st = ail_class_getattr(cx, &%s, %s, g_attr_%s, %s);' %
+                         (t, obj, node.attr, c_str_literal(node.attr)))
+                ctx.check()
+                return t
         prop_owners = [c for c in self.class_order if self.classes[c]['methods'].get(node.attr, {}).get('is_property')]
         if prop_owners:
             return self._property_read(node, prop_owners, ctx)
@@ -6195,7 +6568,10 @@ class Compiler(boxclosure.ClosureMixin):
                     continue
                 if v.conversion == ord('r'):
                     t = ctx.tmp()
-                    ctx.emit('%s = ail_obj_repr(cx, %s);' % (t, val))
+                    if biggate.ON:
+                        ctx.emit('st = ail_obj_repr_st(cx, &%s, %s);' % (t, val)); ctx.check()
+                    else:
+                        ctx.emit('%s = ail_obj_repr(cx, %s);' % (t, val))
                     if v.format_spec is None:
                         pieces.append(t)
                         continue
@@ -6277,7 +6653,11 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.check()
             return t
         t = ctx.tmp()
-        ctx.emit('%s = ail_obj_str(cx, %s);' % (t, val))
+        if biggate.ON:
+            ctx.emit('st = ail_obj_str_st(cx, &%s, %s);' % (t, val))
+            ctx.check()
+        else:
+            ctx.emit('%s = ail_obj_str(cx, %s);' % (t, val))
         return t
 
     # -------------------------------------------------------------------------------- calls
@@ -6756,7 +7136,15 @@ class Compiler(boxclosure.ClosureMixin):
             return
         defs_src = _mix_defs_only_source(tree)
         id_reach, id_any = _mix_identity_unsafe(tree)
+        import bigcap
+        big_hard = bigcap.marked(tree, local=False)          # always stay general
+        big_local = bigcap.marked(tree)
         for name, cand in sorted(report.candidates.items()):
+            # A clone's ABI is int64 in and out (the boxed caller unboxes the result), so an
+            # annotated function whose own local proof can leave int64 cannot be a clone either:
+            # `build` returning 2**70 would overflow before its caller ever saw the shift count.
+            if name in big_hard:
+                continue
             facts = getattr(report, 'function_ir', {}).get(name)
             if facts is None or not facts.matches(source, name):
                 continue
@@ -6774,11 +7162,57 @@ class Compiler(boxclosure.ClosureMixin):
             if ret not in _MIX_SCALAR_KINDS:
                 continue                                     # a list-returning candidate -- ditto
             mangled = pyfunc._mangle_csym(name) + '__typed'
-            try:
-                info2 = {'_checked_arrays': True, '_mixed_clone': True}   # a clone gets its lists from boxed code: every index is checked
-                csrc = pyfunc.to_c(defs_src, entry=name, sig=pymix._scalar_sig(cand['params']),
-                                   name=mangled, info=info2)
-            except Exception:
+            # An int-returning clone is emitted under an INNER name and wrapped in an int64 ABI
+            # function below. The wrapper gives the boxed call site an overflow signal: the inner
+            # clone computes with ail_tint (exact on overflow), and when its exact result does not
+            # fit int64 the wrapper sets the flag and `_call_mix_guarded` calls the boxed body
+            # instead. Every other result kind already has an ABI both sides agree on.
+            integer_ret = ret in (pymix.INT, pymix.BOOL)
+            inner = mangled + '__mix' if integer_ret else mangled
+            info2 = {'_checked_arrays': True, '_mixed_clone': True}   # a clone gets its lists from boxed code: every index is checked
+            # A clone whose local proof cannot bound its ints uses the tagged-int lowering when the
+            # IR can lower it (BIGINT.md rules 2-4). In an AIL_IR=0 build the rest of the program
+            # stays legacy, but this one clone still needs the IR so its int64-overflowing
+            # arithmetic takes the exact (tagged) arm instead of the loud int64 stop. When the IR
+            # cannot lower the function at all, retry without tagging: a checked-int64 clone still
+            # covers everything the old clone did, and a value that overflows there stops loudly.
+            tagged = name in big_local
+            attempts = []
+            if tagged:
+                attempts.append((dict(info2, _mixed_tagged=True), True))
+            attempts.append((info2, False))
+            csrc = None
+            _tag_error = ''
+            chosen_info = None
+            for attempt_info, _tag in attempts:
+                _ir_forced = _tag and os.environ.get('AIL_IR', '1').strip().lower() in (
+                    '0', 'off', 'no', 'false')
+                if _ir_forced:
+                    _old_ir = os.environ.get('AIL_IR')
+                    os.environ['AIL_IR'] = '1'
+                try:
+                    csrc = pyfunc.to_c(defs_src, entry=name, sig=pymix._scalar_sig(cand['params']),
+                                       name=inner, info=attempt_info)
+                    chosen_info = attempt_info
+                    break
+                except Exception as exc:
+                    csrc = None
+                    if _tag:
+                        _tag_error = str(exc)
+                finally:
+                    if _ir_forced:
+                        if _old_ir is None:
+                            os.environ.pop('AIL_IR', None)
+                        else:
+                            os.environ['AIL_IR'] = _old_ir
+            if csrc is None:
+                continue
+            if tagged and _tag_error and 'call of' not in big_local.get(name, ''):
+                # The IR cannot make this clone's local arithmetic exact and the legacy emitter
+                # would stop on int64 overflow rather than return a value the boxed body can
+                # reproduce. Leave it on the exact general path. A bound that comes from a call
+                # (int() parsing text, ...) is the one case where the checked-int64 clone still
+                # preserves the function's behavior for every value it can handle.
                 continue
             # `_one_function`'s own inlining heuristic (pyfunc.py, "NEVER the entry point" --
             # its check is literally `cname == 'run'`, hardcoded to `to_c`'s usual caller) has
@@ -6791,16 +7225,41 @@ class Compiler(boxclosure.ClosureMixin):
             # immediately in front of THIS mangled name's own two appearances (prototype and
             # definition) -- never touches any other function's inlining in the same unit.
             csrc = re.sub(r'__attribute__\(\(always_inline\)\) static inline\r?\n'
-                          r'(?=\S[^\n]*\b' + re.escape(mangled) + r'\s*\()', '', csrc)
-            if info2.get('io'):
+                          r'(?=\S[^\n]*\b' + re.escape(inner) + r'\s*\()', '', csrc)
+            if chosen_info is not None and chosen_info.get('io'):
                 # A clone that prints writes through the typed unit's own stdio while the boxed
                 # program buffers its output separately, so the two interleave out of order; and
                 # the str-return convention calls the clone TWICE (length-then-fill probe, see
                 # `_call_mix_guarded`), which would say a message twice. A function that can
                 # print()/assert stays boxed.
                 continue
-            sig_text = _mix_extract_signature(csrc, mangled)
-            if sig_text is None or not _mix_validate_signature(sig_text, mangled, params, ret):
+            overflow = None
+            if integer_ret:
+                overflow = mangled + '__mix_overflow'
+                patched = _mix_overflow_fallback(csrc, mangled, overflow)
+                if patched is None:
+                    continue
+                csrc, mix_state = patched
+            inner_sig = _mix_extract_signature(csrc, inner)
+            if inner_sig is None:
+                continue
+            if tagged and not _tag_error and 'ail_tint' not in inner_sig:
+                # The tagged attempt reported success but still emitted an int64-only clone: its
+                # local arithmetic (a local the proof cannot bound) would stop on overflow rather
+                # than reach the exact boxed body. Keep this function general.
+                continue
+            if integer_ret and not _mix_validate_signature(re.sub(r'\bail_tint\b', 'int64_t', inner_sig), inner,
+                                                           params, ret):
+                continue          # the inner clone's own ABI is not the one the wrapper (and the call site) call
+            if integer_ret:
+                wrapper, sig_text = _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow,
+                                                               mix_state)
+                if wrapper is None:
+                    continue
+                csrc += wrapper
+            else:
+                sig_text = inner_sig
+            if not _mix_validate_signature(sig_text, mangled, params, ret):
                 continue
             csrc = _mix_drain_before_exit(csrc)
             if csrc is None:
@@ -6809,6 +7268,8 @@ class Compiler(boxclosure.ClosureMixin):
                 'mangled': mangled, 'params': params, 'ret': ret,
                 'is_bool_ret': bool(cand.get('is_bool_ret')), 'sig': sig_text,
             }
+            if overflow is not None:
+                self.mix_typed[name]['overflow'] = overflow
             self.mix_units.append((mangled, name, '/* AIL_MIXED_TYPED: %s */\n' % name + csrc))
 
     def _call_mix_guarded(self, name, mix, argcs, ctx):
@@ -6882,7 +7343,17 @@ class Compiler(boxclosure.ClosureMixin):
         else:
             r = ctx.new_cvar('mixr')
             rtype = 'double' if mix['ret'] == pymix.FLOAT else 'int64_t'
+            if mix.get('overflow'):
+                # The exact (tagged) clone result did not fit int64: the wrapper sets this flag
+                # instead of wrapping or stopping, and the boxed body below produces the exact
+                # big-int answer (or any other value the clone's hypothesis cannot represent).
+                ctx.emit('%s = 0;' % mix['overflow'])
             ctx.emit('%s %s = %s(%s);' % (rtype, r, mix['mangled'], call_args))
+            fallback = mix.get('overflow') and mix['ret'] in (pymix.INT, pymix.BOOL)
+            if fallback:
+                ctx.emit('if (%s) %s = 0;' % (mix['overflow'], ok))
+                ctx.emit('if (%s) {' % ok)
+                ctx.indent += 1
             if mix['ret'] == pymix.FLOAT:
                 # C118/C119: a NaN is found in a container by its identity, and a result boxed afresh is never
                 # the object the boxed body would have handed back (`def ident(p): return p`): a NaN result
@@ -6901,6 +7372,14 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('%s = ail_mix_box_bool((int)%s);' % (t, r))
             else:
                 ctx.emit('%s = ail_mix_box_int(%s);' % (t, r))
+            if fallback:
+                ctx.indent -= 1
+                ctx.emit('} else {')
+                ctx.indent += 1
+                ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+                ctx.check()
+                ctx.indent -= 1
+                ctx.emit('}')
         ctx.indent -= 1
         ctx.emit('} else {')
         ctx.indent += 1
@@ -7060,18 +7539,16 @@ class Compiler(boxclosure.ClosureMixin):
                 (t, self.global_slots['class:' + name]))
         if self._is_exc_class(name):
             return self._call_exc_class(name, info, t, args, kwargs, ctx)
-        # class attributes are copied onto the instance, base class first so a subclass value wins
-        # (a class attribute the subclass does not redefine is read through the base, as CPython does)
+        # Class attributes live on the class itself (installed once by _ensure_class_attrs); an
+        # instance lookup falls through to them at run time, so it sees later `C.x = v` too and a
+        # write to the instance shadows rather than mutating the class.
         chain = []
         k = name
         while k is not None and k in self.classes and k not in chain:
             chain.append(k)
             k = self.classes[k]['base']
         for kls in reversed(chain):
-            for aname, aval, slot in self.classes[kls].get('class_attrs', []):
-                self.attr_names.add(aname)
-                v = self._class_attr_value(slot, aval, ctx, kls)
-                ctx.emit('ail_inst_setattr(cx, %s, g_attr_%s, %s);' % (t, aname, v))
+            self._ensure_class_attrs(kls, ctx)
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
             dummy = ctx.tmp()
@@ -7235,8 +7712,20 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('%s takes %d float arguments' % (name, arity))
         vals = [self.expr(a, ctx) for a in args]
         t = ctx.tmp()
-        ctx.emit('%s = ail_box_float(cx, %s(%s));' % (t, fn, ', '.join(
-            '((%s).tag == AIL_T_FLOAT ? ail_float_val(%s) : (double)(%s).i)' % (v, v, v) for v in vals)))
+        if not biggate.ON:
+            ctx.emit('%s = ail_box_float(cx, %s(%s));' % (t, fn, ', '.join(
+                '((%s).tag == AIL_T_FLOAT ? ail_float_val(%s) : (double)(%s).i)' % (v, v, v) for v in vals)))
+            return t
+        if fn in ('log', 'log2', 'log10') and len(vals) == 1:
+            # an int of any size has a log (CPython's loghelper); the helper's own checks turn a bad argument into the same ValueError
+            ctx.emit('if ((%s).tag == AIL_T_BIG) { st = ail_math_%s(cx, &%s, %s); if (st != AIL_OK) goto %s; } else' % (vals[0], fn, t, vals[0], ctx.cur_err_target()))
+            ctx.uses_st = True
+        md = ctx.new_cvar('md')
+        ctx.emit('{ double %s[%d];' % (md, len(vals)))
+        for i, v in enumerate(vals):
+            ctx.emit('  st = ail__math_double(cx, &%s[%d], %s); if (st != AIL_OK) goto %s;'
+                     % (md, i, v, ctx.cur_err_target()))
+        ctx.emit('  %s = ail_box_float(cx, %s(%s)); }' % (t, fn, ', '.join('%s[%d]' % (md, i) for i in range(len(vals)))))
         return t
 
     def _is_typed_intrinsic(self, name):
@@ -7260,6 +7749,19 @@ class Compiler(boxclosure.ClosureMixin):
             return self._call_typed_intrinsic(name, args, kwargs, ctx)
         if self.threads and name.startswith('_ail_th_') and name not in self.functions:
             return self._call_thread_prim(name, args, kwargs, ctx)
+        if name in ('_ail_perf_counter', '_ail_perf_counter_ns', '_ail_cpu_count') \
+                and name not in self.functions and name not in self.classes:
+            if args or kwargs:
+                raise Unsupported('%s() takes no arguments' % name)
+            self.rt_needs.add('SYSINFO')
+            t = ctx.tmp()
+            if name == '_ail_perf_counter':
+                ctx.emit('%s = ail_box_float(cx, ail_perf_counter());' % t)
+            elif name == '_ail_perf_counter_ns':
+                ctx.emit('%s = ail_box_int(ail_perf_counter_ns());' % t)
+            else:
+                ctx.emit('%s = ail_box_int(ail_cpu_count());' % t)
+            return t
         if name in self._CLOCK_PRIMS and name not in self.functions and name not in self.classes:
             return self._call_clock(name, args, kwargs, ctx)
         if name.startswith('_ail_') and name not in self.functions and name not in self.classes:
@@ -7397,6 +7899,9 @@ class Compiler(boxclosure.ClosureMixin):
                  % (fl, len(vs), ', '.join(fmt)))
         t = ctx.tmp()
         ctx.emit('%s = ail2_str_catn(cx, %s, %s, %d);' % (t, arr, fl, len(vs)))
+        if biggate.ON and '1' in fmt:
+            ctx.emit('st = ail__big_chk(cx);')
+            ctx.check()
         return t
 
     def _str_concat_leaves(self, node, ctx):
@@ -7542,6 +8047,15 @@ class Compiler(boxclosure.ClosureMixin):
     def _range_arg(self, b, ctx):
         """Convert one already-evaluated range() argument as CPython's PyNumber_Index does: an int
         or a bool, or an instance's __index__; anything else is the TypeError that names its type."""
+        self._index_dunder(b, ctx)
+        out = ctx.new_cvar('ri')
+        ctx.emit('int64_t %s;' % out)
+        ctx.emit('st = ail__range_index(cx, &%s, %s);' % (out, b))
+        ctx.check()
+        return out
+
+    def _index_dunder(self, b, ctx):
+        """An instance argument of range() becomes its __index__ result (in place)."""
         err = ctx.cur_err_target()
         if self.dunder_ops:
             fn = ctx.new_cvar('xfn')
@@ -7555,11 +8069,6 @@ class Compiler(boxclosure.ClosureMixin):
                      '%s = %s; } }'
                      % (b, fn, b, fn, xv, fn, xv, b, err, xv, xv, xv, err, b, xv))
             ctx.uses_st = True
-        out = ctx.new_cvar('ri')
-        ctx.emit('int64_t %s;' % out)
-        ctx.emit('st = ail__range_index(cx, &%s, %s);' % (out, b))
-        ctx.check()
-        return out
 
     def _b_range(self, args, kwargs, ctx):
         if kwargs:
@@ -7571,6 +8080,15 @@ class Compiler(boxclosure.ClosureMixin):
             b = ctx.tmp()
             ctx.emit('%s = %s;' % (b, self.expr(a, ctx)))
             objs.append(b)
+        if biggate.ON:
+            # the arguments are boxed values (a big int is a valid range end point); an instance goes through __index__
+            for b in objs:
+                self._index_dunder(b, ctx)
+            t = ctx.tmp()
+            pad = ['ail_box_int(0LL)'] * (3 - len(objs))
+            ctx.emit('st = ail_range_make(cx, &%s, %d, %s);' % (t, len(objs), ', '.join(objs + pad)))
+            ctx.check()
+            return t
         vals = [self._range_arg(b, ctx) for b in objs]
         if len(vals) == 1:
             lo, hi, st_, has_start, has_step = '0LL', vals[0], '1LL', 0, 0
@@ -7673,7 +8191,10 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, v))
             ctx.check()
         else:
-            ctx.emit('%s = ail_obj_repr(cx, %s);' % (t, v))
+            if biggate.ON:
+                ctx.emit('st = ail_obj_repr_st(cx, &%s, %s);' % (t, v)); ctx.check()
+            else:
+                ctx.emit('%s = ail_obj_repr(cx, %s);' % (t, v))
         return t
 
     def _b_bool(self, args, kwargs, ctx):
@@ -7911,7 +8432,7 @@ class Compiler(boxclosure.ClosureMixin):
             if tname in self.classes:
                 self._check_class_name_bound(tname, ctx)
             if tname == 'int':
-                checks.append('(%s.tag==AIL_T_INT||%s.tag==AIL_T_BOOL)' % (v, v))
+                checks.append('(%s.tag==AIL_T_INT||%s.tag==AIL_T_BOOL%s)' % (v, v, ('||%s.tag==AIL_T_BIG' % v) if biggate.ON else ''))
             elif tname in TYPE_TAG:
                 checks.append('%s.tag==%s' % (v, TYPE_TAG[tname]))
             elif tname == 'range':
@@ -7939,14 +8460,30 @@ class Compiler(boxclosure.ClosureMixin):
         if len(args) == 2 and 'start' in kwargs:
             raise Unsupported('enumerate() with both a positional start and start=')
         src = self._resolve_iter_src(args[0], ctx)
-        if len(args) == 2:
-            start = '(%s).i' % self.expr(args[1], ctx)
-        elif 'start' in kwargs:
-            start = '(%s).i' % self.expr(kwargs['start'], ctx)
-        else:
-            start = '0LL'
+        has_start = len(args) == 2 or 'start' in kwargs
+        start_node = args[1] if len(args) == 2 else kwargs.get('start')
+        if biggate.ON and has_start and not (
+                isinstance(start_node, ast.Constant) and type(start_node.value) is int
+                and -(1 << 62) < start_node.value < (1 << 62)):
+            # a start the int64 walk cannot rule out crossing: the exact (big int) count is needed
+            self.need_big_enum = True
         t = ctx.tmp()
-        ctx.emit('st = ail_iter_enumerate(cx, &%s, %s, %s);' % (t, src, start))
+        if biggate.ON:
+            if len(args) == 2:
+                start = self.expr(args[1], ctx)
+            elif 'start' in kwargs:
+                start = self.expr(kwargs['start'], ctx)
+            else:
+                start = 'ail_box_int(0)'
+            ctx.emit('st = ail_iter_enumerate_obj(cx, &%s, %s, %s);' % (t, src, start))
+        else:
+            if len(args) == 2:
+                start = '(%s).i' % self.expr(args[1], ctx)
+            elif 'start' in kwargs:
+                start = '(%s).i' % self.expr(kwargs['start'], ctx)
+            else:
+                start = '0LL'
+            ctx.emit('st = ail_iter_enumerate(cx, &%s, %s, %s);' % (t, src, start))
         ctx.check()
         return t
 
@@ -8217,8 +8754,11 @@ class Compiler(boxclosure.ClosureMixin):
         if not args or len(args) > 2:
             raise Unsupported('accumulate() with other than (iterable[, func])')
         src = self._resolve_iter_src(args[0], ctx)
-        fn = self._func_pointer_lib(args[1], ctx, 2) if len(args) > 1 else 'NULL'
-        has_init = 'initial' in kwargs
+        fn = 'NULL'
+        if len(args) > 1 and not (isinstance(args[1], ast.Constant) and args[1].value is None):
+            fn = self._func_pointer_lib(args[1], ctx, 2)
+        has_init = 'initial' in kwargs and not (
+            isinstance(kwargs['initial'], ast.Constant) and kwargs['initial'].value is None)
         init = self.expr(kwargs['initial'], ctx) if has_init else 'ail_box_none()'
         t = ctx.tmp()
         ctx.emit('st = ail_it_accumulate(cx, &%s, %s, %s, %d, %s);' %
@@ -9079,6 +9619,9 @@ class Compiler(boxclosure.ClosureMixin):
     def _b_pow(self, args, kwargs, ctx):
         if len(args) not in (2, 3) or kwargs:
             raise Unsupported('pow() with other than 2 or 3 positional arguments')
+        if len(args) == 2 and biggate.ON and biggate.int_arith('Pow', self._gate_kind(args[0], ctx),
+                                                              self._gate_kind(args[1], ctx)):
+            ctx.emit(biggate.IMARK)       # pow(a, b) is the `**` operator: an int result can leave int64
         a = self.expr(args[0], ctx); b = self.expr(args[1], ctx)
         t = ctx.tmp()
         if len(args) == 3:
@@ -9452,7 +9995,7 @@ class Compiler(boxclosure.ClosureMixin):
             conds.append('(%s.tag == AIL_T_LIST && ((ail_gcobj *)%s.o)->aux && ((ail_gcobj *)%s.o)->aux != 2)'
                           % (r, r, r))
         if 'int' in owners or 'bool' in owners:
-            conds.append('(%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL)' % (r, r))
+            conds.append('(%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL%s)' % (r, r, (' || %s.tag == AIL_T_BIG' % r) if biggate.ON else ''))
         if 'float' in owners:
             conds.append('%s.tag == AIL_T_FLOAT' % r)
         if name in ('index', 'count'):
@@ -9685,6 +10228,8 @@ class Compiler(boxclosure.ClosureMixin):
 
         def do_list(c):
             # a list or a deque (a flagged wrapper list; the kind is a run-time fact)
+            if biggate.ON:
+                c.emit('if ((%s).tag == AIL_T_BIG) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "Python int too large to convert to C ssize_t"); goto %s; }' % (i, c.cur_err_target()))
             c.emit('st = ail_meth_list_insert2(cx, %s, (%s).i, %s); if (st != AIL_OK) goto %s;' %
                    (recv, i, v, c.cur_err_target()))
             c.uses_st = True
@@ -9826,6 +10371,8 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('.pop() on a list with more than one index argument')
             if args:
                 i = self.expr(args[0], ctx)
+                if biggate.ON:
+                    c.emit('if ((%s).tag == AIL_T_BIG) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "Python int too large to convert to C ssize_t"); goto %s; }' % (i, c.cur_err_target()))
                 c.emit('st = ail_meth_list_pop(cx, &%s, %s, 1, (%s).i); if (st != AIL_OK) goto %s;' %
                       (t, recv, i, c.cur_err_target()))
             else:
@@ -10378,7 +10925,16 @@ class Compiler(boxclosure.ClosureMixin):
         folded = pyfunc.fold_maxsplit_constant(node)
         if folded is not None:
             node = ast.copy_location(ast.Constant(value=folded), node)
-        return '(%s).i' % self.expr(node, ctx)
+        value = self.expr(node, ctx)
+        if biggate.ON:
+            # a big int is no ssize_t: CPython raises at the call (its .i would be the clamped int64)
+            t = ctx.tmp()
+            ctx.emit('%s = %s;' % (t, value))
+            ctx.emit('if ((%s).tag == AIL_T_BIG) { st = ail_raise_c(cx, AIL_B_OVERFLOWERROR, "Python int too large to convert to C ssize_t"); goto %s; }'
+                     % (t, ctx.cur_err_target()))
+            ctx.uses_st = True
+            value = t
+        return '(%s).i' % value
 
     def _m_split(self, recv, kind, args, kwargs, ctx):
         args = self._sep_maxsplit(args, kwargs, ctx, 'split')
@@ -10584,18 +11140,24 @@ class Compiler(boxclosure.ClosureMixin):
     def _m_bit_length(self, recv, kind, args, kwargs, ctx):
         if args or kwargs:
             raise Unsupported('int.bit_length() takes no arguments')
-        x = '(%s).i' % recv
-        mag = '(%s < 0 ? (uint64_t)0 - (uint64_t)%s : (uint64_t)%s)' % (x, x, x)
-        return self._num_method('bit_length', recv, '%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL' % (recv, recv),
-                                'ail_box_int(%s ? 64 - __builtin_clzll(%s) : 0)' % (mag, mag), ctx)
+        if not biggate.ON:
+            x = '(%s).i' % recv
+            mag = '(%s < 0 ? (uint64_t)0 - (uint64_t)%s : (uint64_t)%s)' % (x, x, x)
+            return self._num_method('bit_length', recv, '%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL' % (recv, recv),
+                                    'ail_box_int(%s ? 64 - __builtin_clzll(%s) : 0)' % (mag, mag), ctx)
+        return self._num_method('bit_length', recv, '%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL || %s.tag == AIL_T_BIG' % (recv, recv, recv),
+                                'ail_box_int(ail__int_bit_length(%s))' % recv, ctx)
 
     def _m_bit_count(self, recv, kind, args, kwargs, ctx):
         if args or kwargs:
             raise Unsupported('int.bit_count() takes no arguments')
-        x = '(%s).i' % recv
-        mag = '(%s < 0 ? (uint64_t)0 - (uint64_t)%s : (uint64_t)%s)' % (x, x, x)
-        return self._num_method('bit_count', recv, '%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL' % (recv, recv),
-                                'ail_box_int(__builtin_popcountll(%s))' % mag, ctx)
+        if not biggate.ON:
+            x = '(%s).i' % recv
+            mag = '(%s < 0 ? (uint64_t)0 - (uint64_t)%s : (uint64_t)%s)' % (x, x, x)
+            return self._num_method('bit_count', recv, '%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL' % (recv, recv),
+                                    'ail_box_int(__builtin_popcountll(%s))' % mag, ctx)
+        return self._num_method('bit_count', recv, '%s.tag == AIL_T_INT || %s.tag == AIL_T_BOOL || %s.tag == AIL_T_BIG' % (recv, recv, recv),
+                                'ail_box_int(ail__int_bit_count(%s))' % recv, ctx)
 
     def _m_is_integer(self, recv, kind, args, kwargs, ctx):
         if args or kwargs:
@@ -10841,14 +11403,9 @@ class Compiler(boxclosure.ClosureMixin):
         return None
 
     def _refuse_class_attr_store(self, base, attr, ctx):
-        """A store through a class value updates the class object, but the general path keeps each
-        class attribute in a slot it only reads (and copies onto instances), so the store would
-        raise AttributeError where CPython updates the class.  Refuse by name instead."""
-        owner = self._static_class_base(base, ctx)
-        if owner is not None:
-            raise Unsupported('assigning the class attribute %s.%s; the general path keeps class '
-                              'attributes on instances and cannot update one through the class'
-                              % (owner, attr))
+        """A store through a class value updates the class object's own attribute table (ail_inst_setattr
+        reaches ail_class_setattr for a CLASS value), as CPython does, so nothing is refused."""
+        return
 
     def _assign_target(self, target, value_c, ctx, value_kind=None):
         if isinstance(target, ast.Name):
@@ -10857,6 +11414,14 @@ class Compiler(boxclosure.ClosureMixin):
             self._mark_rebound(target.id, ctx)
             return
         if isinstance(target, ast.Attribute):
+            if (isinstance(target.value, ast.Name) and target.value.id in self.classes
+                    and target.value.id not in ctx.slot_of
+                    and target.value.id not in self.module_names):
+                self._ensure_class_attrs(target.value.id, ctx)
+                obj = self.expr(target.value, ctx)
+                self.attr_names.add(target.attr)
+                ctx.emit('ail_class_setattr(cx, %s, g_attr_%s, %s);' % (obj, target.attr, value_c))
+                return
             if target.attr in ('__cause__', '__context__', '__suppress_context__', '__traceback__'):
                 raise Unsupported('writing %s (exception chaining is not kept here)' % target.attr)
             self._refuse_class_attr_store(target.value, target.attr, ctx)
@@ -11099,6 +11664,9 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('the augmented %s= operator' % type(node.op).__name__)
         t = node.target
         _tk = self.get_kind(t.id, ctx) if isinstance(t, ast.Name) else None
+        if biggate.ON and biggate.int_arith(type(node.op).__name__, _tk if _tk is not None else self._gate_kind(t, ctx),
+                                           self._gate_kind(node.value, ctx)):
+            ctx.emit(biggate.IMARK)
         if _tk not in ('int', 'float', 'str', 'list', 'tuple', 'bool'):
             # `s |= t`, `s &= t`, `s ^= t`, `s -= t` on a set whose kind is not known statically
             fn = {'ail_op_bitor': 'ail_op_ibitor', 'ail_op_bitand': 'ail_op_ibitand',
@@ -11137,7 +11705,21 @@ class Compiler(boxclosure.ClosureMixin):
                 self.set_kind(t.id, None, ctx)
             return
         if isinstance(t, ast.Attribute):
-            self._refuse_class_attr_store(t.value, t.attr, ctx)
+            if (isinstance(t.value, ast.Name) and t.value.id in self.classes
+                    and t.value.id not in ctx.slot_of and t.value.id not in self.module_names):
+                self._ensure_class_attrs(t.value.id, ctx)
+                obj = self.expr(t.value, ctx)
+                self.attr_names.add(t.attr)
+                cur = ctx.tmp()
+                ctx.emit('st = ail_class_getattr(cx, &%s, %s, g_attr_%s, %s);' %
+                        (cur, obj, t.attr, c_str_literal(t.attr)))
+                ctx.check()
+                rhs = self.expr(node.value, ctx)
+                new = ctx.tmp()
+                ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
+                ctx.check()
+                ctx.emit('ail_class_setattr(cx, %s, g_attr_%s, %s);' % (obj, t.attr, new))
+                return
             obj = self.expr(t.value, ctx)
             self.attr_names.add(t.attr)
             cur = ctx.tmp()
@@ -11511,8 +12093,36 @@ class Compiler(boxclosure.ClosureMixin):
                 else:
                     cname = self._inst_class(exc.args[0], ctx)
                     msg_c = self._to_str_slot(mv, cname, ctx)
-            elif len(exc.args) > 1:
+            elif len(exc.args) > 1 and tname in ('OSError', 'IOError', 'EnvironmentError', 'FileNotFoundError',
+                                                 'PermissionError', 'IsADirectoryError', 'FileExistsError',
+                                                 'NotADirectoryError', 'BlockingIOError', 'ChildProcessError',
+                                                 'ConnectionError', 'InterruptedError', 'ProcessLookupError',
+                                                 'TimeoutError'):
+                # (OSError(errno, strerror) carries .errno and .strerror, which this path's exceptions do not)
                 raise Unsupported('raising %s with more than one argument' % tname)
+            elif len(exc.args) > 1:
+                self.rt_needs.add('exc')
+                arr = ctx.new_cvar('ea')
+                slots = []
+                for a in exc.args:
+                    slot = ctx.tmp()
+                    ctx.emit('%s = %s;' % (slot, self.expr(a, ctx)))
+                    slots.append(slot)
+                ctx.emit('ail_obj %s[%d] = { %s };' % (arr, len(slots), ', '.join(slots)))
+                # str(Several(...)) is repr of the tuple of arguments in CPython, whether or not
+                # the program reads e.args (KeyError is not special here for more than one arg)
+                tt = ctx.tmp()
+                ctx.emit('%s = ail_tuple_new(cx, %s, %d);' % (tt, arr, len(slots)))
+                msg_c = ctx.tmp()
+                ctx.emit('%s = ail_obj_repr(cx, %s);' % (msg_c, tt))
+                if tname in EXC_IDS:
+                    # keep the arguments on the exception value even when this program never reads
+                    # e.args: repr(e) (and str of a KeyError) is built from them
+                    ctx.emit('st = ail2x_raise_builtin(cx, cx->builtin_cls[%s], %s, %s, %d); goto %s;' %
+                             (EXC_IDS[tname], msg_c, arr, len(slots), ctx.cur_err_target()))
+                    ctx.uses_st = True
+                    return
+                raise Unsupported('raising %s (only builtin or user Exception subclasses)' % tname)
             if tname in EXC_IDS and self.reads_args and exc.args:
                 # the value keeps the argument for e.args (KeyError('k').args is ('k',), not its message)
                 self.rt_needs.add('exc')
@@ -12076,6 +12686,25 @@ def _lazy_raising_genexp(tree):
 
 
 def build(source, report, allow_mix=True):
+    """One build with the big int support in the program when it can reach it, else (byte for byte what it was before the big ints)
+    without (biggate.py): the first pass has it, a second pass without runs when the first shows no creator reachable."""
+    mode = os.environ.get('AIL_BIGINT', 'auto')
+    biggate.ON = mode != 'off'
+    body = _build(source, report, allow_mix)
+    big = mode != 'off' and (mode == 'on' or report.get('big_enum') or biggate.wants_big(body))
+    if not big:
+        biggate.ON = False
+        try:
+            body = _build(source, report, allow_mix)
+        finally:
+            biggate.ON = True
+    report['bigint'] = big
+    pieces = biggate.pieces_for(body) if big else set()
+    body = biggate.resolve(body, big, pieces=pieces)
+    return biggate.strip(body)
+
+
+def _build(source, report, allow_mix=True):
     """pyc.py's own hook (env AIL_GENERAL=v2): the WHOLE C source for `source` compiled through
     the v2 general path (this file's own preamble + the program, #including ail_obj2.h by
     absolute path -- folding that into cruntime.py's fragment table is the coordinator's later
@@ -12157,6 +12786,7 @@ def build(source, report, allow_mix=True):
     if compiler.uplan is not None and not compiler.threads and os.environ.get('AIL_UNIFIED_POOL'):
         import safetyrt
         body = safetyrt.patch_gcpool(body)
+    report['big_enum'] = getattr(compiler, 'need_big_enum', False)
     report['boxed'] = [n for n in compiler.boxed_names if n not in compiler.prelude_names]
     if compiler.threads:
         # G12: the prelude's own functions are not the program's; the link needs the thread library

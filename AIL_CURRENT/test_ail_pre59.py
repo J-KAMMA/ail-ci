@@ -2,7 +2,7 @@
 
 The general-path runtime returned an empty result for a negative r where CPython
 raises ``ValueError: r must be non-negative`` (DIFFERENCES row
-C?-job-fuzz8-10220554-1).  ``ail_it_permutations``, ``ail_it_combinations`` and
+C200).  ``ail_it_permutations``, ``ail_it_combinations`` and
 ``ail_it_combinations_wr`` now check the sign before the "r larger than the
 pool" early exit, so empty pools and r == 0 keep their CPython results.
 

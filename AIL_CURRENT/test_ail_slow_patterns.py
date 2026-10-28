@@ -1,7 +1,7 @@
 """Advisory slow-pattern hints (ail_slow_patterns): `check` reports them as `slow_patterns`, `compile`
 prints them on stderr after a successful build. Never a failure, at most 3 lines, one per kind.
 
-Why: in the 2026-10-14 held-out task round AIL's route-search program was 40x C. The program used a heap of
+Why: in the 2026-10-14 novel-task round AIL's rail_transfer was 40x C. The program used a heap of
 structs (then 5.5x the instructions of the same search over a heap of packed ints, measured with
 tools/icount; a key of int/float fields is now sifted in C, so only computed keys are reported) and a one-sided search where C/Rust searched from both ends (175x fewer
 relaxations); the reference's own Dijkstra example scanned every edge for each popped node. The
@@ -169,7 +169,7 @@ class SlowPatternTests(unittest.TestCase):
 
     def test_llm_corpus_is_almost_silent(self):
         runs = ROOT.parent / 'experiments/llm-compare'
-        files = sorted(glob.glob(str(runs / 'private-runs/sources/*-ail-*.ail')))
+        files = sorted(glob.glob(str(runs / 'runs-2026-10-1[34]/sources/*-ail-*.ail')))
         if not files:
             self.skipTest('experiments/llm-compare is not part of this tree')
         warned = {}
@@ -179,9 +179,9 @@ class SlowPatternTests(unittest.TestCase):
             found = ail_slow_patterns.scan(text, source_map)
             if found:
                 warned[Path(name).name] = sorted((w['line'], w['rank']) for w in found)
-        # audit-2: venues x events scan. a route-search program 3/4 (the 40x program) key their struct
+        # ticket_audit-2: venues x events scan. rail_transfer 3/4 (the 40x program) key their struct
         # heaps on int fields, which the compiler now sifts in C (4.6x fewer instructions).
-        self.assertEqual(warned, {'audit-ail-2.ail': [(254, 2)]})
+        self.assertEqual(warned, {'ticket_audit-ail-2.ail': [(254, 2)]})
         self.assertEqual(len(files), 60)
 
 

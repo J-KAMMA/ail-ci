@@ -376,7 +376,7 @@ def find(tree, only_tuple=False):
             if _derived(a, b) or _derived(b, a):
                 continue            # `(x or "o") is not x`: the same object (or its stand-in), not two constants that CPython merges
             if _tuple_may_be_same(ka, kb):
-                return n, ('`%s` with a tuple constant (line %d, DIFFERENCES C?-job-fuzz39-10230820-1): CPython merges '
+                return n, ('`%s` with a tuple constant (line %d, DIFFERENCES C175): CPython merges '
                            'equal tuple constants of a code object (`a = (); b = (); a is b` is True; `()` is a '
                            'singleton) and here each tuple display is a value of its own; compare with `==`'
                            % ('is not' if isinstance(o, ast.IsNot) else 'is', n.lineno))
@@ -463,7 +463,7 @@ def _tuple_argument_refusal(tree, scan):
                     ka, kb = scan.kind(aa, scope), scan.kind(bb, scope)
                     if _argument_tuple_risk(ka, kb):
                         return node, ('`%s` between two values that may be tuple constants (line %d, DIFFERENCES '
-                                      'C?-job-fuzz39-10230820-1): CPython merges equal tuple constants of a code object, '
+                                      'C175): CPython merges equal tuple constants of a code object, '
                                       'so the same literal passed to both parameters is one object; each tuple display '
                                       'here is a value of its own; compare with `==`'
                                       % ('is not' if isinstance(op, ast.IsNot) else 'is', node.lineno))

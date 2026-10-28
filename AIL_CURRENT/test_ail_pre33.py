@@ -1,4 +1,4 @@
-"""pre33: an integer power whose constant result leaves int64 is refused by name.
+"""pre33: an integer power whose constant result leaves int64 (refused by name in the int64 era; exact ints now build and match CPython).
 
 CPython's int is unbounded, so `10 ** 40` is an exact integer; this language's int is int64
 (SEMANTICS section 1). Before this, a constant integer power whose exact result does not fit
@@ -7,7 +7,7 @@ reached `ail_ipow` at run time and stopped with `integer overflow`, so a tuple s
 then stopped at run time. It is now refused at compile time with a name: either the generic
 all-constant folder (`int64 constant out of range`, `outside the signed 64-bit range`) or the
 accepted `refuse_int_pow_overflow` check with its DIFFERENCES id
-(C?-job-rbrbrbrbpre33-10271808-1), on both general builds, the typed path and the v1 general emitter.
+(C426), on both general builds, the typed path and the v1 general emitter.
 Powers that fit are unchanged, including INT64_MIN from `(-2) ** 63` and the bases -1, 0 and 1
 under a huge exponent.
 """
@@ -20,7 +20,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 CHATGPT = str(ROOT / 'ail_chatgpt.py')
-MARKER = 'C?-job-rbrbrbrbpre33-10271808-1'
+MARKER = 'C426'
 REFUSALS = ('int64 constant out of range',
             'int64 constant expression out of range',
             'outside the signed 64-bit range',
@@ -98,16 +98,26 @@ main()
 
 
 class Pre33Tests(unittest.TestCase):
-    def test_constant_power_out_of_range_is_refused(self):
+    def test_constant_power_out_of_range_builds_and_matches_cpython(self):
+        # Exact ints: a power beyond int64 builds on both general builds and matches CPython; v1 stops loudly.
         with tempfile.TemporaryDirectory(prefix='ail-pre33-') as directory:
             for name, text in REFUSED.items():
+                want, rc = cpython(directory, name, text)
                 for mode in ('g', 'd', 'v1'):
                     with self.subTest(name=name, mode=mode):
-                        _, built = build(directory, name + '_' + mode, text, mode)
-                        self.assertNotEqual(built.returncode, 0, (name, mode))
-                        message = built.stdout + built.stderr
-                        self.assertTrue(any(item in message for item in REFUSALS), (name, mode, message))
-                        self.assertNotIn('integer overflow', message, (name, mode))
+                        exe, built = build(directory, name + '_' + mode, text, mode)
+                        if mode == 'v1':
+                            # The legacy int64 emitter has no exact ints: it must stop loudly, never print a wrong value.
+                            if built.returncode == 0:
+                                got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+                                self.assertNotEqual(got.returncode, 0, (name, got.stdout))
+                                self.assertEqual(got.stdout, b'', (name, got.stdout))
+                                self.assertIn(b'OverflowError', got.stderr, name)
+                            continue
+                        self.assertEqual(built.returncode, 0, (name, mode, (built.stdout + built.stderr)[-1200:]))
+                        got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+                        self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want, (name, mode, got.stderr[-800:]))
+                        self.assertEqual(got.returncode, rc, (name, mode, got.stderr[-800:]))
 
     def test_powers_that_fit_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre33-') as directory:

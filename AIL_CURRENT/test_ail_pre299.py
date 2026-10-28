@@ -1,10 +1,10 @@
-"""A builtin ``pow()`` that cannot fit int64 is refused by name at compile time (job pre299).
+"""A builtin ``pow()`` that leaves int64 builds and matches CPython under exact ints (job pre299).
 
-CPython's ``pow(2, 63)`` is the exact bignum 9223372036854775808; this compiler's int is int64,
-so the same program used to compile and then stop with ``integer overflow``.  A constant result
-outside int64 is now refused by name, and so is a constant integer base with an exponent computed
-at run time (the value cannot be compared with int64 while compiling, matching the pre273 rule
-for ``**``).  In-range powers, bases 0/1/-1, float powers, the three-argument form and a program
+CPython's ``pow(2, 63)`` is the exact bignum 9223372036854775808.  With the int64 ints this was
+refused by name at compile time (constant result, or a constant base with a run-time exponent);
+under exact ints both builds build the program and match CPython's stdout, exit code and last
+stderr line (``pow(2, 1 << 20)`` fails in CPython itself with the 4300-digit conversion limit).
+In-range powers, bases 0/1/-1, float powers, the three-argument form and a program
 that binds its own ``pow`` keep matching CPython.
 """
 import os
@@ -121,19 +121,24 @@ def _cpython(directory, name, text):
 
 
 class Pre299(unittest.TestCase):
-    def refused(self, cases, extra=''):
+    def matches_cpython(self, cases):
         with tempfile.TemporaryDirectory(prefix='ail-pre299-') as directory:
             for name, text, *rest in cases:
+                src = Path(directory) / (name + '_ref.py')
+                src.write_text(text, encoding='utf-8')
+                done = subprocess.run([sys.executable, '-B', str(src)], capture_output=True, timeout=120,
+                                      env=dict(os.environ, PYTHONUTF8='1'))
+                want_out = done.stdout.replace(b'\r\n', b'\n')
+                lines = done.stderr.decode('utf-8', 'replace').strip().splitlines()
+                want_err = lines[-1] if lines else ''
                 for general in (False, True):
                     with self.subTest(case=name, general=general):
-                        got, output = _build_and_run(directory, name, text, general)
-                        self.assertIsNone(got, output)
+                        got, output = _build_and_run(directory, name + ('_g' if general else '_d'), text, general)
+                        self.assertIsNotNone(got, output)
+                        self.assertEqual(got, (want_out, done.returncode), output)
                         self.assertNotIn('integer overflow', output)
-                        self.assertNotIn('Traceback', output)
-                        if rest:
-                            self.assertIn(rest[0], output)
-                        if extra:
-                            self.assertIn(extra, output)
+                        if want_err:
+                            self.assertIn(want_err, output)
 
     def check_python(self, name, text):
         with tempfile.TemporaryDirectory(prefix='ail-pre299-') as directory:
@@ -144,11 +149,11 @@ class Pre299(unittest.TestCase):
                     self.assertIsNotNone(got, output)
                     self.assertEqual(got, want, output)
 
-    def test_constant_pow_outside_int64_is_refused(self):
-        self.refused(REFUSED_CONSTANT)
+    def test_constant_pow_outside_int64_matches_cpython(self):
+        self.matches_cpython(REFUSED_CONSTANT)
 
-    def test_computed_exponent_pow_is_refused(self):
-        self.refused(REFUSED_COMPUTED, 'computed at run time')
+    def test_computed_exponent_pow_matches_cpython(self):
+        self.matches_cpython(REFUSED_COMPUTED)
 
     def test_in_range_pow_matches_cpython(self):
         self.check_python('safe', SAFE)

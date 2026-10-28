@@ -314,10 +314,10 @@ class HostileInput(unittest.TestCase):
                 self.compare(name, data)
 
     def test_documented_differences(self):
-        """DIFFERENCES.md: a valid non-BMP UTF-8 sequence and an int beyond int64 still stop."""
+        """DIFFERENCES.md: a valid non-BMP UTF-8 sequence still stops."""
+        self.compare('numbers', b'9' * 30)        # exact ints (bigint): an int beyond int64 matches CPython
         for name, data, text in (
-                ('binary', b'\xf0\x9f\x98\x80', 'code point above U+FFFF'),
-                ('numbers', b'9' * 30, 'integer overflow')):
+                ('binary', b'\xf0\x9f\x98\x80', 'code point above U+FFFF'),):
             for mode in ('general', 'default'):
                 got = self.run_ail(name, mode, data)
                 self.assertNotEqual(got.returncode, 0, (name, mode))

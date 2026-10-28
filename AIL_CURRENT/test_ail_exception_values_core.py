@@ -73,7 +73,9 @@ fn main() -> int {
  return 0;
 }'''
         exe = self.ail_build('propagation', source)
-        self.check_run(exe, 'forward cleanup\n元😀\nreplacement\nValueError 0\n')
+        # (int("bad") raises ValueError with CPython's 45-character message "invalid literal for int() with base 10:
+        # 'bad'"; it used to be a bare trap with no text)
+        self.check_run(exe, 'forward cleanup\n元😀\nreplacement\nValueError 45\n')
 
     def test_cross_object_exception_param_result_and_dynamic_reraise(self):
         library = self.ail_build('provider', '''fn make(s: str) -> exception { return OSError(s); }

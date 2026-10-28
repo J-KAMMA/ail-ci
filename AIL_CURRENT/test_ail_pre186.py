@@ -158,12 +158,9 @@ class Pre186Tests(unittest.TestCase):
         for general in (False, True):
             got, err = _run(self.dir, 'overflow_' + ('g' if general else 'd'), OVERFLOW, general)
             self.assertIsNotNone(got, err)
-            self.assertEqual(got.returncode, 0, got.stderr)
-            lines = got.stdout.splitlines()
-            self.assertEqual(len(lines), 8, lines)
-            for line in lines:
-                self.assertRegex(line, r'^\w+ OverflowError enumerate\(\) index integer overflow$')
-                self.assertNotIn('-9223372036854775808', line)
+            # exact ints (bigint): the counter passes INT64_MAX exactly, as in CPython
+            self.assertEqual((got.stdout, got.returncode), (want.stdout, want.returncode),
+                             'general=%s\n%s' % (general, got.stderr))
 
     def test_uncaught_overflow_is_not_a_wrap(self):
         want = _cpython(self.dir, 'uncaught', UNCAUGHT)
@@ -172,9 +169,9 @@ class Pre186Tests(unittest.TestCase):
         for general in (False, True):
             got, err = _run(self.dir, 'uncaught_' + ('g' if general else 'd'), UNCAUGHT, general)
             self.assertIsNotNone(got, err)
-            self.assertNotEqual(got.returncode, 0)
-            self.assertIn('OverflowError', got.stderr)
-            self.assertIn('enumerate() index integer overflow', got.stderr)
+            # exact ints (bigint): prints the big counter like CPython
+            self.assertEqual((got.stdout, got.returncode), (want.stdout, want.returncode),
+                             'general=%s\n%s' % (general, got.stderr))
 
 
 if __name__ == '__main__':

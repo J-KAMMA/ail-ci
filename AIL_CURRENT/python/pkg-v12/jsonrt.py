@@ -269,7 +269,10 @@ def _ail_js_pv_int(p: _AilJp) -> int:
             p.i = e
             v = 0
             try:
-                v = int(b[i:e].decode())
+                w = int(b[i:e].decode())
+                if w > 9223372036854775807 or w < -9223372036854775807 - 1:
+                    _ail_js_mismatch(p, "an int within 64 bits")
+                v = w
             except OverflowError:
                 _ail_js_mismatch(p, "an int within 64 bits")
             except ValueError:

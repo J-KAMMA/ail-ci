@@ -166,31 +166,21 @@ class Pre215Tests(unittest.TestCase):
     def tearDown(self):
         self.tmp.cleanup()
 
-    def test_constant_abs_outside_int64_is_refused_by_name(self):
-        for label, text in OUT_OF_RANGE.items():
+    def _matches_cpython(self, prefix, cases):
+        # exact ints (bigint): an abs() beyond int64 builds and prints CPython's value on both builds
+        for label, text in cases.items():
+            want = _cpython(self.dir, prefix + label, text)
             for general in (False, True):
                 with self.subTest(label + ('_g' if general else '_d')):
-                    built, _ = _build(self.dir, '%s_%s' % (label, 'g' if general else 'd'),
-                                      text, general)
-                    self.assertNotEqual(built.returncode, 0, label)
-                    message = built.stdout + built.stderr
-                    self.assertIn('int64 constant expression out of range', message, label)
-                    self.assertNotIn('integer overflow', message, label)
-                    self.assertNotIn('Traceback', message, label)
+                    got, err = _run(self.dir, '%s%s_%s' % (prefix, label, 'g' if general else 'd'), text, general)
+                    self.assertIsNotNone(got, err)
+                    self.assertEqual((got.stdout, got.returncode), (want.stdout, want.returncode), label)
+
+    def test_constant_abs_outside_int64_is_refused_by_name(self):
+        self._matches_cpython('', OUT_OF_RANGE)
 
     def test_other_review_cases_are_refused_by_name(self):
-        for label, text in OTHER_REFUSED.items():
-            for general in (False, True):
-                with self.subTest(label + ('_g' if general else '_d')):
-                    built, _ = _build(self.dir, 'other_%s_%s' % (label, 'g' if general else 'd'),
-                                      text, general)
-                    self.assertNotEqual(built.returncode, 0, label)
-                    message = built.stdout + built.stderr
-                    self.assertTrue('outside the signed 64-bit range' in message
-                                    or 'int64 constant expression out of range' in message,
-                                    label)
-                    self.assertNotIn('integer overflow', message, label)
-                    self.assertNotIn('Traceback', message, label)
+        self._matches_cpython('other_', OTHER_REFUSED)
 
     def test_in_range_abs_matches_cpython(self):
         want = _cpython(self.dir, 'in_range', IN_RANGE)
