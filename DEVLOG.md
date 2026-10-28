@@ -64,6 +64,26 @@ alias, attribute, dict value, list item; int and slice), `p_boundaries` (class-n
 a builtin function object) all match CPython.  Final-state tests: test_ail_pre378,
 test_ail_pre377, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (30 tests,
 0 failed, 1 skipped for no zig).  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-28 -- re-apply pre385 on the integration tree (job-rbpre385-10281430)
+
+Re-applied the accepted pre385 routed-power change on top of this tree. The new
+`_check_int64_routed_power` pass follows module-scope calls into plain functions and refuses by
+name a `**` or two-argument `pow()` whose call-bound constant operands leave int64; the
+stored-parameter fix from the pre385 review (a parameter the callee stores to before the power
+does not carry its call argument) came with it. The call site kept this tree's
+`_check_int64_augmented_powers` pass as well, and the routed pass now runs before the constant
+pow passes so call-routed powers keep their dedicated diagnostic where no earlier check fires.
+`mixed_sites` is already refused by this tree's earlier constant-binpow pass with the plain
+`int64 constant expression out of range` message, so `test_ail_pre385.py` accepts that message
+for that one route while the routed cases still assert `through a call`.
+
+`tools/diff_ids.py` is not present on this tree, so it was not run. `tools/update_manifest.py`
+was run and `--check` passes; `tools/ci_shards.py --update` placed `test_ail_pre385` and
+`--check` exits 0. Probes in `/tmp/probes` (18 programs, both builds via `cmp.sh`): p01-p09 and
+p16-p18 are refused by name, p10-p15 match CPython. Final-state tests: `test_ail_pre385`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, `test_ail_pre364`,
+`test_ail_pre367`, `test_ail_pre372`, `test_ail_pre388` and `test_ail_pre404` pass.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
@@ -691,6 +711,57 @@ uncaught one, both builds) and registered it in ``ail_check.MODULES`` and
 ``tools/ci_shards.json``.  Final-state tests: test_ail_pre378, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3.  ``tools/update_manifest.py`` was run and
 ``--check`` passes.
+## 2026-10-27 -- pre385 review fix: a stored parameter does not carry its call argument (job-pre385-10280736)
+
+The pre385 review found false refusals: `_check_int64_routed_power` bound every call argument to
+its parameter, so `def power(b, e): b = 1; return b ** e` called with `(2, 100)` was refused with
+`int64 constant expression out of range` although the reported value never executes (CPython and
+base print `1`).  A `for` target, an augmented assignment and a conditional store did the same.
+`scan` now drops a parameter from the call environment for a node when a store to it can run
+first: a store lexically before the node, or any store in the same function while the node is
+inside a loop (a loop may repeat).  A parameter with no binding for a node resolves as unknown
+instead of falling back to a same-named module constant, so a rebinding wrapper that forwards to
+another function cannot leak the shadowed module value.  A store after the power does not
+invalidate it, so `v = b ** e; b = 1` is still refused by name.
+
+Probes in `/tmp/probes` (14 programs, both builds via `cmp.sh`): p1-p6 and p9-p14 match CPython
+(`1`, `1`, `0`, `1`, a rebinding wrapper, a parameter shadowing a module constant, an unknown
+argument, an in-range rebinding, a loop store before the power, a loop power with a later store,
+and a store in a later block); p7 (`u1_nested_call`), p8 (`v1_mixed_sites`) and p11 (store after
+the power) are refused by name on both builds.  `test_ail_pre385.py` gained `REBOUND` (7 matching
+values) and the `store_after_power` refused case.  Tests on this commit: `test_ail_pre385`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`tools/update_manifest.py --check` passes.
+
+## 2026-10-27 -- pre385: refuse a power whose constant operands are routed through calls (job-pre385-10280736)
+
+The pre364 review's first still-differing pre-existing item was `u1_nested_call`: both
+parameters of a function routed through another call into `b ** e` compiled on both builds and
+then stopped with `integer overflow`, where CPython prints the bignum.  `v1_mixed_sites` (a safe
+module call plus a nested `f(2)` with a wide constant exponent) differed the same way.
+`AIL_CURRENT/ail_chatgpt.py` now runs `_check_int64_routed_power` next to the other int64 checks:
+from every module-scope call it binds a plain top-level function's parameters to statically known
+arguments (literals, module constants, safe list/dict items, aliases and literal class
+attributes), follows calls made inside the callee the same way, and refuses by name a `**` or
+two-argument `pow()` that follows such a parameter when the exact result leaves int64.  Only
+operands that syntactically follow a call-bound parameter are checked, so the existing
+constant-power folders keep deciding plain constant sub-expressions such as `(3**100)>>150`.
+Unresolved calls, in-range values, float/bool bases, negative exponents, mutated containers and
+run-time-only values are unchanged.
+
+Probes in `/tmp/probes` (19 programs, both builds via `cmp.sh`): `u1a`-`u1h`, `u1l`-`u1o`,
+`u1r` and `v1a` are refused by name (`int64 constant expression out of range ... through a
+call`), covering the nested call, argument/wrapper, direct call, `pow()` spelling, list item,
+alias, class attribute and dict value routes plus exponent 63 and a huge exponent; `u1i`-`u1k`,
+`u1p` and `u1q` match CPython (in-range and boundary powers, bases 0/1/-1, float/bool/negative
+exponents, a mutated list and a runtime exponent).  Added `test_ail_pre385.py` (11 refused + 1
+matching program, both builds), registered in `ail_check.MODULES`; `tools/ci_shards.json` gained
+its weight and assignment.  Final-state tests: `test_ail_pre385`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`, `test_ail_pre351`, `test_ail_pre299`,
+`test_ail_pre331`, `test_ail_pre294`, `test_ail_pre33` and `test_ail_pre34` pass;
+`tools/update_manifest.py --check` passes; `ci_shards.py --check` reports only the four
+pre-existing duplicate entries.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
