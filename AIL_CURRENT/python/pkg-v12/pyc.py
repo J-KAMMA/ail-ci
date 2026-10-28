@@ -648,8 +648,8 @@ def _has_main_entry(source):
 
 def _runs_no_module_body(source):
     """A Python-surface whole program whose top level executes nothing observable: no `main`, at
-    least one top-level statement, and every one of them is a definition, an import, a docstring,
-    `pass`, or a module-constant assignment. CPython runs such a file (the definitions do not
+    least one top-level statement, and every one of them is an undecorated definition, an import,
+    a docstring, `pass`, or a module-constant assignment. CPython runs such a file (the definitions do not
     execute) and prints nothing, and the general path already runs only the empty module body for
     it (a top-level statement makes `pyboxed2` skip the last-def array entry). Pure definitions
     with no top-level statement stay the last-def entry point, so this rule never touches that
@@ -664,7 +664,13 @@ def _runs_no_module_body(source):
         return False
     statement = False
     for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
+        if isinstance(node, (ast.FunctionDef, ast.ClassDef)):
+            # A decorator runs when the definition executes; the typed path does not run it, so
+            # a decorated definition is not this shape (its probe keeps the old FILE/N entry).
+            if node.decorator_list:
+                return False
+            continue
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
             continue
         if _is_docstring_stmt(node) or isinstance(node, ast.Pass):
             continue

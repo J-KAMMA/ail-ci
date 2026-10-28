@@ -1,3 +1,44 @@
+## 2026-10-28 -- ex1: a definitions+module-constants Python file runs nothing (job-ex1-10290155)
+
+Six of the 266 `.ail` examples under `AIL_CURRENT/language_examples` parse as Python syntax.
+Built with `--syntax python` on both paths, the refused ones were `math.ail` (default build:
+"not in the subset: the first parameter must be the sequence read from the file"),
+`use_math.ail` (both builds, by name: "the name 'sum_to' is not a known function/class/builtin"),
+and `integer_series.ail` (default build: "the C compiler rejected this: ... too few arguments
+to function 'run'", pre-existing).  The other three (`hello`, `sum`, `stdin_sum`) already built
+and matched CPython.
+
+`math.ail` is `LIMIT = 6` plus `def sum_to(n)` with no top-level call.  CPython runs the file,
+binds the constant and the function, prints nothing, and exits 0; the typed path instead used
+the last `def` as the entry point and refused it (or demanded a FILE argument).  The general
+path already ran only the module body.  When the Python-surface program defines no `main`, has
+at least one top-level statement, and every top-level statement is an undecorated `def`/`class`,
+an import, a docstring, `pass`, or a module-constant assignment (so nothing CPython executes can
+print or raise), `_build_unshadowed` now emits `int main(void) { return 0; }` instead of the
+entry call.  Decorated definitions are excluded: the typed path does not run decorators, so
+they keep the previous FILE/N entry rather than becoming a silent empty success.  Pure
+definitions with no top-level statement also keep the last-def convention.
+
+A top-level call, a computed assignment, and an uncalled `main()` still execute or refuse
+exactly as before; default arguments (evaluated at definition time), class bodies and
+module-constant values reaching functions through an argument, a list item, an attribute and a
+dict value all match CPython on both builds.  Every unblocked program now builds and matches
+CPython 3.12 on both builds, so no DIFFERENCES row is added.
+
+Added `AIL_CURRENT/test_ail_ex1.py` (6 tests, both builds) and registered it in
+`ail_check.MODULES`.  Probes `/tmp/probes/ex1_*.py` (24 programs) cover the minimal
+`LIMIT = 5` + `def helper(x)` reproducer, int/float/str/list/tuple/empty/negative/int64
+constants, annotated and folded-alias assignments, `pass`/docstring/import/class shapes, a
+zero-arg definition that prints, default/decorator/annotation/class-body def-time side effects,
+a def-only program (default-build base refusal), an uncalled `main`, top-level calls, computed
+assignments, and the argument/list-item/attribute/dict routes.  Four boundary probes stay at
+their pre-existing behaviour, identical on the base worktree: a decorated definition and a
+plain def-only file keep the FILE/N entry (build succeeds; running without the required argument
+prints usage), and annotation/class-body side effects are still silently omitted by both builds;
+none is caused by this change.  Final-state tests: `test_ail_ex1`,
+`test_ail_python_syntax`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
