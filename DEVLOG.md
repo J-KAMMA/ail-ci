@@ -1,3 +1,27 @@
+## 2026-10-28 -- re-apply pre400 on the integration tree (job-rbpre400-10281602)
+
+Re-applied the accepted pre400 routed-power change on top of this tree.  This tree did not carry
+pre385's routed-power pass (it only had the constant-exponent `**`/`pow` passes), so
+`_routed_power_known` and `_check_int64_routed_power` are added after `_check_int64_pow_constants`
+and called from `_load_sources` beside it.  The call binder accepts keyword arguments instead of
+skipping every keyword that names a positional parameter.  Both-keyword and mixed calls, reversed
+keyword order, keyword-only parameters and a keyword call nested in another function are refused
+by name on both builds, as are constants reached through a module constant, list item, dict value,
+class attribute and alias.  In-range keyword calls, a parameter stored to before the power
+(including in a loop), float/bool/negative exponents, a non-power call, a dynamic argument and a
+later mutation still match CPython.  The pre-existing `pow(b, e)` parameter route (k06) keeps its
+own `int64 constant expression out of range` wording.  Other pre385 items (`r6` default argument,
+`r9` parameter alias, method/nested-def routes and `**kwargs` calls) still stop at run time.
+
+Probes in `/tmp/probes/pre400` on both builds via `cmp.sh`: k01-k14 are refused by name (both
+keywords, reversed, mixed, keyword-only, wrapper, `pow`, exponent 63, store after, module constant,
+list item, dict value, class attribute, alias, huge exponent); s01-s08 match CPython (in-range
+bases/exponents, float/bool/negative/0/1/-1, store before, loop rebind, non-power, dynamic
+argument, later mutation, positional in-range).  Added `AIL_CURRENT/test_ail_pre400.py` and
+registered it in `ail_check.MODULES`; `tools/ci_shards.json` gained its weight and assignment.
+`tools/diff_ids.py` is not present on this tree, so it was not run; `tools/update_manifest.py` was
+run and `--check` passes.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
