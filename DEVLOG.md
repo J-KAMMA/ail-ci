@@ -18,9 +18,9 @@ probes cover item, slice, alias, method and helper-call
 mutation before the call, dead `if False`/`while False`/empty `for`/empty literals/after return,
 the true branch's else, in-range starred calls, container sources (list item, class attribute,
 dict value, wrapper argument), float/bool/negative operands and module-level mutation before the
-call.  One probe (a module list mutated after the call) traps on both this tree and the base
-build; that is the pre-existing item the review already recorded and is unchanged.  The new
-cases are in `test_ail_pre415`.  Final-state tests: test_ail_pre415, test_ail_safetynet,
+call.  Two probes (a module-level name declared `global`, and a module list mutated after the
+call) trap identically on both this tree and the base build; both are pre-existing and unchanged
+by this job.  The new cases are in `test_ail_pre415`.  Final-state tests: test_ail_pre415, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check`
 passes.
 
