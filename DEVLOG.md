@@ -1,3 +1,21 @@
+## 2026-10-28 -- fz1: an exception in a try/else clause reaches an outer handler (job-fz1-10281147)
+
+The daily fuzzer (seed `2075200054`, CPython 3.12, default+ir) found an `int('Cd')` inside a
+try's `else` that CPython ends with an uncaught `ValueError`, while AIL continued and printed
+the program's later lines.  `pyboxed2.py`'s `stmt_Try` emitted the `else` statements in the
+same C block as the try body, so the try's own handlers caught them.  The `else` body now
+jumps over the handler dispatch to a label after it and is compiled against the enclosing
+handlers; under a `finally` it is still inside the finally's reach (through the existing
+trampoline), so the finally runs before the exception propagates.  A matched handler and a
+body error both skip `else`, and a normal body runs it once.
+
+Added `AIL_CURRENT/test_ail_fz1.py` (both builds): the minimized construct, `IndexError` and
+`ZeroDivisionError` raised in `else`, a `finally` case, normal completion, a body error that
+skips `else`, and values from an argument, a list item, an attribute and a dict value.  Probes
+in `/tmp/probes` on both builds via `cmp.sh`: `p_tryelse`, `p_tryelse2`, `p_tryelse3` and the
+fuzzer program `fz1` now match CPython (stdout and exit code).  Final-state tests:
+test_ail_fz1, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  No other
+differences were seen in this reproducer.
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
