@@ -580,9 +580,9 @@ class _Rewriter:
         return [loop]
 
     # -- dict(sorted(d.items())) ---------------------------------------------------------------
-    def dict_sorted_items(self, node, pre):
-        """`dict(sorted(d.items()))` -> `{k: d[k] for k in sorted(d.keys())}` (same order and
-        values; only the no-key spelling, where sorting by the whole pair sorts by the key)."""
+    def dict_sorted_parts(self, node):
+        """(receiver, reverse) of `dict(sorted(d.items()))`; only the no-key spelling, where
+        sorting by the whole pair is the same order as sorting by the key (keys are unique)."""
         if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and node.func.id == 'dict' and len(node.args) == 1 and not node.keywords):
             return None
@@ -595,18 +595,59 @@ class _Rewriter:
         key, reverse = self.options(inner, 'sorted()')
         if key is not None:
             return None
-        element = '_ail_sk%d_k' % self.next_id()
+        return receiver, reverse
+
+    @staticmethod
+    def dict_sorted_loop(receiver, n, reverse, target):
+        """`for k in sorted(d.keys()): target[k] = d[k]`, the shape the typed path lowers an
+        annotated dict assignment to; a dict comprehension would be introduced after the pass
+        that lowers comprehensions, so it cannot be used here."""
+        element = '_ail_sk%d_k' % n
         keys = ast.Call(func=ast.Attribute(value=_name(receiver), attr='keys', ctx=ast.Load()),
                         args=[], keywords=[])
-        inner.args[0] = keys
-        inner.keywords = [ast.keyword(arg='reverse', value=ast.Constant(value=True))] if reverse else []
-        comp = ast.DictComp(
-            key=_name(element),
-            value=ast.Subscript(value=_name(receiver), slice=_name(element), ctx=ast.Load()),
-            generators=[ast.comprehension(target=_name(element, True), iter=inner,
-                                          ifs=[], is_async=0)])
+        iterable = ast.Call(func=_name('sorted'), args=[keys],
+                            keywords=[ast.keyword(arg='reverse', value=ast.Constant(value=True))]
+                            if reverse else [])
+        store = ast.Assign(targets=[ast.Subscript(value=_name(target),
+                                                  slice=_name(element), ctx=ast.Store())],
+                           value=ast.Subscript(value=_name(receiver),
+                                               slice=_name(element), ctx=ast.Load()))
+        return ast.For(target=_name(element, True), iter=iterable, body=[store], orelse=[],
+                       type_comment=None)
+
+    def dict_sorted_items(self, node, pre):
+        """`dict(sorted(d.items()))` in an expression: fill a fresh dict with a loop ahead of the
+        statement and use its name (same order and values)."""
+        parts = self.dict_sorted_parts(node)
+        if parts is None:
+            return None
+        receiver, reverse = parts
+        n = self.next_id()
+        target = '_ail_sk%d_d' % n
+        pre.append(ast.Assign(targets=[_name(target, True)],
+                              value=ast.Dict(keys=[], values=[])))
+        pre.append(self.dict_sorted_loop(receiver, n, reverse, target))
         self.count += 1
-        return comp
+        return _name(target)
+
+    def dict_sorted_assignment(self, st):
+        """`target = dict(sorted(d.items()))` / `target: dict[...] = ...`: empty the target, then
+        fill it by sorted key, so an annotation on the target still settles its exact map kind."""
+        parts = self.dict_sorted_parts(st.value)
+        if parts is None:
+            return None
+        target = st.targets[0] if isinstance(st, ast.Assign) else st.target
+        if not isinstance(target, ast.Name):
+            return None
+        if isinstance(st, ast.Assign) and len(st.targets) != 1:
+            return None
+        receiver, reverse = parts
+        if target.id == receiver:
+            return None              # `d = dict(sorted(d.items()))`: never empty d before reading it
+        n = self.next_id()
+        st.value = ast.Dict(keys=[], values=[])
+        self.count += 1
+        return [st, self.dict_sorted_loop(receiver, n, reverse, target.id)]
 
     # -- walking ---------------------------------------------------------------------------------
     def expr(self, node, pre):
@@ -683,6 +724,9 @@ class _Rewriter:
             target = st.targets[0] if isinstance(st, ast.Assign) else st.target
             if (isinstance(target, ast.Name)
                     and (not isinstance(st, ast.Assign) or len(st.targets) == 1)):
+                replaced = self.dict_sorted_assignment(st)
+                if replaced is not None:
+                    return self.place(replaced, st)
                 replaced = self.pair_assignment(st)
                 if replaced is not None:
                     return self.place(replaced, st)

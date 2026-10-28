@@ -1,3 +1,22 @@
+## 2026-10-28 -- cov20 review: `dict(sorted(d.items()))` on the typed path (job-cov20-10290430)
+
+The review found that the first cov20 commit lowered `dict(sorted(d.items()))` to a dict
+comprehension, but sortkeys.py runs after `iterlower`'s comprehension pass, so the typed path still
+refused it (`'out' is declared sdict; assigning int is unsupported` / `a dict comprehension`). The
+lowering now emits the same shape `iterlower` would have produced: an assignment of `{}` to the
+target followed by `for k in sorted(d.keys()): target[k] = d[k]`. An assignment target keeps its
+annotation, so `out: dict[str, int] = dict(sorted(d.items()))` builds on the typed path; the
+expression form fills a fresh temp dict the same way. A target that is also the receiver
+(`d = dict(sorted(d.items()))`) is left to the expression path, so the receiver is never emptied
+before it is read. The provisional dict comprehension never appears in the tree.
+
+Default-build compile census unchanged at 24 refused / 195 accepted (the change only reaches the
+fallback the typed path uses). `glm t467` strict blockers go 5 -> 4: line 34 (the
+`print(dict(sorted(stats.items())))`) is no longer a blocker; the remaining four are unrelated
+(`*values`/`**extra`, `Iterable[str]`, `None`, tuple assignment). `test_ail_cov20` now builds a
+typed (`AIL_STRICT=1`) `ranked` and `dict(sorted(...))` program and compares it with CPython, and
+pins the lowered AST (two loops, no dict comprehension).
+
 ## 2026-10-28 -- cov20: `sorted(d.items())` bound to a name and `dict(sorted(d.items()))` (job-cov20-10290430)
 
 The current corpus compile census (219 programs, default build) refuses 24 programs. Excluding the

@@ -77,6 +77,51 @@ PROGRAMS['dictsorted'] = r'''def main():
 
 main()
 '''
+TYPED_PROGRAMS = {}
+TYPED_PROGRAMS['ranked'] = r'''def main():
+    d: dict[str, int] = {"b": 2, "a": 1, "d": 4, "c": 3}
+    ranked = sorted(d.items(), key=lambda kv: (-kv[1], kv[0]))
+    for k, v in ranked[:2]:
+        print(k, v)
+    for k, v in ranked:
+        print("all", k, v)
+    flat = sorted(d.items())
+    for k, v in flat[::-1]:
+        print("rev", k, v)
+
+
+main()
+'''
+TYPED_PROGRAMS['dictsorted'] = r'''def main():
+    d: dict[str, int] = {"b": 2, "a": 1, "d": 4, "c": 3}
+    out: dict[str, int] = dict(sorted(d.items()))
+    for k, v in out.items():
+        print(k, v)
+    rev: dict[str, int] = dict(sorted(d.items(), reverse=True))
+    for k, v in rev.items():
+        print("rev", k, v)
+    empty: dict[str, int] = {}
+    nothing: dict[str, int] = dict(sorted(empty.items()))
+    for k, v in nothing.items():
+        print(k, v)
+    copy = dict(sorted(d.items()))
+    for k, v in copy.items():
+        print("copy", k, v)
+
+
+main()
+'''
+
+DICTSORTED = '''def main():
+    d = {"b": 2, "a": 1}
+    out = dict(sorted(d.items()))
+    print(dict(sorted(d.items())))
+    return out
+
+
+main()
+'''
+
 
 SAFE = '''def main():
     d = {"a": 2, "b": 1}
@@ -153,6 +198,22 @@ class Programs(unittest.TestCase):
             with self.subTest(program=name):
                 self.check(name)
 
+    def test_typed_path(self):
+        for name in TYPED_PROGRAMS:
+            with self.subTest(program=name):
+                with tempfile.TemporaryDirectory() as directory:
+                    text = TYPED_PROGRAMS[name]
+                    oracle = Path(directory, "oracle.py")
+                    oracle.write_text(text, encoding="utf-8")
+                    want = subprocess.run([sys.executable, "-X", "utf8", str(oracle)],
+                                          capture_output=True, timeout=300)
+                    built, exe = build(directory, text, "t_" + name, AIL_STRICT="1")
+                    self.assertEqual(built.returncode, 0,
+                                     "%s strict: %s%s" % (name, built.stdout[-400:],
+                                                          built.stderr[-600:]))
+                    got = subprocess.run([str(exe)], capture_output=True, timeout=300)
+                    self.assertEqual(got.stdout.decode(), want.stdout.decode(), name)
+
 
 class Refused(unittest.TestCase):
     def refused(self, text, word, **env):
@@ -176,6 +237,12 @@ class LoweringBoundary(unittest.TestCase):
 
     def test_snapshot_is_lowered(self):
         self.assertEqual(self.rewrite(SAFE), 2)
+
+    def test_dict_sorted_is_a_loop_not_a_comprehension(self):
+        tree = ast.parse(DICTSORTED)
+        self.assertEqual(sortkeys.rewrite(tree, 1, lambda key: False, Exception), 2)
+        self.assertFalse(any(isinstance(node, ast.DictComp) for node in ast.walk(tree)))
+        self.assertEqual(sum(isinstance(node, ast.For) for node in ast.walk(tree)), 2)
 
     def test_not_a_plain_snapshot_is_refused_by_name(self):
         for label, text in UNSAFE.items():
