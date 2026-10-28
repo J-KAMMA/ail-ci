@@ -114,7 +114,9 @@ def spec_from_class(cls, tb):
 def generate(spec, user_defined):
     f = spec.fields
     params = ''.join(', %s%s' % (n, (' = ' + ast.unparse(spec.defaults[n])) if n in spec.defaults else '') for n in f)
-    lines = ['class %s(_AilNT):' % spec.var, '    def __init__(self%s):' % params]
+    lines = ['class %s(_AilNT):' % spec.var,
+             '    _fields = (%s%s)' % (', '.join(repr(n) for n in f), ',' if len(f) == 1 else ''),
+             '    def __init__(self%s):' % params]
     lines += ['        self.%s = %s' % (n, n) for n in f] or ['        pass']
     lines += ['    def _ail_vals(self) -> list:', '        return [%s]' % ', '.join('self.' + n for n in f)]
     lines += ['    def _ail_names(self) -> list:', '        return [%s]' % ', '.join(repr(n) for n in f)]
