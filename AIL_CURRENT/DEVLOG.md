@@ -1,3 +1,31 @@
+## 2026-10-28 -- pre409 review fix: class subscript names are not truncated at 95 (job-pre409-10281141)
+
+The review found that `ail__class_subscript_error` copied the class name into a 96-byte
+buffer, so names longer than 95 code points lost their tail (`96`- and `100`-character cases).
+It now copies into a dynamically sized buffer and caps the name at CPython 3.12's
+200-character message limit (CPython also truncates a 300-character class name to 200).
+`test_ail_pre409.py` covers 95/96/100/199/200/201/300 code points for both index and slice on
+both builds.  The earlier report's claim that deletion keeps CPython's wording was wrong:
+`del A[1]` still says `doesn't` where CPython says `does not`; that pre-existing difference is
+unchanged.  Probes `/tmp/probes/p409_long_names.py`, `p409_long_routes.py` and
+`p409_short_controls.py` match CPython on both builds.
+
+## 2026-10-28 -- pre409: class-object subscript TypeError names the class (job-pre409-10281141)
+
+The pre378 review recorded as pre-existing that `A[1]` on a user class said
+`'type' object is not subscriptable` on both builds, where CPython 3.12 says
+`type 'A' is not subscriptable`.  The v2 runtime's index and slice read paths now format
+the message from the class value's own name (including subclasses, aliases and values
+reaching it through an argument, list item, attribute or dict value); the internal
+`_AilDeque_` name special case is not used here.  Class assignment keeps CPython's bare
+`'type' object ...` wording; `del A[1]` keeps the pre-existing `doesn't` wording where
+CPython says `does not`, and instance `__getitem__` is unchanged.
+
+Probes `/tmp/probes/p409_classobj_{index,slice,store,controls}.py` match CPython on both
+builds; `p409_classobj_unicode.py` is refused by name because the v2 runtime is
+ASCII-only.  Added `test_ail_pre409.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES`.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C

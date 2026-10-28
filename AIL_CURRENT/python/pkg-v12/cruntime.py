@@ -14854,6 +14854,27 @@ static inline ail_st ail__raise_item_tname(ail_ctx *cx, int builtin_id, const ch
     free(buf);
     return st;
 }
+/* CPython's subscript TypeError for a class value names the class after `type`:
+   `type 'A' is not subscriptable`, not the bare metaclass name `'type'`. There is no
+   __class_getitem__ in this subset, so every subscript operation on a class takes this. */
+static inline ail_st ail__class_subscript_error(ail_ctx *cx, ail_obj c, const char *tail) {
+    ail_str nm = ail_view_to_str(((ail_classobj *)c.o)->name);
+    size_t k = 0;
+    char *name = (char *)malloc((size_t)nm.n + 1);
+    if (!name) ail_die("out of memory");
+    for (int64_t i = 0; i < nm.n && k < 200; i++) { /* CPython's message keeps at most 200 name characters */
+        uint32_t ch = (uint32_t)ail_chr(nm, i);
+        name[k++] = ch < 128 ? (char)ch : '?';
+    }
+    name[k] = 0;
+    size_t blen = k + strlen(tail) + 9; /* "type '" + name + "' " + tail + NUL */
+    char *buf = (char *)malloc(blen);
+    if (!buf) { free(name); ail_die("out of memory"); }
+    snprintf(buf, blen, "type '%s' %s", name, tail);
+    ail_st st = ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    free(name); free(buf);
+    return st;
+}
 static inline ail_st ail_deque_concat(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_counter_binop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op);
 static inline ail_st ail_counter_unary(ail_ctx *cx, ail_obj *out, ail_obj a, int neg);
@@ -16104,6 +16125,7 @@ static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_ob
             if (i >= 0 ? ord >= n : (uint64_t)(~i) >= n) return ail_raise_c(cx, AIL_B_INDEXERROR, "range object index out of range");
             *out = ail_box_int(ail__range_at(r->start, r->step, ord)); return AIL_OK;
         }
+        case AIL_T_CLASS: return ail__class_subscript_error(cx, c, "is not subscriptable");
         default: { return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object is not subscriptable", c); }
     }
 }
@@ -16161,6 +16183,7 @@ static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int h
         *out = ail_range_new(cx, (int64_t)ns, (int64_t)ne, (int64_t)nd);
         return AIL_OK;
     }
+    if (c.tag == AIL_T_CLASS) return ail__class_subscript_error(cx, c, "is not subscriptable");
     return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object is not subscriptable", c);
 }
 
