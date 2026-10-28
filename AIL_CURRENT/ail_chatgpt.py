@@ -1081,6 +1081,31 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
     return functions
 
 
+def _wrapper_int_defaults(tree, int_params, known, passthrough, attributes):
+    """The constant value of every default a wrapper passes to int().
+
+    Defaults are evaluated once, in the module scope where they are defined, so a local
+    name bound at a call site must not change the value a default carries.
+    """
+    lookup = lambda name: known.get(name, _UNKNOWN)
+    defaults = {}
+    for fn in tree.body:
+        if not isinstance(fn, ast.FunctionDef) or fn.name not in int_params:
+            continue
+        args = fn.args
+        positional = [argument.arg for argument in (*args.posonlyargs, *args.args)]
+        first = len(positional) - len(args.defaults)
+        mapping = {positional[first + offset]:
+                   _constant_value(default, lookup, lambda unused: True, passthrough, attributes)
+                   for offset, default in enumerate(args.defaults)}
+        for argument, default in zip(args.kwonlyargs, args.kw_defaults):
+            if default is not None:
+                mapping[argument.arg] = _constant_value(
+                    default, lookup, lambda unused: True, passthrough, attributes)
+        defaults[fn.name] = mapping
+    return defaults
+
+
 def _all_bound_names(root):
     """Every name the program (or subtree) binds, for deciding whether a call is a builtin."""
     bound = set()
@@ -1220,11 +1245,12 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
 
 
 class _Int64CallChecker(ast.NodeVisitor):
-    def __init__(self, known, passthrough, int_params, int_shadowed, attributes, program_bound,
-                 argument_containers=None):
+    def __init__(self, known, passthrough, int_params, int_defaults, int_shadowed,
+                 attributes, program_bound, argument_containers=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
+        self.int_defaults = int_defaults
         self.int_shadowed = int_shadowed
         self.attributes = attributes
         self.program_bound = program_bound
@@ -1277,6 +1303,10 @@ class _Int64CallChecker(ast.NodeVisitor):
                         value = self.argument_containers.get(argument.id, _UNKNOWN)
                     for path in paths:
                         self._check_conversion(node, _constant_path_value(value, path))
+                else:
+                    default = self.int_defaults.get(node.func.id, {}).get(name, _UNKNOWN)
+                    for path in paths:
+                        self._check_conversion(node, _constant_path_value(default, path))
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
@@ -1692,7 +1722,8 @@ def _check_int64_literals(tree):
                                      known)
     argument_containers = _call_argument_containers(tree, module_counts, global_names, parents,
                                                    known)
-    _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
+    int_defaults = _wrapper_int_defaults(tree, int_params, known, passthrough, attributes)
+    _Int64CallChecker(known, passthrough, int_params, int_defaults, int_shadowed, attributes,
                       program_bound, argument_containers).visit(tree)
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]

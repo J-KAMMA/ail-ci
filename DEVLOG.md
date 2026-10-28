@@ -1,3 +1,24 @@
+## 2026-10-28 -- re-apply pre393: int() of an out-of-int64 default argument is refused by name (job-rbpre393-10281532)
+
+Re-applied the accepted pre393 change on the current integration tree.  A wrapper parameter whose
+call omits the argument is now checked against the default's constant value, resolved once in the
+module scope where the default is defined (positional defaults aligned from the tail plus
+keyword-only defaults).  The current tree's wrapper paths and argument-container fixes are kept:
+an omitted argument is followed through the same constant subscript paths before the shared
+conversion check.  A constant string outside int64 through a wrapper gets the direct conversion
+refusal.  In-range defaults, an argument that overrides the default, a dead function, a starred
+argument and a non-int read are unchanged; a shadowing caller local neither refuses an in-range
+default nor hides an out-of-range one.  Added `AIL_CURRENT/test_ail_pre393.py` and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`; added DIFFERENCES row
+`C?-job-rbpre393-10281532-1`.  Probes in `/tmp/probes` (24 programs, both builds via `cmp.sh`):
+p01-p10 and p14, p23 (out-of-range positional, keyword-only, second positional, negative,
+module-constant, list-item, dict-value, attribute, string and chained defaults, plus aliasing and
+a shadowed scalar) are refused by name; p11-p13, p15-p22 and p24 (in-range and boundary defaults,
+explicit overrides, shadowed list/dict/attribute defaults, a non-constant default, a starred
+argument, a dead function, an empty string default and zero/negative int defaults) match CPython.
+`tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run and `--check`
+passes.  Final-state tests: test_ail_pre393, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
