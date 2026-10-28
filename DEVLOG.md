@@ -1,3 +1,40 @@
+## 2026-10-28 -- pre402: a function-local int() read before a later mutation is refused (job-pre402-10281051)
+
+The pre387 review's first pre-existing item was `b03`, a function-local container read before
+a later mutation:
+
+    def f():
+        items = [1e300]
+        print(int(items[0]))
+        items[0] = 1.5
+
+    f()
+
+Both builds compiled it and stopped with `integer overflow`, where CPython prints the exact
+big integer.  Added `_check_scope_flow_int64_containers` in `AIL_CURRENT/ail_chatgpt.py`,
+called for every `FunctionDef`/`AsyncFunctionDef` from `_check_int64_literals`.  It walks a
+function's own top-level statements in source order with a small read-only model (literal
+list/tuple/dict containers, `_AilT_` tuple constructors, aliases and scalars); an `int()` read
+of a known out-of-int64 value is refused by name (`int() of a float outside int64` or
+`int64 constant expression out of range`) before a later mutation drops the name.  A mutation
+before the read, a pure statement between them, an in-range value and the int64 boundary stay
+unchanged, and any compound statement or unmodelled call drops the tracked names so it can
+cost a refusal but never invent one.  No code is generated differently: the pass only raises.
+
+Probes in `/tmp/probes/pre402` on both builds via `cmp.sh`: `b03_local_list`,
+`b03_local_dict`, `b03_local_alias`, `r01_local_empty_default`, `r02_local_negative`,
+`r03_local_nested`, `r04_local_tuple`, `r05_local_del_after_read`,
+`r06_local_alias_chain` and `r07_local_dict_string` are refused by name; `m01_local_list_mutate_first`,
+`m02_local_dict_update_first`, `m03_local_alias_mutate_first`, `m04_local_inrange`,
+`m05_local_int64_max`, `m06_local_inrange_mutate_first` and `m07_local_method_mutate_first`
+match CPython.  Exploratory `if_read`, `for_read`, `r18_classattr` and `exec_probe` keep their
+pre-existing `integer overflow`/subset refusal and are not changed here.
+
+Final-state tests on this commit: test_ail_pre402, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (4 modules, 349 s, 0 failed), plus the related test_ail_pre357,
+test_ail_pre358, test_ail_pre359 and test_ail_pre371 (4 modules, 105 s, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:

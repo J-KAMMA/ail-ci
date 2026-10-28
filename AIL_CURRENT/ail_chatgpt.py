@@ -1246,6 +1246,291 @@ class _Int64CallChecker(ast.NodeVisitor):
         self._visit_comprehension(node)
 
 
+_SCOPE_FLOW_PURE_CALLS = frozenset({'print', 'len', 'str', 'repr', 'int'})
+_SCOPE_FLOW_SCALARS = (bool, int, float, str, bytes, type(None))
+
+
+def _scope_flow_mention_names(node):
+    return {sub.id for sub in ast.walk(node) if isinstance(sub, ast.Name)}
+
+
+def _scope_flow_function_header(statement):
+    args = statement.args
+    header = list(statement.decorator_list) + list(args.defaults)
+    header += [default for default in args.kw_defaults if default is not None]
+    for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+        if arg is not None and arg.annotation is not None:
+            header.append(arg.annotation)
+    if statement.returns is not None:
+        header.append(statement.returns)
+    return header
+
+
+def _scope_flow_executed_nodes(statement):
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return _scope_flow_function_header(statement)
+    if isinstance(statement, ast.ClassDef):
+        nodes = list(statement.decorator_list) + list(statement.bases)
+        nodes += [keyword.value for keyword in statement.keywords]
+        for inner in statement.body:
+            nodes.extend(_scope_flow_executed_nodes(inner))
+        return nodes
+    return [statement]
+
+
+def _scope_flow_decorator_names(statement):
+    if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return []
+    names = list(statement.decorator_list)
+    if isinstance(statement, ast.ClassDef):
+        for inner in statement.body:
+            names.extend(_scope_flow_decorator_names(inner))
+    return names
+
+
+def _scope_flow_container(value):
+    if type(value) in _SCOPE_FLOW_SCALARS:
+        return False
+    if isinstance(value, (list, tuple)):
+        return all(type(item) in _SCOPE_FLOW_SCALARS or _scope_flow_container(item)
+                   for item in value)
+    if isinstance(value, dict):
+        return all((type(key) in _SCOPE_FLOW_SCALARS or _scope_flow_container(key))
+                   and (type(item) in _SCOPE_FLOW_SCALARS or _scope_flow_container(item))
+                   for key, item in value.items())
+    return False
+
+
+def _scope_flow_pure_expression(node, lookup, pure_calls, attributes):
+    for sub in ast.walk(node):
+        if isinstance(sub, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp,
+                            ast.GeneratorExp, ast.NamedExpr, ast.IfExp, ast.BoolOp,
+                            ast.Await, ast.Yield, ast.YieldFrom, ast.Starred)):
+            return False
+        if isinstance(sub, ast.Call):
+            if isinstance(sub.func, ast.Name):
+                if sub.func.id.startswith('_AilT_'):
+                    if any(isinstance(inner, ast.Name)
+                           and isinstance(lookup(inner.id), (list, tuple, dict))
+                           for argument in (*sub.args, *[k.value for k in sub.keywords])
+                           for inner in ast.walk(argument)):
+                        return False
+                elif sub.func.id not in pure_calls:
+                    return False
+            elif (isinstance(sub.func, ast.Attribute) and sub.func.attr == 'get'
+                  and isinstance(sub.func.value, (ast.Name, ast.Subscript))):
+                base = _constant_value(sub.func.value, lookup, lambda unused: True, {},
+                                       attributes)
+                if not isinstance(base, dict):
+                    return False
+            else:
+                return False
+        elif isinstance(sub, (ast.Subscript, ast.Attribute)) and isinstance(sub.ctx, ast.Store):
+            return False
+        elif isinstance(sub, ast.Name) and isinstance(sub.ctx, ast.Del):
+            return False
+    return True
+
+
+def _scope_flow_refuse(node, value):
+    if _outside_int64_float(value):
+        error = ValueError(f'int() of a float outside int64: {value!r} (CPython makes a big integer)')
+    else:
+        converted = _int_conversion_outside_int64(value)
+        error = ValueError(f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
+    error.source_line = node.lineno
+    error.source_column = node.col_offset
+    raise error
+
+
+def _check_scope_flow_int64_containers(body, known, attributes, int_shadowed, program_bound,
+                                      scope_counts, declared):
+    """Refuse a function-local int() read of a known out-of-int64 value before a later mutation."""
+    if int_shadowed:
+        return
+    pure_calls = _SCOPE_FLOW_PURE_CALLS - program_bound
+    env = dict(known)
+    share = {}
+    members = {}
+    counter = [0]
+    simple_counts = {}
+    for statement in body:
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            name = statement.targets[0].id
+        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+              and statement.value is not None):
+            name = statement.target.id
+        else:
+            continue
+        simple_counts[name] = simple_counts.get(name, 0) + 1
+
+    def lookup(name):
+        return env.get(name, _UNKNOWN)
+
+    def global_name(name):
+        return name in env
+
+    def drop(name):
+        env.pop(name, None)
+        token = share.pop(name, None)
+        if token is not None:
+            group = members.get(token)
+            if group is not None:
+                group.discard(name)
+                if not group:
+                    members.pop(token, None)
+
+    def drop_group(name):
+        token = share.get(name)
+        if token is None:
+            env.pop(name, None)
+            return
+        for member in tuple(members.get(token, ())):
+            env.pop(member, None)
+            share.pop(member, None)
+        members.pop(token, None)
+
+    def bind_container(name, value):
+        drop(name)
+        counter[0] += 1
+        share[name] = counter[0]
+        members[counter[0]] = {name}
+        env[name] = value
+
+    def bind_alias(name, source):
+        drop(name)
+        if source == name or source not in env:
+            return
+        env[name] = env[source]
+        token = share.get(source)
+        if token is not None:
+            share[name] = token
+            members[token].add(name)
+
+    import_counts = {}
+    for statement in body:
+        if isinstance(statement, (ast.Import, ast.ImportFrom)):
+            for alias in statement.names:
+                imported = (alias.asname or alias.name).split('.')[0]
+                import_counts[imported] = import_counts.get(imported, 0) + 1
+
+    def import_only(name):
+        return (import_counts.get(name, 0) > 0
+                and scope_counts.get(name, 0) == import_counts[name])
+
+    mutating = set()
+    for statement in body:
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            mutating.add(statement.name)
+
+    def safe_call(call):
+        func = call.func
+        if isinstance(func, ast.Name):
+            if func.id in pure_calls:
+                return True
+            if func.id in program_bound:
+                return False
+            return not any(isinstance(inner, ast.Name) and inner.id in mutating
+                           for argument in (*call.args, *[key.value for key in call.keywords])
+                           for inner in ast.walk(argument))
+        if not isinstance(func, (ast.Attribute, ast.Subscript)):
+            return False
+        root = func.value
+        while isinstance(root, (ast.Attribute, ast.Subscript)):
+            root = root.value
+        if isinstance(root, ast.Constant):
+            return True
+        if not isinstance(root, ast.Name):
+            return False
+        value = env.get(root.id, _UNKNOWN)
+        if root.id in env:
+            return type(value) in _SCOPE_FLOW_SCALARS or isinstance(value, (list, tuple, dict))
+        return import_only(root.id) or root.id not in program_bound
+
+    def opaque_call(nodes):
+        for top in nodes:
+            for sub in ast.walk(top):
+                if isinstance(sub, ast.Call) and not safe_call(sub):
+                    return True
+        return False
+
+    def drop_all():
+        for name in tuple(set(env) | set(share)):
+            drop_group(name)
+
+    def drop_mentions(node):
+        opaque = opaque_call((node,))
+        for name in _scope_flow_mention_names(node):
+            drop_group(name)
+        if opaque:
+            drop_all()
+
+    def check_calls(node):
+        for sub in ast.walk(node):
+            if not (isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name)
+                    and sub.func.id == 'int' and len(sub.args) == 1 and not sub.keywords):
+                continue
+            value = _constant_value(sub.args[0], lookup, global_name, {}, attributes)
+            if _outside_int64_float(value) or _int_conversion_outside_int64(value) is not None:
+                _scope_flow_refuse(sub, value)
+
+    def trackable(name):
+        return (name not in declared and simple_counts.get(name, 0) > 0
+                and scope_counts.get(name, 0) == simple_counts[name])
+
+    def self_contained(node):
+        return all(not isinstance(sub, ast.Name)
+                   or not isinstance(lookup(sub.id), (list, tuple, dict))
+                   for sub in ast.walk(node))
+
+    for statement in body:
+        target = value_node = None
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            target, value_node = statement.targets[0].id, statement.value
+        elif (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+              and statement.value is not None):
+            target, value_node = statement.target.id, statement.value
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            executed = _scope_flow_executed_nodes(statement)
+            decorated = any(isinstance(decorator, ast.Name) and decorator.id in program_bound
+                            and not import_only(decorator.id)
+                            for decorator in _scope_flow_decorator_names(statement))
+            if decorated or opaque_call(executed):
+                drop_all()
+            else:
+                for part in executed:
+                    for name in _scope_flow_mention_names(part):
+                        drop_group(name)
+            continue
+        if (value_node is not None
+                and _scope_flow_pure_expression(value_node, lookup, pure_calls, attributes)):
+            check_calls(value_node)
+            value = _constant_value(value_node, lookup, global_name, {}, attributes)
+            if not trackable(target):
+                drop(target)
+            elif isinstance(value_node, ast.Name) and value_node.id in env:
+                bind_alias(target, value_node.id)
+            elif ((isinstance(value_node, (ast.List, ast.Tuple, ast.Dict))
+                   or (isinstance(value_node, ast.Call) and isinstance(value_node.func, ast.Name)
+                       and value_node.func.id.startswith('_AilT_')))
+                  and self_contained(value_node) and _scope_flow_container(value)):
+                bind_container(target, value)
+            elif type(value) in _SCOPE_FLOW_SCALARS:
+                drop(target)
+                env[target] = value
+            else:
+                drop_mentions(statement)
+                drop(target)
+            continue
+        if (isinstance(statement, ast.Expr)
+                and _scope_flow_pure_expression(statement.value, lookup, pure_calls, attributes)):
+            check_calls(statement.value)
+            continue
+        drop_mentions(statement)
+
+
 def _immutable_constant(value):
     if type(value) in (bool, int, float, str, bytes, type(None)):
         return True
@@ -1429,6 +1714,11 @@ def _check_int64_literals(tree):
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
                       program_bound).visit(tree)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _check_scope_flow_int64_containers(
+                node.body, {}, attributes, int_shadowed, program_bound,
+                _binding_counts(node.body), _scope_declared(node))
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
     while nodes:
