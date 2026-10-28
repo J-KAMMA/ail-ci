@@ -2952,10 +2952,26 @@ def _check_int64_routed_power(tree):
                 bound[keyword.arg] = value
         return bound
 
-    def check_power(node, base, exponent):
+    def older_pass_owns(node, base_node, exponent_node, scope_known):
+        """Whether the pre273/pre299 computed-exponent check refuses this node by name.
+
+        Both run after this pass (the ``**`` rule in pyfront, the ``pow()`` rule below), so a
+        syntactic constant base with |base| >= 2 and an exponent the front end does not see as
+        constant keeps its dedicated ``computed at run time`` wording."""
+        if isinstance(node, ast.Call):
+            base = _pow_static_int(base_node, scope_known) if scope_known is not None else None
+        else:
+            base = _const_fold_int(base_node)
+        if type(base) is not int or abs(base) < 2 or not _INT64_MIN <= base <= _INT64_MAX:
+            return False
+        return not _pow_exponent_is_constant(exponent_node)
+
+    def check_power(node, base, exponent, base_node, exponent_node, scope_known):
         if type(base) is int and type(exponent) is int and exponent >= 0:
             value = _exact_pow_or_too_big(base, exponent)
             if value is _CONST_INT_TOO_BIG or not _INT64_MIN <= value <= _INT64_MAX:
+                if older_pass_owns(node, base_node, exponent_node, scope_known):
+                    return
                 refuse(node, value)
 
     def loop_scope_nodes(function):
@@ -3011,7 +3027,8 @@ def _check_int64_routed_power(tree):
                 if (follows_parameter(node.left, current)
                         or follows_parameter(node.right, current)):
                     check_power(node, resolve(node.left, current, scope_known, parameters),
-                                resolve(node.right, current, scope_known, parameters))
+                                resolve(node.right, current, scope_known, parameters),
+                                node.left, node.right, scope_known)
             elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                     and isinstance(node.func.ctx, ast.Load)):
                 name = node.func.id
@@ -3028,7 +3045,8 @@ def _check_int64_routed_power(tree):
                     current = env_at(node)
                     if any(follows_parameter(argument, current) for argument in node.args):
                         check_power(node, resolve(node.args[0], current, scope_known, parameters),
-                                    resolve(node.args[1], current, scope_known, parameters))
+                                    resolve(node.args[1], current, scope_known, parameters),
+                                    node.args[0], node.args[1], scope_known)
 
     for node in _walk_module_scope(tree):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)

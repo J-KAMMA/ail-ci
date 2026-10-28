@@ -1,3 +1,24 @@
+## 2026-10-28 -- routed-power diagnostics keep the pre273/pre299 wording (job-rbpre385-10281859)
+
+The pre385 routed-power pass runs before the older computed-exponent checks and followed a call
+into `2 ** n` / `pow(base, n)`, so it refused the `take(64)` / `take(63)` argument routes with its
+`through a call` message instead of the dedicated pre273 (`a power with the integer constant
+base 2 ... computed at run time`) and pre299 (`pow() with the integer constant base 2 ... computed
+at run time`) messages that `test_ail_pre273` and `test_ail_pre299` assert.  The pass now leaves a
+power to those checks when one owns it: a syntactic constant base with |base| >= 2 and an
+exponent the front end does not see as constant.  Routed refusals for parameter bases
+(`def power(b, e): return b ** e` called with constants), nested calls and module-constant bases
+keep the `through a call` wording, and in-range or dynamic powers are unchanged.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: 13 refused by name (p_pow_arg_wide,
+p_pow_module_alias, p_pow_list_wide, p_pow_attr_wide, p_pow_dict_wide, p_pow_negative_base,
+p_pow_small_arg, p_binpow_arg, p_binpow_negative, p_routed_param_base, p_routed_pow_param,
+p_routed_nested, p_routed_module_base); p_routed_small and p_dynamic_control match CPython.
+p_pow_base_list keeps the same run-time `integer overflow` on the base copy, so it is
+pre-existing and not changed here.  Final-state tests: test_ail_pre273, test_ail_pre299,
+test_ail_pre385, test_ail_pre364, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 pass.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- re-apply pre385 on the integration tree (job-rbpre385-10281430)
 
 Re-applied the accepted pre385 routed-power change on top of this tree. The new
