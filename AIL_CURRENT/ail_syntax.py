@@ -1422,45 +1422,27 @@ _MATH_HELPERS['tw_shorten'] = (
     '    return "\\n".join(lines)\n')
 _MATH_HELPERS['tw_indent'] = (
     'def _ail_tw_indent(text: str, prefix: str) -> str:\n'
-    '    check = text.splitlines()\n'
-    '    if len(check) < 0:\n'
-    '        return ""\n'
-    '    out = ""\n'
-    '    start = 0\n'
-    '    i = 0\n'
-    '    n = len(text)\n'
-    '    while i < n:\n'
-    '        ch = text[i]\n'
-    '        brk = (ch == "\\n" or ch == "\\r" or ch == "\\x0b" or ch == "\\x0c"\n'
-    '               or ch == "\\x1c" or ch == "\\x1d" or ch == "\\x1e" or ch == "\\x85"\n'
-    '               or ch == "\\u2028" or ch == "\\u2029")\n'
-    '        if brk:\n'
-    '            end = i + 1\n'
-    '            if ch == "\\r" and i + 1 < n and text[i + 1] == "\\n":\n'
-    '                end = i + 2\n'
-    '            line = text[start:end]\n'
-    '            if line.strip() != "":\n'
-    '                out += prefix + line\n'
-    '            else:\n'
-    '                out += line\n'
-    '            start = end\n'
-    '            i = end\n'
+    '    out: list[str] = []\n'
+    '    for line in text.splitlines(True):\n'
+    '        if line.strip():\n'
+    '            out.append(prefix + line)\n'
     '        else:\n'
-    '            i += 1\n'
-    '    if start < n:\n'
-    '        line = text[start:]\n'
-    '        if line.strip() != "":\n'
-    '            out += prefix + line\n'
-    '        else:\n'
-    '            out += line\n'
-    '    return out\n')
+    '            out.append(line)\n'
+    '    return "".join(out)\n')
 _MATH_HELPERS['string_capwords'] = (
     'def _ail_string_capwords(s, sep):\n'
-    '    if isinstance(s, bytes) and sep is None:\n'
-    '        raise TypeError("descriptor \'capitalize\' for \'str\' objects doesn\'t apply to a \'bytes\' object")\n'
-    '    if sep is None:\n'
-    '        return " ".join([word.capitalize() for word in s.split()])\n'
-    '    return sep.join([word.capitalize() for word in s.split(sep)])\n')
+    '    if sep and not isinstance(sep, str) and not isinstance(sep, bytes):\n'
+    '        raise AttributeError("\'" + type(sep).__name__ + "\' object has no attribute \'join\'")\n'
+    '    parts = s.split(sep)\n'
+    '    out = []\n'
+    '    for word in parts:\n'
+    '        if not isinstance(word, str):\n'
+    '            raise TypeError("descriptor \'capitalize\' for \'str\' objects doesn\'t apply to a \'"\n'
+    '                            + type(word).__name__ + "\' object")\n'
+    '        out.append(word.capitalize())\n'
+    '    if sep:\n'
+    '        return sep.join(out)\n'
+    '    return " ".join(out)\n')
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',),
              'tw_wrap': ('tw_wrap_more',), 'tw_shorten': ('tw_wrap_more',)}
 import string as _string_module
@@ -2458,12 +2440,13 @@ class _Surface:
             return ast.Call(func=ast.Name(id=_TIME_CLOCKS[name], ctx=ast.Load()), args=[], keywords=[])
         if module == 'textwrap' and name in ('shorten', 'indent') \
                 and not any(isinstance(arg, ast.Starred) for arg in args):
-            if name == 'shorten' and len(args) in (1, 2):
-                width = args[1] if len(args) == 2 else None
-                if width is None and len(node.keywords) == 1 and node.keywords[0].arg == 'width':
+            if name == 'shorten':
+                width = None
+                if len(args) == 2 and not node.keywords:
+                    width = args[1]
+                elif len(args) == 1 and len(node.keywords) == 1 and node.keywords[0].arg == 'width':
                     width = node.keywords[0].value
-                if width is not None and (len(node.keywords) == 0 or
-                                          (len(node.keywords) == 1 and node.keywords[0].arg == 'width')):
+                if width is not None:
                     for each in (*_MATH_DEPS.get('tw_shorten', ()), 'tw_shorten'):
                         if each not in self.helpers:
                             self.helpers.append(each)

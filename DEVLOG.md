@@ -1,3 +1,27 @@
+## 2026-10-28 -- stdlib1 review: shorten duplicate `width`, capwords bytes, indent bytes (job-stdlib1-10282143)
+
+The review found three defects in the stdlib1 change. `textwrap.shorten(text, width, width=...)`
+was lowered with the positional width and silently ignored the duplicate keyword; it now lowers
+only the unambiguous `(text, width)` and `(text, width=...)` forms, so a duplicate width is the
+same named compile-time refusal as the other unbuilt options (`textwrap.shorten() with these
+arguments is not built`). `string.capwords` with a bytes text now raises CPython 3.12's
+`TypeError: descriptor 'capitalize' for 'str' objects doesn't apply to a 'bytes' object` for a
+bytes, a None or an empty separator, while a non-join separator keeps CPython's earlier
+`AttributeError` and a bytes separator on a str text keeps its `TypeError`. `textwrap.indent`
+now mirrors CPython's `splitlines(True)` loop and `''.join`, so a bytes text with a bytes prefix
+raises `TypeError: sequence item 0: expected str instance, bytes found` instead of the helper's
+own concatenation error; it also uses `line.strip()` truthiness, so a blank bytes line is not
+prefixed.
+
+Probes in `/tmp/probes` (both g and d builds): `short_dup.py`, `short_dup2.py`,
+`short_dup_mixed.py`, `short_dup_kwtext.py`, `short_placeholder.py`; `cap_bytes_sep.py`,
+`cap_bytes_none.py`, `cap_sep_bytes.py`, `cap_bytes_routes.py` (list item, dict value,
+attribute and argument routes), `capwords.py`, `capwords_types.py`; `indent_bytes.py`,
+`indent_bytes_str_prefix.py`, `indent_empty_bytes.py`, `indent_bytes_routes.py`,
+`tw_indent.py`, `tw_shorten.py`, `tw_types.py`, `tw_types_var.py`, `tw_wrap_control.py`.
+Each matches CPython or is refused by name. `test_ail_stdlib1` now pins the duplicate-width
+refusal and the runtime type messages on both builds.
+
 ## 2026-10-28 -- stdlib1: `textwrap.shorten` / `textwrap.indent` and `string.capwords` (job-stdlib1-10282143)
 
 Inventory of imports outside the nine baseline modules (counts of import statements):

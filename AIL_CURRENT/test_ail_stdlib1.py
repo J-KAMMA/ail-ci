@@ -68,9 +68,29 @@ for text in ("hello  world FOO", "a,b,c", "", "one two", "  x  "):
     print(repr(cw(text, " ")))
 """
 
+TYPE_ERRORS = r"""import string
+import textwrap
+
+
+def show(label, value):
+    try:
+        print(label, value())
+    except Exception as exc:
+        print(label, type(exc).__name__, str(exc))
+
+
+show("cap bytes sep", lambda: string.capwords(b"a,b", b","))
+show("cap bytes default", lambda: string.capwords(b"a b"))
+show("cap int sep", lambda: string.capwords("a,b", 5))
+show("indent bytes prefix", lambda: textwrap.indent(b"a\nb", b"> "))
+show("indent str prefix", lambda: textwrap.indent(b"a\nb", "> "))
+show("indent blank bytes", lambda: textwrap.indent(b"\n\n", None))
+"""
+
 REFUSALS = {
     "textwrap class": ("import textwrap\n\nprint(textwrap.TextWrapper(width=10))\n", "textwrap"),
     "shorten options": ("import textwrap\n\nprint(textwrap.shorten('a b c', 10, placeholder='...'))\n", "textwrap"),
+    "shorten duplicate width": ("import textwrap\n\nprint(textwrap.shorten('a b c d e', 5, width=10))\n", "textwrap"),
     "string template": ("import string\n\nprint(string.Template('x').substitute(x=1))\n", "string"),
 }
 
@@ -117,6 +137,9 @@ class CompiledPrograms(unittest.TestCase):
 
     def test_string(self):
         self.compare("string", STRING)
+
+    def test_type_errors(self):
+        self.compare("type_errors", TYPE_ERRORS)
 
     def test_corpus_t116(self):
         program = CORPUS / "programs" / "deepseek-v4.1-flash-free" / "t116.py"
