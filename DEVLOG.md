@@ -1,3 +1,26 @@
+## 2026-10-28 -- F6: build a Rust crate for AIL in one step (job-ffi6-10282143)
+
+Added `AIL_CURRENT/ail_cargo.py`: `build CRATE_DIR -o OUT` checks `[lib] crate-type =
+["cdylib", "staticlib"]` and `[profile.release] panic = "abort"` by name, runs `cargo build
+--release --offline --lib` (network only with `--allow-network`, never used in tests), takes a
+header from `cbindgen` when installed or `--header`, runs `ail_bindgen.py`, and writes
+`OUT/libX.so`/`.dylib`, `OUT/libX.a`, `OUT/X.h`, `OUT/X_ffi.py` with `link("./libX.a")`, and
+`OUT/X.link.txt` plus `OUT/link.txt` with cargo's `--print native-static-libs` line.  Added
+`AIL_CURRENT/ail_rsgen.py`, which turns an `ail build --lib NAME` header into a Rust binding
+crate: `extern "C"` declarations plus `Result<T, Error>` wrappers that copy str/bytes/list
+results out and free them, read `NAME_last_error()`, and link the static AIL library through a
+generated `build.rs`.  Registered `test_ail_cargo` in `ail_check.MODULES`.
+
+The tests cover a plain crate (slice-in, buffer-out and a Box handle; CPython using the cdylib
+equals AIL using the staticlib), a dependency vendored from a local git repository with
+`cargo vendor` and built offline, both named Cargo.toml refusals, cbindgen (including a fake
+installed cbindgen) and the `--header` fallback, and a Rust host calling an `@export` AIL
+library through `ail_rsgen.py` compared with CPython.  Probe
+`/tmp/probes/p1_cargo_native.py` (int64 boundaries, empty/negative sums, empty and aliased
+bytearrays, buffer-out sizes, Box handle through a list item) matches CPython on both `cmp.sh`
+builds.  Final-state tests: test_ail_cargo, test_ail_cratebridge, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (42 tests, 0 failed, 1 skipped, 403 s).
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
