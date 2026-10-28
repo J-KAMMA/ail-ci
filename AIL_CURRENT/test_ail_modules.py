@@ -1260,6 +1260,14 @@ class PackageRefusals(ModulesBase):
         self.assertEqual(self.same_as_cpython(
             {"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__file__)\n"}),
             str(self.dir / "lib.py") + "\n")
+        # a module's own binding of `__file__`, or a write from outside, would be silently
+        # replaced by the path when read, so both are refused by name
+        self.refused({"helper.py": '__file__ = "custom"\nX = __file__\n',
+                      "main.py": "import helper\nprint(helper.X)\nprint(helper.__file__)\n"},
+                     "`__file__` is bound")
+        self.refused({"lib.py": "X = 1\n",
+                      "main.py": 'import lib\nlib.__file__ = "custom"\nprint(lib.__file__)\n'},
+                     "`lib.__file__` is assigned")
         # the front end refuses these (exit 3) by name, with the same hint
         for source, needle in (("import importlib\nm = importlib.import_module('math')\nprint(m)\n", "importlib"),
                                ("m = __import__('math')\nprint(m)\n", "__import__")):

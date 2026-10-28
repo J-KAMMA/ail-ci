@@ -1,3 +1,21 @@
+## 2026-10-28 -- ex10 review: refuse a module's own `__file__` binding
+
+The review found that an imported module binding `__file__` (`__file__ = "custom"`) had its reads
+silently replaced by the module path, so `helper.X` and `helper.__file__` printed the path where
+CPython prints `custom`, on both builds.  `ail_modules` now refuses a module-level binding of
+`__file__` by name before rewriting, using the same binding forms as the entry scan (assignment,
+`del`, def/class name, import alias, except/match name, and a `global __file__` assignment).  A
+write from outside (`lib.__file__ = v`) is refused the same way, since reads of `module.__file__`
+are compile-time constants.  A function parameter named `__file__` in a module is still local and
+still builds.
+
+Probes in `/tmp/probes/` on both builds: p1-p8 single-file uses (direct, alias/list/dict/attribute,
+argument/default/kwarg, comprehension, form-feed before the use, a string that only mentions the
+name, entry assignment) match CPython; m1 module path and m7 namespace `None` match; m2 module
+binding, m3 external write, m4 `def __file__`, m5 import alias, m6 `del __file__` and m9 `global`
+write are each refused by name on both builds; m8 local parameter still matches CPython.  Added the
+two refusal cases to `test_ail_modules` and a module-binding refusal to `test_ail_ex10`.
+
 ## 2026-10-28 -- ex10: `__file__` names the source file (job-ex10-10290412)
 
 A coverage scan of the Python-syntax examples under `AIL_CURRENT/language_examples` (the `.py`
@@ -9,9 +27,10 @@ left 14 refused; the most common message was `__file__ is not available` (5 file
 locally imported module's `__file__` (also `module.__file__`) its own absolute source path, so the
 front end now substitutes a string constant at parse time.  Modules get their own path in
 `ail_modules`' rewriter; the entry path is the resolved command-line path; a namespace package's
-`__file__` is `None`.  A program that binds `__file__` itself (assignment, parameter, import
-alias, def/class/except name) is left alone and still refused by name rather than being silently
-rewritten; a program without the name keeps its previous text and C byte for byte.
+`__file__` is `None`.  The entry leaves its own `__file__` binding alone; an imported module that binds
+`__file__` is refused by name in `ail_modules` (see the review entry above), because its value
+cannot be honoured after merging.  A program without the name keeps its previous text and C byte
+for byte.
 
 Probes in `/tmp/probes/f1.py`..`f9.py` on both builds via `cmp.sh` match CPython: direct
 `__file__`; `pathlib.Path` name/suffix/stem; alias, list item and dict value; f-string and

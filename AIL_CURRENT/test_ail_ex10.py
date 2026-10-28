@@ -65,6 +65,18 @@ class Ex10Tests(unittest.TestCase):
                                      (slug, general, got.stderr[-800:]))
                     self.assertEqual(got.returncode, want[1], (slug, general, got.stderr[-800:]))
 
+    def test_module_binding_is_refused(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex10-bind-') as directory:
+            Path(directory, 'helper.py').write_text('__file__ = "custom"\nX = __file__\n', encoding='utf-8')
+            Path(directory, 'case.py').write_text(
+                'import helper\nprint(helper.X)\nprint(helper.__file__)\n', encoding='utf-8')
+            for general in (True, False):
+                exe, built = build(directory, 'bind_%s' % ('g' if general else 'd'), general)
+                self.assertEqual(built.returncode, 2, (general, built.stdout + built.stderr))
+                self.assertIn('__file__', built.stderr)
+                self.assertIn('write instead', built.stderr)
+                self.assertNotIn('Traceback', built.stderr)
+
     def test_module_file_matches_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-ex10-mod-') as directory:
             Path(directory, 'helper.py').write_text(MODULE_HELPER, encoding='utf-8')

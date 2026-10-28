@@ -1725,6 +1725,10 @@ class Rewriter(ast.NodeTransformer):
             if self.mod.entry:
                 return node
             return ast.copy_location(ast.Constant(None if self.mod.kind == 'namespace' else str(self.mod.path)), node)
+        if name == '__file__' and not self.mod.entry and isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.program.refuse(self.mod, node, "`__file__` is bound in %s: this compiler replaces every read of "
+                                "`__file__` with the module's own source path, so the binding would be ignored.\n"
+                                "  write instead: store the value under another name" % self.mod.path.name)
         if name in self.mod.std:
             return node
         if name in self.mod.alias:
@@ -1775,6 +1779,11 @@ class Rewriter(ast.NodeTransformer):
             return ast.copy_location(ast.Constant(target.name), node)
         if attr == '__file__' and not stored:
             return ast.copy_location(ast.Constant(None if target.kind == 'namespace' else str(target.path)), node)
+        if attr == '__file__' and stored:
+            self.program.refuse(self.mod, node, "`%s.__file__` is assigned: this compiler replaces reads of "
+                                "`%s.__file__` with the module's own source path, so the new value would be "
+                                "ignored.\n  write instead: store the value under another name"
+                                % (target.name, target.name))
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
@@ -2010,6 +2019,16 @@ def merge_program(entry_path, entry_text, read=None):
                                "  write instead: move the import to the top of the file, or keep %s to "
                                "definitions and constants"
                                % (ast.unparse(orig), what, mod.path, line, mod.path.name))
+        if not mod.entry:
+            # A module that binds `__file__` itself (assignment, del, def/class name, import alias,
+            # except/match name) would have its own value silently replaced by the module path when
+            # the binding is read.  The entry does the same check before substituting; refuse here
+            # by name instead of compiling the wrong value.
+            for bound, site in _scan_scope(mod.tree.body)[3]:
+                if bound == '__file__':
+                    program.refuse(mod, site, "`__file__` is bound in %s: this compiler replaces every read of "
+                                   "`__file__` with the module's own source path, so the binding would be "
+                                   "ignored.\n  write instead: store the value under another name" % mod.path.name)
         stack.append(mod)
         for index, node in enumerate(mod.tree.body):
             positions[mod] = index
