@@ -14,7 +14,7 @@ default at compile time and inserts `prelude_tempfile.py`. Built: `gettempdir`, 
 aliases and from-imports. `mkstemp`, `NamedTemporaryFile`, `TemporaryFile`, `SpooledTemporaryFile`
 and `tempfile.tempdir` are refused by name. Names keep CPython's 8-character alphabet, prefix, suffix
 and length, but their random text is not comparable between processes; `mkdtemp` returns an absolute
-path. `TemporaryDirectory.__enter__` returns the path text as CPython does; `cleanup()` is idempotent
+path, and `gettempdir()` rechecks the environment on every call where CPython caches its first answer. `TemporaryDirectory.__enter__` returns the path text as CPython does; `cleanup()` is idempotent
 and, like CPython 3.12, still removes the directory of a `delete=False` manager when called
 explicitly, while `__exit__` respects `delete`.
 
