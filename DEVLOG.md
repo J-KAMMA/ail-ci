@@ -1,3 +1,26 @@
+## 2026-10-28 -- cov16: a generator expression nested inside another one, when the inner is consumed at once (job-cov16-10290225)
+
+Corpus coverage for cov16 compiled all 219 programs under `lab/corpus/programs` with the default
+build.  Before: 195 built, 24 refused (10 first lines about an import, 14 not).  Three
+programs were refused only because their general path saw a generator expression nested inside
+another generator expression (`deepseek-v4.1-flash-free/t172`,
+`deepseek-v4.1-flash-free/t432`, `glm-5.3-flash-free/t432`); for `t172` the first line mentioned a
+`collections` import use, but the general-path note was the actual blocker.  After: 198 built, 21
+refused (9 import-first, 12 not); the 12 non-import first lines tie at two each for `json.loads(s)`,
+`sorted(d.items())` and `RunningAverage.__iter__`, with six singletons behind them.
+
+The relaxation is exact only where the inner generator is fully consumed at that point: an argument
+to `sum`, `min`, `max`, `sorted`, `list`, `tuple`, `dict`, `str.join` or another eager method, a
+starred call argument, or a tuple/list unpack target.  `set`/`frozenset` stay refused because their
+print order already differs on the general path.  A nested generator saved as a value, passed to
+`next`/`any`/`all`, used as a `for` iterable, or sitting inside a `try` body stays a named refusal
+(the general path's exception path is not exact there; the `try` guard also keeps the pre-existing
+mixed-return bug from becoming newly reachable).  Six positive probes (`p01_join_routes`,
+`p02_sum_types`, `p03_builtins`, `p04_methods_star`, `p05_exception`, `p06_float_bool`) match CPython
+on both builds, and five negative probes (`r1_saved_inner`, `r2_next_inner`, `r3_any_inner`,
+`r4_for_inner`, `r5_try_inner`) are refused by name.  Added `test_ail_cov16.py` and registered it in
+`ail_check.py`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

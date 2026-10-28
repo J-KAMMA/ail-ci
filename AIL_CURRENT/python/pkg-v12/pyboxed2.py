@@ -2343,9 +2343,19 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        parents = {}
+        for par in ast.walk(tree):
+            for child in ast.iter_child_nodes(par):
+                parents[child] = par
         for gen in ast.walk(tree):
-            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+            if not (isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs):
+                continue
+            nested = [n for n in ast.walk(gen) if n is not gen and isinstance(n, ast.GeneratorExp)]
+            # An inner generator expression may be materialised eagerly only where something
+            # reads every element of it at that point; a `try` body keeps the refusal because the
+            # general path's own exception path is not exact there (see the pre-cov16 probes).
+            if nested and (_inside_try(gen, parents) or
+                           any(not _genexp_fully_consumed_in_place(n, parents) for n in nested)):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6122,7 +6132,12 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        parents = {}
+        for par in ast.walk(node):
+            for child in ast.iter_child_nodes(par):
+                parents[child] = par
+        if any(n is not node and isinstance(n, ast.GeneratorExp)
+               and not _genexp_fully_consumed_in_place(n, parents) for n in ast.walk(node)):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -11836,6 +11851,39 @@ _GENEXP_SAFE_METHODS = frozenset({
     'rsplit', 'splitlines', 'partition', 'rpartition', 'removeprefix', 'removesuffix',
     'bit_length', 'bit_count', 'is_integer', 'get', 'keys', 'values', 'items',
 })
+
+
+_GENEXP_FULL_CALLS = _GENEXP_EAGER_CALLS - frozenset({'any', 'all', 'next', 'set', 'frozenset'})
+
+
+def _inside_try(node, parents):
+    """True when `node` sits anywhere inside a `try` statement."""
+    while node in parents:
+        node = parents[node]
+        if isinstance(node, (ast.Try, getattr(ast, 'TryStar', ast.Try))):
+            return True
+    return False
+
+
+def _genexp_fully_consumed_in_place(node, parents):
+    """True iff `node` is evaluated by something that reads EVERY element at that point, with no
+    early exit: an eager builtin call, an eager method call, a starred unpack, or tuple/list
+    unpacking.  A nested generator expression may be materialised eagerly only there; `next`,
+    `any`/`all` and a for/while body can stop early, so they keep the refusal."""
+    par = parents.get(node)
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, (ast.Assign, ast.AnnAssign)):
+        target = (par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1
+                  else getattr(par, 'target', None))
+        return isinstance(target, (ast.Tuple, ast.List))
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name):
+            return f.id in _GENEXP_FULL_CALLS
+        if isinstance(f, ast.Attribute):
+            return f.attr in _GENEXP_EAGER_METHODS
+    return False
 
 
 def _genexp_consumed_in_place(node, parents):
