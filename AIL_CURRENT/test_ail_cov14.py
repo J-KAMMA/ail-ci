@@ -4,8 +4,9 @@ completely by an eager consumer (`sum`, `min`, `max`, `any`, `all`, `list`, `tup
 
 The corpus programs that were refused for this use the inner generator as the argument of `sum`
 or `str.join` inside the outer element; materialising it at the same point is exact.  Any other
-nesting (the inner generator is the outer one's iterable, so the outer can stop early) keeps the
-named compile-time refusal.
+nesting (the inner generator is the outer one's iterable, so the outer can stop early), a user
+method/function that merely has a consuming name, and a call with `key=` or another argument keep
+the named compile-time refusal.
 """
 import os
 import subprocess
@@ -34,6 +35,9 @@ def emit(rs):
         print("[" + ",".join(f"{' '.join(str(v) for v in row)}" for v in [0]) + "]")
 emit(rows)
 print("|".join(str(v) for v in ["x", "y"]))
+print("|".join(str("|").join(str(v) for v in row) for row in rows))
+sep = " "
+print("|".join(f"{sep}".join(str(v) for v in row) for row in rows))
 '''
 PROGRAMS['nested_routes'] = r'''class Box:
     def __init__(self, rows):
@@ -117,24 +121,88 @@ class Programs(unittest.TestCase):
 
 
 class Refused(unittest.TestCase):
-    REFUSAL = r'''values = (x for x in (y for y in range(5)))
+    REFUSALS = {}
+    REFUSALS['nested_lazy'] = r'''values = (x for x in (y for y in range(5)))
 for v in values:
     print(v)
     break
 '''
+    REFUSALS['custom_extend'] = r'''log = []
+def f(x):
+    log.append(x)
+    return x
+class C:
+    def extend(self, it):
+        v = next(iter(it))
+        return (v, len(log))
+c = C()
+print(list(c.extend(f(x) for x in [1, 2, 3]) for _ in [0]))
+'''
+    REFUSALS['custom_update'] = r'''log = []
+def f(x):
+    log.append(x)
+    return x
+class C:
+    def update(self, it):
+        return next(iter(it))
+c = C()
+print(list(c.update(f(x) for x in [1, 2, 3]) for _ in [0]))
+print(log)
+'''
+    REFUSALS['custom_join'] = r'''log = []
+def f(x):
+    log.append(x)
+    return x
+class C:
+    def join(self, it):
+        return next(iter(it))
+c = C()
+print(list(c.join(f(x) for x in [1, 2, 3]) for _ in [0]))
+print(log)
+'''
+    REFUSALS['max_key'] = r'''log = []
+def f(x):
+    log.append(("f", x))
+    return x
+def k(x):
+    log.append(("k", x))
+    return -x
+print(list(max((f(x) for x in [1, 2, 3]), key=k) for _ in [0]))
+print(log)
+'''
+    REFUSALS['shadowed_sum'] = r'''def sum(it):
+    return next(iter(it))
+log = []
+def f(x):
+    log.append(x)
+    return x
+print(list(sum(f(x) for x in [1, 2, 3]) for _ in [0]))
+print(log)
+'''
+    REFUSALS['sum_start'] = r'''log = []
+def f(x):
+    log.append(x)
+    return x
+print(list(sum((f(x) for x in [1, 2, 3]), 10) for _ in [0]))
+print(log)
+'''
 
-    def refused(self, **env):
+    def refused(self, text, **env):
         with tempfile.TemporaryDirectory() as directory:
-            built, _ = build(directory, self.REFUSAL, "r", **env)
+            built, _ = build(directory, text, "r", **env)
             self.assertNotEqual(built.returncode, 0)
             self.assertIn("a generator expression nested inside another generator expression",
                           built.stdout + built.stderr)
 
     def test_refusal_general_path(self):
-        self.refused(AIL_UNIFIED_FORCE="1")
+        for name, text in self.REFUSALS.items():
+            with self.subTest(program=name):
+                self.refused(text, AIL_UNIFIED_FORCE="1")
 
     def test_refusal_default_build(self):
-        self.refused()
+        for name, text in self.REFUSALS.items():
+            with self.subTest(program=name):
+                self.refused(text)
 
 
 if __name__ == "__main__":

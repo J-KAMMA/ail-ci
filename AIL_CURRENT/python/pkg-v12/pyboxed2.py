@@ -11817,10 +11817,14 @@ _GENEXP_EAGER_CALLS = frozenset({
     'next', 'bytes', 'bytearray', 'Counter', 'array',
 })
 _GENEXP_EAGER_METHODS = frozenset({'join', 'extend', 'update', 'array'})
-# These consume every element, so materialising the generator at the call is the same point.
-# `next`/`any`/`all` are in _GENEXP_EAGER_CALLS for their own fused lowerings but stop early;
-# a nested generator under any of them stays refused unless that fused path handles it.
-_GENEXP_FULLY_CONSUMED_CALLS = _GENEXP_EAGER_CALLS - {'next', 'any', 'all'}
+# Builtin names that read every element when the generator is their only argument.  `next`/`any`/
+# `all` stop early and have their own fused lowerings; `Counter`/`array` are imports, not builtins,
+# so their names may be rebound.  A nested generator under any name rebound in the program is
+# refused: only a provably builtin consumer may materialise it (see _nested_genexp_unsafe).
+_GENEXP_FULLY_CONSUMED_CALLS = frozenset({
+    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max',
+    'bytes', 'bytearray',
+})
 # Builtins whose call cannot raise one of the five catchable traps this compiler models, so a
 # generator element that only uses them keeps the existing eager lowering.
 _GENEXP_SAFE_CALLS = frozenset({
@@ -11860,18 +11864,42 @@ def _genexp_consumed_in_place(node, parents):
     return False
 
 
-def _genexp_fully_consumed(node, parents):
-    """True iff `node` is read completely by its immediate consumer: a consuming builtin call,
-    a consuming method call, a starred unpack, or a tuple/list unpacking assignment.  A
-    comprehension's iterable is deliberately excluded: the outer generator can stop early, so
-    materialising the inner one there would not be the same point in the program."""
+def _genexp_is_str_value(node, shadowed):
+    """True iff `node` is provably an exact builtin `str`, so `node.join` is `str.join`.  A string
+    literal and an f-string always are; `str(x)` is only when the name `str` is not rebound.  A
+    variable, attribute, subscript or arbitrary call may be a user object with its own `join`
+    (or a str subclass), so it does not qualify."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return True
+    if isinstance(node, ast.JoinedStr):
+        return True
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
+            and node.func.id == 'str' and 'str' not in shadowed:
+        return True
+    return False
+
+
+def _genexp_fully_consumed(node, parents, shadowed):
+    """True iff `node` is read completely by its immediate consumer at the same point: a call to
+    an unshadowed consuming builtin with the generator as its only argument and no keywords, a
+    `join` on a provably exact `str`, a starred unpack, or a tuple/list unpacking assignment.
+    Another argument or a keyword (`key=`, `start=`, `default=`, `reverse=`) is evaluated between
+    creating the generator and reading it, and a callback keyword interleaves user calls with
+    element production, so none of those qualify.  A comprehension's iterable is deliberately
+    excluded: the outer generator can stop early, so materialising the inner one there would not
+    be the same point in the program."""
     par = parents.get(node)
     if isinstance(par, ast.Call) and node in par.args:
+        if len(par.args) != 1 or par.keywords:
+            return False
         f = par.func
-        if isinstance(f, ast.Name) and f.id in _GENEXP_FULLY_CONSUMED_CALLS:
+        if isinstance(f, ast.Name) and f.id in _GENEXP_FULLY_CONSUMED_CALLS \
+                and f.id not in shadowed:
             return True
-        if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
+        if isinstance(f, ast.Attribute) and f.attr == 'join' \
+                and _genexp_is_str_value(f.value, shadowed):
             return True
+        return False
     if isinstance(par, ast.Starred):
         return True
     if isinstance(par, (ast.Assign, ast.AnnAssign)):
@@ -11884,18 +11912,21 @@ def _genexp_fully_consumed(node, parents):
 
 def _nested_genexp_unsafe(root):
     """The first generator expression nested inside another one whose value is not read completely
-    by an eager consumer, or None.  The corpus programs that need this use `sum(...)` and
+    by a provably builtin consumer, or None.  The corpus programs that need this use `sum(...)` and
     `str.join(...)` inside the outer element, both of which read every element at the same point,
-    so the existing eager lowering is observationally exact there.  Any other nesting keeps the
-    by-name refusal."""
+    so the existing eager lowering is observationally exact there.  A consumer whose name is bound
+    anywhere (a user function/class/method named `sum`, `extend`, ...) and a call with another
+    argument or a keyword under which callbacks run between elements keep the by-name refusal."""
     parents = {}
     for par in ast.walk(root):
         for child in ast.iter_child_nodes(par):
             parents[child] = par
+    counts = _bound_names(root)
+    shadowed = {name for name, count in counts.items() if count}
     any_all_genargs = set()
     for call in ast.walk(root):
         if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
-                call.func.id in ('any', 'all'):
+                call.func.id in ('any', 'all') and call.func.id not in shadowed:
             any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
     for gen in ast.walk(root):
         if not isinstance(gen, ast.GeneratorExp):
@@ -11905,7 +11936,7 @@ def _nested_genexp_unsafe(root):
                 continue
             if id(inner) in any_all_genargs:
                 continue
-            if not _genexp_fully_consumed(inner, parents):
+            if not _genexp_fully_consumed(inner, parents, shadowed):
                 return inner
     return None
 

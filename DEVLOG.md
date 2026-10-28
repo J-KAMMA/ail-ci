@@ -1,3 +1,23 @@
+## 2026-10-28 -- cov14 review: only provably builtin consumers materialise a nested generator
+
+The cov14 review found the allowance was matched by name/attribute alone.  A user method named
+`extend`, `update` or `join` was treated as an eager consumer, so its generator was materialised
+before the method ran (`[(1, 3)]` where CPython prints `[(1, 1)]`), and `max(..., key=)` read
+every element before the first key call, reordering the two logs.  `_genexp_fully_consumed` now
+accepts only an unshadowed consuming builtin (`list`, `tuple`, `set`, `frozenset`, `dict`,
+`sorted`, `sum`, `min`, `max`, `bytes`, `bytearray`) with the generator as its only argument and
+no keywords, or `join` on a provably exact `str` (a string literal, an f-string, or `str(...)`
+with `str` unbound).  A user receiver of unknown type, any rebound builtin name, and any extra
+argument or keyword (`key=`, `start=`, `default=`, `reverse=`) keep the same named compile-time
+refusal.  Starred unpacking and tuple/list unpacking assignment are unchanged.
+
+Corpus refusals over 219 programs are unchanged at 24 before / 21 after in both builds; the
+three recovered programs are the same, and nested generator expressions remain 3 -> 0.  Probes
+in `/tmp/probes/cov14fix` on both builds: `p_sum_gen`, `p_minmax_gen`, `p_join_gen` match
+CPython; `p_custom_extend`, `p_custom_update`, `p_custom_join`, `p_max_key`, `p_shadowed_sum`,
+`p_sum_start`, `p_join_var_gen`, `p_lazy` are refused by name.  `test_ail_cov14` gains the
+custom-method, `key=`, shadowed-name and extra-argument refusal cases.
+
 ## 2026-10-28 -- cov14: nested generator expressions with an eagerly consumed inner one (job-cov14-10290221)
 
 Profiled all 219 programs in `lab/corpus/programs` in both builds (the general-path compile
