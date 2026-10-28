@@ -1,3 +1,26 @@
+## 2026-10-28 -- stdlib25: textwrap.shorten (job-stdlib25-10290616)
+
+A fresh scan of the current build over `lab/corpus/programs` (219 programs) and
+`AIL_CURRENT/language_examples` (277 `.ail`/`.py` files) found the remaining import refusals in the
+corpus: `unicodedata` 3, `decimal` 2, `textwrap` 1 (`deepseek-v4.1-flash-free/t116`, which calls
+`textwrap.shorten`), `collections` 1 (a nested `defaultdict(lambda: dict.fromkeys(...))`) and `re` 1
+(a pattern list compiled at run time).  `unicodedata` (Unicode name/category/normalize tables) and
+`decimal` (exact decimal arithmetic) are not small lowerings, so the next feasible module is the
+`textwrap` use: `shorten(text, width)`.
+
+The existing `wrap` / `fill` / `dedent` prelude now shares one `_ail_tw_chunks` splitter, and
+`_ail_tw_shorten` implements CPython 3.12's `TextWrapper(width, max_lines=1, placeholder=' [...]')`:
+whitespace collapse, the placeholder-too-large and invalid-width `ValueError`s, and dropping whole
+chunks (including hyphen chunks) until the placeholder fits.  `placeholder=` and the other options
+stay a named refusal (`textwrap.shorten() with these arguments is not built`).  `textwrap.wrap` /
+`fill` / `dedent` output is unchanged.
+
+Probes in `/tmp/probes/stdlib25` on both `cmp.sh` builds: widths 0, -1, 1..12 and 70 over empty,
+whitespace-only, short, long, hyphenated, em-dash, tab/newline and non-ASCII text; values through an
+argument, alias, list item, class/instance attribute and dict value; and a 500-call generated
+program.  All match CPython; the `placeholder=` probe is refused by name.  `test_ail_stdlib25.py`
+pins the same cases on the default build and the general path with AIL_IR=0 and 1.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
