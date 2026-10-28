@@ -1,3 +1,25 @@
+## 2026-10-28 -- pre400: a power routed through keyword calls is refused by name (job-pre400-10281030)
+
+The pre385 review's first pre-existing item was `r4`: `def power(b, e): return b ** e` called as
+`power(b=2, e=100)` compiled on both builds and then stopped with `integer overflow`, where
+CPython prints the bignum.  This tree did not yet carry pre385's routed-power pass, so that pass
+is ported with its store-before-power handling, and its call binder now accepts keyword arguments
+instead of skipping every keyword that names a positional parameter.  Both-keyword and mixed
+calls, reversed keyword order, keyword-only parameters and a keyword call nested in another
+function are refused by name on both builds, as are constants reached through a module constant,
+list item, dict value, class attribute and alias.  In-range calls, a parameter stored to before
+the power, float/bool/negative exponents and a non-power call still match CPython.  The other
+pre385 items (`r6` default argument, `r9` parameter alias, method/nested-def routes and
+`**kwargs` calls) still stop at run time.
+
+Probes in `/tmp/probes/pre400` on both builds via `cmp.sh`: k01-k13 are refused by name (direct,
+reversed, mixed, keyword-only, module constant, list item, dict value, class attribute, alias,
+wrapper, positional control, exponent 63 and a huge exponent); s01-s08 match CPython (in-range
+bases and exponents, float/bool/negative exponent, store and loop rebind before the power, no
+power, an in-range argument, a later mutation and positional in-range powers).  Added
+`AIL_CURRENT/test_ail_pre400.py` and registered it in `ail_check.MODULES`; `tools/ci_shards.json`
+gained its weight and assignment.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
