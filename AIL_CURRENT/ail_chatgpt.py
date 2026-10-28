@@ -2861,6 +2861,473 @@ def _check_int64_pow_constants(tree, known):
             check(node, local, scope_names, values)
 
 
+def _literal_truth(node):
+    """The truth value of a literal test, or None when the expression is not a literal."""
+    if isinstance(node, ast.Constant) and type(node.value) in (
+            bool, int, float, str, bytes, type(None)):
+        return bool(node.value)
+    if isinstance(node, (ast.Tuple, ast.List)) and not node.elts:
+        return False
+    if isinstance(node, ast.Dict) and not node.keys:
+        return False
+    return None
+
+
+def _empty_literal(node):
+    """Whether a loop iterable is a literal container with no items."""
+    if isinstance(node, ast.Constant):
+        return type(node.value) in (str, bytes) and not node.value
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return not node.elts
+    if isinstance(node, ast.Dict):
+        return not node.keys
+    return False
+
+
+def _mark_unreachable(statements, dead):
+    """Add the ids of statements in a block that no execution can reach to ``dead``.
+
+    A literal-false ``if``/``while`` body, a literal-true ``if`` else branch, and the statements
+    after a return, raise, break or continue in the same block are unreachable.  The routed-power
+    check folds calls, so it must not refuse one that only sits in such dead code."""
+    terminated = False
+    for statement in statements:
+        if terminated:
+            for node in ast.walk(statement):
+                dead.add(id(node))
+            continue
+        if isinstance(statement, (ast.Return, ast.Raise, ast.Break, ast.Continue)):
+            terminated = True
+        if isinstance(statement, ast.If):
+            truth = _literal_truth(statement.test)
+            if truth is True:
+                _mark_unreachable(statement.body, dead)
+                for dead_statement in statement.orelse:
+                    for node in ast.walk(dead_statement):
+                        dead.add(id(node))
+            elif truth is False:
+                _mark_unreachable(statement.orelse, dead)
+                for dead_statement in statement.body:
+                    for node in ast.walk(dead_statement):
+                        dead.add(id(node))
+            else:
+                _mark_unreachable(statement.body, dead)
+                _mark_unreachable(statement.orelse, dead)
+        elif isinstance(statement, ast.While):
+            truth = _literal_truth(statement.test)
+            if truth is False:
+                for dead_statement in statement.body:
+                    for node in ast.walk(dead_statement):
+                        dead.add(id(node))
+                _mark_unreachable(statement.orelse, dead)
+            else:
+                _mark_unreachable(statement.body, dead)
+                if truth is True:
+                    for dead_statement in statement.orelse:
+                        for node in ast.walk(dead_statement):
+                            dead.add(id(node))
+                else:
+                    _mark_unreachable(statement.orelse, dead)
+        elif isinstance(statement, (ast.For, ast.AsyncFor)):
+            if _empty_literal(statement.iter):
+                for dead_statement in statement.body:
+                    for node in ast.walk(dead_statement):
+                        dead.add(id(node))
+            else:
+                _mark_unreachable(statement.body, dead)
+            _mark_unreachable(statement.orelse, dead)
+        elif isinstance(statement, (ast.With, ast.AsyncWith)):
+            _mark_unreachable(statement.body, dead)
+        elif isinstance(statement, ast.Try) or isinstance(
+                statement, getattr(ast, 'TryStar', ())):
+            _mark_unreachable(statement.body, dead)
+            for handler in statement.handlers:
+                _mark_unreachable(handler.body, dead)
+            _mark_unreachable(statement.orelse, dead)
+            _mark_unreachable(statement.finalbody, dead)
+        elif isinstance(statement, ast.Match):
+            for case in statement.cases:
+                _mark_unreachable(case.body, dead)
+
+
+def _routed_effect_sites(function):
+    """Nodes that may change a container passed to a call or its contents.
+
+    Any call may mutate a container it receives, directly or through an alias, so every call is
+    a site; a subscript store or delete changes a container in place without one."""
+    sites = []
+    for node in _walk_own_scope(function):
+        if isinstance(node, ast.Call):
+            sites.append(node)
+            continue
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AugAssign):
+            targets = [node.target]
+        elif isinstance(node, ast.Delete):
+            targets = node.targets
+        else:
+            continue
+        if any(isinstance(inner, ast.Subscript)
+               for target in targets for inner in ast.walk(target)):
+            sites.append(node)
+    return sites
+
+
+def _routed_power_known(tree, dead):
+    """Module values the routed-power check may read: scalars, safe literal containers and
+    class attributes, with the same fold rules the int() pass uses.  A use in unreachable code
+    cannot mutate the container, so it does not stop the fold."""
+    global_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            global_names.update(node.names)
+    module_counts = _binding_counts(tree.body)
+    parents = {child: parent for parent in ast.walk(tree)
+               for child in ast.iter_child_nodes(parent)}
+    program_bound = _all_bound_names(tree)
+    known = _scope_constant_map(tree.body, tree, {}, module_counts, set(module_counts),
+                                set(), global_names, program_bound)
+    attributes = _known_class_attributes(tree, known)
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            name = node.targets[0].id
+            if module_counts.get(name) != 1 or name in global_names:
+                continue
+            value = _constant_value(node.value, lambda item: known.get(item, _UNKNOWN),
+                                    lambda unused: True, {}, attributes)
+            if type(value) in (int, float) or isinstance(value, (_KnownClassValue, _KnownInstance)):
+                known[name] = value
+    parents = {child: parent for parent in ast.walk(tree)
+               for child in ast.iter_child_nodes(parent)}
+    for node in tree.body:
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            continue
+        name = node.targets[0].id
+        if module_counts.get(name) != 1 or name in global_names or name in known:
+            continue
+        value = _constant_value(node.value, lambda item: known.get(item, _UNKNOWN),
+                                lambda unused: True, {}, attributes)
+        if isinstance(value, tuple):
+            known[name] = value
+        elif isinstance(value, (list, dict)):
+            safe = True
+            for use in ast.walk(tree):
+                if id(use) in dead:
+                    continue
+                if not (isinstance(use, ast.Name) and use.id == name
+                        and isinstance(use.ctx, ast.Load)):
+                    continue
+                parent = parents.get(use)
+                if isinstance(parent, ast.Starred):
+                    continue
+                if (isinstance(parent, ast.Subscript) and parent.value is use
+                        and isinstance(parent.ctx, ast.Load)):
+                    continue
+                safe = False
+                break
+            if safe:
+                known[name] = value
+    return known, attributes, module_counts
+
+
+def _routed_local_containers(function, known, attributes, dead):
+    """Local literal tuples, and read-only local lists/dicts, the routed-power check may read.
+    A use in unreachable code does not stop the fold."""
+    counts = _binding_counts(function.body)
+    parents = {child: parent for parent in ast.walk(function)
+               for child in ast.iter_child_nodes(parent)}
+    result = {}
+    for statement in function.body:
+        if not (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)):
+            continue
+        name = statement.targets[0].id
+        if counts.get(name) != 1:
+            continue
+        value = _constant_value(statement.value,
+                                lambda item: result.get(item, known.get(item, _UNKNOWN)),
+                                lambda unused: True, {}, attributes)
+        if isinstance(value, tuple):
+            result[name] = value
+        elif isinstance(value, (list, dict)):
+            safe = True
+            for use in ast.walk(function):
+                if id(use) in dead:
+                    continue
+                if not (isinstance(use, ast.Name) and use.id == name
+                        and isinstance(use.ctx, ast.Load)):
+                    continue
+                parent = parents.get(use)
+                if isinstance(parent, ast.Starred):
+                    continue
+                if (isinstance(parent, ast.Subscript) and parent.value is use
+                        and isinstance(parent.ctx, ast.Load)):
+                    continue
+                safe = False
+                break
+            if safe:
+                result[name] = value
+    return result
+
+
+def _freeze_routed(value):
+    if isinstance(value, list):
+        return tuple(_freeze_routed(item) for item in value)
+    if isinstance(value, dict):
+        return tuple(sorted(((repr(key), _freeze_routed(item))
+                             for key, item in value.items())))
+    return value
+
+
+def _check_int64_routed_power(tree):
+    """Refuse a power whose constant operands reach it through calls, by name.
+
+    A function body that computes ``b ** e`` from its parameters was left to the fixed-width run
+    time even when every reachable call site supplies constants whose exact result leaves int64
+    (``def power(b, e): return b ** e`` called with ``2`` directly, through another function or
+    through a starred constant sequence).  The call graph is followed from module-scope calls,
+    binding parameter names to statically known argument values; a power whose exact result does
+    not fit int64 is refused by name.  Calls the fold cannot resolve, and powers whose result
+    fits, are left unchanged."""
+    dead = set()
+    _mark_unreachable(tree.body, dead)
+    known, attributes, module_counts = _routed_power_known(tree, dead)
+    functions = {}
+    for node in tree.body:
+        if (isinstance(node, ast.FunctionDef) and not node.decorator_list
+                and module_counts.get(node.name) == 1):
+            functions[node.name] = node
+    if not functions:
+        return
+    pow_available = not _binds_name(tree, 'pow')
+    for function in functions.values():
+        _mark_unreachable(function.body, dead)
+
+    def refuse(node, value):
+        shown = 'too large' if value is _CONST_INT_TOO_BIG else _constant_diagnostic(value)
+        error = ValueError(
+            'int64 constant expression out of range: %s (the constant operands reach the '
+            'integer power through a call, so it is refused by name at compile time; CPython '
+            'computes it exactly with an unbounded int)' % shown)
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def lookup_for(scope_known, parameters, shadowed):
+        """A name lookup that never falls back to a module value a local shadows."""
+        if scope_known is None:
+            return lambda name: _UNKNOWN if name in parameters else known.get(name, _UNKNOWN)
+
+        def lookup(name):
+            if name in parameters:
+                return _UNKNOWN
+            if name in scope_known:
+                return scope_known[name]
+            if name in shadowed:
+                return _UNKNOWN
+            return known.get(name, _UNKNOWN)
+
+        return lookup
+
+    def resolve(node, env, scope_known, parameters, shadowed):
+        if isinstance(node, ast.Name):
+            if node.id in env:
+                return env[node.id]
+            if node.id in parameters:
+                return _UNKNOWN
+        lookup = lookup_for(scope_known, parameters, shadowed)
+        value = _constant_value(node, lookup, lambda unused: True, {}, attributes)
+        if type(value) is int:
+            return value
+        value = _pow_static_int(node, lookup)
+        return value if type(value) is int else _UNKNOWN
+
+    def value_of(node, env, scope_known, parameters, shadowed):
+        """A call-site argument's constant value (any type), or _UNKNOWN."""
+        if isinstance(node, ast.Name):
+            if node.id in env:
+                return env[node.id]
+            if node.id in parameters:
+                return _UNKNOWN
+        lookup = lookup_for(scope_known, parameters, shadowed)
+        return _constant_value(node, lookup, lambda unused: True, {}, attributes)
+
+    def resolve_sequence(node, env, scope_known, parameters, shadowed):
+        """The scalar values a starred call argument unpacks, or None when not statically known."""
+        value = value_of(node, env, scope_known, parameters, shadowed)
+        if not isinstance(value, (list, tuple)):
+            return None
+        if any(type(item) not in (bool, int, float, str, bytes, type(None))
+               for item in value):
+            return None
+        return list(value)
+
+    def bind(callee, arguments, keywords, env, scope_known, parameters, shadowed):
+        positional = [argument.arg for argument in
+                      (*callee.args.posonlyargs, *callee.args.args)]
+        posonly = {argument.arg for argument in callee.args.posonlyargs}
+        every = _scope_parameters(callee)
+        bound = {}
+        filled = set()
+        flat = []
+        for argument in arguments:
+            if isinstance(argument, ast.Starred):
+                values = resolve_sequence(argument.value, env, scope_known, parameters, shadowed)
+                if values is None:
+                    return None
+                flat.extend(ast.Constant(value=value) for value in values)
+            else:
+                flat.append(argument)
+        for index, argument in enumerate(flat):
+            if index >= len(positional):
+                if callee.args.vararg is None:
+                    return None
+                break
+            filled.add(positional[index])
+            value = value_of(argument, env, scope_known, parameters, shadowed)
+            if value is not _UNKNOWN:
+                bound[positional[index]] = value
+        for keyword in keywords:
+            name = keyword.arg
+            if (name is None or name not in every or name in posonly or name in filled
+                    or (callee.args.vararg is not None and name == callee.args.vararg.arg)
+                    or (callee.args.kwarg is not None and name == callee.args.kwarg.arg)):
+                return None
+            filled.add(name)
+            value = value_of(keyword.value, env, scope_known, parameters, shadowed)
+            if value is not _UNKNOWN:
+                bound[name] = value
+        return bound
+
+    def check_power(node, base, exponent):
+        if (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)
+                and _binpow_syntactic_int_node(node.left)):
+            syntactic_base = _binpow_syntactic_int(node.left)
+            if (syntactic_base is not None and abs(syntactic_base) >= 2
+                    and _INT64_MIN <= syntactic_base <= _INT64_MAX
+                    and not _binpow_syntactic_exponent_is_constant(node.right)):
+                # The pre273 front-end rule refuses this construct with its own wording.
+                return
+        if type(base) is int and type(exponent) is int and exponent >= 0:
+            value = _exact_pow_or_too_big(base, exponent)
+            if value is _CONST_INT_TOO_BIG or not _INT64_MIN <= value <= _INT64_MAX:
+                refuse(node, value)
+
+    def loop_scope_nodes(function):
+        """Nodes inside a loop of the function's own scope (a store there can repeat)."""
+        inside = set()
+
+        def visit(node, in_loop):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                      ast.Lambda)):
+                    continue
+                nested = in_loop or isinstance(child, (ast.For, ast.AsyncFor, ast.While))
+                if nested:
+                    inside.add(id(child))
+                visit(child, nested)
+
+        visit(function, False)
+        return inside
+
+    def scan(function, env, depth, seen):
+        if depth > 12:
+            return
+        key = (id(function), tuple(sorted((name, repr(_freeze_routed(value)))
+                                          for name, value in env.items())))
+        if key in seen:
+            return
+        seen = seen | {key}
+        scope_known = dict(_function_local_int_constants(function, known))
+        scope_known.update(_routed_local_containers(function, known, attributes, dead))
+        parameters = _scope_parameters(function)
+        shadowed = set(_function_scope_stores(function)) | parameters | _scope_declared(function)
+        bindings = _binding_counts(function.body)
+        stored_at = {}
+        for inner in _walk_own_scope(function):
+            if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del)):
+                stored_at.setdefault(inner.id, []).append((inner.lineno, inner.col_offset))
+        looped = loop_scope_nodes(function)
+        effects = [site for site in _routed_effect_sites(function) if id(site) not in dead]
+        parents = {inner: parent for inner, parent in _scope_nodes_with_parents(function)}
+
+        def env_at(node):
+            """Drop a parameter the callee may have stored to or mutated before this node.
+
+            A call argument is only the value the power sees when no store to that parameter
+            and no item mutation of a passed container can run first.  A store in a loop may
+            repeat, so inside a loop any store counts.  An effect site is not tied to a name
+            here: an alias could reach the same container, so any such call or mutation before
+            the node makes every passed container dynamic.  The node itself and the calls that
+            enclose it run later, not before, so they do not count."""
+            position = (node.lineno, node.col_offset)
+            repeated = id(node) in looped
+            enclosing = set()
+            parent = parents.get(node)
+            while parent is not None and parent is not function:
+                enclosing.add(id(parent))
+                parent = parents.get(parent)
+
+            def before(where):
+                return repeated or where < position
+
+            container_changed = any(
+                site is not node and id(site) not in enclosing
+                and before((site.lineno, site.col_offset))
+                for site in effects)
+            return {name: value for name, value in env.items()
+                    if not (type(value) in (list, dict) and container_changed)
+                    and (name not in stored_at
+                         or not any(before(where) for where in stored_at[name]))}
+
+        def follows_parameter(node, current):
+            return isinstance(node, ast.Name) and node.id in current
+
+        for node in _walk_own_scope(function):
+            if id(node) in dead:
+                continue
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+                current = env_at(node)
+                if (follows_parameter(node.left, current)
+                        or follows_parameter(node.right, current)):
+                    check_power(node, resolve(node.left, current, scope_known, parameters,
+                                              shadowed),
+                                resolve(node.right, current, scope_known, parameters,
+                                        shadowed))
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and isinstance(node.func.ctx, ast.Load)):
+                name = node.func.id
+                if (name in functions and name not in bindings and name not in parameters
+                        and name not in env):
+                    current = env_at(node)
+                    bound = bind(functions[name], node.args, node.keywords, current,
+                                 scope_known, parameters, shadowed)
+                    if bound is not None:
+                        scan(functions[name], bound, depth + 1, seen)
+                elif (pow_available and name == 'pow' and name not in bindings
+                      and name not in parameters and len(node.args) == 2 and not node.keywords
+                      and not any(isinstance(argument, ast.Starred) for argument in node.args)):
+                    current = env_at(node)
+                    if any(follows_parameter(argument, current) for argument in node.args):
+                        check_power(node, resolve(node.args[0], current, scope_known, parameters,
+                                                  shadowed),
+                                    resolve(node.args[1], current, scope_known, parameters,
+                                            shadowed))
+
+    for node in _walk_module_scope(tree):
+        if id(node) in dead:
+            continue
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and isinstance(node.func.ctx, ast.Load) and node.func.id in functions):
+            bound = bind(functions[node.func.id], node.args, node.keywords, {}, None, set(),
+                         set())
+            if bound is not None:
+                scan(functions[node.func.id], bound, 0, set())
+
+
 def _static_aug_pow_int(node, known, values, attributes, passthrough, global_name):
     """The int a base or exponent expression denotes for the augmented-power check, or None.
 
@@ -4221,6 +4688,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_int_base_constants(tree)
                 module_known = _known_module_constants(tree)
                 _check_int64_pow_constants(tree, module_known)
+                _check_int64_routed_power(tree)
                 _check_int64_augmented_powers(tree, module_known)
                 _check_class_attribute_assignment(tree)
                 _check_genexpr_hash_keys(tree)
