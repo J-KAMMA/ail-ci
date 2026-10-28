@@ -1,3 +1,28 @@
+## 2026-10-28 -- pre436: a routed power survives a container mutation after the call (job-pre436-10282048)
+
+The pre424 review's first still-differing pre-existing item was the module list mutated after
+the routed power: `def power(b, e): return b ** e`; `xs = [2, 100]`; `print(power(*xs))`;
+`xs[1] = 3`.  On both builds it stopped with `integer overflow` where CPython prints
+1267650600228229401496703205376.  This tree had no routed-power pass, so the pre424 pass is
+included; its container discovery counted the later item store as a second binding of `xs`
+and dropped the literal.  Item and attribute stores no longer count as rebinding a name, and
+a call or item/slice store/delete invalidates a container only when it can run before the
+call (a loop keeps its repeated-store rule).  The later mutation now leaves the exact
+out-of-int64 refusal by name on both builds; a mutation before the call, an in-range result
+and non-integer operands still match CPython.
+
+Probes in `/tmp/probes/pre436` on both builds via `cmp.sh`: `p01` (module list after the
+call, the recorded case), `p02` (append after), `p03` (local list after), `p04` (alias after),
+`p05` (parameter after), `p06` (dict value after), `p07` (helper call after), `p09` (later
+read), `p10` (direct starred tuple), `p11` (class attribute), `p13` (list item), `p15` (the
+int64 boundary through independent lists) and `p16` (a wrapper argument) are refused by name;
+`p08` (the power sits in an empty loop), `p12` (float/bool/negative and safe bases), `p14`
+(an empty starred list keeps CPython's exit status) and `m01`-`m10` (item/slice/alias/method/
+helper mutation before the call, local and parameter mutation before, in-range after and an
+unrelated program) match CPython.  The ported pre424 module also passes (2 tests).
+Added `AIL_CURRENT/test_ail_pre436.py` (2 tests, 9 refused and 12 matching programs, both
+builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
