@@ -1,3 +1,30 @@
+## 2026-10-28 -- pre431: a loop store before a routed power no longer hides an out-of-int64 result (job-pre431-10281945)
+
+The rbpre400 review recorded `p10` (loop-store-before) as pre-existing on both builds: a
+power reached through a function call still stopped with the run-time `integer overflow`
+where CPython prints the exact big integer, because the routed-power scan dropped a
+parameter after any store to it, even a loop that assigns the same constant.  This tree
+also lacked the accepted pre400 routed-power check, so the port is included: module-scope
+calls now bind constant positional and keyword arguments into plain top-level functions,
+including mixed and keyword-only calls, and refuse an exact `**`/`pow()` result outside
+int64 by name.  A simple store now updates the bound value when it provably cannot change
+(the same constant, `b = b`, `b += 0`, an unreachable branch, an empty loop), and a loop
+that runs and assigns one constant uses that constant.  A conditional store that may leave
+a different value keeps the pre-existing run-time stop.  Module names bound by a loop that
+is guaranteed to run are folded the same way, so a loop before the call is covered too.
+
+Probes in `/tmp/probes/pre431` on both builds via `cmp.sh`: `p10a`-`p10e` (loop self,
+same/different constant, other store, exponent store) and `m01`-`m04` (module loop same,
+different, empty, break-first) are refused by name or match CPython; `f01`-`f11` cover
+in-range different constants, conditional stores, empty loops, `while False`, `+= 0`,
+`+= 1`, and an unreachable `else`; `r01`-`r05` cover keyword/in-range controls, list,
+dict, attribute and alias routes, a store after the power, and the safe `b = 1` store.
+Final-state tests: test_ail_pre431, test_ail_pre364, test_ail_pre367, test_ail_pre372,
+test_ail_pre351, test_ail_pre33, test_ail_pre299 and test_ail_safetynet (8 modules, 0
+failed); then test_ail_files and test_ail_corpus_findings3 on the committed tree.
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --update` and
+`--check` pass.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};

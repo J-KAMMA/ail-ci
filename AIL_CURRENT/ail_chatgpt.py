@@ -2861,6 +2861,448 @@ def _check_int64_pow_constants(tree, known):
             check(node, local, scope_names, values)
 
 
+def _routed_power_known(tree):
+    """Module values the routed-power check may read: scalars, safe literal containers and
+    class attributes, with the same fold rules the int() pass uses."""
+    global_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            global_names.update(node.names)
+    module_counts = _binding_counts(tree.body)
+    parents = {child: parent for parent in ast.walk(tree)
+               for child in ast.iter_child_nodes(parent)}
+    program_bound = _all_bound_names(tree)
+    known = _scope_constant_map(tree.body, tree, {}, module_counts, set(module_counts),
+                                set(), global_names, program_bound)
+    attributes = _known_class_attributes(tree, known)
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            name = node.targets[0].id
+            if module_counts.get(name) != 1 or name in global_names:
+                continue
+            value = _constant_value(node.value, lambda item: known.get(item, _UNKNOWN),
+                                    lambda unused: True, {}, attributes)
+            if type(value) in (int, float) or isinstance(value, (_KnownClassValue, _KnownInstance)):
+                known[name] = value
+
+    def loop_nonempty(node):
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and \
+                node.func.id == 'range' and not _binds_name(tree, 'range'):
+            values = []
+            for argument in node.args:
+                value = _const_fold_int(argument)
+                if type(value) is not int:
+                    return False
+                values.append(value)
+            if not values or len(values) > 3 or node.keywords:
+                return False
+            if len(values) == 1:
+                return values[0] > 0
+            start, stop = values[0], values[1]
+            step = values[2] if len(values) == 3 else 1
+            if step == 0:
+                return False
+            return stop > start if step > 0 else stop < start
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            return bool(node.elts)
+        if isinstance(node, ast.Dict):
+            return bool(node.keys)
+        if isinstance(node, ast.Constant):
+            return bool(node.value)
+        return False
+
+    def no_shortcut(node):
+        return not any(isinstance(inner, (ast.Break, ast.Continue, ast.Return))
+                       for inner in ast.walk(node))
+
+    def guaranteed_store(node):
+        current = node
+        while current not in tree.body:
+            parent = parents.get(current)
+            if parent is None:
+                return False
+            if isinstance(parent, ast.If):
+                truth = _constant_truth(parent.test)
+                if current in parent.body:
+                    if truth is not True:
+                        return False
+                elif current in parent.orelse:
+                    if truth is not False:
+                        return False
+            elif isinstance(parent, ast.While):
+                if (current not in parent.body or _constant_truth(parent.test) is not True
+                        or not no_shortcut(parent)):
+                    return False
+            elif isinstance(parent, (ast.For, ast.AsyncFor)):
+                if (current not in parent.body or not loop_nonempty(parent.iter)
+                        or not no_shortcut(parent)):
+                    return False
+            elif isinstance(parent, (ast.Try, ast.ExceptHandler, ast.With, ast.AsyncWith,
+                                     ast.Match, ast.match_case)):
+                return False
+            current = parent
+        return True
+
+    module_nodes = {id(node) for node in _walk_module_scope(tree)}
+    loop_stores = {}
+    loop_values = {}
+    for node in ast.walk(tree):
+        if (id(node) not in module_nodes or not isinstance(node, ast.Name)
+                or not isinstance(node.ctx, (ast.Store, ast.Del))):
+            continue
+        loop_stores.setdefault(node.id, []).append(node)
+    for name, stores in loop_stores.items():
+        if name in known:
+            continue
+        values = []
+        unconditional = False
+        for store in stores:
+            parent = parents.get(store)
+            if (isinstance(parent, ast.Assign) and len(parent.targets) == 1
+                    and parent.targets[0] is store):
+                value = _constant_value(parent.value,
+                                        lambda item: known.get(item, _UNKNOWN),
+                                        lambda unused: True, {}, attributes)
+            elif (isinstance(parent, ast.AnnAssign) and parent.target is store
+                    and parent.value is not None):
+                value = _constant_value(parent.value,
+                                        lambda item: known.get(item, _UNKNOWN),
+                                        lambda unused: True, {}, attributes)
+            else:
+                values = []
+                break
+            if type(value) is not int:
+                values = []
+                break
+            values.append(value)
+            unconditional = unconditional or guaranteed_store(store)
+        if values and unconditional and len(set(values)) == 1:
+            loop_values[name] = values[0]
+    known.update(loop_values)
+    return known, attributes, module_counts
+
+
+def _check_int64_routed_power(tree):
+    """Refuse a power whose constant operands reach it through calls, by name.
+
+    A function body that computes ``b ** e`` from its parameters was left to the fixed-width run
+    time even when every reachable call site supplies constants whose exact result leaves int64
+    (``def power(b, e): return b ** e`` called with ``2`` directly or through another function).
+    The call graph is followed from module-scope calls, binding parameter names to statically
+    known argument values; a power whose exact result does not fit int64 is refused by name.
+    A parameter store that provably keeps the call-site value (``b = b``, a loop that assigns
+    the same constant, or a store in a branch or loop that cannot run) does not hide the power;
+    any other store leaves it to the run-time stop.  Calls the fold cannot resolve, and powers
+    whose result fits, are left unchanged."""
+    known, attributes, module_counts = _routed_power_known(tree)
+    functions = {}
+    for node in tree.body:
+        if (isinstance(node, ast.FunctionDef) and not node.decorator_list
+                and module_counts.get(node.name) == 1):
+            functions[node.name] = node
+    if not functions:
+        return
+    pow_available = not _binds_name(tree, 'pow')
+    parents = {child: parent for parent in ast.walk(tree)
+               for child in ast.iter_child_nodes(parent)}
+
+    def refuse(node, value):
+        shown = 'too large' if value is _CONST_INT_TOO_BIG else _constant_diagnostic(value)
+        error = ValueError(
+            'int64 constant expression out of range: %s (the constant operands reach the '
+            'integer power through a call, so it is refused by name at compile time; CPython '
+            'computes it exactly with an unbounded int)' % shown)
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def resolve(node, env, scope_known, parameters):
+        if isinstance(node, ast.Name):
+            if node.id in env:
+                return env[node.id]
+            if node.id in parameters:
+                return _UNKNOWN
+        lookup = scope_known if scope_known is not None else known
+
+        def find(name):
+            if name in env:
+                return env[name]
+            if name in parameters:
+                return _UNKNOWN
+            return lookup.get(name, known.get(name, _UNKNOWN))
+
+        value = _constant_value(node, find, lambda unused: True, {}, attributes)
+        if type(value) is int:
+            return value
+        value = _pow_static_int(node, lookup)
+        return value if type(value) is int else _UNKNOWN
+
+    def bind(callee, arguments, keywords, env, scope_known, parameters):
+        positional = [argument.arg for argument in
+                      (*callee.args.posonlyargs, *callee.args.args)]
+        posonly = {argument.arg for argument in callee.args.posonlyargs}
+        every = _scope_parameters(callee)
+        bound = {}
+        filled = set()
+        for index, argument in enumerate(arguments):
+            if isinstance(argument, ast.Starred):
+                return None
+            if index >= len(positional):
+                if callee.args.vararg is None:
+                    return None
+                break
+            filled.add(positional[index])
+            value = resolve(argument, env, scope_known, parameters)
+            if value is not _UNKNOWN:
+                bound[positional[index]] = value
+        for keyword in keywords:
+            name = keyword.arg
+            if (name is None or name not in every or name in posonly or name in filled
+                    or (callee.args.vararg is not None and name == callee.args.vararg.arg)
+                    or (callee.args.kwarg is not None and name == callee.args.kwarg.arg)):
+                return None
+            filled.add(name)
+            value = resolve(keyword.value, env, scope_known, parameters)
+            if value is not _UNKNOWN:
+                bound[name] = value
+        return bound
+
+    def check_power(node, base, exponent):
+        if type(base) is int and type(exponent) is int and exponent >= 0:
+            value = _exact_pow_or_too_big(base, exponent)
+            if value is _CONST_INT_TOO_BIG or not _INT64_MIN <= value <= _INT64_MAX:
+                refuse(node, value)
+
+    def loop_scope_nodes(function):
+        """Nodes inside a loop of the function's own scope (a store there can repeat)."""
+        inside = set()
+
+        def visit(node, in_loop):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                      ast.Lambda)):
+                    continue
+                nested = in_loop or isinstance(child, (ast.For, ast.AsyncFor, ast.While))
+                if nested:
+                    inside.add(id(child))
+                visit(child, nested)
+
+        visit(function, False)
+        return inside
+
+    def dead_scope_nodes(function):
+        """Nodes in a branch or loop body that cannot run."""
+        dead = set()
+
+        def visit(node):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                      ast.Lambda)):
+                    continue
+                skip = ()
+                if isinstance(child, ast.If):
+                    truth = _constant_truth(child.test)
+                    if truth is False:
+                        skip = child.body
+                    elif truth is True:
+                        skip = child.orelse
+                elif isinstance(child, ast.While) and _constant_truth(child.test) is False:
+                    skip = child.body
+                elif isinstance(child, (ast.For, ast.AsyncFor)) and \
+                        _constant_empty_iter(child.iter):
+                    skip = child.body
+                for part in skip:
+                    stack = [part]
+                    while stack:
+                        item = stack.pop()
+                        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                             ast.ClassDef, ast.Lambda)):
+                            continue
+                        dead.add(id(item))
+                        stack.extend(ast.iter_child_nodes(item))
+                visit(child)
+
+        visit(function)
+        return dead
+
+    def scan(function, env, depth, seen):
+        if depth > 12:
+            return
+        key = (id(function), tuple(sorted(env.items())))
+        if key in seen:
+            return
+        seen = seen | {key}
+        scope_known = _function_local_int_constants(function, known)
+        parameters = _scope_parameters(function)
+        bindings = _binding_counts(function.body)
+        stored_at = {}
+        for inner in _walk_own_scope(function):
+            if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del)):
+                stored_at.setdefault(inner.id, []).append(inner)
+        looped = loop_scope_nodes(function)
+        dead = dead_scope_nodes(function)
+
+        def loop_nonempty(node):
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and \
+                    node.func.id == 'range' and not _binds_name(tree, 'range'):
+                values = []
+                for argument in node.args:
+                    value = _const_fold_int(argument)
+                    if type(value) is not int:
+                        return False
+                    values.append(value)
+                if not values or len(values) > 3 or node.keywords:
+                    return False
+                if len(values) == 1:
+                    return values[0] > 0
+                start, stop = values[0], values[1]
+                step = values[2] if len(values) == 3 else 1
+                if step == 0:
+                    return False
+                return stop > start if step > 0 else stop < start
+            if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+                return bool(node.elts)
+            if isinstance(node, ast.Dict):
+                return bool(node.keys)
+            if isinstance(node, ast.Constant):
+                return bool(node.value)
+            return False
+
+        def no_shortcut(node):
+            return not any(isinstance(inner, (ast.Break, ast.Continue, ast.Return))
+                           for inner in ast.walk(node))
+
+        def guaranteed_store(store, current, new):
+            if new == current:
+                return True
+            node = store
+            while node is not function:
+                parent = parents.get(node)
+                if parent is None:
+                    return False
+                if isinstance(parent, ast.If):
+                    truth = _constant_truth(parent.test)
+                    if node in parent.body:
+                        if truth is not True:
+                            return False
+                    elif node in parent.orelse:
+                        if truth is not False:
+                            return False
+                elif isinstance(parent, ast.While):
+                    if (node not in parent.body or _constant_truth(parent.test) is not True
+                            or not no_shortcut(parent)):
+                        return False
+                elif isinstance(parent, (ast.For, ast.AsyncFor)):
+                    if (node not in parent.body or not loop_nonempty(parent.iter)
+                            or not no_shortcut(parent)):
+                        return False
+                elif isinstance(parent, (ast.Try, ast.ExceptHandler, ast.With, ast.AsyncWith,
+                                         ast.Match, ast.match_case)):
+                    return False
+                node = parent
+            return True
+
+        def inside_loop(node):
+            current = node
+            while current is not function:
+                parent = parents.get(current)
+                if parent is None:
+                    return False
+                if isinstance(parent, (ast.For, ast.AsyncFor, ast.While)):
+                    return True
+                current = parent
+            return False
+
+        def store_value(store, name, value, current):
+            """The constant a simple store leaves in the name, or _UNKNOWN."""
+            if id(store) in dead:
+                return value
+            parent = parents.get(store)
+            if (isinstance(parent, ast.Assign) and len(parent.targets) == 1
+                    and parent.targets[0] is store):
+                new = resolve(parent.value, current, scope_known, parameters)
+            elif (isinstance(parent, ast.AnnAssign) and parent.target is store
+                    and parent.value is not None):
+                new = resolve(parent.value, current, scope_known, parameters)
+            elif (isinstance(parent, ast.AugAssign) and parent.target is store
+                    and isinstance(parent.op, (ast.Add, ast.Sub))):
+                change = resolve(parent.value, current, scope_known, parameters)
+                new = value if type(change) is int and change == 0 else _UNKNOWN
+            else:
+                return _UNKNOWN
+            if type(new) is not int:
+                return _UNKNOWN
+            if new != value:
+                reads_self = isinstance(parent, (ast.Assign, ast.AnnAssign, ast.AugAssign)) \
+                    and any(isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load)
+                            and inner.id == name for inner in ast.walk(parent))
+                if reads_self and inside_loop(store):
+                    return _UNKNOWN
+                if not guaranteed_store(store, value, new):
+                    return _UNKNOWN
+            return new
+
+        def env_at(node):
+            """Update or drop a parameter the callee may have stored to."""
+            position = (node.lineno, node.col_offset)
+            repeated = id(node) in looped
+            kept = {}
+            for name, value in env.items():
+                stores = stored_at.get(name, ())
+                relevant = [store for store in stores
+                            if repeated or _binding_position(store) < position]
+                values = []
+                failed = False
+                for store in relevant:
+                    new = store_value(store, name, value, env)
+                    if new is _UNKNOWN:
+                        failed = True
+                        break
+                    values.append(new)
+                if failed:
+                    continue
+                if not values:
+                    kept[name] = value
+                elif len(set(values)) == 1:
+                    kept[name] = values[0]
+            return kept
+
+        def follows_parameter(node, current):
+            return isinstance(node, ast.Name) and node.id in current
+
+        for node in _walk_own_scope(function):
+            if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+                current = env_at(node)
+                if (follows_parameter(node.left, current)
+                        or follows_parameter(node.right, current)):
+                    check_power(node, resolve(node.left, current, scope_known, parameters),
+                                resolve(node.right, current, scope_known, parameters))
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and isinstance(node.func.ctx, ast.Load)):
+                name = node.func.id
+                if (name in functions and name not in bindings and name not in parameters
+                        and name not in env):
+                    current = env_at(node)
+                    bound = bind(functions[name], node.args, node.keywords, current,
+                                 scope_known, parameters)
+                    if bound is not None:
+                        scan(functions[name], bound, depth + 1, seen)
+                elif (pow_available and name == 'pow' and name not in bindings
+                      and name not in parameters and len(node.args) == 2 and not node.keywords
+                      and not any(isinstance(argument, ast.Starred) for argument in node.args)):
+                    current = env_at(node)
+                    if any(follows_parameter(argument, current) for argument in node.args):
+                        check_power(node, resolve(node.args[0], current, scope_known, parameters),
+                                    resolve(node.args[1], current, scope_known, parameters))
+
+    for node in _walk_module_scope(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and isinstance(node.func.ctx, ast.Load) and node.func.id in functions):
+            bound = bind(functions[node.func.id], node.args, node.keywords, {}, None, set())
+            if bound is not None:
+                scan(functions[node.func.id], bound, 0, set())
+
 def _static_aug_pow_int(node, known, values, attributes, passthrough, global_name):
     """The int a base or exponent expression denotes for the augmented-power check, or None.
 
@@ -4221,6 +4663,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_int64_int_base_constants(tree)
                 module_known = _known_module_constants(tree)
                 _check_int64_pow_constants(tree, module_known)
+                _check_int64_routed_power(tree)
                 _check_int64_augmented_powers(tree, module_known)
                 _check_class_attribute_assignment(tree)
                 _check_genexpr_hash_keys(tree)
