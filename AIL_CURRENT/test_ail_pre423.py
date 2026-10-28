@@ -6,7 +6,9 @@ operand of ``and``/``or`` still counted.  ``class C: x: ((lambda: C)() if False 
 and ``x: (0 and (lambda: C)()) = 1`` were therefore refused although CPython never evaluates the
 deferred read, so the annotation and the class body run normally.  The read now follows the
 statically known truth value of an ``if`` expression and of ``and``/``or`` operands, including
-empty containers; an unknown condition keeps the conservative refusal.
+empty containers; an unknown condition keeps the conservative refusal.  A literal containing an
+unpacking (``[*()]``, ``(*(),)``, ``{*()}``, ``{**{}}``) can be empty at run time, so its truth is
+unknown and the read stays refused.
 """
 import os
 import subprocess
@@ -63,6 +65,7 @@ MATCHING = {
     'or_str': annotated('"x" or (lambda: C)()'),
     'mixed_chain': annotated('(0 and (lambda: C)()) or (1 if True else (lambda: C)())'),
     'and_false_genexp': annotated('0 and list(C for _ in range(1))'),
+    'or_nested_star_list': annotated('[[*()]] or (lambda: C)()'),
     'no_annotation_read': 'class C:\n    x: int = 1\nprint(C.x)\n',
 }
 
@@ -76,6 +79,18 @@ REFUSED = {
     'or_none_genexp': annotated('None or list(C for _ in range(1))'),
     'nested_live': annotated('(lambda: C)() if True else ((lambda: C)() if False else 1)'),
     'unknown_condition': 'flag = False\n' + annotated('(lambda: C)() if flag else 1'),
+    'or_star_list': annotated('[*()] or (lambda: C)()'),
+    'or_star_tuple': annotated('(*(),) or (lambda: C)()'),
+    'or_star_set': annotated('{*()} or (lambda: C)()'),
+    'or_star_dict': annotated('{**{}} or (lambda: C)()'),
+    'if_star_list': annotated('1 if [*()] else (lambda: C)()'),
+    'if_star_tuple': annotated('1 if (*(),) else (lambda: C)()'),
+    'if_star_dict': annotated('1 if {**{}} else (lambda: C)()'),
+    'notif_star_list': annotated('(lambda: C)() if (not [*()]) else 1'),
+    'notif_star_dict': annotated('(lambda: C)() if (not {**{}}) else 1'),
+    'or_star_nonempty_list': annotated('[*[1]] or (lambda: C)()'),
+    'or_star_nonempty_dict': annotated('{**{1: 2}} or (lambda: C)()'),
+    'or_star_mixed_dict': annotated('{1: 2, **{}} or (lambda: C)()'),
 }
 
 

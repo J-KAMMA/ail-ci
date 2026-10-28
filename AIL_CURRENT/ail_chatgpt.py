@@ -2433,8 +2433,12 @@ def _annotation_truth(node):
     if truth is not None:
         return truth
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        if any(isinstance(element, ast.Starred) for element in node.elts):
+            return None
         return bool(node.elts)
     if isinstance(node, ast.Dict):
+        if any(key is None for key in node.keys):
+            return None
         return bool(node.keys)
     if isinstance(node, ast.UnaryOp):
         if isinstance(node.op, ast.Not):

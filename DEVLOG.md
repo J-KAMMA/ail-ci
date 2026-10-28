@@ -1,3 +1,22 @@
+## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
+
+The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
+literal whose contents are empty only after unpacking (`[*()]`, `(*(),)`, `{*()}`, `{**{}}`) was
+treated as truthy.  In a short-circuit position the live branch was then skipped and the deferred
+read was missed: `class C: x: ([*()] or (lambda: C)()) = 1` compiled and printed `1` on both
+builds where CPython raises `NameError`, and the base refused it by name.  A list/tuple/set
+literal with any `ast.Starred` element, and a dict literal with any `None` key (`**` unpacking),
+now has unknown truth, so the read stays refused by name.  Nested containers whose outer literal
+has no unpacking keep their static truth (`[[*()]]` is still truthy and matches CPython).
+
+Probes in `/tmp/probes/pre423fix` on both builds via `cmp.sh`: `p_star_list_or`,
+`p_star_tuple_or`, `p_star_set_or`, `p_star_dict_or`, `p_star_list_if`, `p_star_tuple_if`,
+`p_star_dict_if`, `p_star_list_notif`, `p_star_dict_notif`, `p_star_mixed_dict_or`,
+`p_star_nonempty_list_or`, `p_star_nonempty_dict_or` and the four container/argument routes
+(`p_via_list_item`, `p_via_attribute`, `p_via_dict_value`, `p_via_argument`) are refused by name
+(`a class body annotation reads the class name C before it is bound`); `p_star_nested_list_or`
+matches CPython on both builds.  Added the cases to `test_ail_pre423.py`.
+
 ## 2026-10-28 -- pre423: a statically dead deferred read in a class annotation matches (job-pre423-10281734)
 
 The first still-differing case in the pre410 review's deferred-read area was a deferred lambda or
