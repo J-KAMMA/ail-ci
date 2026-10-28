@@ -1,3 +1,32 @@
+## 2026-10-28 -- stdlib27: `struct` pack / unpack / calcsize (job-stdlib27-10290700)
+
+`import struct` was still refused by the generic import screen (six imports across the corpus and the
+language examples), and the Python wording rewrote the module name to `class` in the message.  Added
+`AIL_CURRENT/python/pkg-v12/structlib.py`, a front-end pass after batch 5 and before the collection/tuple
+passes.  A literal format with an explicit byte-order prefix (`<`, `>`, `!`, or `=` for native byte order
+with the standard sizes and no alignment) and the codes `x c b B h H i I l L q Q s ?` is lowered; a repeat
+count is built (`2I`, `4x`, `0I`, `10s`).  `pack` becomes a `bytearray` and `int.to_bytes` with CPython's
+range checks, argument-type checks and `struct.error` texts, `unpack` checks the buffer type and length
+then uses `int.from_bytes` / slices / a bool test, and `calcsize` becomes an int.  `struct.error` is
+`ValueError` (the text matches; `type(e).__name__` is `ValueError`, not `error`).  The native layout
+(`@` or no prefix), the float codes `e/f/d`, `p/n/N/P`, a computed format string, `unpack_from`,
+`pack_into`, `Struct` and `iter_unpack` are refused by name at compile time; a format over 1 MiB is refused
+too.  The wording pass now leaves a quoted/dotted/colon-suffixed `struct` alone, so the refusal names the
+module instead of saying `class`.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `struct_all` (all codes, both byte orders,
+`=`/`!`, padding, `c`/`s`/`?`, zero counts, nested `calcsize`, int64 edges), `struct_forms`
+(from-imports and aliases, values through helpers / a list item / an attribute / a dict value, error
+texts), `struct_corpus` (the corpus t475 shape) and `struct_types` (str / bytes / float / bool
+arguments; invalid types give CPython's texts, with `Exception` as the struct.error stand-in) all match
+CPython apart from `type(e).__name__` noted above.  The refusal cases are pinned in
+`test_ail_stdlib27.py` (native layout, float format, computed format, `unpack_from`).  Added
+`AIL_CURRENT/test_ail_stdlib27.py` and registered it in `ail_check.MODULES`; the default build is checked
+on `AIL_IR=0` and `1`, and a pack/calcsize program is built with `AIL_NO_GENERAL=1`.  Final-state tests:
+test_ail_stdlib27, test_ail_python_syntax, test_ail_refusal_messages, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3 (6 modules, 42 tests, 0 failed; 1 skip for no zig).  `tools/update_manifest.py`
+was run and `--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

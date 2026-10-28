@@ -190,6 +190,17 @@ def _stdlib4():
     return _stdlib4.module
 
 
+def _structlib():
+    """python/pkg-v12/structlib.py (`struct` pack / unpack / calcsize, lowered before the other source passes)."""
+    if not hasattr(_structlib, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import structlib
+        _structlib.module = structlib
+    return _structlib.module
+
+
 _OPTIONAL =re.compile(r'\bOptional\s*\[\s*([A-Za-z_]\w*)\s*\]')
 
 
@@ -3410,6 +3421,8 @@ def python_surface(source, notes=None, library=False):
         source = _stdlib5().rewrite_text(source, notes)
     if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "time", "zoneinfo")):
         source = _stdlib4().rewrite_text(source, notes)
+    if "struct" in source:
+        source = _structlib().rewrite_text(source, notes)
     if "collections" in source:
         source = _collib().rewrite(source, notes)
     if "None" in source or "Optional" in source:
@@ -3445,5 +3458,5 @@ def python_wording(message):
     message = re.sub(r'`([^`\n]*)`', snippet, message)
     message = re.sub(r'\ba let\b', 'an assignment', message)
     message = re.sub(r'(?<!C )\bstructs\b', 'class instances', message)
-    message = re.sub(r'(?<!C )\bstruct\b', 'class', message)
+    message = re.sub(r"(?<!C )\bstruct\b(?!['.:])", 'class', message)
     return message

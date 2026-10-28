@@ -1052,6 +1052,19 @@ slower than typed code), where operator methods dispatch on the run-time class (
   __round__ __floor__ __ceil__ __trunc__ __index__ __hash__ __eq__ __len__ __getitem__ __setitem__ __delitem__ __contains__`; instances hash and compare by identity unless the
   class says otherwise. `d1 | d2` on dicts, `type(x).__name__`, `x.__class__.__name__`, `Cls(*xs)` for a class with a fixed `__init__`.
 
+### `struct` (pack, unpack, calcsize)
+
+Lowered in the front end by `structlib.py`; a program that does not import `struct` is unchanged.  A format
+must be a string literal with an explicit byte-order prefix: `<` little, `>` / `!` big, `=` native byte
+order with the standard sizes and no alignment.  Codes: `x c b B h H i I l L q Q s ?`; a repeat count is
+built (`2I`, `4x`, `8s`, `0I`).  `struct.pack` gives `bytes`, `struct.unpack` gives a tuple (a `c` or `s`
+field is `bytes`, `?` is `bool`), and `struct.calcsize` is folded to an int.  `struct.error` is
+`ValueError`; pack range errors and unpack buffer errors use CPython 3.12's text.
+
+Refused by name: the native layout (`@` or no prefix), the float codes `e f d`, `p n N P`, a computed
+format string, `unpack_from`, `pack_into`, `Struct`, `iter_unpack`, and a format over 1 MiB.  Keep such a
+field as an int and use `int.to_bytes()` / `int.from_bytes()` (native endianness: `sys.byteorder`).
+
 ### Tooling: projects, language server, debugging (last section of this file)
 
 `ail` (packaging/ail_lang/cli.py) is the command; `python -m ail_lang` is the same. With `AIL_SDK_DIR=<AIL_CURRENT>` it runs from a source checkout.

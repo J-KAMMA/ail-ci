@@ -5084,14 +5084,14 @@ def _python_notes(message, notes, source):
                 break
     for entries in notes.values():
         # `import time` followed by a time name the front end could not map: name that, not the import
-        named = [text.split(';')[0] for _, text in entries if re.match(r'(time|string|os|operator)\.', text)]
-        found = re.search(r"import of '(time|string|os|operator)' is not available[^\n]*\n  write instead: [^\n]*", message)
+        named = [text.split(';')[0] for _, text in entries if re.match(r'(time|string|os|operator|struct)\.', text)]
+        found = re.search(r"import of '(time|string|os|operator|struct)' is not available[^\n]*\n  write instead: [^\n]*", message)
         if named and found and any(text.startswith(found.group(1) + '.') for _, text in entries):
             message = message.replace(found.group(0), next(n for n in named if n.startswith(found.group(1) + '.'))
                                       + ' (see the note below)')
             break
     # library batch 4 (csv, datetime, ...): the import is refused because a use was not built; say which
-    found = re.search(r"import of '(csv|datetime|decimal|fractions|unicodedata|statistics|textwrap|enum|string)'; [^\n]*?by hand",
+    found = re.search(r"import of '(csv|datetime|decimal|fractions|unicodedata|statistics|textwrap|enum|string|struct)'; [^\n]*?by hand",
                       message)
     if found:
         for entries in notes.values():
