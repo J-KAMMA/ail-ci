@@ -1,3 +1,26 @@
+## 2026-10-28 -- pre381 follow-up: handlers after a class-name check still run (job-pre381-10281228)
+
+The pre381 class-name check broke `test_ail_multifile`'s `m1_misc`: a loop whose `try` had two
+user-class handlers caught `OutOfStock` on the first iteration and then stopped before the second
+`except ShopError`, exiting 0 with no stderr.  `stmt_Try` emits the handlers as one `if`/`else if`
+chain; `_check_class_name_bound` puts an `if (g_class_init_arr[i])` in front of a handler, so a
+later handler's match became the `else if` of that check instead of of the preceding handler.
+Once an earlier handler had caught and cleared the exception, control fell into the check's
+`else { goto leave; }`.
+
+Every handler now jumps explicitly to the try end (or to the `finally` label) after its body, so a
+later handler is never tested after a match and its class name is not evaluated either.
+`test_ail_pre381.py` gained `loop_second_handler` (the m1_misc shape) and
+`later_handler_not_evaluated` (an earlier handler catches while a later handler names the class
+whose body is running), both checked on the general and default builds.
+
+Probes in `/tmp/probes` (`pre381fix_p01`-`p08`, both builds via `cmp.sh`): `p01`, `p02`, `p03`,
+`p05`, `p06`, `p07` and `p08` match CPython; `p04` (`continue` out of a `try/finally`) is refused
+by name on the general build and matches on the default build.  Targeted tests on this tree:
+`test_ail_pre381`, `test_ail_try_locals`, `test_ail_try_hoist` and `test_ail_multifile` pass.
+The required modules were run on the committed tree (results in the job report).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- pre381: a class body cannot read its own name (job-pre381-10280717)
 
 The pre362 review's first still-differing pre-existing item reproduced on this tree: rp28

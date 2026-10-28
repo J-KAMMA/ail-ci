@@ -89,6 +89,38 @@ class C:
     box = Box()
 print(C().box.get().__name__)
 ''',
+    # Regression: a handler whose type is a class name opens its own `if (bound)` check.  An
+    # earlier handler catching the exception must not then fall into that check's `else`, and a
+    # later handler's class name must not be evaluated once an earlier handler matched.
+    'loop_second_handler': '''
+class Base(Exception):
+    pass
+class Child(Base):
+    pass
+for n in ("bad", "nope"):
+    try:
+        if n == "bad":
+            raise Child(n)
+        raise Base("unknown " + n)
+    except Child as e:
+        print("child", e)
+    except Base as e:
+        print("base", e)
+print("after")
+''',
+    'later_handler_not_evaluated': '''
+def f():
+    try:
+        raise ValueError("x")
+    except ValueError as e:
+        print("caught", e)
+    except C as e:
+        print("wrong")
+    print("after")
+class C(Exception):
+    x = f()
+print(C.x)
+''',
 }
 
 REFUSALS = {

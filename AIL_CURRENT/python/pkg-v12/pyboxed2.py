@@ -11675,8 +11675,16 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.lines.append('%s: ;' % unb_done)
             if keeps:
                 ctx.reraise_stack.pop()
+            # CPython stops matching handlers once one has caught the exception.  The chain
+            # below skips later handlers only while the matched branch is part of the same
+            # if/else-if chain; a class-name check emitted by one handler opens its own `if`
+            # and would let an earlier handler's success fall through to the final `else`.
+            # Jump out of the handler explicitly so the remaining handlers are never tried.
             if has_finally:
                 ctx.emit('comp = AIL_COMPLETE_NORMAL;')
+                ctx.emit('goto %s;' % fin_label)
+            else:
+                ctx.emit('goto %s;' % end)
             ctx.indent -= 1
             ctx.emit('}')
         if node.handlers:
