@@ -3,10 +3,12 @@
 The pre379 review recorded ``p6_enumret`` as pre-existing: CPython accepts an ``__index__``
 method that returns an IntEnum member (an IntEnum subclasses int), while both AIL builds raised
 ``TypeError: list indices must be integers or slices, not instance``.  The general-path
-``__index__`` result is now unwrapped through the member's own ``__index__`` wherever an index
+``__index__`` result is now unwrapped through the member's integer ``value`` wherever an index
 is converted: list/tuple/str subscription, range(), round()'s ndigits, str and bytes search
-bounds and list.index bounds.  Direct IntEnum/IntFlag subscriptions already worked and keep
-working; a plain object whose ``__index__`` returns a non-int (a str, None, another object with
+bounds and list.index bounds.  CPython never calls an IntEnum member's own (possibly overridden)
+``__index__`` for such a result, so neither does AIL: an override that returns a different value
+or raises is ignored.  Direct IntEnum/IntFlag subscriptions already worked and keep working; a
+plain object whose ``__index__`` returns a non-int (a str, None, another object with
 ``__index__``, a StrEnum or a plain Enum) stays a TypeError.  Values reach the conversion
 through a variable, an argument, a list item, an attribute and a dict value.
 
@@ -182,6 +184,87 @@ main()
 '''
 
 
+OVERRIDDEN_INDEX = r'''import enum
+
+
+class E(enum.IntEnum):
+    ZERO = 0
+    ONE = 1
+    TWO = 2
+    NEG = -1
+
+    def __index__(self):
+        return 999
+
+
+class F(enum.IntFlag):
+    A = 1
+    B = 2
+
+    def __index__(self):
+        return 7
+
+
+class R(enum.IntEnum):
+    A = 5
+
+    def __index__(self):
+        raise ValueError("boom")
+
+
+class C:
+    def __init__(self, v):
+        self.v = v
+
+    def __index__(self):
+        return self.v
+
+
+class Box:
+    pass
+
+
+def show(tag, f):
+    try:
+        print(tag, repr(f()))
+    except Exception as e:
+        print(tag, type(e).__name__, str(e))
+
+
+def take(x):
+    print("arg", [10, 20, 30, 40][x])
+
+
+def main():
+    for v in (E.ZERO, E.ONE, E.NEG, F.B):
+        c = C(v)
+        show("list-" + repr(v), lambda c=c: [10, 20, 30, 40][c])
+        show("tuple-" + repr(v), lambda c=c: (10, 20, 30, 40)[c])
+        show("str-" + repr(v), lambda c=c: "abcd"[c])
+        show("item-" + repr(v), lambda c=c: [10, 20, 30, 40][[c][0]])
+        box = Box()
+        box.i = c
+        show("attr-" + repr(v), lambda box=box: [10, 20, 30, 40][box.i])
+        show("dict-" + repr(v), lambda c=c: [10, 20, 30, 40][{"i": c}["i"]])
+        take(c)
+    show("empty", lambda: [][C(E.ZERO)])
+    for v in (E.ZERO, E.ONE, E.TWO, E.NEG):
+        c = C(v)
+        show("range1-" + repr(v), lambda c=c: list(range(c)))
+        show("range2-" + repr(v), lambda c=c: list(range(0, c)))
+        show("find-" + repr(v), lambda c=c: "abcabcabc".find("a", c))
+        show("bfind-" + repr(v), lambda c=c: b"abcabcabc".find(b"a", c))
+        show("lindex-" + repr(v), lambda c=c: [1, 2, 3, 4].index(3, c))
+        show("round-" + repr(v), lambda c=c: round(2.34567, c))
+    show("raise-list", lambda: [10, 20, 30][C(R.A)])
+    show("raise-range", lambda: list(range(C(R.A))))
+    show("raise-round", lambda: round(2.34567, C(R.A)))
+    print("done")
+
+
+main()
+'''
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -224,6 +307,9 @@ class Pre397Tests(unittest.TestCase):
 
     def test_intenum_returned_from_index_in_other_index_contexts(self):
         self.check('contexts', INDEX_CONTEXTS)
+
+    def test_overridden_index_on_returned_member_is_not_called(self):
+        self.check('override', OVERRIDDEN_INDEX)
 
 
 if __name__ == '__main__':

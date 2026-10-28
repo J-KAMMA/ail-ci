@@ -1,11 +1,26 @@
+## 2026-10-28 -- pre397 review fix: read the returned member's value, not its `__index__` (job-pre397-10281018)
+
+The pre397 review found that `ail__intenum_index` called the returned IntEnum member's own
+`__index__` to unwrap it, so an override returning 999 made `[0..1999][C()]` print 999 instead
+of the member's 5, and an override raising `ValueError` made an otherwise valid index fail.
+CPython accepts the member as an int subclass and never calls that override.  The helper now
+reads the member's integer `value` attribute directly (the same value the base `__index__`
+returns) and no longer dispatches or raises.  Added `OVERRIDDEN_INDEX` to `test_ail_pre397.py`:
+returned members with overridden `__index__` (returning 999 or raising) across list/tuple/str
+subscription, range, round, str/bytes find, list.index, an argument, a list item, an attribute
+and a dict value, plus zero, negative, empty and IntFlag cases.  Probes `/tmp/probes/r9_override_diff.py`,
+`r10_override_raise.py`, `v1_getitem_override.py`, `v2_contexts_override.py`,
+`v3_raise_override.py`, `v4_intflag_override.py` and `v5_big_override.py` match CPython on both
+builds.  Required tests on the final commit: test_ail_pre397, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-28 -- pre397: `__index__` returning an IntEnum member is an index (job-pre397-10281018)
 
 The pre379 review's first still-differing pre-existing item was `p6_enumret`: CPython accepts an
 `__index__` method that returns an IntEnum member (an IntEnum subclasses int), while both AIL
 builds raised `TypeError: list indices must be integers or slices, not instance`.  The general
 path kept the returned member as an instance.  A new `ail__intenum_index` helper (dunderrt.py)
-recognises an `_AilIntEnum` member in the class chain and unwraps it through its own
-`__index__`; it is used where an `__index__` result is checked: list/tuple/str subscription
+recognises an `_AilIntEnum` member in the class chain and unwraps its integer `value` (see the
+review-fix entry above); it is used where an `__index__` result is checked: list/tuple/str subscription
 (dunderrt's `ail_op_getitem`), `range()` arguments and sequence index bounds (pyboxed2),
 `round()` ndigits (dunderrt), and str/bytes search bounds (safetyrt).  Direct IntEnum/IntFlag
 indexes already worked and are unchanged; a non-int result (a str, None, another object with

@@ -87,8 +87,10 @@ static inline ail_d2_fn ail_dun2(ail_obj x, int i) {
     return 0;
 }
 /* CPython accepts an IntEnum / IntFlag member returned from __index__: it subclasses int, so the
-   result is a PyLong.  AIL stores the member as an instance, so unwrap it through its own
-   __index__.  1 = normalized, 0 = not such a member, -1 = the member's __index__ raised (*err). */
+   result is already a PyLong and CPython never calls its (possibly overridden) __index__.  AIL
+   stores the member as an instance holding its integer value in the `value` attribute, so
+   unwrap that attribute instead of dispatching __index__ again.  1 = normalized, 0 = not such a
+   member. */
 static inline int ail__intenum_member(ail_obj x) {
     if (x.tag != AIL_T_INST) return 0;
     static const char name[] = "_AilIntEnum";
@@ -102,12 +104,17 @@ static inline int ail__intenum_member(ail_obj x) {
     return 0;
 }
 static inline int ail__intenum_index(ail_ctx *cx, ail_obj *r, ail_st *err) {
+    (void)err;
     if (r->tag != AIL_T_INST || !ail__intenum_member(*r)) return 0;
-    ail_d1_fn f = ail_dun1(*r, AIL_D1_INDEX);
-    if (!f) return 0;
-    ail_obj v; ail_st st = f(cx, &v, *r);
-    if (st != AIL_OK) { *err = st; return -1; }
-    if (v.tag == AIL_T_INT || v.tag == AIL_T_BOOL) { *r = ail_box_int(v.i); return 1; }
+    ail_instobj *o = (ail_instobj *)r->o;
+    for (int64_t i = 0; i < o->n; i++) {
+        int64_t nid = o->attrs[i].name_id;
+        if (nid >= 0 && nid < cx->intern_n && strcmp(cx->intern_tab[nid], "value") == 0) {
+            ail_obj v = o->attrs[i].val;
+            if (v.tag == AIL_T_INT || v.tag == AIL_T_BOOL) { *r = ail_box_int(v.i); return 1; }
+            return 0;
+        }
+    }
     return 0;
 }
 static void ail__dun_tname(char *buf, size_t n, ail_obj x) {
