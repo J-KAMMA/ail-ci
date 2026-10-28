@@ -1,3 +1,27 @@
+## 2026-10-28 -- cov22: untyped `json.load` from stdin (job-cov22-10290434)
+
+Built every program under `lab/corpus/programs` the way `lab/corpus/check.py` compiles them, on the
+default and general paths: 24 programs were refused on each build before this change; 7 of those
+are imports (the stdlib tasks' area), leaving 17. The most frequent non-import construct was the
+untyped JSON result: the typed path wants a declared type for `json.loads`, and the general path
+refused `json.load` itself. `glm-5.3-flash-free/t176` and `t184` read JSON that way.
+
+`genlib.py` now lowers exactly `json.load(sys.stdin)` to the existing `_ail_json_loads` piece with
+`sys.stdin.read()`, so the default build falls back to the general path and both builds return the
+boxed value CPython 3.12 returns. `json.load` of any other file (including a binary file, which
+CPython decodes), `json.load` used as a value and an aliased `sys` remain named compile-time
+refusals. After the change 23 programs are refused on each build (7 imports, 16 others); t184
+matches CPython on all three corpus inputs on both builds.
+
+Probes in `/tmp/probes/cov22` on both builds: `p_types`, `p_routes`, `p_json_alias` and
+`p_from_load` match CPython for objects, lists, int, negative int, float, 1e300, str, true, null,
+duplicate keys, empty input, invalid JSON and extra data (values routed directly, through an
+argument, a list item, an attribute and a dict value); `p_refuse_file`, `p_refuse_binary`,
+`p_refuse_filevar` and `p_refuse_sys_alias` are refused by name on both builds. Added
+`test_ail_cov22.py`, registered in `ail_check.MODULES` and `tools/ci_shards.json`, with the same
+CPython comparison on both builds and one refusal case. `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --update` adds the module and `--check` exits 0.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
