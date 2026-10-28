@@ -271,8 +271,23 @@ class _Body:
                                   % (base, base, base, base))
 
 
+def _is_extern(fn):
+    """Whether fn is an `@extern(...)` stub for a foreign C function."""
+    for d in fn.decorator_list:
+        target = d.func if isinstance(d, ast.Call) else d
+        if isinstance(target, ast.Name) and target.id == 'extern':
+            return True
+    return False
+
+
 def check_callee(fn, funcs, Unsupported, stack):
     """A fn callable from a parallel body: int/float parameters and result, locals only."""
+    # A C function may keep state or call back into the runtime, so worker threads never run one.
+    # Checked first: the annotation rule below refuses today's stubs only because they use C types,
+    # which is not a promise
+    if _is_extern(fn):
+        raise _refuse(Unsupported, fn, 'extern %s() is a C function, so a parallel body cannot call it'
+                                       % fn.name)
     if fn.name in stack:
         raise _refuse(Unsupported, fn, '%s() is recursive; a parallel body cannot call it' % fn.name)
     stack = stack + (fn.name,)
