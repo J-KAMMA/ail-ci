@@ -4387,12 +4387,57 @@ def _binpow_param_constants(function, lookup, global_name, attributes, passthrou
     return found
 
 
+def _binpow_default_values(function, module_known, attributes, passthrough):
+    """A parameter's statically known default value, evaluated in the defining scope."""
+    defaults = {}
+    positional = [argument.arg for argument in (*function.args.posonlyargs, *function.args.args)]
+    for name, node in zip(positional[len(positional) - len(function.args.defaults):],
+                          function.args.defaults):
+        defaults[name] = _constant_value(node, lambda item: module_known.get(item, _UNKNOWN),
+                                         lambda unused: True, passthrough, attributes)
+    for name, node in zip((argument.arg for argument in function.args.kwonlyargs),
+                          function.args.kw_defaults):
+        if node is not None:
+            defaults[name] = _constant_value(node, lambda item: module_known.get(item, _UNKNOWN),
+                                             lambda unused: True, passthrough, attributes)
+    return defaults
+
+
+def _binpow_argument_value(node, parameter, index, value_of, default):
+    """The value a call binds to a power parameter, including a constant ``*`` expansion.
+
+    ``index`` is the positional slot, or None for a keyword-only parameter.  An omitted
+    argument takes the parameter's default; a ``*`` argument whose value is not a flat
+    constant tuple keeps the value unknown, so nothing is assumed about it.  Only a tuple is
+    expanded: it cannot be mutated after the value was recorded."""
+    if index is not None:
+        position = 0
+        for argument in node.args:
+            if isinstance(argument, ast.Starred):
+                expanded = value_of(argument.value)
+                if (not isinstance(expanded, tuple)
+                        or any(isinstance(item, (list, tuple, dict)) for item in expanded)):
+                    return _UNKNOWN
+                if position <= index < position + len(expanded):
+                    return expanded[index - position]
+                position += len(expanded)
+            else:
+                if position == index:
+                    return value_of(argument)
+                position += 1
+    for keyword in node.keywords:
+        if keyword.arg == parameter:
+            return value_of(keyword.value)
+    return default
+
+
 def _binpow_power_parameters(tree, module_known, module_int_known, attributes, passthrough,
                              program_bound=None):
     """Module functions whose parameter is the base of a power with a known int exponent.
 
-    ``name -> {parameter: (argument index, [exponents])}``.  A parameter the function rebinds
-    is left out: ``_binpow_param_constants`` folds that use instead."""
+    ``name -> {parameter: (argument index, [exponents], default)}``.  A parameter the function
+    rebinds is left out: ``_binpow_param_constants`` folds that use instead.  A call that omits
+    the parameter is checked with its constant default, the value CPython binds there."""
     counts = _binding_counts(tree.body)
     if program_bound is None:
         program_bound = _all_bound_names(tree)
@@ -4410,6 +4455,7 @@ def _binpow_power_parameters(tree, module_known, module_int_known, attributes, p
         lookup, global_name = _binpow_function_lookup(function, module_known, module_int_known,
                                                        program_bound=program_bound)
         rebound = set(_function_scope_stores(function)) | _scope_declared(function)
+        defaults = _binpow_default_values(function, module_known, attributes, passthrough)
         uses = {}
         for node in _walk_own_scope(function):
             if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
@@ -4422,7 +4468,7 @@ def _binpow_power_parameters(tree, module_known, module_int_known, attributes, p
                 continue
             uses.setdefault(base.id, []).append(exponent)
         if uses:
-            found[function.name] = {name: (mapped[name], exponents)
+            found[function.name] = {name: (mapped[name], exponents, defaults.get(name, _UNKNOWN))
                                     for name, exponents in uses.items()}
     return found
 
@@ -4472,11 +4518,8 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
             return
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and global_name(node.func.id) and node.func.id in power_parameters):
-            for parameter, (index, exponents) in power_parameters[node.func.id].items():
-                argument = _bound_argument(node, parameter, index)
-                if argument is None:
-                    continue
-                value = value_of(argument)
+            for parameter, (index, exponents, default) in power_parameters[node.func.id].items():
+                value = _binpow_argument_value(node, parameter, index, value_of, default)
                 if type(value) is not int:
                     continue
                 for exponent in exponents:
