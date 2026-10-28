@@ -186,6 +186,38 @@ main()
 '''
 
 
+RESERVED_USER_CLASSES = (
+    r'''class _AilIntEnum:
+    def __init__(self):
+        self.value = 2
+
+
+xs = [10, 20, 30]
+print(xs[_AilIntEnum()])
+''',
+    r'''class _AilIntEnum:
+    def __index__(self):
+        return 1
+
+
+xs = [10, 20, 30]
+print(xs[_AilIntEnum()])
+''',
+    r'''class _AilIntEnum:
+    value = 2
+
+
+class X:
+    def __index__(self):
+        return _AilIntEnum()
+
+
+xs = [10, 20, 30]
+print(xs[X()])
+''',
+)
+
+
 @unittest.skipUnless(HAVE_CC, 'gcc is required')
 class IndexResultTypeError(unittest.TestCase):
     def check(self, mode):
@@ -200,6 +232,17 @@ class IndexResultTypeError(unittest.TestCase):
 
     def test_default(self):
         self.check('default')
+
+    def test_user_redefinition_is_refused_by_name(self):
+        # The runtime finds an IntEnum member by the `_AilIntEnum` name on its base chain, so a user
+        # class of that name (legal in CPython without importing enum) must be refused by name.
+        for mode in ('general', 'default'):
+            with tempfile.TemporaryDirectory(prefix='ail-pre411-reserved-') as directory:
+                for i, text in enumerate(RESERVED_USER_CLASSES):
+                    got, error = _build_run(directory, 'reserved%d_%s.ail' % (i, mode), text, mode)
+                    self.assertIsNone(got, text)
+                    self.assertIn('_AilIntEnum', error)
+                    self.assertIn('reserved', error)
 
 
 if __name__ == '__main__':

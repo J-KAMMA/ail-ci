@@ -116,7 +116,9 @@ static void ail__dun_tname(char *buf, size_t n, ail_obj x) {
 static const char *ail__dun_tname_s(ail_obj x) { static char b[80]; ail__dun_tname(b, sizeof b, x); return b; }
 /* An IntEnum / IntFlag member is an int subclass in CPython: a list index uses the member's value
    directly (an overridden __index__ is ignored), and a __index__ result that is a member is accepted
-   by that value.  The prelude keeps the value in the member's `value` attribute. */
+   by that value.  The prelude keeps the value in the member's `value` attribute.  The prelude class
+   is found by name, which is why ail_syntax.py refuses a user class of that name before the prelude
+   is added (otherwise a program that does not import `enum` could spoof it). */
 static inline int ail__dun_int_enum(ail_obj x) {
     if (x.tag != AIL_T_INST) return 0;
     for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {

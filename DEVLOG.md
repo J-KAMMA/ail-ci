@@ -1,3 +1,21 @@
+## 2026-10-28 -- pre411 review: a user `_AilIntEnum` is refused, not read as an enum member (job-pre411-10281301)
+
+The pre411 review found that dunderrt.py detects an IntEnum/IntFlag member by the class name
+`_AilIntEnum` on its base chain.  A program that does not import `enum` may define a class of that
+name, and its instances were then used as list indices (the review's p11/p13/p17).  The name is now
+reserved: ail_syntax.py refuses a user class `_AilIntEnum` by name before the enum prelude is
+added, so the name match can only see the prelude class.  Probes on both builds:
+`p_reserved_direct.py` (p13: CPython raises `TypeError ... not _AilIntEnum`; both builds refuse by
+name), `p_reserved_index.py` (p11: CPython prints 30; both builds refuse), `p_reserved_chain.py`
+(p17: CPython raises `__index__ returned non-int`; both builds refuse), `p_reserved_routes.py` (the
+class reaching the subscript through an argument, a list item, an attribute and a dict value; both
+refuse) and `p_reserved_nested.py` (a nested class; both refuse).  The earlier probes
+p1/p6/p10/p14/p15, p_index_nonint and p_pre411_testprog still match CPython on both builds; p2 keeps
+the pre-existing `not instance` wording; p_nested and p_slice_bounds keep the pre-existing slice
+divergence.  Final-state tests: test_ail_pre411, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (4 modules, 0 failed).  `tools/update_manifest.py` was run and `--check`
+passes.  The full suite was not run.
+
 ## 2026-10-28 -- pre411: a non-int `__index__` result on a subscript names CPython's TypeError (job-pre411-10281301)
 
 The pre397 review recorded r4: an `__index__` returning a non-int raised `list indices must be

@@ -657,8 +657,10 @@ def translate(source, *, module=False, imports=None, declarations=None, source_m
         source_map.update({index: (position[0], position[1] + 1)
                            for index, (_, position) in enumerate(lines, 1 if module else 2)
                            if position is not None})
-    return '\n'.join([*([] if module else ['import sys']), *(line for line, _ in lines),
-                      *([] if module else ['sys.exit(main())']), ''])
+    out = '\n'.join([*([] if module else ['import sys']), *(line for line, _ in lines),
+                     *([] if module else ['sys.exit(main())']), ''])
+    _refuse_reserved_class_names(out)
+    return out
 
 
 # ------------------------------------------------------------------------------------------------
@@ -3374,9 +3376,31 @@ def _inline_type_aliases(source):
     return source
 
 
+def _refuse_reserved_class_names(source):
+    """Refuse a user class that takes the name of an internal prelude class.
+
+    dunderrt.py finds an IntEnum/IntFlag member by the name `_AilIntEnum` on its base chain (a
+    member is an int subclass in CPython, so its value is the index).  A program that defines a
+    class of that name without importing `enum` would be misread as a member, so the name is
+    reserved; the prelude itself is added after this check.
+    """
+    if '_AilIntEnum' not in source:
+        return
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and node.name == '_AilIntEnum':
+            raise SyntaxErrorAIL(
+                "the class name '_AilIntEnum' is reserved for enum.IntEnum; rename the class",
+                lineno=node.lineno, offset=node.col_offset + 1)
+
+
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    _refuse_reserved_class_names(source)
     source = _inline_type_aliases(source)
     if "raise" in source and " from " in source:
         source = _raisefrom().rewrite(source, notes)
