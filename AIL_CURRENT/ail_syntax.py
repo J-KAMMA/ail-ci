@@ -1214,10 +1214,12 @@ _MATH_HELPERS['prod'] = (
     '    for v in xs:\n'
     '        r = r * v\n'
     '    return r\n')
-_MATH_HELPERS['tw_wrap'] = (
-    'def _ail_tw_wrap(text: str, width: int) -> list[str]:\n'
+_MATH_HELPERS['tw_wrap_more'] = (
+    'def _ail_tw_wrap_more(text: str, width: int, placeholder: str) -> list[str]:\n'
     '    if width <= 0:\n'
     '        raise ValueError("invalid width " + str(width) + " (must be > 0)")\n'
+    '    if placeholder != "" and len(placeholder.lstrip()) > width:\n'
+    '        raise ValueError("placeholder too large for max width")\n'
     '    munged = ""\n'
     '    col = 0\n'
     '    for ch in text:\n'
@@ -1344,9 +1346,40 @@ _MATH_HELPERS['tw_wrap'] = (
     '        if len(line_chunks) > 0 and line_chunks[len(line_chunks) - 1].strip() == "":\n'
     '            line_chunks.pop()\n'
     '        if len(line_chunks) > 0:\n'
+    '            if placeholder != "" and len(lines) == 0 and (\n'
+    '                    pos < cnt and not (pos == cnt - 1 and chunks[pos].strip() == ""\n'
+    '                                     and cur_len <= width)):\n'
+    '                cur_len = 0\n'
+    '                k = 0\n'
+    '                while k < len(line_chunks):\n'
+    '                    cur_len += len(line_chunks[k])\n'
+    '                    k += 1\n'
+    '                trimmed = False\n'
+    '                while len(line_chunks) > 0:\n'
+    '                    last = line_chunks[len(line_chunks) - 1]\n'
+    '                    if last.strip() != "" and cur_len + len(placeholder) <= width:\n'
+    '                        line_chunks.append(placeholder)\n'
+    '                        lines.append("".join(line_chunks))\n'
+    '                        trimmed = True\n'
+    '                        break\n'
+    '                    cur_len -= len(last)\n'
+    '                    line_chunks.pop()\n'
+    '                if not trimmed:\n'
+    '                    if len(lines) > 0:\n'
+    '                        prev = lines[len(lines) - 1].rstrip()\n'
+    '                        if len(prev) + len(placeholder) <= width:\n'
+    '                            lines[len(lines) - 1] = prev + placeholder\n'
+    '                        else:\n'
+    '                            lines.append(placeholder.lstrip())\n'
+    '                    else:\n'
+    '                        lines.append(placeholder.lstrip())\n'
+    '                break\n'
     '            lines.append("".join(line_chunks))\n'
     '    return lines\n'
 )
+_MATH_HELPERS['tw_wrap'] = (
+    'def _ail_tw_wrap(text: str, width: int) -> list[str]:\n'
+    '    return _ail_tw_wrap_more(text, width, "")\n')
 _MATH_HELPERS['tw_fill'] = (
     'def _ail_tw_fill(text: str, width: int) -> str:\n'
     '    parts = _ail_tw_wrap(text, width)\n'
@@ -1382,7 +1415,49 @@ _MATH_HELPERS['tw_dedent'] = (
     '        else:\n'
     '            out.append(line[len(margin):])\n'
     '    return "\\n".join(out)\n')
-_MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',)}
+_MATH_HELPERS['tw_shorten'] = (
+    'def _ail_tw_shorten(text: str, width: int) -> str:\n'
+    '    collapsed = " ".join(text.strip().split())\n'
+    '    lines = _ail_tw_wrap_more(collapsed, width, " [...]")\n'
+    '    return "\\n".join(lines)\n')
+_MATH_HELPERS['tw_indent'] = (
+    'def _ail_tw_indent(text: str, prefix: str) -> str:\n'
+    '    out = ""\n'
+    '    start = 0\n'
+    '    i = 0\n'
+    '    n = len(text)\n'
+    '    while i < n:\n'
+    '        ch = text[i]\n'
+    '        brk = (ch == "\\n" or ch == "\\r" or ch == "\\x0b" or ch == "\\x0c"\n'
+    '               or ch == "\\x1c" or ch == "\\x1d" or ch == "\\x1e" or ch == "\\x85"\n'
+    '               or ch == "\\u2028" or ch == "\\u2029")\n'
+    '        if brk:\n'
+    '            end = i + 1\n'
+    '            if ch == "\\r" and i + 1 < n and text[i + 1] == "\\n":\n'
+    '                end = i + 2\n'
+    '            line = text[start:end]\n'
+    '            if line.strip() != "":\n'
+    '                out += prefix + line\n'
+    '            else:\n'
+    '                out += line\n'
+    '            start = end\n'
+    '            i = end\n'
+    '        else:\n'
+    '            i += 1\n'
+    '    if start < n:\n'
+    '        line = text[start:]\n'
+    '        if line.strip() != "":\n'
+    '            out += prefix + line\n'
+    '        else:\n'
+    '            out += line\n'
+    '    return out\n')
+_MATH_HELPERS['string_capwords'] = (
+    'def _ail_string_capwords(s, sep):\n'
+    '    if sep is None:\n'
+    '        return " ".join([word.capitalize() for word in s.split()])\n'
+    '    return sep.join([word.capitalize() for word in s.split(sep)])\n')
+_MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',),
+             'tw_wrap': ('tw_wrap_more',), 'tw_shorten': ('tw_wrap_more',)}
 import string as _string_module
 
 _STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
@@ -1399,20 +1474,20 @@ _OPERATOR_BINARY = {'add': ast.Add, 'sub': ast.Sub, 'mul': ast.Mult, 'truediv': 
 _OPERATOR_COMPARE = {'lt': ast.Lt, 'le': ast.LtE, 'gt': ast.Gt, 'ge': ast.GtE, 'eq': ast.Eq, 'ne': ast.NotEq}
 _OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv': ast.Invert}
 _SMALL_MODULES = {
-    'textwrap': ('wrap', 'fill', 'dedent'),
+    'textwrap': ('wrap', 'fill', 'dedent', 'shorten', 'indent'),
     'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
-    'string': tuple(_STRING_CONSTANTS),
+    'string': (*tuple(_STRING_CONSTANTS), 'capwords'),
     'os': ('cpu_count',),
     'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem', 'itemgetter'),
 }
 _SMALL_NOTE = {
-    'textwrap': 'textwrap.wrap(text[, width]), fill(text[, width]) and dedent(text) are built; the other options '
-                'and functions are not',
+    'textwrap': 'textwrap.wrap(text[, width]), fill(text[, width]), dedent(text), shorten(text, width) and '
+                'indent(text, prefix) are built with their default options; the other options and functions are not',
     'time': 'time.perf_counter() / monotonic() / time() (and the _ns forms), sleep(), localtime(), gmtime(), '
             'strftime() and mktime() are built (the wall clock is an input: AIL_CLOCK=<seconds> pins it); '
             'asctime, ctime, struct_time, tzset and the zone constants are not',
-    'string': 'the string module is built as its constants: ascii_lowercase, ascii_uppercase, ascii_letters, '
-              'digits, hexdigits, octdigits, punctuation, whitespace, printable',
+    'string': 'the string module is built as its constants (ascii_lowercase, ascii_uppercase, ascii_letters, '
+              'digits, hexdigits, octdigits, punctuation, whitespace, printable) and capwords()',
     'os': 'os.cpu_count() is built; the rest of os (environ, path, ...) is not',
     'operator': 'operator.add/sub/mul/truediv/floordiv/mod/pow/and_/or_/xor/lshift/rshift, the comparisons, '
                 'neg/pos/invert/not_/abs/getitem called directly, and itemgetter(k) as a key= are built',
@@ -2376,6 +2451,30 @@ class _Surface:
         plain = not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args)
         if plain and module == 'time' and name in _TIME_CLOCKS and not args:
             return ast.Call(func=ast.Name(id=_TIME_CLOCKS[name], ctx=ast.Load()), args=[], keywords=[])
+        if module == 'textwrap' and name in ('shorten', 'indent') \
+                and not any(isinstance(arg, ast.Starred) for arg in args):
+            if name == 'shorten' and len(args) in (1, 2):
+                width = args[1] if len(args) == 2 else None
+                if width is None and len(node.keywords) == 1 and node.keywords[0].arg == 'width':
+                    width = node.keywords[0].value
+                if width is not None and (len(node.keywords) == 0 or
+                                          (len(node.keywords) == 1 and node.keywords[0].arg == 'width')):
+                    for each in (*_MATH_DEPS.get('tw_shorten', ()), 'tw_shorten'):
+                        if each not in self.helpers:
+                            self.helpers.append(each)
+                    return ast.Call(func=ast.Name(id='_ail_tw_shorten', ctx=ast.Load()),
+                                    args=[args[0], width], keywords=[])
+            if name == 'indent' and len(args) == 2 and not node.keywords:
+                if 'tw_indent' not in self.helpers:
+                    self.helpers.append('tw_indent')
+                return ast.Call(func=ast.Name(id='_ail_tw_indent', ctx=ast.Load()),
+                                args=args, keywords=[])
+        if module == 'string' and name == 'capwords' and plain and len(args) in (1, 2):
+            if 'string_capwords' not in self.helpers:
+                self.helpers.append('string_capwords')
+            sep = args[1] if len(args) == 2 else ast.Constant(value=None)
+            return ast.Call(func=ast.Name(id='_ail_string_capwords', ctx=ast.Load()),
+                            args=[args[0], sep], keywords=[])
         if module == 'textwrap' and name in ('wrap', 'fill', 'dedent') and not any(
                 isinstance(arg, ast.Starred) for arg in args):
             if name == 'dedent' and len(args) == 1 and not node.keywords:
@@ -2391,8 +2490,9 @@ class _Surface:
                     width = node.keywords[0].value
             if width is not None:
                 for each in (('tw_wrap', 'tw_fill') if name == 'fill' else ('tw_wrap',)):
-                    if each not in self.helpers:
-                        self.helpers.append(each)
+                    for helper in (*_MATH_DEPS.get(each, ()), each):
+                        if helper not in self.helpers:
+                            self.helpers.append(helper)
                 return ast.Call(func=ast.Name(id='_ail_tw_' + name, ctx=ast.Load()), args=[args[0], width], keywords=[])
         if plain and module == 'os' and name == 'cpu_count' and not args:
             return ast.Call(func=ast.Name(id='_ail_cpu_count', ctx=ast.Load()), args=[], keywords=[])

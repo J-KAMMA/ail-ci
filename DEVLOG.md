@@ -1,3 +1,31 @@
+## 2026-10-28 -- stdlib1: `textwrap.shorten` / `textwrap.indent` and `string.capwords` (job-stdlib1-10282143)
+
+Inventory of imports outside the nine baseline modules (counts of import statements):
+`lab/corpus/programs` has typing 24, csv 7, datetime 5, `__future__` 4, unicodedata 3,
+dataclasses 3, decimal 2, struct 2, statistics 2, random 2, and one each of string, calendar,
+textwrap, enum and fractions. `AIL_CURRENT/language_examples` has pathlib 11, argparse 9,
+subprocess 7, tempfile 7, hashlib 5, os 5, struct 4, contextlib 3, io 3, shutil 3, statistics 2,
+array 2, time 2, unittest 2, signal 2, and one each of dataclasses, random and ail_ffi (plus the
+repo-local row/benchmark modules). Most of the corpus names are already built by the existing
+library batches; the import-only refusals left on this tree were textwrap 1, decimal 2, struct 2
+and unicodedata 3, plus collections/re uses that are not import-only.
+
+`textwrap.shorten(text, width)` now follows CPython 3.12's collapsed-whitespace, max_lines=1
+placeholder path through the existing chunker (including hyphen chunks), and
+`textwrap.indent(text, prefix)` preserves every `splitlines(True)` line ending. `string.capwords`
+supports the default whitespace separator and an explicit separator. Unsupported textwrap
+options/functions (for example `TextWrapper`, `shorten(..., placeholder=...)`) and
+`string.Template` remain named compile-time refusals; no wrong result is produced.
+
+This makes `lab/corpus/programs/deepseek-v4.1-flash-free/t116.py` build on both AIL_IR=0 and
+AIL_IR=1 and match CPython on all three recorded inputs. Added and registered
+`test_ail_stdlib1.py`; no new DIFFERENCES row (the supported functions match CPython).
+Probes in `/tmp/probes`: `tw.py`, `tw2.py`, `tw3.py`, `tw4.py`, `tw_random.py` (hyphen/tab/
+newline/empty/negative-width boundaries, 120 generated texts), `cw.py` and `cp.py`
+(copy stays a named refusal). Final-state tests: test_ail_stdlib1, test_ail_pre360,
+test_ail_stdlib5, test_ail_files, test_ail_corpus_findings3 and test_ail_safetynet pass;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
