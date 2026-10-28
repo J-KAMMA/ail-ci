@@ -1,8 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `pre351` recorded these as already present before that job:
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_pre160 test_ail_pre190 test_ail_pre200 test_ail_pre205 test_ail_pre273 test_ail_pre97.
 
-**Unverified:** `test_ail_files` / `test_ail_corpus_findings3` (not re-run per review scoping); speed/icount (no runtime or emitted-C change, irrelevant).
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre367.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
