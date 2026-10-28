@@ -30,7 +30,7 @@ HERE = Path(__file__).parent
 
 # a word of the program text that can mean one of the modules (the quick test before parsing)
 WORDS = ('fractions', 'enum', 'namedtuple', 'NamedTuple', 'ChainMap', 'keyword', 'calendar', 'abc', 'array',
-         'random', 'string', 'io', 'statistics', 'typing', 'argparse')
+         'random', 'string', 'io', 'statistics', 'typing', 'argparse', 'tempfile')
 
 
 def prelude(name):
@@ -243,7 +243,7 @@ def rewrite_text(source, notes=None):
         return source
     mods = imported_modules(tree)
     if not (mods & {'fractions', 'enum', 'collections', 'typing', 'random', 'keyword', 'calendar', 'abc', 'array',
-                    'string', 'io', 'statistics', 'argparse'}):
+                    'string', 'io', 'statistics', 'argparse', 'tempfile'}):
         return source
     text = []
     changed = False
@@ -266,6 +266,9 @@ def rewrite_text(source, notes=None):
         if 'argparse' in mods:
             import argparselib
             argparselib.run(tree, text)
+        if 'tempfile' in mods:
+            import tempfilelib
+            tempfilelib.run(tree, text)
         changed = ast.dump(tree) != before or bool(text)
         if not changed:
             return source

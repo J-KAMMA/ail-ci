@@ -1,3 +1,22 @@
+## 2026-10-28 -- stdlib24: tempfile gettempdir, mkdtemp and TemporaryDirectory (job-stdlib23-10290511)
+
+Before this change the imports still refused in `lab/corpus/programs` and
+`AIL_CURRENT/language_examples` (top-level modules, already supported and out-of-scope crypto excluded) were:
+tempfile 7, struct 6, unicodedata 3, contextlib 3, shutil 3, signal 2, decimal 2, unittest 2, resource 1.
+`tempfile` was the most used.  `gettempdir()`, `mkdtemp(suffix, prefix, dir)` and
+`TemporaryDirectory(suffix, prefix, dir)` are now lowered by `tempfilelib.py` onto the file layer's `os`
+functions through `prelude_tempfile.py`: positional or keyword arguments, `None` defaults, the name,
+`cleanup()`, `__enter__`/`__exit__` (also after an exception), recursive removal of nested trees, and the
+environment candidate list cached as CPython caches it.  The generated name is an equivalent unique name,
+not CPython's random one.  `NamedTemporaryFile`, `TemporaryFile`, `SpooledTemporaryFile`, `mkstemp`, `mktemp`,
+`gettempdirb`, `gettempprefix`, `tempdir` and `TemporaryDirectory(ignore_cleanup_errors=/delete=)` stay named
+compile-time refusals.  `test_ail_stdlib24.py` (added to `ail_check.MODULES`) compares five programs with
+CPython on AIL_IR=0 and AIL_IR=1 and covers two refusals.  Probes in `/tmp/probes/tf_*` match CPython or are
+refused by name: basic mkdtemp/read/write/remove, with-context and explicit cleanup, nested trees, an exception
+inside the body, empty and positional prefix/suffix, explicit dir, prefix through an argument, list item,
+attribute and dict value, `TMPDIR` selection with caching, import aliases, and the refusal cases.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- stdlib23: argparse long options and positionals (job-stdlib23-10290511)
 
 Before this change the imports still refused in `lab/corpus/programs` and
