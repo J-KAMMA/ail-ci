@@ -191,6 +191,101 @@ def main():
 main()
 """
 
+PTR_RESULT = r"""
+from ail_ffi import *
+
+@cstruct(header="time.h", name="struct tm")
+class Tm:
+    tm_sec: c_int
+    tm_min: c_int
+    tm_hour: c_int
+    tm_mday: c_int
+    tm_mon: c_int
+    tm_year: c_int
+    tm_wday: c_int
+    tm_yday: c_int
+    tm_isdst: c_int
+    tm_gmtoff: c_long
+    tm_zone: c_char_p
+
+@extern(header="time.h", symbol="gmtime_r")
+def c_gmtime_ptr(timer: cptr(c_long), result: ptr(Tm)) -> ptr(Tm): ...
+
+def main():
+    raw = bytes(bytearray(8))
+    a = c_gmtime_ptr(raw, Tm())
+    print(a.tm_year + 1900, a.tm_mon + 1, a.tm_mday, a.tm_hour)
+
+main()
+"""
+
+PAIR_H = r"""
+#ifndef AIL_PAIR_H
+#define AIL_PAIR_H
+struct Pair { int a; int b; };
+const struct Pair *pair_const(void);
+struct Pair *pair_mut(void);
+#endif
+"""
+
+PAIR_C = r"""
+#include "pair.h"
+static struct Pair pair_value = {5, 6};
+const struct Pair *pair_const(void) { return &pair_value; }
+struct Pair *pair_mut(void) { return &pair_value; }
+"""
+
+PAIR_MAIN = r"""
+{STUBS}
+
+def main():
+    p = pair_const()
+    print(p.a, p.b)
+    q = pair_mut()
+    q.a = 7
+    print(q.a, q.b)
+
+main()
+"""
+
+ARRAYS_H = r"""
+#include <stdbool.h>
+struct Arrays {
+    int i[2];
+    double d[2];
+    _Bool b[2];
+    float f[2];
+};
+void arrays_fill(struct Arrays *a);
+"""
+
+ARRAYS_C = r"""
+#include "arrays.h"
+void arrays_fill(struct Arrays *a) {
+    a->i[0] = 1; a->i[1] = -2;
+    a->d[0] = 1.5; a->d[1] = -2.5;
+    a->b[0] = 1; a->b[1] = 0;
+    a->f[0] = 0.5f; a->f[1] = -0.25f;
+}
+"""
+
+ARRAYS_MAIN = r"""
+{STUBS}
+
+def main():
+    a = Arrays()
+    print(a.i[0], a.i[1], a.d[0], a.d[1], a.b[0], a.b[1], a.f[0], a.f[1])
+    a.i = [1, -2]
+    a.d = [1.5, -2.5]
+    a.b = [True, False]
+    a.f = [0.5, -0.25]
+    print(a.i[0], a.i[1], a.d[0], a.d[1], a.b[0], a.b[1], a.f[0], a.f[1])
+    arrays_fill(a)
+    print(a.i[0], a.i[1], a.d[0], a.d[1], a.b[0], a.b[1], a.f[0], a.f[1])
+
+main()
+"""
+
 RUST_SOURCE = r"""
 #[repr(C)]
 pub struct AilPoint { pub x: i32, pub y: i32 }
@@ -264,6 +359,7 @@ class CStructTests(unittest.TestCase):
         cls.dir = Path(cls.temp.name)
         shutil.copyfile(ROOT / "ail_cbuf.py", cls.dir / "ail_cbuf.py")
         build_shared(cls.dir, "mix", MIX_H, MIX_C)
+        build_shared(cls.dir, "arrays", ARRAYS_H, ARRAYS_C)
 
     @classmethod
     def tearDownClass(cls):
@@ -308,6 +404,28 @@ class CStructTests(unittest.TestCase):
         self.assertIn("-128 255 -32768 65535 -2147483647 4294967295", out)
         self.assertIn("1.5 -2.25 True 10 -20 30", out)
         self.assertIn("7 8 -9 10 -11 12 -13 14 2.5 3.5 True 15 16 17", out)
+
+    def test_ptr_and_cptr_struct_results(self):
+        out = self.both("ptr_result", PTR_RESULT)
+        self.assertEqual(out, "1970 1 1 0\n")
+
+    def test_const_struct_result_and_bindgen(self):
+        build_shared(self.dir, "pair", PAIR_H, PAIR_C)
+        stubs = load_bindgen().generate(PAIR_H, "pair.h", lib="./libpair.so")
+        self.assertIn("def pair_const() -> cptr(Pair): ...", stubs)
+        self.assertIn("def pair_mut() -> Pair: ...", stubs)
+        out = self.both("pair", PAIR_MAIN.replace("{STUBS}", stubs))
+        self.assertEqual(out, "5 6\n7 6\n")
+
+    def test_arrays_of_different_element_kinds(self):
+        stubs = load_bindgen().generate(ARRAYS_H, "arrays.h", lib="./libarrays.so")
+        for line in ("i: c_array(c_int, 2)", "d: c_array(c_double, 2)",
+                     "b: c_array(c_bool, 2)", "f: c_array(c_float, 2)"):
+            self.assertIn(line, stubs)
+        out = self.both("arrays", ARRAYS_MAIN.replace("{STUBS}", stubs))
+        self.assertEqual(out, "0 0 0.0 0.0 False False 0.0 0.0\n"
+                              "1 -2 1.5 -2.5 True False 0.5 -0.25\n"
+                              "1 -2 1.5 -2.5 True False 0.5 -0.25\n")
 
     def test_a_wrong_field_type_is_a_compile_error(self):
         text = r"""
@@ -380,6 +498,27 @@ main()
                 built, _ = compile_cli(self.dir, "refuse.py", name="refuse.out")
                 self.assertNotEqual(built.returncode, 0)
                 self.assertIn(message, built.stderr)
+
+    def test_a_struct_in_a_dict_is_refused_by_name(self):
+        text = r"""
+from ail_ffi import *
+
+@cstruct()
+class Pair:
+    a: c_int
+    b: c_int
+
+def main():
+    p = Pair()
+    d = {"p": p}
+    print(d["p"].a, d["p"].b)
+
+main()
+"""
+        self.write("dict_struct.py", text)
+        built, _ = compile_cli(self.dir, "dict_struct.py", name="dict_struct.out")
+        self.assertNotEqual(built.returncode, 0)
+        self.assertIn("a @cstruct value cannot be stored in a dict", built.stderr)
 
     def test_the_shim_refuses_the_same_structs(self):
         sys.path.insert(0, str(ROOT))

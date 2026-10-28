@@ -1107,11 +1107,12 @@ print(m, get_i32(e, 0))                              # 0.75 6
   ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; fields are read and written at the C offsets with
   `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`. For an opaque C struct use `c_mut_void_p` / `c_const_void_p`.
 - `@cstruct` gives a struct a real layout and typed attribute access. `@cstruct(header="time.h", name="struct tm")` on a class of
-  C-typed fields (and `c_array(T, n)` fields) makes `Tm()` a zeroed bytearray of `sizeof(struct tm)`; `tm.tm_hour` reads and writes the
+  C-typed fields (and `c_array(T, n)` fields) gives `Tm()` the fixed `sizeof(struct tm)` byte layout; `tm.tm_hour` reads and writes the
   field at its ABI offset. Every field is checked with `_Static_assert(offsetof(...) == k && sizeof(...) == n)` against the header, so
-  a wrong field type or order is a compile error. A pointer parameter/result is annotated with the class (or `ptr(Tm)` / `cptr(Tm)`),
-  and `trust=True` is not needed for a pointer to that struct. Unions, bitfields, struct fields by value, arrays of structs and
-  flexible array members are refused by name.
+  a wrong field type or order is a compile error. A pointer parameter/result is annotated with the class (or `ptr(Tm)` / `cptr(Tm)`);
+  `cptr(Tm)` makes the C result a pointer to const struct, and `trust=True` is not needed for a pointer to that struct. A `@cstruct`
+  instance cannot be stored in a dict (AIL dict values are int64): pass it as an argument, a list item or an attribute. Unions,
+  bitfields, struct fields by value, arrays of structs and flexible array members are refused by name.
 - `trust=True` for an opaque pointer the header cannot spell (`sqlite3 **`, an unknown typedef): the header is included, its
   prototype is not compared.
 - Callbacks (AIL functions called from C) are not supported.

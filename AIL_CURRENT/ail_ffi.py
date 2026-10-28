@@ -426,6 +426,8 @@ def _classify(annotation, result=False):
         raise TypeError('annotate with a C type (c_int, c_double, ...), not %s' % annotation.__name__)
     if isinstance(annotation, type) and getattr(annotation, '__ail_cstruct__', None) is not None:
         return _StructResult(annotation) if result else ptr(annotation)
+    if result and isinstance(annotation, ptr) and annotation.cstruct is not None:
+        return _StructResult(annotation.cstruct)
     if isinstance(annotation, (CType, length, ptr)):
         return annotation
     raise TypeError('unsupported FFI annotation: %r' % (annotation,))

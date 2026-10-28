@@ -1,3 +1,25 @@
+## 2026-10-28 -- F5 review fixes: pointer results, const struct results, mixed array types (job-ffi5-10282140)
+
+The F5 review found four defects in the `@cstruct` work.  `ptr(Tm)` / `cptr(Tm)` results were accepted by the
+compiler but the CPython shim refused them at definition; the shim now classifies a struct-pointer result as
+the struct instance, the same value the compiled wrapper returns.  A `const struct T *` result could not be
+called or bindgen-generated because the C result type was always `struct T *`; `-> cptr(T)` now emits
+`const struct T *` in the prototype check and the adapter (bindgen emits `cptr(T)` for a const result, while a
+non-const `struct T *` result stays `T`).  Fixed arrays of different element kinds in one struct shared the
+generated `items` local in `_load`; each field now has its own `_items_<field>` local, so int/float/bool array
+combinations and bindgen `_Bool[n]` fields compile.
+
+A `@cstruct` instance still cannot be stored in a dict: the compiler links FFI through its typed object path,
+whose dict values are int64 (the general path is not available with FFI objects).  Instead of the misleading
+"annotated Tm but the caller supplies int", the FFI lowerer now refuses a struct literal or a known
+struct-valued name/subscript store into a dict by name.  The reference now states the `Tm()` instance and dict
+limitations plainly.
+
+Probes in `/tmp/probes/fix` on both `cmp.sh` builds: p1 (ptr result), p2 (cptr result), p3 (cptr/ptr const and
+non-const results), p4 (int/double/bool/float arrays) match CPython; p5 (struct through a dict value) is
+refused by the new named message on both builds.  Final-state tests: test_ail_cstruct, test_ail_ffi,
+test_ail_cratebridge, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-28 -- F5: C struct layouts with `@cstruct` (job-ffi5-10282140)
 
 `@cstruct(header="time.h", name="struct tm")` on a class of C-typed fields now makes `Tm()` a zeroed

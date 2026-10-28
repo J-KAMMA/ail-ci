@@ -15,7 +15,7 @@ the C types as follows:
     const T * / T * for a number T                           cptr(T) / ptr(T)
     a pointer followed by a length parameter                 the pointer plus length("name", C type)
     void *   const void *                                     c_void_p   c_const_void_p
-    struct T * (a struct it can read)                         ptr(T) / cptr(T), with a generated @cstruct class
+    struct T * / const struct T * (a struct it can read)      T / ptr(T) / cptr(T), with a generated @cstruct class
     T ** and pointers to an opaque or unknown typedef         ptr(c_void_p) and c_void_p, and the stub gets trust=True
     callbacks, variadics, struct by value, unknown typedefs  skipped, listed as a comment (pass --typedef NAME=c_int to name a typedef)
 
@@ -286,7 +286,7 @@ def convert_result(t, typedefs, structs):
             raise Skip('unknown or struct result type %r' % t.base)
         return c, False
     if t.stars == 1 and found:
-        return found, False
+        return ('cptr(%s)' % found if t.const else found), False
     if t.stars == 1 and t.base == 'char':
         return ('c_char_p' if t.const else 'c_mut_char_p'), False
     if t.stars == 1 and t.base == 'void':
