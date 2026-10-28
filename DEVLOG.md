@@ -134,6 +134,33 @@ and added DIFFERENCES row `C?-job-pre429-10281932-1`.  Final-state tests: test_a
 test_ail_fz2, test_ail_pre104, test_ail_pre54, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3 (7 modules, 353 s, 0 failed).  `tools/update_manifest.py` was run and
 `--check` passes; `tools/ci_shards.py --check` exits 0.
+## 2026-10-28 -- pre430: an aliased power wrapper is followed by the constant checks (job-pre430-10281939)
+
+The rbrbpre366 review recorded the aliased power-wrapper probes as pre-existing: on this tree
+`def power(b, e): return b ** e` followed by `q = power` and `print(q(10, 40))` (also the
+`pow()` spelling, a negative base and an alias chain) compiled and then stopped with
+`integer overflow`, where CPython prints the exact unbounded integer.  The check now follows a
+module-level alias (and alias chain) to a one-return wrapper whose body is exactly
+`base ** exponent` or `pow(base, exponent)`.  An exact constant result outside int64 is refused
+with `int64 constant expression out of range`; an aliased wrapper whose operands are not
+statically known is refused with the aliased-wrapper message.  A wrapper body already refused
+by the pre273 rule keeps that diagnostic.  Direct wrapper calls and safe constants keep their
+previous behaviour.
+
+The review's allowed named refusals are kept: a bool base (`q(True, 3)`), a float base and
+values routed through an argument, list item, class attribute or dict value are refused by
+name.  Values that reach a single module-level call site as in-range constants still match
+CPython.  The `int()` alias half of the original accepted change is not applied here; it is a
+separate cause and unchanged.
+
+Probes in `/tmp/probes/pre430b` on both builds via `cmp.sh`: c01-c07 and c14 (bool/float and
+routed operands) and c08/c09 (out-of-range constants) are refused by name; c10 (safe constants),
+c11-c13 (dynamic in-range calls) and c15 (direct wrapper) match CPython.  Final-state tests:
+test_ail_pre430, test_ail_pre364, test_ail_pre367, test_ail_pre299, test_ail_pre331,
+test_ail_pre160, test_ail_pre273, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (10 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
