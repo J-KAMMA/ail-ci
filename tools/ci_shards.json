@@ -481,6 +481,7 @@
   "test_ail_stdin_list_batch": 46.3,
   "test_ail_stdin_read_until": 3.7,
   "test_ail_stdlib5": 455.5,
+  "test_ail_stdlib9": 10.0,
   "test_ail_stdlib_batch1": 70.0,
   "test_ail_stdlib_batch3": 192.7,
   "test_ail_stdlib_batch4": 880.0,
@@ -928,6 +929,7 @@
    "test_ail_pre97",
    "test_ail_raise_from",
    "test_ail_sexpr",
+   "test_ail_stdlib9",
    "test_ail_tcp_json_lines_poll"
   ],
   [

@@ -1,3 +1,36 @@
+## 2026-10-28 -- struct: pack / unpack / calcsize lowered (job-stdlib9-10290220)
+
+`struct` was the most-imported remaining refused stdlib module (6 imports across the corpus and
+the language examples, after `sys`/`collections`/`typing` and the already-built modules).  A new
+source pass, `python/pkg-v12/structlib.py`, runs from `ail_syntax.python_surface` and lowers
+`struct.pack`, `struct.unpack` and `struct.calcsize` when the format is a literal string.  The
+built format characters are `x b B ? h H i I l L q Q n N e f d s p P` with `@ = < > !`, repeat
+counts and native alignment; native `l/L/n/N/P` are 8 bytes.  `@f` overflow follows CPython's
+native path (infinity), while `= < > ! f/e` raise `OverflowError`.  `struct.error` is a custom
+`Exception` subclass (not `ValueError`), and the pass maps the name to it.  `pack_into`,
+`unpack_from`, `Struct`, `iter_unpack`, a non-literal format, an unsupported character, a
+non-native `n/N/P`, a wrong value count and an import inside a function are refused by name at
+compile time; programs that do not import the module keep their text.
+
+The pass uses `int.to_bytes` / `int.from_bytes` and a pure-Python IEEE-754 bit layout, so it
+works on both the typed path and the general path.  The typed path builds a pack-only program
+(`AIL_NO_GENERAL=1`); `unpack` returns a tuple and therefore uses the general path where the
+tuple is consumed as a value.  Declared int64 limit: an unsigned 64-bit value above INT64_MAX
+cannot be represented (an `unpack` of such bytes prints the two's-complement negative, and a
+`pack` of a value computed above the limit is out of range).
+
+Probes in `/tmp/probes` (`struct1`-`struct5`, `struct_fuzz.py` with 1,332 generated calls
+covering every built character, byte order, repeat/alignment shape, int boundary and
+float/subnormal/inf/nan value, plus `s9_values`, `s9_native`, `s9_boundaries`, `s9_floats`,
+`s9_inputs` and the `refuse/` programs) match CPython 3.12 on both builds except that declared
+unsigned 64-bit unpack limit; the refusals name the use.  The `s9_values`/`s9_inputs` probes
+also caught that `c` must reject a `bytearray` (CPython accepts it for `s`/`p` but not `c`);
+`c` now accepts only `bytes`, and `test_ail_stdlib9` covers both cases.  Added `test_ail_stdlib9.py` (CPython oracle,
+default and `AIL_IR=1`, typed pack path, refusals, unchanged-text check), registered it in
+`ail_check.MODULES`, ran `tools/update_manifest.py`, `tools/update_manifest.py --check` and
+`tools/ci_shards.py --update` / `--check`.  Final-state tests: test_ail_stdlib9,
+test_ail_stdlib5, test_ail_files, test_ail_safetynet and test_ail_corpus_findings3.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
