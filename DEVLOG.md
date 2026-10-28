@@ -115,6 +115,63 @@ in `/tmp/probes` (34 programs, both builds via `cmp.sh`): q01-q17 are refused by
 m01-m17 match CPython.  Final-state tests: test_ail_pre372, test_ail_safetynet, test_ail_files
 and test_ail_corpus_findings3 (4 modules, 0 failed).  `tools/update_manifest.py` was run and
 `--check` passes.
+## 2026-10-27 -- pre375 follow-up: rebind shadowing and the p6 construction (job-pre375-10280558)
+
+The pre375 review found two defects.  (1) A new under-refusal: walrus and `for` bindings were in
+the plain assignment table, so `_classes_of` treated them as a local binding and stopped before
+consulting a module-level alias.  `p9` (`X = C` at module scope, `(X := pick())` in a function,
+`X().f()`) and `p1` (`X = C` module alias, `for X in ys` over a list mutated after its literal)
+compiled and stopped with `AttributeError` where the base refused by name.  Walrus and `for`
+bindings now live only in the rebinding table and are resolved as *additional* possible values:
+when their value resolves to nothing, the enclosing scopes (including the module alias) are
+still consulted; a plain local assignment still shadows, exactly as before.  Both probes are
+refused by name on both builds again.
+
+(2) The task's p6 (`y = C; y().g()`, and equally `C().g()`) was not fixed by the previous
+commit.  The failure is construction, not alias dispatch: `self.f = self.g` reads a method as a
+value, which this subset cannot build, so `__init__` raises `AttributeError` on both builds where
+CPython returns 55.  The field/method collision screen now refuses the construction of a class
+whose colliding field may hold a bound method (`_may_be_bound`), naming the class and the field;
+a colliding field holding a plain lambda/function is representable and still matches CPython.
+This also covers construction through an alias, a list item, a dict value, an attribute, an
+argument or a call in another function (all refused by name; the last is conservative).
+
+Probes in `/tmp/probes/pre375fix` on both builds via `cmp.sh`: `c1_p6_alias_g`, `c2_p6_direct_g`,
+`c3_p6_in_function`, `c5_bound_arg_refused`, `w1_walrus_outer_alias`, `w2_for_mutated_alias`,
+`w7_walrus_argument`, `w9_walrus_dict_value` are refused by name; `c4_lambda_field_match`,
+`c6_unrelated_construct`, `s1_param_shadows_class`, `s2_local_shadows_class`,
+`w3_walrus_local_unrelated`, `w4_plain_local_shadow`, `w5_plain_unknown_shadow`,
+`w6_for_local_unrelated`, `w8_for_empty` match CPython.  The 20 reviewer probes were re-run:
+every one is refused by name or matches except the two known pre-existing differences `p2`
+(module-level `for` over a mutated list) and `p13` (comprehension target), both unchanged.
+Final-state tests: test_ail_pre375 (74 s), test_ail_pre278 (72 s), test_ail_pre361 (34 s),
+test_ail_safetynet (82 s), test_ail_files (43 s, 1 skip) and test_ail_corpus_findings3 (89 s),
+all OK.  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-27 -- pre375: walrus and `for`-target class receivers are refused by name (job-pre375-10280558)
+
+Reproduced the first still-differing pre-existing item from the pre361 review on this tree.  Its
+p6 shape (``y = C; y().f()``) is already refused by name after pre361; the p15/p16 walrus and
+``for`` target shapes still compiled on both builds and stopped with ``AttributeError: 'C'
+object has no attribute 'g'`` where CPython prints 55.  ``refuse_field_method_call`` now puts a
+walrus target and each value a ``for`` iterable is seen to hold into its assignment table: a
+list/tuple/set literal, a name bound to one, an instance field, a subscript of one and an
+argument list (including a method argument and a keyword argument), with the same scope rules as
+the existing assignment pass.  A ``for`` target that rebinds a parameter is resolved through a
+separate walrus/loop rebinding table, so a plain reassignment still does not refactor the
+parameter's call-site resolution.  A comprehension target is deliberately left alone (adding it
+to the enclosing scope would make an unrelated later name look like a possible class), and the
+existing unrelated-class, direct-call and no-feature routes are unchanged.
+
+Probes in ``/tmp/probes/pre375`` on both builds via ``cmp.sh``: ``p06_alias``, ``p06_gcall``,
+``p15_walrus``, ``p15_walrus_g``, ``p16_for``, ``p16_for_tuple``, ``b01``-``b05``,
+``b08``, ``b11``, ``b12``, ``b13``, ``b14``, ``c01``-``c05``, ``c10``, ``c11``, ``c13``,
+``c17`` and ``c19`` are refused by name (``also stores an instance field named f``); ``b06``
+(empty iterable), ``b07``/``c06``-``c08``/``c14``/``c18`` (unrelated class), ``b09``, ``b10``,
+``b15``, ``c09``, ``c12``, ``c15`` (plain parameter reassignment), ``c16`` (other function) and
+``c18`` match CPython.  Final-state tests: test_ail_pre375, test_ail_pre361, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (5 modules, 255 s, 0 failed).
+``tools/update_manifest.py`` was run and ``--check`` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
