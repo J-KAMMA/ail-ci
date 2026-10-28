@@ -126,6 +126,9 @@ def parse(text, node):
             refuse(node, "struct: format character %r needs the native mode @ (CPython refuses it in =, <, > and !)"
                    % code)
         if count == 0:
+            if native:
+                unit = size_of(code, native)
+                offset = (offset + unit - 1) // unit * unit
             continue
         unit = size_of(code, native)
         if native and code not in 'c?':
@@ -143,14 +146,14 @@ class Lower(ast.NodeTransformer):
 
     def visit_Name(self, node):
         if isinstance(node.ctx, ast.Load) and self.binder.names.get(node.id) == (MODULE, 'error'):
-            return ast.Name(id='_AilStructError', ctx=ast.Load())
+            return ast.Name(id='error', ctx=ast.Load())
         return node
 
     def visit_Attribute(self, node):
         self.generic_visit(node)
         found = self.binder.resolve(node)
         if found == (MODULE, 'error'):
-            return ast.Name(id='_AilStructError', ctx=ast.Load())
+            return ast.Name(id='error', ctx=ast.Load())
         return node
 
     def visit_Call(self, node):
@@ -178,10 +181,10 @@ class Lower(ast.NodeTransformer):
                 refuse(node, 'struct.calcsize: one argument, the format string')
             return ast.copy_location(ast.Constant(value=total), node)
         if name == 'pack':
-            return self.lower_pack(node, fmt, fields, order, native)
+            return self.lower_pack(node, fmt, fields, total, order, native)
         return self.lower_unpack(node, fmt, fields, total, order)
 
-    def lower_pack(self, node, fmt, fields, order, native):
+    def lower_pack(self, node, fmt, fields, total, order, native):
         values = node.args[1:]
         needed = 0
         for field in fields:
@@ -236,6 +239,8 @@ class Lower(ast.NodeTransformer):
                     parts.append('_ail_st_pack_int(%s, %d, %d, %d, "%s")'
                                  % (value, unit, signed, order, code))
             position += unit * count
+        if total > position:
+            parts.append('b"\\x00" * %d' % (total - position))
         if not parts:
             return ast.copy_location(ast.parse('b""', mode='eval').body, node)
         return ast.copy_location(ast.parse('(' + ' + '.join(parts) + ')', mode='eval').body, node)
@@ -252,6 +257,9 @@ class Lower(ast.NodeTransformer):
                 continue
             count = field[1]
             if code in 'sp':
+                if code == 'p' and count == 0:
+                    refuse(node, "struct.unpack: a zero-count 'p' field is not built (CPython 3.12 stops with "
+                                 "SystemError: Negative size passed to PyBytes_FromStringAndSize)")
                 if code == 's':
                     exprs.append('_ail_st_unpack_s(data, %d, %d)' % (field[3], count))
                 else:
@@ -291,13 +299,13 @@ class Lower(ast.NodeTransformer):
             annotation = 'tuple[()]'
         self.helpers.append('def %s(data: bytes) -> %s:\n'
                             '    if len(data) != %d:\n'
-                            '        raise _AilStructError("unpack requires a buffer of %d bytes")\n'
+                            '        raise error("unpack requires a buffer of %d bytes")\n'
                             '    return (%s)\n' % (name, annotation, total, total, items))
         return ast.copy_location(ast.parse('%s(%s)' % (name, data), mode='eval').body, node)
 
 
 HELPERS = r"""
-class _AilStructError(Exception):
+class error(Exception):
     pass
 
 
@@ -338,11 +346,13 @@ def _ail_st_log2(value: float) -> int:
 
 
 def _ail_st_pack_int(value: int, width: int, signed: int, order: int, code: str) -> bytes:
+    if not isinstance(value, int):
+        raise error("required argument is not an integer")
     if code == 'P':
         if value < 0:
             return value.to_bytes(8, _ail_st_order(order), signed=True)
         if value > 9223372036854775807:
-            raise _AilStructError("'P' format requires 0 <= number <= 18446744073709551615")
+            raise error("'P' format requires 0 <= number <= 18446744073709551615")
         return value.to_bytes(8, _ail_st_order(order), signed=False)
     if signed:
         if width == 8:
@@ -362,7 +372,7 @@ def _ail_st_pack_int(value: int, width: int, signed: int, order: int, code: str)
             high = (1 << (8 * width)) - 1
             shown = '%d' % high
     if value < low or value > high:
-        raise _AilStructError("'%s' format requires %d <= number <= %s" % (code, low, shown))
+        raise error("'%s' format requires %d <= number <= %s" % (code, low, shown))
     if width == 8 and signed and value < 0:
         return value.to_bytes(8, _ail_st_order(order), signed=True)
     if value < 0:
@@ -390,9 +400,9 @@ def _ail_st_unpack_bool(data: bytes, offset: int) -> bool:
 
 def _ail_st_pack_c(value: bytes) -> bytes:
     if not isinstance(value, bytes):
-        raise _AilStructError("char format requires a bytes object of length 1")
+        raise error("char format requires a bytes object of length 1")
     if len(value) != 1:
-        raise _AilStructError("char format requires a bytes object of length 1")
+        raise error("char format requires a bytes object of length 1")
     return bytes(value)
 
 
@@ -401,6 +411,8 @@ def _ail_st_unpack_c(data: bytes, offset: int) -> bytes:
 
 
 def _ail_st_pack_s(value: bytes, count: int) -> bytes:
+    if not (isinstance(value, bytes) or isinstance(value, bytearray)):
+        raise error("argument for 's' must be a bytes object")
     data = bytes(value)
     if len(data) >= count:
         return data[:count]
@@ -408,6 +420,8 @@ def _ail_st_pack_s(value: bytes, count: int) -> bytes:
 
 
 def _ail_st_pack_p(value: bytes, count: int) -> bytes:
+    if not (isinstance(value, bytes) or isinstance(value, bytearray)):
+        raise error("argument for 'p' must be a bytes object")
     data = bytes(value)
     if count == 0:
         return b""
@@ -602,10 +616,10 @@ def rewrite_text(source, notes=None):
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return source
-    binder = Binder(tree)
-    if not binder.nodes:
-        return source
     try:
+        binder = Binder(tree)
+        if not binder.nodes:
+            return source
         lower = Lower(binder)
         tree = lower.visit(tree)
         leftovers(tree, binder)

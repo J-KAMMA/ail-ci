@@ -38,6 +38,9 @@ def main() -> None:
         print(struct.unpack(">i", struct.pack(">i", vals[0])), struct.unpack("<q", struct.pack("<q", vals[1])))
     print(struct.calcsize(">I"), struct.calcsize("@bi"), struct.calcsize("@bq"), struct.calcsize("=l"), struct.calcsize("@l"))
     print(struct.calcsize("@bqi"), struct.calcsize("@qB"), struct.calcsize("@bd"), struct.calcsize("@bhb"), struct.calcsize("0s"), struct.calcsize("2?"))
+    print(struct.calcsize("@b0q"), struct.calcsize("@b0Q"), struct.calcsize("@b0d"), struct.calcsize("@b0i"), struct.calcsize("@b0h"), struct.calcsize("@b0P"), struct.calcsize("@b0n"), struct.calcsize("@b0L"), struct.calcsize("@b0l"))
+    print(struct.pack("@b0q", 1).hex(), struct.pack("@b0Q", 1).hex(), struct.pack("@b0d", 1).hex(), struct.pack("@b0P", 1).hex())
+    print(struct.calcsize("@2e0N2i2h"), struct.pack("@2e0N2i2h", -0.0, -2.25, 1219495918, 688296495, -14778, 28539).hex())
     print(struct.pack(">I", 305419896).hex())
     print(struct.pack("<hH", -2, 65535).hex())
     print(struct.pack("=bBhHiIlLqQ", -1, 255, -2, 65535, -3, 4294967295, -4, 4294967295, -5, 9223372036854775807).hex())
@@ -80,6 +83,27 @@ def main() -> None:
         print("char-bytearray", exc)
     print(struct.pack("0s", b"x").hex(), struct.pack("").hex(), struct.unpack("", b""))
     print(struct.pack(">2?2h", 1, 0, -1, 2).hex())
+    for v in (3, [1, 2], None):
+        try:
+            struct.pack("4s", v)
+        except struct.error as exc:
+            print("s-error", type(exc).__name__, exc)
+        try:
+            struct.pack("4p", v)
+        except struct.error as exc:
+            print("p-error", type(exc).__name__, exc)
+    try:
+        struct.pack("B", 2.5)
+    except struct.error as exc:
+        print("int-error", type(exc).__name__, exc)
+    try:
+        struct.pack("B", "3")
+    except struct.error as exc:
+        print("int-error", type(exc).__name__, exc)
+    try:
+        struct.pack("@P", None)
+    except struct.error as exc:
+        print("P-error", type(exc).__name__, exc)
 
 
 main()
@@ -192,6 +216,8 @@ class Refusals(unittest.TestCase):
             "count": ("import struct\n\nprint(struct.pack('>I', 1, 2))\n", "needs 1 value"),
             "native_only": ("import struct\n\nprint(struct.calcsize('<n'))\n", "native mode"),
             "nested": ("def f() -> None:\n    import struct\n    print(struct.calcsize('>I'))\nf()\n", "top of the file"),
+            "star": ("from struct import *\n\nprint(calcsize('>I'))\n", "from struct import *"),
+            "zero_p": ("import struct\n\nprint(struct.unpack('0p', b''))\n", "zero-count 'p'"),
         }
         for name, (text, wanted) in cases.items():
             with self.subTest(name):

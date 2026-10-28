@@ -1,3 +1,21 @@
+## 2026-10-28 -- struct review fixes (job-stdlib9-10290220)
+
+Review fixes for the `struct` pass.  Native alignment is now applied to zero-count typed fields too
+(`@b0q` is 8 bytes and `pack` pads to the aligned total), while `s`/`p` still take a zero count
+without alignment.  `pack` of `s`/`p` rejects a non-`bytes`/`bytearray` value with
+`struct.error: argument for 's'/'p' must be a bytes object`, and integer codes reject a non-integer
+with `struct.error: required argument is not an integer`.  The helper exception class is now named
+`error`, so `type(exc).__name__` is `error` as in CPython.  `Binder` runs inside the pass's
+`Refused` handler, so a nested import and `from struct import *` are named compile-time refusals
+instead of compiler tracebacks, and a `0p` field in `unpack` is refused by name because CPython
+3.12 stops with `SystemError`.  The declared int64 difference now also names native `@L` alongside
+`Q`, `N` and `P`.
+
+Probes in `/tmp/probes` on both builds: `zalign`, `zalign2`, `bytes_types`, `int_types`, `routes`
+match CPython; `zero_p`, `nested` and `star` are refused by name; `native_l` shows only the declared
+unsigned-64-bit difference.  `test_ail_stdlib9` passes (67 s) with the new alignment, type-error,
+error-name, star-import and `0p` cases.
+
 ## 2026-10-28 -- struct: pack / unpack / calcsize lowered (job-stdlib9-10290220)
 
 `struct` was the most-imported remaining refused stdlib module (6 imports across the corpus and
