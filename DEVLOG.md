@@ -1,3 +1,28 @@
+## 2026-10-28 -- pre403: a class-body annotation that reads the class name is refused by name (job-pre403-10281055)
+
+The pre381 review's first still-differing pre-existing item outside the class-name runtime fix was
+the annotation read: `class C: x: C = 1` printed `1` on both builds where CPython evaluates the
+annotation while the class body runs and raises `NameError`, because the class name is bound only
+after the body.  AIL does not read annotations, so the read was lost.  A new front-end check
+(`_check_class_body_annotations` in `ail_chatgpt.py`) refuses a class-body annotation that reads
+the class name before any earlier binding of that name, on both builds, for an annotated class
+attribute (with or without a value), a method parameter or return annotation, and a read reached
+through a subscript, a list item, a dict value, an argument or an attribute.  The check runs on
+the original Python AST before the surface rewrite, so a string annotation (`x: "C"`) and
+`from __future__ import annotations` still match CPython; an earlier module or class-body binding
+of the name also matches; a later binding after the read is still refused.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p30_ann_self`, `p30_ann_only`,
+`p30_method_ann`, `p403_ref_subscript`, `p403_ref_listitem`, `p403_ref_dictvalue`,
+`p403_ref_argument`, `p403_ref_attribute`, `p403_ref_return` and `p403_ref_later` are refused by
+name; `p30_ann_plain`, `p30_ann_other`, `p30_ann_func`, `p30_ann_future`, `p30_ann_shadow_prior`,
+`p30_ann_shadow_local`, `p403_match_string`, `p403_match_listvalue` and `p403_match_empty_neg`
+match CPython.  Added `AIL_CURRENT/test_ail_pre403.py`, registered it in `ail_check.MODULES` and
+`tools/ci_shards.json` (weight 38.8), and added DIFFERENCES row `C?-job-pre403-10281055-1`.
+Final-state tests on this commit: test_ail_pre403, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (4 modules, 299 s, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:

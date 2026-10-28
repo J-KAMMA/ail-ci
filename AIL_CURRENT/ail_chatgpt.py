@@ -1852,6 +1852,79 @@ def _check_class_attribute_assignment(tree):
                 _refuse_class_attr_target(target, aliases, containers)
 
 
+_CLASS_ANNOTATION_REFUSAL = (
+    'a class body annotation reads the class name %s before it is bound: '
+    'CPython evaluates the annotation and raises NameError')
+
+
+def _future_annotations(tree):
+    for item in tree.body:
+        if isinstance(item, ast.ImportFrom) and item.module == '__future__' \
+                and any(alias.name == 'annotations' for alias in item.names):
+            return True
+    return False
+
+
+def _class_body_annotations(node):
+    for stmt in node.body:
+        if isinstance(stmt, ast.AnnAssign):
+            yield stmt.annotation
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = stmt.args
+            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+                if arg.annotation is not None:
+                    yield arg.annotation
+            for arg in (args.vararg, args.kwarg):
+                if arg is not None and arg.annotation is not None:
+                    yield arg.annotation
+            if stmt.returns is not None:
+                yield stmt.returns
+
+
+def _check_class_body_annotations(tree):
+    """Refuse a class body annotation that reads the class name before it is bound, by name.
+
+    The general path does not read annotations, so ``class C: x: C = 1`` printed 1 where CPython
+    evaluates the annotation while the class body runs and raises NameError (the name is bound
+    only after the body).  A binding of the same name before the annotation keeps CPython's read
+    of that binding, and ``from __future__ import annotations`` leaves every annotation as text.
+    """
+    if _future_annotations(tree):
+        return
+    bindings = []
+    for item in ast.walk(tree):
+        if isinstance(item, ast.Name) and isinstance(item.ctx, (ast.Store, ast.Del)):
+            bindings.append((item.id, item.lineno, None))
+        elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bindings.append((item.name, item.lineno, item))
+        elif isinstance(item, ast.arg):
+            bindings.append((item.arg, item.lineno, item))
+        elif isinstance(item, (ast.Import, ast.ImportFrom)):
+            for alias in item.names:
+                if alias.name != '*':
+                    bindings.append(((alias.asname or alias.name).split('.')[0], item.lineno, item))
+        elif isinstance(item, ast.ExceptHandler) and item.name:
+            bindings.append((item.name, item.lineno, item))
+        elif isinstance(item, (ast.MatchAs, ast.MatchStar)) and item.name:
+            bindings.append((item.name, item.lineno, item))
+        elif isinstance(item, ast.MatchMapping) and item.rest:
+            bindings.append((item.rest, item.lineno, item))
+    for node in (item for item in ast.walk(tree) if isinstance(item, ast.ClassDef)):
+        name = node.name
+        for annotation in _class_body_annotations(node):
+            for read in ast.walk(annotation):
+                if not (isinstance(read, ast.Name) and isinstance(read.ctx, ast.Load)
+                        and read.id == name):
+                    continue
+                if any(bound == name and line < read.lineno and owner is not node
+                       for bound, line, owner in bindings):
+                    continue
+                error = ValueError(_CLASS_ANNOTATION_REFUSAL % name)
+                error.source_line = read.lineno
+                error.source_column = read.col_offset
+                raise error
+
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
 
@@ -3033,6 +3106,11 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             imports = []
             declarations = {}
             locations = {}
+            if syntax == 'python':
+                try:
+                    _check_class_body_annotations(ast.parse(text, filename=str(path)))
+                except SyntaxError:
+                    pass
             if syntax == 'ail':
                 text = translate(text, module=module_only or not entry, imports=imports, declarations=declarations, source_map=locations)
             else:
