@@ -422,11 +422,12 @@ class _KnownClassValue:
 
 class _KnownInstance:
     """An instance of a class whose literal class and __init__ attributes this pass can read."""
-    __slots__ = ('name', 'arguments')
+    __slots__ = ('name', 'arguments', 'overrides')
 
     def __init__(self, name, arguments=None):
         self.name = name
         self.arguments = arguments or {}
+        self.overrides = {}
 
 
 class _KnownClassAttributes:
@@ -774,6 +775,8 @@ def _constant_value(node, lookup, global_name, passthrough, attributes=None):
         if attributes is not None and isinstance(base, _KnownClassValue):
             return attributes.class_value(base.name, node.attr)
         if attributes is not None and isinstance(base, _KnownInstance):
+            if node.attr in base.overrides:
+                return base.overrides[node.attr]
             return attributes.instance_value(base.name, node.attr, base.arguments)
         if node.attr.startswith('f') and node.attr[1:].isdigit() and isinstance(base, tuple):
             index = int(node.attr[1:])
@@ -840,6 +843,211 @@ def _constant_value(node, lookup, global_name, passthrough, attributes=None):
                 return _constant_value(argument, lookup, global_name, passthrough, attributes)
         return _UNKNOWN
     return _UNKNOWN
+
+
+_MUTATING_CONTAINER_METHODS = frozenset({
+    'append', 'extend', 'insert', 'pop', 'remove', 'clear', 'sort', 'reverse',
+    'update', 'setdefault', 'popitem',
+})
+
+
+def _apply_known_container_stores(tree, known, attributes, int_shadowed):
+    """Apply module-level stores to the literal containers of known instances and classes.
+
+    ``_known_class_attributes`` only sees plain ``self.attr = value`` stores, so a later
+    ``c.attr[index] = value`` or ``c.attr = value`` was invisible and ``int(c.attr[index])``
+    folded the construction value (or stopped with a run-time ``integer overflow`` when it did
+    not fold).  A constant store now updates the per-instance value; a store whose key or value
+    is not static makes that attribute unknown, so a stale value is never folded.
+    """
+    def resolve(node):
+        return _constant_value(node, lambda name: known.get(name, _UNKNOWN),
+                               lambda unused: True, {}, attributes)
+
+    def target_of(node):
+        value = resolve(node)
+        if isinstance(value, (_KnownInstance, _KnownClassValue)):
+            return value
+        return None
+
+    def current(target, attr):
+        if isinstance(target, _KnownInstance):
+            if attr in target.overrides:
+                return target.overrides[attr]
+            return attributes.instance_value(target.name, attr, target.arguments)
+        info = attributes.classes.get(target.name)
+        return _UNKNOWN if info is None else info['class'].get(attr, _UNKNOWN)
+
+    def store(target, attr, value):
+        if isinstance(target, _KnownInstance):
+            target.overrides[attr] = value
+        else:
+            info = attributes.classes.get(target.name)
+            if info is not None:
+                info['class'][attr] = value
+
+    def copy_container(value):
+        if type(value) is list:
+            return list(value)
+        if type(value) is dict:
+            return dict(value)
+        return value
+
+    def stored_value(node):
+        value = resolve(node)
+        if value is not _UNKNOWN or int_shadowed:
+            return value
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'int' and len(node.args) == 1 and not node.keywords):
+            return value
+        argument = resolve(node.args[0])
+        if argument is _UNKNOWN:
+            return _UNKNOWN
+        if _outside_int64_float(argument):
+            error = ValueError(
+                f'int() of a float outside int64: {argument!r} (CPython makes a big integer)')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+        converted = _int_conversion_outside_int64(argument)
+        if converted is not None:
+            error = ValueError(
+                f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+        if type(argument) in (bool, int, float, str, bytes):
+            try:
+                return int(argument)
+            except (TypeError, ValueError, OverflowError):
+                return _UNKNOWN
+        return _UNKNOWN
+
+    def store_attribute(node, value_node):
+        target = target_of(node.value)
+        if target is None:
+            return
+        store(target, node.attr, copy_container(stored_value(value_node)))
+
+    def store_subscript(node, value_node):
+        base = node.value
+        if not isinstance(base, ast.Attribute):
+            return
+        target = target_of(base.value)
+        if target is None:
+            return
+        attr = base.attr
+        key = resolve(node.slice)
+        container = current(target, attr)
+        if isinstance(key, slice) or key is _UNKNOWN:
+            store(target, attr, _UNKNOWN)
+            return
+        if type(container) is list:
+            if type(key) not in (int, bool) or not -len(container) <= key < len(container):
+                store(target, attr, _UNKNOWN)
+                return
+            value = stored_value(value_node)
+            if value is _UNKNOWN:
+                store(target, attr, _UNKNOWN)
+                return
+            updated = list(container)
+            updated[key] = value
+            store(target, attr, updated)
+            return
+        if type(container) is dict:
+            value = stored_value(value_node)
+            if value is _UNKNOWN:
+                store(target, attr, _UNKNOWN)
+                return
+            updated = dict(container)
+            try:
+                updated[key] = value
+            except TypeError:
+                store(target, attr, _UNKNOWN)
+                return
+            store(target, attr, updated)
+            return
+        store(target, attr, _UNKNOWN)
+
+    def store_call(node):
+        func = node.func
+        if not isinstance(func, ast.Attribute) or not isinstance(func.value, ast.Attribute):
+            return
+        if func.attr not in _MUTATING_CONTAINER_METHODS:
+            return
+        base = func.value
+        target = target_of(base.value)
+        if target is None:
+            return
+        attr = base.attr
+        container = current(target, attr)
+        if (func.attr == 'append' and len(node.args) == 1 and not node.keywords
+                and type(container) is list):
+            value = stored_value(node.args[0])
+            if value is _UNKNOWN:
+                store(target, attr, _UNKNOWN)
+                return
+            updated = list(container)
+            updated.append(value)
+            store(target, attr, updated)
+            return
+        if (func.attr == 'extend' and len(node.args) == 1 and not node.keywords
+                and type(container) is list):
+            value = resolve(node.args[0])
+            if type(value) not in (list, tuple):
+                store(target, attr, _UNKNOWN)
+                return
+            updated = list(container)
+            updated.extend(value)
+            store(target, attr, updated)
+            return
+        if (func.attr == 'insert' and len(node.args) == 2 and not node.keywords
+                and type(container) is list):
+            index = resolve(node.args[0])
+            value = stored_value(node.args[1])
+            if type(index) not in (int, bool) or value is _UNKNOWN:
+                store(target, attr, _UNKNOWN)
+                return
+            updated = list(container)
+            updated.insert(index, value)
+            store(target, attr, updated)
+            return
+        store(target, attr, _UNKNOWN)
+
+    nodes = sorted(_shallow_walk(tree.body),
+                   key=lambda node: (getattr(node, 'lineno', 0), getattr(node, 'col_offset', 0)))
+    for node in nodes:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Attribute):
+                    store_attribute(target, node.value)
+                elif isinstance(target, ast.Subscript):
+                    store_subscript(target, node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            if isinstance(node.target, ast.Attribute):
+                store_attribute(node.target, node.value)
+            elif isinstance(node.target, ast.Subscript):
+                store_subscript(node.target, node.value)
+        elif isinstance(node, ast.AugAssign):
+            target = node.target
+            if isinstance(target, ast.Attribute):
+                holder = target_of(target.value)
+                if holder is not None:
+                    store(holder, target.attr, _UNKNOWN)
+            elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Attribute):
+                holder = target_of(target.value.value)
+                if holder is not None:
+                    store(holder, target.value.attr, _UNKNOWN)
+        elif isinstance(node, ast.Delete):
+            for target in node.targets:
+                if isinstance(target, ast.Subscript):
+                    base = target.value
+                    if isinstance(base, ast.Attribute):
+                        target_value = target_of(base.value)
+                        if target_value is not None:
+                            store(target_value, base.attr, _UNKNOWN)
+        elif isinstance(node, ast.Call):
+            store_call(node)
 
 
 def _outside_int64_float(value):
@@ -1425,6 +1633,7 @@ def _check_int64_literals(tree):
                        or (isinstance(node, ast.arg) and node.arg == 'int')
                        or (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store) and node.id == 'int')
                        for node in ast.walk(tree))
+    _apply_known_container_stores(tree, known, attributes, int_shadowed)
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
