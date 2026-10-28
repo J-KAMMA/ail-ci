@@ -20,7 +20,8 @@ concatenation; argument and default argument; comprehension item; class/instance
 assigns `__file__`.  A parameter named `__file__` (`f4.py`) is still refused by name on both
 builds, as before.  A sibling module and `module.__file__` match CPython in a manual two-file
 build, and a namespace package gives `None`; `test_ail_ex10.py` pins the direct and module cases
-on both builds.
+on both builds.  `test_ail_modules`' `lib.__file__` case now expects CPython's path instead of the
+old named refusal.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
