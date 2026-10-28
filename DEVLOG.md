@@ -1,3 +1,30 @@
+## 2026-10-28 -- cov20: `sorted(d.items())` bound to a name and `dict(sorted(d.items()))` (job-cov20-10290430)
+
+The current corpus compile census (219 programs, default build) refuses 24 programs. Excluding the
+imports that the stdlib jobs own, the most frequent first refusal was `sorted(d.items()) is supported
+only as the iterable of `for k, v in sorted(d.items(), ...)` (2 programs: deepseek t456, glm t467).
+The existing `for k, v in sorted(d.items(), ...)` site is exact, so the same pair snapshot now also
+covers two neighbouring spellings: `ranked = sorted(d.items(), ...)` whose only later reads are
+`for k, v in ranked` or a slice of it (`ranked[:3]`, negative/step slices, repeated loops), and
+`dict(sorted(d.items()))` (no key; keys are unique, so sorting the keys is the same order, and the
+values are read by key). A rebinding, `del`, nested-scope use, load before the assignment, or a
+conditional binding is refused by name as before, never run with the wrong snapshot.
+
+Corpus compile census on this tree: before 24 refused / 195 accepted; after 24 refused / 195
+accepted. The two `sorted(d.items())` first refusals are gone (2 -> 0); those programs still stop
+by name at their next blocker (`inheritance from 'dict[str, int]'` for t456 and
+`only a class type can be None` for glm t467). Added `AIL_CURRENT/test_ail_cov20.py` (both builds,
+plus the non-constant `reverse=` refusal and lowering-boundary tests) and registered it in
+`ail_check.MODULES`.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `cov20_p01_ranked_basic`, `p02_ranked_empty`,
+`p03_ranked_slices`, `p04_ranked_mutate` (snapshot before dict mutation), `p05_ranked_arg`,
+`p06_ranked_values` (float/bool/big int values), `p07_dict_sorted`, `p08`-`p15` (ranked printed,
+reassigned, nested, dict(sorted(key=...)), receiver through a list item/attribute/dict value, and
+`dict(sorted(list_item.items()))`) all match CPython or are refused by name. The lowering boundary
+is also pinned directly: a plain top-level snapshot rewrites 2 sites, while a reassignment, a nested
+scope and a conditional binding raise `sorted(d.items()) bound to a name ...`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

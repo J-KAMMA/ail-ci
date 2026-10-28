@@ -202,6 +202,8 @@ class _Rewriter:
         self.struct_names = set()
         self.dicts = set()
         self.range_sources = set()
+        self.pairs = {}
+        self.fn = None
 
     # -- site pieces ---------------------------------------------------------------------------
     def options(self, call, what):
@@ -401,22 +403,13 @@ class _Rewriter:
         return pre
 
     # -- for k, v in sorted(d.items(), ...) -----------------------------------------------------
-    def for_items(self, st):
-        it = st.iter
-        if not (_is_sorted_call(it) and len(it.args) == 1):
-            return None
-        receiver = _items_receiver(it.args[0])
-        if receiver is None:
-            return None
-        if not (isinstance(st.target, ast.Tuple) and len(st.target.elts) == 2
-                and all(isinstance(e, ast.Name) for e in st.target.elts)):
-            raise self.Unsupported('for ... in sorted(d.items(), ...) binds exactly two names: '
-                                   '`for k, v in sorted(d.items())`')
-        key, reverse = self.options(it, 'sorted()')
+    def items_columns(self, call, receiver, pre):
+        """(n, keys, values, perm) for a sorted() over `receiver.items()`; fills `pre`."""
+        key, reverse = self.options(call, 'sorted()')
         n = self.next_id()
         keys, values = '_ail_sk%d_k' % n, '_ail_sk%d_v' % n
-        pre = [ast.Assign(targets=[_name(keys, True)], value=_method(receiver, 'keys')),
-               ast.Assign(targets=[_name(values, True)], value=_method(receiver, 'values'))]
+        pre.append(ast.Assign(targets=[_name(keys, True)], value=_method(receiver, 'keys')))
+        pre.append(ast.Assign(targets=[_name(values, True)], value=_method(receiver, 'values')))
         columns = []
         if key is None:
             # tuples compare by (k, v); keys are unique, so the key alone decides
@@ -451,6 +444,21 @@ class _Rewriter:
         self.mark_columns(n, pre)
         perm, statements = self.perm_statements(n, reverse, columns)
         pre.extend(statements)
+        return n, keys, values, perm
+
+    def for_items(self, st):
+        it = st.iter
+        if not (_is_sorted_call(it) and len(it.args) == 1):
+            return None
+        receiver = _items_receiver(it.args[0])
+        if receiver is None:
+            return None
+        if not (isinstance(st.target, ast.Tuple) and len(st.target.elts) == 2
+                and all(isinstance(e, ast.Name) for e in st.target.elts)):
+            raise self.Unsupported('for ... in sorted(d.items(), ...) binds exactly two names: '
+                                   '`for k, v in sorted(d.items())`')
+        pre = []
+        n, keys, values, perm = self.items_columns(it, receiver, pre)
         step = '_ail_sk%d_t' % n
         k, v = st.target.elts
         prologue = [
@@ -467,6 +475,139 @@ class _Rewriter:
         self.count += 1
         return pre + [loop]
 
+    # -- ranked = sorted(d.items(), ...) then `for k, v in ranked[:n]` ---------------------------
+    def _pair_uses(self, target, assignment, st):
+        """True when `target` is assigned once at this function's top level and every load of it
+        afterwards is the iterable of `for k, v in target` or a slice of it. A nested scope, a
+        second store, a store before/after, a `del`, or a load before the assignment means the
+        name is not just a snapshot of `d.items()`, so the site is refused by name."""
+        parents = {}
+        for node in ast.walk(self.fn):
+            for child in ast.iter_child_nodes(node):
+                parents[child] = node
+        if parents.get(st) is not self.fn:
+            return False
+
+        def nested(node):
+            parent = parents.get(node)
+            while parent is not None and parent is not self.fn:
+                if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda,
+                                       ast.ClassDef)):
+                    return True
+                parent = parents.get(parent)
+            return False
+
+        for node in ast.walk(self.fn):
+            if not (isinstance(node, ast.Name) and node.id == target):
+                continue
+            if nested(node):
+                return False
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                if node is not assignment:
+                    return False
+                continue
+            if not isinstance(node.ctx, ast.Load):
+                continue
+            if (node.lineno, node.col_offset) < (assignment.lineno, assignment.col_offset):
+                return False
+            parent = parents.get(node)
+            if isinstance(parent, ast.For) and parent.iter is node:
+                continue
+            if (isinstance(parent, ast.Subscript) and parent.value is node
+                    and isinstance(parent.slice, ast.Slice)):
+                grand = parents.get(parent)
+                if isinstance(grand, ast.For) and grand.iter is parent:
+                    continue
+            return False
+        return True
+
+    def pair_assignment(self, st):
+        """`name = sorted(d.items(), ...)` walked only as `for k, v in name[:n]`."""
+        value = st.value
+        if not (_is_sorted_call(value) and len(value.args) == 1):
+            return None
+        receiver = _items_receiver(value.args[0])
+        if receiver is None:
+            return None
+        target = st.targets[0] if isinstance(st, ast.Assign) else st.target
+        if not isinstance(target, ast.Name):
+            return None
+        if not self._pair_uses(target.id, target, st):
+            raise self.Unsupported('sorted(d.items()) bound to a name is supported only when '
+                                   'that name is the iterable of `for k, v in name` (or a slice '
+                                   'of it).\n'
+                                   '  write instead: `for k, v in sorted(d.items(), ...):`')
+        if target.id in self.pairs:
+            raise self.Unsupported('sorted(d.items()) bound twice to the same name (%r).\n'
+                                   '  write instead: use a second name' % target.id)
+        pre = []
+        n, keys, values, perm = self.items_columns(value, receiver, pre)
+        self.pairs[target.id] = (keys, values, perm)
+        self.count += 1
+        return pre
+
+    def pair_for(self, st):
+        it = st.iter
+        source = None
+        slice_node = None
+        if isinstance(it, ast.Name) and it.id in self.pairs:
+            source = it.id
+        elif (isinstance(it, ast.Subscript) and isinstance(it.value, ast.Name)
+              and it.value.id in self.pairs and isinstance(it.slice, ast.Slice)):
+            source, slice_node = it.value.id, it.slice
+        if source is None:
+            return None
+        if not (isinstance(st.target, ast.Tuple) and len(st.target.elts) == 2
+                and all(isinstance(e, ast.Name) for e in st.target.elts)):
+            raise self.Unsupported('for ... in a sorted(d.items()) name binds exactly two names: '
+                                   '`for k, v in ranked`')
+        keys, values, perm = self.pairs[source]
+        step = '_ail_sk%d_t' % self.next_id()
+        k, v = st.target.elts
+        prologue = [
+            ast.Assign(targets=[_name(k.id, True)],
+                       value=ast.Subscript(value=_name(keys), slice=_name(step), ctx=ast.Load())),
+            ast.Assign(targets=[_name(v.id, True)],
+                       value=ast.Subscript(value=_name(values), slice=_name(step), ctx=ast.Load()))]
+        iterable = _name(perm)
+        if slice_node is not None:
+            iterable = ast.Subscript(value=_name(perm), slice=slice_node, ctx=ast.Load())
+        loop = ast.For(target=_name(step, True), iter=iterable,
+                       body=prologue + self.block(st.body), orelse=self.block(st.orelse),
+                       type_comment=None)
+        ast.copy_location(loop, st)
+        self.count += 1
+        return [loop]
+
+    # -- dict(sorted(d.items())) ---------------------------------------------------------------
+    def dict_sorted_items(self, node, pre):
+        """`dict(sorted(d.items()))` -> `{k: d[k] for k in sorted(d.keys())}` (same order and
+        values; only the no-key spelling, where sorting by the whole pair sorts by the key)."""
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'dict' and len(node.args) == 1 and not node.keywords):
+            return None
+        inner = node.args[0]
+        if not (_is_sorted_call(inner) and len(inner.args) == 1):
+            return None
+        receiver = _items_receiver(inner.args[0])
+        if receiver is None:
+            return None
+        key, reverse = self.options(inner, 'sorted()')
+        if key is not None:
+            return None
+        element = '_ail_sk%d_k' % self.next_id()
+        keys = ast.Call(func=ast.Attribute(value=_name(receiver), attr='keys', ctx=ast.Load()),
+                        args=[], keywords=[])
+        inner.args[0] = keys
+        inner.keywords = [ast.keyword(arg='reverse', value=ast.Constant(value=True))] if reverse else []
+        comp = ast.DictComp(
+            key=_name(element),
+            value=ast.Subscript(value=_name(receiver), slice=_name(element), ctx=ast.Load()),
+            generators=[ast.comprehension(target=_name(element, True), iter=inner,
+                                          ifs=[], is_async=0)])
+        self.count += 1
+        return comp
+
     # -- walking ---------------------------------------------------------------------------------
     def expr(self, node, pre):
         if node is None:
@@ -474,6 +615,10 @@ class _Rewriter:
         if isinstance(node, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp,
                              ast.GeneratorExp, ast.BoolOp, ast.IfExp)):
             return node            # evaluated conditionally or repeatedly: never hoisted
+        if isinstance(node, ast.Call):
+            replaced = self.dict_sorted_items(node, pre)
+            if replaced is not None:
+                return replaced
         for field, value in ast.iter_fields(node):
             if isinstance(value, list):
                 setattr(node, field, [self.expr(v, pre) if isinstance(v, ast.expr) else v
@@ -509,6 +654,9 @@ class _Rewriter:
     def statement(self, st):
         pre = []
         if isinstance(st, ast.For):
+            replaced = self.pair_for(st)
+            if replaced is not None:
+                return replaced
             replaced = self.for_items(st)
             if replaced is not None:
                 return replaced
@@ -533,6 +681,11 @@ class _Rewriter:
             st.value = self.expr(st.value, pre)
         elif isinstance(st, (ast.Assign, ast.AnnAssign)) and st.value is not None:
             target = st.targets[0] if isinstance(st, ast.Assign) else st.target
+            if (isinstance(target, ast.Name)
+                    and (not isinstance(st, ast.Assign) or len(st.targets) == 1)):
+                replaced = self.pair_assignment(st)
+                if replaced is not None:
+                    return self.place(replaced, st)
             if (_is_sorted_call(st.value) and len(st.value.args) == 1
                     and isinstance(target, ast.Name)
                     and (not isinstance(st, ast.Assign) or len(st.targets) == 1)):
@@ -556,6 +709,7 @@ def rewrite(tree, stage, old_shape, Unsupported):
     classes = {n.name for n in tree.body if isinstance(n, ast.ClassDef)}
     for fn in [n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)]:
         rewriter = _Rewriter(stage, old_shape, Unsupported)
+        rewriter.fn = fn
         rewriter.serial = serial        # names are unique across the whole program, not per function
         rewriter.dicts = _dict_names(fn)
         rewriter.struct_names = _struct_list_names(fn, classes)
