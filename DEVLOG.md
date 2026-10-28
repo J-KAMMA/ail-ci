@@ -1,3 +1,22 @@
+## 2026-10-28 -- rbpre393 suite review: test_ail_pre393 and test_ail_safetynet pass (job-rbpre393-10281743)
+
+The suite job reported `test_ail_pre393` and `test_ail_safetynet` failing on today's integration
+tree, but neither reproduces on this checkout.  Run alone and together with `par_check -j 2`:
+`test_ail_pre393` passes 2 tests (52 s) and `test_ail_safetynet` passes 5 tests (95 s); the other
+required modules pass too (`test_ail_files` 18 tests, 1 skip, 100 s; `test_ail_corpus_findings3`
+2 tests, 177 s).  The CI shard assignments containing them were also run locally:
+shards 7 and 14, 69 modules at `-j 2`, 1150 s, with no failure in either module (only the
+known-failing `test_ail_fuzz1` from `.agent/integ_base_fail.txt`, missing `difffuzz`).  No code,
+test or DIFFERENCES change was needed; the recorded failure looks like the transient suite
+false positives already recorded for pre345, pre346 and pre390.
+
+Probes in `/tmp/probes/rbpre393sf` (both builds via `cmp.sh`): `p01_float_default`,
+`p02_negative_kwonly`, `p03_string_default`, `p04_list_item_default`, `p05_dict_value_default`
+and `p06_attribute_default` are refused by name (`int() of a float outside int64` or
+`int64 constant expression out of range`); `p07_in_range_and_override` (default, override,
+negative override) and `p08_shadowed_caller` (in-range module constant shadowed by a caller
+local) match CPython.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- re-apply pre393: int() of an out-of-int64 default argument is refused by name (job-rbpre393-10281532)
 
 Re-applied the accepted pre393 change on the current integration tree.  A wrapper parameter whose
