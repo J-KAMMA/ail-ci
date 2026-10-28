@@ -41,6 +41,31 @@ in `/tmp/probes` on both builds via `cmp.sh`: `p_tryelse`, `p_tryelse2`, `p_trye
 fuzzer program `fz1` now match CPython (stdout and exit code).  Final-state tests:
 test_ail_fz1, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  No other
 differences were seen in this reproducer.
+## 2026-10-28 -- fz2: a finite out-of-int64 `round()` stops as the declared int64 overflow (job-fz2-10281148)
+
+The daily fuzzer seed 2075200891 (`exit code cpython=0 ail=1; ... cpython='-1.9999506175892305e+20'
+ail='<end>'`) grew a float to about -2e20 and used `round(v)` in a comparison.  CPython's int is
+unbounded and returns the exact integer; AIL's int is int64, so the value cannot be represented.
+The typed runtime stopped with its own trap text `round() result does not fit in this language's
+int64`, which the fuzz runner could not class as the declared 64-bit difference.  `ail_round0` now
+uses the ordinary `integer overflow` stop (stderr `integer overflow`, exit 1, stdout flushed up to
+the call), exactly like `+`, `-`, `*` and the other int64 limits; `round(x, n)` and the general path
+already did.  A constant float at or outside the boundary keeps pre54's compile-time refusal by
+name, and NaN/Infinity keep pre104's catchable ValueError/OverflowError.  The original seed is now
+`overflow` (not DIFF) in both default and IR modes under `lab/fuzz/run.py`.
+
+Probes in `/tmp/probes` (both cmp.sh builds): `c_wide` and `c_wide_neg` are refused by name
+(`round() of a constant float at the int64 boundary is refused`, exit 3); `m_big`,
+`m_big_untyped`, `m_arg`, `m_list`, `m_attr`, `m_neg` and `m_edge` stop with `integer overflow`,
+exit 1, stdout a prefix (the fuzz runner's declared-overflow contract); `m_in` (in-range floats,
+int64 boundaries, int/bool) and `m_nan` (NaN/Infinity exceptions) match CPython.  Added
+`AIL_CURRENT/test_ail_fz2.py` (7 tests, four modes: default/IR and general/IR): the minimized form,
+a comparison-only use, a negative value, values through an argument, list item, attribute, dict
+value and float/list aliases, in-range and integral arguments, NaN/Infinity, and the constant
+compile-time refusal.  Registered it in `ail_check.MODULES` and `tools/ci_shards.json`, and added
+DIFFERENCES row `C?-job-fz2-10281148-1`.  Final-state tests: test_ail_fz2, test_ail_pre104,
+test_ail_pre54, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (6 modules,
+0 failed).  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:
