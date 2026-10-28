@@ -70,6 +70,67 @@ BUNDLED_DIR = Path(__file__).resolve().parent / 'stdlib'
 # zlib.error is a class of its own, the compiler spells it RuntimeError (as csv.Error is ValueError)
 BUNDLED_NAMES = {('zlib', 'error'): 'RuntimeError'}
 
+# `__file__` is the one module dunder the compiler binds: CPython 3.12 makes the entry's value the
+# absolute path of the script it was given and an imported module's value the absolute path it was
+# found at, both known when the program is built (os.path.abspath, which keeps symlinks as written).
+FILE_DUNDER = '__file__'
+
+
+def file_uses(tree):
+    """True when `tree` names `__file__` in any scope (a read, a binding, a parameter)."""
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == FILE_DUNDER:
+            return True
+        if isinstance(node, ast.arg) and node.arg == FILE_DUNDER:
+            return True
+        if isinstance(node, ast.alias) and FILE_DUNDER in (node.name, node.asname):
+            return True
+        if isinstance(node, ast.ExceptHandler) and node.name == FILE_DUNDER:
+            return True
+    return False
+
+
+def file_insert_line(tree):
+    """The line count before the body's first statement: a module docstring and `__future__` imports
+    stay first (CPython requires the latter), so a text-level `__file__` line goes after them."""
+    index = 0
+    body = tree.body
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        index = 1
+    while index < len(body) and isinstance(body[index], ast.ImportFrom) and body[index].module == '__future__':
+        index += 1
+    if not index:
+        return 0
+    last = body[index - 1]
+    return last.end_lineno or last.lineno
+
+
+def define_file(tree, value):
+    """Insert CPython's `__file__` binding at the top of a module body (after its docstring). A later
+    assignment, `del` or parameter of the same name then behaves as it does in CPython."""
+    index = 0
+    if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant) \
+            and isinstance(tree.body[0].value.value, str):
+        index = 1
+    target, source = ast.Name(FILE_DUNDER, ast.Store()), ast.Constant(value)
+    statement = ast.Assign(targets=[target], value=source)
+    if tree.body:
+        anchor = tree.body[index] if index < len(tree.body) else tree.body[0]
+        for node in (statement, target, source):
+            ast.copy_location(node, anchor)
+    else:
+        for node in (statement, target, source):
+            node.lineno, node.col_offset = 1, 0
+            node.end_lineno, node.end_col_offset = 1, 0
+    tree.body.insert(index, statement)
+    ast.fix_missing_locations(tree)
+
+
+def file_value(mod):
+    """CPython's __file__ for an imported module: its absolute path, or None for a namespace package."""
+    return None if mod.kind == 'namespace' else os.path.abspath(str(mod.path))
+
 
 class ModuleRefusal(ValueError):
     """A named refusal; `refusal` is (path, line, column, text) as ail_chatgpt._refuse_load prints it."""
@@ -366,6 +427,8 @@ class Program:
                 raise ModuleRefusal(path, error.lineno or 1, error.offset or 1, error.msg)
         mod = Mod(fullname, path if path is not None else mdirs[0], tree, False, kind, mdirs if kind != 'module' else [])
         self.mods[fullname] = mod
+        if kind != 'namespace' and file_uses(mod.tree):
+            define_file(mod.tree, file_value(mod))
         self.drop_main_guards(mod)
         self.take_all(mod)
         self.discover(mod)
@@ -1734,6 +1797,9 @@ class Rewriter(ast.NodeTransformer):
                 self.program.refuse(self.mod, node, "%r is imported from %s and cannot be rebound here.\n"
                                     "  write instead: use another name for your own variable"
                                     % (name, entry[1].name))
+            if entry[0] == 'member' and entry[2] == FILE_DUNDER and FILE_DUNDER not in entry[1].merged \
+                    and not entry[1].entry:
+                return ast.copy_location(ast.Constant(file_value(entry[1])), node)
             self.check_partial(entry[1], entry[2], node)
             merged = (self.program.merged_name(found[1], found[2]) if found[0] == 'var'
                       else self.program.export(entry[1], entry[2], self.mod, node))
@@ -1769,7 +1835,10 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
-        if attr in MODULE_DUNDERS and not stored:
+        if attr == FILE_DUNDER and not stored and not target.entry and FILE_DUNDER not in target.merged:
+            # the module does not bind __file__ itself: CPython's value is known at build time
+            return ast.copy_location(ast.Constant(file_value(target)), node)
+        if attr in MODULE_DUNDERS and not stored and not (attr == FILE_DUNDER and FILE_DUNDER in target.merged):
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
         if attr.startswith('_') and not (attr.startswith('__') and attr.endswith('__')):
@@ -1914,7 +1983,7 @@ class Rewriter(ast.NodeTransformer):
 
 # ---------------------------------------------------------------- the merge
 
-def merge_program(entry_path, entry_text, read=None):
+def merge_program(entry_path, entry_text, read=None, entry_display=None):
     """None when the entry imports no local module; else a Merged program (see the module docstring)."""
     if read is None:
         def read(path):
@@ -1928,6 +1997,9 @@ def merge_program(entry_path, entry_text, read=None):
                for node in ast.walk(tree)):
         return None
     entry = Mod('__main__', program.entry_path, tree, True)
+    if file_uses(tree):
+        define_file(tree, os.path.abspath(str(entry_display if entry_display is not None
+                                            else program.entry_path)))
     program.entry = entry
     program.mods['__main__'] = entry
     program.prepare_entry(entry)

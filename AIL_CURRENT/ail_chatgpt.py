@@ -4218,6 +4218,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
     search_paths = tuple(dict.fromkeys(Path(path).resolve() for path in module_paths))
     if any(not path.is_dir() for path in search_paths):
         raise ValueError('each --module-path must name an existing directory')
+    entry_file_value = os.path.abspath(os.fspath(source))
     standard = ROOT / 'language_examples'
     modules = []
     names = set()
@@ -4260,7 +4261,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 # a file that does not mention ail_ffi is returned untouched
                 text = ffi.lower(path, text)
             if local_imports and entry and syntax == 'python' and not module_only:
-                merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
+                merged = ail_modules.merge_program(path, text, entry_display=entry_file_value,
+                                                   **({} if ffi is None else {'read': ffi.read}))
                 if merged is not None:
                     _MERGED_ENTRIES[str(path)] = merged
                     text = merged.text
@@ -4284,6 +4286,16 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             text = fold_constants(text)
             text = _fold_float_int_text(text)
             tree = ast.parse(text, filename=str(path))
+            file_insert = 0
+            if syntax == 'python' and merged is None and not declarations_only and ail_modules.file_uses(tree):
+                # bind CPython's __file__ before the body (after the docstring and the __future__
+                # imports); one added line, so the source map below shifts the lines after it
+                value = entry_file_value if entry else os.path.abspath(str(path))
+                file_insert = ail_modules.file_insert_line(tree)
+                lines = text.split('\n')
+                lines.insert(file_insert, '__file__ = %r' % (value,))
+                text = '\n'.join(lines)
+                tree = ast.parse(text, filename=str(path))
             if syntax == 'python' and entry and not module_only and not declarations_only:
                 _check_main_called(tree)
                 if local_imports:
@@ -4302,16 +4314,20 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 _check_genexpr_hash_keys(tree)
             if merged is not None and merged.positions:
                 locations = dict(merged.positions)
-            if source_map is not None:
+            if source_map is not None or file_insert:
                 if syntax == 'python' and merged is None:
                     for node in ast.walk(tree):
                         if isinstance(node, ast.stmt):
-                            position = (node.lineno, len(text.splitlines()[node.lineno - 1].encode('utf8')[:node.col_offset].decode('utf8')) + 1)
+                            if file_insert and node.lineno == file_insert + 1:
+                                continue                    # the __file__ line added above
+                            line = node.lineno - 1 if file_insert and node.lineno > file_insert + 1 else node.lineno
+                            position = (line, len(text.splitlines()[node.lineno - 1].encode('utf8')[:node.col_offset].decode('utf8')) + 1)
                             locations[node.lineno] = None if node.lineno in locations else position
                     locations = {line: position for line, position in locations.items() if position is not None}
-                unit_locations[text] = ({line: position for line, position in locations.items()}
-                                        if merged is not None and merged.positions else
-                                        {line: (str(path), *position) for line, position in locations.items()})
+                if source_map is not None:
+                    unit_locations[text] = ({line: position for line, position in locations.items()}
+                                            if merged is not None and merged.positions else
+                                            {line: (str(path), *position) for line, position in locations.items()})
             if origins is not None:
                 if syntax == 'python' and merged is None:
                     for owner, fn in ((node.name if isinstance(node, ast.ClassDef) else None, member)
