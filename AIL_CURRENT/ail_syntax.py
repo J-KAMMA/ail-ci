@@ -1422,6 +1422,9 @@ _MATH_HELPERS['tw_shorten'] = (
     '    return "\\n".join(lines)\n')
 _MATH_HELPERS['tw_indent'] = (
     'def _ail_tw_indent(text: str, prefix: str) -> str:\n'
+    '    check = text.splitlines()\n'
+    '    if len(check) < 0:\n'
+    '        return ""\n'
     '    out = ""\n'
     '    start = 0\n'
     '    i = 0\n'
@@ -1453,6 +1456,8 @@ _MATH_HELPERS['tw_indent'] = (
     '    return out\n')
 _MATH_HELPERS['string_capwords'] = (
     'def _ail_string_capwords(s, sep):\n'
+    '    if isinstance(s, bytes) and sep is None:\n'
+    '        raise TypeError("descriptor \'capitalize\' for \'str\' objects doesn\'t apply to a \'bytes\' object")\n'
     '    if sep is None:\n'
     '        return " ".join([word.capitalize() for word in s.split()])\n'
     '    return sep.join([word.capitalize() for word in s.split(sep)])\n')

@@ -15,16 +15,21 @@ placeholder path through the existing chunker (including hyphen chunks), and
 `textwrap.indent(text, prefix)` preserves every `splitlines(True)` line ending. `string.capwords`
 supports the default whitespace separator and an explicit separator. Unsupported textwrap
 options/functions (for example `TextWrapper`, `shorten(..., placeholder=...)`) and
-`string.Template` remain named compile-time refusals; no wrong result is produced.
+`string.Template` remain named compile-time refusals; no wrong result is produced. Follow-up
+hardening covers wrong-type routes too: `textwrap.indent` performs CPython's `splitlines()`
+type check first, so a None/int text raises the same AttributeError, and `string.capwords`
+reproduces CPython's bytes descriptor TypeError for a bytes text with the default separator.
 
 This makes `lab/corpus/programs/deepseek-v4.1-flash-free/t116.py` build on both AIL_IR=0 and
 AIL_IR=1 and match CPython on all three recorded inputs. Added and registered
 `test_ail_stdlib1.py` and assigned it in `tools/ci_shards.json` (weight 10.0); no new DIFFERENCES row (the supported functions match CPython).
 Probes in `/tmp/probes`: `tw.py`, `tw2.py`, `tw3.py`, `tw4.py`, `tw_random.py` (hyphen/tab/
-newline/empty/negative-width boundaries, 120 generated texts), `cw.py` and `cp.py`
-(copy stays a named refusal). Final-state tests: test_ail_stdlib1, test_ail_pre360,
-test_ail_stdlib5, test_ail_files, test_ail_corpus_findings3 and test_ail_safetynet pass;
-`tools/update_manifest.py --check` passes.
+newline/empty/negative-width boundaries, 120 generated texts), `tw_shorten.py`, `tw_indent.py`,
+`tw_wrap_control.py`, `capwords.py`, `tw_types.py`, `capwords_types.py`, `tw_types_var.py`
+(literal and variable wrong-type routes) and `cp.py` (copy stays a named refusal); the
+`refuse_tw*.py` and `refuse_string.py` probes are refused by name. Final-state tests:
+test_ail_stdlib1, test_ail_pre360, test_ail_files, test_ail_corpus_findings3 and
+test_ail_safetynet pass; `tools/update_manifest.py --check` passes.
 
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
