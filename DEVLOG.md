@@ -1,3 +1,30 @@
+## 2026-10-28 -- pre393: int() of an out-of-int64 default argument is refused by name (job-pre393-10280904)
+
+The pre370 review recorded as pre-existing (its probe `r09`) that `def f(x=1e300): return int(x)`
+followed by `print(f())` compiled on both builds and stopped at run time with `integer
+overflow`, where CPython prints the big integer.  `_wrapper_int_params` followed a value passed
+at the call site, but the call-site check skipped a parameter the call omits, so the default
+was never seen.  `_Int64CallChecker` now takes a `_wrapper_int_defaults` map (positional
+defaults aligned from the tail, plus keyword-only defaults) and falls back to the default
+expression when the argument is missing; the same value check is shared by the direct `int()`
+and wrapper routes, so a constant string outside int64 through a wrapper now gets the direct
+conversion refusal instead of a run-time stop.  In-range defaults, an argument that overrides
+the default, a dead function and a non-int read are unchanged; the other recorded routes
+(computed index, `list()` argument, returned list, nested container item) are separate
+pre-existing gaps and were left alone.
+
+Added `AIL_CURRENT/test_ail_pre393.py` (2 tests: 11 refused and 7 matching programs, both
+builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`; added DIFFERENCES
+row `C?-job-pre393-10280904-1`.  Probes in `/tmp/probes/pre393` on both builds via `cmp.sh`:
+`r09_default`, `d01_kwonly`, `d02_positional`, `d06_negative`, `d07_module_const`,
+`d08_list_item`, `d09_dict_value`, `d10_attr`, `d11_str`, `d14_chain`, `d17_arg_str_out` and
+`d19_direct_str` are refused by name; `d03_inrange_arg`, `d04_not_called`, `d05_inrange_default`,
+`d12_boundary`, `d13_nonint_use`, `d16_inrange_str` and `d18_starred` match CPython.  The five
+other recorded routes (`r10_computed_index`, `r22_list_arg`, `r23_returned_list`,
+`p08_container_item`, `p09_dict_value`) were reproduced as still differing and are unchanged.
+Final-state tests: test_ail_pre393, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (results in the job report).  `tools/update_manifest.py` was run and
+`--check` passes.
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The

@@ -975,6 +975,24 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
     return functions
 
 
+def _wrapper_int_defaults(tree, int_params):
+    """The default expression of every parameter a wrapper passes to int()."""
+    defaults = {}
+    for fn in tree.body:
+        if not isinstance(fn, ast.FunctionDef) or fn.name not in int_params:
+            continue
+        args = fn.args
+        positional = [argument.arg for argument in (*args.posonlyargs, *args.args)]
+        first = len(positional) - len(args.defaults)
+        mapping = {positional[first + offset]: default
+                   for offset, default in enumerate(args.defaults)}
+        for argument, default in zip(args.kwonlyargs, args.kw_defaults):
+            if default is not None:
+                mapping[argument.arg] = default
+        defaults[fn.name] = mapping
+    return defaults
+
+
 def _all_bound_names(root):
     """Every name the program (or subtree) binds, for deciding whether a call is a builtin."""
     bound = set()
@@ -1105,10 +1123,12 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
 
 
 class _Int64CallChecker(ast.NodeVisitor):
-    def __init__(self, known, passthrough, int_params, int_shadowed, attributes, program_bound):
+    def __init__(self, known, passthrough, int_params, int_defaults, int_shadowed,
+                 attributes, program_bound):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
+        self.int_defaults = int_defaults
         self.int_shadowed = int_shadowed
         self.attributes = attributes
         self.program_bound = program_bound
@@ -1131,27 +1151,29 @@ class _Int64CallChecker(ast.NodeVisitor):
         error.source_column = node.col_offset
         raise error
 
+    def _check_int_value(self, node, value):
+        if _outside_int64_float(value):
+            self._refuse(node, value)
+        converted = _int_conversion_outside_int64(value)
+        if converted is not None:
+            error = ValueError(
+                f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+
     def visit_Call(self, node):
         if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
                 and self._global_name('int') and len(node.args) == 1 and not node.keywords):
-            value = self._value(node.args[0])
-            if _outside_int64_float(value):
-                self._refuse(node, value)
-            converted = _int_conversion_outside_int64(value)
-            if converted is not None:
-                error = ValueError(
-                    f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
-                error.source_line = node.lineno
-                error.source_column = node.col_offset
-                raise error
+            self._check_int_value(node, self._value(node.args[0]))
         if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
                 and self._global_name(node.func.id)):
             for name, index in self.int_params[node.func.id].items():
                 argument = _bound_argument(node, name, index)
+                if argument is None:
+                    argument = self.int_defaults.get(node.func.id, {}).get(name)
                 if argument is not None:
-                    value = self._value(argument)
-                    if _outside_int64_float(value):
-                        self._refuse(node, value)
+                    self._check_int_value(node, self._value(argument))
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
@@ -1423,7 +1445,8 @@ def _check_int64_literals(tree):
                        for node in ast.walk(tree))
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes)
-    _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
+    int_defaults = _wrapper_int_defaults(tree, int_params)
+    _Int64CallChecker(known, passthrough, int_params, int_defaults, int_shadowed, attributes,
                       program_bound).visit(tree)
     maxsplit = _maxsplit_constant_nodes(tree)
     nodes = [tree]
