@@ -515,7 +515,8 @@
   "test_json_pointer_batch": 6.8,
   "test_json_pointer_scan": 23.6,
   "test_json_query_cli": 63.7,
-  "test_json_query_file": 39.2
+  "test_json_query_file": 39.2,
+  "test_ail_pre392": 38.8
  },
  "assignment": [
   [
@@ -958,7 +959,8 @@
    "test_ail_silent1",
    "test_ail_spec_fixes",
    "test_ail_string_field_mutation",
-   "test_ail_typed_blockers"
+   "test_ail_typed_blockers",
+   "test_ail_pre392"
   ],
   [
    "test_ail_bugs7",

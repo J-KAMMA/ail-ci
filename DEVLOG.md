@@ -1,3 +1,34 @@
+## 2026-10-28 -- pre392: int() of out-of-int64 text from a container through a wrapper (job-pre392-10280857)
+
+The pre370 review's first still-differing item reproduced on both builds with text: `show(d["k"])` and
+`show(items[0])`, with the value read from a bound container (`d = {"k": "9223372036854775808"}`,
+`items = ["9223372036854775808"]`) and converted by the helper's `int(v)`, printed the exact bignum in
+CPython while both builds stopped with `integer overflow`.  The wrapper-int pass in
+`_Int64CallChecker` applied only `_outside_int64_float` to the argument reaching
+`int(<parameter>)`, while the direct `int(...)` branch also applies `_int_conversion_outside_int64`
+(text/bytes); that check now runs for wrapper arguments too, and the two refusals share
+`_check_conversion` / `_refuse_out_of_range`.
+
+Covered on both builds through a dict value, a list item, a tuple negative index, an int key, a
+class/instance attribute, an alias, `dict.get` and its default, a keyword argument, a
+wrapper/passthrough chain and a function-local container: all refused by name (`int64 constant
+expression out of range`).  In-range text/bytes, invalid text (CPython's ValueError text), dynamic
+text, a container mutated to an in-range value, a reassigned binding and a helper that does not
+convert match CPython; the float refusal is unchanged.  A nested container (the item is itself a
+list/dict, `int(v[0])`, e.g. `d = {"k": [1e300]}; show(d["k"])`) still stops with `integer
+overflow`; that is the pre-existing nested/mutable-container limit pre322 documented, unchanged
+here.
+
+Added `AIL_CURRENT/test_ail_pre392.py` (3 tests: 14 refused programs, 7 matching programs and the
+float control, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Probes in `/tmp/probes/pre392` on both builds via `cmp.sh`: r01-r11, r21 and r23 are refused by
+name; r12, r13, r16, r22, r25-r27 and r29 match CPython; r15 is the float control (refused); r24 is
+refused by the pre-existing `int`-shadowing subset rule; r17/r28 (nested container), r18 (container
+mutated to an out-of-int64 value) and r30 (`int(list)` TypeError wording) keep pre-existing
+run-time differences.  Final-state tests: test_ail_pre392, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (4 modules, `-j 2`, 300 s, 0 failed: pre392 38.0 s, safetynet 105.6 s,
+files 111.7 s, corpus_findings3 194.2 s).
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The

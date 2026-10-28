@@ -1131,27 +1131,30 @@ class _Int64CallChecker(ast.NodeVisitor):
         error.source_column = node.col_offset
         raise error
 
+    def _refuse_out_of_range(self, node, converted):
+        error = ValueError(
+            f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def _check_conversion(self, node, value):
+        if _outside_int64_float(value):
+            self._refuse(node, value)
+        converted = _int_conversion_outside_int64(value)
+        if converted is not None:
+            self._refuse_out_of_range(node, converted)
+
     def visit_Call(self, node):
         if (not self.int_shadowed and isinstance(node.func, ast.Name) and node.func.id == 'int'
                 and self._global_name('int') and len(node.args) == 1 and not node.keywords):
-            value = self._value(node.args[0])
-            if _outside_int64_float(value):
-                self._refuse(node, value)
-            converted = _int_conversion_outside_int64(value)
-            if converted is not None:
-                error = ValueError(
-                    f'int64 constant expression out of range: {_constant_diagnostic(converted)}')
-                error.source_line = node.lineno
-                error.source_column = node.col_offset
-                raise error
+            self._check_conversion(node, self._value(node.args[0]))
         if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
                 and self._global_name(node.func.id)):
             for name, index in self.int_params[node.func.id].items():
                 argument = _bound_argument(node, name, index)
                 if argument is not None:
-                    value = self._value(argument)
-                    if _outside_int64_float(value):
-                        self._refuse(node, value)
+                    self._check_conversion(node, self._value(argument))
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
