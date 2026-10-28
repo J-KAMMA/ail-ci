@@ -1769,6 +1769,37 @@ def _fold_float_int_text(text):
     return text
 
 
+def _module_value_map(tree):
+    """Module scalars, safe containers and known instances for the int64 expression checks."""
+    global_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            global_names.update(node.names)
+    module_counts = _binding_counts(tree.body)
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    safe_containers = _safe_module_containers(tree, module_counts, global_names, parents)
+    program_bound = _all_bound_names(tree)
+    known = _scope_constant_map(tree.body, tree, {}, module_counts, set(module_counts),
+                                set(), global_names, program_bound)
+    attributes = _known_class_attributes(tree, known)
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            name = node.targets[0].id
+            if module_counts.get(name) != 1 or name in global_names:
+                continue
+            value = _constant_value(node.value, lambda name: known.get(name, _UNKNOWN),
+                                    lambda unused: True, {}, attributes)
+            if type(value) in (int, float) or isinstance(value, (_KnownClassValue, _KnownInstance)):
+                known[name] = value
+            elif (isinstance(value, (list, tuple, dict)) and _contains_known_instance(value)
+                    and _only_subscripted(tree, name, node.targets[0])):
+                known[name] = value
+            elif name in safe_containers and _foldable_container(value):
+                known[name] = value
+    return known, attributes, program_bound, module_counts, global_names, parents
+
+
 def _check_int64_literals(tree):
     """A brace-syntax (`.ail`) program keeps 64-bit ints: a literal beyond them is named at its own position here.
     (A Python-syntax program has big ints; the typed path names such a literal and the general path builds it.)"""
@@ -1855,6 +1886,7 @@ def _check_int64_literals(tree):
             error.source_column = node.col_offset
             raise error
     _check_int64_binpow_constants(tree, known, attributes, passthrough, parents, maxsplit)
+    _check_int64_power_routes(tree, known, attributes, program_bound)
 
 
 _INT_BINARY = {
@@ -4495,6 +4527,129 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
 
     for statement in tree.body:
         visit(statement, module_lookup, module_global, {}, {})
+
+
+class _DropPowerAugAt(ast.NodeTransformer):
+    """Remove the augmented power at one source position, for a pre-assignment value map."""
+
+    def __init__(self, position):
+        self.position = position
+
+    def visit_AugAssign(self, node):
+        if (isinstance(node.op, ast.Pow)
+                and (node.lineno, node.col_offset) == self.position):
+            return ast.copy_location(ast.Pass(), node)
+        return node
+
+
+def _check_int64_power_routes(tree, known=None, attributes=None, program_bound=None):
+    """Refuse a constant-exponent power whose known base comes through a dict/list/argument.
+
+    ``refuse_variable_int_pow`` handles a constant base and ``_check_constant_power`` an
+    arithmetic constant; a base read from a safe container, a known call-site argument or an
+    augmented target was invisible to both, so the program compiled and then stopped with
+    ``integer overflow`` where CPython prints the exact bignum.  The base is resolved through
+    the same safe value map as the int() checks; a container that can be mutated, a name with
+    more than one binding and disagreeing call sites stay unknown, so their run-time behaviour
+    is unchanged.  For an augmented power the value is read from a copy of the program with
+    that one statement removed, so the target's pre-assignment value is used.
+    """
+    if known is None or attributes is None or program_bound is None:
+        (known, attributes, program_bound, _module_counts, _global_names,
+         _parents) = _module_value_map(tree)
+    int_known = {name: value for name, value in known.items() if type(value) is int}
+    bindings = _pow_parameter_bindings(tree, int_known)
+    functions = [node for node in ast.walk(tree)
+                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    node_scope = {}
+    for index, function in enumerate(functions):
+        for node in _walk_own_scope(function):
+            node_scope[id(node)] = index
+
+    def local_for(function, known_map, bound, binds):
+        local = _scope_constant_map(function.body, function, known_map,
+                                    _binding_counts(function.body), _function_bindings(function),
+                                    _scope_parameters(function), _scope_declared(function),
+                                    bound)
+        ints, _others = binds.get(id(function), ({}, {}))
+        if ints:
+            local.update(ints)
+        return local
+
+    def resolve(node, local, attrs):
+        value = _constant_value(node, lambda name: local.get(name, _UNKNOWN),
+                                lambda unused: False, {}, attrs)
+        if type(value) is int:
+            return value
+        ints = {name: value for name, value in local.items() if type(value) is int}
+        return _pow_static_int(node, ints)
+
+    def refuse(node, result):
+        shown = 'too large' if result is _CONST_INT_TOO_BIG else _constant_diagnostic(result)
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = getattr(node, 'lineno', None)
+        error.source_column = getattr(node, 'col_offset', None)
+        raise error
+
+    def check(node, local, attrs):
+        if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
+            return
+        if _pow_exponent_is_constant(node.left):
+            return
+        exponent = resolve(node.right, local, attrs)
+        if type(exponent) is not int or exponent < 0:
+            return
+        base = resolve(node.left, local, attrs)
+        if type(base) is not int or not _INT64_MIN <= base <= _INT64_MAX:
+            return
+        result = _exact_pow_or_too_big(base, exponent)
+        if result is None or _int64_holds(result):
+            return
+        refuse(node, result)
+
+    for node in ast.walk(tree):
+        if id(node) not in node_scope:
+            check(node, known, attributes)
+    for index, function in enumerate(functions):
+        local = local_for(function, known, program_bound, bindings)
+        for node in _walk_own_scope(function):
+            check(node, local, attributes)
+
+    augmented = [node for node in ast.walk(tree)
+                 if isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Pow)]
+    if not augmented:
+        return
+    counts = {}
+    for node in augmented:
+        key = (node_scope.get(id(node), -1), ast.dump(node.target))
+        counts[key] = counts.get(key, 0) + 1
+    for node in augmented:
+        key = (node_scope.get(id(node), -1), ast.dump(node.target))
+        if counts[key] != 1:
+            continue
+        removed = _DropPowerAugAt((node.lineno, node.col_offset)).visit(copy.deepcopy(tree))
+        r_known, r_attributes, r_bound, _mc, _gn, _parents = _module_value_map(removed)
+        r_int_known = {name: value for name, value in r_known.items() if type(value) is int}
+        r_bindings = _pow_parameter_bindings(removed, r_int_known)
+        r_functions = [inner for inner in ast.walk(removed)
+                       if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        scope = node_scope.get(id(node), -1)
+        local = r_known if scope < 0 else local_for(r_functions[scope], r_known,
+                                                      r_bound, r_bindings)
+        target = copy.deepcopy(node.target)
+        target.ctx = ast.Load()
+        if _pow_exponent_is_constant(target):
+            continue
+        exponent = resolve(node.value, local, r_attributes)
+        if type(exponent) is not int or exponent < 0:
+            continue
+        base = resolve(target, local, r_attributes)
+        if type(base) is not int or not _INT64_MIN <= base <= _INT64_MAX:
+            continue
+        result = _exact_pow_or_too_big(base, exponent)
+        if result is None or _int64_holds(result):
+            continue
+        refuse(node, result)
 
 
 def _check_int64_unary_constants(tree):
