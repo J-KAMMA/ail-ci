@@ -1,3 +1,27 @@
+## 2026-10-28 -- pre426 review: resolve function effects per binding (job-pre426-10281803)
+
+The pre426 review found that function effects were keyed only by identifier: `d = {"k": 1e300};
+mutate = 0; x = mutate + 1; print(int(d.get("k"))); def mutate(): d["k"] = 1.5` trapped with
+`integer overflow` on HEAD where base refused by name, because the later `def mutate`
+attributed `d` to the earlier `mutate` read.  `_escaped_constant_statements` now tracks the
+binding of each name as the scope's statements execute (a function, a non-function, or
+unknown) and applies a definition's effects only while that name is bound to it; a name
+definitely rebound to a non-function, or an alias of one, no longer inherits a later
+same-named definition.  An unsettled binding keeps the union of same-named definitions, so
+nested-function effects through a name that is not bound in the outer scope still apply.
+Alias pairs are followed only while both names still share the binding, so a rebound alias
+drops the old relation.
+
+Probes in `/tmp/probes/pre426fix` on both builds via `cmp.sh`: p01-p09 and p11 are refused by
+name on HEAD (p01-p04 were already refused on base; p05, p08 and p09 were base traps); p12
+matches CPython on both; p10 is refused by both builds as `duplicate AIL name`.  Re-ran the
+review's q01-q15: q13 now matches base's by-name refusal; q03, q07 and q09 also become
+by-name refusals where base trapped; q06, q08 and q15 match CPython; q01, q02, q04, q05,
+q10-q12 and q14 are unchanged (pre-existing traps or refusals).  Final-state tests:
+test_ail_pre426, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules,
+0 failed).  `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py
+--check` exits 0.
+
 ## 2026-10-28 -- pre426: a function body mutates a module container but is never called (job-pre426-10281803)
 
 The pre417 review recorded as pre-existing on both builds the r14 shape `d = {"k": 1e300};

@@ -7,7 +7,9 @@ statement, so the container was dropped before the read was checked.  A function
 contributes its effects at the statement that names the function, and a function that is
 never named cannot run.  A never-called mutation is therefore refused by name at compile
 time, a call (direct, through an alias, or as a callback) keeps its effects in order, and
-nested functions follow their enclosing function.
+nested functions follow their enclosing function.  Effects are resolved against the binding
+the name has at that statement: a variable rebound to a non-function, or an alias of it,
+does not inherit a later same-named definition's mutation.
 """
 import os
 import subprocess
@@ -103,6 +105,97 @@ def mutate():
 def read(x):
     print(int(x.get("k")))
 read(d)
+''',
+    'shadow_then_def': '''
+d = {"k": 1e300}
+mutate = 0
+x = mutate + 1
+print(int(d.get("k")))
+def mutate():
+    d["k"] = 1.5
+''',
+    'shadow_alias': '''
+d = {"k": 1e300}
+mutate = 0
+alias = mutate
+x = alias + 1
+print(int(d.get("k")))
+def mutate():
+    d["k"] = 1.5
+''',
+    'shadow_negative': '''
+d = {"k": 1e300}
+mutate = -1
+x = mutate * 2
+print(int(d.get("k")))
+def mutate():
+    d["k"] = 1.5
+''',
+    'shadow_containers': '''
+d = {"k": 1e300}
+mutate = [0, 1]
+x = mutate[0]
+other = (0, 1)
+y = other[0]
+print(int(d.get("k")))
+def mutate():
+    d["k"] = 1.5
+''',
+    'shadow_argument': '''
+d = {"k": 1e300}
+mutate = 0
+def use(v):
+    return v + 1
+x = use(mutate)
+print(int(d.get("k")))
+def mutate():
+    d["k"] = 1.5
+''',
+    'shadow_attribute': '''
+d = {"k": 1e300}
+class Box:
+    pass
+mutate = Box
+mutate.value = 0
+x = mutate.value + 1
+print(int(d.get("k")))
+def mutate():
+    d["k"] = 1.5
+''',
+    'shadow_dict_alias': '''
+d = {"k": 1e300}
+table = {"v": 0}
+mutate = table
+x = mutate["v"] + 1
+print(int(d.get("k")))
+def mutate():
+    d["k"] = 1.5
+''',
+    'rebind_after_def': '''
+d = {"k": 1e300}
+def mutate():
+    d["k"] = 1.5
+mutate = 0
+x = mutate + 1
+print(int(d.get("k")))
+''',
+    'alias_rebind_after_def': '''
+d = {"k": 1e300}
+def mutate():
+    d["k"] = 1.5
+alias = mutate
+alias = 0
+x = alias + 1
+print(int(d.get("k")))
+''',
+    'latest_def_passes': '''
+d = {"k": 1e300}
+def mutate():
+    d["k"] = 1.5
+def mutate():
+    pass
+mutate()
+print(int(d.get("k")))
 ''',
 }
 

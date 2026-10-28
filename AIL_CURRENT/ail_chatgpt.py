@@ -1131,9 +1131,13 @@ def _escaped_constant_statements(body, root, program_bound):
     builtin; a store through the name, a call, a return, iteration or any other use marks it
     (and every alias) dynamic from that statement on.  A function body runs when the function
     is used, not at its definition, so its effects are recorded at the statement that names
-    it; a function that is never named cannot run.  Whether a call is a pure builtin is
-    decided against every binding in the program, not only this scope: a module or enclosing
-    binding of ``len``/``print``/``str``/``repr`` may mutate its argument.
+    it; a function that is never named cannot run.  Effects are resolved against the binding
+    of the name at that statement: a name definitely rebound to a non-function (or to an
+    earlier function definition) does not inherit a later same-named definition's effects;
+    only a name whose binding is not settled keeps the union of every same-named definition.
+    Whether a call is a pure builtin is decided against every binding in the program, not
+    only this scope: a module or enclosing binding of ``len``/``print``/``str``/``repr`` may
+    mutate its argument.
     """
     pure_calls = {'len', 'print', 'str', 'repr'} - program_bound
     parents = {child: parent for parent in ast.walk(root) for child in ast.iter_child_nodes(parent)}
@@ -1199,11 +1203,108 @@ def _escaped_constant_statements(body, root, program_bound):
         return names
 
     function_effects = {}
+    function_effects_by_name = {}
     for node in deferred_defs.values():
-        function_effects.setdefault(node.name, set()).update(collect(node.body))
+        effects = collect(node.body)
+        function_effects[id(node)] = effects
+        function_effects_by_name.setdefault(node.name, set()).update(effects)
 
     for index, statement in enumerate(body):
         events[index] = collect([statement])
+
+    class _Binding:
+        __slots__ = ('kind', 'node')
+
+        def __init__(self, kind, node=None):
+            self.kind = kind
+            self.node = node
+
+    def binding(kind, node=None):
+        return _Binding(kind, node)
+
+    bindings = {}
+
+    def set_binding(name, value):
+        bindings[name] = value
+
+    def assigned_state(value):
+        if isinstance(value, ast.Name):
+            return bindings.get(value.id) or binding('unknown')
+        if isinstance(value, ast.NamedExpr):
+            return assigned_state(value.value)
+        if isinstance(value, ast.Lambda):
+            return binding('non-function')
+        if isinstance(value, (ast.Call, ast.Attribute, ast.Subscript, ast.IfExp)):
+            return binding('unknown')
+        return binding('non-function')
+
+    def bind_target(target, value):
+        if isinstance(target, ast.Name):
+            set_binding(target.id, value)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                bind_target(element, binding('unknown'))
+        elif isinstance(target, ast.Starred):
+            bind_target(target.value, binding('unknown'))
+
+    def conditional_names(node):
+        names = set()
+        stack = list(ast.iter_child_nodes(node))
+        while stack:
+            child = stack.pop()
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(child.name)
+                continue
+            if isinstance(child, ast.Lambda):
+                continue
+            if isinstance(child, ast.ExceptHandler) and child.name:
+                names.add(child.name)
+            if isinstance(child, ast.alias):
+                names.add(child.asname or child.name.split('.')[0])
+            if (isinstance(child, ast.Name)
+                    and isinstance(child.ctx, (ast.Store, ast.Del))):
+                names.add(child.id)
+            stack.extend(ast.iter_child_nodes(child))
+        return names
+
+    snapshots = []
+    for statement in body:
+        snapshots.append(dict(bindings))
+        if (isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef))
+                and id(statement) in deferred_defs):
+            set_binding(statement.name, binding('function', statement))
+        elif isinstance(statement, ast.ClassDef):
+            set_binding(statement.name, binding('non-function'))
+        elif isinstance(statement, ast.Assign):
+            value = assigned_state(statement.value)
+            for target in statement.targets:
+                bind_target(target, value)
+        elif isinstance(statement, ast.AnnAssign):
+            if statement.value is not None:
+                bind_target(statement.target, assigned_state(statement.value))
+        elif isinstance(statement, ast.AugAssign):
+            bind_target(statement.target, binding('non-function'))
+        elif isinstance(statement, ast.Delete):
+            for target in statement.targets:
+                bind_target(target, binding('unknown'))
+        else:
+            for name in conditional_names(statement):
+                set_binding(name, binding('unknown'))
+
+    def effects_for(name, state):
+        value = state.get(name)
+        if value is None:
+            return function_effects_by_name.get(name, ())
+        if value.kind == 'non-function':
+            return ()
+        if value.kind == 'unknown':
+            return function_effects_by_name.get(name, ())
+        return function_effects.get(id(value.node), ())
+
+    def same_binding(target, source, state):
+        left = state.get(target)
+        right = state.get(source)
+        return left is None or right is None or left is right
 
     aliases = {}
     for node in ast.walk(root):
@@ -1213,21 +1314,23 @@ def _escaped_constant_statements(body, root, program_bound):
         elif (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
                 and isinstance(node.value, ast.Name)):
             aliases.setdefault(node.target.id, set()).add(node.value.id)
-    for names in events:
+    for index, names in enumerate(events):
+        state = snapshots[index]
         changed = bool(names)
         while changed:
             changed = False
             for target, sources in aliases.items():
-                if target in names:
-                    for source in sources:
-                        if source not in names:
-                            names.add(source)
-                            changed = True
-                if sources & names and target not in names:
-                    names.add(target)
-                    changed = True
+                for source in sources:
+                    if not same_binding(target, source, state):
+                        continue
+                    if target in names and source not in names:
+                        names.add(source)
+                        changed = True
+                    if source in names and target not in names:
+                        names.add(target)
+                        changed = True
             for name in list(names):
-                for effect in function_effects.get(name, ()):
+                for effect in effects_for(name, state):
                     if effect not in names:
                         names.add(effect)
                         changed = True
