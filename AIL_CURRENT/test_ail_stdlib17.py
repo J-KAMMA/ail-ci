@@ -114,6 +114,63 @@ def main() -> None:
 main()
 '''
 
+PATHNONE = r'''import argparse
+from pathlib import Path
+
+
+class Holder:
+    def __init__(self) -> None:
+        self.ns = None
+
+
+def show(ns) -> None:
+    print(ns.out)
+    print(ns.out is None)
+    if ns.out is not None:
+        print(ns.out.name, ns.out.parent)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="p", add_help=False)
+    parser.add_argument("--out", type=Path)
+    parser.add_argument("--other", type=Path, default=None)
+    first = parser.parse_args([])
+    show(first)
+    print(first)
+    second = parser.parse_args(["--out", "x/y.txt", "--other="])
+    show(second)
+    print(second)
+    items = [second]
+    d = {"k": second}
+    holder = Holder()
+    holder.ns = second
+    print(items[0].out, items[0].out.name)
+    print(d["k"].out, d["k"].out.parent)
+    print(holder.ns.out, holder.ns.out.suffix)
+    print(second.out == Path("x/y.txt"))
+
+
+main()
+'''
+
+PATHCHOICES = r'''import argparse
+from pathlib import Path
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog="p", add_help=False)
+    parser.add_argument("--out", type=Path, choices=(Path("a"), Path("b")), default=Path("a"))
+    parser.add_argument("--none", type=Path, choices=(Path("a"), Path("b")))
+    first = parser.parse_args([])
+    print(first.out, first.none)
+    print(first)
+    second = parser.parse_args(["--out", "b", "--none", "a"])
+    print(second)
+
+
+main()
+'''
+
 NAMESPACE = r'''import argparse
 
 
@@ -200,6 +257,9 @@ CASES = [
         ["in.txt", "-o", "x", "--o", "z"],
         ["-h"],
         ["--help"],
+        ["--help=x"],
+        ["-h=x"],
+        ["--help="],
     ]),
     ("explicit", EXPLICIT, [
         [],
@@ -213,6 +273,16 @@ CASES = [
     ("paths", PATHS, [
         [],
         ["--p", "x/y.json", "--n", "007", "--flag", "false"],
+    ]),
+    ("pathnone", PATHNONE, [
+        [],
+        ["--out", "x/y.txt", "--other="],
+    ]),
+    ("pathchoices", PATHCHOICES, [
+        [],
+        ["--out", "b", "--none", "a"],
+        ["--out", "c"],
+        ["--out", "a", "--none", "c"],
     ]),
     ("namespace", NAMESPACE, [
         [],

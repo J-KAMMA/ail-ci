@@ -311,7 +311,13 @@ class _Lowerer(ast.NodeTransformer):
         if isinstance(e, ast.Subscript):
             return not isinstance(e.slice, ast.Slice) and self.isPL(e.value)
         if isinstance(e, ast.IfExp):
-            return self.isP(e.body) and self.isP(e.orelse)
+            if self.isP(e.body) and self.isP(e.orelse):
+                return True
+            if self.isP(e.body) and isinstance(e.orelse, ast.Constant) and e.orelse.value is None:
+                return True
+            if self.isP(e.orelse) and isinstance(e.body, ast.Constant) and e.body.value is None:
+                return True
+            return False
         return False
 
     def isPL(self, e):
@@ -594,6 +600,10 @@ class _Lowerer(ast.NodeTransformer):
 
     def pstr(self, e):
         """The text (a str expression) of the path-valued expression `e` (an original node)."""
+        if isinstance(e, ast.IfExp):
+            body = self.pstr(e.body) if self.isP(e.body) else self.visit(e.body)
+            orelse = self.pstr(e.orelse) if self.isP(e.orelse) else self.visit(e.orelse)
+            return self.at(ast.IfExp(test=self.visit(e.test), body=body, orelse=orelse), e)
         if isinstance(e, ast.Call):
             f = e.func
             if self.is_path_class(f):

@@ -12,8 +12,12 @@ whose repr, equality and `vars()` agree.  Everything else is refused by name: `a
 `const`, unknown types, the action returned by `add_argument`, mixed positional/option names, unknown
 Namespace destinations, `getattr`/`setattr`, other parser methods and other `argparse` names.
 `type=Path` uses the existing pathlib `_AilPath` (its class name and repr are pathlib's existing
-representation).  `test_ail_stdlib17.py` compares stdout, stderr and status with CPython under
-`AIL_IR=0` and `AIL_IR=1`, and checks the refusal cases.
+representation).  Every read of a path destination is a path, including through a function argument,
+a list item, a dict value or an attribute; an option with no non-None default yields `None` (and the
+Namespace repr shows `None`), and `type=Path` with `choices` compares the converted path.  An
+explicit argument on `--help`/`-h` (`--help=x`) is an error, as CPython makes it.  `test_ail_stdlib17.py`
+compares stdout, stderr and status with CPython under `AIL_IR=0` and `AIL_IR=1`, and checks the
+refusal cases.
 
 Probes in `/tmp/probes/argparse` on both `cmp.sh` builds: `p_basic` (defaults and conversions),
 `p_path` / `p_path_vars` (Path default and `vars`, the latter refused), `p_choices`, `p_help` (long
@@ -21,8 +25,12 @@ wrapped help), `p_neg_opts` (negative option names and values), `p_option_value`
 `p_short_eq` (`--`, attached short values, `-b=val`), `p_positions`, `p_default_dest`, `p_abbrev`,
 `p_abbrev2`, `p_ns_use` (repr/equality/`vars`), `p_parser_alias`, and the `p_err_*` error paths all
 match CPython or have the same exit status and diagnostic; `p_addret`, `p_mixed_names`, `p_ns_refuse`
-and the `getattr` case are refused by name.  The new module and the existing `test_ail_check`,
-`test_ail_python_syntax`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+and the `getattr` case are refused by name.  The review probes in `/tmp/probes/rev` cover optional
+`type=Path` with no default and `default=None`, the provided/empty values, aliasing through a
+function, list item, dict value and attribute, Namespace repr, `type=Path` with `choices` (both
+accepted and rejected), and `--help=x` / `-h=x`; all match CPython on both `cmp.sh` builds.  The new
+module and the existing `test_ail_check`, `test_ail_python_syntax`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` and `test_ail_pathlib` pass.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 

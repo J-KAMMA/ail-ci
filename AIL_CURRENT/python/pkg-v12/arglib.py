@@ -12,6 +12,7 @@ add_argument with a literal name (or names), action='store' (the default), no na
 parse_args() with no arguments or one sequence.  Everything else is a named refusal.
 """
 import ast
+import copy
 import keyword
 from pathlib import Path
 
@@ -73,6 +74,7 @@ class Rewrite:
         self.need_path = False
         self.path_bound = False
         self.path_dests = []
+        self.path_optional = set()
 
     def line(self, node):
         return getattr(node, 'lineno', None) or 1
@@ -234,6 +236,16 @@ class Rewrite:
                     self.need_path = True
                     if dest not in self.path_dests:
                         self.path_dests.append(dest)
+                    required = kwargs.get('required')
+                    guaranteed = isinstance(required, ast.Constant) and required.value is True
+                    if not guaranteed and 'default' in kwargs:
+                        default = kwargs['default']
+                        if isinstance(default, ast.Constant):
+                            guaranteed = default.value is not None
+                        elif isinstance(default, ast.Call):
+                            guaranteed = _type_name(default.func) == 'Path'
+                    if not guaranteed:
+                        self.path_optional.add(dest)
                 call.keywords.append(ast.keyword(arg='_ail_type_name', value=ast.Constant(value=label)))
         return option
 
@@ -290,17 +302,23 @@ class Rewrite:
     def rewrite_path_reads(self):
         if not self.path_dests:
             return
-        result_names = self.result_names
         path_dests = self.path_dests
+        path_optional = self.path_optional
 
         class PathReads(ast.NodeTransformer):
             def visit_Attribute(self, node):
                 self.generic_visit(node)
-                if isinstance(node.value, ast.Name) and node.value.id in result_names \
-                        and node.attr in path_dests and isinstance(node.ctx, ast.Load):
+                if node.attr in path_dests and isinstance(node.ctx, ast.Load):
                     call = ast.Call(func=ast.Name(id='Path', ctx=ast.Load()), args=[node], keywords=[])
                     ast.copy_location(call, node)
                     ast.copy_location(call.func, node)
+                    if node.attr in path_optional:
+                        test = ast.Compare(left=copy.deepcopy(node), ops=[ast.IsNot()],
+                                           comparators=[ast.Constant(value=None)])
+                        guarded = ast.IfExp(test=test, body=call, orelse=ast.Constant(value=None))
+                        ast.copy_location(test, node)
+                        ast.copy_location(guarded, node)
+                        return guarded
                     return call
                 return node
 
@@ -324,11 +342,12 @@ class Rewrite:
                 refuse(node, 'argparse parser.%s is not built' % node.attr)
 
 
-def namespace_source(dests, extra):
+def namespace_source(dests, extra, path_dests=()):
     names = list(dests)
     for name in extra:
         if name not in names:
             names.append(name)
+    paths = set(path_dests)
     lines = ['class _AilNamespace:', '    def __init__(self, values) -> None:']
     if not dests:
         lines.append('        pass')
@@ -338,9 +357,15 @@ def namespace_source(dests, extra):
             lines.append('            self.%s = values["%s"]' % (name, name))
     lines.append('    def __repr__(self) -> str:')
     lines.append('        parts = []')
-    for name in sorted(names):
+    for name in names:
         lines.append('        if hasattr(self, "%s"):' % name)
-        lines.append('            parts.append("%s=" + repr(self.%s))' % (name, name))
+        if name in paths:
+            lines.append('            if self.%s is None:' % name)
+            lines.append('                parts.append("%s=None")' % name)
+            lines.append('            else:')
+            lines.append('                parts.append("%s=" + repr(Path(self.%s)))' % (name, name))
+        else:
+            lines.append('            parts.append("%s=" + repr(self.%s))' % (name, name))
     lines.append('        return "Namespace(" + ", ".join(parts) + ")"')
     lines.append('    def __eq__(self, other) -> bool:')
     lines.append('        if not isinstance(other, _AilNamespace):')
@@ -364,7 +389,7 @@ def rewrite_text(source, notes=None):
     rewrite = Rewrite(tree)
     try:
         rewrite.run()
-        chunks = [prelude('argparse'), namespace_source(rewrite.dests, rewrite.extra)]
+        chunks = [prelude('argparse'), namespace_source(rewrite.dests, rewrite.extra, rewrite.path_dests)]
         added = []
         if rewrite.need_path and not rewrite.path_bound:
             added.extend(ast.parse('from pathlib import Path\n').body)

@@ -6,6 +6,24 @@ _AIL_NOT_OPTION = -1
 _AIL_UNKNOWN_OPTION = -2
 
 
+def _ail_argparse_choice_str(choice) -> str:
+    if isinstance(choice, str):
+        return choice
+    if choice is None:
+        return str(choice)
+    if isinstance(choice, int):
+        return str(choice)
+    if isinstance(choice, float):
+        return str(choice)
+    return choice.s
+
+
+def _ail_argparse_choice_repr(choice) -> str:
+    if isinstance(choice, str) or choice is None or isinstance(choice, int) or isinstance(choice, float):
+        return repr(choice)
+    return "PosixPath(" + repr(choice.s) + ")"
+
+
 class _AilArgumentParser:
     def __init__(self, prog=None, description=None, add_help=True, allow_abbrev=True) -> None:
         self._attached = ""
@@ -98,13 +116,13 @@ class _AilArgumentParser:
     def _choices_text(self, choices) -> str:
         parts = []
         for value in choices:
-            parts.append(repr(value))
+            parts.append(_ail_argparse_choice_str(value))
         return "{" + ",".join(parts) + "}"
 
     def _choices_list(self, choices) -> str:
         parts = []
         for value in choices:
-            parts.append(repr(value))
+            parts.append(_ail_argparse_choice_repr(value))
         return ", ".join(parts)
 
     def _usage_part(self, action) -> str:
@@ -384,9 +402,22 @@ class _AilArgumentParser:
                             self._type_label(action) + " value: " + repr(text))
                 return None
         if action["choices"] is not None:
-            if value not in action["choices"]:
+            found = False
+            if action["type_name"] == "Path":
+                for choice in action["choices"]:
+                    if isinstance(choice, str) or choice is None or isinstance(choice, int) or isinstance(choice, float):
+                        continue
+                    if choice.s == value:
+                        found = True
+            else:
+                found = value in action["choices"]
+            if not found:
+                if action["type_name"] == "Path":
+                    shown = "PosixPath(" + repr(value) + ")"
+                else:
+                    shown = repr(value)
                 self._error("argument " + self._display_name(action) + ": invalid choice: " +
-                            repr(value) + " (choose from " + self._choices_list(action["choices"]) + ")")
+                            shown + " (choose from " + self._choices_list(action["choices"]) + ")")
         return value
 
     def _error(self, message) -> None:
@@ -530,6 +561,9 @@ class _AilArgumentParser:
                     continue
                 action = self.actions[position]
                 if action["action"] == "help":
+                    if self._has_attached:
+                        self._error("argument " + self._display_name(action) +
+                                    ": ignored explicit argument " + repr(self._attached))
                     print(self.format_help(), end="")
                     sys.exit(0)
                 given[position] = True
