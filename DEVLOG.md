@@ -1,3 +1,32 @@
+## 2026-10-28 -- cov29: a nested generator expression with an eagerly consumed inner one matches (job-cov29-10290513)
+
+A census of all 219 `lab/corpus/programs` built in both modes (`default` and
+`AIL_UNIFIED_FORCE=1`) found 24 compile-time refusals on each build.  Excluding imports, the most
+frequent named construct was "a generator expression nested inside another generator expression"
+(3 programs, general build).  The general path materialises a generator expression when it is
+built, so it refused every nested one; an inner generator passed whole to `sum`, `"".join`,
+`any`/`all`/`next`, `list`/`tuple`/`sorted`, a starred unpack or a tuple/list unpack is read at
+exactly the same point by CPython.
+
+`pyboxed2._nested_value_genexp` now keeps the refusal only when the outer or inner generator is
+not read whole at that point: an inner generator saved as a value, or an outer generator used as
+a for/comprehension source (its body interleaves with the loop body), still refuses by name, so
+the eager lowering cannot move a side effect or an exception.  The nested checks in
+`expr_GeneratorExp`, `_b_next` and `_any_all` follow the same rule.  `AIL_CURRENT/test_ail_cov29.py`
+compares CPython on both builds for nested consumers, empty/negative/triple nesting and the four
+value routes, and asserts the named refusal for an interleaved outer generator.
+
+Before/after refusals over 219 programs: default 24 -> 21, `AIL_UNIFIED_FORCE=1` 24 -> 21; the
+nested-generator reason 3 -> 0.  The three programs (deepseek-v4.1-flash-free t172, t432 and
+glm-5.3-flash-free t432) now build and match CPython on all three corpus inputs in both modes.
+Probes in `/tmp/probes/cov29` via `cmp.sh`: `p_basic`, `p_routes`, `p_empty`, `p_consumers`
+and `p_triple` match on both builds; `p_negative` (outer used as a comprehension source),
+`p_side_effects` and `p_side_simple` (outer used as a for source) are refused by name;
+`p_refuse_inner_value`, `p_refuse_inner_list` and `p_refuse_any_value` keep the nested refusal.
+The `side_effect_order` case in test_ail_cov29 covers an eagerly consumed outer generator.
+Final-state tests: test_ail_cov29, test_ail_pre116, test_ail_pre211, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

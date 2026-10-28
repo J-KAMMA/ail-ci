@@ -2536,14 +2536,13 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
-        for gen in ast.walk(tree):
-            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
-                refusal = Unsupported(
-                    'a generator expression nested inside another generator expression '
-                    '(the inner one would be materialised eagerly, not lazily)')
-                refusal.source_line = getattr(gen, 'lineno', None)
-                raise refusal
+        nested_genexp = _nested_value_genexp(tree, any_all_genargs)
+        if nested_genexp is not None:
+            refusal = Unsupported(
+                'a generator expression nested inside another generator expression '
+                '(the inner one would be materialised eagerly, not lazily)')
+            refusal.source_line = getattr(nested_genexp, 'lineno', None)
+            raise refusal
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
@@ -6495,9 +6494,6 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
-            raise Unsupported('a generator expression nested inside another generator expression '
-                              '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
@@ -9045,9 +9041,6 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('next() with other than (iterator[, default])')
         if isinstance(args[0], ast.GeneratorExp):
             gen = args[0]
-            if any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
-                raise Unsupported('a generator expression nested inside another generator expression '
-                                  '(the inner one would be materialised eagerly, not lazily)')
             first = gen.generators[0]
             src = self._resolve_iter_src(first.iter, ctx)
             opened = ctx.tmp()
@@ -9519,7 +9512,9 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('%s() over a generator expression whose iterable is itself a '
                                   'generator expression (the inner generator would be materialised '
                                   'eagerly)' % name)
-            if any(n is not arg and isinstance(n, ast.GeneratorExp) for n in ast.walk(arg)):
+            parents = _genexp_parents(arg)
+            if any(n is not arg and isinstance(n, ast.GeneratorExp)
+                   and not _genexp_immediate_consumer(n, parents) for n in ast.walk(arg)):
                 raise Unsupported('a generator expression nested inside another generator expression '
                                   '(the inner one would be materialised eagerly, not lazily)')
             # fused: short-circuits at the first deciding element, like CPython's any()/all()
@@ -12448,6 +12443,56 @@ _GENEXP_SAFE_METHODS = frozenset({
 })
 
 
+def _genexp_parents(tree):
+    parents = {}
+    for par in ast.walk(tree):
+        for child in ast.iter_child_nodes(par):
+            parents[child] = par
+    return parents
+
+
+def _genexp_immediate_consumer(node, parents):
+    """True iff `node` is read whole at the same point by its parent: an argument of a
+    consuming builtin/method, a starred unpack, a tuple/list unpacking, or the argument of
+    any/all/next (compiled lazily by their own handlers).  A for/comprehension source is not
+    immediate: the body interleaves with the consumer, so the eager lowering would move its
+    side effects."""
+    par = parents.get(node)
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, (ast.Assign, ast.AnnAssign)):
+        target = par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1 else getattr(par, 'target', None)
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return True
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in _GENEXP_EAGER_CALLS:
+            return True
+        if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
+            return True
+    return False
+
+
+def _nested_value_genexp(tree, skip=()):
+    """The first generator expression with an inner generator expression that cannot be read
+    exactly where CPython reads it.  Both the outer and the inner must have an immediate
+    consumer (`sum(...)`, `join(...)`, `next(...)`, ...): then the eager lowering runs the same
+    elements, in the same order, when CPython would.  A nested generator saved as a value, or
+    an outer one used as a for/comprehension source (its body interleaves with the loop body),
+    still needs the lazy lowering and stays refused.  `skip` holds outer expressions handled
+    elsewhere."""
+    parents = _genexp_parents(tree)
+    for outer in ast.walk(tree):
+        if not isinstance(outer, ast.GeneratorExp) or id(outer) in skip:
+            continue
+        immediate = _genexp_immediate_consumer(outer, parents)
+        for inner in ast.walk(outer):
+            if inner is not outer and isinstance(inner, ast.GeneratorExp) \
+                    and not (immediate and _genexp_immediate_consumer(inner, parents)):
+                return outer
+    return None
+
+
 def _genexp_consumed_in_place(node, parents):
     """True iff `node` is evaluated by a construct that reads every element at the same point:
     a for/comprehension source, a starred unpack, a tuple/list unpacking assignment, or an
@@ -12664,10 +12709,7 @@ def _lazy_raising_genexp(tree):
     path already refuses this construct by name; the general path used to materialise it eagerly,
     so an exception the CPython generator would raise only at `next()` aborted before the caller's
     `try` could catch it."""
-    parents = {}
-    for par in ast.walk(tree):
-        for child in ast.iter_child_nodes(par):
-            parents[child] = par
+    parents = _genexp_parents(tree)
     user_functions = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     counts = _bound_names(tree)
     mutated = _mutated_class_names(tree)
