@@ -1,3 +1,27 @@
+## 2026-10-28 -- library batch 24 review: negative offsets, buffer types and packed strings
+
+The batch-24 review found three defects, all fixed in `prelude_struct.py` (with the '0p' rationale in
+`structlib.py` corrected). `unpack_from` and `pack_into` now normalize a negative offset against the buffer
+length: an in-range offset counts from the end and an out-of-range one raises `struct.error` with CPython's
+message. `unpack` snapshots a `bytearray` buffer to `bytes`, so `s`/`p`/`c` results are bytes and a later
+mutation of the buffer cannot change them; a `str` buffer is rejected with CPython's `TypeError: a bytes-like
+object is required, not 'str'`. `pack('c'|'s'|'p', wrong_type)` raises `struct.error`/`ValueError` with
+CPython's message instead of a `TypeError` from `len()`, while `s`/`p` still accept a `bytearray`; `pack_into`
+on bytes raises CPython's read-write `TypeError`. `pack('0p', ...)` is now built and returns `b''`; only
+unpacking a '0p' field stays refused by name (CPython raises SystemError for the empty buffer).
+
+A literal negative offset is now a simple expression (the compiler no longer refuses `-4` outright).
+Review probes in `/tmp/rprobes` on both builds via `cmp.sh`: `neg_off`, `neg_off_var`, `pack_neg_var`,
+`bytearray_unpack3`, `mutate_after`, `unpack_str_s`, `pack_char_int`, `pack_s_int`, `pack_p_int`,
+`pack_into_immutable`, `pack0p`, `packempty` and `unpack_str_i` match CPython; `kw_offset` and `memview` stay
+refused by name, and `unpack_empty_zero` stays refused by name (the format has no values). New probes in
+`/tmp/probes/stdlib24_review` (`neg_offsets`, `pack_into_offsets`, `pack_types`, `unpack_types`, `regression`)
+match CPython on both builds, covering literal and variable negative offsets, in-range/out-of-range boundaries,
+bytearray snapshots through an argument/attribute/dict, wrong-type `c`/`s`/`p` values through an
+argument/list-item/attribute/dict, `0p`/`0s`, immutable `pack_into` and the existing integer/string formats.
+`AIL_CURRENT/test_ail_stdlib24.py` now also compiles `negatives` and `types` programs on both builds and its
+`zero_p` refusal is the unpack form.
+
 ## 2026-10-28 -- library batch 24: `struct` with a literal format (job-stdlib24-10290512)
 
 `struct` was the most-imported module still refused (6 programs in `lab/corpus/programs` and

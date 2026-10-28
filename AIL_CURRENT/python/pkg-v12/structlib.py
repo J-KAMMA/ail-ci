@@ -119,7 +119,7 @@ def _args(node, what, low, high=None):
 
 
 def _simple(node, what):
-    if isinstance(node, (ast.Name, ast.Attribute, ast.Subscript, ast.Constant, ast.Slice)):
+    if isinstance(node, (ast.Name, ast.Attribute, ast.Subscript, ast.Constant, ast.Slice, ast.UnaryOp)):
         return
     refuse(node, '%s needs the buffer in a name or a simple expression; assign it to a name first' % what)
 
@@ -186,9 +186,6 @@ def _pack_data(fields, values, what, node):
             at += field.total
             continue
         if field.code in 'sp':
-            if field.code == 'p' and field.total == 0:
-                refuse(node, "%s: a '0p' pascal-string field has no room for its length byte (CPython "
-                             "raises SystemError); give the field at least one byte" % what)
             if index >= len(values):
                 refuse(node, '%s: format requires more arguments' % what)
             parts.append(_call('_ail_struct_pack_' + field.code,
@@ -236,8 +233,9 @@ def _unpack_tuple(fields, total, buffer, base, exact, what, node):
             continue
         if field.code in 'sp':
             if field.code == 'p' and field.total == 0:
-                refuse(node, "%s: a '0p' pascal-string field has no room for its length byte (CPython "
-                             "raises SystemError); give the field at least one byte" % what)
+                refuse(node, "%s: unpack of a '0p' pascal-string field is not built: CPython raises "
+                             "SystemError for the zero-length buffer and ValueError for any other; give "
+                             "the field at least one byte" % what)
             parts.append(_call('_ail_struct_unpack_' + field.code,
                                [buffer, _offset(base, field.offset), ast.Constant(field.total),
                                 base, ast.Constant(total), ast.Constant(exact)]))

@@ -13,8 +13,10 @@ formats, and the refusal cases must name the use that is not built.
 
 Known limits, shared with the rest of the subset: int is signed 64-bit, so a Q/N/P value or result above
 2**63-1 is not representable (an out-of-int64 literal is refused by name); `struct.error` in an `except` clause is
-spelt `ValueError` (as csv.Error is), and its other uses are refused by name; a '0p' field is refused because
-CPython 3.12 raises SystemError for it.
+spelt `ValueError` (as csv.Error is), and its other uses are refused by name; unpacking a '0p' field is refused
+because CPython 3.12 raises SystemError for an empty buffer (`pack('0p', ...)` is built and returns b'').
+Negative `unpack_from`/`pack_into` offsets count from the end of the buffer, and `s`/`p`/`c` results of a
+`bytearray` buffer are bytes copies, as in CPython.
 """
 import os
 import random
@@ -271,6 +273,30 @@ def main() -> None:
         struct.pack("B", 999)
     except (struct.error, ValueError) as e:
         print("tuple", e)
+    try:
+        print(struct.pack("c", 65))
+    except struct.error as e:
+        print("struct.error", e)
+    try:
+        print(struct.pack("s", 5))
+    except struct.error as e:
+        print("struct.error", e)
+    try:
+        print(struct.pack("p", 5))
+    except struct.error as e:
+        print("struct.error", e)
+    try:
+        print(struct.pack("0s", 5))
+    except struct.error as e:
+        print("struct.error", e)
+    try:
+        print(struct.pack("0p", 5))
+    except struct.error as e:
+        print("struct.error", e)
+    try:
+        print(struct.pack("c", bytearray(b"Z")))
+    except struct.error as e:
+        print("struct.error", e)
 
 
 main()
@@ -295,7 +321,76 @@ except err as e:
 print(st.pack("?c", 3, b"c").hex())
 """
 
-PROGRAMS = (("core", CORE), ("routes", ROUTES), ("errors", ERRORS), ("aliases", ALIASES))
+NEGATIVES = r"""import struct
+
+buf = b"abcdefgh"
+for off in [-8, -7, -5, -4, -2, -1]:
+    try:
+        print(off, struct.unpack_from(">h", buf, off))
+    except struct.error as e:
+        print(off, "err", e)
+for off in [-12, -9]:
+    try:
+        print(off, struct.unpack_from(">i", buf, off))
+    except struct.error as e:
+        print(off, "err", e)
+b = bytearray(8)
+struct.pack_into(">i", b, -4, 0x01020304)
+print(bytes(b).hex())
+b = bytearray(8)
+struct.pack_into(">h", b, -2, 0x0506)
+print(bytes(b).hex())
+for off in [-9, -2, -1, 5, 8]:
+    b = bytearray(8)
+    try:
+        struct.pack_into(">i", b, off, 7)
+        print(off, bytes(b).hex())
+    except struct.error as e:
+        print(off, "err", e)
+b = bytearray(8)
+print(struct.pack_into(">i", b, 0, 1))
+print(struct.pack_into("0i", b, 8))
+try:
+    print(struct.pack_into("0i", b, 9))
+except struct.error as e:
+    print("err", e)
+try:
+    print(struct.pack_into(">i", b, -9, 1))
+except struct.error as e:
+    print("err", e)
+"""
+
+TYPES = r"""import struct
+
+b = bytearray(b"abcd")
+print(struct.unpack("4s", b))
+pb = bytearray(b"\x02ab\x00")
+cb = bytearray(b"Z")
+print(struct.unpack("4p", pb))
+print(struct.unpack("c", cb))
+buf = bytearray(struct.pack(">3h", 1, 2, 3))
+print(struct.unpack_from("2s", buf, 1))
+t = struct.unpack("4s", b)
+b[0] = 122
+print(t)
+u = struct.unpack_from("2s", b, 1)
+b[2] = 113
+print(u)
+print(struct.pack("0p", b"x").hex(), struct.pack("0p", b"").hex())
+print(struct.pack("0s", b"x").hex())
+print(struct.pack("s", bytearray(b"ab")).hex(), struct.pack("p", bytearray(b"ab")).hex())
+try:
+    print(struct.unpack("4s", "abcd"))
+except TypeError as e:
+    print("TypeError", e)
+try:
+    print(struct.pack_into(">h", b"abcd", 0, 7))
+except TypeError as e:
+    print("TypeError", e)
+"""
+
+PROGRAMS = (("core", CORE), ("routes", ROUTES), ("errors", ERRORS), ("aliases", ALIASES),
+            ("negatives", NEGATIVES), ("types", TYPES))
 BUILDS = (("default", {}), ("general", {"AIL_UNIFIED_FORCE": "1"}))
 
 REFUSALS = {
@@ -305,8 +400,8 @@ REFUSALS = {
               "struct.pack: float format 'f' is not built"),
     "value": ("import struct\n\nf = struct.pack\nprint(f('i', 1))\n",
               "struct.pack is not built"),
-    "zero_p": ("import struct\n\nprint(struct.pack('0p', b'x'))\n",
-               "'0p' pascal-string field has no room for its length byte"),
+    "zero_p": ("import struct\n\nprint(struct.unpack('0p', b''))\n",
+               "unpack of a '0p' pascal-string field is not built"),
     "wildcard": ("from struct import *\n\nprint(pack('i', 1))\n",
                  "from struct import *: name what you use"),
     "error_value": ("import struct\n\ne = struct.error\nprint(e)\n",
