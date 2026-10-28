@@ -553,6 +553,8 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
     if is_function(source):
         rewritten = _rewrite_script(source, force=False)
         if rewritten is None:
+            if info is not None and _has_module_constant(source):
+                info['_declarations_only'] = True
             return func_to_c(source, name=name, strict=strict, info=info, external=external)
         # the rewritten text has lost its comments: keep the @dataclass markers for dunders.py
         import dunders
@@ -568,6 +570,94 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
         return to_pipeline_c(source, name=name, strict=strict)
     rewritten = _rewrite_script(source, force=True)
     return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+
+
+DECLARATIONS_MAIN = r'''
+int main(void) {
+    return 0;
+}
+'''
+
+
+def _pure_definition_expr(node):
+    """A def/class default or class attribute with no call, comprehension or other side effect."""
+    if isinstance(node, (ast.Constant, ast.Name)):
+        return True
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return all(_pure_definition_expr(item) for item in node.elts)
+    if isinstance(node, ast.Dict):
+        return (all(key is None or _pure_definition_expr(key) for key in node.keys)
+                and all(_pure_definition_expr(value) for value in node.values))
+    if isinstance(node, ast.UnaryOp):
+        return _pure_definition_expr(node.operand)
+    if isinstance(node, ast.BinOp):
+        return _pure_definition_expr(node.left) and _pure_definition_expr(node.right)
+    if isinstance(node, ast.BoolOp):
+        return all(_pure_definition_expr(value) for value in node.values)
+    if isinstance(node, ast.Compare):
+        return (_pure_definition_expr(node.left)
+                and all(_pure_definition_expr(item) for item in node.comparators))
+    if isinstance(node, ast.IfExp):
+        return all(_pure_definition_expr(item) for item in (node.test, node.body, node.orelse))
+    return False
+
+
+def _pure_function(node):
+    args = node.args
+    defaults = list(args.defaults) + [d for d in args.kw_defaults if d is not None]
+    return not node.decorator_list and all(_pure_definition_expr(d) for d in defaults)
+
+
+def _pure_class(node):
+    if node.decorator_list:
+        return False
+    for stmt in node.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if not _pure_function(stmt):
+                return False
+        elif isinstance(stmt, ast.Pass):
+            continue
+        elif isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant):
+            continue
+        elif isinstance(stmt, ast.Assign) and _pure_definition_expr(stmt.value):
+            continue
+        elif isinstance(stmt, ast.AnnAssign) and (stmt.value is None
+                                                   or _pure_definition_expr(stmt.value)):
+            continue
+        else:
+            return False
+    return True
+
+
+def _has_module_constant(source):
+    """Whether top-level module literals and pure definitions stay after `_rewrite_script`.
+
+    Such a source runs those assignments and defines its functions/classes, but never calls one;
+    CPython prints nothing and exits 0.  A class body, decorator or default value with a side
+    effect is not this shape, so it keeps the old entry path.  See the no-entry `main` in
+    `_build_unshadowed_inner`.
+    """
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    has_constant = False
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            if not _pure_definition_expr(node.value):
+                return False
+            has_constant = True
+        elif isinstance(node, ast.AnnAssign):
+            if node.value is not None and not _pure_definition_expr(node.value):
+                return False
+            has_constant = True
+        elif isinstance(node, ast.FunctionDef):
+            if not _pure_function(node):
+                return False
+        elif isinstance(node, ast.ClassDef):
+            if not _pure_class(node):
+                return False
+    return has_constant
 
 
 def _main_for(info):
@@ -1223,7 +1313,16 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
+    array_entry = bool(info.get('kinds')) and info['kinds'][0] == 'array'
+    if info.get('_declarations_only') and not array_entry:
+        # `_rewrite_script` left the source unchanged and it only defines functions and module
+        # literals: CPython runs the assignments and exits 0 without calling anything.  The
+        # function-entry convention has nothing to call, so `_main_for` used to refuse a scalar
+        # first parameter here -- emit the same do-nothing `main` the general path's module-body
+        # route uses.  A file-reading array entry keeps the established convention.
+        main = DECLARATIONS_MAIN
+    else:
+        main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]

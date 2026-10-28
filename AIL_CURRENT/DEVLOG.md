@@ -1,3 +1,28 @@
+## 2026-10-28 -- ex23: a module constant with only function definitions runs nothing (job-ex23-10290702)
+
+`math.ail` is the only Python-syntax example in `language_examples` refused on the default build.
+It has a module constant (`LIMIT = 6`) and a helper (`sum_to`) but no top-level call, so CPython
+runs the literal assignment, prints nothing and exits 0.  The general path already built that
+module-body shape; the typed path selected the last function as its file/argv entry and stopped
+with `not in the subset: the first parameter must be the sequence read from the file`.  When
+`_rewrite_script` leaves the source unchanged and it keeps top-level literal assignments, the
+typed path now uses a do-nothing `main` for an entry whose first parameter is not the file array,
+so both builds exit 0 with no output.  Definitions whose evaluation can have a side effect
+(decorators, non-literal defaults, non-declaration class bodies) keep the old entry path.  A
+top-level call (or `if __name__ == "__main__":`) still becomes the synthetic entry and runs; a
+source with definitions but no module constant, and a file-reading array entry next to a module
+constant, keep the existing entry convention.
+
+Added `AIL_CURRENT/test_ail_ex23.py` (7 programs, both builds, CPython comparison) and registered
+it in `ail_check.MODULES`.  Probes in `/tmp/probes` (`ex23_math_const`, `ex23_const_call`,
+`ex23_const_ifmain`, `ex23_const_types`, `ex23_const_class`, `ex23_const_print_uncalled`,
+`ex23_const_computed`, `ex23_const_default`) match CPython on both builds; the constant-only
+source matched CPython on the general path and is still refused by name on the typed path (the
+separate no-parameter/no-output refusal), and a definition with no module constant keeps the
+pre-existing typed refusal.  Tests on the final tree: `test_ail_ex23`, `test_ail_python_syntax`,
+`test_ail_fallback_note`, `test_ail_refusal_messages`, `test_ail_pre170`, `test_ail_safetynet`,
+`test_ail_modconst`, `test_ail_files` and `test_ail_corpus_findings3`; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
