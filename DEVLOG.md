@@ -1,3 +1,40 @@
+## 2026-10-28 -- pre418: module stores before a function/lambda body call (job-pre418-10281345)
+
+The pre401 review recorded, as a regression in its container-store ordering change, that a
+function or lambda body was checked when it was defined, so a module-level store after the
+definition but before the call was invisible.  The review's scalar constructor shape
+(`class C: def __init__(self, v): self.v = v`, `c = C(1e300)`, `def f(): print(int(c.v))`,
+`c.v = 1.5`, `f()`) already matched CPython on this base in both builds; the first shape that
+still differed here was a class or instance attribute holding a
+literal list/dict.  `class C: v = [1e300]`, `def f(): print(int(C.v[0]))`, `C.v[0] = 1.5`,
+`f()` refused both builds with `int() of a float outside int64: 1e+300` where CPython prints
+`1`; the same cause covered the constructor-literal container, the reviewer's lambda and nested
+variants, an alias, a negative index, `insert`, and the value reaching `int()` through an
+argument, a list item, an attribute or a dict value.
+
+The int() checker now applies the module-level attribute/subscript/mutating-method stores in
+source order and registers module functions and simple module lambdas, checking their bodies at
+the call site (including a call nested in another module function) rather than at definition;
+a function never called is checked once at the end against the final module state.  A read that
+runs before the later store still compiles to a named refusal
+(`int() of a float outside int64`), and a module name already folded from a safe container is
+refreshed in source order so a later route sees the stored item.  Attributes after a store that
+cannot be resolved, and a class-name store, keep the named refusal.
+
+Added `AIL_CURRENT/test_ail_pre418.py` (2 tests, 15 matching and 6 refused programs, both
+builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+Probes in `/tmp/probes/pre418` on both builds via `cmp.sh`: the scalar constructor/function and
+lambda cases, class-body and constructor-literal lists, nested function, dict value, alias,
+negative index, `insert` at zero, `extend`, `pop`, uncalled function
+and lambda, inline lambda, two instances, scalar values through an argument, a list item and a
+dict value, and the in-range before/after reads match CPython; read-before-store direct,
+argument and append cases, `C.v = [1.5]` and the class-name store are refused by name.
+A class-method `self.v[0]` read before the store still traps with a run-time `integer overflow`
+exactly as on the base tree; that shape is unchanged here.
+Final-state tests: test_ail_pre418, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes;
+`tools/ci_shards.py --check` exits 0.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
