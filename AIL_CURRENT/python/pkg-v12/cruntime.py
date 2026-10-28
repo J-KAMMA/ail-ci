@@ -14874,7 +14874,10 @@ static inline ail_st ail_op_add(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
         ail_obj r; r.tag = a.tag; r.o = (ail_gcobj *)nv; *out = r; return AIL_OK;
     }
     if (a.tag == AIL_T_LIST && b.tag == AIL_T_LIST && ((ail_gcobj *)a.o)->flags && ((ail_gcobj *)b.o)->flags) return ail_deque_concat(cx, out, a, b);
-    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for +: '%s' and '%s'", ail__tname_c(a), ail__tname_c(b));
+    char na[101], nb[101];
+    snprintf(na, sizeof na, "%.100s", ail__tname_c(a));
+    snprintf(nb, sizeof nb, "%.100s", ail__tname_c(b));
+    char buf[256]; snprintf(buf, sizeof buf, "unsupported operand type(s) for +: '%s' and '%s'", na, nb);
     /* CPython: a sequence on the left says what it cannot concatenate (`list + Counter`), anything else the operand types */
     if (a.tag == AIL_T_LIST || a.tag == AIL_T_TUPLE || a.tag == AIL_T_STR) {
         const char *n = a.tag == AIL_T_TUPLE ? "tuple" : a.tag == AIL_T_STR ? "str" : ((ail_gcobj *)a.o)->flags ? "deque" : "list";
@@ -14933,7 +14936,10 @@ static inline ail_st ail_op_sub(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
         *out = ail_box_int(r); return AIL_OK;
     }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) { *out = ail_box_float(cx, ail__as_double(a) - ail__as_double(b)); return AIL_OK; }
-    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: '%s' and '%s'", ail__tname_c(a), ail__tname_c(b));
+    char na[101], nb[101];
+    snprintf(na, sizeof na, "%.100s", ail__tname_c(a));
+    snprintf(nb, sizeof nb, "%.100s", ail__tname_c(b));
+    char buf[256]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: '%s' and '%s'", na, nb);
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 static inline ail_obj ail_list_new(ail_ctx *cx);
@@ -15081,7 +15087,10 @@ static inline ail_st ail_op_pow(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
     return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for **");
 }
 static inline ail_st ail__bit_type_error(ail_ctx *cx, const char *op, ail_obj a, ail_obj b) {
-    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for %s: '%s' and '%s'", op, ail__tname_c(a), ail__tname_c(b));
+    char na[101], nb[101], buf[256];
+    snprintf(na, sizeof na, "%.100s", ail__tname_c(a));
+    snprintf(nb, sizeof nb, "%.100s", ail__tname_c(b));
+    snprintf(buf, sizeof buf, "unsupported operand type(s) for %s: '%s' and '%s'", op, na, nb);
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 /* & | ^ : bool op bool stays bool (CPython), any int involvement gives int. */

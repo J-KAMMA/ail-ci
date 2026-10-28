@@ -285,7 +285,10 @@ static inline ail_st ail__view_cmp(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj
     int a_s = ka == 1 || ka == 3 || AIL_IS_ANYSET(a.tag), b_s = kb == 1 || kb == 3 || AIL_IS_ANYSET(b.tag);
     if (!a_s || !b_s) {
         static const char *const sym[4] = { "<", "<=", ">", ">=" };
-        char eb[160]; snprintf(eb, sizeof eb, "'%s' not supported between instances of '%s' and '%s'", sym[op], ail__tname_c(a), ail__tname_c(b));
+        char na[256], nb[256], eb[160];
+        snprintf(na, sizeof na, "%s", ail__tname_c(a));
+        snprintf(nb, sizeof nb, "%s", ail__tname_c(b));
+        snprintf(eb, sizeof eb, "'%s' not supported between instances of '%s' and '%s'", sym[op], na, nb);
         return ail_raise_c(cx, AIL_B_TYPEERROR, eb);
     }
     int na = ail__view_n(a), nb = ail__view_n(b), r = 0; ail_st st;

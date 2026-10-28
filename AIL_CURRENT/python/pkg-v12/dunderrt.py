@@ -396,10 +396,10 @@ def _edits(inplace=False):
     e.append(('            if (kc->repr_fn) break;\n        }\n    }\n    ail_obj_write_repr(cx, x, f);',
               '        }\n    }\n    ail_obj_write_repr(cx, x, f);'))
     # arithmetic
-    e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for +: \'%s\' and \'%s\'"',
-              '    ' + _binop_guard('ADD', 'RADD', '+') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for +: \'%s\' and \'%s\'"'))
-    e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"',
-              '    ' + _binop_guard('SUB', 'RSUB', '-') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"'))
+    e.append(('    char buf[256]; snprintf(buf, sizeof buf, "unsupported operand type(s) for +: \'%s\' and \'%s\'"',
+              '    ' + _binop_guard('ADD', 'RADD', '+') + 'char buf[256]; snprintf(buf, sizeof buf, "unsupported operand type(s) for +: \'%s\' and \'%s\'"'))
+    e.append(('    char buf[256]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"',
+              '    ' + _binop_guard('SUB', 'RSUB', '-') + 'char buf[256]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"'))
     e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'"',
               '    ' + _binop_guard('MUL', 'RMUL', '*') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'"'))
     for sym, fwd, rev in (('//', 'FLOORDIV', 'RFLOORDIV'), ('%', 'MOD', 'RMOD'), ('/', 'TRUEDIV', 'RTRUEDIV'),

@@ -106,6 +106,31 @@ e = E('m')
 print(e[0])
 print(e[1:2])
 ''',
+    'two_exception_operands': '''
+class E(Exception):
+    pass
+
+
+class F(Exception):
+    pass
+
+
+def show(label, fn):
+    try:
+        fn()
+    except TypeError as err:
+        print(label, '=>', str(err))
+
+
+show('E+F', lambda: E() + F())
+show('F+E', lambda: F() + E())
+show('E-F', lambda: E() - F())
+show('E&F', lambda: E() & F())
+show('E|F', lambda: E() | F())
+show('E^F', lambda: E() ^ F())
+show('E<<F', lambda: E() << F())
+show('E>>F', lambda: E() >> F())
+''',
 }
 
 

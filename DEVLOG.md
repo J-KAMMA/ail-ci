@@ -1,3 +1,23 @@
+## 2026-10-28 -- pre416 review fix: two-operand names no longer alias (job-pre416-10281338)
+
+The review found that broadening `ail__tname_c` to exception values exposed its single
+shared buffer: `E() + F()` formatted both operands from the same (left) name, printing
+`'E' and 'E'` where CPython prints `'E' and 'F'`.  The `+`, `-`, `&`, `|`, `^`, `<<` and
+`>>` messages and the dict-view comparison message now copy each operand name into its
+own buffer before formatting.  The arithmetic messages also truncate each name at 100
+characters, as CPython does, and use a buffer large enough for two names, so a long
+exception class name is no longer cut mid-message.  `test_ail_pre416.py` gained a
+`two_exception_operands` case covering all seven operators in both orders.
+
+Review-fix probes in `/tmp/probes/pre416_fix` on both builds via `cmp.sh`: `p1_two_exc`
+(all operators and both orders), `p2_routes` (argument, list item, attribute, dict value,
+alias), `p3_mixed` (exception with builtin operand in both orders, string index),
+`p4_controls` (ordinary instances, int/str, list/Counter), `p5_long` (211-character names),
+`p6_item_regress` (item access, slice, assignment and deletion on a subclass) and
+`p7_views` (dict-view/set comparison messages) all match CPython.  Final-state tests: test_ail_pre416, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3 all pass (4 modules, 231s).  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-28 -- pre416: exception item errors name the class (job-pre416-10281338)
 
 The pre395 review recorded as pre-existing that `class E(Exception): pass; E()[0]` raised
