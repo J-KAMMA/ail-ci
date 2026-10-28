@@ -1,3 +1,34 @@
+## 2026-10-28 -- stdlib16: struct.pack / unpack / unpack_from / calcsize over a literal format
+
+`struct` was the next most-imported still-refused module (6 corpus/example imports, after argparse 9 and
+tempfile 7; argparse is very large, tempfile has nondeterministic names, hashlib is crypto and
+unicodedata/decimal are refused by design).  `structlib.py` runs in `python_surface` before the other
+passes and rewrites only a direct `struct.<name>` call whose first argument is a string literal:
+`calcsize` becomes its integer, `pack` becomes `_ail_struct_pack(fmt, [values])`, and `unpack` /
+`unpack_from` become the matching prelude helpers.  The format is validated with CPython's own
+`struct.calcsize` at build time.  Built codes are `b B h H i I l L q Q n N P ? c s p x`, repeat
+counts, whitespace and all byte orders (`@ = < > !`), including CPython's native alignment (also for a
+zero repeat after a field); `s` truncates and pads (and still takes one value when its count is zero),
+`p` truncates to `count-1`, `c` takes exactly one `bytes` (a bytearray is CPython's error, not a value),
+unpack returns a tuple, and unpack_from normalises a negative offset in `[-len, -1]`, rejecting a smaller
+one as "offset %d out of range for %d-byte buffer", and the error messages are CPython 3.12's.  The float codes (`e f d`),
+run-time formats, `Struct`, `pack_into`, `iter_unpack`, `struct.error` and starred/keyword arguments are
+refused by name; a raised error is `ValueError` on this path, as declared in DIFFERENCES
+(`C?-job-stdlib16-10290430-1`).
+
+Probes in `/tmp/probes/struct16` on both builds via `cmp.sh`: `p_pack` (integer widths, `s`/`p`/`c`/`?`,
+byte orders), `p_unpack` (pack -> unpack, truncation, `unpack_from`), `p_native` (alignment and zero
+repeats), `p_boundaries` (empty and zero-count formats, `l`/`L`/`n`/`N`/`P` widths, signed extremes,
+`0s`/`0p`/`0c`, whitespace), `p_alias` (`import ... as` and `from ... import ... as`), `p_routes` and
+`p_routes2` (values through a call, a list item, an attribute, a dict value and a function argument),
+`p_errors`, `p_errors2` and `p_offsets` (range, char, bytes, exact buffer, negative/positive offset and
+argument-count messages) and `p_calcsize` match CPython; `p_refuse_float`, `p_refuse_dynamic`,
+`p_refuse_dynamic_item`, `p_refuse_struct`, `p_refuse_alias_value`, `p_refuse_kw` and
+`p_refuse_fromstar` are refused by name.  The prelude was also
+checked against host `struct` for 300000 generated formats/values (pack, unpack, unpack_from and
+calcsize) with no difference.  `prelude_struct.py` is plain Python; `test_ail_stdlib16.py` fuzzes it
+directly and pins one program on both builds plus eight refusals.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

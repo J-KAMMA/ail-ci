@@ -179,6 +179,17 @@ def _stdlib5():
     return _stdlib5.module
 
 
+def _structlib():
+    """python/pkg-v12/structlib.py (library batch 16: struct over literal formats)."""
+    if not hasattr(_structlib, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import structlib
+        _structlib.module = structlib
+    return _structlib.module
+
+
 def _stdlib4():
     """python/pkg-v12/stdlib4.py (library batch 4: csv, datetime, ... lowered before the other source passes)."""
     if not hasattr(_stdlib4, "module"):
@@ -3403,6 +3414,8 @@ def python_surface(source, notes=None, library=False):
         _threadlib()                             # puts python/pkg-v12 on sys.path
         import typedpar                          # typed parallelism without the lock (TYPED_PARALLEL.md)
         source = typedpar.rewrite_text(source, notes)
+    if "struct" in source:
+        source = _structlib().rewrite_text(source, notes)
     if any(name in source for name in ("threading", "queue", "concurrent")):
         source = _threadlib().rewrite_text(source, notes)
     if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
