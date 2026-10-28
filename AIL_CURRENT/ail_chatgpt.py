@@ -1114,18 +1114,28 @@ def _flat_constant_container(value):
     return False
 
 
-def _escaped_constant_names(root, program_bound):
-    """Names read in a way that may mutate or expose a container, propagated through aliases.
+def _escaped_constant_statements(body, root, program_bound):
+    """Per top-level statement, the names a read there may mutate or expose, with aliases.
 
-    A container stays foldable only when every read is a load-only subscript, an alias
-    assignment, or an argument to a pure builtin.  A store through the name, a call, a return,
-    iteration or any other use marks it (and every alias) as dynamic.  Whether a call is a
-    pure builtin is decided against every binding in the program, not only this scope: a
-    module or enclosing binding of ``len``/``print``/``str``/``repr`` may mutate its argument.
+    A container stays foldable up to the first statement that may mutate it.  A read is
+    load-only when it is a subscript read, an alias assignment or an argument to a pure
+    builtin; a store through the name, a call, a return, iteration or any other use marks it
+    (and every alias) dynamic from that statement on.  A use inside a nested definition counts
+    at the definition statement, whose body runs no earlier than the statements after it.
+    Whether a call is a pure builtin is decided against every binding in the program, not only
+    this scope: a module or enclosing binding of ``len``/``print``/``str``/``repr`` may mutate
+    its argument.
     """
     pure_calls = {'len', 'print', 'str', 'repr'} - program_bound
     parents = {child: parent for parent in ast.walk(root) for child in ast.iter_child_nodes(parent)}
-    escaped = set()
+    owners = {id(statement): index for index, statement in enumerate(body)}
+    events = [set() for _ in body]
+
+    def statement_index(node):
+        while node is not None and id(node) not in owners:
+            node = parents.get(node)
+        return owners[id(node)] if node is not None else None
+
     for node in ast.walk(root):
         if not (isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load)):
             continue
@@ -1142,7 +1152,9 @@ def _escaped_constant_names(root, program_bound):
         if (isinstance(parent, ast.Call) and node in parent.args
                 and isinstance(parent.func, ast.Name) and parent.func.id in pure_calls):
             continue
-        escaped.add(node.id)
+        index = statement_index(node)
+        if index is not None:
+            events[index].add(node.id)
     aliases = {}
     for node in ast.walk(root):
         if (isinstance(node, ast.Assign) and len(node.targets) == 1
@@ -1151,28 +1163,33 @@ def _escaped_constant_names(root, program_bound):
         elif (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
                 and isinstance(node.value, ast.Name)):
             aliases.setdefault(node.target.id, set()).add(node.value.id)
-    changed = bool(aliases)
-    while changed:
-        changed = False
-        for target, sources in aliases.items():
-            for source in sources:
-                if target in escaped and source not in escaped:
-                    escaped.add(source)
+    for names in events:
+        changed = bool(names)
+        while changed:
+            changed = False
+            for target, sources in aliases.items():
+                if target in names:
+                    for source in sources:
+                        if source not in names:
+                            names.add(source)
+                            changed = True
+                if sources & names and target not in names:
+                    names.add(target)
                     changed = True
-                if source in escaped and target not in escaped:
-                    escaped.add(target)
-                    changed = True
-    return escaped
+    return events
 
 
 def _scope_constant_map(body, root, base, stores, bound, parameters, declared, program_bound):
     """Constant values a scope's top-level names bind, including safe container aliases.
 
-    Scalars are followed exactly as before.  A flat list/tuple/dict literal (or an alias of
-    one) is kept only when the name never escapes: a mutation, call, return or other use makes
-    the value dynamic, so a later alias read is left to the run-time int64 trap.
+    Top-level statements run once and in order, so a flat list/tuple/dict literal (or an alias
+    of one) is followed up to the statement that may mutate it: a scalar read through a name
+    that is only mutated later keeps the literal's value, which lets the int() check refuse a
+    value outside int64 instead of leaving it to the run-time trap.
     """
     local = {name: value for name, value in base.items() if name not in bound}
+    events = _escaped_constant_statements(body, root, program_bound)
+    escaped = set()
 
     def candidate(statement):
         if isinstance(statement, ast.Assign) and len(statement.targets) == 1:
@@ -1184,29 +1201,21 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
                 return statement.target.id, statement.value
         return None, None
 
-    def add_scalars():
-        for statement in body:
-            name, value_node = candidate(statement)
-            if (name is None or stores.get(name) != 1
-                    or name in parameters or name in declared):
-                continue
+    for index, statement in enumerate(body):
+        name, value_node = candidate(statement)
+        if (name is not None and stores.get(name) == 1
+                and name not in parameters and name not in declared):
             value = _constant_value(value_node, lambda item: local.get(item, _UNKNOWN),
                                     lambda unused: True, {})
             if type(value) in (bool, int, float, str, bytes, type(None)):
                 local[name] = value
-
-    add_scalars()
-    escaped = _escaped_constant_names(root, program_bound)
-    for statement in body:
-        name, value_node = candidate(statement)
-        if (name is None or stores.get(name) != 1
-                or name in parameters or name in declared or name in escaped):
-            continue
-        value = _constant_value(value_node, lambda item: local.get(item, _UNKNOWN),
-                                lambda unused: True, {})
-        if _flat_constant_container(value):
-            local[name] = value
-    add_scalars()
+            elif (name not in escaped and name not in events[index]
+                    and _flat_constant_container(value)):
+                local[name] = value
+        escaped |= events[index]
+        for bad in escaped:
+            if isinstance(local.get(bad), (list, tuple, dict)):
+                local.pop(bad, None)
     return local
 
 
