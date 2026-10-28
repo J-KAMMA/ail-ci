@@ -1,3 +1,30 @@
+## 2026-10-28 -- cov26: nested generator expressions consumed at once (job-cov26-10290509)
+
+The corpus profile (219 programs, compiled the way `lab/profile/run.py` does; imports excluded)
+had 24 refusals on both builds. The most common non-import construct on the general path was
+`a generator expression nested inside another generator expression` (3 programs: deepseek t172,
+deepseek t432, glm t432). The outer generator in each is an argument to `str.join`, and the inner
+one is consumed at once by `str.join` or `sum`, so eager materialisation evaluates exactly the
+same elements in the same order as CPython.
+
+`pyboxed2.py` now accepts a nested generator only when the outer generator is fully consumed
+(`str.join`/`extend`/`update`, `sum`/`min`/`max`, `list`/`tuple`/`set`/`frozenset`/`dict`/`sorted`,
+`bytes`/`bytearray`, `Counter`/`array`, or a starred element) and every inner one is too. A saved
+outer generator, `next()` (reads one element), `any()`/`all()` (short-circuit) and an inner
+generator merely handed to a function keep the named refusal; `test_ail_pre42`'s refused cases
+still refuse. The v1 general emitter is unchanged and keeps its named refusal.
+
+After the change the same profile has 21 refusals (from 24) on both the default and
+`AIL_UNIFIED_FORCE=1` builds; the three programs compile and match CPython on all three inputs.
+Probes in `/tmp/probes/cov26` (17 programs; both builds via `cmp.sh`): `p_join_join`,
+`p_join_sum_empty`, `p_sum_inner_negative`, `p_arg_route`, `p_list_item_route`,
+`p_attribute_route`, `p_dict_value_route`, `p_alias_route`, `p_side_effects`, `p_exception`,
+`p_types`, `p_nested_containers` match CPython; `p_saved_outer_refused`, `p_next_refused`,
+`p_any_refused`, `p_inner_handed_on_refused` are refused by name. Added `test_ail_cov26.py`
+(8 matching programs, 5 refusals). Final-state tests: test_ail_cov26, test_ail_pre42,
+test_ail_pre116, test_ail_pre166, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3. `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

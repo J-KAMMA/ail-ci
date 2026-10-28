@@ -2536,9 +2536,15 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        parents = {}
+        for parent in ast.walk(tree):
+            for child in ast.iter_child_nodes(parent):
+                parents[child] = parent
+        self._genexp_parents = parents
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)) and \
+                    not _nested_genexps_safe(gen, parents):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6495,7 +6501,8 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)) and \
+                not _nested_genexps_safe(node, getattr(self, '_genexp_parents', {})):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -12433,6 +12440,14 @@ _GENEXP_EAGER_CALLS = frozenset({
     'next', 'bytes', 'bytearray', 'Counter', 'array',
 })
 _GENEXP_EAGER_METHODS = frozenset({'join', 'extend', 'update', 'array'})
+# Consumers that read every element of their argument before returning.  A nested generator
+# expression passed to one of these can be materialised eagerly: the elements are evaluated at
+# the same point, in the same order, as CPython's lazy generator would evaluate them.
+_GENEXP_FULLY_CONSUMING_CALLS = frozenset({
+    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max',
+    'bytes', 'bytearray', 'Counter', 'array',
+})
+_GENEXP_FULLY_CONSUMING_METHODS = frozenset({'join', 'extend', 'update', 'array'})
 # Builtins whose call cannot raise one of the five catchable traps this compiler models, so a
 # generator element that only uses them keeps the existing eager lowering.
 _GENEXP_SAFE_CALLS = frozenset({
@@ -12446,6 +12461,33 @@ _GENEXP_SAFE_METHODS = frozenset({
     'rsplit', 'splitlines', 'partition', 'rpartition', 'removeprefix', 'removesuffix',
     'bit_length', 'bit_count', 'is_integer', 'get', 'keys', 'values', 'items',
 })
+
+
+def _genexp_consumed_fully(node, parents):
+    """True iff `node` is an argument to a consumer that reads every element before returning
+    (or a starred element), so materialising it at that point cannot be observed."""
+    par = parents.get(node)
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in _GENEXP_FULLY_CONSUMING_CALLS:
+            return True
+        if isinstance(f, ast.Attribute) and f.attr in _GENEXP_FULLY_CONSUMING_METHODS:
+            return True
+    return False
+
+
+def _nested_genexps_safe(node, parents):
+    """True when `node` itself is fully consumed in place and every generator expression inside
+    it is too: the eager lowering then evaluates exactly the elements CPython would, at the same
+    point.  A saved outer generator, `next()` (it reads only the first element) or a
+    short-circuiting `any()`/`all()` is not fully consumed, so a nested generator there keeps the
+    by-name refusal."""
+    if not _genexp_consumed_fully(node, parents):
+        return False
+    return all(n is node or not isinstance(n, ast.GeneratorExp)
+               or _genexp_consumed_fully(n, parents) for n in ast.walk(node))
 
 
 def _genexp_consumed_in_place(node, parents):
