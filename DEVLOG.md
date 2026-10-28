@@ -1,3 +1,13 @@
+## 2026-10-28 -- pre427 follow-up: register the regression module (job-pre427-10281842)
+
+The review of `717227e` found that `test_ail_pre427.py` was never registered, so neither
+`par_check.py` with no module list nor the CI shards ran it.  Added `test_ail_pre427` to
+`AIL_CURRENT/ail_check.MODULES`, placed it with `tools/ci_shards.py --update` (shard 4), and
+pinned it in `AIL_CURRENT/MANIFEST.json` with `tools/update_manifest.py`; `--check` exits 0 and
+`python3 -c "import ail_check; print('test_ail_pre427' in ail_check.MODULES)"` prints `True`.
+The compiler change is unchanged: the 40 probes in `/tmp/probes` still match CPython or are
+refused by name on both builds, and the four required modules pass on the final commit.
+
 ## 2026-10-28 -- pre427: a positional-only lambda is refused by name (job-pre427-10281842)
 
 The pre413 review left the posonly/kwonly/vararg lambda subset refusals unverified.  Reproduced
