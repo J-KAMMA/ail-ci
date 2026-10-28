@@ -1,3 +1,25 @@
+## 2026-10-28 -- pre411: a non-int `__index__` result on a subscript names CPython's TypeError (job-pre411-10281301)
+
+The pre397 review recorded r4: an `__index__` returning a non-int raised `list indices must be
+integers or slices, not ...` (with the tuple/str wording) instead of CPython's `__index__
+returned non-int (type ...)`.  Reproduced on both builds.  The general path's instance-key
+branch now validates the `__index__` result, and an IntEnum/IntFlag member is used by its value
+as CPython's int-subclass fast path does: a direct member ignores an overridden `__index__`
+(a member whose `__index__` returns 2 still indexes its value 1), and a member returned by
+`__index__` is accepted by its value (one-level unwrap).  This also fixes the recorded direct
+IntEnum (r5) and nested-member (r6) indexing cases.  The slice-bound part of r5/r12 is a
+separate pre-existing cause and still differs.
+
+Probes in `/tmp/probes` with `bash ~/tools/cmp.sh <probe> $PWD` on both builds:
+`p_index_nonint.py` was DIFF on 12 bad-result routes before and matches CPython after;
+`p_nested.py` now matches for a direct member, an argument, a list item, an attribute, a str
+index and a member chain, while its slice cases still DIFF; `p_slice.py` still DIFFs (not
+changed); `p_pre411_testprog.py` matches CPython (bad str/float/None/list results, bool,
+negative, good `__index__`, direct IntEnum/IntFlag with an overridden `__index__`, a chain
+member result and a bad instance result).  Final-state tests: test_ail_pre411 (new),
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.  The full suite was not run.
+
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:

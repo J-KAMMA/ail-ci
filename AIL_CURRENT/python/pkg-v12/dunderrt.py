@@ -114,6 +114,33 @@ static void ail__dun_tname(char *buf, size_t n, ail_obj x) {
     snprintf(buf, n, "%s", ail_type_name(x.tag));
 }
 static const char *ail__dun_tname_s(ail_obj x) { static char b[80]; ail__dun_tname(b, sizeof b, x); return b; }
+/* An IntEnum / IntFlag member is an int subclass in CPython: a list index uses the member's value
+   directly (an overridden __index__ is ignored), and a __index__ result that is a member is accepted
+   by that value.  The prelude keeps the value in the member's `value` attribute. */
+static inline int ail__dun_int_enum(ail_obj x) {
+    if (x.tag != AIL_T_INST) return 0;
+    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_str s = ail_view_to_str(((ail_classobj *)k.o)->name);
+        static const char nm[] = "_AilIntEnum";
+        if (s.n == (int64_t)(sizeof nm - 1)) {
+            size_t i = 0;
+            while (i < sizeof nm - 1 && (uint32_t)ail_chr(s, (int64_t)i) == (unsigned char)nm[i]) i++;
+            if (i == sizeof nm - 1) return 1;
+        }
+    }
+    return 0;
+}
+static inline int ail__dun_int_enum_value(ail_ctx *cx, ail_obj x, int64_t *out) {
+    ail_instobj *o = (ail_instobj *)x.o;
+    for (int64_t i = 0; i < o->n; i++) {
+        int64_t nid = o->attrs[i].name_id;
+        if (nid >= 0 && nid < cx->intern_n && !strcmp(cx->intern_tab[nid], "value")) {
+            ail_obj v = o->attrs[i].val;
+            if (v.tag == AIL_T_INT || v.tag == AIL_T_BOOL) { *out = v.i; return 1; }
+        }
+    }
+    return 0;
+}
 __attribute__((noinline, cold)) static ail_st ail_dun_noattr(ail_ctx *cx, ail_obj inst, const char *name_for_msg) {
     char b2[200], tn[80]; ail__dun_tname(tn, sizeof tn, inst);
     snprintf(b2, sizeof b2, "'%s' object has no attribute '%s'", tn, name_for_msg);
@@ -549,8 +576,20 @@ def _edits(inplace=False):
     e.append(('static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key) {\n',
               'static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key) {\n'
               '    if (key.tag == AIL_T_INST && (c.tag == AIL_T_LIST || c.tag == AIL_T_TUPLE || c.tag == AIL_T_STR)) {   /* __index__ */\n'
-              '        ail_d1_fn xf = ail_dun1(key, AIL_D1_INDEX);\n'
-              '        if (xf) { ail_obj ik; ail_st xst = xf(cx, &ik, key); if (xst != AIL_OK) return xst; key = ik; }\n'
+              '        int64_t iev;\n'
+              '        if (ail__dun_int_enum(key)) {\n'
+              '            if (ail__dun_int_enum_value(cx, key, &iev)) key = ail_box_int(iev);\n'
+              '        } else {\n'
+              '            ail_d1_fn xf = ail_dun1(key, AIL_D1_INDEX);\n'
+              '            if (xf) {\n'
+              '                ail_obj ik; ail_st xst = xf(cx, &ik, key); if (xst != AIL_OK) return xst;\n'
+              '                if (ik.tag == AIL_T_INT || ik.tag == AIL_T_BOOL) key = ail_box_int(ik.i);\n'
+              '                else if (ail__dun_int_enum(ik) && ail__dun_int_enum_value(cx, ik, &iev)) key = ail_box_int(iev);\n'
+              '                else { char buf[160], tn[80]; ail__dun_tname(tn, sizeof tn, ik);\n'
+              '                       snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", tn);\n'
+              '                       return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n'
+              '            }\n'
+              '        }\n'
               '    }\n'))
     e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object does not support item assignment", ail_type_name(c.tag));',
               '    if (c.tag == AIL_T_INST) { ail_d3_fn f = ail_dun3(c, AIL_D3_SETITEM); if (f) { ail_obj r; return f(cx, &r, c, key, val); } }\n'
