@@ -4132,6 +4132,38 @@ def _zig_compiler(target):
     return str(wrapper)
 
 
+def _definition_only_module(text):
+    """True for a Python module with no program to run: imports, definitions and assignments only.
+
+    CPython executes such a file by binding the names (and importing its dependencies) and then
+    exits 0 without printing anything.  The compiler cannot execute the research drivers that
+    import the compiler itself, so `compile` builds the module's observable behaviour -- nothing on
+    stdout, exit 0 -- rather than treating one of its functions as a file-processing entry point.
+    A file with a `main` function, a `__main__` guard or any other top-level statement is a
+    program and keeps its ordinary handling."""
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return False
+    allowed = (ast.Import, ast.ImportFrom, ast.FunctionDef, ast.AsyncFunctionDef,
+               ast.ClassDef, ast.Assign, ast.AnnAssign, ast.Pass)
+    imported = defined = False
+    for node in tree.body:
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            imported = True
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == 'main':
+            return False
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            defined = True
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
+                and isinstance(node.value.value, str):
+            continue                                      # module docstring
+        if not isinstance(node, allowed):
+            return False
+    return imported and defined
+
+
 def _check_main_called(tree):
     """Python-surface programs: CPython runs nothing for a `main` that is defined and never
     called, so this compiler (whose entry convention would call it) refuses instead of printing
@@ -4207,7 +4239,8 @@ def _refuse_load(error):
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False, ffi=None, prelower=None, file_path=None):
+                  notes=None, local_imports=False, ffi=None, prelower=None, file_path=None,
+                  entry_noop=False):
     """Resolve source imports once and validate their shared declaration scope.
 
     `prelower` rewrites the entry's text right after it is read (ail_export.lower for `--lib`); the
@@ -4264,7 +4297,14 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 text = ail_modules.substitute_file(
                     text, (file_path if file_path is not None else os.path.abspath(os.fspath(source)))
                     if entry else path)
-            if local_imports and entry and syntax == 'python' and not module_only:
+            noop_module = (entry_noop and entry and syntax == 'python' and path.suffix.lower() == '.py'
+                           and _definition_only_module(text))
+            if noop_module:
+                # A module is not a program: running it binds names and exits 0.  Build that
+                # observable behaviour instead of selecting one of its functions as a file entry.
+                text = "print('', end='')\n"
+            if (local_imports and entry and syntax == 'python' and not module_only
+                    and not noop_module):
                 merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
                 if merged is not None:
                     _MERGED_ENTRIES[str(path)] = merged
@@ -5609,7 +5649,8 @@ def main(argv=None):
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
                 module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,
-                prelower=lower_exports if export_lib else None, file_path=file_path, **loading)
+                prelower=lower_exports if export_lib else None, file_path=file_path,
+                entry_noop=args.command == 'compile' and not library, **loading)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
         if export_lib:

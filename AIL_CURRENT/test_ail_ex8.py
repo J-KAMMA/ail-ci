@@ -150,6 +150,36 @@ class Ex8Tests(unittest.TestCase):
     def test_own_binding_keeps_python_semantics(self):
         self.check({'main.py': OWN_BINDING})
 
+    def test_definition_only_module_is_a_no_op(self):
+        # No main(): CPython binds the names and exits 0 without printing, so the program built
+        # from this module must do the same instead of treating use() as a file entry point.
+        self.check({'main.py': 'from helper import VALUE\n\n\ndef use():\n    return VALUE\n',
+                    'helper.py': 'VALUE = 3\n'})
+
+    def test_definition_only_examples_build_and_match_cpython(self):
+        examples = ROOT / 'language_examples'
+        for name in ('row_decimal_quad.py', 'row_codec_controls.py'):
+            source = examples / name
+            want = subprocess.run([sys.executable, '-B', name], capture_output=True, timeout=300,
+                                  cwd=examples, env=dict(os.environ, PYTHONUTF8='1',
+                                                         PYTHONWARNINGS='ignore'))
+            self.assertEqual(want.stdout, b'', name)
+            self.assertEqual(want.returncode, 0, name)
+            with tempfile.TemporaryDirectory(prefix='ail-ex8-mod-') as directory:
+                for general in (True, False):
+                    exe = Path(directory) / ('exe_' + Path(name).stem + ('_g' if general else '_d'))
+                    env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
+                    env.pop('AIL_NO_GENERAL', None)
+                    if general:
+                        env['AIL_UNIFIED_FORCE'] = '1'
+                    built = subprocess.run([sys.executable, '-B', CHATGPT, 'compile', name,
+                                            '--syntax', 'python', '-o', str(exe)], cwd=examples,
+                                           capture_output=True, text=True, timeout=900, env=env)
+                    self.assertEqual(built.returncode, 0, (name, general, built.stdout + built.stderr))
+                    got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=examples)
+                    self.assertEqual(got.stdout, want.stdout, (name, general, got.stderr[-800:]))
+                    self.assertEqual(got.returncode, want.returncode, (name, general, got.stderr[-800:]))
+
 
 if __name__ == '__main__':
     unittest.main()

@@ -1,3 +1,26 @@
+## 2026-10-28 -- ex8 review: a definition-only Python module builds as a no-op (job-ex8-10290227)
+
+The review found that fixing `__file__` did not make any refused `language_examples` program
+build: all 12 refused `.py` files still exited 2.  Two of them (`row_decimal_quad.py` and
+`row_codec_controls.py`) are modules, not programs: they contain only imports, definitions and
+assignments, no `main` and no `__main__` guard, so CPython binds the names and exits 0 with
+empty stdout.  `compile` now detects that shape for a `.py` entry and builds the observable
+program (`print('', end='')`) instead of choosing one of the module's functions as a
+file-processing entry point.  Both files now build on the general and default paths and match
+CPython (empty stdout, exit 0).  A file with `main`, a `__main__` guard or any other top-level
+statement is unchanged, as is a module with no imports (such as `table_crc.py`, which already
+built).
+
+Added two cases to `AIL_CURRENT/test_ail_ex8.py`: a minimal definitions-only module with one
+local import, and both real examples built and compared with CPython on both builds.
+
+Probes (both builds): `/tmp/probes/noopdir/main.py` (a stdlib import plus a def, no main; built
+directly as `.py`) and `cmp.sh` cases `ex8_noop_if` (a `__main__` guard still runs),
+`ex8_noop_print` (a top-level print is not a no-op), `ex8_noop_main` (a called `main` still runs)
+and `ex8_noop_guardless` (top-level code after defs still runs) match CPython.
+`row_decimal_quad.py` and `row_codec_controls.py` match CPython (empty stdout, exit 0) on both
+builds.
+
 ## 2026-10-28 -- ex8: `__file__` is the module's absolute source path (job-ex8-10290227)
 
 Building every Python-syntax example under `AIL_CURRENT/language_examples` (14 files: 11 at the
