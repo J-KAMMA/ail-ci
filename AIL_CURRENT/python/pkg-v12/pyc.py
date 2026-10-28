@@ -367,6 +367,53 @@ def _reads_global(fn, name):
     return loads and name not in bound
 
 
+def _definition_has_no_effect(node):
+    """A top-level import or function definition CPython evaluates without an observable effect.
+
+    A class body, a decorator, an annotation and a non-constant default all run code while the
+    module loads, which the compiled entry does not; those shapes keep the old path instead of
+    silently dropping the effect.
+    """
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return True
+    if not isinstance(node, ast.FunctionDef):
+        return False
+    if node.decorator_list or node.returns is not None or getattr(node, 'type_params', None):
+        return False
+    args = node.args
+    parameters = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+    parameters += [parameter for parameter in (args.vararg, args.kwarg) if parameter is not None]
+    if any(parameter.annotation is not None for parameter in parameters):
+        return False
+    defaults = [value for value in [*args.defaults, *args.kw_defaults] if value is not None]
+    return all(isinstance(value, ast.Constant) for value in defaults)
+
+
+def _python_module_only(source):
+    """A Python-surface file that only defines things: CPython runs nothing for it.
+
+    `to_c` treats any `def` as a function program and calls its last function.  That is the AIL
+    convention (a block program is a `main`), but a Python module -- effect-free definitions,
+    imports, a docstring and literal module constants only -- is not run: importing it has no
+    output.  The entry's own uncalled `main` already refuses in `ail_chatgpt.py`; this covers a
+    module whose last function is an ordinary library function (`math.ail`'s `sum_to`).  Restricted
+    to the Python surface so a block-syntax file keeps its `fn`/function-program behaviour.
+    """
+    if os.environ.get('AIL_SURFACE') != 'python' or not is_function(source):
+        return False
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    for node in tree.body:
+        if _is_docstring_stmt(node) or _definition_has_no_effect(node):
+            continue
+        if isinstance(node, ast.Assign) and _is_module_const_assign(node):
+            continue
+        return False
+    return True
+
+
 def _entry_name(taken):
     if 'main' not in taken:
         return 'main'
@@ -552,6 +599,10 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
             raise refusal
     if is_function(source):
         rewritten = _rewrite_script(source, force=False)
+        module_only = False
+        if rewritten is None and _python_module_only(source):
+            rewritten = _rewrite_script(source, force=True)
+            module_only = rewritten is not None
         if rewritten is None:
             return func_to_c(source, name=name, strict=strict, info=info, external=external)
         # the rewritten text has lost its comments: keep the @dataclass markers for dunders.py
@@ -561,6 +612,8 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
             return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
         finally:
             dunders.HINT.clear()
+            if module_only and info is not None:
+                info['_python_module_only'] = True
     if _is_single_expression(source):
         if info is not None:
             info.setdefault('kinds', ['array'])
@@ -1073,6 +1126,7 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     out = pathlib.Path(out)
     c = out.with_suffix('.c')
     info = {'_checked_arrays': True}
+    module_only = _python_module_only(source)
     if legacy_int:
         info['_tint_legacy'] = True
     if native_diagnostics.enabled():
@@ -1126,9 +1180,13 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             import pyboxed2 as _boxed_impl
         typed_main = not force_general and _has_main_entry(source)
         boxed_report = {}
+        # The general path calls the last top-level def when there is no module statement.  A
+        # Python module is not run, so give it one no-op module statement: the boxed entry then
+        # takes its plain `main(void)` shape, exactly like the typed path's empty entry point.
+        boxed_source = source + '\npass\n' if module_only else source
         try:
-            boxed_c = (_boxed_impl.build(source, boxed_report, allow_mix=False) if force_general
-                       else _boxed_impl.build(source, boxed_report))
+            boxed_c = (_boxed_impl.build(boxed_source, boxed_report, allow_mix=False) if force_general
+                       else _boxed_impl.build(boxed_source, boxed_report))
         except Unsupported as boxed_refusal:
             if boundary:
                 raise _typed_e
@@ -1223,7 +1281,8 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
+    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET
+                                  or info.get('_python_module_only')) else _main_for(info)
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]

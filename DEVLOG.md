@@ -1,3 +1,30 @@
+## 2026-10-28 -- ex12: a definitions-only Python module is not a program (job-ex12-10290431)
+
+Every Python-syntax example was built.  Of the six `.ail` examples that parse as Python, `math.ail`
+(and the fragment `use_math.ail`, which CPython also cannot run alone) was refused; the fourteen
+`.py` benchmark helpers are refused earlier for unrelated module-import shapes.  `math.ail` is
+`LIMIT = 6` plus `def sum_to(n)` and nothing else: CPython runs nothing and exits 0, but `pyc`
+treated the last top-level `def` as the entry point and refused with `the first parameter must be
+the sequence read from the file`.
+
+`_python_module_only` now recognises a Python-surface entry whose top level is only effect-free
+definitions, imports, a docstring and literal module constants, and gives it an empty entry point
+(no output, exit 0).  A class body, a decorator, an annotation or a non-constant default can run
+code while the module loads, so those shapes are deliberately not classified and keep the old
+path.  The general (boxed) path has its own last-def entry convention (`pyboxed2`); it receives a
+no-op module statement for the same classification, so both builds match.  A script with top-level
+statements and the existing uncalled-`main()` refusal are unchanged.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p_ex12_math_example`, `p_ex12_defs_basic`,
+`p_ex12_defs_docstring`, `p_ex12_defs_import`, `p_ex12_defs_const`,
+`p_ex12_defs_default_const`, `p_ex12_script_call`, `p_ex12_nested_func`, `p_ex12_class_only`
+match CPython; `p_ex12_only_pass` (default build), `p_ex12_empty_docstring` and
+`p_ex12_uncalled_main` are refused by name.  `p_ex12_class_body_effect`, `p_ex12_default_effect`,
+`p_ex12_decorator_effect` and `p_ex12_annotation_effect` show the same output on the base tree and
+are pre-existing, not changed here.  Final-state tests: test_ail_ex12, test_ail_python_syntax,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was
+run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
