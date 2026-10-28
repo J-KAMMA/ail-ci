@@ -2149,6 +2149,350 @@ def _check_class_attribute_assignment(tree):
                 _refuse_class_attr_target(target, aliases, containers)
 
 
+_CLASS_ANNOTATION_REFUSAL = (
+    'a class body annotation reads the class name %s before it is bound: '
+    'CPython evaluates the annotation and raises NameError')
+
+
+def _future_annotations(tree):
+    for item in tree.body:
+        if isinstance(item, ast.ImportFrom) and item.module == '__future__' \
+                and any(alias.name == 'annotations' for alias in item.names):
+            return True
+    return False
+
+
+def _class_body_annotations(node):
+    for stmt in node.body:
+        if isinstance(stmt, ast.AnnAssign):
+            yield stmt.annotation
+        elif isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = stmt.args
+            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+                if arg.annotation is not None:
+                    yield arg.annotation
+            for arg in (args.vararg, args.kwarg):
+                if arg is not None and arg.annotation is not None:
+                    yield arg.annotation
+            if stmt.returns is not None:
+                yield stmt.returns
+
+
+def _annotation_target_names(target):
+    if isinstance(target, ast.Name):
+        return {target.id}
+    names = set()
+    for child in ast.iter_child_nodes(target):
+        names |= _annotation_target_names(child)
+    return names
+
+
+def _annotation_callee_name(node):
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
+def _annotation_reads(annotation, name):
+    """The reads of ``name`` in ``annotation`` that run when the annotation is evaluated.
+
+    A lambda body and a generator-expression element are deferred: creating the object does not
+    read the name.  The body runs only when the lambda is called directly, and the element only
+    when a known consumer iterates the generator (or it is unpacked or iterated by a
+    comprehension).  Defaults and the first generator iterable are evaluated immediately.
+    """
+    reads = []
+    consumers = {
+        'add', 'all', 'any', 'append', 'bytearray', 'bytes', 'count', 'dict',
+        'difference_update', 'discard', 'enumerate', 'extend', 'filter', 'frozenset', 'insert',
+        'intersection_update', 'iter', 'join', 'list', 'map', 'max', 'min', 'next', 'remove',
+        'reversed', 'set', 'sorted', 'sum', 'symmetric_difference_update', 'tuple', 'update',
+        'zip',
+    }
+
+    def lambda_parts(node):
+        args = node.args
+        parameters = {arg.arg for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]}
+        for arg in (args.vararg, args.kwarg):
+            if arg is not None:
+                parameters.add(arg.arg)
+        defaults = [default for default in [*args.defaults, *args.kw_defaults]
+                    if default is not None]
+        return parameters, defaults
+
+    def visit_generators(generators, shadowed, eager):
+        # The first iterable is evaluated in the enclosing scope.  The remaining iterables,
+        # conditions and the element run inside the comprehension scope; for a bare generator
+        # expression they are deferred until something iterates it.
+        inner = shadowed
+        for index, generator in enumerate(generators):
+            if index == 0 or eager:
+                # An eagerly evaluated iterable is also iterated, so a generator expression
+                # used as one is consumed and its element runs.
+                if eager and isinstance(generator.iter, ast.GeneratorExp):
+                    visit_generator(generator.iter, inner)
+                else:
+                    visit(generator.iter, inner)
+            inner = inner or name in _annotation_target_names(generator.target)
+            if eager:
+                for condition in generator.ifs:
+                    visit(condition, inner)
+        return inner
+
+    def visit_generator(node, shadowed):
+        inner = visit_generators(node.generators, shadowed, True)
+        visit(node.elt, inner)
+
+    def visit(node, shadowed):
+        if isinstance(node, ast.Name):
+            if not shadowed and isinstance(node.ctx, ast.Load) and node.id == name:
+                reads.append(node)
+            return
+        if isinstance(node, ast.Lambda):
+            _, defaults = lambda_parts(node)
+            for default in defaults:
+                visit(default, shadowed)
+            return
+        if isinstance(node, ast.Call):
+            consumer = _annotation_callee_name(node.func) in consumers
+            if isinstance(node.func, ast.Lambda):
+                parameters, defaults = lambda_parts(node.func)
+                for default in defaults:
+                    visit(default, shadowed)
+                visit(node.func.body, shadowed or name in parameters)
+            else:
+                visit(node.func, shadowed)
+            for argument in node.args:
+                if consumer and isinstance(argument, ast.GeneratorExp):
+                    visit_generator(argument, shadowed)
+                else:
+                    visit(argument, shadowed)
+            for keyword in node.keywords:
+                if consumer and isinstance(keyword.value, ast.GeneratorExp):
+                    visit_generator(keyword.value, shadowed)
+                else:
+                    visit(keyword.value, shadowed)
+            return
+        if isinstance(node, ast.GeneratorExp):
+            visit_generators(node.generators, shadowed, False)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp)):
+            visit(node.elt, visit_generators(node.generators, shadowed, True))
+            return
+        if isinstance(node, ast.DictComp):
+            inner = visit_generators(node.generators, shadowed, True)
+            visit(node.key, inner)
+            visit(node.value, inner)
+            return
+        if isinstance(node, ast.Starred) and isinstance(node.value, ast.GeneratorExp):
+            visit_generator(node.value, shadowed)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, shadowed)
+
+    visit(annotation, False)
+    return reads
+
+
+def _constant_truth(node):
+    if isinstance(node, ast.Constant):
+        try:
+            return bool(node.value)
+        except Exception:
+            return None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not) \
+            and isinstance(node.operand, ast.Constant):
+        try:
+            return not bool(node.operand.value)
+        except Exception:
+            return None
+    return None
+
+
+def _binding_position(node):
+    return getattr(node, 'lineno', 0), getattr(node, 'col_offset', 0)
+
+
+def _constant_empty_iter(node):
+    """An iterable literal whose loop body never runs."""
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, (str, bytes)) and not node.value
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return not node.elts
+    if isinstance(node, ast.Dict):
+        return not node.keys
+    return False
+
+
+def _store_target_names(target):
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, (ast.Tuple, ast.List)):
+        names = set()
+        for element in target.elts:
+            names |= _store_target_names(element)
+        return names
+    if isinstance(target, ast.Starred):
+        return _store_target_names(target.value)
+    return set()
+
+
+def _scope_bindings(statements):
+    """Bindings a module or class body makes, without descending into nested scopes.
+
+    A binding inside a function or lambda is not visible in the class body, and one inside an
+    ``if False:`` body never runs, so neither hides the class name from an annotation.
+    """
+    bindings = []
+
+    def visit(node):
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Store):
+                bindings.append((node.id, _binding_position(node)))
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bindings.append((node.name, _binding_position(node)))
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)):
+            return
+        if isinstance(node, ast.AnnAssign):
+            if node.value is not None:
+                # The annotation runs before the value and the target store, so a target with
+                # the class name is not visible to a read in its own annotation.
+                end = (getattr(node, 'end_lineno', None) or node.lineno,
+                       getattr(node, 'end_col_offset', None) or node.col_offset)
+                for name in _store_target_names(node.target):
+                    bindings.append((name, end))
+            visit(node.annotation)
+            if node.value is not None:
+                visit(node.value)
+            return
+        if isinstance(node, ast.AugAssign):
+            visit(node.value)
+            return
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name != '*':
+                    bindings.append(((alias.asname or alias.name).split('.')[0],
+                                     _binding_position(node)))
+            return
+        if isinstance(node, ast.ExceptHandler):
+            if node.name:
+                bindings.append((node.name, _binding_position(node)))
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)):
+            if node.name:
+                bindings.append((node.name, _binding_position(node)))
+        elif isinstance(node, ast.MatchMapping):
+            if node.rest:
+                bindings.append((node.rest, _binding_position(node)))
+        elif isinstance(node, ast.If):
+            truth = _constant_truth(node.test)
+            if truth is not False:
+                for child in node.body:
+                    visit(child)
+            if truth is not True:
+                for child in node.orelse:
+                    visit(child)
+            visit(node.test)
+            return
+        elif isinstance(node, ast.While):
+            truth = _constant_truth(node.test)
+            if truth is not False:
+                for child in node.body:
+                    visit(child)
+            if truth is not True:
+                for child in node.orelse:
+                    visit(child)
+            visit(node.test)
+            return
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            visit(node.iter)
+            if not _constant_empty_iter(node.iter):
+                visit(node.target)
+                for child in node.body:
+                    visit(child)
+            for child in node.orelse:
+                visit(child)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    for statement in statements:
+        visit(statement)
+    return bindings
+
+
+def _node_parents(tree):
+    parents = {}
+    stack = [(tree, None)]
+    while stack:
+        node, parent = stack.pop()
+        parents[node] = parent
+        for child in ast.iter_child_nodes(node):
+            stack.append((child, node))
+    return parents
+
+
+def _class_visible_bindings(parents, node):
+    """Bindings in the scopes that enclose ``node`` and run before the class statement."""
+    position = _binding_position(node)
+    bindings = []
+    ancestor = parents.get(node)
+    while ancestor is not None:
+        if isinstance(ancestor, ast.Module):
+            bindings.extend(binding for binding in _scope_bindings(ancestor.body)
+                            if binding[1] < position)
+            break
+        if isinstance(ancestor, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            args = ancestor.args
+            for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs]:
+                bindings.append((arg.arg, (-1, -1)))
+            for arg in (args.vararg, args.kwarg):
+                if arg is not None:
+                    bindings.append((arg.arg, (-1, -1)))
+            bindings.extend(binding for binding in _scope_bindings(ancestor.body)
+                            if binding[1] < position)
+        ancestor = parents.get(ancestor)
+    return bindings
+
+
+def _check_class_body_annotations(tree):
+    """Refuse a class body annotation that reads the class name before it is bound, by name.
+
+    The general path does not read annotations, so ``class C: x: C = 1`` printed 1 where CPython
+    evaluates the annotation while the class body runs and raises NameError (the name is bound
+    only after the body).  Only a binding in the class body before the read, or in an enclosing
+    module/function scope before the class, keeps CPython's read; an unrelated function local or
+    a binding in a constant-false branch no longer hides the NameError.  A type parameter with
+    the class name, a comprehension target or lambda parameter inside the annotation, a string
+    annotation and ``from __future__ import annotations`` keep the program.
+    """
+    if _future_annotations(tree):
+        return
+    parents = _node_parents(tree)
+    for node in (item for item in ast.walk(tree) if isinstance(item, ast.ClassDef)):
+        name = node.name
+        if name in {parameter.name for parameter in getattr(node, 'type_params', ())}:
+            continue
+        visible = _class_visible_bindings(parents, node)
+        inside = _scope_bindings(node.body)
+        for annotation in _class_body_annotations(node):
+            for read in _annotation_reads(annotation, name):
+                position = _binding_position(read)
+                if any(bound == name for bound, _line in visible):
+                    continue
+                if any(bound == name and line < position for bound, line in inside):
+                    continue
+                error = ValueError(_CLASS_ANNOTATION_REFUSAL % name)
+                error.source_line = read.lineno
+                error.source_column = read.col_offset
+                raise error
+
+
 def _check_int64_abs_constants(tree, known):
     """Refuse a constant ``abs`` whose exact value int64 cannot hold, by name.
 
@@ -3760,6 +4104,11 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             imports = []
             declarations = {}
             locations = {}
+            if syntax == 'python':
+                try:
+                    _check_class_body_annotations(ast.parse(text, filename=str(path)))
+                except SyntaxError:
+                    pass
             if syntax == 'ail':
                 text = translate(text, module=module_only or not entry, imports=imports, declarations=declarations, source_map=locations)
             else:
