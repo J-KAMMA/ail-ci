@@ -3911,6 +3911,10 @@ class Compiler(boxclosure.ClosureMixin):
         body_order = []          # class dict order: ('p'/'m', name) or ('a', class_attrs index)
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
+                if item.name in ('__getattr__', '__getattribute__', '__setattr__', '__delattr__'):
+                    # attribute access hooks are not modelled: the plain lookup would silently skip them
+                    raise Unsupported('dunder method %s.%s: attribute access hooks are not built'
+                                      % (node.name, item.name))
                 mcname = 'pm_%s_%s' % (node.name, item.name)
                 setter = any(isinstance(d, ast.Attribute) and d.attr == 'setter' for d in item.decorator_list)
                 info = self._register_function(item, cname=mcname + ('__set' if setter else ''), is_method=True,
