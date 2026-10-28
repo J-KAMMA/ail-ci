@@ -1,3 +1,26 @@
+## 2026-10-28 -- pre421: list/tuple index errors name the key's class (job-pre421-10281638)
+
+The pre411 review listed as pre-existing that `Box(Bad())` as a list or tuple index said
+`not instance` where CPython says `not Box`.  The v2 general runtime's list/tuple getitem
+built the message from the value tag (`ail_type_name`); it now uses the existing
+object-to-name helper (`ail__tname_c`) and caps the class name at 200 characters, as
+CPython's type-error text does.  A list item store and deletion with the same key now also
+name the class; they previously omitted the `not ...` part.  The other three recorded
+items (enum member `.value`, slice bounds and bytes/bytearray subscription through
+`__index__`) are separate causes and were left unchanged.
+
+Added `AIL_CURRENT/test_ail_pre421.py` (1 test, 4 programs, both builds) and registered it
+in `ail_check.MODULES` and `tools/ci_shards.json`.  Probes in `/tmp/probes/pre421` on both
+builds via `cmp.sh`: `p2_a` (list/tuple through a constructor argument), `p2_c` (through a
+function value), `p2_routes` (subclass, alias, argument, list item, attribute, dict value,
+direct read), `p2_alias` (alias/attribute/list/dict routes and tuple), `p2_long2`
+(210-character class name, capped at 200), `p2_builtins` (float/str/None/list/dict/tuple/
+bytes/function keys and an empty list) and `p2_setdel` (list store and deletion) all match
+CPython.  `p2_b` (`Box.__index__` returning a non-int) still differs and is a separate
+pre-existing cause, not changed here.  Final-state tests: test_ail_pre421,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py`
+was run and `--check` passes.
+
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 
 The pre380 review recorded, as pre-existing before that job, that `compscope` renamed a
