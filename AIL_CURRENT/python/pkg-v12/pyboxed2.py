@@ -2536,14 +2536,24 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        parents = {}
+        for par in ast.walk(tree):
+            for child in ast.iter_child_nodes(par):
+                parents[child] = par
+        bound = _bound_names(tree)
+        safe_calls = frozenset(n for n in _NESTED_GENEXP_EAGER_CALLS if not bound.get(n))
         for gen in ast.walk(tree):
-            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
-                refusal = Unsupported(
-                    'a generator expression nested inside another generator expression '
-                    '(the inner one would be materialised eagerly, not lazily)')
-                refusal.source_line = getattr(gen, 'lineno', None)
-                raise refusal
+            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs:
+                nested = [n for n in ast.walk(gen)
+                          if n is not gen and isinstance(n, ast.GeneratorExp)]
+                if nested and (not _nested_genexp_materialised_safely(gen, parents, safe_calls)
+                               or not all(_nested_genexp_materialised_safely(n, parents, safe_calls)
+                                          for n in nested)):
+                    refusal = Unsupported(
+                        'a generator expression nested inside another generator expression '
+                        '(the inner one would be materialised eagerly, not lazily)')
+                    refusal.source_line = getattr(gen, 'lineno', None)
+                    raise refusal
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
@@ -6495,9 +6505,16 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
-            raise Unsupported('a generator expression nested inside another generator expression '
-                              '(the inner one would be materialised eagerly, not lazily)')
+        nested = [n for n in ast.walk(node)
+                  if n is not node and isinstance(n, ast.GeneratorExp)]
+        if nested:
+            parents = {}
+            for par in ast.walk(node):
+                for child in ast.iter_child_nodes(par):
+                    parents[child] = par
+            if not all(_nested_genexp_materialised_safely(n, parents) for n in nested):
+                raise Unsupported('a generator expression nested inside another generator expression '
+                                  '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
@@ -12468,6 +12485,41 @@ def _genexp_consumed_in_place(node, parents):
         if isinstance(f, ast.Name) and f.id in _GENEXP_EAGER_CALLS:
             return True
         if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
+            return True
+    return False
+
+
+_NESTED_GENEXP_EAGER_CALLS = frozenset({
+    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max',
+    'bytes', 'bytearray', 'Counter', 'array',
+})
+
+
+def _nested_genexp_materialised_safely(node, parents, safe_calls=frozenset(_NESTED_GENEXP_EAGER_CALLS)):
+    """True when a nested generator expression is read to exhaustion at the point it is
+    created, so materialising it there is observationally the same as CPython's lazy
+    generator.  `any`/`all`/`next` are excluded: they may stop before the last element,
+    so an eager inner generator could raise or run a side effect CPython never reaches.
+    `safe_calls` leaves out a builtin the program rebinds, and a `.join` is trusted only
+    on a string literal receiver (a user class may define its own lazy join)."""
+    par = parents.get(node)
+    if isinstance(par, (ast.For, ast.AsyncFor)) and par.iter is node:
+        return True
+    if isinstance(par, ast.comprehension) and par.iter is node:
+        return True
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, (ast.Assign, ast.AnnAssign)):
+        target = (par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1
+                  else getattr(par, 'target', None))
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return True
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in safe_calls:
+            return True
+        if (isinstance(f, ast.Attribute) and f.attr == 'join'
+                and isinstance(f.value, ast.Constant) and isinstance(f.value.value, str)):
             return True
     return False
 

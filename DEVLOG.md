@@ -1,3 +1,23 @@
+## 2026-10-28 -- cov21: nested generator expressions consumed in place (job-cov21-10290431)
+
+Profiled all 219 programs in `lab/corpus/programs` on both builds (default and
+`AIL_UNIFIED_FORCE=1`): 24 compile-time refusals each before, 21 each after.  The most frequent
+non-import construct was a generator expression nested inside another generator expression (3
+programs: deepseek t172/t432, glm t432).  The general path (`pyboxed2.py`) now allows the nesting
+when the inner generator is read to exhaustion at the point it is created -- an argument of
+sum/min/max/list/tuple/set/dict/sorted/join/extend/update, a comprehension source, or an unpack
+target.  The outer generator must itself be consumed in place as well, and a builtin the
+program rebinds (or a user class's `join` method) is not trusted.  Materialising it there is
+observationally the same as CPython's lazy generator; an `any`/`all`/`next` consumer and an
+inner generator saved as a value stay refused by name.
+All three programs print what CPython 3.12 prints on their three corpus inputs, both builds.
+Added `test_ail_cov21.py` (5 programs, both builds, plus the saved-inner refusal) and registered
+it in `ail_check.MODULES`.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `nested_sum.py`, `nested_join.py`,
+`nested_empty.py`, `nested_types.py`, `nested_sources.py`, `nested_flat.py` all match CPython;
+`nested_refuse.py` is refused by name (nested generator expression).
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
