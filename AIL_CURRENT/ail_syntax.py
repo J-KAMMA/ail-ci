@@ -9,6 +9,7 @@ import math
 import operator
 from pathlib import Path
 import re
+import struct as _py_struct
 import sys
 import token
 import tokenize
@@ -1396,6 +1397,80 @@ _MATH_HELPERS['tw_dedent'] = (
     '            out.append(line[len(margin):])\n'
     '    return "\\n".join(out)\n')
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',)}
+_MATH_HELPERS['struct'] = (
+    'def _ail_struct_pack(fields, values, little: bool) -> bytes:\n'
+    '    need = 0\n'
+    '    for field in fields:\n'
+    '        if field[0] != "x":\n'
+    '            need += field[1]\n'
+    '    if len(values) != need:\n'
+    '        raise ValueError("pack expected " + str(need) + " items for packing (got " + str(len(values)) + ")")\n'
+    '    out = b""\n'
+    '    index = 0\n'
+    '    for field in fields:\n'
+    '        code = field[0]\n'
+    '        count = field[1]\n'
+    '        width = field[2]\n'
+    '        signed = field[3] != 0\n'
+    '        if code == "x":\n'
+    '            out = out + b"\\x00" * (count * width)\n'
+    '            continue\n'
+    '        for k in range(count):\n'
+    '            value = values[index]\n'
+    '            index += 1\n'
+    '            if not isinstance(value, int):\n'
+    '                raise ValueError("required argument is not an integer")\n'
+    '            if code == "B" and (value < 0 or value > 255):\n'
+    '                raise ValueError("\'B\' format requires 0 <= number <= 255")\n'
+    '            if code == "b" and (value < -128 or value > 127):\n'
+    '                raise ValueError("\'b\' format requires -128 <= number <= 127")\n'
+    '            if code == "H" and (value < 0 or value > 65535):\n'
+    '                raise ValueError("\'H\' format requires 0 <= number <= 65535")\n'
+    '            if code == "h" and (value < -32768 or value > 32767):\n'
+    '                raise ValueError("\'h\' format requires -32768 <= number <= 32767")\n'
+    '            if code == "I" and (value < 0 or value > 4294967295):\n'
+    '                raise ValueError("\'I\' format requires 0 <= number <= 4294967295")\n'
+    '            if code == "i" and (value < -2147483648 or value > 2147483647):\n'
+    '                raise ValueError("\'i\' format requires -2147483648 <= number <= 2147483647")\n'
+    '            if code == "L" and (value < 0 or value > 4294967295):\n'
+    '                raise ValueError("\'L\' format requires 0 <= number <= 4294967295")\n'
+    '            if code == "l" and (value < -2147483648 or value > 2147483647):\n'
+    '                raise ValueError("\'l\' format requires -2147483648 <= number <= 2147483647")\n'
+    '            if code == "Q" and (value < 0 or value > 18446744073709551615):\n'
+    '                raise ValueError("\'Q\' format requires 0 <= number <= 18446744073709551615")\n'
+    '            if code == "q" and (value < -9223372036854775808 or value > 9223372036854775807):\n'
+    '                raise ValueError("\'q\' format requires -9223372036854775808 <= number <= 9223372036854775807")\n'
+    '            if little:\n'
+    '                out = out + value.to_bytes(width, "little", signed=signed)\n'
+    '            else:\n'
+    '                out = out + value.to_bytes(width, "big", signed=signed)\n'
+    '    return out\n'
+    '\n'
+    '\n'
+    'def _ail_struct_unpack(fields, raw: bytes, little: bool) -> list:\n'
+    '    size = 0\n'
+    '    for field in fields:\n'
+    '        size += field[1] * field[2]\n'
+    '    if len(raw) != size:\n'
+    '        raise ValueError("unpack requires a buffer of " + str(size) + " bytes")\n'
+    '    out = []\n'
+    '    offset = 0\n'
+    '    for field in fields:\n'
+    '        code = field[0]\n'
+    '        count = field[1]\n'
+    '        width = field[2]\n'
+    '        signed = field[3] != 0\n'
+    '        if code == "x":\n'
+    '            offset += count * width\n'
+    '            continue\n'
+    '        for k in range(count):\n'
+    '            if little:\n'
+    '                value = int.from_bytes(raw[offset:offset + width], "little", signed=signed)\n'
+    '            else:\n'
+    '                value = int.from_bytes(raw[offset:offset + width], "big", signed=signed)\n'
+    '            out.append(value)\n'
+    '            offset += width\n'
+    '    return out\n')
 import string as _string_module
 
 _STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
@@ -1411,7 +1486,53 @@ _OPERATOR_BINARY = {'add': ast.Add, 'sub': ast.Sub, 'mul': ast.Mult, 'truediv': 
                     'or_': ast.BitOr, 'xor': ast.BitXor, 'lshift': ast.LShift, 'rshift': ast.RShift}
 _OPERATOR_COMPARE = {'lt': ast.Lt, 'le': ast.LtE, 'gt': ast.Gt, 'ge': ast.GtE, 'eq': ast.Eq, 'ne': ast.NotEq}
 _OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv': ast.Invert}
+_STRUCT_CODES = {'B': (1, 0), 'b': (1, 1), 'H': (2, 0), 'h': (2, 1), 'I': (4, 0), 'i': (4, 1),
+                 'L': (4, 0), 'l': (4, 1), 'Q': (8, 0), 'q': (8, 1)}
+_STRUCT_NOTE = ('struct.pack(), unpack() and calcsize() are built for a string-literal format with an explicit '
+                'byte-order prefix (<, >, ! or =) and the integer codes b B h H i I l L q Q and x, with repeat '
+                'counts; floats, s, p, c, ?, @ and native layouts are not built')
+
+
+def _struct_format(fmt):
+    """The fields and byte size of a struct format in the built subset; ValueError names the part not built."""
+    if not fmt:
+        raise ValueError('the format needs an explicit byte-order prefix (<, >, ! or =)')
+    prefix = fmt[0]
+    if prefix not in '<>!=':
+        raise ValueError('the format needs an explicit byte-order prefix (<, >, ! or =); native and @ layouts '
+                         'are not built')
+    little = prefix == '<' or (prefix == '=' and sys.byteorder == 'little')
+    fields = []
+    size = 0
+    rest = fmt[1:]
+    index = 0
+    while index < len(rest):
+        char = rest[index]
+        if char.isspace():
+            index += 1
+            continue
+        start = index
+        while index < len(rest) and rest[index].isdigit():
+            index += 1
+        count = int(rest[start:index]) if index > start else 1
+        if index == len(rest):
+            raise ValueError('a repeat count must be followed by a format character')
+        code = rest[index]
+        index += 1
+        if code == 'x':
+            fields.append(('x', count, 1, 0))
+            size += count
+        elif code in _STRUCT_CODES:
+            width, signed = _STRUCT_CODES[code]
+            fields.append((code, count, width, signed))
+            size += count * width
+        elif code in 'efdspc?':
+            raise ValueError("'%s' is not built; only integer fields and x are" % code)
+        else:
+            raise ValueError("bad char %r in struct format" % code)
+    return little, fields, size
 _SMALL_MODULES = {
+    'struct': (*('pack', 'unpack', 'calcsize', 'error'),),
     'textwrap': ('wrap', 'fill', 'dedent'),
     'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
     'string': tuple(_STRING_CONSTANTS),
@@ -1429,9 +1550,10 @@ _SMALL_NOTE = {
     'os': 'os.cpu_count() is built; the rest of os (environ, path, ...) is not',
     'operator': 'operator.add/sub/mul/truediv/floordiv/mod/pow/and_/or_/xor/lshift/rshift, the comparisons, '
                 'neg/pos/invert/not_/abs/getitem called directly, and itemgetter(k) as a key= are built',
+    'struct': _STRUCT_NOTE,
 }
 _TYPING = {'List': 'list', 'Dict': 'dict', 'Set': 'set', 'Tuple': 'tuple', 'FrozenSet': 'frozenset'}
-_DROPPED = ('heapq', 'bisect', 'textwrap', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator', 're')
+_DROPPED = ('heapq', 'bisect', 'textwrap', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator', 're', 'struct')
 _STDOUT_STATEMENTS = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdout.flush',
                       'sys.stdout.buffer.flush', 'sys.setrecursionlimit')
 _ALIASABLE = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdin.readline',
@@ -1911,6 +2033,8 @@ class _Surface:
         elif module in _SMALL_MODULES and name:
             if module == 'string' and name in _STRING_CONSTANTS:
                 return ast.Constant(value=_STRING_CONSTANTS[name])
+            if module == 'struct' and name == 'error':
+                return ast.Name(id='ValueError', ctx=ast.Load())
             self.keep.add(module)
             self.note(node, f'{path} used as a value is not built; ' + _SMALL_NOTE[module])
         elif path == 'sys.maxsize':
@@ -2389,6 +2513,45 @@ class _Surface:
         plain = not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args)
         if plain and module == 'time' and name in _TIME_CLOCKS and not args:
             return ast.Call(func=ast.Name(id=_TIME_CLOCKS[name], ctx=ast.Load()), args=[], keywords=[])
+        if module == 'struct' and name in ('pack', 'unpack', 'calcsize'):
+            if not plain or not args:
+                self.keep.add(module)
+                self.note(node, f'struct.{name}() with these arguments is not built; ' + _STRUCT_NOTE)
+                return None
+            fmt = args[0]
+            if not (isinstance(fmt, ast.Constant) and isinstance(fmt.value, str)):
+                self.keep.add(module)
+                self.note(node, f'struct.{name}() needs a string-literal format; ' + _STRUCT_NOTE)
+                return None
+            try:
+                little, fields, size = _struct_format(fmt.value)
+            except ValueError as error:
+                self.keep.add(module)
+                self.note(node, f'struct.{name}() with format {fmt.value!r}: {error}')
+                return None
+            if name == 'calcsize':
+                if len(args) != 1:
+                    self.keep.add(module)
+                    self.note(node, f'struct.calcsize() takes one format argument; ' + _STRUCT_NOTE)
+                    return None
+                return ast.Constant(value=size)
+            if name == 'pack' and len(args) < 1 or name == 'unpack' and len(args) != 2:
+                self.keep.add(module)
+                self.note(node, f'struct.{name}() with these arguments is not built; ' + _STRUCT_NOTE)
+                return None
+            if 'struct' not in self.helpers:
+                self.helpers.append('struct')
+            descriptor = ast.List(elts=[
+                ast.Tuple(elts=[ast.Constant(value=code), ast.Constant(value=count),
+                                ast.Constant(value=width), ast.Constant(value=signed)], ctx=ast.Load())
+                for code, count, width, signed in fields], ctx=ast.Load())
+            if name == 'pack':
+                return ast.Call(func=ast.Name(id='_ail_struct_pack', ctx=ast.Load()),
+                                args=[descriptor, ast.List(elts=args[1:], ctx=ast.Load()),
+                                      ast.Constant(value=little)], keywords=[])
+            return ast.Call(func=ast.Name(id='tuple', ctx=ast.Load()), args=[
+                ast.Call(func=ast.Name(id='_ail_struct_unpack', ctx=ast.Load()),
+                         args=[descriptor, args[1], ast.Constant(value=little)], keywords=[])], keywords=[])
         if module == 'textwrap' and name in ('wrap', 'fill', 'dedent') and not any(
                 isinstance(arg, ast.Starred) for arg in args):
             if name == 'dedent' and len(args) == 1 and not node.keywords:

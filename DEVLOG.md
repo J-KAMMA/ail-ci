@@ -1,3 +1,27 @@
+## 2026-10-28 -- stdlib15: `struct.pack` / `unpack` / `calcsize` for integer layouts (job-stdlib15-10290429)
+
+`struct` was the next most-imported module still refused: 2 programs in `lab/corpus/programs`
+and 4 files in `AIL_CURRENT/language_examples` import it (after the modules of batches 1/3/4/5,
+heapq/bisect, pathlib and the crypto modules).  The Python surface now lowers `struct.pack()`,
+`struct.unpack()` and `struct.calcsize()` for a string-literal format with an explicit
+byte-order prefix (`<`, `>`, `!`, `=`), the integer codes `b B h H i I l L q Q`, `x` and
+repeat counts.  Sizes, byte order, zero counts, an empty format, the `bytes` result of `pack`
+and the `tuple` result of `unpack` match CPython 3.12; so do the count mismatch, range and
+buffer-length messages (`struct.error` is spelt `ValueError` in an `except` clause, the same
+mapping csv.Error uses, so only that exception's type name differs).  Floats, `s/p/c/?`,
+pointer/size codes, `@`/native layouts, `unpack_from`/`pack_into`/`iter_unpack`, a format that
+is not a string literal, starred/keyword arguments and a function used as a value stay named
+compile-time refusals.
+
+Probes in `/tmp/probes/stdlib15` on both builds via `cmp.sh`: `p_basic` (all ten integer codes,
+both byte orders, `=`, `!`, repeat counts, `x`, empty/zero formats, `bytes`/`bytearray` input,
+values through an argument, a list item, an alias, an attribute and a dict value),
+`p_errors` (20 count/range/buffer/type errors with CPython's text), `p_roundtrip`,
+`p_from_import`, and the refusals `p_refuse_dynamic`, `p_refuse_float`, `p_refuse_native`,
+`p_refuse_unpack_from` (each refused by name).  `p_type_name` matches CPython except the
+declared `struct.error` -> `ValueError` type name.  Added `test_ail_stdlib15.py` (5 tests, the
+general path and AIL_IR=0/1) and registered it in `ail_check.MODULES`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
