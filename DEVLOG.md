@@ -1,3 +1,29 @@
+## 2026-10-28 -- pre398: a class body's indirect self-read through a function is refused (job-pre398-10281024)
+
+The first pre-existing item in the pre382 review was an indirect class-body self-read: a module
+function that returns the class being defined, called as a class-attribute value
+(`def get(): return C` / `class C: x = get()`), returned the class object on both builds where
+CPython raises `NameError` because the class name is not bound until its body has finished.
+The pre-typed front end (`pyc._refuse_class_body_indirect_self_read`) now refuses that construct
+by name at compile time on both builds, following a chain of module-function calls and any
+expression in the class body (a list item, a dict value, a tuple item, a nested argument). It
+does not fire for a function that reads another class, a parameter/local named like the class,
+or a reader alias called only after the body; those match CPython, as do plain functions and
+argument-valued attributes. The direct reads are pre382's feature and the other pre382 items
+(a saved generator expression consumed inside its class body, class-body expression statements)
+are unchanged.
+
+Probes in `/tmp/probes/pre398` on both builds via `cmp.sh`: the six refusal programs (`q1_indirect`,
+`q1_list`, `q1_dict`, `q1_nested_arg`, `q1_wrapper`, plus the same direct spelling) are refused
+by name on both builds; `m1_plain`, `m3_param_shadow`, `m5_after`, `m6_other_class`,
+`m7_local_c`, `m9_reader_not_called` match CPython. `q2_exprstmt`, `q3_savedgen`, `q3b_savedgen_next`,
+`q4_direct`, `m4_class_shadow` and `m8_deferred_lambda_attr` still differ exactly as before the
+change (pre-existing / pre382 items, not touched here).
+
+Added `AIL_CURRENT/test_ail_pre398.py` and registered it in `ail_check.MODULES` and
+`tools/ci_shards.json`. Final-state tests: test_ail_pre398, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (4 modules, 0 failed). `tools/update_manifest.py` was run and `--check`
+passes.
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:

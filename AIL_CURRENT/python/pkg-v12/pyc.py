@@ -740,6 +740,99 @@ def _refuse_round_at_int64_boundary(source):
             raise refusal
 
 
+def _class_body_own_nodes(value):
+    """The nodes a class-attribute value evaluates now: lambdas/defs/comprehension bodies are deferred."""
+    stack = [value]
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                             ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _function_own_nodes(fn):
+    stack = list(fn.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
+
+
+def _function_reads_class(fn, cname, functions, seen):
+    """True when `fn` (or a module function it calls) reads the class name `cname`."""
+    if id(fn) in seen:
+        return False
+    seen.add(id(fn))
+    args = list(fn.args.posonlyargs) + list(fn.args.args) + list(fn.args.kwonlyargs)
+    bound = {a.arg for a in args}
+    if fn.args.vararg:
+        bound.add(fn.args.vararg.arg)
+    if fn.args.kwarg:
+        bound.add(fn.args.kwarg.arg)
+    nodes = list(_function_own_nodes(fn))
+    for node in nodes:
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+            bound.add(node.id)
+    if cname in bound:
+        return False
+    if any(isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id == cname
+           for node in nodes):
+        return True
+    for node in nodes:
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id not in bound and node.func.id in functions):
+            if _function_reads_class(functions[node.func.id], cname, functions, seen):
+                return True
+    return False
+
+
+def _refuse_class_body_indirect_self_read(source):
+    """Refuse a class-attribute value that calls a module function reading the class being defined.
+
+    CPython binds a class name only after its body has run, so `def get(): return C` called as a
+    class-attribute value raises `NameError`; AIL's pre-created class object made it return the
+    class.  The direct spellings are the pre382 feature; this indirect function route is refused
+    by name instead of silently returning the class.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return
+    functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
+    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+        bound = set()
+        for item in cls.body:
+            if isinstance(item, ast.FunctionDef):
+                bound.add(item.name)
+                continue
+            if isinstance(item, ast.Assign):
+                value = item.value
+                targets = item.targets
+            elif isinstance(item, ast.AnnAssign) and item.value is not None:
+                value = item.value
+                targets = [item.target]
+            else:
+                continue
+            for node in _class_body_own_nodes(value):
+                if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+                    continue
+                fn = functions.get(node.func.id)
+                if fn is not None and node.func.id not in bound and _function_reads_class(fn, cls.name, functions, set()):
+                    refusal = Unsupported(
+                        'a class attribute value in %s calls %s(), which reads the class name %s '
+                        'while the class body is running; CPython raises NameError because %s is '
+                        'not bound yet' % (cls.name, node.func.id, cls.name, cls.name))
+                    refusal.source_line = getattr(node, 'lineno', None)
+                    raise refusal
+            for target in targets:
+                if isinstance(target, ast.Name):
+                    bound.add(target.id)
+
+
 def _source_line_marker(line):
     """`ail-source-line: N` on its own stderr line, for ail_chatgpt.py to turn into file:line:col.
     Printed only when it asks for it (AIL_REPORT_SOURCE_LINE=1); it removes the line from the text."""
@@ -783,6 +876,7 @@ def build(source, out, strict=True, report=None, force_general=False):
     # either path sees it, so the general path's name-keyed dispatch honours it too (shadowing.py).
     source, shadow = shadowing.rename_all(source, Unsupported)
     _refuse_round_at_int64_boundary(source)
+    _refuse_class_body_indirect_self_read(source)
     try:
         result = _build_unshadowed(source, out, strict, report, force_general)
         if last_fallback_reason is not None and shadow:
