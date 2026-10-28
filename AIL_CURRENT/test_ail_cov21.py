@@ -1,6 +1,7 @@
 """Branch cov21: a generator expression nested inside another generator expression, when the
-inner one is read to exhaustion at the point it is created (an argument of sum/min/max/join/...,
-a comprehension source, or an unpack target).
+inner one is read to exhaustion at the point it is created (the sole argument of
+sum/min/max/list/tuple/sorted, a comprehension source, a starred unpack, or `.join` on a string
+literal).
 
 The general path used to refuse every nested generator expression because it materialises
 generators eagerly.  For an outer and inner generator that those consumers read completely
@@ -9,8 +10,10 @@ generator.
 
 * PROGRAMS are compiled with AIL_UNIFIED_FORCE=1 (the general path) and on the default build,
   and must print what CPython 3.12 prints;
-* an inner generator whose elements are saved (not consumed at creation) is still refused by
-  name: `g = ((y for y in row) for row in rows)`.
+* contexts that do not exhaust the generator at creation stay refused by name: a `for` loop
+  (which can break), a tuple/list unpack target (which pulls len(target)+1 elements), a
+  generator saved as a value, a consumer with another argument or keyword (evaluated before
+  the generator in CPython), and an incrementally validating consumer such as `dict`.
 """
 import os
 import subprocess
@@ -114,10 +117,45 @@ class Refused(unittest.TestCase):
             self.assertNotEqual(built.returncode, 0)
             self.assertIn(word, built.stdout + built.stderr)
 
+    def both(self, text):
+        word = "nested inside another generator expression"
+        self.refused(text, word, AIL_UNIFIED_FORCE="1")
+        self.refused(text, word)
+
     def test_saved_inner_generator(self):
-        text = "rows = [[1, 2], [3]]\ng = ((y for y in row) for row in rows)\nprint(list(list(x) for x in g))\n"
-        self.refused(text, "nested inside another generator expression", AIL_UNIFIED_FORCE="1")
-        self.refused(text, "nested inside another generator expression")
+        self.both("rows = [[1, 2], [3]]\ng = ((y for y in row) for row in rows)\nprint(list(list(x) for x in g))\n")
+
+    def test_for_break_is_not_exhaustion(self):
+        self.both("rows = [[1], [2], [3]]\n"
+                  "def bad(x):\n"
+                  "    if x == 3:\n"
+                  "        raise RuntimeError('boom')\n"
+                  "    return x\n"
+                  "for r in (sum(bad(v) for v in row) for row in rows):\n"
+                  "    print(r)\n"
+                  "    break\n"
+                  "print('done')\n")
+
+    def test_sibling_arguments_are_evaluated_first(self):
+        self.both("rows = [[1], [2]]\n"
+                  "def bump():\n"
+                  "    rows.append([100])\n"
+                  "    return 0\n"
+                  "print(sum((sum(v for v in row) for row in rows), bump()))\n")
+        self.both("rows = [[1], [2]]\n"
+                  "print(sorted((sum(v for v in row) for row in rows), key=len))\n")
+
+    def test_unpack_target_is_not_exhaustion(self):
+        self.both("rows = [[1], [2], [3], [4]]\n"
+                  "def bad(x):\n"
+                  "    if x == 4:\n"
+                  "        raise RuntimeError('boom')\n"
+                  "    return x\n"
+                  "a, b = (sum(bad(v) for v in row) for row in rows)\n")
+
+    def test_incremental_consumer(self):
+        self.both("rows = [[1], [2, 'a']]\n"
+                  "print(dict((sum(v for v in row) for row in rows)))\n")
 
 
 if __name__ == "__main__":

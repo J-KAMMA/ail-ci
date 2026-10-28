@@ -12490,8 +12490,7 @@ def _genexp_consumed_in_place(node, parents):
 
 
 _NESTED_GENEXP_EAGER_CALLS = frozenset({
-    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max',
-    'bytes', 'bytearray', 'Counter', 'array',
+    'list', 'tuple', 'sorted', 'sum', 'min', 'max',
 })
 
 
@@ -12500,21 +12499,20 @@ def _nested_genexp_materialised_safely(node, parents, safe_calls=frozenset(_NEST
     created, so materialising it there is observationally the same as CPython's lazy
     generator.  `any`/`all`/`next` are excluded: they may stop before the last element,
     so an eager inner generator could raise or run a side effect CPython never reaches.
-    `safe_calls` leaves out a builtin the program rebinds, and a `.join` is trusted only
-    on a string literal receiver (a user class may define its own lazy join)."""
+    A `for` target is excluded too: the loop can `break` after the first element.  A
+    tuple/list unpack target only pulls `len(target) + 1` elements.  A call qualifies
+    only when the generator is its sole positional argument and it has no keyword
+    arguments: CPython evaluates the other arguments before consuming the generator,
+    and consumers that validate element by element (`dict`, `set`, ...) can fail before
+    the eager materialisation would have created the later elements.  `safe_calls`
+    leaves out a builtin the program rebinds, and a `.join` is trusted only on a string
+    literal receiver (a user class may define its own lazy join)."""
     par = parents.get(node)
-    if isinstance(par, (ast.For, ast.AsyncFor)) and par.iter is node:
-        return True
     if isinstance(par, ast.comprehension) and par.iter is node:
         return True
     if isinstance(par, ast.Starred):
         return True
-    if isinstance(par, (ast.Assign, ast.AnnAssign)):
-        target = (par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1
-                  else getattr(par, 'target', None))
-        if isinstance(target, (ast.Tuple, ast.List)):
-            return True
-    if isinstance(par, ast.Call) and node in par.args:
+    if isinstance(par, ast.Call) and node in par.args and len(par.args) == 1 and not par.keywords:
         f = par.func
         if isinstance(f, ast.Name) and f.id in safe_calls:
             return True

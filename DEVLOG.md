@@ -1,3 +1,24 @@
+## 2026-10-28 -- cov21 review: only exhaustion contexts, not loops/unpack/dict (job-cov21-10290431)
+
+Fixed the four defects the review found in the nested-generator support. `_nested_genexp_materialised_safely`
+no longer trusts a `for`/`async for` iterable (the loop can `break`), a tuple/list unpack target
+(CPython pulls only `len(target)+1` elements), or a call with another positional argument or any
+keyword (those are evaluated before the generator is consumed). Calls now qualify only when the
+generator is the sole positional argument, and `dict`/`set`/`frozenset`/`bytes`/`bytearray`/`Counter`/
+`array` were removed from the trusted set because they validate elements incrementally and can fail
+before CPython would ever create the later inner generators. `list`/`tuple`/`sorted`/`sum`/`min`/`max`
+with one argument, a comprehension source, a starred unpack and `.join` on a string literal stay
+accepted. Added regression cases to `test_ail_cov21.py` for the loop-break, sibling-argument,
+sorted-key, unpack and `dict` refusals.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `nested_sum`, `nested_join`, `nested_sources`,
+`nested_flat`, `nested_types`, `nested_empty`, `nested_star`, `nested_consume` match CPython;
+`nested_shadow`, `nested_custom_join`, `nested_refuse`, `nested_sortedkey`, `nested_dict`,
+`nested_unpack2`, `nested_order`, `nested_forbreak`, `nested_next` are refused by name on both builds.
+The three corpus programs that used the construct (deepseek t172/t432, glm t432) still compile on both
+builds and match CPython on all three inputs; only those three programs contain a nested generator
+expression, so the corpus refusal count stays 24 -> 21 on each build.
+
 ## 2026-10-28 -- cov21: nested generator expressions consumed in place (job-cov21-10290431)
 
 Profiled all 219 programs in `lab/corpus/programs` on both builds (default and
