@@ -12140,7 +12140,7 @@ class Compiler(boxclosure.ClosureMixin):
                     ctx.uses_st = True
                     return
                 raise Unsupported('raising %s (only builtin or user Exception subclasses)' % tname)
-            if tname in EXC_IDS and self.reads_args and exc.args:
+            if tname in EXC_IDS and (self.reads_args or tname == 'KeyError') and exc.args:
                 # the value keeps the argument for e.args (KeyError('k').args is ('k',), not its message)
                 self.rt_needs.add('exc')
                 arr = ctx.new_cvar('ea')
