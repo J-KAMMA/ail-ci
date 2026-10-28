@@ -1,3 +1,29 @@
+## 2026-10-28 -- stdlib17: `argparse.ArgumentParser` (job-stdlib17-10290432)
+
+Added the next still-refused standard-library module, `argparse`, lowered by `python/pkg-v12/arglib.py`
+onto `prelude_argparse.py`.  Supported: `ArgumentParser(prog=..., description=..., add_help=...,
+allow_abbrev=...)`; `add_argument` with literal names, `action="store"`, no `nargs`/`const`, `type` in
+str / int / float / bool / pathlib.Path, `default`, `required`, `choices`, `help`, `metavar` and
+`dest`; `parse_args()` with no arguments or one sequence.  The parser matches CPython 3.12 for short
+and long options, `--name=value`, unique long-option abbreviations, attached short values, negative
+numbers when no negative option is defined, negative option names, `--`, repeated options, defaults,
+required arguments, choices, conversion and usage errors (exit status 2), help text and a Namespace
+whose repr, equality and `vars()` agree.  Everything else is refused by name: `action`, `nargs`,
+`const`, unknown types, the action returned by `add_argument`, mixed positional/option names, unknown
+Namespace destinations, `getattr`/`setattr`, other parser methods and other `argparse` names.
+`type=Path` uses the existing pathlib `_AilPath` (its class name and repr are pathlib's existing
+representation).  `test_ail_stdlib17.py` compares stdout, stderr and status with CPython under
+`AIL_IR=0` and `AIL_IR=1`, and checks the refusal cases.
+
+Probes in `/tmp/probes/argparse` on both `cmp.sh` builds: `p_basic` (defaults and conversions),
+`p_path` / `p_path_vars` (Path default and `vars`, the latter refused), `p_choices`, `p_help` (long
+wrapped help), `p_neg_opts` (negative option names and values), `p_option_value` / `p_dash` /
+`p_short_eq` (`--`, attached short values, `-b=val`), `p_positions`, `p_default_dest`, `p_abbrev`,
+`p_abbrev2`, `p_ns_use` (repr/equality/`vars`), `p_parser_alias`, and the `p_err_*` error paths all
+match CPython or have the same exit status and diagnostic; `p_addret`, `p_mixed_names`, `p_ns_refuse`
+and the `getattr` case are refused by name.  The new module and the existing `test_ail_check`,
+`test_ail_python_syntax`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

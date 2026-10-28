@@ -168,6 +168,17 @@ def _threadlib():
     return _threadlib.module
 
 
+def _arglib():
+    """python/pkg-v12/arglib.py (argparse.ArgumentParser, lowered onto prelude_argparse.py)."""
+    if not hasattr(_arglib, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import arglib
+        _arglib.module = arglib
+    return _arglib.module
+
+
 def _stdlib5():
     """python/pkg-v12/stdlib5.py (library batch 5: fractions, enum, namedtuple, random.Random, ... lowered first)."""
     if not hasattr(_stdlib5, "module"):
@@ -3405,6 +3416,8 @@ def python_surface(source, notes=None, library=False):
         source = typedpar.rewrite_text(source, notes)
     if any(name in source for name in ("threading", "queue", "concurrent")):
         source = _threadlib().rewrite_text(source, notes)
+    if "argparse" in source:
+        source = _arglib().rewrite_text(source, notes)
     if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
                                        "abc", "array", "Random", "string", "io", "statistics")):
         source = _stdlib5().rewrite_text(source, notes)
