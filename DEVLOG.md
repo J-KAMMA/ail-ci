@@ -10,12 +10,12 @@ alias (`a = c.v; a[0] = 1.5`), a tuple target (`c.v[0], x = 1.5, 0`), a nested s
 aliases in source order, and applies or invalidates stores through names, nested subscripts,
 tuple/list targets, augmented stores, container methods and slices.  A store that cannot be
 applied invalidates the affected attribute or taints the module replay, so a stale item is
-never folded.  Probes in `/tmp/probes` (26 programs, both builds) all match CPython or are
-refused by name: the four reviewer programs match, as do alias chains, aliases through a list
-item, attribute or dict value, class-held aliases, `__init__`-held aliases, nested dict
-aliases, negative/boundary values, deletion, dict `update`, empty-then-append, slice
-assignment and alternate instances; reads before a mutation and appends/augmented stores that
-leave the out-of-int64 item in place are refused by name.  `test_ail_pre407.py` gains the four
+never folded.  Probes in `/tmp/probes` (24 programs, both builds) all match CPython or are
+refused by name: 19 match and 5 are refused by name.  The four reviewer programs match, as do
+alias chains, aliases through a list item, attribute or dict value, class-held aliases,
+`__init__`-held aliases, nested dict aliases, negative/boundary values, deletion, dict
+`update`, empty-then-append, slice assignment and alternate instances; reads before a mutation
+and appends/augmented stores that leave the out-of-int64 item in place are refused by name.  `test_ail_pre407.py` gains the four
 reviewer programs as matching cases (14 matching, 16 refused).  Final-state tests:
 `test_ail_pre407`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
 (4 modules, 0 failed).  `tools/update_manifest.py` was run and `--check` passes.
