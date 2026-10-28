@@ -11,9 +11,10 @@ unreachable code was refused; a literal-false `if`/`while`/empty `for` body, the
 literal-true `if`, the else of `while True`, and statements after `return`, `raise`, `break` or
 `continue` are now marked dead and skipped, at module scope and in function bodies.
 
-Probes in `/tmp/probes` on both builds: 5 refusal probes (original starred tuple, positional
+Probes in `/tmp/probes` on both builds: 8 refusal probes (original starred tuple, positional
 power, a call after the call-site mutation, a power inside an enclosing `print`, a power inside
-a loop) are refused by name; 15 matching probes cover item, slice, alias, method and helper-call
+a loop, and reachable `if True`, `while True` and `try` bodies) are refused by name; 15 matching
+probes cover item, slice, alias, method and helper-call
 mutation before the call, dead `if False`/`while False`/empty `for`/empty literals/after return,
 the true branch's else, in-range starred calls, container sources (list item, class attribute,
 dict value, wrapper argument), float/bool/negative operands and module-level mutation before the
