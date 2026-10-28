@@ -1,3 +1,25 @@
+## 2026-10-28 -- pre397: `__index__` returning an IntEnum member is an index (job-pre397-10281018)
+
+The pre379 review's first still-differing pre-existing item was `p6_enumret`: CPython accepts an
+`__index__` method that returns an IntEnum member (an IntEnum subclasses int), while both AIL
+builds raised `TypeError: list indices must be integers or slices, not instance`.  The general
+path kept the returned member as an instance.  A new `ail__intenum_index` helper (dunderrt.py)
+recognises an `_AilIntEnum` member in the class chain and unwraps it through its own
+`__index__`; it is used where an `__index__` result is checked: list/tuple/str subscription
+(dunderrt's `ail_op_getitem`), `range()` arguments and sequence index bounds (pyboxed2),
+`round()` ndigits (dunderrt), and str/bytes search bounds (safetyrt).  Direct IntEnum/IntFlag
+indexes already worked and are unchanged; a non-int result (a str, None, another object with
+`__index__`, a StrEnum or a plain Enum) stays a TypeError.  The value is covered through a
+variable, an argument, a list item, an attribute and a dict value.
+
+Probes in `/tmp/probes` on both builds: `p6_enumret`, `p6_boundaries` (direct/returned IntEnum
+and IntFlag, empty list, negative, out-of-range, argument/list-item/attribute/dict-value routes,
+non-int returns) and `p6_other_contexts` (range, round, str/bytes find, list.index); all match
+CPython on both builds.  Final-state tests: test_ail_pre397, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3, plus test_ail_pre160, test_ail_pre173, test_ail_pre258 and
+test_ail_c169 (8 modules, 0 failed; test_ail_files skips 1).  The other pre379 items
+(`E.A *= [1,2]`, `list *= IntEnum` aliasing and `d.keys() * 2` / genexpr `* 2`) are not changed
+here.  `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-27 -- pre371: annotated `self.attr: T = v` constructor store is folded (job-pre371-10280520)
 
 The pre357 review's first other pre-existing item was the annotated constructor store:

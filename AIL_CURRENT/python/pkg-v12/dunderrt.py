@@ -86,6 +86,30 @@ static inline ail_d2_fn ail_dun2(ail_obj x, int i) {
         if (((ail_classobj *)k.o)->d2[i]) return ((ail_classobj *)k.o)->d2[i];
     return 0;
 }
+/* CPython accepts an IntEnum / IntFlag member returned from __index__: it subclasses int, so the
+   result is a PyLong.  AIL stores the member as an instance, so unwrap it through its own
+   __index__.  1 = normalized, 0 = not such a member, -1 = the member's __index__ raised (*err). */
+static inline int ail__intenum_member(ail_obj x) {
+    if (x.tag != AIL_T_INST) return 0;
+    static const char name[] = "_AilIntEnum";
+    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_str s = ail_view_to_str(((ail_classobj *)k.o)->name);
+        if (s.n != 11) continue;
+        int same = 1;
+        for (int64_t i = 0; i < 11; i++) if (ail_chr(s, i) != (uint8_t)name[i]) { same = 0; break; }
+        if (same) return 1;
+    }
+    return 0;
+}
+static inline int ail__intenum_index(ail_ctx *cx, ail_obj *r, ail_st *err) {
+    if (r->tag != AIL_T_INST || !ail__intenum_member(*r)) return 0;
+    ail_d1_fn f = ail_dun1(*r, AIL_D1_INDEX);
+    if (!f) return 0;
+    ail_obj v; ail_st st = f(cx, &v, *r);
+    if (st != AIL_OK) { *err = st; return -1; }
+    if (v.tag == AIL_T_INT || v.tag == AIL_T_BOOL) { *r = ail_box_int(v.i); return 1; }
+    return 0;
+}
 static void ail__dun_tname(char *buf, size_t n, ail_obj x) {
     if (x.tag == AIL_T_INST) {
         ail_obj c = ((ail_instobj *)x.o)->cls;
@@ -530,6 +554,8 @@ def _edits(inplace=False):
               '        if (f) {\n'
               '            ail_obj r; ail_st st = f(cx, &r, nobj);\n'
               '            if (st != AIL_OK) return st;\n'
+              '            ail_st xerr = AIL_OK; int xn = ail__intenum_index(cx, &r, &xerr);\n'
+              '            if (xn < 0) return xerr;\n'
               '            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = r.i; return AIL_OK; }\n'
               '            { char buf[96]; snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__dun_tname_s(r)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }\n'
               '        }\n'
@@ -550,7 +576,9 @@ def _edits(inplace=False):
               'static inline ail_st ail_op_getitem(ail_ctx *cx, ail_obj *out, ail_obj c, ail_obj key) {\n'
               '    if (key.tag == AIL_T_INST && (c.tag == AIL_T_LIST || c.tag == AIL_T_TUPLE || c.tag == AIL_T_STR)) {   /* __index__ */\n'
               '        ail_d1_fn xf = ail_dun1(key, AIL_D1_INDEX);\n'
-              '        if (xf) { ail_obj ik; ail_st xst = xf(cx, &ik, key); if (xst != AIL_OK) return xst; key = ik; }\n'
+              '        if (xf) { ail_obj ik; ail_st xst = xf(cx, &ik, key); if (xst != AIL_OK) return xst;\n'
+              '                  ail_st xerr = AIL_OK; int xn = ail__intenum_index(cx, &ik, &xerr);\n'
+              '                  if (xn < 0) return xerr; key = ik; }\n'
               '    }\n'))
     e.append(('    char buf[64]; snprintf(buf, sizeof buf, "\'%s\' object does not support item assignment", ail_type_name(c.tag));',
               '    if (c.tag == AIL_T_INST) { ail_d3_fn f = ail_dun3(c, AIL_D3_SETITEM); if (f) { ail_obj r; return f(cx, &r, c, key, val); } }\n'

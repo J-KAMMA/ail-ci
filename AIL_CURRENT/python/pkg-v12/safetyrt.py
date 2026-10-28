@@ -220,6 +220,8 @@ static inline ail_st ail2b_index(ail_ctx *cx, ail_obj *out, ail_obj x) {
         if (f) {
             ail_obj r; ail_st st = f(cx, &r, x);
             if (st != AIL_OK) return st;
+            ail_st xerr = AIL_OK; int xn = ail__intenum_index(cx, &r, &xerr);
+            if (xn < 0) return xerr;
             if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = ail_box_int(r.i); return AIL_OK; }
             char buf[160];
             snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__tname_c(r));

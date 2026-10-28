@@ -7447,12 +7447,14 @@ class Compiler(boxclosure.ClosureMixin):
             xv = ctx.new_cvar('xiv')
             ctx.emit('if (%s.tag == AIL_T_INST) { ail_d1_fn %s = ail_dun1(%s, AIL_D1_INDEX); '
                      'if (%s) { ail_obj %s; st = %s(cx, &%s, %s); if (st != AIL_OK) goto %s; '
+                     '{ ail_st xerr = AIL_OK; int xn = ail__intenum_index(cx, &%s, &xerr); '
+                     'if (xn < 0) { st = xerr; goto %s; } } '
                      'if (%s.tag != AIL_T_INT && %s.tag != AIL_T_BOOL) { const char *tn = ail__tname_c(%s); '
                      'size_t n = strlen(tn) + 64; char *buf = (char *)malloc(n); if (!buf) ail_die("out of memory"); '
                      'snprintf(buf, n, "__index__ returned non-int (type %%s)", tn); '
                      'st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); free(buf); goto %s; } '
                      '%s = %s; } }'
-                     % (b, fn, b, fn, xv, fn, xv, b, err, xv, xv, xv, err, b, xv))
+                     % (b, fn, b, fn, xv, fn, xv, b, err, xv, err, xv, xv, xv, err, b, xv))
             ctx.uses_st = True
         out = ctx.new_cvar('ri')
         ctx.emit('int64_t %s;' % out)
@@ -9806,8 +9808,10 @@ class Compiler(boxclosure.ClosureMixin):
             had = ctx.new_cvar('xhad')
             ctx.emit('int %s = 0;' % had)
             ctx.emit('if (%s.tag == AIL_T_INST) { ail_d1_fn %s = ail_dun1(%s, AIL_D1_INDEX); '
-                     'if (%s) { ail_obj %s; %s = 1; st = %s(cx, &%s, %s); if (st != AIL_OK) goto %s; %s = %s; } }'
-                     % (b, fn, b, fn, xv, had, fn, xv, b, ctx.cur_err_target(), b, xv))
+                     'if (%s) { ail_obj %s; %s = 1; st = %s(cx, &%s, %s); if (st != AIL_OK) goto %s; '
+                     '{ ail_st xerr = AIL_OK; int xn = ail__intenum_index(cx, &%s, &xerr); '
+                     'if (xn < 0) { st = xerr; goto %s; } } %s = %s; } }'
+                     % (b, fn, b, fn, xv, had, fn, xv, b, ctx.cur_err_target(), xv, ctx.cur_err_target(), b, xv))
         err = ctx.cur_err_target()
         # A source argument that was actually None may be skipped (allow_none), but a None
         # returned by __index__ must still raise: only a run-time had == 0 counts as "no bound".
