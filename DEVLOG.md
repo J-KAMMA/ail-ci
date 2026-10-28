@@ -1,3 +1,31 @@
+## 2026-10-28 -- pre395: class object subscript names the class (job-pre395-10281000)
+
+The pre377 review's first still-differing pre-existing item reproduced on both builds:
+`class A: pass; A[0]` stopped with `TypeError: 'type' object is not subscriptable`, where
+CPython 3.12 says `TypeError: type 'A' is not subscriptable`.  The general-path runtime's
+`ail_op_getitem` and `ail_op_getslice` now name a class object's own class in that error
+(`ail__raise_class_not_subscriptable`), and the dunderrt patch fragments still match.  The
+message follows the class actually subscribed through an alias, a subclass, an argument, a
+list item, an attribute, a dict value and a return value, for int, negative, wide, bool,
+None, float, str, empty-str and tuple keys and full/open/step/negative/reverse slices.  Item
+assignment keeps CPython's `'type' object does not support item assignment` wording.  The
+recorded second item (`E()[0]`, an exception subclass) still prints `'exception'`, and an
+exploratory plain instance `A()[0]` still prints `'instance'`; an exploratory `del A[0]` also
+still says `doesn't support` against CPython's `does not support`.  Those three are
+pre-existing and unchanged here.
+
+Added `AIL_CURRENT/test_ail_pre395.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json` (weight 38.8).  Probes in `/tmp/probes/pre395`
+on both builds via `cmp.sh`: `p01_direct` (14 class-object index forms, including inherited,
+aliased and int/negative/wide/bool/None/float/str/empty/tuple keys), `p02_routes` (argument,
+list item, dict value, attribute, return value and slices) and `p03_dunderpatch` (a class
+with `__add__`, so dunderrt's patch is applied) match CPython; the original `class_sub.py`
+now matches the CPython message on both builds; `p04_exc.py` still differs on both builds
+(the recorded exception-subclass item, not changed).  Final-state tests:
+test_ail_pre395 (14.4 s), test_ail_safetynet (109.3 s), test_ail_files (114.7 s) and
+test_ail_corpus_findings3 (198.6 s), 4 modules, 308 s, 0 failed.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-27 -- re-apply pre322 on the integration tree (job-rbrbrbpre322-10280232)
 
 Re-applied the accepted pre322 container-alias fix on top of the current integration tree.  The
