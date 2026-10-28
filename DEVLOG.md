@@ -16,11 +16,12 @@ still refuse. The v1 general emitter is unchanged and keeps its named refusal.
 
 After the change the same profile has 21 refusals (from 24) on both the default and
 `AIL_UNIFIED_FORCE=1` builds; the three programs compile and match CPython on all three inputs.
-Probes in `/tmp/probes/cov26` (17 programs; both builds via `cmp.sh`): `p_join_join`,
+Probes in `/tmp/probes/cov26` (19 programs; both builds via `cmp.sh`): `p_join_join`,
 `p_join_sum_empty`, `p_sum_inner_negative`, `p_arg_route`, `p_list_item_route`,
 `p_attribute_route`, `p_dict_value_route`, `p_alias_route`, `p_side_effects`, `p_exception`,
-`p_types`, `p_nested_containers` match CPython; `p_saved_outer_refused`, `p_next_refused`,
-`p_any_refused`, `p_inner_handed_on_refused` are refused by name. Added `test_ail_cov26.py`
+`p_types`, `p_nested_containers`, `p_widths`, `p_deep_nested` match CPython;
+`p_saved_outer_refused`, `p_next_refused`, `p_any_refused`, `p_inner_handed_on_refused` are
+refused by name. Added `test_ail_cov26.py`
 (8 matching programs, 5 refusals). Final-state tests: test_ail_cov26, test_ail_pre42,
 test_ail_pre116, test_ail_pre166, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3. `tools/update_manifest.py` was run and `--check` passes.
