@@ -1,0 +1,81 @@
+name: profile-lab
+
+# Where AIL's compile time goes (phase shares, gcc share) and how real Python programs fare against CPython 3.12
+# (pass rate, refusal reasons, run time, compile time, binary size), measured on a CI runner.
+# No secrets or API keys are used; the jobs have read-only repository access.
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+  push:
+    paths:
+      - lab/profile/**
+      - .github/workflows/profile-lab.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: profile-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  measure:
+    name: measure shard ${{ matrix.shard }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Compile-time profile (shard 0 only, before anything else runs on its VM)
+        if: matrix.shard == 0
+        run: |
+          gcc --version | head -1
+          python3 --version
+          python3 lab/profile/run.py compile-profile --out out/shard-${{ matrix.shard }} --budget 1200
+      - name: Real programs
+        run: |
+          python3 lab/profile/run.py programs --out out/shard-${{ matrix.shard }} --shard ${{ matrix.shard }} --of 2 --jobs 2 --budget 1800
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: profile-shard-${{ matrix.shard }}
+          path: out/
+          retention-days: 7
+
+  report:
+    needs: measure
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: profile-shard-*
+          path: shards
+      - name: Merge
+        run: |
+          python3 lab/profile/run.py report --out profile-out shards
+          cat profile-out/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: profile-lab
+          path: |
+            profile-out/summary.md
+            profile-out/results.jsonl
+          retention-days: 30
