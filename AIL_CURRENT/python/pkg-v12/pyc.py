@@ -1026,12 +1026,53 @@ def _refuse_typed_big_store(source, force_general=False):
 _TINT_GATE_WORDS = ('tagged-int', 'tagged local', 'can need an int beyond int64')
 
 
+def _python_runs_nothing(source, constants=False):
+    """Whether a Python-syntax program (AIL_SURFACE=python) has a top level that only defines things
+    (def, class, import, a docstring; with `constants`, also assignments of plain literals), so that
+    CPython prints nothing and exits 0. AIL_TOOL_MODE=1 opts out (library "tool" mode)."""
+    if os.environ.get('AIL_SURFACE') != 'python' or os.environ.get('AIL_TOOL_MODE'):
+        return False
+    try:
+        tree = ast.parse(source.strip())
+    except (SyntaxError, ValueError):
+        return False
+    if not tree.body:
+        return False
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom, ast.Pass)):
+            continue
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            continue
+        if constants and isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            try:
+                ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+                return False
+            continue
+        return False
+    return True
+
+
+def _python_defs_only_runs_nothing(source):
+    """A Python-syntax program that only defines things runs nothing under CPython: no output,
+    exit 0. Left alone the build would treat the file as a library "tool" (the last def becomes the
+    entry; a `usage: tool FILE` line, exit 2), so a trailing `pass` gives the module body one
+    statement and the ordinary script `main` is built. ail/brace syntax keeps tool mode."""
+    if not _python_runs_nothing(source):
+        return source
+    return source.rstrip('\n') + '\npass\n'
+
+
+_NOTHING_MAIN = '\nint main(void) { return 0; }\n'
+
+
 def _build_unshadowed(source, out, strict, report, force_general):
     """Try the typed path with exact (tagged) ints, then the exact general path. When neither builds the program and the
     typed attempt was stopped by a tagged-int gate (not by another construct), the program was accepted before the big-int
     work: build it once more on the legacy int64 emitter, whose overflow is a loud stop (never a wrap-around). The
     hard big-int constructs (`_refuse_big_capable`) stay refused."""
     source = fold_int_constants(source)
+    source = _python_defs_only_runs_nothing(source)
     try:
         return _build_unshadowed_exact(source, out, strict, report, force_general)
     except (Unsupported, PipelineError) as first:
@@ -1223,7 +1264,8 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
+    main = (_NOTHING_MAIN if _python_runs_nothing(source, True) else
+            _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
@@ -1256,7 +1298,8 @@ def build_link_units(source, out, unit_map, external=None):
     grouped = {0: []}
     for name, body in bodies:
         grouped.setdefault(unit_map.get(name, 0), []).append(body)
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
+    main = (_NOTHING_MAIN if _python_runs_nothing(source, True) else
+            _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
     references = ''
     if external is not None:
         from module_object import _binding_references
