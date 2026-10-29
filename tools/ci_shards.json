@@ -489,6 +489,7 @@
   "test_ail_sqlite": 225.7,
   "test_ail_stdin_list_batch": 46.3,
   "test_ail_stdin_read_until": 3.7,
+  "test_ail_stdlib31": 10.0,
   "test_ail_stdlib5": 455.5,
   "test_ail_stdlib_batch1": 70.0,
   "test_ail_stdlib_batch3": 192.7,
@@ -844,6 +845,7 @@
    "test_ail_project",
    "test_ail_source_edit",
    "test_ail_splitlines_utf8",
+   "test_ail_stdlib31",
    "test_csv_group_scan"
   ],
   [

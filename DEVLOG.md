@@ -1,3 +1,26 @@
+## 2026-10-29 -- stdlib31: textwrap.shorten for the default options (job-stdlib31-10290951)
+
+A current compile of `lab/corpus/programs` and the Python files in `AIL_CURRENT/language_examples` leaves
+these import refusals: `unicodedata` 3, `decimal` 2, `textwrap` 1, `collections` 1 and `re` 1 (the last two
+are unsupported uses, not unmodelled modules).  `unicodedata` would need the full Unicode name, category and
+normalization database and `decimal` the decimal context/rounding machinery, so neither is a small module;
+the most-used one that lowers onto existing code is `textwrap`, whose only refused use was `shorten`.
+
+`textwrap.shorten(text, width)` now lowers to `_ail_tw_shorten`, which reuses the existing chunking helper
+(`_ail_tw_chunks`, the same expandtabs / whitespace / em-dash / hyphen rules as `wrap`) and CPython 3.12's
+`max_lines=1` truncation with the default `" [...]"` placeholder.  The text is collapsed first; width <= 0
+raises CPython's `invalid width` ValueError, width < 5 its `placeholder too large for max width`, and the
+`text=` / `width=` keywords are accepted.  Any other keyword (for example `placeholder=`) and any other
+textwrap function remain named compile-time refusals.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `shorten_basic` (whitespace, long words, hyphens,
+tabs, empty/padded text and widths 5..70), `shorten_keyword` (width= and text=), `shorten_errors` (width 0,
+-1 and 4), `shorten_routes` (argument, alias, list item, attribute and dict value), `shorten_fuzz` (600
+random texts over spaces, tabs, hyphens, em dashes, digits, punctuation and non-ASCII), all match CPython;
+`shorten_refuse`, `shorten_missing_width` and `shorten_indent_refuse` are refused by name.  The corpus
+program `deepseek-v4.1-flash-free/t116.py` matches CPython on both builds.  Added
+`AIL_CURRENT/test_ail_stdlib31.py`, registered in `ail_check.MODULES`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
