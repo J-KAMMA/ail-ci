@@ -1851,12 +1851,16 @@ class _Surface:
         return '.'.join([root, *reversed(parts)])
 
     def collect(self):
-        stored = {}
+        stored, bindings = {}, {}
+        imported = {}                  # local name -> (module, imported member or None, import node)
         for node in ast.walk(self.tree):
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name in ('heapq', 'bisect', 'math', 'typing', 'dataclasses', 'sys', 're', *_SMALL_MODULES):
-                        self.modules[alias.asname or alias.name] = alias.name
+                        local = alias.asname or alias.name
+                        self.modules[local] = alias.name
+                        if alias.name == 'unicodedata':
+                            imported[local] = (alias.name, None, node)
                         if alias.name == 're':
                             self.re_on = True
             elif isinstance(node, ast.ImportFrom) and not node.level:
@@ -1864,13 +1868,31 @@ class _Surface:
                     local = alias.asname or alias.name
                     if node.module in ('heapq', 'bisect', 'math', 'dataclasses', *_SMALL_MODULES):
                         self.names[local] = f'{node.module}.{alias.name}'
+                        if node.module == 'unicodedata':
+                            imported[local] = (node.module, alias.name, node)
                     elif node.module == 'typing':
                         self.typing[local] = alias.name
             names = ([node.id] if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load)
                      else [node.arg] if isinstance(node, ast.arg)
-                     else [node.name] if isinstance(node, (ast.FunctionDef, ast.ClassDef)) else [])
+                     else [node.name] if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+                     else [node.name] if isinstance(node, ast.ExceptHandler) and node.name else [])
             for name in names:
                 stored[name] = stored.get(name, 0) + 1
+                bindings.setdefault(name, []).append(node)
+        for local, (module, member, _) in imported.items():
+            if not stored.get(local):
+                continue
+            used = any(isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load) and n.id == local
+                       for n in ast.walk(self.tree))
+            if not used:
+                self.modules.pop(local, None)
+                self.names.pop(local, None)
+                continue
+            line = min(getattr(n, 'lineno', 1) for n in bindings[local])
+            raise SyntaxErrorAIL(
+                f"import of 'unicodedata' is shadowed by a binding of '{local}' at line {line}, so "
+                f"unicodedata.category() cannot be lowered; rename the binding (e.g. 'my_{local}')",
+                lineno=line)
         if self.re_on:
             self.collect_re(stored)
         for node in ast.walk(self.tree):

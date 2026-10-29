@@ -1,3 +1,22 @@
+## 2026-10-29 -- stdlib29 review: a rebound import name is refused, not silently lowered (job-stdlib29-10290853)
+
+The review found that the new `unicodedata` lowering ignored a rebinding of the imported name, so
+programs that CPython rejects for a shadowed module or from-import were compiled and printed a
+category. `import unicodedata` followed by a module-level constant, a function parameter, a local,
+a loop target, a `with`/`except` target or a module alias rebound to an int now stays a named
+compile-time refusal ("import of 'unicodedata' is shadowed by a binding of ... so
+unicodedata.category() cannot be lowered; rename the binding"), on both builds. The same applies
+to `from unicodedata import category as cat` followed by `cat = 5`. The surface records every
+non-import binding, and an import whose local name is also bound is not lowered; `unicodedata` is
+also in `shadowing._STRUCTURAL`, like `math`/`os`, so the module-level definition path refuses it
+with the same "shadows the built-in name" wording.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `ud_const`, `ud_local`, `ud_loop`, `ud_param`,
+`ud_fromrebind`, `ud_shadow_modalias`, `ud_shadow_fromplain`, `ud_shadow_except`,
+`ud_shadow_nestedparam`, `ud_shadow_with` and `ud_shadow_other_scope` are refused by name; the
+existing `udcat_*` probes still match CPython or are refused as before. Added the rebound cases to
+`test_ail_stdlib29.py`.
+
 ## 2026-10-29 -- stdlib29: `unicodedata.category()` from a generated table (job-stdlib29-10290853)
 
 The corpus/example census left `unicodedata` as the most-imported still-refused module (3 imports,

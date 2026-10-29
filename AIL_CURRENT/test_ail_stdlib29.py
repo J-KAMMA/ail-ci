@@ -134,6 +134,30 @@ class Refusals(unittest.TestCase):
             with self.subTest(name):
                 self.refused(text, wanted)
 
+    def test_rebound_module_or_from_import_is_refused(self):
+        cases = {
+            "module_constant": ("import unicodedata\nunicodedata = 5\nprint(unicodedata.category('A'))\n",
+                                "unicodedata.category() cannot be lowered"),
+            "module_alias": ("import unicodedata as ud\nud = 5\nprint(ud.category('A'))\n",
+                             "unicodedata.category() cannot be lowered"),
+            "parameter": ("import unicodedata\n\ndef f(unicodedata: int) -> str:\n"
+                          "    return unicodedata.category('A')\n\nprint(f(5))\n",
+                          "unicodedata.category() cannot be lowered"),
+            "local": ("import unicodedata\n\ndef f() -> str:\n    unicodedata = 5\n"
+                      "    return unicodedata.category('A')\n\nprint(f())\n",
+                      "unicodedata.category() cannot be lowered"),
+            "loop": ("import unicodedata\n\nfor unicodedata in [5]:\n"
+                     "    print(unicodedata.category('A'))\n",
+                     "unicodedata.category() cannot be lowered"),
+            "from_rebind": ("from unicodedata import category as cat\ncat = 5\nprint(cat('A'))\n",
+                            "unicodedata.category() cannot be lowered"),
+            "from_plain_rebind": ("from unicodedata import category\ncategory = 5\nprint(category('A'))\n",
+                                  "unicodedata.category() cannot be lowered"),
+        }
+        for name, (text, wanted) in cases.items():
+            with self.subTest(name):
+                self.refused(text, wanted)
+
 
 if __name__ == "__main__":
     unittest.main()

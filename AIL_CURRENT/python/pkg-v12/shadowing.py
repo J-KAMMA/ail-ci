@@ -47,6 +47,7 @@ _STRUCTURAL = {
     'math': 'math.* functions are reached through this name',
     'sys': 'sys.argv/sys.stdin are reached through this name',
     'os': 'os.* functions are reached through this name',
+    'unicodedata': 'unicodedata.category() is reached through this name',
 }
 _EXCEPTIONS = frozenset(name for name in dir(builtins)
                         if isinstance(getattr(builtins, name), type)

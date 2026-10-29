@@ -6349,7 +6349,7 @@
     "test_ail_method_object_contracts.py": "671ac3b3ec22a0733394af8ce1c8f40ce871d52634e3e6b454748ffda716d74f",
     "test_ail_struct_list_objects.py": "4c857b79f8db7ab1bee1b9efae1d0f1525fc3a895b8886e7eb6756d3fbe4ae1f",
     "test_ail_object_json_query.py": "97c8c6e1ca649a709a5c4e9c96e68b7eafdb97be391a3584b54bf5477d72df49",
-    "ail_syntax.py": "b5c59667176f2c299432445da63e7c3f02adbffa83048e75322fc92c22dbfe39",
+    "ail_syntax.py": "465c3dd78cc8462b4fc5a902ffdb0a1e065c1051a2d381f1a1e7e07176fe807f",
     "test_ail_exception_values_core.py": "76ff4b037740b3a1e9d077d078446593541d1415271f2dbe5cf3dfd507f4d0c8",
     "test_ail_exception_aggregate_objects.py": "fa2cdbd644eac81e48b87d26dcefd4a9860ccbb7f969e847f2a803470f0485b5",
     "test_ail_source_check.py": "bac245f98cfbeb1097e5b169c02b46a5b9d2ed943e381eb8556dbe8042d8113e",
@@ -6452,7 +6452,7 @@
     "test_ail_text_views.py": "72ed5aacb0e1542603d3014cbc6924da61c100f85020763db778f97803689617",
     "test_ail_libc_names.py": "052b628bf5a2f22e7b2ddffa72e804f8f362d6087f819a95149b556adedbf963",
     "test_ail_builtin_shadowing.py": "835b687578503e39d83c68ce205380a5528f6c83a008f7e3f57111622e945784",
-    "python/pkg-v12/shadowing.py": "1d46e162b6260537304004204e265348d2e0b217d6b1feaa78bbe990cad60968",
+    "python/pkg-v12/shadowing.py": "335d6400755d0b9914f433b5af322749dcbd5f6d4e29740c0779172acec66253",
     "ail_slow_patterns.py": "df80b76f47de6b7586e862a8f45f73ac873ee2bd09945e0267c673cbedb3be4d",
     "test_ail_slow_patterns.py": "a7caf3bfd3fc90bf57f4ba641409bb03c2dd3b118bf4d8777f82d78e027233a1",
     "test_ail_python_syntax.py": "49536270347f73b3a44b1347b80bd2ba1fa5d446eff92c4e4cc354141c45ce58",
@@ -7017,7 +7017,7 @@
     "test_ail_pre422.py": "3179d0ad7c3a7e4125c9bb6bab28de7a4a2c521afd12d6ef53e4dfbeb9c0e7ff",
     "test_ail_pre423.py": "e1505577d1aec7dbf07a96677979351537b54dab19e4669825b3068668db67da",
     "python/pkg-v12/unicodecat.py": "0166a56ca255904bfabef6b6ab299b734e52228c242502e5eecffa94b7541baa",
-    "test_ail_stdlib29.py": "0902a8a1e13e6ae8ae9775e4ab75e895be4fb7f71542796028aec3db3e447646"
+    "test_ail_stdlib29.py": "b27336eb65dcdfc605a89c565468593c146ddcb762f55ec2ed7a4ab502dc958b"
   },
   "release": "R1.40+xlang-304d34f+native-round72+windows-cpython+workflow-tests-candidate+bracket-read-candidate+n0-v4-candidate+r8-fuzz-plan-v2+r9-byte-arena-sanitizer+r10-native-ledger-n0+r11-n0-fresh-evidence+r12-optimizer-current-chain+r13-xlang-arm64-emulated-gate+r14-native-r11-historical-inputs+r15-native-r11-regression+r16-native-recovered-inputs+r20-native-versioned-scope+r21-native-pinned-input-recovery+r22-provenance-precision+r23-direct-indexed-undefined+r24-protected-lock-line-endings+r25-current-r6-seeds+r26-nullish-ternary+r27-seed777-coercion+r28-includes+r30-indexof+r32-native-model-inputs+r33-native-checkpoint+r36-xlang-dynamic-array+r37-source-bound-gate+r38-host-matrix+r51-native-f32-successor+r52-native-f32-migration-candidate+r53-v1-string-width+r54-v1-runtime-repair+r55-windows-cli-intake",
   "work_id": "r140-xlang-304d34f-integration-20260926",
@@ -24285,7 +24285,7 @@
     "test_ail_method_object_contracts.py": "671ac3b3ec22a0733394af8ce1c8f40ce871d52634e3e6b454748ffda716d74f",
     "test_ail_struct_list_objects.py": "4c857b79f8db7ab1bee1b9efae1d0f1525fc3a895b8886e7eb6756d3fbe4ae1f",
     "test_ail_object_json_query.py": "97c8c6e1ca649a709a5c4e9c96e68b7eafdb97be391a3584b54bf5477d72df49",
-    "ail_syntax.py": "b5c59667176f2c299432445da63e7c3f02adbffa83048e75322fc92c22dbfe39",
+    "ail_syntax.py": "465c3dd78cc8462b4fc5a902ffdb0a1e065c1051a2d381f1a1e7e07176fe807f",
     "test_ail_exception_values_core.py": "76ff4b037740b3a1e9d077d078446593541d1415271f2dbe5cf3dfd507f4d0c8",
     "test_ail_exception_aggregate_objects.py": "fa2cdbd644eac81e48b87d26dcefd4a9860ccbb7f969e847f2a803470f0485b5",
     "test_ail_source_check.py": "bac245f98cfbeb1097e5b169c02b46a5b9d2ed943e381eb8556dbe8042d8113e",
@@ -24392,7 +24392,7 @@
     "test_ail_text_views.py": "72ed5aacb0e1542603d3014cbc6924da61c100f85020763db778f97803689617",
     "test_ail_libc_names.py": "052b628bf5a2f22e7b2ddffa72e804f8f362d6087f819a95149b556adedbf963",
     "test_ail_builtin_shadowing.py": "835b687578503e39d83c68ce205380a5528f6c83a008f7e3f57111622e945784",
-    "python/pkg-v12/shadowing.py": "1d46e162b6260537304004204e265348d2e0b217d6b1feaa78bbe990cad60968",
+    "python/pkg-v12/shadowing.py": "335d6400755d0b9914f433b5af322749dcbd5f6d4e29740c0779172acec66253",
     "ail_slow_patterns.py": "df80b76f47de6b7586e862a8f45f73ac873ee2bd09945e0267c673cbedb3be4d",
     "test_ail_slow_patterns.py": "a7caf3bfd3fc90bf57f4ba641409bb03c2dd3b118bf4d8777f82d78e027233a1",
     "test_ail_python_syntax.py": "49536270347f73b3a44b1347b80bd2ba1fa5d446eff92c4e4cc354141c45ce58",
@@ -24957,7 +24957,7 @@
     "test_ail_pre422.py": "3179d0ad7c3a7e4125c9bb6bab28de7a4a2c521afd12d6ef53e4dfbeb9c0e7ff",
     "test_ail_pre423.py": "e1505577d1aec7dbf07a96677979351537b54dab19e4669825b3068668db67da",
     "python/pkg-v12/unicodecat.py": "0166a56ca255904bfabef6b6ab299b734e52228c242502e5eecffa94b7541baa",
-    "test_ail_stdlib29.py": "0902a8a1e13e6ae8ae9775e4ab75e895be4fb7f71542796028aec3db3e447646"
+    "test_ail_stdlib29.py": "b27336eb65dcdfc605a89c565468593c146ddcb762f55ec2ed7a4ab502dc958b"
   },
   "base_local_change_scope": "Cross-language pipeline hardened to real-world measurement. incr.py: two new incrementalization pattern classes -- dict argmax (d[k]=d.get(k,0)+POS writes plus keys() rescan with tiebreak become update-site tracking) and sliding window sum (del xs[0] sites emit _wacc-=xs[0]); probe 64/64, mode/wma translations fire with byte-identical oracles. pkg-v12: str(<float>) enabled via existing ail_str_from_float FMT machinery (SEMANTICS.md updated). jstrans.py: deterministic JS->subset translator -- float profile (Number/parseFloat, JS Number->String formatting: integral doubles without .0, NaN/Infinity, -0->0, true / on floats, IEEE remainder), plus parser-surface hardening (ASI, shebang, new Array, function-expr arrows, stdin line-terminator fix via rstrip, null-sentinel re-kinding via vartypes/zero_of, trivial-function inlining, named TErrs for all remaining unsupported constructs). Corpus 17/17 byte-identical vs Node; real-world corpus 0->2 end-to-end with zero generic crashes (12 named TErrs). dominfer.py: machine-derived input domains via differential probing (found 2^53+ integer JS precision boundary on all add-protocol programs).",
   "integration": {
