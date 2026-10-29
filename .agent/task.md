@@ -1,6 +1,6 @@
-**Your change breaks another test in the full suite.** On top of the current integration branch, test_ail_pre346 fails with your change and passes without it (culprit.yml run 40872719537 applied each job alone).
+**Your change fails tests on top of the current integration branch.** Applied alone on today's integ, one or more of these test modules fail: test_ail_obj_refs test_ail_pre430 test_ail_safetynet test_ail_unified test_ail_virtual_dispatch.
 
-Run `cd AIL_CURRENT && python3 -m unittest -q test_ail_pre346`, find what your change broke, and fix it so it passes again while keeping your own fix and its test. If your fix cannot coexist with it, revert it and say so. Commit.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find why it fails here (another change may have altered behaviour or output your test expects), and fix it so they pass while keeping your fix and its test. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
