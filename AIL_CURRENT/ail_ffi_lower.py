@@ -200,11 +200,20 @@ class Session:
                         dataclass_names.add(alias.asname or alias.name)
         if not imported and not module_names:
             return text
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Delete):
+                continue
+            for target in node.targets:
+                if isinstance(target, ast.Name) and (target.id in imported or target.id in module_names):
+                    self._refuse(path, node, 'ail_ffi: deleting the imported name %s is not supported by a plain '
+                                 'compile (the import is not a run-time value there)' % target.id)
         export_imported = 'export' in imported and not self._name_rebound(tree, 'export')
-        exports_imported = 'exports' in imported and not self._name_rebound(tree, 'exports')
+        state_imported = 'exports' in imported
+        state_modules = set(module_names)
         module_names = {name for name in module_names if not self._name_rebound(tree, name)}
-        blank.extend(self._strip_exports(path, tree, export_imported, exports_imported, module_names,
-                                         dataclass_names, dataclasses_modules, future_annotations))
+        blank.extend(self._strip_exports(path, tree, export_imported, module_names, state_imported,
+                                         state_modules, dataclass_names, dataclasses_modules,
+                                         future_annotations))
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -374,8 +383,8 @@ class Session:
         return (isinstance(decorator, ast.Call) and not decorator.args and not decorator.keywords
                 or not isinstance(decorator, ast.Call)) and cls._export_target(decorator, imported, module_names)
 
-    def _strip_exports(self, path, tree, imported, exports_imported, module_names, dataclass_names,
-                       dataclasses_modules, future_annotations):
+    def _strip_exports(self, path, tree, imported, module_names, state_imported, state_modules,
+                       dataclass_names, dataclasses_modules, future_annotations):
         """On CPython @export checks its function and returns it unchanged; drop it for a plain program.
 
         Returns the line ranges to blank; the lowering below edits the original text, not a reprint."""
@@ -395,7 +404,7 @@ class Session:
                 found.append((node, marks))
         exported_names = {node.name for node, _ in found}
         if exported_names:
-            self._refuse_export_state(path, tree, exports_imported, module_names, exported_names)
+            self._refuse_export_state(path, tree, state_imported, state_modules, exported_names)
         shadowed = {name for name in ('int', 'float', 'bool', 'str', 'bytes', 'list')
                     if self._name_rebound(tree, name)}
         structs = self._export_structs(tree, dataclass_names, dataclasses_modules, future_annotations, shadowed)
@@ -413,7 +422,7 @@ class Session:
             node.decorator_list = [d for d in node.decorator_list if d not in marks]
         return blank
 
-    def _refuse_export_state(self, path, tree, exports_imported, module_names, exported_names):
+    def _refuse_export_state(self, path, tree, state_imported, state_modules, exported_names):
         """@export also sets fn.__ail_export__ and records the function in ail_ffi.exports(); a plain
         compile cannot attach attributes to a function value, so refuse an introspection instead."""
         for node in ast.walk(tree):
@@ -429,9 +438,9 @@ class Session:
                 if name in ('getattr', 'hasattr', 'vars', 'dir'):
                     self._refuse(path, node, '@export: introspecting an exported function at run time is not '
                                  'supported by a plain compile (the marking is only for `ail build --lib`)')
-                if name == 'exports' and (exports_imported or (isinstance(func, ast.Attribute)
-                                                               and isinstance(func.value, ast.Name)
-                                                               and func.value.id in module_names)):
+                if name == 'exports' and (state_imported or (isinstance(func, ast.Attribute)
+                                                             and isinstance(func.value, ast.Name)
+                                                             and func.value.id in state_modules)):
                     self._refuse(path, node, '@export: ail_ffi.exports() reports the marked functions at run '
                                  'time, which a plain compile does not keep (`ail build --lib` does)')
 

@@ -1,3 +1,23 @@
+## 2026-10-29 -- ex41 review: refuse `exports()` after the name is rebound
+
+The ex41 review found a silent difference in the runtime-marking guard. `_refuse_export_state` only
+refused `exports()` when the name was still the `ail_ffi` import, so a later rebinding in the same
+module hid an earlier call: `from ail_ffi import export, exports; @export def add...;
+print(len(exports())); exports = lambda: []` built on both paths and then stopped with `NameError`
+(exit 1) where CPython prints `1` (exit 0). The state check now uses the unfiltered import set, so a
+call to the imported `exports` (or `ail_ffi.exports()` through an imported module alias) is refused
+by name whenever an `@export` exists, even if the name is rebound later. Deleting an imported
+`ail_ffi` name (`from ail_ffi import export; del export`) also used to crash the general path with
+`KeyError: 'export'`; it is now refused by name. Probes in `/tmp/probes/ex41b` on both builds via
+`cmp.sh`: the four matching forms (`p_attr_alias`, `p_dc_default`, `p_nested`, `p_star_import`,
+`p_trailing_comment`, `p_walrus`) plus `geometry.py` match CPython; the exports-rebinding and
+delete forms are refused by name, as are `p_factory`, `p_async`, `p_export_args`, `p_exports_only`,
+`p_dc_classvar`, the alias forms and `p_exported_direct`. Added the rebinding/delete cases to
+`test_ail_ex41.py` (7 tests). Final-state tests: test_ail_ex41, test_ail_ffi, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (5 modules, 0 failed); test_ail_cratebridge has one
+environmental failure (`rustup` has no default toolchain) unrelated to this change.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-29 -- ex41: `@export` is an identity decorator in a plain compile
 
 The Python-syntax survey (14 `.py` plus 6 Python-parseable `.ail` under `language_examples`)

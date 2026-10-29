@@ -254,10 +254,27 @@ print(add(-2, 5), shout(""))
             'print(len(exports()))\n',
             'import ail_ffi\n\n\n@ail_ffi.export\ndef add(a: int) -> int:\n    return a\n\n\n'
             'print(ail_ffi.exports())\n',
+            'from ail_ffi import export, exports\n\n\n@export\ndef add(a: int) -> int:\n    return a\n\n\n'
+            'print(len(exports()))\nexports = lambda: []\n',
+            'from ail_ffi import export\nimport ail_ffi\n\n\n@export\ndef add(a: int) -> int:\n'
+            '    return a\n\n\n'
+            'print(len(ail_ffi.exports()))\nail_ffi = None\n',
         ]
         for source in programs:
             with self.subTest(source=source.splitlines()[-1]):
                 self.refused_by_name(source)
+
+    def test_deleting_the_imported_decorator_is_refused_by_name(self):
+        source = ('from ail_ffi import export\n\n'
+                  'del export\n\n\n'
+                  '@export\n'
+                  'def add(a: int) -> int:\n'
+                  '    return a\n')
+        for general in (False, True):
+            built, _ = self.build(source, general)
+            self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
+            self.assertIn('deleting the imported name export',
+                          built.stdout + built.stderr)
 
 
 if __name__ == '__main__':
