@@ -11,6 +11,12 @@ def enabled(args):
     return getattr(args, 'json', False) or getattr(args, 'debug_dir', None) is not None
 
 
+def _source(args):
+    """`compile` keeps its source as the invoked string (for `__file__`), every other command holds a
+    Path; both resolve to the absolute path the reports name."""
+    return Path(args.source).resolve()
+
+
 def prepare(args, parser):
     args._native_data = None
     args._native_origins = {}
@@ -24,8 +30,9 @@ def prepare(args, parser):
             raise SystemExit(2)
         parser.error = error
     try:
-        if args.source.is_file():
-            args._native_source_sha256 = hashlib.sha256(args.source.read_bytes()).hexdigest()
+        source = _source(args)
+        if source.is_file():
+            args._native_source_sha256 = hashlib.sha256(source.read_bytes()).hexdigest()
     except OSError as error:
         if args.json:
             emit(args, {}, 2, 'loader', str(error))
@@ -34,7 +41,7 @@ def prepare(args, parser):
     if args.debug_dir is not None:
         directory = Path(os.path.abspath(args.debug_dir))
         output = Path(os.path.abspath(args.output))
-        source = args.source.resolve()
+        source = _source(args)
         if (directory.exists() or directory.is_symlink() or not directory.parent.is_dir()
                 or directory in (source, output, Path(str(output)+'.exe'))
                 or output.is_relative_to(directory)):
@@ -49,7 +56,7 @@ def loading(args):
 def invoke(args, command, temporary, **kwargs):
     if not enabled(args):
         return subprocess.run(command, **kwargs)
-    source = args._native_sources.get(args.source.resolve())
+    source = args._native_sources.get(_source(args))
     if source is not None:
         args._native_source_sha256 = hashlib.sha256(source).hexdigest()
     report = Path(temporary) / 'native-build.json'
@@ -119,9 +126,9 @@ def emit(args, output, status=0, stage=None, message=None):
         failed_operation = operations[-1] if operations and (operations[-1]['exit_code'] != 0 or operations[-1]['error']) else None
         stage = 'complete' if status == 0 else failed_operation['phase'] if failed_operation else 'type' if status == 3 else 'backend'
     report = dict(schema='ail.build/1', status='passed' if status == 0 else 'failed', stage=stage,
-                  command=args.command, source=str(args.source.resolve()), source_sha256=args._native_source_sha256,
+                  command=args.command, source=str(_source(args)), source_sha256=args._native_source_sha256,
                   dependency_sha256={str(path):hashlib.sha256(data).hexdigest() for path,data in args._native_sources.items()
-                                     if path != args.source.resolve()},
+                                     if path != _source(args)},
                   exit_code=status, output=output if status == 0 else None,
                   link_verified=status == 0 and args.command == 'compile', runtime_verified=False,
                   diagnostics=_locations(args, native), native_build=native or None)

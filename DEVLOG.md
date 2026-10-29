@@ -1,3 +1,14 @@
+## 2026-10-29 -- reex26 fix: build reports take the invoked source string (job-reex26-10300433)
+
+Review of the `__file__` change found that `compile --json` and `compile --debug-dir` crashed on
+every source: `compile` now holds its source as a `str` (it must keep the path as invoked), but
+`ail_native_build.prepare`/`invoke`/`emit` still called `args.source.is_file()`/`.resolve()`.
+`ail_native_build` now resolves through `Path(args.source)` for both the `compile` string and the
+other commands' `Path`, so the reports name the same absolute path as before.  Probes on both
+report modes match the base output again (`source_sha256`, `source`, `program.c`, exit 0, no
+traceback; `--json --debug-dir` also writes `ail_build.json`), `__file__` keeps its dot under
+`./p.py`, and `test_ail_build_reports` passes.
+
 ## 2026-10-29 -- reex26: `__file__` is the implicit module-level binding (job-reex26-10300433)
 
 `__file__` was still the top blocker: `print(__file__)` was refused as an undefined name on both
