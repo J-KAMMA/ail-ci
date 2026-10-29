@@ -1,5 +1,5 @@
 """Library batch 31: textwrap.shorten(text, width) for CPython 3.12's default options, compared with CPython
-on the default build and AIL_IR=1.
+on the AIL_IR=0 and AIL_IR=1 builds.
 
 The text has its whitespace collapsed first, then the default TextWrapper (expandtabs(8), the whitespace /
 em-dash / hyphen chunking, break_long_words and break_on_hyphens) keeps as many chunks as fit and appends
@@ -91,7 +91,7 @@ class Stdlib31Tests(unittest.TestCase):
             self.assertEqual((ran.returncode, ran.stdout), (0, expected.stdout), ran.stderr[-500:])
 
     def test_shorten_matches_cpython_on_both_builds(self):
-        for env in ({}, {"AIL_IR": "1"}):
+        for env in ({"AIL_IR": "0"}, {"AIL_IR": "1"}):
             with self.subTest(env=env):
                 self.same_as_cpython(PROGRAM, "shorten", env)
 
@@ -101,7 +101,7 @@ class Stdlib31Tests(unittest.TestCase):
             'import textwrap\n\n\ndef main() -> None:\n    print(textwrap.indent("a\\nb", "> "))\n\n\nmain()\n',
         ]
         for text in programs:
-            for env in ({}, {"AIL_IR": "1"}):
+            for env in ({"AIL_IR": "0"}, {"AIL_IR": "1"}):
                 with self.subTest(env=env, text=text.splitlines()[2]):
                     with tempfile.TemporaryDirectory() as directory:
                         built, _, exe = compile_python(directory, text, "refused", **env)

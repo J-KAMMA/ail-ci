@@ -6,8 +6,8 @@ are unsupported uses, not unmodelled modules).  `unicodedata` would need the ful
 normalization database and `decimal` the decimal context/rounding machinery, so neither is a small module;
 the most-used one that lowers onto existing code is `textwrap`, whose only refused use was `shorten`.
 
-`textwrap.shorten(text, width)` now lowers to `_ail_tw_shorten`, which reuses the existing chunking helper
-(`_ail_tw_chunks`, the same expandtabs / whitespace / em-dash / hyphen rules as `wrap`) and CPython 3.12's
+`textwrap.shorten(text, width)` now lowers to `_ail_tw_shorten`, which calls the new `_ail_tw_chunks`
+helper (a copy of `wrap`'s expandtabs / whitespace / em-dash / hyphen chunking rules) and CPython 3.12's
 `max_lines=1` truncation with the default `" [...]"` placeholder.  The text is collapsed first; width <= 0
 raises CPython's `invalid width` ValueError, width < 5 its `placeholder too large for max width`, and the
 `text=` / `width=` keywords are accepted.  Any other keyword (for example `placeholder=`) and any other
