@@ -1,3 +1,29 @@
+## 2026-10-29 -- cov49: str.translate / str.maketrans on the general path (job-cov49-10291923)
+
+A fresh build of every program in `lab/corpus/programs` (219 programs, default build, the
+`lab/corpus/check.py` compile path) refused 24 programs.  Grouped by the first refusal,
+8 are stdlib imports (`unicodedata` 3, `decimal` 2, `textwrap` 1, `collections` 1, `re` 1),
+which are the stdlib tasks' job.  The remaining groups are one or two programs each; the
+two-program groups cannot match exactly (dynamic `json.loads` results, exact big ints from
+`int.from_bytes`, tuple values in `sorted(d.items())`).  The most frequent refused construct
+that can be supported exactly is `str.translate`/`str.maketrans` with a dict table
+(`deepseek-v4.1-flash-free/t484`): the general path now lowers `str.maketrans(frm, to[,
+delete])` to a runtime dict and `s.translate(table)` to a code-point lookup, so
+`TABLE = str.maketrans("", "", string.punctuation)` and `text.translate(TABLE)` match CPython.
+The table forms that cannot match stay named compile-time refusals: the one-argument
+`str.maketrans(mapping)` form and a literal (non-dict) table.  Refused programs: **24 before,
+23 after** (t484 now builds and matches on both builds).
+
+Probes in `/tmp/probes/cov49`, each run with `bash ~/tools/cmp.sh ... $PWD` on both builds:
+`p_basic` (empty, delete-only, 2-arg and 3-arg tables, printed table dicts), `p_routes`
+(argument, list item, attribute, dict value, alias, literal dict values int/str/None),
+`p_values` (int/str/None values, multi-character replacement, NUL), `p_alias` (the same table
+through a name, alias, list item and dict value), `p_constant` (module constant + punctuation),
+`p_unicode` (BMP mappings), `p_errors` (length mismatch and argument/character-mapping TypeError
+texts) all match CPython; `p_refuse_list` and `p_refuse_maketrans1` are refused by name.
+Added `AIL_CURRENT/test_ail_cov49.py` (4 tests: general path, default build, and the two
+refusals), registered in `ail_check.MODULES`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

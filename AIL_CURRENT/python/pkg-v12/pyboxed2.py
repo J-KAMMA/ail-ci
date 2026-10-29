@@ -2565,6 +2565,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.uses_proc = False
         self.uses_path = False
         self.uses_clock = False
+        self.uses_str_translate = False
         import threadlib
         self.threads = threadlib.inject(tree)                       # G12: the thread prelude (threadlib.py)
         if self.threads:
@@ -2802,6 +2803,9 @@ class Compiler(boxclosure.ClosureMixin):
         elif getattr(self, 'needs_boxcase', False):
             import cruntime
             parts.append(cruntime.BOXCASE)
+        if getattr(self, 'uses_str_translate', False):
+            import cruntime
+            parts.append(cruntime.STRTRANSLATE)
         if getattr(self, 'needs_type_name', False):
             parts.append(TYPE_NAME_C)
         if getattr(self, 'needs_padfill', False):
@@ -9659,6 +9663,11 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _call_attribute(self, f, args, kwargs, ctx):
         recv = f.value
+        _tk = self.infer_kind(recv, ctx) if f.attr == 'translate' else None
+        if f.attr == 'translate' and (
+                _tk == 'str' or (isinstance(recv, ast.Constant) and isinstance(recv.value, str)) or
+                (_tk is None and not any('translate' in self.classes[c]['methods'] for c in self.classes))):
+            return self._str_translate_call(recv, args, kwargs, ctx)
         # sys.stdin.read() / .readline(): the only sys.stdin surface this emitter models
         # (B046/B047 -- glue in the preamble, see the module docstring's stdin note).
         if isinstance(recv, ast.Attribute) and isinstance(recv.value, ast.Name) and \
@@ -9677,6 +9686,10 @@ class Compiler(boxclosure.ClosureMixin):
                               % f.attr)
         if isinstance(recv, ast.Name) and recv.id == 'sys' and f.attr == 'exit':
             return self._emit_sys_exit(args, kwargs, ctx)
+        if (isinstance(recv, ast.Name) and recv.id == 'str' and f.attr == 'maketrans'
+                and recv.id not in self.classes and recv.id not in self.module_names
+                and recv.id not in ctx.slot_of):
+            return self._str_maketrans(args, kwargs, ctx)
         if isinstance(recv, ast.Name) and (recv.id in self.module_aliases or recv.id == 'math'
                                            or recv.id in self.from_imports):
             return self._call_module_function(recv, f, args, kwargs, ctx)
@@ -11044,6 +11057,44 @@ class Compiler(boxclosure.ClosureMixin):
         self.needs_boxcase = True
         t = ctx.tmp()
         ctx.emit('%s = ail_boxed_case(cx, %s, 1);' % (t, recv))
+        return t
+
+    def _str_maketrans(self, args, kwargs, ctx):
+        """`str.maketrans(frm, to[, delete])` as the dict of code point -> character / None."""
+        if kwargs:
+            raise Unsupported('.maketrans() with keyword arguments')
+        if len(args) == 1:
+            raise Unsupported('str.maketrans() with one argument (a mapping) is not built; '
+                              'write the two strings and an optional delete string')
+        if len(args) not in (2, 3):
+            raise Unsupported('str.maketrans() takes 2 or 3 positional arguments (%d given)' % len(args))
+        self.uses_str_translate = True
+        vals = [self.expr(a, ctx) for a in args]
+        t = ctx.tmp()
+        if len(args) == 2:
+            ctx.emit('st = ail_meth_str_maketrans(cx, &%s, %s, %s, 0, ail_box_none());' %
+                     (t, vals[0], vals[1]))
+        else:
+            ctx.emit('st = ail_meth_str_maketrans(cx, &%s, %s, %s, 1, %s);' %
+                     (t, vals[0], vals[1], vals[2]))
+        ctx.check()
+        return t
+
+    def _str_translate_call(self, recv, args, kwargs, ctx):
+        """`s.translate(table)` for the dict `str.maketrans` returns (and a dict literal)."""
+        if kwargs:
+            raise Unsupported('.translate() with keyword arguments')
+        if len(args) != 1:
+            raise Unsupported('.translate() takes exactly one argument (%d given)' % len(args))
+        table = args[0]
+        if isinstance(table, (ast.List, ast.Set, ast.Tuple, ast.Constant)):
+            raise Unsupported('.translate() with a table literal that is not a dict is not built')
+        self.uses_str_translate = True
+        recvc = self.expr(recv, ctx)
+        tab = self.expr(table, ctx)
+        t = ctx.tmp()
+        ctx.emit('st = ail_meth_str_translate(cx, &%s, %s, %s);' % (t, recvc, tab))
+        ctx.check()
         return t
 
     def _m_replace(self, recv, kind, args, kwargs, ctx):
