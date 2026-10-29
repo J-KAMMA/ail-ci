@@ -316,6 +316,7 @@ MODULES = (
     'test_ail_qtest3',
     'test_ail_fz1',
     'test_ail_covtop1', 'test_ail_ffi_handles', 'test_ail_classnames',
+    'test_ail_ffi_objfold', 'test_ail_stdtop1', 'test_ail_stdtop2', 'test_ail_stdtop3', 'test_ail_stdtop4', 'test_ail_gpu_g1',
 )
 
 
