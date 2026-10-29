@@ -130,6 +130,15 @@ REFUSED = {
     'shadowed_builtin': ('from ail_ffi import export\nint = list\n\n'
                          '@export\ndef f(x: int) -> int:\n    return 1\n\nprint("ok")\n',
                          'TypeError: list is not one of int float bool str bytes list[int] list[float]'),
+    'walrus_shadow': ('from ail_ffi import export\n(int := 3)\n\n'
+                      '@export\ndef f(x: int) -> int:\n    return 1\n\nprint("ok")\n',
+                      'TypeError: 3 is not one of int float bool str bytes list[int] list[float]'),
+    'match_capture_shadow': ('from ail_ffi import export\nmatch 3:\n    case int:\n        pass\n\n'
+                             '@export\ndef f(x: int) -> int:\n    return 1\n\nprint("ok")\n',
+                             'TypeError: conditional is not one of int float bool str bytes list[int] list[float]'),
+    'type_alias_shadow': ('from ail_ffi import export\ntype int = str\n\n'
+                          '@export\ndef f(x: int) -> int:\n    return 1\n\nprint("ok")\n',
+                          'TypeError: type alias is not one of int float bool str bytes list[int] list[float]'),
 }
 
 

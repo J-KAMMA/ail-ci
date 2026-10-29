@@ -349,9 +349,51 @@ def _merge_envs(first, second):
     return merged
 
 
+def _bind_walrus(node, env):
+    """Bind the names of module-level assignment expressions, including decorators/defaults."""
+    if isinstance(node, ast.NamedExpr):
+        _bind_walrus(node.value, env)
+        _bind_target(node.target, _resolve_value(node.value, env), env)
+        return
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        parts = [*node.decorator_list, *node.args.defaults,
+                 *(value for value in node.args.kw_defaults if value is not None)]
+        parts.extend(argument.annotation for argument in
+                     (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs)
+                     if argument.annotation is not None)
+        if node.returns is not None:
+            parts.append(node.returns)
+        for part in parts:
+            _bind_walrus(part, env)
+        return
+    if isinstance(node, ast.ClassDef):
+        for part in [*node.decorator_list, *node.bases, *(item.value for item in node.keywords)]:
+            _bind_walrus(part, env)
+        return
+    if isinstance(node, ast.Lambda):
+        for part in [*node.args.defaults, *(value for value in node.args.kw_defaults if value is not None)]:
+            _bind_walrus(part, env)
+        return
+    for child in ast.iter_child_nodes(node):
+        _bind_walrus(child, env)
+
+
+def _pattern_names(pattern):
+    names = []
+    for node in ast.walk(pattern):
+        if isinstance(node, ast.MatchAs) and node.name:
+            names.append(node.name)
+        elif isinstance(node, ast.MatchStar) and node.name:
+            names.append(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.append(node.rest)
+    return names
+
+
 def _walk_environment(statements, env, exported, future):
     """Run the top-level statements over the symbolic module namespace, validating @export defs."""
     for node in statements:
+        _bind_walrus(node, env)
         if isinstance(node, ast.ImportFrom) and node.module == '__future__':
             if any(alias.name == 'annotations' for alias in node.names):
                 future = True
@@ -459,6 +501,27 @@ def _walk_environment(statements, env, exported, future):
                 if item.optional_vars is not None:
                     _bind_target(item.optional_vars, ('object', 'with'), env)
             _walk_environment(node.body, env, exported, future)
+            continue
+        match_type = getattr(ast, 'Match', None)
+        if match_type is not None and isinstance(node, match_type):
+            base = dict(env)
+            ends = []
+            for case in node.cases:
+                branch = dict(env)
+                for name in _pattern_names(case.pattern):
+                    branch[name] = ('object', 'match')
+                if case.guard is not None:
+                    _bind_walrus(case.guard, branch)
+                ends.append(_walk_environment(case.body, branch, exported, future))
+            merged = base
+            for branch in ends:
+                merged = _merge_envs(merged, branch)
+            env.clear()
+            env.update(merged)
+            continue
+        type_alias = getattr(ast, 'TypeAlias', None)
+        if type_alias is not None and isinstance(node, type_alias):
+            _bind_target(node.name, ('object', 'type alias'), env)
             continue
     return env
 

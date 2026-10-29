@@ -1,3 +1,19 @@
+## 2026-10-29 -- ex42 review: bind every module-level name before an exported annotation (job-ex42-10291945)
+
+The review's three defects (forward reference, future-annotated dataclass, shadowed builtin) were
+already refused on both builds, but the binding walk ignored three statements that also bind
+module names: assignment expressions, `match` capture patterns and PEP 695 `type` aliases.  So
+`(int := 3)`, `match 3: case int: pass` and `type int = str` before `@export def f(x: int)` each
+compiled and ran, where CPython's `export()` resolves `int` to the new value and raises
+`TypeError`.  `_walk_environment` now binds walrus targets (including in decorators, defaults and
+guards), walks each `match` case with its capture names merged conservatively, and binds a
+`type` alias name to an opaque value.  All three are now refused by name on both builds.
+Probes `a02_match_shadow.py`, `a08_walrus_int.py`, `a09_match_bind_int.py` and
+`a10_typealias_int.py` fail by name on both builds; the positives `p01`--`p06` and `r07`--`r10`,
+`r13`--`r14` still match CPython (`r11` remains a named refusal; `r04` and `r12` are the
+pre-existing differences recorded in the review).  Added the three refusal cases to
+`test_ail_ex42.py` (5 tests, 14 programs).
+
 ## 2026-10-29 -- ex42 review: resolve annotations at @export time, not from the AST (job-ex42-10291945)
 
 The review found three silent differences in `lower_executable`: an annotation naming a class
