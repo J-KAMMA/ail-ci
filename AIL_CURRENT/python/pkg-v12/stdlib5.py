@@ -240,16 +240,266 @@ def struct_format_error(fmt):
     return None
 
 
-def run_struct(tree, text):
+def _scope_bindings(body):
+    """The names a scope binds: assignments and definitions in `body`, not inside a nested function or class."""
+    names = set()
+
+    def visit(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, ast.arg):
+            names.add(node.arg)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name != '*':
+                    names.add(alias.asname or alias.name.split('.')[0])
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchAs) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchStar) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+    for statement in body:
+        visit(statement)
+    return names
+
+
+def _argument_names(arguments):
+    out = {arg.arg for arg in list(arguments.posonlyargs) + list(arguments.args) + list(arguments.kwonlyargs)}
+    if arguments.vararg is not None:
+        out.add(arguments.vararg.arg)
+    if arguments.kwarg is not None:
+        out.add(arguments.kwarg.arg)
+    return out
+
+
+def _scope_declarations(body):
+    """The `global` and `nonlocal` names declared in a scope, not inside a nested function or class."""
+    glob, nonloc = set(), set()
+
+    def visit(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            return
+        if isinstance(node, ast.Global):
+            glob.update(node.names)
+        elif isinstance(node, ast.Nonlocal):
+            nonloc.update(node.names)
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+    for statement in body:
+        visit(statement)
+    return glob, nonloc
+
+
+class _RenameNames(ast.NodeTransformer):
+    """Rename a set of identifiers in place (every binding and every use). Attribute names and keyword names are
+    not identifiers, so `o.error` and `f(error=1)` keep their spelling."""
+
+    def __init__(self, mapping):
+        self.mapping = mapping
+
+    def name(self, text):
+        return self.mapping.get(text, text)
+
+    def visit_Name(self, node):
+        node.id = self.name(node.id)
+        return node
+
+    def visit_arg(self, node):
+        node.arg = self.name(node.arg)
+        return self.generic_visit(node)
+
+    def visit_FunctionDef(self, node):
+        node.name = self.name(node.name)
+        return self.generic_visit(node)
+
+    def visit_AsyncFunctionDef(self, node):
+        node.name = self.name(node.name)
+        return self.generic_visit(node)
+
+    def visit_ClassDef(self, node):
+        node.name = self.name(node.name)
+        return self.generic_visit(node)
+
+    def visit_alias(self, node):
+        local = node.asname or node.name.split('.')[0]
+        if local in self.mapping:
+            node.asname = self.mapping[local]
+        return node
+
+    def visit_Global(self, node):
+        node.names = [self.name(each) for each in node.names]
+        return node
+
+    def visit_Nonlocal(self, node):
+        node.names = [self.name(each) for each in node.names]
+        return node
+
+    def visit_ExceptHandler(self, node):
+        if node.name:
+            node.name = self.name(node.name)
+        return self.generic_visit(node)
+
+    def visit_MatchAs(self, node):
+        if node.name:
+            node.name = self.name(node.name)
+        return self.generic_visit(node)
+
+    def visit_MatchStar(self, node):
+        if node.name:
+            node.name = self.name(node.name)
+        return self.generic_visit(node)
+
+    def visit_MatchMapping(self, node):
+        if node.rest:
+            node.rest = self.name(node.rest)
+        return self.generic_visit(node)
+
+
+class _HideNames(ast.NodeTransformer):
+    """Replace a load of a name the prelude would otherwise put in the program's global namespace, when the load
+    has no binding of its own, by a call that raises CPython's NameError."""
+
+    def __init__(self, hidden, raise_name, module_bindings):
+        self.hidden = hidden
+        self.raise_name = raise_name
+        self.module_bindings = module_bindings
+        self.scopes = [('module', set(module_bindings), set(), set())]
+
+    def bound(self, text):
+        for index in range(len(self.scopes) - 1, -1, -1):
+            kind, local, glob, nonloc = self.scopes[index]
+            if kind == 'module':
+                return text in local
+            if text in glob:
+                return text in self.module_bindings
+            if kind == 'class' and index != len(self.scopes) - 1:
+                continue
+            if text in local or text in nonloc:
+                return True
+        return text in self.module_bindings
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, ast.Load) and node.id in self.hidden and not self.bound(node.id):
+            call = ast.Call(func=name(self.raise_name), args=[ast.Constant(node.id)], keywords=[])
+            return ast.copy_location(call, node)
+        return node
+
+    def function(self, node, arguments, body):
+        for each in node.decorator_list:
+            self.visit(each)
+        for each in list(arguments.defaults) + [d for d in arguments.kw_defaults if d is not None]:
+            self.visit(each)
+        glob, nonloc = _scope_declarations(body)
+        local = _argument_names(arguments) | _scope_bindings(body)
+        local -= glob
+        local -= nonloc
+        self.scopes.append(('function', local, glob, nonloc))
+        node.body = [self.visit(statement) for statement in body]
+        self.scopes.pop()
+        return node
+
+    def visit_FunctionDef(self, node):
+        return self.function(node, node.args, node.body)
+
+    def visit_AsyncFunctionDef(self, node):
+        return self.function(node, node.args, node.body)
+
+    def visit_Lambda(self, node):
+        self.scopes.append(('function', _argument_names(node.args), set(), set()))
+        node.body = self.visit(node.body)
+        self.scopes.pop()
+        return node
+
+    def visit_ClassDef(self, node):
+        for each in list(node.decorator_list) + list(node.bases) + [word.value for word in node.keywords]:
+            self.visit(each)
+        local = _scope_bindings(node.body)
+        self.scopes.append(('class', local, set(), set()))
+        node.body = [self.visit(statement) for statement in node.body]
+        self.scopes.pop()
+        return node
+
+    def comprehension(self, node, elements):
+        targets = set()
+        for generator in node.generators:
+            targets |= _scope_bindings([ast.Expr(value=generator.target)])
+        self.scopes.append(('function', targets, set(), set()))
+        for index, generator in enumerate(node.generators):
+            generator.iter = self.visit(generator.iter)
+            generator.target = self.visit(generator.target)
+            if index == 0:
+                generator.ifs = [self.visit(each) for each in generator.ifs]
+        node.generators[-1].ifs = [self.visit(each) for each in node.generators[-1].ifs]
+        for element in elements:
+            self.visit(element)
+        self.scopes.pop()
+        return node
+
+    def visit_ListComp(self, node):
+        return self.comprehension(node, [node.elt])
+
+    def visit_SetComp(self, node):
+        return self.comprehension(node, [node.elt])
+
+    def visit_GeneratorExp(self, node):
+        return self.comprehension(node, [node.elt])
+
+    def visit_DictComp(self, node):
+        return self.comprehension(node, [node.key, node.value])
+
+
+def _prelude_names(tree):
+    names = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+    return names
+
+
+def run_struct(tree, text, source):
     binder = take_imports(tree, 'struct', set(STRUCT_FUNCTIONS) | {'error'},
                           unknown='pack, unpack, calcsize, unpack_from and pack_into are built')
     if not binder:
         return
+    prelude_tree = ast.parse(prelude('struct'))
+    prelude_names = _prelude_names(prelude_tree)
+    base = '_ail_s45_'
+    prefix = base
+    count = 0
+    while prefix in source:
+        count += 1
+        prefix = '_ail_s45_%d_' % count
+    mapped = {each: prefix + each for each in prelude_names}
+    _RenameNames(mapped).visit(prelude_tree)
+    functions = {each: mapped[each] for each in STRUCT_FUNCTIONS.values()}
+    raise_name = mapped['_ail_st_name_error']
+    hidden = set(prelude_names) | {'error'}
+
+    user_bindings = _scope_bindings(tree.body)
+    for each in [name for name in binder.names if name in user_bindings]:
+        del binder.names[each]          # a later `error = ...` (or `def error`) is the binding CPython uses
+    module_bindings = set(user_bindings) | set(binder.aliases)
+    module_bindings.update(each for each, value in binder.names.items() if value in hidden)
+    _HideNames(hidden, raise_name, module_bindings).visit(tree)
 
     def fix(node):
         attr = binder.attr(node.func) if isinstance(node, ast.Call) else binder.attr(node)
         if attr == 'error':
-            return name('error')
+            return name(mapped['_AilStructError'])
         if attr in STRUCT_FUNCTIONS:
             if not isinstance(node, ast.Call):
                 refuse(node, 'struct.%s used as a value is not built' % attr)
@@ -269,15 +519,16 @@ def run_struct(tree, text):
                 start = 1 if attr == 'pack' else 3
                 values = ast.Tuple(elts=list(args[start:]), ctx=ast.Load())
                 packed = list(args[:start]) + [values]
-                return ast.Call(func=name(STRUCT_FUNCTIONS[attr]), args=packed, keywords=[])
-            return ast.Call(func=name(STRUCT_FUNCTIONS[attr]), args=args, keywords=keywords)
+                return ast.Call(func=name(functions[STRUCT_FUNCTIONS[attr]]), args=packed, keywords=[])
+            return ast.Call(func=name(functions[STRUCT_FUNCTIONS[attr]]), args=args, keywords=keywords)
         return None
     tree.body = [Replace(fix).visit(stmt) for stmt in tree.body]
     for alias in [each for each, handled in binder.names.items() if handled == 'error']:
         del binder.names[alias]
     leftover(tree, binder, 'pack, unpack, calcsize, unpack_from and pack_into are built; '
                            'the Struct class, iter_unpack, the float formats and n/N/P are not')
-    text.append(prelude('struct'))
+    ast.fix_missing_locations(prelude_tree)
+    text.append(ast.unparse(prelude_tree) + '\n')
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -327,7 +578,7 @@ def rewrite_text(source, notes=None):
         if 'fractions' in mods:
             run_fractions(tree, text)
         if 'struct' in mods:
-            run_struct(tree, text)
+            run_struct(tree, text, source)
         if 'enum' in mods:
             import enumlib
             enumlib.run(tree, text)

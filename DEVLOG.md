@@ -1,3 +1,24 @@
+## 2026-10-29 -- stdlib45 review: `struct` error paths, validation order and prelude names
+
+The `struct` review found four defects in the first cut, all fixed here.  `_ail_st_check_buffer` now uses
+CPython 3.12's negative-offset cutoff (`offset < -max(size - 1, buffer)`) and the `not enough data` / `no space`
+texts before the positive `requires a buffer` texts; `pack_into` item-count errors say `pack_into expected`
+through a separate label; and `pack`/`pack_into` count their values up front, before buffer writability,
+offset bounds and value types or ranges.  The prelude no longer defines a top-level `error` or any of its
+`_ail_st_*` names in the program's namespace: helpers are renamed to a prefix absent from the source, and an
+unbound read of an old helper name (or of `error`) becomes CPython's `NameError`.  A user `class error` stays
+the user's class: the prelude's exception is `_AilStructError` with a prelude-only
+`__ail_display_name__ = "error"`, honoured by `userexc` (typed path) and `pyboxed2` (general path), so
+`type(e).__name__` still reads `error` on both builds and the two classes stay distinct.
+
+Probes `p1`-`p14` rerun on both builds: negative/out-of-range offsets, item counts, validation order, all
+four routes for values, aliasing and bytearray mutation, zero-length formats, bool/float/str offsets and
+buffer types, user `class error` with `from struct import error` aliasing, and hidden prelude names all
+match CPython; native alignment, a non-literal format and `iter_unpack` remain named refusals.  Tests:
+`test_ail_stdlib45`, `test_ail_stdlib5`, `test_ail_exception_values_core`, `test_ail_exc_str`,
+`test_ail_python_syntax`, `test_ail_check`, `test_ail_files`, `test_ail_corpus_findings3` and
+`test_ail_safetynet` pass (638s, final commit).
+
 ## 2026-10-29 -- stdlib45: `struct.pack` / `unpack` / `calcsize` / `unpack_from` / `pack_into` (job-stdlib45-10291923)
 
 `struct` was the most imported module in `lab/corpus/programs` and `language_examples` that was

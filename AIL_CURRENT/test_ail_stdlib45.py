@@ -118,6 +118,98 @@ try:
     struct.unpack(">H", "ab")
 except TypeError as exc:
     print("TypeError", str(exc))
+for data, offset in ((b"", -1), (b"abc", -3), (b"abcd", -4), (b"abcd", -5), (b"abc", -5)):
+    try:
+        print(struct.unpack_from(">I", data, offset))
+    except struct.error as exc:
+        print(type(exc).__name__, str(exc))
+for size, offset in ((1, -1), (4, -4), (4, -5), (4, 5), (0, 0), (0, -1)):
+    try:
+        struct.pack_into(">I", bytearray(size), offset, 1)
+        print("packed")
+    except struct.error as exc:
+        print(type(exc).__name__, str(exc))
+try:
+    struct.pack_into(">2H", bytearray(4), 0, 1)
+except struct.error as exc:
+    print(type(exc).__name__, str(exc))
+try:
+    struct.pack_into(">2H", b"abcd", 0, 1)
+except struct.error as exc:
+    print(type(exc).__name__, str(exc))
+try:
+    struct.pack_into(">2H", b"abcd", 0, 1, 2)
+except TypeError as exc:
+    print("TypeError", str(exc))
+try:
+    struct.pack(">I", "x", 2)
+except struct.error as exc:
+    print(type(exc).__name__, str(exc))
+try:
+    struct.pack(">BI", 300)
+except struct.error as exc:
+    print(type(exc).__name__, str(exc))
+try:
+    struct.pack_into(">I", bytearray(0), 0, "x")
+except struct.error as exc:
+    print(type(exc).__name__, str(exc))
+'''
+
+NAMESPACE_PROGRAM = r'''import struct
+from struct import error as struct_error
+
+
+class error(Exception):
+    def __init__(self, value: int) -> None:
+        self.value = value
+
+
+try:
+    raise error(5)
+except error as exc:
+    print("user", type(exc).__name__, exc.value)
+try:
+    struct.pack(">B", 300)
+except error:
+    print("WRONG user class caught a struct error")
+except struct_error as exc:
+    print("struct", type(exc).__name__, str(exc))
+try:
+    raise error(6)
+except struct_error:
+    print("WRONG struct class caught a user error")
+except error as exc:
+    print("user2", type(exc).__name__, exc.value)
+print(error.__name__, struct_error.__name__)
+try:
+    print(_ail_st_calcsize)
+except NameError as exc:
+    print("hidden calcsize", type(exc).__name__, str(exc))
+try:
+    print(_ail_st_pack)
+except NameError as exc:
+    print("hidden pack", type(exc).__name__, str(exc))
+'''
+
+HIDDEN_PROGRAM = r'''import struct
+print(struct.calcsize(">I"))
+try:
+    print(error)
+except NameError as exc:
+    print("hidden error", type(exc).__name__, str(exc))
+try:
+    print(_ail_st_calcsize)
+except NameError as exc:
+    print("hidden calcsize", type(exc).__name__, str(exc))
+try:
+    print(_ail_st_codes)
+except NameError as exc:
+    print("hidden codes", type(exc).__name__, str(exc))
+try:
+    print(_ail_st_error_type)
+except NameError as exc:
+    print("hidden error_type", type(exc).__name__, str(exc))
+print(struct.pack(">I", 7))
 '''
 
 
@@ -158,6 +250,25 @@ class CompiledStruct(unittest.TestCase):
 
     def test_general_build(self):
         self.check("general", AIL_UNIFIED_FORCE="1")
+
+    def check_program(self, label, program, **extra):
+        with tempfile.TemporaryDirectory() as directory:
+            built, _, exe = compile_python(directory, program, "p_struct", **extra)
+            self.assertEqual(built.returncode, 0, "%s\n%s%s" % (label, built.stdout, built.stderr))
+            oracle = Path(directory, "oracle.py")
+            oracle.write_text(program, encoding="utf-8")
+            want = subprocess.run([sys.executable, "-X", "utf8", str(oracle)], capture_output=True, timeout=300)
+            got = subprocess.run([str(exe)], capture_output=True, timeout=300)
+            self.assertEqual(got.returncode, want.returncode, "%s\n%s" % (label, got.stderr[-500:]))
+            self.assertEqual(got.stdout, want.stdout, label)
+
+    def test_namespace_and_user_error_class(self):
+        self.check_program("namespace", NAMESPACE_PROGRAM)
+        self.check_program("namespace general", NAMESPACE_PROGRAM, AIL_UNIFIED_FORCE="1")
+
+    def test_internal_names_are_hidden(self):
+        self.check_program("hidden", HIDDEN_PROGRAM)
+        self.check_program("hidden general", HIDDEN_PROGRAM, AIL_UNIFIED_FORCE="1")
 
 
 class Refusals(unittest.TestCase):

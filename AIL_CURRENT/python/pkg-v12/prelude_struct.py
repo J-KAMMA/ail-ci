@@ -9,11 +9,11 @@ _ail_st_codes = "x?bBhHiIlLqQcs"
 _ail_st_space = " \t\n\r\x0b\x0c"
 
 
-class error(Exception):
-    pass
+class _AilStructError(Exception):
+    __ail_display_name__ = "error"
 
 
-_ail_st_error_type = error
+_ail_st_error_type = _AilStructError
 
 
 def _ail_st_little():
@@ -21,7 +21,11 @@ def _ail_st_little():
 
 
 def _ail_st_error(message: str):
-    raise error(message)
+    raise _AilStructError(message)
+
+
+def _ail_st_name_error(what: str):
+    raise NameError("name '" + what + "' is not defined")
 
 
 def _ail_st_width(code: str) -> int:
@@ -117,8 +121,7 @@ def _ail_st_check_int(v, code: str) -> int:
     return iv
 
 
-def _ail_st_pack(fmt: str, values) -> bytes:
-    toks = _ail_st_parse(fmt)
+def _ail_st_pack_tokens(toks: list, values) -> bytes:
     little = toks[0]
     out = bytearray()
     k = 0
@@ -133,8 +136,6 @@ def _ail_st_pack(fmt: str, values) -> bytes:
                 out.append(0)
                 n = n + 1
         elif code == "s":
-            if k >= len(values):
-                _ail_st_error("pack expected " + str(_ail_st_count(toks)) + " items for packing (got " + str(len(values)) + ")")
             v = values[k]
             k = k + 1
             if isinstance(v, str) or (not isinstance(v, bytes) and not isinstance(v, bytearray)):
@@ -149,8 +150,6 @@ def _ail_st_pack(fmt: str, values) -> bytes:
         else:
             n = 0
             while n < count:
-                if k >= len(values):
-                    _ail_st_error("pack expected " + str(_ail_st_count(toks)) + " items for packing (got " + str(len(values)) + ")")
                 v = values[k]
                 k = k + 1
                 if code == "?":
@@ -167,9 +166,20 @@ def _ail_st_pack(fmt: str, values) -> bytes:
                     out += iv.to_bytes(_ail_st_width(code), "little" if little else "big",
                                        signed=_ail_st_signed(code))
                 n = n + 1
-    if k != len(values):
-        _ail_st_error("pack expected " + str(k) + " items for packing (got " + str(len(values)) + ")")
     return bytes(out)
+
+
+def _ail_st_count_error(fmt: str, values, label: str):
+    toks = _ail_st_parse(fmt)
+    want = _ail_st_count(toks)
+    if len(values) != want:
+        _ail_st_error(label + " expected " + str(want) + " items for packing (got " + str(len(values)) + ")")
+    return toks
+
+
+def _ail_st_pack(fmt: str, values) -> bytes:
+    toks = _ail_st_count_error(fmt, values, "pack")
+    return _ail_st_pack_tokens(toks, values)
 
 
 def _ail_st_read(toks: list, data, pos: int):
@@ -210,22 +220,30 @@ def _ail_st_bytes(data):
 
 def _ail_st_check_buffer(data, size: int, offset: int, what: str) -> int:
     _ail_st_bytes(data)
-    start = offset
-    if start < 0:
-        if -start > len(data):
-            _ail_st_error("offset " + str(offset) + " out of range for " + str(len(data)) + "-byte buffer")
-        start = len(data) + start
-        if len(data) - start < size:
+    if isinstance(offset, bool):
+        pass
+    elif not isinstance(offset, int):
+        raise TypeError("'" + type(offset).__name__ + "' object cannot be interpreted as an integer")
+    n = len(data)
+    if offset < 0:
+        limit = size - 1
+        if n > limit:
+            limit = n
+        if offset < -limit:
+            _ail_st_error("offset " + str(offset) + " out of range for " + str(n) + "-byte buffer")
+        start = n + offset
+        if n - start < size:
             if what == "unpack_from":
                 _ail_st_error("not enough data to unpack " + str(size) + " bytes at offset " + str(offset))
             _ail_st_error("no space to pack " + str(size) + " bytes at offset " + str(offset))
-    elif len(data) - start < size:
+        return start
+    if n - offset < size:
         if what == "unpack_from":
-            _ail_st_error("unpack_from requires a buffer of at least " + str(start + size) + " bytes for unpacking "
-                          + str(size) + " bytes at offset " + str(start) + " (actual buffer size is " + str(len(data)) + ")")
-        _ail_st_error("pack_into requires a buffer of at least " + str(start + size) + " bytes for packing "
-                      + str(size) + " bytes at offset " + str(start) + " (actual buffer size is " + str(len(data)) + ")")
-    return start
+            _ail_st_error("unpack_from requires a buffer of at least " + str(offset + size) + " bytes for unpacking "
+                          + str(size) + " bytes at offset " + str(offset) + " (actual buffer size is " + str(n) + ")")
+        _ail_st_error("pack_into requires a buffer of at least " + str(offset + size) + " bytes for packing "
+                      + str(size) + " bytes at offset " + str(offset) + " (actual buffer size is " + str(n) + ")")
+    return offset
 
 
 def _ail_st_unpack(fmt: str, data):
@@ -245,8 +263,10 @@ def _ail_st_unpack_from(fmt: str, data, offset: int = 0):
 
 
 def _ail_st_pack_into(fmt: str, buffer, offset: int, values) -> None:
+    toks = _ail_st_count_error(fmt, values, "pack_into")
     if not isinstance(buffer, bytearray):
         raise TypeError("argument must be read-write bytes-like object, not " + type(buffer).__name__)
-    packed = _ail_st_pack(fmt, values)
-    start = _ail_st_check_buffer(buffer, len(packed), offset, "pack_into")
-    buffer[start:start + len(packed)] = packed
+    size = _ail_st_size(toks)
+    start = _ail_st_check_buffer(buffer, size, offset, "pack_into")
+    packed = _ail_st_pack_tokens(toks, values)
+    buffer[start:start + size] = packed

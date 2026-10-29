@@ -2877,8 +2877,9 @@ class Compiler(boxclosure.ClosureMixin):
                 base_expr = 'g_slots_arr[%d]' % self.global_slots['class:' + cls['base']]
             else:
                 base_expr = 'ail_box_none()'
+            display = cls.get('display') or cname
             setup.append('    g_slots_arr[%d] = ail_class_new(cx, %s, %s);\n' %
-                         (self.global_slots['class:' + cname], c_str_literal(cname), base_expr))
+                         (self.global_slots['class:' + cname], c_str_literal(display), base_expr))
             for entry in cls.get('class_body', []):
                 # A class attribute read through a class VALUE (alias/argument/...) looks it up by
                 # name.  A method or property in the class body is a sentinel (slot -1): it hides a
@@ -3908,6 +3909,7 @@ class Compiler(boxclosure.ClosureMixin):
         self._class_global_slot(node.name)
         methods = {}
         class_attrs = []
+        display = None
         body_order = []          # class dict order: ('p'/'m', name) or ('a', class_attrs index)
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
@@ -3919,6 +3921,10 @@ class Compiler(boxclosure.ClosureMixin):
                 body_order.append(('p' if info.get('is_property') else 'm', item.name))
             elif isinstance(item, ast.Assign) and len(item.targets) == 1 and \
                     isinstance(item.targets[0], ast.Name):
+                if (item.targets[0].id == '__ail_display_name__'
+                        and isinstance(item.value, ast.Constant) and isinstance(item.value.value, str)):
+                    display = item.value.value
+                    continue
                 class_attrs.append((item.targets[0].id, item.value))
                 body_order.append(('a', len(class_attrs) - 1))
             elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name):
@@ -3964,6 +3970,7 @@ class Compiler(boxclosure.ClosureMixin):
         for kind, what in body_order:
             class_body.append((kind,) + (class_attrs[what] if kind == 'a' else (what,)))
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
+                                   'display': display,
                                    'class_body': class_body, 'dc': dc, 'dc_hide': hide}
         self.class_order.append(node.name)
 

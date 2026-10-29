@@ -51,6 +51,7 @@ class UserClass:
         self.str_final = None      # ... with every self.attr replaced by the expression that sets it
         self.inline = False        # no __init__ but attributes or a __str__: calls become _ail_exc_new(...) inline
         self.node = None
+        self.display = None        # the name `type(e).__name__` reads (a prelude class may keep its own identifier)
 
     @property
     def function(self):
@@ -152,6 +153,11 @@ def _parse_class(node, base):
         if isinstance(stmt, ast.Pass):
             continue
         if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str):
+            continue
+        if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Name) and stmt.targets[0].id == '__ail_display_name__'
+                and isinstance(stmt.value, ast.Constant) and isinstance(stmt.value.value, str)):
+            cls.display = stmt.value.value
             continue
         if isinstance(stmt, ast.FunctionDef) and stmt.name == '__init__' and not cls.has_init:
             if not _parse_init(cls, stmt):
@@ -360,7 +366,7 @@ def collect(tree, builtin_codes):
     for cls in good:
         cls.code = FIRST_CODE + 1 + reserved() + len(NAMES)
         cls.base_code = builtin_codes[cls.base] if cls.base in builtin_codes else known[cls.base].code
-        NAMES.append(cls.name)
+        NAMES.append(cls.display or cls.name)
         USER[cls.name] = cls
         for name, expr in final_attrs(cls):
             if name not in ATTRS:
