@@ -1,3 +1,22 @@
+## 2026-10-29 -- ex43 review: resolve the dataclass decorator and field names, not their spelling
+
+The ex43 follow-up matched decorator and field annotation names syntactically, so three forms
+CPython rejects still ran: a dataclass base decorated through `from dataclasses import dataclass
+as dc`, a local `def dataclass` that is not `dataclasses.dataclass`, and `int = str` before a
+field `x: int`.  The FFI scan now walks module statements in execution order, resolving imports
+and aliases of `dataclasses`/`dataclass`, `builtins`, `typing.ClassVar` and scalar names, and
+takes a snapshot at each function/class; inherited fields, the decorator and field annotations
+follow the objects visible at definition time.  A plain local base still contributes no fields;
+an aliased dataclass base with a `str` field, a fake local decorator and a shadowed `int` are now
+refused by name on both builds, matching CPython's `TypeError`.
+
+Probes in `/tmp/probes` via `cmp.sh` (with `PYTHONPATH=AIL_CURRENT`): `alias_dataclass_base`,
+`fake_dataclass`, `shadow_int_field`, `module_alias_base`, `alias_dc_fake`, `later_class`,
+`class_body_shadow` and `class_body_shadow_alias` are refused by name on both builds; `plain_base_ok`, `empty_dataclass`, `valid_fields`,
+`alias_int_field` (builtins.int alias) and `shadow_int_direct` (shadowed int still spells the
+allowed str) match CPython on both builds.  `classvar_ok` stays refused by the separate
+unmodelled-ClassVar note.  Extended `test_ail_ex43.py` with the three regressions.
+
 ## 2026-10-29 -- ex43 follow-up: `@export` dataclass fields and non-function decorators
 
 The first ex43 change accepted `@export` on the ordinary Python-syntax build, but five boundary

@@ -6545,7 +6545,7 @@
     "test_ail_ffi.py": "fc9e0e87dfbd2a3d843a008e9dea83a7cc620b9e86828c0128a04eda3e657369",
     "test_ail_zlib.py": "6f63289d7ff5b6606b402fb2717e7e9f697a4d7af93028179d52f77648310f3e",
     "ail_ffi.py": "bfd6a183b9455237e9cac2ff279e7cf0a78749e6f3fe897af6363f09237c80e4",
-    "ail_ffi_lower.py": "1c8cfe9289d683bd55c72fa0887946504af72b51be52b373a0a5ecea67707796",
+    "ail_ffi_lower.py": "1a981b0cd7133ec0f212cf584bd6077c69d36092d5f94d461d37a61ee94ad231",
     "stdlib/zlib.py": "0942d127fd3d0d9281fa6bbf163bf23859feebac01695a75a83a131d28f30a4c",
     "stdlib/zlib_glue.c": "0c567dc25fb91deebafab600ecec3fa0168303400cca91f80cca2b4fd068fff5",
     "stdlib/zlib_glue.h": "4207f4ce60ea5036c21a1b8072a6345ec4d4f2a7e194b7e8c07124f5e2533378",
@@ -7022,7 +7022,7 @@
     "test_ail_rdiff3.py": "e77da325c553f298bf2954e0455308c72000fdeb53ab0c6891d4beefbd48a3b8",
     "test_ail_rdiff4.py": "8187d4a046d063bce4daeddf3476058ddae7feb2f8579dfb283209d6fdf911fe",
     "test_ail_rdiff5.py": "8e85c3956860ab03883666bb94be89103e7db13c6b968c2adc47eacfa659076e",
-    "test_ail_ex43.py": "8f2cff118527ebb55a53ec2173b986c99b4ba453e870a618c8b06e5e207ccfdd"
+    "test_ail_ex43.py": "af37d5de1015719f2918ffe08b053faa8f1be0c8b67f91ca17fad4491f4069c2"
   },
   "release": "R1.40+xlang-304d34f+native-round72+windows-cpython+workflow-tests-candidate+bracket-read-candidate+n0-v4-candidate+r8-fuzz-plan-v2+r9-byte-arena-sanitizer+r10-native-ledger-n0+r11-n0-fresh-evidence+r12-optimizer-current-chain+r13-xlang-arm64-emulated-gate+r14-native-r11-historical-inputs+r15-native-r11-regression+r16-native-recovered-inputs+r20-native-versioned-scope+r21-native-pinned-input-recovery+r22-provenance-precision+r23-direct-indexed-undefined+r24-protected-lock-line-endings+r25-current-r6-seeds+r26-nullish-ternary+r27-seed777-coercion+r28-includes+r30-indexof+r32-native-model-inputs+r33-native-checkpoint+r36-xlang-dynamic-array+r37-source-bound-gate+r38-host-matrix+r51-native-f32-successor+r52-native-f32-migration-candidate+r53-v1-string-width+r54-v1-runtime-repair+r55-windows-cli-intake",
   "work_id": "r140-xlang-304d34f-integration-20260926",
@@ -24490,7 +24490,7 @@
     "test_ail_ffi.py": "fc9e0e87dfbd2a3d843a008e9dea83a7cc620b9e86828c0128a04eda3e657369",
     "test_ail_zlib.py": "6f63289d7ff5b6606b402fb2717e7e9f697a4d7af93028179d52f77648310f3e",
     "ail_ffi.py": "bfd6a183b9455237e9cac2ff279e7cf0a78749e6f3fe897af6363f09237c80e4",
-    "ail_ffi_lower.py": "1c8cfe9289d683bd55c72fa0887946504af72b51be52b373a0a5ecea67707796",
+    "ail_ffi_lower.py": "1a981b0cd7133ec0f212cf584bd6077c69d36092d5f94d461d37a61ee94ad231",
     "stdlib/zlib.py": "0942d127fd3d0d9281fa6bbf163bf23859feebac01695a75a83a131d28f30a4c",
     "stdlib/zlib_glue.c": "0c567dc25fb91deebafab600ecec3fa0168303400cca91f80cca2b4fd068fff5",
     "stdlib/zlib_glue.h": "4207f4ce60ea5036c21a1b8072a6345ec4d4f2a7e194b7e8c07124f5e2533378",
@@ -24967,7 +24967,7 @@
     "test_ail_rdiff3.py": "e77da325c553f298bf2954e0455308c72000fdeb53ab0c6891d4beefbd48a3b8",
     "test_ail_rdiff4.py": "8187d4a046d063bce4daeddf3476058ddae7feb2f8579dfb283209d6fdf911fe",
     "test_ail_rdiff5.py": "8e85c3956860ab03883666bb94be89103e7db13c6b968c2adc47eacfa659076e",
-    "test_ail_ex43.py": "8f2cff118527ebb55a53ec2173b986c99b4ba453e870a618c8b06e5e207ccfdd"
+    "test_ail_ex43.py": "af37d5de1015719f2918ffe08b053faa8f1be0c8b67f91ca17fad4491f4069c2"
   },
   "base_local_change_scope": "Cross-language pipeline hardened to real-world measurement. incr.py: two new incrementalization pattern classes -- dict argmax (d[k]=d.get(k,0)+POS writes plus keys() rescan with tiebreak become update-site tracking) and sliding window sum (del xs[0] sites emit _wacc-=xs[0]); probe 64/64, mode/wma translations fire with byte-identical oracles. pkg-v12: str(<float>) enabled via existing ail_str_from_float FMT machinery (SEMANTICS.md updated). jstrans.py: deterministic JS->subset translator -- float profile (Number/parseFloat, JS Number->String formatting: integral doubles without .0, NaN/Infinity, -0->0, true / on floats, IEEE remainder), plus parser-surface hardening (ASI, shebang, new Array, function-expr arrows, stdin line-terminator fix via rstrip, null-sentinel re-kinding via vartypes/zero_of, trivial-function inlining, named TErrs for all remaining unsupported constructs). Corpus 17/17 byte-identical vs Node; real-world corpus 0->2 end-to-end with zero generic crashes (12 named TErrs). dominfer.py: machine-derived input domains via differential probing (found 2^53+ integer JS precision boundary on all add-protocol programs).",
   "integration": {

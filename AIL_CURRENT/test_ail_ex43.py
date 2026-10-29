@@ -317,6 +317,69 @@ def weight(p: Point) -> int:
 
 print(weight(Point("ab", 1)))
 ''', '@export weight: parameter p needs one of'),
+    ('dataclass_alias_base_bad_field', '''
+from dataclasses import dataclass as dc
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dc
+class Base:
+    name: str
+
+
+@dataclass
+class Point(Base):
+    y: int
+
+
+@export
+def weight(p: Point) -> int:
+    return p.y
+
+
+print(weight(Point("ab", 2)))
+''', '@export weight: parameter p needs one of'),
+    ('fake_dataclass_decorator', '''
+from ail_ffi import export
+
+
+def dataclass(c):
+    return c
+
+
+@dataclass
+class Point:
+    x: int
+
+
+@export
+def weight(p: Point) -> int:
+    return 1
+
+
+print(weight(Point()))
+''', '@export weight: parameter p needs one of'),
+    ('dataclass_shadowed_int_field', '''
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+int = str
+
+
+@dataclass
+class Point:
+    x: int
+
+
+@export
+def weight(p: Point) -> int:
+    return 1
+
+
+print(weight(Point("ab")))
+''', '@export weight: parameter p needs one of'),
     ('dataclass_shadowed_classvar_str', '''
 from dataclasses import dataclass
 from ail_ffi import export

@@ -187,7 +187,7 @@ class Session:
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
-        data_classes = self._dataclass_names(tree)
+        data_classes, snapshots = self._scan(tree)
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -205,7 +205,8 @@ class Session:
                 if self._is_export(dec, imported, module_names):
                     if isinstance(dec, ast.Call) and (dec.args or dec.keywords):
                         self._refuse(path, dec, '@export: the decorator takes no arguments')
-                    self._check_export(path, node, data_classes)
+                    classes, env = snapshots.get(id(node), (data_classes, {}))
+                    self._check_export(path, node, classes, env)
                     blank.append((dec.lineno, dec.end_lineno))
             deco = [d for d in node.decorator_list if self._is_extern(d, imported, module_names)]
             if not deco:
@@ -274,70 +275,185 @@ class Session:
                 and node.value.id in module_names)
 
     @staticmethod
-    def _dataclass_names(tree):
-        """Every local dataclass and whether CPython's @export accepts it as a parameter.
+    def _expr_value(node, env):
+        """The object a module-level expression names, as far as dataclass resolution needs it."""
+        if isinstance(node, ast.Name):
+            if node.id in env:
+                return env[node.id]
+            if node.id in ('int', 'float', 'bool', 'str', 'bytes', 'object', 'list', 'NoneType'):
+                return ('builtin', node.id)
+            return ('unknown',)
+        if isinstance(node, ast.Attribute):
+            base = Session._expr_value(node.value, env)
+            if base == ('module', 'dataclasses') and node.attr == 'dataclass':
+                return ('dataclass',)
+            if base == ('module', 'builtins') and node.attr in (
+                    'int', 'float', 'bool', 'str', 'bytes', 'object', 'list', 'NoneType'):
+                return ('builtin', node.attr)
+            if base in (('module', 'typing'), ('module', 'typing_extensions')) and node.attr == 'ClassVar':
+                return ('classvar',)
+            return ('unknown',)
+        if isinstance(node, ast.Subscript):
+            return ('classvar',) if Session._expr_value(node.value, env) == ('classvar',) else ('unknown',)
+        return ('unknown',)
 
-        CPython reads `dataclasses.fields`, which includes inherited dataclass fields and skips
-        `ClassVar`; each field's type must be exactly int, float or bool (never a string, a list
-        or another dataclass).  A base this scan does not know is treated as unknown, so an
-        exported parameter over it is refused by name instead of silently accepted.
-        """
-        future = any(isinstance(n, ast.ImportFrom) and n.module == '__future__'
-                     and any(a.name == 'annotations' for a in n.names) for n in tree.body)
-        classvars, typing_modules = set(), set()
-        for item in tree.body:
-            if isinstance(item, ast.ImportFrom) and item.module in ('typing', 'typing_extensions'):
-                classvars.update(a.asname or a.name for a in item.names if a.name == 'ClassVar')
-            elif isinstance(item, ast.Import) and any(a.name in ('typing', 'typing_extensions') for a in item.names):
-                typing_modules.update(a.asname or a.name for a in item.names
-                                      if a.name in ('typing', 'typing_extensions'))
-        names = {}
-        plain = set()
-        for node in tree.body:
-            if not isinstance(node, ast.ClassDef):
-                continue
-            decorated = False
-            for dec in node.decorator_list:
-                target = dec.func if isinstance(dec, ast.Call) else dec
-                if ((isinstance(target, ast.Name) and target.id == 'dataclass')
-                        or (isinstance(target, ast.Attribute) and target.attr == 'dataclass')):
-                    decorated = True
-            if not decorated:
-                plain.add(node.name)
-                continue
-            ok = not future
-            for base in node.bases:
-                if not isinstance(base, ast.Name) or base.id == 'object' or base.id in plain:
-                    continue
-                # a local dataclass contributes its fields; an imported or later name is unknown
-                ok = ok and names.get(base.id, False)
-            for item in node.body:
-                if not isinstance(item, ast.AnnAssign) or Session._is_classvar(
-                        item.annotation, classvars, typing_modules):
-                    continue
-                ok = ok and Session._export_field_annotation_ok(item.annotation)
-            names[node.name] = ok
+    @staticmethod
+    def _target_names(target):
+        if isinstance(target, ast.Name):
+            return {target.id}
+        if isinstance(target, (ast.Tuple, ast.List)):
+            names = set()
+            for element in target.elts:
+                names |= Session._target_names(element)
+            return names
+        return set()
+
+    @staticmethod
+    def _module_bound_names(statements):
+        names = set()
+        for node in statements:
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    names |= Session._target_names(target)
+            elif isinstance(node, ast.AnnAssign):
+                names |= Session._target_names(node.target)
+            elif isinstance(node, ast.AugAssign):
+                names |= Session._target_names(node.target)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(node.name)
+            elif isinstance(node, ast.Import):
+                names.update(alias.asname or alias.name.split('.')[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                names.update(alias.asname or alias.name for alias in node.names if alias.name != '*')
+            elif isinstance(node, (ast.If, ast.For, ast.AsyncFor, ast.While)):
+                names |= Session._module_bound_names(node.body)
+                names |= Session._module_bound_names(node.orelse)
+                if isinstance(node, (ast.For, ast.AsyncFor)):
+                    names |= Session._target_names(node.target)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                names |= Session._module_bound_names(node.body)
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        names |= Session._target_names(item.optional_vars)
+            elif isinstance(node, ast.Try):
+                names |= Session._module_bound_names(node.body)
+                names |= Session._module_bound_names(node.orelse)
+                names |= Session._module_bound_names(node.finalbody)
+                for handler in node.handlers:
+                    names |= Session._module_bound_names(handler.body)
+                    if handler.name:
+                        names.add(handler.name)
         return names
 
     @staticmethod
-    def _is_classvar(ann, imported, modules):
-        if isinstance(ann, ast.Subscript):
-            ann = ann.value
-        if isinstance(ann, ast.Name):
-            return ann.id in imported
-        return (isinstance(ann, ast.Attribute) and ann.attr == 'ClassVar'
-                and isinstance(ann.value, ast.Name) and ann.value.id in modules)
+    def _scan_statement(node, env, classes, future):
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == '*':
+                    continue
+                bound = alias.asname or alias.name
+                if node.module == 'dataclasses' and alias.name == 'dataclass':
+                    env[bound] = ('dataclass',)
+                elif node.module in ('typing', 'typing_extensions') and alias.name == 'ClassVar':
+                    env[bound] = ('classvar',)
+                elif node.module == 'builtins' and alias.name in (
+                        'int', 'float', 'bool', 'str', 'bytes', 'object', 'list', 'NoneType'):
+                    env[bound] = ('builtin', alias.name)
+                else:
+                    env[bound] = ('unknown',)
+            return
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                bound = alias.asname or alias.name.split('.')[0]
+                if alias.name in ('dataclasses', 'builtins', 'typing', 'typing_extensions'):
+                    env[bound] = ('module', alias.name)
+                else:
+                    env[bound] = ('unknown',)
+            return
+        if isinstance(node, ast.ClassDef):
+            decorated = any(Session._expr_value(
+                dec.func if isinstance(dec, ast.Call) else dec, env) == ('dataclass',)
+                for dec in node.decorator_list)
+            if not decorated:
+                classes[node.name] = None
+                env[node.name] = ('class', node.name)
+                return
+            ok = not future
+            local = dict(env)
+            for item in node.body:
+                if isinstance(item, ast.AnnAssign):
+                    annotation = Session._expr_value(item.annotation, local)
+                    if annotation != ('classvar',):
+                        ok = ok and annotation in (
+                            ('builtin', 'int'), ('builtin', 'float'), ('builtin', 'bool'))
+                    if item.value is not None and isinstance(item.target, ast.Name):
+                        local[item.target.id] = Session._expr_value(item.value, local)
+                elif isinstance(item, ast.Assign):
+                    value = Session._expr_value(item.value, local)
+                    for target in item.targets:
+                        for name in Session._target_names(target):
+                            local[name] = value
+                elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    local[item.name] = ('unknown',)
+                else:
+                    for name in Session._module_bound_names([item]):
+                        local[name] = ('unknown',)
+            for base in node.bases:
+                value = Session._expr_value(base, env)
+                if value == ('builtin', 'object'):
+                    continue
+                if value[0] == 'class':
+                    status = classes.get(value[1], False)
+                    if status is None:
+                        continue
+                    ok = ok and status
+                else:
+                    ok = False
+            classes[node.name] = ok
+            env[node.name] = ('class', node.name)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            env[node.name] = ('unknown',)
+            return
+        if isinstance(node, ast.Assign):
+            value = Session._expr_value(node.value, env)
+            for target in node.targets:
+                for name in Session._target_names(target):
+                    env[name] = value
+            return
+        if isinstance(node, ast.AnnAssign):
+            if node.value is not None:
+                value = Session._expr_value(node.value, env)
+                for name in Session._target_names(node.target):
+                    env[name] = value
+            return
+        if isinstance(node, ast.AugAssign):
+            for name in Session._target_names(node.target):
+                env[name] = ('unknown',)
+            return
+        for name in Session._module_bound_names([node]):
+            env[name] = ('unknown',)
 
     @staticmethod
-    def _export_field_annotation_ok(ann):
-        """A dataclass field @export accepts: exactly int, float or bool (CPython compares the object)."""
-        if isinstance(ann, ast.Name):
-            return ann.id in ('int', 'float', 'bool')
-        return (isinstance(ann, ast.Attribute) and ann.attr in ('int', 'float', 'bool')
-                and isinstance(ann.value, ast.Name) and ann.value.id == 'builtins')
+    def _scan(tree):
+        """Resolve local dataclasses and module bindings in execution order.
+
+        CPython's @export reads `dataclasses.fields` on whatever the decorator name resolves to at
+        class-definition time, and field annotations resolve the names visible then.  A class not
+        proven to be a dataclass, an unknown base, or a field type that is not exactly the builtin
+        int, float or bool makes an exported parameter a named refusal rather than a silent accept.
+        """
+        future = any(isinstance(n, ast.ImportFrom) and n.module == '__future__'
+                     and any(a.name == 'annotations' for a in n.names) for n in tree.body)
+        env, classes, snapshots = {}, {}, {}
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                snapshots[id(node)] = (dict(classes), dict(env))
+            Session._scan_statement(node, env, classes, future)
+        return classes, snapshots
 
     @staticmethod
-    def _export_annotation_ok(ann, data_classes, *, result):
+    def _export_annotation_ok(ann, data_classes, env, *, result):
         """One annotation CPython's `@export` accepts; anything else is refused by name."""
         if isinstance(ann, ast.Constant) and ann.value is None:
             return result
@@ -347,24 +463,35 @@ class Session:
                 return True
             ann = ast.Name(id=text)
         if isinstance(ann, ast.Name):
-            if ann.id in ('int', 'float', 'bool', 'str', 'bytes'):
+            value = Session._expr_value(ann, env)
+            if value in (('builtin', 'int'), ('builtin', 'float'), ('builtin', 'bool'),
+                         ('builtin', 'str'), ('builtin', 'bytes')):
                 return True
-            if ann.id == 'None':
+            if value == ('builtin', 'NoneType'):
                 return result
-            return not result and bool(data_classes.get(ann.id, False))
+            if value[0] == 'class':
+                return not result and bool(data_classes.get(value[1], False))
+            return False
         if isinstance(ann, ast.Attribute):
-            if ann.attr == 'NoneType':
+            value = Session._expr_value(ann, env)
+            if value in (('builtin', 'int'), ('builtin', 'float'), ('builtin', 'bool'),
+                         ('builtin', 'str'), ('builtin', 'bytes')):
+                return True
+            if value == ('builtin', 'NoneType'):
                 return result
             return False
-        if isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name) \
-                and ann.value.id in ('list', 'List'):
+        if isinstance(ann, ast.Subscript):
+            value = Session._expr_value(ann.value, env)
+            if value != ('builtin', 'list') and not (
+                    isinstance(ann.value, ast.Name) and ann.value.id == 'List'):
+                return False
             elt = ann.slice
             if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
                 elt = ast.Name(id=elt.value.strip())
-            return isinstance(elt, ast.Name) and elt.id in ('int', 'float')
+            return Session._expr_value(elt, env) in (('builtin', 'int'), ('builtin', 'float'))
         return False
 
-    def _check_export(self, path, node, data_classes):
+    def _check_export(self, path, node, data_classes, env):
         """`@export` is an identity at run time, but CPython checks the signature first."""
         if len(node.decorator_list) != 1:
             self._refuse(path, node, '@export %s: no other decorator (CPython checks the decorated '
@@ -375,11 +502,11 @@ class Session:
         if node.returns is None:
             self._refuse(path, node, '@export %s: the result needs an annotation (-> None for no result)' % node.name)
         for arg in args.args:
-            if arg.annotation is None or not self._export_annotation_ok(arg.annotation, data_classes, result=False):
+            if arg.annotation is None or not self._export_annotation_ok(arg.annotation, data_classes, env, result=False):
                 self._refuse(path, node, '@export %s: parameter %s needs one of int float bool str bytes '
                                          'list[int] list[float] or a dataclass of int/float/bool'
                                          % (node.name, arg.arg))
-        if not self._export_annotation_ok(node.returns, data_classes, result=True):
+        if not self._export_annotation_ok(node.returns, data_classes, env, result=True):
             self._refuse(path, node, '@export %s: the result must be int float bool str bytes list[int] '
                                      'list[float] or None' % node.name)
 
