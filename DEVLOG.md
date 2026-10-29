@@ -126,6 +126,27 @@ lp_posonly_body_first, lp_posonly_body_first_key, lp_nested_posonly, lp_return_p
 lp_direct_posonly, lp_mixed and lp_default_posonly are refused by name; lp_defvararg matches
 CPython; lp_defposonly and lp_kwonly/lp_vararg are refused by name.  `test_ail_pre427.py` passes
 on both builds, as do `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+## 2026-10-28 -- pre432: deleting a class object's item says "does not" (job-pre432-10281950)
+
+The rbpre395 review recorded as pre-existing on both builds that `del A[0]` on `class A` printed
+`TypeError: 'type' object doesn't support item deletion`, where CPython says
+`does not support item deletion`.  The reviewer's earlier item (`E()[0]` naming `'exception'`)
+is already fixed on this tree by pre414, so this was the first still-differing item.  The v2
+`ail_op_delitem` fallback now uses CPython's `does not` text when the receiver is a class
+object; item reads, item assignment, slice deletion and other receivers are unchanged (an
+instance, an exception instance and a str keep `doesn't`, which matches CPython).  The same
+wording for an `int` or `None` receiver remains a separate pre-existing difference.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `pre432_del_class_stmt2` (direct and
+negative statement forms, slice literal and slice object), `pre432_del_class_routes` (alias,
+argument, list item, dict value, attribute, return; int/bool/wide/str/None/tuple keys; slice
+keys) and `pre432_exc_read` match CPython; `pre432_del_types` matches for class and subclass
+while int/None keep the pre-existing `doesn't`; `pre432_slice_args` still differs only on
+`A[slice('a','b')]`, the next recorded pre-existing item, which is not changed here.
+Added `AIL_CURRENT/test_ail_pre432.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests: test_ail_pre432,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 233 s, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
