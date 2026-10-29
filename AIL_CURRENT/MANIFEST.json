@@ -25865,6 +25865,7 @@
     "python/pkg-v12/prelude_format.py",
     "python/pkg-v12/prelude_with.py",
     "python/pkg-v12/withlib.py",
-    "python/pkg-v12/fastwalk.py"
+    "python/pkg-v12/fastwalk.py",
+    "python/pkg-v12/classname.py"
   ]
 }
