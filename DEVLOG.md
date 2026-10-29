@@ -1,3 +1,28 @@
+## 2026-10-29 -- stdlib44: `struct` integer, bool, char, string and padding formats (job-stdlib44-10291920)
+
+`struct` was the most-imported standard-library module still refused after the earlier stdlib batches
+(6 imports in `lab/corpus/programs` and `AIL_CURRENT/language_examples`; the larger counts were
+already-modelled modules -- `typing`, `pathlib`, `argparse`, `tempfile`, `subprocess`, `hashlib` --
+or out-of-scope areas).  A new lowering pass, `python/pkg-v12/structlib.py`, rewrites a literal
+`struct.pack` / `unpack` / `unpack_from` / `pack_into` / `calcsize` use before the other source
+passes and emits helpers from `python/pkg-v12/prelude_struct.py`.  The supported formats are the
+integers `b B h H i I l L q Q n N P`, bool `?`, char `c`, string `s`, pascal string `p` and padding
+`x`, with native `@` alignment and the `< > = !` byte orders, repeat counts and whitespace.  `n`, `N`
+and `P` stay native-only as CPython requires.  The resulting bytes, tuples and `struct.error`
+messages (range checks, short buffers, positive and negative offsets) match CPython 3.12 on both
+builds for values that fit int64; an unsigned 64-bit field above int64 keeps the declared int64 stop
+(`struct.error: unsigned 64-bit value is outside this language's int64`) instead of returning a
+bignum.  Float formats `e f d`, `Struct`, `iter_unpack`, a non-literal format, keyword and starred
+arguments, an unknown format character, a trailing repeat count, `n`/`N`/`P` under a standard prefix
+and the zero-width `p` unpack (a CPython `SystemError`) are refused by name at compile time.
+
+Files: `AIL_CURRENT/python/pkg-v12/structlib.py`, `python/pkg-v12/prelude_struct.py`,
+`ail_syntax.py`, `ail_check.py` (MODULES) and `test_ail_stdlib44.py`.  Probes in
+`/tmp/probes/stdlib44` via `cmp.sh` on both builds: `p_int`, `p_align`, `p_bytes`, `p_bool`,
+`p_into`, `p_routes`, `p_imports`, `p_errors` have the same stdout and exit status as CPython;
+`r_float`, `r_nonliteral`, `r_struct`, `r_keyword`, `r_star`, `r_badchar`, `r_repeat`, `r_native`,
+`r_zerop` and `r_binderror` are refused by name on both builds.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
