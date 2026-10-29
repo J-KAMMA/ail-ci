@@ -12,6 +12,14 @@ keeps) and the assignment. A shard runs its modules with `par_check.py -j 4`, so
 larger of its longest module and its total weight / 4 (longest-processing-time assignment on that
 cost). A module missing from the file is spread over the shards by name, so a new test module
 still runs in CI before the file is updated.
+
+A module that alone would be longer than a balanced shard is split into pieces: "pieces" in the json maps
+"test_ail_x#0" ... to lists of "Class.test_name" ids, and the assignment lists the pieces instead of the
+module. A piece reaches par_check.py as `test_ail_x.Class.test_a+test_ail_x.Class.test_b`, one
+`python -m unittest` process (the tests of a split module are independent; keep a module whole when they
+share state, as test_ail_sdk does). A test of a split module that no piece lists still runs: --shard
+spreads it by name, --update puts it on the lightest piece, --check reports it, and a listed test that no
+longer exists is dropped.
 """
 import argparse
 import json
@@ -32,11 +40,44 @@ def all_modules():
     return sorted(ail_check.MODULES)
 
 
+def test_ids(module):
+    """The "Class.test_name" ids unittest finds in `module`."""
+    sys.path.insert(0, str(REPO / 'AIL_CURRENT'))
+    import unittest
+    found = []
+
+    def walk(suite):
+        for test in suite:
+            if isinstance(test, unittest.TestSuite):
+                walk(test)
+            else:
+                found.append(test.id())
+    walk(unittest.defaultTestLoader.loadTestsFromName(module))
+    prefix = module + '.'
+    bad = [i for i in found if not i.startswith(prefix)]
+    if bad:
+        raise SystemExit('cannot list the tests of %s: %s' % (module, bad[0]))
+    return sorted(i[len(prefix):] for i in found)
+
+
+def base(name):
+    return name.split('#')[0]
+
+
+def pieces_modules(pieces):
+    return {base(p) for p in pieces}
+
+
+def split_modules(data):
+    return sorted({base(p) for p in data.get('pieces', {})})
+
+
 def load():
     try:
         data = json.loads(MAP.read_text(encoding='utf-8'))
     except (OSError, ValueError):
-        return {'shards': SHARDS, 'jobs': JOBS, 'weights': {}, 'assignment': [[] for _ in range(SHARDS)]}
+        return {'shards': SHARDS, 'jobs': JOBS, 'weights': {}, 'pieces': {}, 'assignment': [[] for _ in range(SHARDS)]}
+    data.setdefault('pieces', {})
     return data
 
 
@@ -64,27 +105,61 @@ def fallback_weight(cache, modules):
 
 def build(modules, cache, previous, rebalance):
     n = previous.get('shards', SHARDS)
-    old_weights = {} if rebalance else previous.get('weights', {})
+    old_weights = previous.get('weights', {})
+    pieces = {}
+    wanted = set(modules)
+    for piece, ids in previous.get('pieces', {}).items():
+        if base(piece) in wanted:
+            current = set(test_ids(base(piece)))
+            pieces[piece] = [i for i in ids if i in current]
+    for module in sorted({base(p) for p in pieces}):
+        listed = {i for piece, ids in pieces.items() if base(piece) == module for i in ids}
+        lightest = min((p for p in pieces if base(p) == module), key=lambda p: (len(pieces[p]), p))
+        pieces[lightest] += [i for i in test_ids(module) if i not in listed]
+    split = {base(p) for p in pieces}
+    items = [m for m in modules if m not in split] + sorted(pieces)
     default = fallback_weight(cache, modules)
-    weights = {m: old_weights.get(m, cache.get(m, default)) for m in modules}
+    weights = {}
+    for item in items:
+        if item in pieces:
+            weights[item] = old_weights.get(item, default)
+        else:
+            weights[item] = (cache.get(item, old_weights.get(item, default)) if rebalance
+                             else old_weights.get(item, cache.get(item, default)))
     assignment = [[] for _ in range(n)]
     if not rebalance:
-        wanted = set(modules)
+        keep = set(items)
         for index, members in enumerate(previous.get('assignment', [])[:n]):
-            assignment[index] = [m for m in members if m in wanted]
+            assignment[index] = [m for m in members if m in keep]
     placed = {m for members in assignment for m in members}
-    for name in sorted((m for m in modules if m not in placed), key=lambda m: (-weights[m], m)):
+    for name in sorted((m for m in items if m not in placed), key=lambda m: (-weights[m], m)):
         place(weights, assignment, name)
     return {'shards': n, 'jobs': JOBS, 'weights': dict(sorted(weights.items())),
+            'pieces': dict(sorted((p, sorted(ids)) for p, ids in pieces.items())),
             'assignment': [sorted(members) for members in assignment]}
 
 
 def shard_modules(data, index):
     modules = all_modules()
     n = data['shards']
-    mapped = {m for members in data['assignment'] for m in members}
-    chosen = [m for m in data['assignment'][index] if m in modules]
+    pieces = data.get('pieces', {})
+    split = set(split_modules(data)) & set(modules)
+    mapped = {base(m) for members in data['assignment'] for m in members}
+    chosen = []
+    for name in data['assignment'][index]:
+        if name in pieces:
+            if base(name) in modules:
+                current = set(test_ids(base(name)))
+                chosen += ['+'.join('%s.%s' % (base(name), i) for i in pieces[name] if i in current)]                     if any(i in current for i in pieces[name]) else []
+        elif name in modules:
+            chosen.append(name)
     chosen += [m for k, m in enumerate(m for m in modules if m not in mapped) if k % n == index]
+    for module in sorted(split):
+        listed = {i for piece, ids in pieces.items() if base(piece) == module for i in ids}
+        extra = [i for i in test_ids(module) if i not in listed]
+        mine = ['%s.%s' % (module, i) for k, i in enumerate(extra) if k % n == index]
+        if mine:
+            chosen.append('+'.join(mine))
     return sorted(chosen)
 
 
@@ -135,10 +210,28 @@ def main():
         report(data)
         return 0
     modules = all_modules()
-    mapped = [m for members in data['assignment'] for m in members]
+    pieces = data.get('pieces', {})
+    mapped = [base(m) for members in data['assignment'] for m in members]
+    listed = [m for members in data['assignment'] for m in members]
     missing = sorted(set(modules) - set(mapped))
     extra = sorted(set(mapped) - set(modules))
-    duplicates = sorted({m for m in mapped if mapped.count(m) > 1})
+    duplicates = sorted({m for m in listed if listed.count(m) > 1})
+    duplicates += sorted({m for m in mapped if mapped.count(m) > 1 and m not in pieces_modules(pieces)})
+    duplicates += sorted(m for m in pieces_modules(pieces) if m in listed)
+    for module in split_modules(data):
+        if module not in modules:
+            continue
+        existing = test_ids(module)
+        mine = [i for p, ids in pieces.items() if base(p) == module for i in ids]
+        unlisted = sorted(set(existing) - set(mine))
+        unknown = sorted(set(mine) - set(existing))
+        repeated = sorted({i for i in mine if mine.count(i) > 1})
+        unassigned = sorted(p for p in pieces if base(p) == module and p not in listed)
+        for label, names in (('unlisted tests of %s' % module, unlisted), ('unknown tests of %s' % module, unknown),
+                             ('repeated tests of %s' % module, repeated), ('unassigned pieces of %s' % module, unassigned)):
+            if names:
+                print('%s: %s' % (label, ' '.join(names)))
+                missing += names
     for label, names in (('unassigned', missing), ('unknown', extra), ('duplicated', duplicates)):
         if names:
             print('%s: %s' % (label, ' '.join(names)))

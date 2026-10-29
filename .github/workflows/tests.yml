@@ -17,10 +17,10 @@ jobs:
   suite:
     name: shard ${{ matrix.shard }}/20
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 40
     strategy:
       fail-fast: false
-      max-parallel: 20
+      max-parallel: 20   # one run alone fills the ~20 concurrent jobs of the free plan
       matrix:
         shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19]
     steps:
