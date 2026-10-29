@@ -356,10 +356,73 @@ Notebook outline (`tools/colab/gpu_check.ipynb`, written in G3):
 Cost control: the notebook does steps 1-3 first (seconds) and stops if nothing is usable; the whole run should fit in a
 few minutes on a T4.
 
-## 8. Risks
+## 8. Positioning for ML workloads (owner decision 2026-10-29)
+
+Goal: beat PyTorch where it can be measured, not everywhere. **Every speed statement in this section is unmeasured
+until the benchmark named next to it has been run and its numbers are written here.**
+
+### 8.1 What AIL does not rewrite
+
+Matmul, convolution and attention kernels are not written by AIL. AIL calls the same vendor libraries PyTorch calls
+(cuBLAS/cuDNN on NVIDIA, rocBLAS/MIOpen on AMD, an optimized CPU BLAS such as OpenBLAS) through the FFI (`@extern`;
+library policy: big proven native libraries are linked, not rewritten). For those kernels the target is **parity**, not a
+win. They are loaded with `dlopen`, like Vulkan, so a binary without them still starts.
+
+Exactness: a BLAS call is an FFI call, and the library defines its result, as with every `@extern` today. It is outside
+the CPython comparison, and the docs say so. AIL never *replaces* a matmul the user wrote as Python loops with a BLAS
+call: that changes the summation order, which is a silent difference. Tests of the FFI layer compare with the same
+library called from CPython (ctypes), not with a Python loop.
+
+### 8.2 Where AIL can win
+
+| claim (unmeasured) | why it could hold | benchmark: what to measure, against what |
+| --- | --- | --- |
+| **No per-op dispatch**: small models and batch size 1 run faster | PyTorch eager pays Python and dispatcher work per op (often quoted as microseconds per op **[unverified]**); AIL compiles the whole forward pass to C with direct library calls | B1: latency per inference (median and p99 of 1,000 runs) of an MLP and a small transformer (2-4 layers, hidden 128-512), batch 1 and 8, CPU and GPU; against PyTorch eager and `torch.compile` (default and `mode="reduce-overhead"`), same weights, same BLAS |
+| **Whole-program fusion** of element-wise chains into one kernel | the G1 kernel IR sees the whole loop body (bias + activation + scale + residual) and emits one kernel with one pass over memory | B2: wall time and bytes moved for chains of 3-10 element-wise ops over 10^5..10^8 elements; against PyTorch eager, `torch.compile` (Inductor/Triton) and a hand-written Triton kernel; on Colab (T4/L4) |
+| **Start-up** | a native binary with no interpreter and no framework import | B3: time from process start to first output; against `python -c "import torch"` plus the same model |
+| **Binary size and memory** for deployed inference | AIL binaries are tens of KB to a few MB (build disk 0.34 MB vs Rust 8.8 MB, measured earlier on another program); no framework in memory | B4: size on disk and peak RSS for B1's models; against a PyTorch install (wheel + CUDA libs), LibTorch C++ and ONNX Runtime |
+| **CPython-exact surrounding code** | preprocessing and control code prints exactly what CPython prints, or is refused by name | B5: not a speed claim; the differential tests of section 5 on the preprocessing programs |
+
+### 8.3 First target: small-model inference plus CPU-side preprocessing
+
+The case: a program that reads text, tokenizes it (BPE/WordPiece written in Python: dicts, strings and loops, which the
+typed and general paths already compile), runs a small model through BLAS and the fused element-wise kernels, and
+prints the results. It is compared **end to end** (time and peak memory) with the same Python program under CPython +
+PyTorch. The tokenizer alone is compared with Hugging Face `tokenizers` (Rust): B6, tokens per second on a fixed corpus
+with the same vocabulary, identical token ids required.
+
+### 8.4 Second target: one fused kernel faster than `torch.compile`
+
+One element-wise chain (for example `gelu(x * w + b) * scale + residual`) where AIL's fused kernel beats `torch.compile`
+on a Colab GPU. Measured with B2: median of 100 runs after warm-up, compile time reported separately. If it does not
+win, the result is written here and the claim is dropped.
+
+### 8.5 The precision problem (owner decision Q8)
+
+ML runs in binary32/bf16/fp16; CPython floats are binary64. A fused kernel that computes in binary32 is not what
+CPython computes, so under the zero-silent-differences rule it cannot be the meaning of ordinary Python float code. Two
+ways out: (a) ML kernels stay binary64 (exact, but slow on consumer GPUs, section 4.3), or (b) a separate typed array
+module whose element type is declared (`f32`) and whose arithmetic is defined by its own spec (rounded to binary32
+after every op, like `array('f')` storage but for arithmetic too), shipped with a CPython reference implementation of
+that module so the oracle comparison still works. (b) is what makes the targets above reachable; it is a semantics
+decision.
+
+### 8.6 Staged plan (after G7; each one PR)
+
+| stage | content | done means |
+| --- | --- | --- |
+| M1 | FFI bindings for CPU BLAS (`sgemm`/`dgemm`) and the typed array storage they read | B1 CPU numbers recorded against PyTorch eager; outputs equal the same BLAS called from CPython |
+| M2 | fusion of whole element-wise chains (G1 IR) over the typed arrays, on Vulkan | B2 numbers on the laptop iGPU; CPython-equal outputs on lavapipe in CI |
+| M3 | small-model inference example (MLP, small transformer) + Python tokenizer, end to end | B1, B3, B4, B6 recorded |
+| M4 | the binary32 array module of 8.5 (only if Q8 says yes) | its CPython reference matches bit for bit |
+| M5 | GPU BLAS through `dlopen` (rocBLAS/cuBLAS) and the B2 run on Colab against `torch.compile` | the 8.4 result written here, win or not |
+
+Out of scope: automatic differentiation, training (distributed or not), a model zoo, ONNX import.
+
+## 9. Risks
 
 - **Little speed for float64 on the iGPU.** Consumer GPUs run binary64 far slower than binary32 **[unverified ratio for
-  the 780M]**, and AIL can never use binary32. The guards (denormal, NaN, overflow) and software `/`/`sqrt` add work per
+  the 780M]**, and ordinary Python float code can never use binary32 (section 8.5). The guards (denormal, NaN, overflow) and software `/`/`sqrt` add work per
   element. G7 may find that only int and comparison-heavy kernels pay off. The design stops cleanly there.
 - **Driver bugs.** A driver that ignores `NoContraction` or RTE would give wrong bits with no flag. Mitigation: the bit
   tests run on every device before it is trusted, and a device whose start-up feature list is not on a tested list can be
@@ -371,7 +434,7 @@ few minutes on a T4.
 - **CI install time.** The lavapipe packages are about 240 MB installed if the runner image lacks them; caching may be
   needed (G3).
 
-## 9. Open questions for the owner
+## 10. Open questions for the owner
 
 - **Q1. CUDA for NVIDIA (Colab)?** Vulkan is the main backend. Should a second CUDA backend (G9) be built later, knowing
   it can only be tested by hand on Colab, never in CI? Or only use Colab to test the Vulkan backend if Colab supports it?
@@ -383,3 +446,8 @@ few minutes on a T4.
 - **Q6. CI cost.** One extra CI job (target under 5 minutes) for GPU tests on lavapipe: acceptable?
 - **Q7. Windows laptop runs** need the Windows (MinGW) build path working for GPU programs. Is a by-hand run before each
   GPU merge enough, or do you want it scripted to run on a schedule?
+- **Q8. binary32 for ML.** Ordinary Python floats are binary64, so fast ML kernels need a separate array module whose
+  element type is declared `f32` and whose results follow its own spec, with a CPython reference version (section 8.5).
+  Build it, or keep ML kernels in binary64?
+- **Q9. Benchmark baseline.** For the PyTorch comparisons (section 8.2), which versions and machines count: the laptop
+  CPU plus a Colab T4/L4, with `torch.compile` in its default mode?
