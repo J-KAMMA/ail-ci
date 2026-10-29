@@ -18,10 +18,12 @@ Probes in `/tmp/probes/stdlib43` on both builds via `cmp.sh`: `p1_formats` (abou
 widths/boundaries, native alignment, empty and zero-count formats), `p2_errors` (range/type/buffer/offset
 errors, `pack_into`, `unpack_from`, bytes and bool offsets), `p3_routes` (values through an argument, a list
 item, a loop item, an attribute and a dict value, for pack, unpack, pack_into and unpack_from), `p4_imports`
-(module alias, `from` import, `error` alias), `p5_error_value`, `p6_star` (starred pack arguments) match
-CPython. The refusal probes `r1_float`, `r2_double`, `r3_half` (calcsize is supported), `r4_pascal`,
-`r5_nonliteral`, `r6_struct_class`, `r7_iter` and `r8_alias_value` are refused by name on both builds;
-`p7_memoryview` is refused because `memoryview` itself is not a built name.
+(module alias, `from` import, `error` alias) and `p6_star` (starred pack arguments) match CPython.
+`p5_error_value` and `p8_error_repr` (`struct.error` used as a value) are refused by name;
+`p7_memoryview` is refused because `memoryview` itself is not a built name. The refusal probes `r1_float`,
+`r2_double`, `r4_pascal`, `r5_nonliteral`, `r6_struct_class`, `r7_iter` and `r8_alias_value` are refused by
+name on both builds; `r3_half` (`calcsize('<e')`) matches CPython, since `calcsize` folds every format
+CPython accepts.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
