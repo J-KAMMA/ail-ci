@@ -10,8 +10,11 @@ supported functions through an argument, a list item, an attribute and a dict va
 
 Everything else is refused by name at compile time: lookup / decimal / digit / numeric and the other
 queries, NFKC / NFKD and a form computed at run time, keyword arguments (CPython takes these
-positional-only), and a literal CJK compatibility ideograph whose canonical decomposition is above
-U+FFFF, which the 16-bit v2 runtime cannot hold.
+positional-only), a binding that shadows an imported unicodedata name or the module alias, and a
+literal CJK compatibility ideograph whose canonical decomposition is above U+FFFF, which the 16-bit
+v2 runtime cannot hold.  Such a character that only reaches normalize at run time raises the same
+named error instead of returning the BMP character unchanged; a shadowed from-import is left as
+written and matches CPython.
 """
 import os
 import subprocess
@@ -149,7 +152,60 @@ REFUSED = {
     'astral_decomp': ('import unicodedata\n\n\ndef main() -> None:\n'
                       '    print(unicodedata.normalize("NFD", "\ufa6c"))\n\n\nmain()\n',
                       'above U+FFFF'),
+    'astral_decomp_value': (r'''import unicodedata
+
+
+def main() -> None:
+    s = "\ufa6c"
+    print(repr(unicodedata.normalize("NFD", s)))
+
+
+main()
+''', 'on a value that may hold U+FA6C'),
+    'rebind_module_alias': (r'''import unicodedata
+
+
+class Box:
+    def name(self, x: str) -> str:
+        return "box:" + x
+
+
+unicodedata = Box()
+
+
+def main() -> None:
+    print(unicodedata.name("A"))
+
+
+main()
+''', 'binds the name unicodedata itself'),
 }
+
+REBIND_LOCAL = r'''from unicodedata import name
+
+
+def name(x: str) -> str:
+    return "local:" + x
+
+
+def main() -> None:
+    print(name("A"))
+
+
+main()
+'''
+
+RUNTIME_ASTRAL = r'''import sys
+import unicodedata
+
+
+def main() -> None:
+    s = sys.stdin.read()
+    print(repr(unicodedata.normalize("NFD", s)))
+
+
+main()
+'''
 
 
 def _cpython(directory, name, text):
@@ -195,6 +251,21 @@ class Stdlib46Tests(unittest.TestCase):
 
     def test_from_import_matches_cpython_on_both_builds(self):
         self.check_matches(FROM_IMPORT, 'from_import')
+
+    def test_rebound_from_import_is_left_as_written(self):
+        self.check_matches(REBIND_LOCAL, 'rebind_local')
+
+    def test_runtime_astral_value_raises_a_named_error(self):
+        with tempfile.TemporaryDirectory(prefix='ail-stdlib46-') as directory:
+            for general in (True, False):
+                built, exe = _build(directory, 'runtime_astral_%s' % ('g' if general else 'd'), RUNTIME_ASTRAL, general)
+                output = built.stdout + built.stderr
+                self.assertEqual(built.returncode, 0, 'general=%s\n%s' % (general, output[-4000:]))
+                got = subprocess.run([str(exe)], input='\ufa6c\n'.encode('utf-8'), capture_output=True,
+                                     timeout=300, cwd=directory)
+                self.assertNotEqual(got.returncode, 0, 'general=%s ran the unsupported value' % general)
+                self.assertIn(b'above U+FFFF', got.stderr, 'general=%s\n%s' % (general, got.stderr[-2000:]))
+                self.assertIn(b'U+FA6C', got.stderr, 'general=%s\n%s' % (general, got.stderr[-2000:]))
 
     def test_unsupported_forms_are_refused_by_name(self):
         for slug, (text, wanted) in REFUSED.items():

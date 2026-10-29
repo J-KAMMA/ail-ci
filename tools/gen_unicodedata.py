@@ -274,6 +274,14 @@ _AIL_UNI_DECOMP = _ail_uni_decode_decomp(@DECOMP@)
 
 _AIL_UNI_COMPOSE = _ail_uni_decode_compose(@COMPOSE@)
 
+# Canonical decompositions that fall above U+FFFF.  The generated table leaves them out (the
+# 16-bit v2 runtime cannot hold the result), so a value that reaches normalize at run time
+# raises a named error instead of silently keeping the compatibility ideograph unchanged.
+_AIL_UNI_ASTRAL_DECOMP = {
+    0xFA6C: 0x242EE, 0xFACF: 0x2284A, 0xFAD0: 0x22844, 0xFAD1: 0x233D5,
+    0xFAD5: 0x25249, 0xFAD6: 0x25CD0, 0xFAD7: 0x27ED3,
+}
+
 def _ail_uni_tname(x) -> str:
     if isinstance(x, bool):
         return "bool"
@@ -424,6 +432,10 @@ def _ail_uni_hangul_decompose(cp: int) -> str:
 def _ail_uni_decompose_one(cp: int) -> str:
     if 0xAC00 <= cp <= 0xD7A3:
         return _ail_uni_hangul_decompose(cp)
+    point = _AIL_UNI_ASTRAL_DECOMP.get(cp)
+    if point is not None:
+        raise RuntimeError("unicodedata.normalize: U+%04X decomposes to U+%X, above U+FFFF, which the "
+                           "16-bit v2 runtime cannot hold" % (cp, point))
     got = _AIL_UNI_DECOMP.get(cp)
     if got is not None:
         return got

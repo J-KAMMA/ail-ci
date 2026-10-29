@@ -1,3 +1,19 @@
+## 2026-10-29 -- stdlib46 review: imported-name rebinding and run-time astral decompositions (job-stdlib46-10291930)
+
+The review found two defects in the `unicodedata` lowering.  An imported name could be rebound
+(`from unicodedata import name` followed by `def name(...)`, or `unicodedata = Box()`), and the pass
+still rewrote the local use onto the module; `run_unicodedata` now refuses any def, class, argument or
+assignment target that shadows an imported `unicodedata` name or the module alias, as
+`run_fractions` does for `Fraction`; a shadowed `from unicodedata import ...` is left as written
+and the base prints the local definition, while the module alias and a shadowing parameter are refused
+by name.  The seven CJK compatibility ideographs whose canonical decomposition is above U+FFFF still
+silently kept the BMP character for a value known only at run time; `_ail_uni_decompose_one` now raises
+a named `RuntimeError` for them (the generated table still leaves them out because the 16-bit v2
+runtime cannot hold U+242EE and the other six results), and the rewrite refuses a computed normalize
+argument when the program holds such a character in a string literal.  `test_ail_stdlib46.py` adds the
+rebinding match/refusals, the computed-literal refusal and a run-time-error test; the generator
+template carries the same guard.
+
 ## 2026-10-29 -- stdlib46: `unicodedata` name / category / normalize (NFC, NFD) on both builds (job-stdlib46-10291930)
 
 `unicodedata` was the most-imported module still refused in `lab/corpus/programs` (3 programs, t081 and

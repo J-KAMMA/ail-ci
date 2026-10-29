@@ -307,11 +307,43 @@ def unicodedata_astral_decomp(cp):
     return UNICODE_ASTRAL_DECOMP.get(cp)
 
 
+def _unicodedata_rebound(tree, bound):
+    """A top-level or nested binding that shadows an imported unicodedata name (or the module alias)."""
+    for each in ast.walk(tree):
+        if isinstance(each, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            name = each.name
+        elif isinstance(each, ast.arg):
+            name = each.arg
+        elif isinstance(each, ast.Name) and not isinstance(each.ctx, ast.Load):
+            name = each.id
+        else:
+            continue
+        if name in bound:
+            return name
+    return None
+
+
+def _unicodedata_astral_literal(tree):
+    """The first string literal holding a code point whose canonical decomposition is above U+FFFF."""
+    for each in ast.walk(tree):
+        if isinstance(each, ast.Constant) and isinstance(each.value, str):
+            for ch in each.value:
+                point = unicodedata_astral_decomp(ord(ch))
+                if point is not None:
+                    return ord(ch), point
+    return None
+
+
 def run_unicodedata(tree, text):
     b = stdlib5.take_imports(tree, 'unicodedata', set(UNICODE_FUNCS) | {'unidata_version'},
                              unknown='name, category, normalize (NFC/NFD) and unidata_version are built')
     if not b:
         return
+    rebound = _unicodedata_rebound(tree, set(b.names) | set(b.aliases))
+    if rebound is not None:
+        refuse(b.first, 'the program binds the name %s itself and also imports it from unicodedata; '
+               'rename one' % rebound)
+    astral_literal = _unicodedata_astral_literal(tree)
     used = set()
 
     def form_node(call):
@@ -342,6 +374,11 @@ def run_unicodedata(tree, text):
                         if point is not None:
                             refuse(node, "unicodedata.normalize: U+%04X decomposes to U+%X, above U+FFFF, "
                                    "which the 16-bit v2 runtime cannot hold" % (ord(ch), point))
+                if len(node.args) > 1 and not isinstance(node.args[1], ast.Constant) \
+                        and astral_literal is not None:
+                    refuse(node, "unicodedata.normalize on a value that may hold U+%04X: its canonical "
+                           "decomposition is U+%X, above U+FFFF, which the 16-bit v2 runtime cannot hold; "
+                           "the program has a string literal with that character" % astral_literal)
                 form = form_node(node)
                 if not (isinstance(form, ast.Constant) and isinstance(form.value, str)
                         and form.value in ('NFC', 'NFD')):
