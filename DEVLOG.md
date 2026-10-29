@@ -344,6 +344,62 @@ Probes in `/tmp/probes/quickstart` through `bash ~/tools/cmp.sh`: `hello.py`, `w
 `outside_subset.py` is refused by name with exit 3 on the default build. Final-state tests:
 test_ail_quickstart_docs (4 s), test_ail_safetynet (144 s), test_ail_files (212 s) and
 test_ail_corpus_findings3 (336 s), all with `-j 2`, 0 failed.
+## 2026-10-28 -- stdlib1 review: shorten duplicate `width`, capwords bytes, indent bytes (job-stdlib1-10282143)
+
+The review found three defects in the stdlib1 change. `textwrap.shorten(text, width, width=...)`
+was lowered with the positional width and silently ignored the duplicate keyword; it now lowers
+only the unambiguous `(text, width)` and `(text, width=...)` forms, so a duplicate width is the
+same named compile-time refusal as the other unbuilt options (`textwrap.shorten() with these
+arguments is not built`). `string.capwords` with a bytes text now raises CPython 3.12's
+`TypeError: descriptor 'capitalize' for 'str' objects doesn't apply to a 'bytes' object` for a
+bytes, a None or an empty separator, while a non-join separator keeps CPython's earlier
+`AttributeError` and a bytes separator on a str text keeps its `TypeError`. `textwrap.indent`
+now mirrors CPython's `splitlines(True)` loop and `''.join`, so a bytes text with a bytes prefix
+raises `TypeError: sequence item 0: expected str instance, bytes found` instead of the helper's
+own concatenation error; it also uses `line.strip()` truthiness, so a blank bytes line is not
+prefixed.
+
+Probes in `/tmp/probes` (both g and d builds): `short_dup.py`, `short_dup2.py`,
+`short_dup_mixed.py`, `short_dup_kwtext.py`, `short_placeholder.py`; `cap_bytes_sep.py`,
+`cap_bytes_none.py`, `cap_sep_bytes.py`, `cap_bytes_routes.py` (list item, dict value,
+attribute and argument routes), `capwords.py`, `capwords_types.py`; `indent_bytes.py`,
+`indent_bytes_str_prefix.py`, `indent_empty_bytes.py`, `indent_bytes_routes.py`,
+`tw_indent.py`, `tw_shorten.py`, `tw_types.py`, `tw_types_var.py`, `tw_wrap_control.py`.
+Each matches CPython or is refused by name. `test_ail_stdlib1` now pins the duplicate-width
+refusal and the runtime type messages on both builds.
+
+## 2026-10-28 -- stdlib1: `textwrap.shorten` / `textwrap.indent` and `string.capwords` (job-stdlib1-10282143)
+
+Inventory of imports outside the nine baseline modules (counts of import statements):
+`lab/corpus/programs` has typing 24, csv 7, datetime 5, `__future__` 4, unicodedata 3,
+dataclasses 3, decimal 2, struct 2, statistics 2, random 2, and one each of string, calendar,
+textwrap, enum and fractions. `AIL_CURRENT/language_examples` has pathlib 11, argparse 9,
+subprocess 7, tempfile 7, hashlib 5, os 5, struct 4, contextlib 3, io 3, shutil 3, statistics 2,
+array 2, time 2, unittest 2, signal 2, and one each of dataclasses, random and ail_ffi (plus the
+repo-local row/benchmark modules). Most of the corpus names are already built by the existing
+library batches; the import-only refusals left on this tree were textwrap 1, decimal 2, struct 2
+and unicodedata 3, plus collections/re uses that are not import-only.
+
+`textwrap.shorten(text, width)` now follows CPython 3.12's collapsed-whitespace, max_lines=1
+placeholder path through the existing chunker (including hyphen chunks), and
+`textwrap.indent(text, prefix)` preserves every `splitlines(True)` line ending. `string.capwords`
+supports the default whitespace separator and an explicit separator. Unsupported textwrap
+options/functions (for example `TextWrapper`, `shorten(..., placeholder=...)`) and
+`string.Template` remain named compile-time refusals; no wrong result is produced. Follow-up
+hardening covers wrong-type routes too: `textwrap.indent` performs CPython's `splitlines()`
+type check first, so a None/int text raises the same AttributeError, and `string.capwords`
+reproduces CPython's bytes descriptor TypeError for a bytes text with the default separator.
+
+This makes `lab/corpus/programs/deepseek-v4.1-flash-free/t116.py` build on both AIL_IR=0 and
+AIL_IR=1 and match CPython on all three recorded inputs. Added and registered
+`test_ail_stdlib1.py` and assigned it in `tools/ci_shards.json` (weight 10.0); no new DIFFERENCES row (the supported functions match CPython).
+Probes in `/tmp/probes`: `tw.py`, `tw2.py`, `tw3.py`, `tw4.py`, `tw_random.py` (hyphen/tab/
+newline/empty/negative-width boundaries, 120 generated texts), `tw_shorten.py`, `tw_indent.py`,
+`tw_wrap_control.py`, `capwords.py`, `tw_types.py`, `capwords_types.py`, `tw_types_var.py`
+(literal and variable wrong-type routes) and `cp.py` (copy stays a named refusal); the
+`refuse_tw*.py` and `refuse_string.py` probes are refused by name. Final-state tests:
+test_ail_stdlib1, test_ail_pre360, test_ail_files, test_ail_corpus_findings3 and
+test_ail_safetynet pass; `tools/update_manifest.py --check` passes.
 
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 

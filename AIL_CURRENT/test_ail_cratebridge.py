@@ -22,9 +22,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from test_ail_ffi import CC, compile_cli, run_cpython  # noqa: E402
+from ail_testenv import rustc_path  # noqa: E402
 
 BINDGEN = ROOT / "ail_bindgen.py"
-RUSTC = shutil.which("rustc")
+RUSTC = rustc_path()
 
 
 def have_header(name):
