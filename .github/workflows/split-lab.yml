@@ -1,0 +1,81 @@
+name: split-lab
+
+# Lab only (docs/design/COMPILE_TIME.md 2.2): what compiling the runtime once and only the program per build would save in gcc
+# time, and whether the instruction count of the program changes.  Nothing in the compiler uses lab/profile/split.py.
+# No secrets or API keys are used; the jobs have read-only repository access.
+on:
+  workflow_dispatch:
+    inputs:
+      programs:
+        description: corpus programs to measure (even stride)
+        default: "36"
+      variants:
+        description: "split.py variants: none = only non-inline statics move, N = also inline functions longer than N lines"
+        default: "none,40,12"
+
+permissions:
+  contents: read
+
+jobs:
+  measure:
+    name: measure shard ${{ matrix.shard }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - name: Tools
+        run: |
+          gcc --version | head -1
+          cc -O2 -w -include signal.h -include stdlib.h -o /tmp/icount tools/icount.c
+          /tmp/icount /bin/true || echo "perf_event_open is not allowed here; valgrind counts instead"
+          sudo apt-get install -y -q valgrind > /dev/null
+          valgrind --version
+      - name: Split lab
+        run: |
+          python3 -m compileall -q -j 0 AIL_CURRENT tools
+          python3 lab/profile/splitlab.py --out out/shard-${{ matrix.shard }} --n ${{ inputs.programs }} \
+            --variants ${{ inputs.variants }} --shard ${{ matrix.shard }} --of 2
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: split-shard-${{ matrix.shard }}
+          path: out/
+          retention-days: 14
+
+  report:
+    needs: measure
+    if: always()
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: split-shard-*
+          path: shards
+      - name: Merge
+        run: |
+          python3 lab/profile/splitlab.py report split.md ${{ inputs.variants }} shards/*/shard-*/split.jsonl
+          cat split.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: split-lab
+          path: |
+            split.md
+            shards/
+          retention-days: 30
