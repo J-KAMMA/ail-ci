@@ -9,7 +9,11 @@ module-level ``q = power`` alias (and alias chains) for a wrapper whose body is 
 refused by name; an aliased wrapper whose operands are not statically known is refused by
 name too.  Safe constants and direct wrapper calls keep matching CPython.
 
-Both the general path and the default build are checked.
+Both the general path and the default build are checked.  A build whose general path has
+exact big integers (the integration branch's bigint work) computes these programs on that
+path instead, so each probe must either be refused by name or print CPython's exact result;
+a run-time ``integer overflow`` still fails.  The safe constants and the direct wrapper
+must match CPython on every build.
 """
 import os
 import subprocess
@@ -173,12 +177,20 @@ print(run(2, 3))
 '''),
     )
 
-    def test_aliased_power_wrappers_are_refused_by_name(self):
+    def test_aliased_power_wrappers_are_refused_or_match_cpython(self):
         for general in (False, True):
             for name, source, marker in self.REFUSED:
                 with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
                     built, exe = compile_source(directory, 'pre430_' + name, source, general=general)
-                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
+                    if built.returncode == 0:
+                        # A general path with exact big integers builds these exactly; the
+                        # result must then be CPython's, never a run-time overflow.
+                        expected, status = run_cpython(directory, 'pre430_' + name, source)
+                        self.assertTrue(exe.exists())
+                        ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=120)
+                        self.assertEqual(ran.returncode, status, ran.stderr)
+                        self.assertEqual(ran.stdout.replace('\r\n', '\n'), expected)
+                        continue
                     self.assertFalse(exe.exists())
                     self.assertIn(marker, built.stderr, built.stderr[-1200:])
                     self.assertNotIn('integer overflow', built.stderr)

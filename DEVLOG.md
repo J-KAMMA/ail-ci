@@ -1,3 +1,21 @@
+## 2026-10-29 -- pre430: the bigint general path makes the aliased wrappers exact (job-pre430-10300444)
+
+The integration branch now gives a Python-syntax program exact big integers on its general
+path (the bigint work), so the aliased power-wrapper programs no longer stop with `integer
+overflow`: they are built on the general path and print CPython's exact result.  The four
+refusal cases of `test_ail_pre430` (constant overflow, `pow()` spelling, a negative base and
+an alias chain) plus the bool/float/argument/list-item/attribute/dict routes therefore
+failed on both builds of today's integ.  The test now accepts either the named refusal (the
+int64-only path still raises it) or CPython's exact stdout and exit status; a run-time
+`integer overflow` still fails.  The safe constants and the direct wrapper keep requiring an
+exact match on every build.  No compiler code changed: the aliased-wrapper refusal still
+applies where ints are int64.
+
+21 probes in `/tmp/probes` on both builds: on the integration tree all 21 match CPython; on
+this branch 13 are refused by name and 8 match CPython, with no `integer overflow`.
+`test_ail_pre430` passes on both trees.  `tools/update_manifest.py` was run and `--check`
+passes.
+
 ## 2026-10-29 -- pre430 suite fix: register the module where the integration hunk is stable (job-pre430-10292334)
 
 The pre430 change added `test_ail_pre430` to `ail_check.MODULES` between `test_ail_pre378` and
