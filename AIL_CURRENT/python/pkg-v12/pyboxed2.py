@@ -35,7 +35,8 @@ import runpy
 
 from pyfront import (Unsupported, int_constant, refuse_complex_pow, refuse_variable_int_pow,
                       refuse_int_float_literal, refuse_int_pow_overflow,
-                      refuse_unrepresentable_delete_bounds, refuse_field_method_call)
+                      refuse_unrepresentable_delete_bounds, refuse_field_method_call,
+                      safe_generator_expressions)
 import filelib
 import hashlower
 import pyfunc
@@ -2504,6 +2505,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.prelude_names = set() # functions and methods of the preludes added here (not the program's own)
         self.rt_needs = set()      # safetyrt.py fragments this program uses (none: the C it always had)
         self.lib_tuples = False    # genlib.py pieces are in the program: their tuples meet the tuple pass's records
+        self.safe_genexprs = set()  # nested GeneratorExp nodes an eager consumer fully drains
 
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
@@ -2513,6 +2515,7 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _compile_cond(self, source):
         tree = ast.parse(source)
+        self.safe_genexprs = safe_generator_expressions(tree)
         self.source_has_class = any(isinstance(n, ast.ClassDef) for n in ast.walk(tree))
         import exctext
         exctext.refuse_args_item_store(tree, Unsupported)
@@ -2538,6 +2541,7 @@ class Compiler(boxclosure.ClosureMixin):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
+                    id(gen) not in self.safe_genexprs and \
                     any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
@@ -6499,7 +6503,8 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        if (any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node))
+                and id(node) not in self.safe_genexprs):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)

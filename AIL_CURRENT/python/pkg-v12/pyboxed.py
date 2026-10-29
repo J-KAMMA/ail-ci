@@ -22,7 +22,8 @@ import ast
 import re
 
 from pyfront import (Unsupported, int_constant, refuse_complex_pow, refuse_variable_int_pow,
-                      refuse_int_float_literal, refuse_int_pow_overflow)
+                      refuse_int_float_literal, refuse_int_pow_overflow,
+                      safe_generator_expressions)
 
 # ---------------------------------------------------------------------------------------------
 # Exception-type-name -> the runtime's AIL_ERR_* id. Only the runtime's own built-in exception
@@ -837,10 +838,12 @@ class Compiler:
         self.needs_libm = True     # ail_obj_pow/ail_obj_floordiv always use pow()/floor()
         self.init_ctx = Ctx(is_main=True, module_names=set())  # default-arg init, run first in main()
         self.from_imports = {}  # bare name -> (module, attr), e.g. 'deque' -> ('collections', 'deque')
+        self.safe_genexprs = set()  # nested GeneratorExp nodes an eager consumer fully drains
 
     # ---------------------------------------------------------------------------- entry point
     def compile(self, source):
         tree = ast.parse(source)
+        self.safe_genexprs = safe_generator_expressions(tree)
         self.module_names = _scan_assigned_names(tree.body)
         for n in ast.walk(tree):
             if isinstance(n, ast.FunctionDef):
@@ -1649,7 +1652,8 @@ class Compiler:
         return self._emit_comp(node, ctx, 'ail_list_new()', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        if (any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node))
+                and id(node) not in self.safe_genexprs):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)

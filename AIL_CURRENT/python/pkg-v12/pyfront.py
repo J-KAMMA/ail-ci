@@ -1261,6 +1261,127 @@ def refuse_int_pow_overflow(node):
     raise refusal
 
 
+
+# ---------------------------------------------------------------------------------------------
+# Nested generator expressions an eager consumer fully drains.
+#
+# Both emitters materialise a generator expression as a list, which is observationally identical
+# to CPython only when the whole iterable is consumed at the point of use.  A nested generator
+# expression used to be refused unconditionally because the inner one was then materialised too
+# (pre41/pre42).  A nested expression is safe when BOTH the outer generator and every inner one
+# are passed directly to a consumer that drains the whole iterable before returning (sum, list,
+# tuple, sorted, min, max, set, dict, or str/bytes `.join`).  The inner one is then drained while
+# its enclosing element is evaluated, exactly where CPython drains it, and no element is produced
+# that CPython would not produce.  An inner expression in a `for` iterable is still refused (the
+# outer loop would run only after the inner was drained), as are next()/any()/all() consumers,
+# assignments, loops and calls to functions of the program, whose consumption is not known here.
+_EAGER_GENEXPR_CONSUMERS = frozenset(
+    {'sum', 'list', 'tuple', 'sorted', 'min', 'max', 'set', 'dict'})
+
+
+def _bound_names(tree):
+    names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+            if not isinstance(node, ast.ClassDef):
+                args = node.args
+                names.update(a.arg for a in list(args.posonlyargs) + list(args.args)
+                             + list(args.kwonlyargs))
+                if args.vararg:
+                    names.add(args.vararg.arg)
+                if args.kwarg:
+                    names.add(args.kwarg.arg)
+        elif isinstance(node, ast.ImportFrom):
+            names.update(a.asname or a.name for a in node.names)
+        elif isinstance(node, ast.Import):
+            names.update((a.asname or a.name).split('.')[0] for a in node.names)
+    return names
+
+
+def _genexpr_consumer_is_eager(node, parent, bound):
+    call = parent.get(id(node))
+    if not isinstance(call, ast.Call) or not call.args or call.args[0] is not node:
+        return False
+    if isinstance(call.args[0], ast.Starred):
+        return False
+    func = call.func
+    if isinstance(func, ast.Name):
+        return func.id in _EAGER_GENEXPR_CONSUMERS and func.id not in bound
+    return (isinstance(func, ast.Attribute) and func.attr == 'join'
+            and isinstance(func.value, ast.Constant)
+            and isinstance(func.value.value, (str, bytes)))
+
+
+def _immediate_nested_genexprs(expr):
+    """The GeneratorExp nodes directly inside `expr`, not those nested inside one of them.
+
+    `blocked` is true when one sits in a lambda or function body, which is not evaluated when
+    `expr` is.
+    """
+    if isinstance(expr, ast.GeneratorExp):
+        return [expr], False
+    found, blocked = [], [False]
+
+    def walk(node, deferred):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.GeneratorExp):
+                if deferred:
+                    blocked[0] = True
+                else:
+                    found.append(child)
+            elif isinstance(child, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef)):
+                walk(child, True)
+            else:
+                walk(child, deferred)
+
+    walk(expr, False)
+    return found, blocked[0]
+
+
+def safe_generator_expressions(tree):
+    """ids of the GeneratorExp nodes whose eager materialisation cannot change the program."""
+    parent = {}
+    for node in ast.walk(tree):
+        for child in ast.iter_child_nodes(node):
+            parent[id(child)] = node
+    bound = _bound_names(tree)
+    memo = {}
+
+    def safe(node):
+        if id(node) in memo:
+            return memo[id(node)]
+        memo[id(node)] = False
+        for gen in node.generators:  # an inner generator as a loop source is not drained there
+            found, blocked = _immediate_nested_genexprs(gen.iter)
+            if found or blocked:
+                return False
+        nested = []
+        exprs = [node.elt] + [cond for gen in node.generators for cond in gen.ifs]
+        for expr in exprs:
+            found, blocked = _immediate_nested_genexprs(expr)
+            if blocked:
+                return False
+            nested.extend(found)
+        if not nested:
+            memo[id(node)] = True
+            return True
+        if not _genexpr_consumer_is_eager(node, parent, bound):
+            return False
+        for inner in nested:
+            if not _genexpr_consumer_is_eager(inner, parent, bound) or not safe(inner):
+                return False
+        memo[id(node)] = True
+        return True
+
+    safe_ids = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.GeneratorExp) and safe(node):
+            safe_ids.add(id(node))
+    return safe_ids
+
 def _use(need, *names):
     need.update(names)
     need.add('ail_die')

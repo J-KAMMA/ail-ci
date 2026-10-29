@@ -1,3 +1,33 @@
+## 2026-10-29 -- cov52: nested generator expressions with an eager consumer (job-cov52-10292235)
+
+A fresh compile census of all 219 programs in `lab/corpus/programs` (both builds) found 48
+compile-refusal records over 24 programs. Imports aside, the most frequent remaining construct was
+a generator expression nested inside another generator expression: 3 programs (deepseek t172 and
+t432, glm t432) were refused on the general path because the inner one was materialised eagerly.
+The shape in all three is the same: an outer generator passed straight to `str.join`, with each
+element containing an inner generator passed straight to `sum` or another `join`.
+
+`pyfront.safe_generator_expressions` now marks a nested generator expression for the emitters when
+the outer generator AND every inner one are the direct argument of a consumer that drains the
+whole iterable before returning (`sum`, `list`, `tuple`, `sorted`, `min`, `max`, `set`, `dict`, or
+a literal str/bytes `.join`). The inner one is then drained exactly where CPython drains it, so the
+eager list is observationally identical. An inner generator in a `for` iterable stays refused (the
+whole inner list would be built before the outer loop starts), as do an assigned outer generator, a
+`next()`/`any()`/`all()` consumer, a lambda-deferred inner, a shadowed builtin and a non-literal
+`.join` receiver. Both `pyboxed.py` and `pyboxed2.py` consult the set; the pre-existing blanket
+refusal in `pyboxed2`'s early pass now lets a safe node through to the emitter. The three corpus
+programs now build and match CPython on all three task inputs on both builds.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p01_join`, `p02_sum`, `p03_reductions`,
+`p04_routes` (argument, list item, attribute and dict value), `p05_triple` (three levels) match
+CPython, including empty inner/outer containers, negative values, int64-boundary and float sums;
+`p06_inner_iter_refused`, `p07_unconsumed_refused`, `p08_list_later_refused` and
+`p09_shadow_refused` are refused by name. Added `AIL_CURRENT/test_ail_cov52.py` (2 tests) and
+registered it in `ail_check.MODULES`. Corpus refusals go from 48 records / 24 programs to
+42 records / 21 programs. Final-state tests: test_ail_cov52, test_ail_pre41, test_ail_pre42,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed, 1 skipped for no zig).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
