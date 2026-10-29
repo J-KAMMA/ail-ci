@@ -1,3 +1,31 @@
+## 2026-10-29 -- cov33: a nested generator expression consumed at once builds (job-cov33-10290854)
+
+A fresh compile-only census of all 219 programs in `lab/corpus/programs` on both builds found 24
+refusals per build (48 program-build records) after leaving imports to the stdlib jobs.  The most
+frequent remaining construct was a generator expression nested inside another one: three program
+files (`t172`, both `t432`) and six build records.  The general path materialises generator
+expressions eagerly, so it refused every nested one even when the eager point is unobservable.
+
+`pyboxed2` now allows a nested generator expression when its outer expression and every inner one
+are arguments of a call that reads all elements before returning (`str.join`, `list`, `tuple`,
+`set`, `frozenset`, `dict`, `sorted`, `sum`, `min`, `max`, `bytes`, `bytearray`).  A nested
+expression in an outer clause's iterable or condition, a saved outer expression, a lazy
+`for`/comprehension consumer, `next`/`any`/`all`, and an inner expression used as a value stay
+refused by name (`a generator expression nested inside another generator expression`); a saved
+generator whose body can raise keeps `a generator expression used as a value`.  The corpus's
+`"\n".join(" ".join(...) for row in rows)` and `"".join(f"{sum(...):>7}" for q in quarters)`
+programs now build on both builds.  Corpus refusals fell 24 -> 21 per build (48 -> 42 records) and
+nested-generator refusals 6 -> 0; the two saved-generator refusals remain.
+
+Probes in `/tmp/probes/cov33` on both builds via `cmp.sh`: `p_join_nested`, `p_join_routes`,
+`p_side_effects`, `p_outer_consumers`, `p_three_level` and `p_control_plain` match CPython;
+`p_refuse_outer_lazy`, `p_refuse_saved`, `p_refuse_inner_iterable`, `p_refuse_inner_value`,
+`p_refuse_next`, `p_refuse_any` and `p_refuse_shadowed_join` are refused by name (a user
+`.join` receiver and a rebound builtin are not trusted).  The corpus programs `t172` (deepseek) and
+both `t432` files match CPython on all three task inputs on both builds; `t437` keeps the
+saved-generator refusal.  Added `AIL_CURRENT/test_ail_cov33.py` (2 tests, 8 programs and 5
+refusals, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

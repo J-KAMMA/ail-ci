@@ -2536,9 +2536,14 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        genexp_parents = {c: n for n in ast.walk(tree) for c in ast.iter_child_nodes(n)}
+        genexp_bound = _bound_names(tree)
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
                     any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                if _nested_genexp_consumed_in_place(gen, genexp_parents, genexp_bound):
+                    gen._ail_nested_consumed = True
+                    continue
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6495,7 +6500,8 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        if not getattr(node, '_ail_nested_consumed', False) and \
+                any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -12470,6 +12476,50 @@ def _genexp_consumed_in_place(node, parents):
         if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
             return True
     return False
+
+
+_GENEXP_NESTED_FULL_CALLS = frozenset({
+    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max', 'bytes',
+    'bytearray',
+})
+
+
+def _genexp_consumed_by_full_call(node, parents, bound):
+    """True iff `node` is an argument of a call that reads every element before returning
+    (not a lazy for/comprehension source, a short-circuit any/all/next, or an unpack).  A
+    builtin the program binds is not trusted, and `.join` is trusted only on a string literal
+    or an f-string, so a user callable cannot turn the eager lowering into a visible change."""
+    par = parents.get(node)
+    if not (isinstance(par, ast.Call) and node in par.args):
+        return False
+    f = par.func
+    if isinstance(f, ast.Name) and f.id in _GENEXP_NESTED_FULL_CALLS and not bound.get(f.id):
+        return True
+    if isinstance(f, ast.Attribute) and f.attr == 'join':
+        recv = f.value
+        if isinstance(recv, ast.Constant) and isinstance(recv.value, str):
+            return True
+        if isinstance(recv, ast.JoinedStr):
+            return True
+    return False
+
+
+def _nested_genexp_consumed_in_place(node, parents, bound):
+    """True iff every generator expression inside `node` is safe to materialise eagerly: the
+    outer one and each inner one are arguments of a fully consuming call, and no inner one is
+    an enclosing clause's iterable or condition (where CPython would interleave lazily)."""
+    inner = [n for n in ast.walk(node) if n is not node and isinstance(n, ast.GeneratorExp)]
+    if not inner or not _genexp_consumed_by_full_call(node, parents, bound):
+        return False
+    for gen in node.generators:
+        for root in [gen.iter] + list(gen.ifs):
+            for n in ast.walk(root):
+                if isinstance(n, ast.GeneratorExp):
+                    return False
+    for child in inner:
+        if not _genexp_consumed_by_full_call(child, parents, bound):
+            return False
+    return True
 
 
 def _bound_names(tree):

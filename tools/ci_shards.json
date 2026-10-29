@@ -48,6 +48,7 @@
   "test_ail_corpus_findings2": 125.7,
   "test_ail_corpus_findings3": 463.8,
   "test_ail_cov2": 539.4,
+  "test_ail_cov33": 10.0,
   "test_ail_cratebridge": 53.9,
   "test_ail_cross_target": 10.3,
   "test_ail_crypto": 328.2,
@@ -816,6 +817,7 @@
   [
    "test_ail_api_contracts",
    "test_ail_bytearray_refs",
+   "test_ail_cov33",
    "test_ail_fuzz47",
    "test_ail_fuzz59",
    "test_ail_fuzz62",
