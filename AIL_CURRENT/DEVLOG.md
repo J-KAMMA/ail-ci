@@ -1,3 +1,32 @@
+## 2026-10-29 -- stdlib47: `struct` lowered onto bytes / int.to_bytes (job-stdlib47-10292150)
+
+`struct` is the next still-refused module used by compiled programs: 6 imports across
+`lab/corpus/programs` and `AIL_CURRENT/language_examples`.  The seven `tempfile` imports are in
+CPython-side test harnesses (`TemporaryDirectory` / `gettempdir`), not in AIL code, and the
+larger module names (`collections`, `typing`, `json`, `pathlib`, `re`, ...) are already built;
+`hashlib` is out of scope as crypto.  Added `python/pkg-v12/structlib.py`, run from
+`ail_syntax.python_surface` before the batch-4 and collections passes.  `struct.pack`,
+`struct.unpack`, `struct.calcsize` and `struct.error` with a literal format string are lowered
+to bytes and `int.to_bytes` / `int.from_bytes`.  The built prefixes are `<`, `>`, `!` and `=`;
+the built fields are `x c b B ? h H i I l L q Q s p`, with repeat counts and whitespace between
+fields.  The lowering matches CPython 3.12 for the built forms: range errors and messages,
+`s`/`p` truncation and `\0` fill, `?` truthiness, `s`/`p` accepting bytearray and returning
+bytes, `unpack` accepting a bytearray buffer and its TypeError text for other values, and
+`struct.error` construction/catching.  Native `@`/no prefix, `e f d n N P u w`, `Struct`,
+`pack_into`, `unpack_from`, `iter_unpack`, dynamic format strings, zero-length `s`/`p`, a count
+separated from its format by whitespace, and leading whitespace before a prefix are refused by
+name at compile time.
+
+Added `test_ail_stdlib47.py` (2 tests, both builds) and registered it in `ail_check.MODULES`.
+Probes in `/tmp/probes` (15 matching programs and 15 refused forms) cover every built field at
+min/max/over/under, all four orders, padding/counts/zero counts, whitespace, `s`/`p`/`c`
+truncation and bad types, bytearray/str buffer inputs, `struct.error` construction, values
+through an argument, a list item, an attribute, a dict value and an import alias; each probe
+matches CPython on both builds or is refused by name.  Final-state tests:
+test_ail_stdlib47, test_ail_python_syntax, test_ail_modules, test_ail_files,
+test_ail_corpus_findings3 and test_ail_safetynet pass (103 tests, 1 skipped);
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
