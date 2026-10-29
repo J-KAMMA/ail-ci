@@ -97,6 +97,35 @@ is refused by name for the bad template `\\\\1` (CPython exits 1 too).  Added
 `tools/ci_shards.json`; `tools/update_manifest.py` and `--check` pass.  Final-state tests:
 test_ail_fz196, test_ail_re, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3 (5 modules, 0 failed).
+## 2026-10-28 -- pre427 follow-up: register the regression module (job-pre427-10281842)
+
+The review of `717227e` found that `test_ail_pre427.py` was never registered, so neither
+`par_check.py` with no module list nor the CI shards ran it.  Added `test_ail_pre427` to
+`AIL_CURRENT/ail_check.MODULES`, placed it with `tools/ci_shards.py --update` (shard 4), and
+pinned it in `AIL_CURRENT/MANIFEST.json` with `tools/update_manifest.py`; `--check` exits 0 and
+`python3 -c "import ail_check; print('test_ail_pre427' in ail_check.MODULES)"` prints `True`.
+The compiler change is unchanged: the 40 probes in `/tmp/probes` still match CPython or are
+refused by name on both builds, and the four required modules pass on the final commit.
+
+## 2026-10-28 -- pre427: a positional-only lambda is refused by name (job-pre427-10281842)
+
+The pre413 review left the posonly/kwonly/vararg lambda subset refusals unverified.  Reproduced
+the first one on both builds with `bash ~/tools/cmp.sh`: `list(map(lambda x, /, y: y * 2, [5]))`
+printed `[10]` and `sorted([3, 1, 2], key=lambda x, /, y: y)` printed `[1, 2, 3]`, where CPython
+raises `TypeError: <lambda>() missing 1 required positional argument: 'y'` because the single
+argument binds to `x` and `y` is left unbound.  The map()/filter() surface lowering substituted
+for `args.args` only (tuplam), and the general path's key=/map() lambda lowering did the same
+(pyboxed/pyboxed2), so the positional-only parameter vanished.  Both builds now refuse any lambda
+with a positional-only parameter, by name, at the earliest Python-surface pass (and again in pyc
+for a source that bypasses that pass): `not in the subset: a lambda with a positional-only
+parameter (`lambda x, /: ...`) is not built`.  A positional-only `def`, plain map/key lambdas and
+a vararg `def` still match CPython; keyword-only and vararg lambdas keep their existing refusals.
+Probes in `/tmp/probes` on both builds via `cmp.sh`: lp_posonly, lp_key_posonly, lp_map_posonly,
+lp_posonly_ignored, lp_posonly_ignored_key, lp_posonly_multi, lp_posonly_multi_key,
+lp_posonly_body_first, lp_posonly_body_first_key, lp_nested_posonly, lp_return_posonly,
+lp_direct_posonly, lp_mixed and lp_default_posonly are refused by name; lp_defvararg matches
+CPython; lp_defposonly and lp_kwonly/lp_vararg are refused by name.  `test_ail_pre427.py` passes
+on both builds, as do `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
 
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
