@@ -743,6 +743,30 @@ def _refuse_round_at_int64_boundary(source):
             raise refusal
 
 
+def _refuse_lambda_positional_only(source):
+    """Refuse a lambda that declares a positional-only parameter (`lambda x, /: ...`) by name.
+
+    Every lambda lowering reads `args.args` for the parameters it binds, so a positional-only
+    parameter was silently dropped: a one-argument call that CPython rejects for a missing
+    ordinary parameter produced a value instead (found by the pre413 review through map() and
+    key=).  The subset has no route for a positional-only lambda, so name it at compile time on
+    both builds; a `def` with positional-only parameters keeps its existing support.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Lambda) and node.args.posonlyargs:
+            refusal = Unsupported(
+                'a lambda with a positional-only parameter (`lambda x, /: ...`) is not in the '
+                'subset\n'
+                '  write instead: use a nested `def` with positional-only parameters, or list '
+                'every lambda parameter as a plain positional one')
+            refusal.source_line = getattr(node, 'lineno', None)
+            raise refusal
+
+
 def _source_line_marker(line):
     """`ail-source-line: N` on its own stderr line, for ail_chatgpt.py to turn into file:line:col.
     Printed only when it asks for it (AIL_REPORT_SOURCE_LINE=1); it removes the line from the text."""
@@ -785,6 +809,7 @@ def build(source, out, strict=True, report=None, force_general=False):
     # A module-level definition shadowing a built-in (`def abs`, `def heappush`) is renamed before
     # either path sees it, so the general path's name-keyed dispatch honours it too (shadowing.py).
     source, shadow = shadowing.rename_all(source, Unsupported)
+    _refuse_lambda_positional_only(source)
     _refuse_round_at_int64_boundary(source)
     try:
         result = _build_unshadowed(source, out, strict, report, force_general)
