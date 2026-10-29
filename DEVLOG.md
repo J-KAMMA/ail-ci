@@ -1,7 +1,7 @@
 ## 2026-10-29 -- stdlib32: `unicodedata.name` / `category` / `normalize` (job-stdlib32-10291014)
 
 `unicodedata` was the next most-imported still-refused module in the corpus (`lab/corpus/programs`:
-four programs, `glm-5.3-flash-free/t081.py` and the two `t489.py` samples).  `unilower.py` lowers the
+three programs: `glm-5.3-flash-free/t081.py` and the two `t489.py` samples).  `unilower.py` lowers the
 three functions onto `_ail_uni_*` primitives; `unirt.py` has the typed and general adapters, and
 `ailuni_core.h` is generated from CPython 3.12.3 / Unicode 15.0 by `tools/gen_unicodedata.py`
 (categories, names including the CJK / Khitan / Nushu and Hangul algorithmic ranges, canonical and
