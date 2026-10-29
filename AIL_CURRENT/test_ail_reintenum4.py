@@ -45,6 +45,24 @@ class F(IntFlag):
 class E(Enum):
     A = 1
 
+class O(IntEnum):
+    A = 3
+    B = 5
+    def __index__(self):
+        return 1
+
+class G(IntFlag):
+    X = 3
+    Y = 5
+    def __index__(self):
+        return 1
+
+class A(Exception):
+    pass
+
+class B(Exception):
+    pass
+
 
 def t(label, thunk):
     try:
@@ -73,6 +91,15 @@ t("str_exp", lambda: 2 ** "a")
 t("list_base", lambda: [1] ** 2)
 t("list_exp", lambda: 2 ** [1])
 t("plain_cross", lambda: C.B ** E.A)
+t("exc_names", lambda: A() ** B())
+t("exc_names_rev", lambda: B() ** A())
+t("exc_int", lambda: A() ** 2)
+t("int_exc", lambda: 2 ** A())
+t("override_a", lambda: pow(O.A, 2, 5))
+t("override_b", lambda: pow(O.B, 3, 7))
+t("override_peer", lambda: pow(O.A, O.B, 7))
+t("override_flag", lambda: (pow(G.X, 2, 5), pow(G.Y, 3, 7)))
+t("override_plain", lambda: (pow(O.A, 2, 5), O.A ** 2))
 ''',
     'equality': '''
 from enum import Enum, IntEnum, IntFlag, StrEnum

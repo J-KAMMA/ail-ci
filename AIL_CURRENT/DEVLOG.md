@@ -1,3 +1,22 @@
+## 2026-10-29 -- reintenum4 review fixes: `**` operand names and 3-argument `pow` of an IntEnum with `__index__`
+
+Two defects from the review of the entry below, each verified with CPython 3.12 on both builds
+(`/tmp/probes/q1_pow_exc_names.py`, `/tmp/probes/q2_pow3_index.py`):
+
+* Binary `**` copied both operand names into one `snprintf`, but `ail__tname_c` returns one shared
+  static buffer, so `A() ** B()` said `'A' and 'A'`. The dunder runtime's `**` arm now copies each
+  name into its own buffer first, as the 3-argument path and the comparison error already do
+  (`'A' and 'B'`, reversed for `B() ** A()`).
+* The 3-argument `pow` unwrapped an IntEnum/IntFlag argument through `__index__`, so a subclass
+  override changed the value (`pow(C.A, 2, 5)` with `__index__` returning 1 gave 1, CPython 4).
+  `ail_bi_pow` now reads the member's stored `value` attribute -- CPython's int-subclass payload --
+  and ignores the overridable method.  `pow(C.A, 2, 5)`, `pow(C.B, 3, 7)`, IntFlag peers, an
+  overridden exponent/modulus and values through a parameter, a list item, an attribute and a dict
+  value all match CPython (`4 6` for the reviewer's program).
+
+`test_ail_reintenum4.py`'s `pow` program gained the exception-name pairs and an IntEnum/IntFlag
+with `__index__` overridden; both builds pass it.
+
 ## 2026-10-29 -- reintenum4: IntEnum/IntFlag `**`, cross-kind equality, plain-enum ordering and divmod (job-reintenum4-10300605)
 
 Re-checked on today's integ first; only the differences that still reproduced were changed.
@@ -5,7 +24,7 @@ Re-checked on today's integ first; only the differences that still reproduced we
 (`_AilIntEnum.__pow__`/`__rpow__`); `pow(x, y, None)` is the binary power, a float anywhere keeps
 CPython's int-only 3-argument message, and any other instance gets the three-operand
 `unsupported operand type(s) for ** or pow()` message naming all three classes (the 3-argument
-`ail_bi_pow` now unwraps an IntEnum/IntFlag through `__index__`).  Binary `**` on a non-instance
+`ail_bi_pow` now unwraps an IntEnum/IntFlag from its stored `value`, the int-subclass payload).  Binary `**` on a non-instance
 pair names both operands (`'str' and 'int'`), and the sequence-multiply error no longer
 misreads the operator text `** or pow()` as `*`.
 

@@ -313,8 +313,13 @@ BI_POW_NEW = (
     '        ail_obj ops[3] = {base, exp, modv};\n'
     '        for (int i = 0; i < 3; i++) {\n'
     '            if (ops[i].tag != AIL_T_INST) continue;\n'
-    '            ail_d1_fn ix = ail__bi_intenum(ops[i]) ? ail_dun1(ops[i], AIL_D1_INDEX) : 0;\n'
-    '            if (!ix) {\n'
+    '            ail_st st = AIL_OK;\n'
+    '            if (ail__bi_intenum(ops[i])) {\n'          # an int subclass: its stored payload, not an overridable __index__
+    '                ail_obj v;\n'
+    '                st = ail_inst_getattr(cx, &v, ops[i], ail_intern(cx, "value"), "value");\n'
+    '                if (st != AIL_OK) return st;\n'
+    '                ops[i] = v;\n'
+    '            } else {\n'
     '                char buf[500], na[160], nb[160], nc[160];\n'
     '                snprintf(na, sizeof na, "%s", ail__tname_c(base));\n'
     '                snprintf(nb, sizeof nb, "%s", ail__tname_c(exp));\n'
@@ -322,8 +327,6 @@ BI_POW_NEW = (
     '                snprintf(buf, sizeof buf, "unsupported operand type(s) for ** or pow(): \'%s\', \'%s\', \'%s\'", na, nb, nc);\n'
     '                return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n'
     '            }\n'
-    '            ail_obj r; ail_st st = ix(cx, &r, ops[i]); if (st != AIL_OK) return st;\n'
-    '            ops[i] = r;\n'
     '        }\n'
     '        base = ops[0]; exp = ops[1]; modv = ops[2];\n'
     '    }\n')
@@ -458,9 +461,13 @@ def _edits(inplace=False):
                           ('**', 'POW', 'RPOW')):
         disp = '** or pow()' if sym == '**' else sym
         if sym == '**':
-            # CPython names both operands and says `** or pow()`; no instance reaches here (the guard above dispatches it)
-            new_err = ('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for ** or pow(): \'%s\' and \'%s\'", '
-                       'ail__tname_c(a), ail__tname_c(b));\n    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);')
+            # CPython names both operands and says `** or pow()`; no instance reaches here (the guard above dispatches it).
+            # ail__tname_c returns one shared static buffer, so copy each name before the snprintf.
+            new_err = ('    char buf[420], na[160], nb[160];\n'
+                       '    snprintf(na, sizeof na, "%s", ail__tname_c(a));\n'
+                       '    snprintf(nb, sizeof nb, "%s", ail__tname_c(b));\n'
+                       '    snprintf(buf, sizeof buf, "unsupported operand type(s) for ** or pow(): \'%s\' and \'%s\'", na, nb);\n'
+                       '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);')
         else:
             new_err = '    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % disp
         e.append(('    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym,
