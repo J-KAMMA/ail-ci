@@ -6,9 +6,9 @@
 
 _AIL_CSV_UNSET = "\x01unset\x02"
 
-# CPython 3.12.5 (and 3.13+) parses a QUOTE_NONNUMERIC field that starts with the escapechar as a number;
+# CPython 3.12.6 (and 3.13+) parses a QUOTE_NONNUMERIC field that starts with the escapechar as a number;
 # earlier releases left it a str. csvgen.py replaces this line with a literal for the compiler's CPython.
-_AIL_CSV_ESCAPE_NUMERIC = __import__("sys").version_info >= (3, 12, 5)
+_AIL_CSV_ESCAPE_NUMERIC = __import__("sys").version_info >= (3, 12, 6)
 
 
 class _AilCsvError(Exception):

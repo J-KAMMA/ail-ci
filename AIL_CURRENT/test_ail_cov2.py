@@ -1038,8 +1038,8 @@ class PreludeCsv(unittest.TestCase):
                 return out
             self.assertEqual(self.fix(run(csv.reader)), self.fix(run(self.ns["_ail_csv_reader"])), (text, kw))
 
-        # CI's Python 3.12.5+ parses a QUOTE_NONNUMERIC field that starts with the escapechar as a number;
-        # 3.12.0-3.12.4 left it a str. The prelude follows the interpreter it is built with, which is the oracle.
+        # CI's Python 3.12.6+ parses a QUOTE_NONNUMERIC field that starts with the escapechar as a number;
+        # 3.12.0-3.12.5 left it a str. The prelude follows the interpreter it is built with, which is the oracle.
         for text, kw in (("1\\.5,\\.5,.5", {"quoting": csv.QUOTE_NONNUMERIC, "escapechar": "\\"}),
                          ('\\a"1 xa; 1aa', {"quoting": csv.QUOTE_NONNUMERIC, "escapechar": "\\",
                                              "delimiter": "|"}),
@@ -1067,10 +1067,10 @@ class PreludeCsv(unittest.TestCase):
             compare(text, kw)
 
     def test_reader_escape_numeric(self):
-        # gh-113785 (CPython 3.12.5+, 3.13+): under QUOTE_NONNUMERIC a field that starts with the escapechar is
+        # gh-113785 (CPython 3.12.6+, 3.13+): under QUOTE_NONNUMERIC a field that starts with the escapechar is
         # numeric. Older hosts (e.g. 3.12.3) keep it a string, and the prelude follows the host.
         rd = self.ns["_ail_csv_reader"]
-        new = sys.version_info >= (3, 12, 5)
+        new = sys.version_info >= (3, 12, 6)
         self.assertEqual(list(rd(['1\\.5,\\.5,.5'], quoting=2, escapechar="\\")),
                          [[1.5, 0.5, 0.5]] if new else [[1.5, ".5", 0.5]])
         self.assertEqual(list(rd(['1\\.5,\\.5,"\\.5"'], quoting=2, escapechar="\\")),

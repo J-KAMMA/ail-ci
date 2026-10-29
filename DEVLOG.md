@@ -2,9 +2,9 @@
 
 Re-applied accepted job csv1 on a tree that had already forced the new gh-113785 behaviour on every
 host.  `PreludeCsv.test_reader` failed on CI but not on the maintainer's 3.12.3: CI's setup-python
-installs the latest 3.12 (3.12.15 here).  CPython 3.12.5 made a QUOTE_NONNUMERIC field that begins
+installs the latest 3.12 (3.12.15 here).  CPython 3.12.6 made a QUOTE_NONNUMERIC field that begins
 with the escapechar numeric, so `list(csv.reader(['1\\.5,\\.5,.5'], escapechar='\\',
-quoting=csv.QUOTE_NONNUMERIC))` is `[[1.5, 0.5, 0.5]]`; 3.12.0-3.12.4 left those fields as strings.
+quoting=csv.QUOTE_NONNUMERIC))` is `[[1.5, 0.5, 0.5]]`; 3.12.0-3.12.5 left those fields as strings.
 The prelude now follows the interpreter it runs under (the raw module checks `sys.version_info`;
 csvgen replaces that line with a literal for the compiler's CPython), so both the 3.12.3 sandbox
 and the 3.12.15 CI oracle match CPython.  `test_ail_cov2` pins the escaped-start cases (`1\\.5`,
