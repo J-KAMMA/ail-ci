@@ -1,3 +1,33 @@
+## 2026-10-29 -- ex35: @export in an ordinary compile (job-ex35-10291432)
+
+`language_examples/c_export/geometry.py` is the one Python-syntax AIL example under
+`AIL_CURRENT/language_examples` that an ordinary `compile` refused: it stopped at
+`not in the subset: the decorator on def add ...`, although `compile --lib geometry` and CPython both
+accept the file.  The six Python-syntax `.ail` examples build as documented (with `--module math.ail`
+for `use_math.ail`); `table_crc.py` also builds.  The remaining `.py` files are host research
+scripts, not AIL examples: eight stop at `__file__` (which a standalone executable cannot reproduce),
+and the rest need host-only modules (`pyfunc`, `benchmark_current_rows`), colliding module names or
+`subprocess`/`pathlib` host facilities.  Those are not supportable exactly, so the fix is the
+`@export` decorator: `ail_ffi_lower` now removes it for an ordinary compile when CPython's own
+decorator would accept the function (`_valid_export`: top-level, no defaults/posonly/kw-only/star
+parameters, every parameter and result annotated int/float/bool/str/bytes/list[int]/list[float],
+a dataclass of int/float/bool as a parameter, `-> None` as a result, and only `@lru_cache`/`@cache`
+above it).  Any other form is refused by name on both builds, so CPython's decorator `TypeError` is
+never hidden by a running program.  A called form with arguments (`@export(expr)`) is refused by
+name before blanking, so an expression CPython would evaluate (and possibly fail on) is never
+silently dropped.  Programs without `ail_ffi` are returned byte for byte.
+
+Probes in `/tmp/probes/ex35` with `cmp.sh` (general and default builds; CPython got
+`PYTHONPATH=AIL_CURRENT` so it can import `ail_ffi`): valid bare/`@export()`/star/module forms, dataclass
+parameter, all scalar/list/bytes types, `@lru_cache` ordering, `-> None`, future annotations, values
+through an argument, list item and dict value, and the actual `geometry.py` match CPython.  The
+attribute-held function call (`box.f(5)`) and a custom decorator are refused by name (pre-existing
+method/decorator screens); invalid defaults, missing annotations/results, `list[str]`, a bad
+dataclass field, a dataclass result, positional-only parameters, the reversed `@lru_cache` order and
+`@export(undefined_name)` are refused by name on both builds.  Final-state tests: test_ail_ex35, test_ail_ffi,
+test_ail_c_export, test_ail_check, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

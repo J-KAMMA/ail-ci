@@ -174,7 +174,7 @@ class Session:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
+                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'export', 'link', 'length', 'ptr', 'cptr', 'declarations'})
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
@@ -187,6 +187,8 @@ class Session:
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
+        export_unsafe = self._export_names_shadowed(tree)
+        export_classes = self._export_dataclasses(tree)
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -195,6 +197,23 @@ class Session:
                 continue
             if not isinstance(node, ast.FunctionDef):
                 continue
+            exports = [d for d in node.decorator_list if self._is_export(d, imported, module_names)]
+            if exports:
+                for decorator in exports:
+                    if isinstance(decorator, ast.Call) and (decorator.args or decorator.keywords):
+                        self._refuse(path, decorator, '@export %s: use @export or @export(); an argument would be '
+                                     'evaluated by CPython before the decorator runs' % node.name)
+                others = [d for d in node.decorator_list if d not in exports]
+                first_export = min(node.decorator_list.index(d) for d in exports)
+                last_other = max((node.decorator_list.index(d) for d in others), default=-1)
+                if (export_unsafe or not self._valid_export(node, export_classes) or last_other > first_export
+                        or any(self._decorator_name(d) not in ('lru_cache', 'cache') for d in others)):
+                    self._refuse(path, exports[0], '@export %s: a plain top-level function with no defaults, every '
+                                 'parameter and the result annotated as int, float, bool, str, bytes, list[int], '
+                                 'list[float] (a parameter may also be a dataclass of int/float/bool), -> None '
+                                 'for no result, and only @lru_cache/@cache above it' % node.name)
+                for decorator in exports:
+                    blank.append((decorator.lineno, decorator.end_lineno))
             deco = [d for d in node.decorator_list if self._is_extern(d, imported, module_names)]
             if not deco:
                 continue
@@ -250,6 +269,102 @@ class Session:
         if not libs or len(libs) != len(call.args):
             self._refuse(path, call, 'link("name", ...) takes library names or paths as string literals')
         self.links.setdefault(str(path), []).extend((lib, pkg, str(path.parent)) for lib in libs)
+
+    @staticmethod
+    def _is_export(node, imported, module_names):
+        if isinstance(node, ast.Call):
+            node = node.func
+        if isinstance(node, ast.Name):
+            return node.id == 'export' and 'export' in imported
+        return (isinstance(node, ast.Attribute) and node.attr == 'export' and isinstance(node.value, ast.Name)
+                and node.value.id in module_names)
+
+    @staticmethod
+    def _decorator_name(node):
+        if isinstance(node, ast.Call):
+            node = node.func
+        if isinstance(node, ast.Name):
+            return node.id
+        if isinstance(node, ast.Attribute):
+            return node.attr
+        return None
+
+    @staticmethod
+    def _export_names_shadowed(tree):
+        """True when the file binds a name `@export` or its annotations rely on.
+
+        CPython resolves an annotation through the module globals, so `int = list[str]` before a def
+        makes its `x: int` something else; this check keeps the conservative refusal then."""
+        targets = {'int', 'float', 'bool', 'str', 'bytes', 'list', 'None',
+                   'export', 'dataclass', 'lru_cache', 'cache'}
+        allowed = {('functools', 'lru_cache'), ('functools', 'cache'),
+                   ('dataclasses', 'dataclass'), ('ail_ffi', 'export')}
+        bound = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                bound.add(node.id)
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                bound.add(node.name)
+        for node in tree.body:
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    bound.add(alias.asname or alias.name.split('.')[0])
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    if (node.module, alias.name) not in allowed:
+                        bound.add(alias.asname or alias.name)
+        return bool(bound & targets)
+
+    def _export_dataclasses(self, tree):
+        """Class names whose @export use as a parameter type CPython's decorator accepts.
+
+        Only a plain scalar field annotation (int, float, bool) is accepted, and only for a class
+        with no base, so a field that get_type_hints cannot turn into one of those three keeps the
+        source as written and the ordinary decorator refusal."""
+        if any(isinstance(node, ast.ImportFrom) and node.module == '__future__'
+               and any(alias.name == 'annotations' for alias in node.names) for node in tree.body):
+            return {}                   # dataclass field types stay strings, so CPython's decorator rejects them
+        found = {}
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef) or node.bases:
+                continue
+            if not any(self._decorator_name(d) == 'dataclass' for d in node.decorator_list):
+                continue
+            ok = True
+            for item in node.body:
+                if isinstance(item, ast.AnnAssign):
+                    ann = item.annotation
+                    if not (isinstance(ann, ast.Name) and ann.id in ('int', 'float', 'bool')):
+                        ok = False
+                        break
+            if ok:
+                found[node.name] = True
+        return found
+
+    @staticmethod
+    def _export_annotation(ann, export_classes, *, result):
+        if isinstance(ann, ast.Name):
+            if ann.id in ('int', 'float', 'bool', 'str', 'bytes'):
+                return True
+            if result and ann.id == 'None':
+                return True
+            return not result and ann.id in export_classes
+        if isinstance(ann, ast.Constant) and ann.value is None:
+            return result
+        if isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name) and ann.value.id == 'list':
+            return isinstance(ann.slice, ast.Name) and ann.slice.id in ('int', 'float')
+        return False
+
+    def _valid_export(self, node, export_classes):
+        args = node.args
+        if (args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg
+                or args.defaults or any(d is not None for d in args.kw_defaults)
+                or node.returns is None):
+            return False
+        for arg in args.args:
+            if arg.annotation is None or not self._export_annotation(arg.annotation, export_classes, result=False):
+                return False
+        return self._export_annotation(node.returns, export_classes, result=True)
 
     @staticmethod
     def _is_extern(node, imported, module_names):
