@@ -7,8 +7,9 @@ prints 244), on both builds.  The general runtime's `ail_dun_binop` kept each op
 `unsupported operand type(s) for %s: '%.100s' and '%.100s'` (CPython's `binary_op_error`), while
 `can only concatenate ...` and `can't multiply sequence ...` keep the full name up to CPython's 200
 bytes.  Only a program with a class gets this runtime text, so a no-class program's C is unchanged.
-The other two items in the review's list (`u_mixinst`, and the operand-less `//`/`%`/`/`/`**` plus
-`'exception'` ordering text) are separate pre-existing causes and untouched.
+The other two items in the review's list are separate pre-existing causes and untouched: an
+exception operand still prints `'exception'`, and `**` still omits CPython's `or pow()` suffix
+(ordering also says `'exception'`; `//`, `%` and `/` already name their operands on this tree).
 
 Probes in `/tmp/probes/pre440` on both builds via `cmp.sh`: `p_add_120`, `p_sub_120`, `p_mul_120`,
 `p_add_99`, `p_add_100`, `p_add_101`, `p_add_79`, `p_add_80`, `p_add_long_int`, `p_add_int_long`,
