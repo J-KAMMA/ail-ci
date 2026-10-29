@@ -1,3 +1,36 @@
+## 2026-10-29 -- pre437: a walrus-bound lambda called from a class annotation (job-pre437-10300148)
+
+The pre423 review recorded as pre-existing that `class C: x: ((f := (lambda: C)) and f()) = 1`
+compiled and printed `1` on both builds, where CPython evaluates the annotation, calls the
+lambda and raises `NameError` because `C` is unbound.  Reproduced on this tree (CPython exit 1,
+both builds exit 0).  `_annotation_reads` deferred the lambda body but never followed the name
+the assignment expression bound.  It now keeps an environment of `:=` bindings, resolved to the
+lambda or generator a value names, and follows values through names, subscripted literal
+aggregates (`l[0]`, `d["k"]`), `__call__`, and statically known `if`/`and`/`or` results.  A call
+through such a name runs the body, and an immediately called lambda binds its arguments to the
+parameters; a known consumer (`list(g)`) or an unpacking (`[*g]`) runs a generator reached
+through a name.  `_annotation_truth` now reports a lambda or generator expression as truthy and
+a `:=` expression by its value, so `(f := lambda: C) or f()` and `(lambda: C) or
+(lambda: C)()` match CPython instead of being refused.  Calling a lambda with its own parameter
+named `C`, an unused binding, a statically dead branch and an empty `map` argument still match
+CPython.
+
+Probes in `/tmp/probes/pre437` on both builds via `cmp.sh`: the 17 matching cases
+(`m_or_dead`, `m_no_call`, `m_dead_if`, `m_dead_and`, `m_shadow_param`, `m_call_shadowed_body`,
+`m_shadow_call`, `m_container_nocall`, `m_genexp_unused`, `m_map_empty`, `m_bool_use`,
+`m_nested_lambda`, `m_default_arg`, `m_or_lambda`, `m_or_genexp`, `m_genexp_dead_or`,
+`m_cond_param`) match CPython, and the 12 live cases (`p_main`, `p_paren_call`, `p_chain`,
+`p_list_item`, `p_tuple_item`, `p_dict_value`, `p_attr_call`, `p_arg_lambda`,
+`p_call_with_arg_read`, `p_consumer_genexp`, `p_star_genexp`, `p_default_c`) are refused by name
+on both builds.  Remaining pre-existing, unchanged (`/tmp/probes/pre437rem`, both builds compile
+and run where CPython raises `NameError`): `rem_class_assign`, `rem_module_alias`,
+`rem_later_annotation`, `rem_map_nonempty`, `rem_sorted_key`, `rem_attribute_obj`,
+`rem_returned_lambda`; the pre423 over-refusals (`list(C for _ in [])` and the like) are also
+unchanged.  Final-state tests: test_ail_pre437, test_ail_pre423, test_ail_pre410,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (6 modules, 0 failed, 592 s).
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --update` added the
+module and `--check` exits 0.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
