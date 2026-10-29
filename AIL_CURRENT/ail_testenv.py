@@ -18,6 +18,20 @@ LEAK_CHECK_REASON = 'AddressSanitizer has no leak checker on macOS (detect_leaks
 _GNU_TIME = []
 
 
+def runnable_which(name):
+    """`shutil.which(name)` when the tool actually runs, else None. A rustup shim on PATH without a
+    default toolchain answers `--version` with an error; a test that only checked `which` would then
+    fail instead of skipping."""
+    path = shutil.which(name)
+    if path is None:
+        return None
+    try:
+        probe = subprocess.run([path, '--version'], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return path if probe.returncode == 0 else None
+
+
 def gnu_time():
     """Path of a `time` that understands `-f %M` (GNU time, peak RSS in KiB), else None. The BSD
     time of macOS has `-l` with another output shape, and Windows has none."""

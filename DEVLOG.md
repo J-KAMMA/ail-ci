@@ -1,3 +1,18 @@
+## 2026-10-29 -- reex26 fix: Rust tests skip when the toolchain cannot run (job-reex26-10300433)
+
+The full suite failed `test_ail_c_export` and `test_ail_cratebridge` on this runner with `rustup
+could not choose a version of rustc to run ... no default is configured`: `rustc` is the rustup
+shim on `PATH`, but `$HOME` is remapped to a rustup home with no toolchain, so `shutil.which` finds
+a binary that exits 1.  Both modules detected Rust with `which` alone, so they ran the test and
+failed instead of skipping.
+
+`ail_testenv.runnable_which(name)` returns the path only when `<tool> --version` exits 0; both
+modules use it for `RUSTC`.  Here the two Rust tests now skip (`test_ail_c_export` skipped=2,
+`test_ail_cratebridge` skipped=1); with a real toolchain
+(`RUSTUP_HOME=/home/runner/.rustup`) they still run and pass, so coverage is unchanged where Rust
+works.  `test_ail_reex26`, `test_ail_modules`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; `update_manifest.py --check` passes.
+
 ## 2026-10-29 -- reex26 fix: build reports take the invoked source string (job-reex26-10300433)
 
 Review of the `__file__` change found that `compile --json` and `compile --debug-dir` crashed on
