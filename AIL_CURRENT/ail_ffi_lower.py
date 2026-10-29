@@ -201,6 +201,7 @@ class Session:
             except ail_export.ExportError as error:
                 self._refuse(path, exports[0][1], 'ail_ffi @export: %s' % error)
             self._check_export_names(path, tree, exports)
+            self._check_export_effects(path, tree, exports, module_names)
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -249,6 +250,9 @@ class Session:
     def _check_export_names(self, path, tree, exports):
         """CPython's @export reads its annotations when the function is defined, so a dataclass
         named by one must already be bound; ail_export.lower accepts a class declared later."""
+        future_annotations = any(
+            isinstance(node, ast.ImportFrom) and node.module == '__future__' and node.level == 0
+            and any(alias.name == 'annotations' for alias in node.names) for node in tree.body)
         dataclass_names, dataclass_modules = set(), set()
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module == 'dataclasses' and node.level == 0:
@@ -288,6 +292,10 @@ class Session:
                         if defined.get(name.id) != 'dataclass':
                             self._refuse(path, decorator, 'ail_ffi @export: name %s is not a dataclass '
                                          'defined before the decorator runs' % name.id)
+                        if future_annotations:
+                            self._refuse(path, decorator, 'ail_ffi @export: dataclass %s is used with '
+                                         '`from __future__ import annotations`, so its field types are '
+                                         'strings and CPython refuses the parameter' % name.id)
                 defined[node.name] = 'other'
             elif isinstance(node, ast.ClassDef):
                 defined[node.name] = 'dataclass' if any(is_dataclass(d) for d in node.decorator_list) else 'other'
@@ -301,6 +309,34 @@ class Session:
             elif isinstance(node, (ast.Import, ast.ImportFrom)):
                 for alias in node.names:
                     defined[alias.asname or alias.name.split('.')[0]] = 'other'
+
+    def _check_export_effects(self, path, tree, exports, module_names):
+        """CPython keeps the decorated function and its marker attributes, but a normal build cannot
+        represent function objects; refuse every program that observes that side effect by name."""
+        names = {function.name for function, _ in exports}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute):
+                if node.attr in ('__ail_export__', '__dict__'):
+                    self._refuse(path, node, 'ail_ffi @export: %s is a CPython-only attribute of an '
+                                 'exported function' % node.attr)
+                if node.attr in ('exports', '_EXPORTED') and isinstance(node.value, ast.Name) \
+                        and node.value.id in module_names:
+                    self._refuse(path, node, 'ail_ffi @export: %s.%s is a CPython-only side effect of '
+                                 'the decorator' % (node.value.id, node.attr))
+                if isinstance(node.value, ast.Name) and node.value.id in names:
+                    self._refuse(path, node, 'ail_ffi @export: reading %s.%s needs a function object, '
+                                 'which a normal build does not have' % (node.value.id, node.attr))
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+                if node.func.id in ('getattr', 'hasattr'):
+                    if any(isinstance(argument, ast.Constant) and argument.value == '__ail_export__'
+                           for argument in node.args):
+                        self._refuse(path, node, 'ail_ffi @export: __ail_export__ is a CPython-only '
+                                     'attribute of an exported function')
+                elif node.func.id in ('vars', 'dir') and node.args:
+                    first = node.args[0]
+                    if isinstance(first, ast.Name) and first.id in names:
+                        self._refuse(path, node, 'ail_ffi @export: %s(%s) needs a function object, '
+                                     'which a normal build does not have' % (node.func.id, first.id))
 
     @staticmethod
     def _is_link(node, imported, module_names):

@@ -126,6 +126,18 @@ except ValueError as error:
     print("error", str(error))
 '''
 
+FUTURE_SCALAR = '''from __future__ import annotations
+from ail_ffi import export
+
+
+@export
+def twice(n: int) -> int:
+    return n * 2
+
+
+print(twice(21))
+'''
+
 ATTRIBUTE = '''import ail_ffi
 
 
@@ -178,6 +190,23 @@ def f(*a: int) -> int:
 
 print(f(1))
 ''',
+    'future_annotations_dataclass': '''from __future__ import annotations
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dataclass
+class Point:
+    x: int
+
+
+@export
+def getx(p: Point) -> int:
+    return p.x
+
+
+print(getx(Point(9)))
+''',
     'dataclass_defined_later': '''from dataclasses import dataclass
 from ail_ffi import export
 
@@ -203,6 +232,7 @@ class Ex34Tests(unittest.TestCase):
             'geometry': (EXAMPLES / 'c_export' / 'geometry.py').read_text(encoding='utf-8'),
             'marker': MARKER,
             'attribute': ATTRIBUTE,
+            'future_scalar': FUTURE_SCALAR,
         }
         with tempfile.TemporaryDirectory(prefix='ail-ex34-') as directory:
             for slug, text in cases.items():
@@ -215,6 +245,53 @@ class Ex34Tests(unittest.TestCase):
                     self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0],
                                      (slug, general, got.stderr[-800:]))
                     self.assertEqual(got.returncode, want[1], (slug, general, got.stderr[-800:]))
+
+    def test_export_side_effect_is_refused_by_name(self):
+        cases = {
+            'direct': '''from ail_ffi import export
+
+@export
+def twice(n: int) -> int:
+    return n * 2
+
+print(twice(21))
+print(twice.__ail_export__)
+''',
+            'getattr': '''from ail_ffi import export
+
+@export
+def twice(n: int) -> int:
+    return n * 2
+
+print(twice(21))
+print(getattr(twice, "__ail_export__"))
+''',
+            'alias': '''from ail_ffi import export
+
+@export
+def twice(n: int) -> int:
+    return n * 2
+
+f = twice
+print(f.__ail_export__)
+''',
+            'module_exports': '''import ail_ffi
+
+@ail_ffi.export
+def twice(n: int) -> int:
+    return n * 2
+
+print([f.__name__ for f in ail_ffi.exports()])
+''',
+        }
+        with tempfile.TemporaryDirectory(prefix='ail-ex34-') as directory:
+            for slug, text in cases.items():
+                self.assertEqual(cpython(directory, slug, text)[1], 0, slug)
+                for general in (True, False):
+                    _, built = build(directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
+                    output = built.stdout + built.stderr
+                    self.assertNotEqual(built.returncode, 0, (slug, general, output[-1200:]))
+                    self.assertIn(REFUSAL, output, (slug, general, output[-1200:]))
 
     def test_invalid_export_is_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-ex34-') as directory:

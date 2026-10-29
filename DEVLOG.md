@@ -1,3 +1,27 @@
+## 2026-10-29 -- ex34 review: future annotations and @export side effects (job-ex34-10291334)
+
+The review found two silent differences in the `@export` normal-build support.  With
+`from __future__ import annotations`, a dataclass field type stays a string, so CPython's `@export`
+raises `TypeError` at definition time; the build accepted the file and printed `9`.  The export
+check now detects the future import and refuses a dataclass parameter by name (a future-annotated
+dataclass that no export uses, and scalar annotations, still match CPython).  The second defect was
+that blanking the decorator removed its observable CPython side effect: `twice.__ail_export__`,
+`getattr`/`hasattr`, `vars`/`dir` on the function, any attribute read on an exported function, and
+`ail_ffi.exports`/`_EXPORTED` are now refused by name before lowering, instead of building and then
+stopping with `AttributeError`/`NotImplementedError`.  Importing `exports` was already refused by
+name by `ail_export.lower`.
+
+Probes in `/tmp/probes/ex34fix` via `cmp.sh` with `PYTHONPATH=$PWD/AIL_CURRENT`, both builds:
+`future_scalar`, `future_scalar_routes` (negative, zero, argument, list item, attribute, dict
+value), `future_dataclass_unused`, `function_value`, `valid`, `valid_attr` and `geometry` match
+CPython; `future_ann`, `future_dataclass_boolfloat`, `future_dataclass_later`,
+`future_dataclass_routes`, `valid_attr_direct`, `valid_attr_getattr`, `valid_attr_hasattr`,
+`valid_attr_vars`, `valid_attr_dir`, `valid_attr_name`, `module_exported_list` and `exports_list`
+are refused by name where CPython exits nonzero or where the observation cannot be represented.
+Added both cases to `test_ail_ex34.py`.  Final-state tests on the commit: test_ail_ex34,
+test_ail_ffi, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (5 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-29 -- ex34: @export is a marker in a normal build (job-ex34-10291334)
 
 Built the 20 Python-syntax files under `language_examples` (14 `.py`, 6 `.ail`, using
