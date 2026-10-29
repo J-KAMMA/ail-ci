@@ -136,6 +136,8 @@ class Session:
         self.extra_libs = []            # `compile --link LIB`: the same as link("LIB") for the whole program
         self.notes = []
         self._owned = False
+        self.library_entry = None       # `compile --lib`: the entry file, the only one that may say `@export`
+        self.link_lines = {}            # (declaring file, library) -> line of its link() call
 
     def close(self):
         if self._owned and self.workdir is not None:
@@ -187,6 +189,18 @@ class Session:
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
+        keep = []                       # (first line, replacement) in the library entry: `export` stays for ail_export.lower
+        if self.library_entry is not None:
+            if Path(path) == self.library_entry:
+                for node in tree.body:
+                    if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0 \
+                            and any(a.name == 'export' for a in node.names):
+                        keep.append((node.lineno, 'from ail_ffi import export'))
+                    elif isinstance(node, ast.Import) and any(a.name == 'ail_ffi' for a in node.names):
+                        keep.append((node.lineno, 'import ' + ', '.join(
+                            a.name + (' as ' + a.asname if a.asname else '') for a in node.names)))
+            else:
+                self._refuse_export(path, tree, imported, module_names)
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -213,6 +227,8 @@ class Session:
         for first, last in blank:
             for index in range(first - 1, last):
                 lines[index] = ''
+        for first, statement in keep:
+            lines[first - 1] = statement
         self.decls.extend(decls)
         # a file that imports ail_ffi but declares nothing is left with its import blanked
         block = []
@@ -227,6 +243,47 @@ class Session:
             for decl in decls:
                 block.extend(self._wrapper(decl))
         return '\n'.join(lines).rstrip('\n') + '\n' + '\n'.join(block) + ('\n' if block else '')
+
+    def _refuse_export(self, path, tree, imported, module_names):
+        """`compile --lib`: only the entry file declares the C API."""
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            for d in node.decorator_list:
+                target = d.func if isinstance(d, ast.Call) else d
+                if (isinstance(target, ast.Name) and target.id == 'export' and 'export' in imported) or (
+                        isinstance(target, ast.Attribute) and target.attr == 'export'
+                        and isinstance(target.value, ast.Name) and target.value.id in module_names):
+                    entry = self.library_entry.name
+                    self._refuse(path, d, '@export on %s in %s, which is not the entry file: only %s declares '
+                                 'the C API of a library.\n  write instead: remove @export here and, in %s, write '
+                                 '`@export def %s(...): return <this module>.%s(...)` over the same types'
+                                 % (node.name, Path(path).name, entry, entry, node.name, node.name))
+
+    @staticmethod
+    def _shared_path(lib):
+        return lib.endswith(('.so', '.dylib', '.dll')) or '.so.' in lib
+
+    def refuse_shared_links(self, name):
+        """`compile --lib` also writes lib<name>.a: a `.so` path would have to be present wherever the archive is
+        linked, so a library build takes library names (`-lz`) or `.a` archives, not shared objects."""
+        used = {d.path for d in self.decls}
+        wanted = [(d.lib, d.path, d.line) for d in self.decls if d.lib is not None]
+        for key, entries in self.links.items():
+            if key in used:
+                wanted.extend((lib, key, self.link_lines.get((key, lib), 1)) for lib, _, _ in entries)
+        for lib, path, line in wanted:
+            if self._shared_path(lib):
+                raise ModuleRefusal(path, line, 1,
+                                    'link of the shared library %r cannot go into lib%s.a: a program that links the archive '
+                                    'would need that .so at run time.\n  write instead: link by name (`link("%s")`) '
+                                    'so the consumer\'s link line gets -l%s from %s.h, or link a static archive (`.a` path)'
+                                    % (lib, name, Path(lib).name.removeprefix('lib').split('.')[0], Path(lib).name.removeprefix('lib').split('.')[0], name))
+        for lib in self.extra_libs:
+            if self._shared_path(lib):
+                raise ValueError('--link %s: a shared library path cannot go into lib%s.a (a program that links the archive '
+                                 'would need that .so at run time).\n  write instead: --link by name, or a static archive'
+                                 % (lib, name))
 
     @staticmethod
     def _is_link(node, imported, module_names):
@@ -250,6 +307,8 @@ class Session:
         if not libs or len(libs) != len(call.args):
             self._refuse(path, call, 'link("name", ...) takes library names or paths as string literals')
         self.links.setdefault(str(path), []).extend((lib, pkg, str(path.parent)) for lib in libs)
+        for lib in libs:
+            self.link_lines.setdefault((str(path), lib), call.lineno)
 
     @staticmethod
     def _is_extern(node, imported, module_names):
@@ -484,8 +543,9 @@ class Session:
                 pointer_arguments=[p.name for p in d.params if p.ann in ('bytes', 'bytearray', 'c_const_void_p', 'c_mut_void_p', 'c_char_p', 'c_mut_char_p', 'c_void_p')]))
         return rows
 
-    def build(self, cli, env=None):
-        """Build the adapter object; returns its path, or None when no stub was declared."""
+    def build(self, cli, env=None, c_api_name=None):
+        """Build the adapter object; returns its path, or None when no stub was declared.
+        `c_api_name` builds it as a dependency of a C library (`compile --lib`, c_api.py)."""
         if not self.decls:
             return None
         if self.workdir is None:
@@ -564,7 +624,8 @@ class Session:
         out = work / 'ffi_adapter.o'
         run_env = dict(os.environ if env is None else env)
         result = subprocess.run([sys.executable, '-B', str(cli), 'compile-c', str(work / 'ffi_adapter.c'),
-                                 '--interface', str(work / 'ffi_adapter.json'), '-o', str(out)],
+                                 '--interface', str(work / 'ffi_adapter.json'), '-o', str(out),
+                                 *([] if c_api_name is None else ['--c-api-name', c_api_name])],
                                 capture_output=True, text=True, timeout=300, env=run_env)
         if result.returncode:
             raise ValueError('FFI adapter build failed:\n' + (result.stderr or result.stdout)[-3000:])
