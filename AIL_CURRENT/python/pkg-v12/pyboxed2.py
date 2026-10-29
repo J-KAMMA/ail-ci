@@ -9662,7 +9662,7 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('chr() with the surrogate code point U+%04X' % cp)
         cp = _const_int(node)
         if cp is not None and not WIDE_STRINGS and 0x10000 <= cp <= 0x10FFFF:
-            raise Unsupported('chr() with the non-BMP code point U+%04X in the 16-bit v2 runtime' % cp)
+            raise Unsupported('chr() of the non-BMP code point U+%04X in the 16-bit v2 runtime' % cp)
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_bi_chr(cx, &%s, %s);' % (t, v))

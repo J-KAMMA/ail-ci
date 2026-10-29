@@ -19013,7 +19013,7 @@ static inline ail_st ail_bi_chr(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.i < 0 || x.i > 0x10FFFF) return ail_raise_c(cx, AIL_B_VALUEERROR, "chr() arg not in range(0x110000)");
     if (x.i >= 0xD800 && x.i <= 0xDFFF) ail_die("chr() surrogate code point is unsupported");
     if (x.i > 0xFFFF && sizeof(((ail_strback *)0)->data[0]) < 4)
-        ail_die("chr() non-BMP code point requires 32-bit strings");
+        return ail_hit_limit(cx, "chr_non_bmp", "chr() of the non-BMP code point requires 32-bit strings");
     ail_strback *b = ail_strback_alloc(cx, 1); b->data[0] = x.i;
     *out = ail_str_view((ail_gcobj *)b, 0, 1);
     return AIL_OK;

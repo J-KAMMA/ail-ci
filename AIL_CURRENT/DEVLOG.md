@@ -1,3 +1,9 @@
+## 2026-10-30 -- repre20: chr() of a non-BMP code point on the general path stops by name (job-repre20-10300611)
+
+Today's integ already refused a statically known non-BMP `chr()` argument at build time (`test_ail_pre36.py`, added after the old pre20 diff), but a value only known at run time still reached `ail_bi_chr`'s `ail_die` and ended with `AIL internal error: chr() non-BMP code point requires 32-bit strings`. The general runtime stores UTF-16 units and cannot represent U+10000..U+10FFFF; the typed/default build can. `ail_bi_chr` now returns `ail_hit_limit(cx, "chr_non_bmp", ...)` (the uncatchable `AIL limit: chr_non_bmp`, exit 3) for such a value, in the `str_title_nonascii` limit style, and the build-time refusal wording is `chr() of the non-BMP code point U+... in the 16-bit v2 runtime` (pre267's `bytes.decode()` style). `test_ail_pre36.py` was updated for the wording; new `test_ail_repre20.py` (8 tests) compares with CPython through a literal, an argument, a list item, an attribute, a dict value and stdin on both builds, checks the limit is uncatchable (`except`/`finally` do not run), and keeps the U+FFFF boundary and the ValueError range errors unchanged.
+
+Probes in `/tmp/probes`: `p20_literal` (general refused by name; the default build of a lone top-level statement falls back to the general path here, the three-line `p20_default` matches CPython), `p20_runtime_value` / `p20_attr_only` / `p20_dict_only` / `p20_try` (named limit, exit 3), `p20_bmp` / `p20_range` (match on both builds), `p20_typed_simple` (default matches CPython, general stops with the limit).
+
 ## 2026-10-30 -- GPU stage G1: `# ail: gpu`, the eligibility proof, kernel IR and its CPU emulation
 
 `compile --gpu` (or `AIL_GPU_BUILD=1`) reads `# ail: gpu` on the line before a loop (or at the end of a list-comprehension
