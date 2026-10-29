@@ -126,7 +126,7 @@ each one multiplies the lowering cases and the aliasing proofs (section 6) and n
 | -0.0 | kept as IEEE: `-0.0 + -0.0 = -0.0`, `0.0 + -0.0 = 0.0`, `-(0.0) = -0.0`, `abs(-0.0) = 0.0`; `r_f16(-0.0)` is `0x8000` **[verified]** |
 | subnormals | kept (gradual underflow) in all three dtypes, in arithmetic and conversion. f16: smallest `2^-24`, largest subnormal `2^-14 - 2^-24`; `2^-25` rounds to `0.0` (tie to even), anything above it to `2^-24` **[verified with `struct 'e'`]**. No flush-to-zero anywhere: the runtime never sets FTZ/DAZ, and a C callee that does is "trusted C" as in SEMANTICS.md section 48 |
 | `sqrt` | correctly rounded. Negative input gives NaN (canonical), not `ValueError` (TA2) |
-| `exp log tanh` | defined as `r_T(math.<f>(float(x)))`: CPython's libm result in binary64, rounded once to `T`. On one platform CPython and AIL call the same libm, so the bits agree; across platforms both follow that platform's libm, as plain `math.exp` already does. `log` of a negative is NaN, of zero `-inf` (IEEE, not `ValueError`). No vector libm (it gives other bits) except in the inexact mode (section 7) |
+| `exp log tanh` | defined as `r_T(math.<f>(float(x)))`: CPython's libm result in binary64, rounded once to `T`. On one platform CPython and AIL call the same libm, so the bits agree; across platforms both follow that platform's libm, as plain `math.exp` already does. `log` of a negative is NaN, of zero `-inf` (IEEE, not `ValueError`); `exp` whose binary64 result overflows is `inf` (CPython's `math.exp(1000)` raises `OverflowError: math range error` **[verified]**, so the reference catches it; found in T1). No vector libm (it gives other bits) except in the inexact mode (section 7) |
 | `minimum maximum clip` | element-wise; NaN in either operand gives NaN; `-0.0` is less than `0.0`. Order-independent on purpose (Python's `min(-0.0, 0.0)` returns the first argument **[verified]**; the module does not copy that position rule) |
 
 ### 3.2 Why "compute in binary64, round once" is exact
@@ -161,9 +161,13 @@ module op rounds separately and nothing is fused.
   once). int8 to f16 is exact; int32 to f32 rounds (above `2^24`); int32 to f16 overflows to inf from 65520 on.
 - **`astype` float to int**: `rounding='trunc'` (toward zero, like `int()`, default) or `'nearest'` (ties to even, like
   `round()`); `overflow='raise'` (default: NaN raises `ValueError: cannot convert float NaN to integer`, inf raises
-  `OverflowError: cannot convert float infinity to integer` **[texts verified]**, out of range raises `OverflowError`)
-  or `'saturate'` (clamp; NaN becomes 0).
-- **`astype` int to int**: `overflow='raise'` (default), `'saturate'` or `'wrap'`.
+  `OverflowError: cannot convert float infinity to integer` **[texts verified]**, out of range raises
+  `OverflowError: int8 cast overflow at index 4` at the first such index) or `'saturate'` (clamp; NaN becomes 0).
+  `overflow='wrap'` is a `ValueError` for float sources.
+- **`astype` int to int**: `overflow='raise'` (default, same text), `'saturate'` or `'wrap'`.
+- In T1 a 2-D shape (`ta.zeros((2, 3), ...)`) raises `ValueError` naming stage T6, and 3-D or more raises the
+  `1-D and 2-D` error; `order='any'` on `ta.min`/`ta.max` raises `ValueError` at run time in the reference (the
+  compiler refuses it by name, section 8).
 - **Array op Python scalar**: section 3.6.
 
 ### 3.5 Reductions: one fixed order
@@ -190,8 +194,9 @@ of 16 all produce it with no extra work; threads take whole subtrees of blocks. 
 `sum(a.tolist())` (Neumaier, sequential: `sum([0.1] * 10)` prints `1.0`, `sum([-0.0])` prints `0.0` **[verified]**)
 and not numpy's pairwise sum; users who want Python's result call the builtin `sum(a)`, which stays exactly CPython's.
 
-- `ta.dot(a, b)` is bit-for-bit `ta.sum(a * b)` with the products rounded to `A` (`r_A(a_i * b_i)` after widening to
-  `A`); the fused native loop keeps no temporary array.
+- `ta.dot(a, b)` is the fixed-order sum of the products `r_A(a_i * b_i)` (operands widened to `A` first); the fused
+  native loop keeps no temporary array. When `A = T` (f32, f64 by default) that is bit-for-bit `ta.sum(a * b)`; for
+  f16 (default `A = f32`) it is not, because `a * b` rounds the products to f16 (clarified in T1).
 - `ta.min` / `ta.max`: NaN if any element is NaN (canonical); `-0.0 < 0.0`; `ValueError` on an empty array (CPython
   3.12's `min()` text: `min() iterable argument is empty` **[verified]**). Order-independent, so any lane or thread
   split is exact.
