@@ -1,3 +1,20 @@
+## 2026-10-29 -- pre430 suite fix: register the module where the integration hunk is stable (job-pre430-10292334)
+
+The pre430 change added `test_ail_pre430` to `ail_check.MODULES` between `test_ail_pre378` and
+`test_ail_pre293`, a spot the integration tree has since filled with other modules.  Applying
+the job diff alone with `git apply --3way` therefore reinserted `test_ail_pre378` (it appears at
+another position there) or left a conflict, and `test_ail_pre346` failed on the duplicate/stale
+module list.  The registration now sits after the final `test_ail_fz1` entry, whose context is
+unchanged on the integration bases, so the job diff applies cleanly.  The `tools/ci_shards.json`
+placement is removed: a module missing from the file is spread over the shards by name (the case
+`test_ail_pre346` documents and tests), so the job diff no longer rewrites the evolved assignment
+file.  Simulated the culprit steps (`git diff cf01ff6 <this branch> -- . ':!.agent' ':!corpus'
+':!AIL_CURRENT/MANIFEST.json'` through `git apply --3way`) on integration bases `73713ae`,
+`cand-1029233952` and `d68453f`: only the record files conflict, `test_ail_pre346` passes 5/5
+and `test_ail_pre430` still passes.  Probes in `/tmp/probes/pre430fix`: safe aliased constants
+and the direct wrapper match CPython on both builds; out-of-range constants and bool/float/
+argument/list-item/attribute/dict routes are refused by name.
+
 ## 2026-10-28 -- pre430: an aliased power wrapper is followed by the constant checks (job-pre430-10281939)
 
 The rbrbpre366 review recorded the aliased power-wrapper probes as pre-existing: on this tree
