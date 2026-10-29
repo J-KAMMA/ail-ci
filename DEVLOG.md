@@ -1,3 +1,37 @@
+## 2026-10-29 -- ex38: `@export` is an identity decorator for a plain compile (job-ex38-10291503)
+
+Built every Python-syntax file under `AIL_CURRENT/language_examples`: the six `.ail` Python-surface
+examples (`hello`, `math`, `sum`, `stdin_sum`, `integer_series`, and `use_math` with its documented
+`--module math.ail`) all build, and before the change of the 13 `.py` files only `c_headers_workflow/table_crc.py`
+built.  The refusals were `__file__` (5: `row_codec_compare`, `row_decimal_quad`,
+`row_state_quad_compare`, `row_store_identity_compare`, `test_row_cpu_profile`), a local import not
+on the search path (3: `build_crc_library`, `ordinary_join_price`, `row_locals_compare`), a merged
+module-name collision (2: `row_codec_controls`, `row_cpu_profile`), a duplicate import alias (1:
+`row_codec_memory`), `Path` used as a value plus `os.environ` (1: `row_cpu_sampler_probe`), and the
+`@export` decorator (1: `c_export/geometry.py`).
+
+The first group is the largest, but those files are CPython research/harness scripts that locate the
+repository through `__file__`, modify `sys.path` at run time and import repo tools; a single built
+executable has no module file or search path, so that refusal cannot be supported exactly.  The one
+refusal that is exact and blocks a real AIL Python-syntax example is `@export`: on CPython
+`ail_ffi.export` checks its function and returns it unchanged.  `ail_ffi_lower` now validates the
+same annotation rules (plain parameters, a result annotation, int/float/bool/str/bytes/list[int]/
+list[float]/None, a parameter dataclass of int/float/bool, and `@export` innermost) and blanks the
+decorator.  An invalid use is refused by name rather than ignored; a class decorated with `@export`
+is refused too, since CPython raises `TypeError`.  `c_export/geometry.py` now compiles on both
+builds and prints the same bytes as CPython.
+
+Probes in `/tmp/probes` (both builds through `cmp.sh` with `PYTHONPATH=AIL_CURRENT`):
+`ex38_basic`, `ex38_dataclass`, `ex38_alias`, `ex38_star`, `ex38_decorators` and `ex38_call_form`
+match CPython (including empty strings/bytes/lists, negative values and the int64 boundary route,
+and values through an argument, a list item, an attribute and a dict value).  `ex38_outer_cache`,
+`ex38_missing_annotation`, `ex38_no_result`, `ex38_bad_type`, `ex38_bad_list`, `ex38_defaults`,
+`ex38_bad_dataclass`, `ex38_return_dataclass`, `ex38_class_decorated` and `ex38_method` are refused
+by name where CPython raises `TypeError`.  Final-state tests: `test_ail_ex38`, `test_ail_c_export`,
+`test_ail_ffi`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (6 modules,
+0 failed).  `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --update`
+added the module and `--check` exits 0.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

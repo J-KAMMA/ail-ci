@@ -6389,7 +6389,7 @@
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
-    "ail_check.py": "eeea382031e868dcd05b7f965537b554c59b7326ed53e58090af65620b3ee6a8",
+    "ail_check.py": "20c178995ea61b44a3262c229478e4798704c1eb79bca6ef108009aefd0af035",
     "test_ail_sdk.py": "af18bc35a3d951ce733ca3b73a05c91e58e44c15b12131b1e92c42807c909872",
     "test_ail_str_rfind.py": "9216fc98dd70e3f9de393ff29798602dce499c3600552c6a7b6b77a2b1a432b5",
     "ail_builtin_syntax_forms.py": "8b6a4a90b4ccfcac48a9a3938fcf7c7df3b1ec14a5ca1096dc8e1130d378c7e8",
@@ -6545,7 +6545,7 @@
     "test_ail_ffi.py": "fc9e0e87dfbd2a3d843a008e9dea83a7cc620b9e86828c0128a04eda3e657369",
     "test_ail_zlib.py": "6f63289d7ff5b6606b402fb2717e7e9f697a4d7af93028179d52f77648310f3e",
     "ail_ffi.py": "bfd6a183b9455237e9cac2ff279e7cf0a78749e6f3fe897af6363f09237c80e4",
-    "ail_ffi_lower.py": "dba1aa6a1ac32242b913ce96913856d69b3134ea737a677ec1e87f3b093dfa61",
+    "ail_ffi_lower.py": "3b9b4ee632b929e1b1a250a0a4e195f63740cf3861af34d830e114c171ca0ae0",
     "stdlib/zlib.py": "0942d127fd3d0d9281fa6bbf163bf23859feebac01695a75a83a131d28f30a4c",
     "stdlib/zlib_glue.c": "0c567dc25fb91deebafab600ecec3fa0168303400cca91f80cca2b4fd068fff5",
     "stdlib/zlib_glue.h": "4207f4ce60ea5036c21a1b8072a6345ec4d4f2a7e194b7e8c07124f5e2533378",
@@ -7016,7 +7016,8 @@
     "test_ail_pre421.py": "7d3889b891c3f1c6ac531b2627791215f30941505733d981dd54adb2fdb76b6a",
     "test_ail_pre422.py": "3179d0ad7c3a7e4125c9bb6bab28de7a4a2c521afd12d6ef53e4dfbeb9c0e7ff",
     "test_ail_pre423.py": "e1505577d1aec7dbf07a96677979351537b54dab19e4669825b3068668db67da",
-    "test_ail_ffi_parallel.py": "0b2edc0deb9a287134da00873128872a5d617063dd8324d207dfe5dc5e8c0b40"
+    "test_ail_ffi_parallel.py": "0b2edc0deb9a287134da00873128872a5d617063dd8324d207dfe5dc5e8c0b40",
+    "test_ail_ex38.py": "7b5362ca559e957a085f2d1c63cda7a0c6401eb1efb53a23c1e4b549a9dbb4bf"
   },
   "release": "R1.40+xlang-304d34f+native-round72+windows-cpython+workflow-tests-candidate+bracket-read-candidate+n0-v4-candidate+r8-fuzz-plan-v2+r9-byte-arena-sanitizer+r10-native-ledger-n0+r11-n0-fresh-evidence+r12-optimizer-current-chain+r13-xlang-arm64-emulated-gate+r14-native-r11-historical-inputs+r15-native-r11-regression+r16-native-recovered-inputs+r20-native-versioned-scope+r21-native-pinned-input-recovery+r22-provenance-precision+r23-direct-indexed-undefined+r24-protected-lock-line-endings+r25-current-r6-seeds+r26-nullish-ternary+r27-seed777-coercion+r28-includes+r30-indexof+r32-native-model-inputs+r33-native-checkpoint+r36-xlang-dynamic-array+r37-source-bound-gate+r38-host-matrix+r51-native-f32-successor+r52-native-f32-migration-candidate+r53-v1-string-width+r54-v1-runtime-repair+r55-windows-cli-intake",
   "work_id": "r140-xlang-304d34f-integration-20260926",
@@ -24324,7 +24325,7 @@
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
     "test_ail_builtin_api.py": "f4ed0186a304be917c36526a5818b1d2b6561c7529698f79ce62cc9ac83b5686",
-    "ail_check.py": "eeea382031e868dcd05b7f965537b554c59b7326ed53e58090af65620b3ee6a8",
+    "ail_check.py": "20c178995ea61b44a3262c229478e4798704c1eb79bca6ef108009aefd0af035",
     "test_ail_sdk.py": "af18bc35a3d951ce733ca3b73a05c91e58e44c15b12131b1e92c42807c909872",
     "test_ail_str_rfind.py": "9216fc98dd70e3f9de393ff29798602dce499c3600552c6a7b6b77a2b1a432b5",
     "ail_builtin_syntax_forms.py": "8b6a4a90b4ccfcac48a9a3938fcf7c7df3b1ec14a5ca1096dc8e1130d378c7e8",
@@ -24484,7 +24485,7 @@
     "test_ail_ffi.py": "fc9e0e87dfbd2a3d843a008e9dea83a7cc620b9e86828c0128a04eda3e657369",
     "test_ail_zlib.py": "6f63289d7ff5b6606b402fb2717e7e9f697a4d7af93028179d52f77648310f3e",
     "ail_ffi.py": "bfd6a183b9455237e9cac2ff279e7cf0a78749e6f3fe897af6363f09237c80e4",
-    "ail_ffi_lower.py": "dba1aa6a1ac32242b913ce96913856d69b3134ea737a677ec1e87f3b093dfa61",
+    "ail_ffi_lower.py": "3b9b4ee632b929e1b1a250a0a4e195f63740cf3861af34d830e114c171ca0ae0",
     "stdlib/zlib.py": "0942d127fd3d0d9281fa6bbf163bf23859feebac01695a75a83a131d28f30a4c",
     "stdlib/zlib_glue.c": "0c567dc25fb91deebafab600ecec3fa0168303400cca91f80cca2b4fd068fff5",
     "stdlib/zlib_glue.h": "4207f4ce60ea5036c21a1b8072a6345ec4d4f2a7e194b7e8c07124f5e2533378",
@@ -24955,7 +24956,8 @@
     "test_ail_pre421.py": "7d3889b891c3f1c6ac531b2627791215f30941505733d981dd54adb2fdb76b6a",
     "test_ail_pre422.py": "3179d0ad7c3a7e4125c9bb6bab28de7a4a2c521afd12d6ef53e4dfbeb9c0e7ff",
     "test_ail_pre423.py": "e1505577d1aec7dbf07a96677979351537b54dab19e4669825b3068668db67da",
-    "test_ail_ffi_parallel.py": "0b2edc0deb9a287134da00873128872a5d617063dd8324d207dfe5dc5e8c0b40"
+    "test_ail_ffi_parallel.py": "0b2edc0deb9a287134da00873128872a5d617063dd8324d207dfe5dc5e8c0b40",
+    "test_ail_ex38.py": "7b5362ca559e957a085f2d1c63cda7a0c6401eb1efb53a23c1e4b549a9dbb4bf"
   },
   "base_local_change_scope": "Cross-language pipeline hardened to real-world measurement. incr.py: two new incrementalization pattern classes -- dict argmax (d[k]=d.get(k,0)+POS writes plus keys() rescan with tiebreak become update-site tracking) and sliding window sum (del xs[0] sites emit _wacc-=xs[0]); probe 64/64, mode/wma translations fire with byte-identical oracles. pkg-v12: str(<float>) enabled via existing ail_str_from_float FMT machinery (SEMANTICS.md updated). jstrans.py: deterministic JS->subset translator -- float profile (Number/parseFloat, JS Number->String formatting: integral doubles without .0, NaN/Infinity, -0->0, true / on floats, IEEE remainder), plus parser-surface hardening (ASI, shebang, new Array, function-expr arrows, stdin line-terminator fix via rstrip, null-sentinel re-kinding via vartypes/zero_of, trivial-function inlining, named TErrs for all remaining unsupported constructs). Corpus 17/17 byte-identical vs Node; real-world corpus 0->2 end-to-end with zero generic crashes (12 named TErrs). dominfer.py: machine-derived input domains via differential probing (found 2^53+ integer JS precision boundary on all add-protocol programs).",
   "integration": {

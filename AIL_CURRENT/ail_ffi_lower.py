@@ -169,12 +169,15 @@ class Session:
     def _lower(self, path, text, tree):
         imported = set()                # names bound by `from ail_ffi import`
         module_names = set()            # names bound by `import ail_ffi [as x]`
+        dataclass_names = set()         # names bound by `from dataclasses import dataclass`
+        dataclasses_modules = set()     # names bound by `import dataclasses [as x]`
         blank = []                      # (first line, last line)
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
+                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'export', 'link', 'length', 'ptr', 'cptr',
+                                                                 'declarations'})
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
@@ -185,8 +188,18 @@ class Session:
                     if alias.name == 'ail_ffi':
                         module_names.add(alias.asname or 'ail_ffi')
                         blank.append((node.lineno, node.end_lineno))
+                    elif alias.name == 'dataclasses':
+                        dataclasses_modules.add(alias.asname or 'dataclasses')
+            elif isinstance(node, ast.ImportFrom) and node.module == 'dataclasses' and node.level == 0:
+                for alias in node.names:
+                    if alias.name == 'dataclass':
+                        dataclass_names.add(alias.asname or alias.name)
         if not imported and not module_names:
             return text
+        export_imported = 'export' in imported and not self._name_rebound(tree, 'export')
+        module_names = {name for name in module_names if not self._name_rebound(tree, name)}
+        blank.extend(self._strip_exports(path, tree, export_imported, module_names, dataclass_names,
+                                         dataclasses_modules))
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -227,6 +240,141 @@ class Session:
             for decl in decls:
                 block.extend(self._wrapper(decl))
         return '\n'.join(lines).rstrip('\n') + '\n' + '\n'.join(block) + ('\n' if block else '')
+
+    @staticmethod
+    def _name_rebound(tree, name):
+        """True when a module-level statement other than the ail_ffi import binds `name` again."""
+        def provided(node):
+            if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
+                return any((a.asname or a.name) == name for a in node.names)
+            if isinstance(node, ast.Import):
+                return any(a.name == 'ail_ffi' and (a.asname or a.name) == name for a in node.names)
+            return False
+
+        def binds(node):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                return node.name == name
+            if isinstance(node, ast.Assign):
+                return any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+            if isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                return isinstance(node.target, ast.Name) and node.target.id == name
+            if isinstance(node, ast.Import):
+                return any((a.asname or a.name.split('.')[0]) == name for a in node.names)
+            if isinstance(node, ast.ImportFrom):
+                return any(a.name != '*' and (a.asname or a.name) == name for a in node.names)
+            if isinstance(node, (ast.For, ast.AsyncFor)):
+                return isinstance(node.target, ast.Name) and node.target.id == name
+            if isinstance(node, (ast.With, ast.AsyncWith)):
+                return any(isinstance(v.optional_vars, ast.Name) and v.optional_vars.id == name for v in node.items)
+            if isinstance(node, ast.Try):
+                return (any(binds(s) for part in (node.body, node.orelse, node.finalbody) for s in part)
+                        or any(h.name == name for h in node.handlers))
+            if isinstance(node, ast.If):
+                return any(binds(s) for s in node.body + node.orelse)
+            return False
+        return any(binds(node) and not provided(node) for node in tree.body)
+
+    @staticmethod
+    def _is_dataclass(decorator, names, modules):
+        d = decorator.func if isinstance(decorator, ast.Call) and not decorator.args and not decorator.keywords else decorator
+        if isinstance(d, ast.Name):
+            return d.id in names
+        return (isinstance(d, ast.Attribute) and d.attr == 'dataclass'
+                and isinstance(d.value, ast.Name) and d.value.id in modules)
+
+    @classmethod
+    def _export_structs(cls, tree, dataclass_names, dataclasses_modules):
+        """Class name -> whether its dataclass fields are only int/float/bool (the @export rule)."""
+        structs = {}
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if not any(cls._is_dataclass(d, dataclass_names, dataclasses_modules) for d in node.decorator_list):
+                continue
+            good = not node.bases and not node.keywords
+            for statement in node.body:
+                if isinstance(statement, ast.AnnAssign):
+                    if not (isinstance(statement.target, ast.Name) and isinstance(statement.annotation, ast.Name)
+                            and statement.annotation.id in ('int', 'float', 'bool')):
+                        good = False
+                elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Pass)):
+                    continue
+                elif isinstance(statement, ast.Expr) and isinstance(statement.value, ast.Constant):
+                    continue
+                elif isinstance(statement, ast.Assign):
+                    continue
+                else:
+                    good = False
+            structs[node.name] = good
+        return structs
+
+    @staticmethod
+    def _export_kind(annotation, structs, result):
+        if isinstance(annotation, ast.Constant) and annotation.value is None:
+            return result
+        if isinstance(annotation, ast.Name):
+            if annotation.id in ('int', 'float', 'bool', 'str', 'bytes'):
+                return True
+            if annotation.id in structs:
+                return not result and structs[annotation.id]
+            return False
+        return (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
+                and annotation.value.id == 'list' and isinstance(annotation.slice, ast.Name)
+                and annotation.slice.id in ('int', 'float'))
+
+    def _check_export(self, path, node, structs):
+        where = 'function %s' % node.name
+        args = node.args
+        if args.defaults or args.kw_defaults or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg:
+            self._refuse(path, node, '@export %s: plain parameters without defaults only' % where)
+        if node.returns is None:
+            self._refuse(path, node, '@export %s: annotate the result (-> None for no result)' % where)
+        for arg in args.args:
+            if arg.annotation is None:
+                self._refuse(path, node, '@export %s: parameter %s needs a type annotation' % (where, arg.arg))
+            if not self._export_kind(arg.annotation, structs, False):
+                self._refuse(path, arg.annotation, '@export %s: parameter %s has unsupported type %s '
+                             '(allowed: int float bool str bytes list[int] list[float] or a dataclass of '
+                             'int/float/bool)' % (where, arg.arg, ast.unparse(arg.annotation)))
+        if not self._export_kind(node.returns, structs, True):
+            self._refuse(path, node.returns, '@export %s: unsupported result type %s (allowed: int float bool str '
+                         'bytes list[int] list[float] or None)' % (where, ast.unparse(node.returns)))
+
+    @staticmethod
+    def _is_export(decorator, imported, module_names):
+        d = decorator.func if isinstance(decorator, ast.Call) and not decorator.args and not decorator.keywords else decorator
+        if isinstance(d, ast.Name):
+            return imported and d.id == 'export'
+        return (isinstance(d, ast.Attribute) and d.attr == 'export'
+                and isinstance(d.value, ast.Name) and d.value.id in module_names)
+
+    def _strip_exports(self, path, tree, imported, module_names, dataclass_names, dataclasses_modules):
+        """On CPython @export checks its function and returns it unchanged; drop it for a plain program.
+
+        Returns the line ranges to blank; the lowering below edits the original text, not a reprint."""
+        if not imported and not module_names:
+            return []
+        structs = self._export_structs(tree, dataclass_names, dataclasses_modules)
+        blank = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ClassDef):
+                if any(self._is_export(d, imported, module_names) for d in node.decorator_list):
+                    self._refuse(path, node, '@export applies to a top-level function, not class %s' % node.name)
+                continue
+            if not isinstance(node, ast.FunctionDef):
+                continue
+            found = [d for d in node.decorator_list if self._is_export(d, imported, module_names)]
+            if not found:
+                continue
+            if node.decorator_list[-1] not in found:
+                self._refuse(path, node, '@export %s: it must be the innermost decorator; CPython applies the '
+                             'decorators below it first and @export then receives their result, which is often '
+                             'not a function (for example @lru_cache)' % node.name)
+            self._check_export(path, node, structs)
+            blank.extend((d.lineno, d.end_lineno) for d in found)
+            node.decorator_list = [d for d in node.decorator_list
+                                   if not self._is_export(d, imported, module_names)]
+        return blank
 
     @staticmethod
     def _is_link(node, imported, module_names):
