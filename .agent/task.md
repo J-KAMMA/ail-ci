@@ -1,10 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `rbrbpre366` recorded these as already present before that job:
+**Your change breaks another test in the full suite.** On top of the current integration branch, test_ail_pre346 fails with your change and passes without it (culprit.yml run 40872719537 applied each job alone).
 
-**Allowed named refusals introduced (same as original accepted change):** aliased power wrapper with bool base (`q(True, 3)`) and with dynamic operands through a parameter (`p14`, `p22`).
-
-**Unverified:** instruction-count speed (change is compile-time only); full suite (not to be run).
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre430.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Run `cd AIL_CURRENT && python3 -m unittest -q test_ail_pre346`, find what your change broke, and fix it so it passes again while keeping your own fix and its test. If your fix cannot coexist with it, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
