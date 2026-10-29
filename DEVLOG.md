@@ -1,3 +1,14 @@
+## 2026-10-29 -- suite fix: a rustup shim without a toolchain is not rustc (job-recsv1-10300430)
+
+The full suite failed `test_ail_cratebridge` in `test_rust_crate_cdylib_and_staticlib` with
+`rustup could not choose a version of rustc to run`: the agent sandbox puts `$HOME` somewhere
+other than the runner's home, so `rustc` on `PATH` is the rustup shim while the installed
+toolchain (under the runner's `.rustup`) is invisible, and `shutil.which("rustc")` still treats
+it as present.  `ail_testenv.rustc()` now runs `rustc --version` once and returns None when the
+shim does not work, so the Rust cases in `test_ail_cratebridge.py` and `test_ail_c_export.py`
+skip there; with a usable toolchain they still run (cratebridge: 11 tests, 0 skipped).  The csv
+fix and `test_ail_recsv1.py` are unchanged.
+
 ## 2026-10-29 -- recsv1: QUOTE_NONNUMERIC on a csv reader is refused by name (job-recsv1-10300430)
 
 The typed `csvlib` reader accepted `quoting=csv.QUOTE_NONNUMERIC` and returned every cell as a str
