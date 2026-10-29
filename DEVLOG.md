@@ -1,3 +1,31 @@
+## 2026-10-29 -- ex41: `@export` is an identity decorator in a plain compile
+
+The Python-syntax survey (14 `.py` plus 6 Python-parseable `.ail` under `language_examples`)
+refuses 13 of the 20 on the base. Twelve are host/research harnesses: five stop at `__file__`,
+three at a host-only import (`pyfunc`, `benchmark_current_rows`, a local `table_crc`), two at an
+import-name collision, one at a double import, and one at the int64/`Path` subset. The only
+standalone language example still refused is `c_export/geometry.py`, by
+`the decorator on def add (only @staticmethod ...)`. `table_crc.py` builds, and the six `.ail`
+files build (`use_math.ail` as the documented `--module math.ail` fragment).
+
+`ail_ffi_lower` now treats `@export`, `@export()`, `@ail_ffi.export` and the star-import form as
+CPython's identity decorator on both builds: it validates the same annotation contract (scalars,
+`list[int]`/`list[float]`, dataclass parameters with int/float/bool fields, `-> None`) and blanks
+the decorator, so `geometry.py` builds and matches CPython's stdout and exit status. Invalid
+exports are refused by name; so are reads of the runtime marking (`__ail_export__`, `exports()`)
+and function introspection (`getattr`/`hasattr`/`vars`/`dir`/`__dict__`), which a plain compile
+cannot carry. Dataclass parameters whose field names or class name are rebound, or whose module
+uses PEP 563, are refused exactly where CPython's decorator would reject the resolved types.
+
+Probes in `/tmp/probes/ex41` on both builds via `cmp.sh` (`PYTHONPATH=$PWD/AIL_CURRENT`):
+`p_basic`, `p_attr`, `p_star`, `r_dc_ok`, `r_future_scalar` and `geometry.py` match CPython;
+`r_missing_ann`, `r_default`, `r_bad_type`, `r_class`, `r_export_args`, `r_outer_cache`,
+`r_dataclass_bad_field`, `r_future_dataclass`, `r_shadow_int`, `r_rebound_dc`, `r_attr`,
+`r_getattr`, `r_vars`, `r_dict`, `r_alias_dict`, `r_alias_getattr`, `r_exports` are refused by
+name on both builds. Added `test_ail_ex41.py` (6 tests). Final-state tests: test_ail_ex41,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
