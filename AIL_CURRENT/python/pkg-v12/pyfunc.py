@@ -54,6 +54,7 @@ import stdlib4
 import float64_fusion
 import sortkeys
 import parallel
+import gpu
 import rebinding
 import string_repeat_fusion
 import borrowed_callback
@@ -2713,6 +2714,7 @@ class Ctx:
         self.has_try = False
         self.par_depth = 0          # > 0 while compiling the body of a `parallel for`
         self.par_regions = {}       # parallel-for number -> facts _par_outline needs
+        self.gpu_regions = {}       # `# ail: gpu` site number -> facts gpu.outline needs (GPU.md G1)
         # (struct name, numeric list field) -> (pointer C name, count C name) while a loop whose body
         # provably never resizes or replaces that field is being emitted (`_span_cache_plan`).
         # Only the code emitter reads it; no type or kind query does, so it needs no epoch bump.
@@ -19287,7 +19289,10 @@ def _listcomp_into_temp(node, ctx):
     # comprehension's own element loop, wiping everything but the last element. The
     # allocator cannot know where its caller will place the fill.
     ctx.pre.append('%s_clear(&%s);' % (helper, c))
-    ctx.pre.append('{ %s }' % ' '.join(lines))
+    block = '{ %s }' % ' '.join(lines)
+    if getattr(node, 'gpu', None) is not None and kind in (FLIST, LIST) and not string_source and not struct_source:
+        block = gpu.region(ctx, node.gpu, block, dest=c)
+    ctx.pre.append(block)
     return c
 
 
@@ -21911,6 +21916,8 @@ def _stmt_inner(node, ctx, ind):
     if isinstance(node, ast.For):
         if getattr(node, 'par', None) is not None:
             return _par_for(node, ctx, ind)
+        if getattr(node, 'gpu', None) is not None:
+            return gpu.region(ctx, node.gpu, _for(node, ctx, ind)) + '\n'
         return _for(node, ctx, ind)
     if isinstance(node, ast.Return):
         if ctx.ret in (EXCEPTION, BYTEARRAY, BINARYFILE, TCPSOCKET):
@@ -35030,6 +35037,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    gpu.tag(tree, source.strip())              # `# ail: gpu`: before any pass rewrites the tree
     refuse_field_method_call(tree)
     debug_restore_lines(tree, source.strip())
     _read_only_sequence_annotations(tree)
@@ -35132,6 +35140,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     if _MODCONSTS.vars:
         _check_module_variables(tree, _MODCONSTS.vars)
     parallel.prepare(tree, Unsupported)
+    gpu.prepare(tree, source.strip())          # `# ail: gpu` loops (a no-op without `compile --gpu`)
     _hoist_augassign_indexes(tree)
     _lower_set_method_spellings(tree)
     _lower_list_operations(tree)
@@ -37711,6 +37720,8 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         generated = _c_identifier_replace(generated, token, value)
     if ctx.par_regions:
         generated = _par_outline(generated, sig, decls, ctx, cname)
+    if ctx.gpu_regions:
+        generated = gpu.outline(generated, sig, decls, ctx, cname, _par_decls)
     generated = _range_strip(generated)
     return sig, generated, ctx
 

@@ -5359,6 +5359,10 @@ def main(argv=None):
              'with --json the blockers are printed as ail.strict/1 JSON')
     compile_cmd.add_argument('--static', action='store_true',
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
+    compile_cmd.add_argument('--gpu', action='store_true',
+        help="build the loops marked '# ail: gpu' as GPU kernels (docs/design/GPU.md; stage G1 runs the kernel on the "
+             "CPU as an emulation, same output): a marked loop that is not provably eligible is refused by name "
+             "(also AIL_GPU_BUILD=1)")
     compile_cmd.add_argument('--lib', metavar='NAME',
         help='build the @export functions of the source as a C library: -o DIR receives lib<NAME>.so, '
              'lib<NAME>.a and <NAME>.h (error codes, NAME_last_error(), NAME_free(); see NATIVE_LIBRARIES.md)')
@@ -5409,6 +5413,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if getattr(args, 'no_cache', False):
         os.environ['AIL_NO_CACHE'] = '1'
+    if getattr(args, 'gpu', False):
+        os.environ['AIL_GPU_BUILD'] = '1'
     if getattr(args, 'static', False):
         if sys.platform == 'darwin' and not getattr(args, 'target', None):
             parser.error('--static is not supported on macOS: Apple ships no static C library, so the '
@@ -5618,6 +5624,24 @@ def main(argv=None):
         if source.suffix.lower() not in ('.ail', '.py') or not source.is_file():
             parser.error('source must be an existing .ail or .py file')
         notes = {}
+        gpu_sites = []
+        if args.command == 'compile' and os.environ.get('AIL_GPU_BUILD', '').strip().lower() in ('1', 'on', 'yes', 'true') \
+                and source.suffix.lower() == '.py':
+            # `compile --gpu`: the syntactic half of the proof on the file as written (python/pkg-v12/gpu.py)
+            sys.path.insert(0, str(ROOT / 'python/pkg-v12'))
+            import gpu
+            try:
+                gpu_sites = gpu.sites_of(source.read_text(encoding='utf-8'))
+            except gpu.GpuRefusal as refusal:
+                line = getattr(refusal, 'source_line', None)
+                lines = source.read_text(encoding='utf-8').strip().splitlines()
+                where = _relpath(source)
+                if line is not None and 0 < line <= len(lines):
+                    text = lines[line - 1]
+                    where += ':%d:%d' % (line, len(text) - len(text.lstrip()) + 1)
+                return native_build.emit(args, {}, 3, message='%s: not in the subset: %s' % (where, refusal))
+            except (SyntaxError, ValueError, OSError):
+                gpu_sites = []
         loading = native_build.loading(args) or {'source_map': {}}
         ffi = None if library and not export_lib else _ffi_session(args)
         if export_lib and (separate or args.target):
@@ -5796,6 +5820,15 @@ def main(argv=None):
                 for line in _fallback_notes(args, source, result.stderr, locate=not objects and not separate,
                                              source_map=loading['source_map']):
                     print(line, file=sys.stderr)
+                if gpu_sites:                                             # gpu.py: a marked loop that got no kernel
+                    import gpu
+                    applied = set()
+                    for line in (result.stderr or '').splitlines():
+                        if line.startswith('ail-gpu-applied:'):
+                            applied = {int(n) for n in line.split(':', 1)[1].split()}
+                    for number in gpu_sites:
+                        if number not in applied:
+                            print('note: %s:%d: %s' % (_relpath(source), number, gpu.IGNORED), file=sys.stderr)
                 # typedpar.py: why a thread / executor / pool use runs under the general path's lock
                 for path, entries in notes.items():
                     for line, text in entries:

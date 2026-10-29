@@ -1,3 +1,15 @@
+## 2026-10-30 -- GPU stage G1: `# ail: gpu`, the eligibility proof, kernel IR and its CPU emulation
+
+`compile --gpu` (or `AIL_GPU_BUILD=1`) reads `# ail: gpu` on the line before a loop (or at the end of a list-comprehension
+assignment), proves the loop eligible (docs/design/GPU.md 1.1, 1.3) or refuses it by name with file:line and a `write
+instead:` hint, lowers it to a kernel IR (`python/pkg-v12/gpu.py`) and emits the kernel as a C function that runs on the CPU
+with the flag word and CPU replay of GPU.md 3.1 / 5.1. No SPIR-V, no Vulkan, no cost model (G2, G3, G7). A program without a
+marker, or built without `--gpu`, generates byte-identical C. Section 6.1 of GPU.md lists what is built, the refusals, and
+every deviation from the design. `test_ail_gpu_g1.py` (42 tests) compares marked programs byte for byte with CPython, with
+the same binary under `AIL_GPU=0` and with the build without `--gpu`; covers empty and one-element lists, lists of different
+lengths, NaN/inf/-0.0/denormals, values at the int64 limits, division by zero and an IndexError inside the body, every
+refusal, and the unchanged-C proof.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C

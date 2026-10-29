@@ -243,6 +243,8 @@ class Lowering(TextLowering):
             raise NotS0('parameter shape')
         if getattr(ctx, 'par_regions', None):
             raise NotS0('parallel region')
+        if getattr(ctx, 'gpu_regions', None):
+            raise NotS0('a GPU loop (docs/design/GPU.md G1): the legacy emitter owns the replay region')
         self.tracked = set(P._numeric_mixed_bindings(ctx))
         self.tracked |= {n for n, _, _ in (getattr(ctx, 'numeric_assignments', None) or {}).values()}
         self.tracked |= {n for n, _, _ in (getattr(ctx, 'numeric_tokens', None) or {}).values()}

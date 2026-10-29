@@ -47,7 +47,7 @@ def identity():
                 implementation={name: digest(package / name) for name in
                                 ('pyfunc.py', 'cruntime.py', 'float64_fusion.py', 'string_repeat_fusion.py', 'sortkeys.py', 'parallel.py', 'pyc.py', 'module_object.py', 'c_object.py',
                                  'pyfront.py', 'pipeline.py', 'native_diagnostics.py', 'c_api_bridge.py', 'callable_types.py',
-                                 'borrowed_callback.py')})
+                                 'borrowed_callback.py', 'gpu.py')})
 
 
 def contract_symbol(contract):
