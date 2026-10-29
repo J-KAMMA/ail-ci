@@ -6,7 +6,10 @@ Python. The compiler used to refuse the decorator on a plain `ail compile` even 
 language_examples/c_export/geometry.py is written that way. The front end now validates the
 annotations exactly as the library front end does and drops the decorator; every valid program
 below is compared with CPython on the default build and on `AIL_UNIFIED_FORCE=1`, and an invalid
-`@export` is refused by name instead of being ignored.
+`@export` is refused by name instead of being ignored. The decorator's runtime marking
+(`fn.__ail_export__`, `ail_ffi.exports()`) cannot be carried by a function value in a plain
+compile, so a program that reads it is refused by name; PEP 563 turns dataclass field annotations
+into strings, which CPython's `@export` rejects, so such a dataclass parameter is refused too.
 """
 import os
 import subprocess
@@ -66,10 +69,51 @@ class Base(unittest.TestCase):
         ref.write_text(source, encoding='utf-8')
         code, _ = run_py(ref)
         self.assertNotEqual(code, 0)
+        self.refused_by_name(source)
+
+    def refused_by_name(self, source):
         for general in (False, True):
             built, _ = self.build(source, general)
             self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
             self.assertIn('@export', built.stdout + built.stderr)
+
+    def test_runtime_marking_is_refused_by_name(self):
+        programs = [
+            'from ail_ffi import export\n\n\n@export\ndef add(a: int) -> int:\n    return a\n\n\n'
+            'print(add.__ail_export__)\n',
+            'from ail_ffi import export\n\n\n@export\ndef add(a: int) -> int:\n    return a\n\n\n'
+            'funcs = [add]\nprint(funcs[0].__ail_export__)\n',
+            'from ail_ffi import export, exports\n\n\n@export\ndef add(a: int) -> int:\n    return a\n\n\n'
+            'print(len(exports()))\n',
+            'import ail_ffi\n\n\n@ail_ffi.export\ndef add(a: int) -> int:\n    return a\n\n\n'
+            'print(ail_ffi.exports())\n',
+        ]
+        for source in programs:
+            with self.subTest(source=source.splitlines()[-1]):
+                self.refused_by_name(source)
+
+    def test_future_annotations_scalar_export_matches(self):
+        self.same(r'''from __future__ import annotations
+from ail_ffi import export
+
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+@export
+def shout(text: str) -> str:
+    return text + "!"
+
+
+@export
+def halves(values: list[float]) -> list[float]:
+    return [v / 2.0 for v in values]
+
+
+print(add(-2, 5), shout(""), halves([-1.0, 0.0, 4.5]))
+''')
 
     def test_values_and_empty_boundaries(self):
         self.same(r'''from ail_ffi import export
@@ -214,6 +258,16 @@ print(square(-3) + square(4), identity(""))
             'from dataclasses import dataclass\nfrom ail_ffi import export\n\n\n'
             '@dataclass\nclass Item:\n    name: str\n\n\n'
             '@export\ndef size(item: Item) -> int:\n    return 1\n',
+            'from dataclasses import dataclass\nfrom ail_ffi import export\n\n'
+            'int = str\n\n\n'
+            '@dataclass\nclass Point:\n    x: int\n\n\n'
+            '@export\ndef size(p: Point) -> int:\n    return 4\n',
+            'from __future__ import annotations\nfrom dataclasses import dataclass\nfrom ail_ffi import export\n\n\n'
+            '@dataclass\nclass Point:\n    x: int\n    y: float\n\n\n'
+            '@export\ndef weight(p: Point) -> float:\n    return p.x * p.y\n',
+            'from ail_ffi import export\n\n'
+            'int = list\n\n\n'
+            '@export\ndef size(x: int) -> int:\n    return 1\n',
         ]
         for source in programs:
             with self.subTest(source=source.splitlines()[-1]):

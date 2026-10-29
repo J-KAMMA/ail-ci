@@ -171,13 +171,17 @@ class Session:
         module_names = set()            # names bound by `import ail_ffi [as x]`
         dataclass_names = set()         # names bound by `from dataclasses import dataclass`
         dataclasses_modules = set()     # names bound by `import dataclasses [as x]`
+        future_annotations = False      # `from __future__ import annotations` (PEP 563)
         blank = []                      # (first line, last line)
         for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and node.module == '__future__' and node.level == 0:
+                if any(alias.name == 'annotations' for alias in node.names):
+                    future_annotations = True
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'export', 'link', 'length', 'ptr', 'cptr',
-                                                                 'declarations'})
+                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'export', 'exports', 'link', 'length',
+                                                                 'ptr', 'cptr', 'declarations'})
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
@@ -197,9 +201,10 @@ class Session:
         if not imported and not module_names:
             return text
         export_imported = 'export' in imported and not self._name_rebound(tree, 'export')
+        exports_imported = 'exports' in imported and not self._name_rebound(tree, 'exports')
         module_names = {name for name in module_names if not self._name_rebound(tree, name)}
-        blank.extend(self._strip_exports(path, tree, export_imported, module_names, dataclass_names,
-                                         dataclasses_modules))
+        blank.extend(self._strip_exports(path, tree, export_imported, exports_imported, module_names,
+                                         dataclass_names, dataclasses_modules, future_annotations))
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -283,19 +288,24 @@ class Session:
                 and isinstance(d.value, ast.Name) and d.value.id in modules)
 
     @classmethod
-    def _export_structs(cls, tree, dataclass_names, dataclasses_modules):
-        """Class name -> whether its dataclass fields are only int/float/bool (the @export rule)."""
+    def _export_structs(cls, tree, dataclass_names, dataclasses_modules, future_annotations, shadowed):
+        """Class name -> whether its dataclass fields are only int/float/bool (the @export rule).
+
+        CPython reads the type objects stored in the dataclass, not the annotation text. A field name
+        rebound at module level, or a PEP 563 module where every annotation is a string, therefore
+        cannot be treated as the builtin type and the class is refused."""
         structs = {}
         for node in tree.body:
             if not isinstance(node, ast.ClassDef):
                 continue
             if not any(cls._is_dataclass(d, dataclass_names, dataclasses_modules) for d in node.decorator_list):
                 continue
-            good = not node.bases and not node.keywords
+            good = not node.bases and not node.keywords and not future_annotations
             for statement in node.body:
                 if isinstance(statement, ast.AnnAssign):
                     if not (isinstance(statement.target, ast.Name) and isinstance(statement.annotation, ast.Name)
-                            and statement.annotation.id in ('int', 'float', 'bool')):
+                            and statement.annotation.id in ('int', 'float', 'bool')
+                            and statement.annotation.id not in shadowed):
                         good = False
                 elif isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Pass)):
                     continue
@@ -309,20 +319,21 @@ class Session:
         return structs
 
     @staticmethod
-    def _export_kind(annotation, structs, result):
+    def _export_kind(annotation, structs, result, shadowed):
         if isinstance(annotation, ast.Constant) and annotation.value is None:
             return result
         if isinstance(annotation, ast.Name):
             if annotation.id in ('int', 'float', 'bool', 'str', 'bytes'):
-                return True
+                return annotation.id not in shadowed
             if annotation.id in structs:
                 return not result and structs[annotation.id]
             return False
         return (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
-                and annotation.value.id == 'list' and isinstance(annotation.slice, ast.Name)
-                and annotation.slice.id in ('int', 'float'))
+                and annotation.value.id == 'list' and 'list' not in shadowed
+                and isinstance(annotation.slice, ast.Name) and annotation.slice.id in ('int', 'float')
+                and annotation.slice.id not in shadowed)
 
-    def _check_export(self, path, node, structs):
+    def _check_export(self, path, node, structs, shadowed):
         where = 'function %s' % node.name
         args = node.args
         if args.defaults or args.kw_defaults or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg:
@@ -332,11 +343,11 @@ class Session:
         for arg in args.args:
             if arg.annotation is None:
                 self._refuse(path, node, '@export %s: parameter %s needs a type annotation' % (where, arg.arg))
-            if not self._export_kind(arg.annotation, structs, False):
+            if not self._export_kind(arg.annotation, structs, False, shadowed):
                 self._refuse(path, arg.annotation, '@export %s: parameter %s has unsupported type %s '
                              '(allowed: int float bool str bytes list[int] list[float] or a dataclass of '
                              'int/float/bool)' % (where, arg.arg, ast.unparse(arg.annotation)))
-        if not self._export_kind(node.returns, structs, True):
+        if not self._export_kind(node.returns, structs, True, shadowed):
             self._refuse(path, node.returns, '@export %s: unsupported result type %s (allowed: int float bool str '
                          'bytes list[int] list[float] or None)' % (where, ast.unparse(node.returns)))
 
@@ -348,13 +359,17 @@ class Session:
         return (isinstance(d, ast.Attribute) and d.attr == 'export'
                 and isinstance(d.value, ast.Name) and d.value.id in module_names)
 
-    def _strip_exports(self, path, tree, imported, module_names, dataclass_names, dataclasses_modules):
+    def _strip_exports(self, path, tree, imported, exports_imported, module_names, dataclass_names,
+                       dataclasses_modules, future_annotations):
         """On CPython @export checks its function and returns it unchanged; drop it for a plain program.
 
         Returns the line ranges to blank; the lowering below edits the original text, not a reprint."""
         if not imported and not module_names:
             return []
-        structs = self._export_structs(tree, dataclass_names, dataclasses_modules)
+        shadowed = {name for name in ('int', 'float', 'bool', 'str', 'bytes', 'list')
+                    if self._name_rebound(tree, name)}
+        self._refuse_export_state(path, tree, exports_imported, module_names)
+        structs = self._export_structs(tree, dataclass_names, dataclasses_modules, future_annotations, shadowed)
         blank = []
         for node in ast.walk(tree):
             if isinstance(node, ast.ClassDef):
@@ -370,11 +385,28 @@ class Session:
                 self._refuse(path, node, '@export %s: it must be the innermost decorator; CPython applies the '
                              'decorators below it first and @export then receives their result, which is often '
                              'not a function (for example @lru_cache)' % node.name)
-            self._check_export(path, node, structs)
+            self._check_export(path, node, structs, shadowed)
             blank.extend((d.lineno, d.end_lineno) for d in found)
             node.decorator_list = [d for d in node.decorator_list
                                    if not self._is_export(d, imported, module_names)]
         return blank
+
+    def _refuse_export_state(self, path, tree, exports_imported, module_names):
+        """@export also sets fn.__ail_export__ and records the function in ail_ffi.exports(); a plain
+        compile cannot attach attributes to a function value, so refuse an introspection instead."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr == '__ail_export__':
+                self._refuse(path, node, '@export: reading __ail_export__ at run time is not supported by a '
+                             'plain compile (the marking is only for `ail build --lib`)')
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name) and exports_imported and func.id == 'exports':
+                    self._refuse(path, node, '@export: ail_ffi.exports() reports the marked functions at run '
+                                 'time, which a plain compile does not keep (`ail build --lib` does)')
+                if (isinstance(func, ast.Attribute) and func.attr == 'exports'
+                        and isinstance(func.value, ast.Name) and func.value.id in module_names):
+                    self._refuse(path, node, '@export: ail_ffi.exports() reports the marked functions at run '
+                                 'time, which a plain compile does not keep (`ail build --lib` does)')
 
     @staticmethod
     def _is_link(node, imported, module_names):

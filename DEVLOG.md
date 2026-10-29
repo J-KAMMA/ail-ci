@@ -1,3 +1,27 @@
+## 2026-10-29 -- ex38 review: refuse lost runtime marking; validate real dataclass field types (job-ex38-10291503)
+
+The review found three defects in the `@export` acceptance: (1) the decorator's runtime side effect
+(`fn.__ail_export__ = True`, the `ail_ffi.exports()` list) was stripped, so a program that read it
+compiled and then crashed; (2) a dataclass field name rebound at module level (`int = str`) was
+validated by AST name instead of the type object CPython sees; (3) with `from __future__ import
+annotations` every dataclass field `.type` is a string, which CPython's `@export` rejects, but the
+general build accepted it. A plain compile cannot attach attributes to a function value, so a
+program that reads `__ail_export__` or calls `exports()` is now refused by name; dataclass fields
+whose annotation names are rebound, all dataclasses in a PEP 563 module, and rebound
+int/float/bool/str/bytes/list annotations are refused as unsupported, matching CPython's
+`TypeError`. Normal dataclasses and scalar/`list` PEP 563 exports still match CPython.
+
+Probes in `/tmp/probes` (both builds through `cmp.sh` with `PYTHONPATH=AIL_CURRENT`):
+`ex38_mark`, `ex38_exports`, `ex38_listattr` are refused by name (CPython succeeds);
+`ex38_shadow`, `ex38_future_dc`, `ex38_shadow_param` are refused by name where CPython raises
+`TypeError`; `ex38_shadow_bool` is conservatively refused by name where CPython accepts (the field
+name is rebound to `int`, an allowed type). `ex38_future_scalar`, `ex38_valid_dc` and
+`language_examples/c_export/geometry.py` match CPython on both builds, including empty values,
+negative values and dataclass fields through an argument, a list item, an attribute and a dict
+value. Final-state tests: `test_ail_ex38`, `test_ail_c_export`, `test_ail_ffi`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (6 modules, 0 failed).
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --check` exits 0.
+
 ## 2026-10-29 -- ex38: `@export` is an identity decorator for a plain compile (job-ex38-10291503)
 
 Built every Python-syntax file under `AIL_CURRENT/language_examples`: the six `.ail` Python-surface
