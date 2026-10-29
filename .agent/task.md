@@ -1,11 +1,6 @@
-**Write the install guide and the English quickstart, with every command checked by a test.**
+**Your change breaks another test in the full suite.** On top of the current integration branch, test_ail_pre346 fails with your change and passes without it (culprit.yml run 40872719537 applied each job alone).
 
-Read `README.md`, `AIL_CURRENT/LANGUAGE_QUICKSTART_JA.md` and the `ail_chatgpt.py` CLI (`compile`, `check`, `doctor`, ...). Add:
-
-- `docs/INSTALL.md`: requirements (Python version, a C compiler — gcc as used in CI), how to get the code, how to check the setup (`doctor` if it fits), how to compile and run a first program, and common problems. Linux first; one short note for macOS and for Windows via WSL. No claims you have not run.
-- `docs/QUICKSTART.md`: a 10-minute English tour for a Python programmer: hello world, a function with loops/lists/dicts, a class, compiling with `--syntax python`, what happens when a program uses something outside the subset (a named compile-time refusal; show one real message), and where to read more (AIL_REFERENCE.md). Each example is a small complete program.
-
-Put every example program from QUICKSTART.md in `AIL_CURRENT/language_examples/quickstart/` and add `AIL_CURRENT/test_ail_quickstart_docs.py` (register it in `ail_check.py` MODULES) that extracts each fenced `python` block from docs/QUICKSTART.md, checks it equals the matching file, compiles it with AIL and compares stdout with CPython. Link both documents from README.md. Run `python3 tools/update_manifest.py`, run only `test_ail_quickstart_docs` and `test_ail_safetynet`, then commit. Do not change the compiler.
+Run `cd AIL_CURRENT && python3 -m unittest -q test_ail_pre346`, find what your change broke, and fix it so it passes again while keeping your own fix and its test. If your fix cannot coexist with it, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
