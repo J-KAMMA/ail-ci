@@ -226,6 +226,21 @@ def _cc(command, phase, **kwargs):
     return buildcache.run_cc(command, lambda c: native_diagnostics.run(c, phase=phase, **kwargs))
 
 
+def _cc_jobs(units):
+    """How many independent gcc compiles to run at once: AIL_CC_JOBS if set (1 = serial), else
+    min(2, cpu count) -- two gcc -O2 runs on the large generated units fit a 6 GB machine. A native
+    build report records its operations in order, so it always builds serially."""
+    if native_diagnostics.enabled():
+        return 1
+    try:
+        jobs = int(os.environ.get('AIL_CC_JOBS') or 0)
+    except ValueError:
+        jobs = 0
+    if jobs < 1:
+        jobs = min(2, os.cpu_count() or 1)
+    return max(1, min(jobs, units))
+
+
 def _finalize_output(out):
     """Return the actual artifact path when Windows GCC appends .exe."""
     out = pathlib.Path(out)
@@ -1219,30 +1234,49 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             # written .c" (test_mixed.py's own spy) still sees the boxed unit -- the one that
             # carries an `AIL_MIXED_TYPED` marker for every wired candidate at its own `extern`
             # declaration, not only the typed unit that defines it.
-            objs = []
+            # The translation units are independent, so their gcc calls run concurrently (_cc_jobs);
+            # every .c is written first, in the serial order, and a failure is reported for the FIRST
+            # failing unit in that order, so the diagnostics and the linked binary match a serial build.
+            cflags = [compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
+                      *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else [])]
+            jobs = _cc_jobs(len(mix_units) + 1)
+            objs, steps = [], []
             for i, (mangled, pyname, csrc) in enumerate(mix_units):
                 tc = out.parent / ('%s_mix%d.c' % (out.name, i))
                 to = out.parent / ('%s_mix%d.o' % (out.name, i))
-                tc.write_text(csrc, encoding='utf-8')
-                native_diagnostics.generated(tc, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-                r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
-                         *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []),
-                         '-c', '-o', str(to), str(tc)],
-                                   capture_output=True, text=True, phase='compile')
-                if r.returncode:
-                    raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path, typed clone of %r):\n%s' %
-                        (pyname, r.stderr[-800:])))
+                steps.append((tc, csrc, [*cflags, '-c', '-o', str(to), str(tc)],
+                              'the C compiler rejected this (general path, typed clone of %r):\n%%s' % (pyname,)))
                 objs.append(str(to))
-            c.write_text(boxed_c, encoding='utf-8')
-            native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
             obj_boxed = out.parent / ('%s_boxed.o' % out.name)
-            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
-                     *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []),
-                     '-c', '-o', str(obj_boxed), str(c)],
-                               capture_output=True, text=True, phase='compile')
-            if r.returncode:
-                raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path):\n%s' %
-                                    r.stderr[-800:]))
+            steps.append((c, boxed_c, [*cflags, '-c', '-o', str(obj_boxed), str(c)],
+                          'the C compiler rejected this (general path):\n%s'))
+
+            def _write(step):
+                step[0].write_text(step[1], encoding='utf-8')
+                native_diagnostics.generated(step[0], info.get('c_source_regions', info.get('c_units', (None, []))[1]))
+
+            def _fail(step, r):
+                raise _general_failure(_typed_e, typed_main, PipelineError(step[3] % r.stderr[-800:]))
+
+            if jobs == 1:
+                for step in steps:
+                    _write(step)
+                    r = _cc(step[2], capture_output=True, text=True, phase='compile')
+                    if r.returncode:
+                        _fail(step, r)
+            else:
+                for step in steps:
+                    _write(step)
+                # the boxed unit (last) is by far the longest compile: start it first, so the typed
+                # clones share the other job slot instead of queueing ahead of it
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(jobs) as pool:
+                    pending = {i: pool.submit(_cc, steps[i][2], capture_output=True, text=True, phase='compile')
+                               for i in reversed(range(len(steps)))}
+                    results = [pending[i].result() for i in range(len(steps))]
+                for step, r in zip(steps, results):
+                    if r.returncode:
+                        _fail(step, r)
             r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(),
                      *(['-Wl,--gc-sections'] if boxed_report.get('bigint') else []), '-o', str(out), str(obj_boxed)]
                                + objs + ['-lm'], capture_output=True, text=True, phase='link')
