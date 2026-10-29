@@ -1,3 +1,35 @@
+## 2026-10-29 -- ex34: @export is a marker in a normal build (job-ex34-10291334)
+
+Built the 20 Python-syntax files under `language_examples` (14 `.py`, 6 `.ail`, using
+`ail_syntax.detect`).  Before the change 13 were refused; the only standalone language example was
+`c_export/geometry.py`, refused with `the decorator on def add (only @staticmethod on a method and
+@functools.lru_cache/@lru_cache/@cache are supported)`.  The other 12 are research/test harness
+scripts whose first refusal is an unavailable module (`pyfunc`, `benchmark_current_rows`,
+`language_examples.c_headers_workflow.table_crc`), `__file__` (5 scripts), an import-name collision
+(2), the int64/`Path` subset, or a module fragment (`use_math.ail` without `math.ail`) -- each also
+relies on filesystem/import machinery outside the subset, so none can be made to build exactly by
+one refusal.
+
+`@export` is now dropped before lowering on both builds (`@export`, `@export()`,
+`ail_ffi.export`, `import ail_ffi as x; @x.export`), so the decorated functions run unchanged as
+on CPython.  Because CPython validates the decorator at definition time, the source is also checked
+with `ail_export.lower`; a missing/default/`*args` parameter, unsupported annotation or result, or a
+dataclass named before its definition is refused by name (`ail_ffi @export: ...`) instead of
+building where CPython stops with `TypeError`/`NameError`.  A file without `@export` is unchanged.
+
+Probes in `/tmp/probes/ex34` (cmp.sh, `PYTHONPATH=$PWD/AIL_CURRENT` so CPython can import
+`ail_ffi`): `geometry.py` (the example), `valid.py` (int/float/bool/str/bytes/list[int]/list[float]/
+None, empty and negative values, calls through an argument, a list item, a dict value and an
+attribute, `@export()`), `valid_attr.py` (`@ail_ffi.export`), and the invalid
+`inv_missing_param`, `inv_default`, `inv_bad_result`, `inv_no_result`, `inv_vararg`,
+`inv_late_dataclass` all match CPython or are refused by name on both builds.  Added
+`AIL_CURRENT/test_ail_ex34.py`.  Final-state tests on HEAD: test_ail_ex34, test_ail_ffi,
+test_ail_ffi_parallel, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass;
+test_ail_c_export and test_ail_cratebridge have one pre-existing environment failure each
+(`rustup` has no installed toolchain, so the Rust host tests cannot run).  `tools/update_manifest.py`
+was run and `--check` passes; `tools/ci_shards.py --check` exits 0 (new module unassigned, as
+test_ail_ffi_parallel already was).
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

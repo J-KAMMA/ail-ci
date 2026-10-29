@@ -187,6 +187,20 @@ class Session:
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
+        exports = []
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef):
+                for decorator in node.decorator_list:
+                    if self._is_export(decorator, imported, module_names):
+                        exports.append((node, decorator))
+                        break
+        if exports:
+            import ail_export
+            try:
+                ail_export.lower(text)
+            except ail_export.ExportError as error:
+                self._refuse(path, exports[0][1], 'ail_ffi @export: %s' % error)
+            self._check_export_names(path, tree, exports)
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -195,6 +209,10 @@ class Session:
                 continue
             if not isinstance(node, ast.FunctionDef):
                 continue
+            for d in node.decorator_list:
+                if self._is_export(d, imported, module_names):
+                    # @export is a --lib marker; a normal build runs the function unchanged, as CPython does
+                    blank.append((d.lineno, d.end_lineno))
             deco = [d for d in node.decorator_list if self._is_extern(d, imported, module_names)]
             if not deco:
                 continue
@@ -228,6 +246,62 @@ class Session:
                 block.extend(self._wrapper(decl))
         return '\n'.join(lines).rstrip('\n') + '\n' + '\n'.join(block) + ('\n' if block else '')
 
+    def _check_export_names(self, path, tree, exports):
+        """CPython's @export reads its annotations when the function is defined, so a dataclass
+        named by one must already be bound; ail_export.lower accepts a class declared later."""
+        dataclass_names, dataclass_modules = set(), set()
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and node.module == 'dataclasses' and node.level == 0:
+                dataclass_names.update(alias.asname or alias.name for alias in node.names
+                                       if alias.name == 'dataclass')
+            elif isinstance(node, ast.Import):
+                dataclass_modules.update(alias.asname or 'dataclasses' for alias in node.names
+                                         if alias.name == 'dataclasses')
+
+        def is_dataclass(decorator):
+            if isinstance(decorator, ast.Call):
+                decorator = decorator.func
+            return (isinstance(decorator, ast.Name) and decorator.id in dataclass_names) or (
+                isinstance(decorator, ast.Attribute) and decorator.attr == 'dataclass'
+                and isinstance(decorator.value, ast.Name) and decorator.value.id in dataclass_modules)
+
+        def annotations(function):
+            args = list(function.args.posonlyargs) + list(function.args.args) + list(function.args.kwonlyargs)
+            args += [arg for arg in (function.args.vararg, function.args.kwarg) if arg is not None]
+            values = [arg.annotation for arg in args if arg.annotation is not None]
+            if function.returns is not None:
+                values.append(function.returns)
+            for value in values:
+                for node in ast.walk(value):
+                    if isinstance(node, ast.Name):
+                        yield node
+
+        export_lines = {id(function): decorator for function, decorator in exports}
+        defined = {}
+        for node in tree.body:
+            if isinstance(node, ast.FunctionDef):
+                decorator = export_lines.get(id(node))
+                if decorator is not None:
+                    for name in annotations(node):
+                        if name.id in ('int', 'float', 'bool', 'str', 'bytes', 'list'):
+                            continue
+                        if defined.get(name.id) != 'dataclass':
+                            self._refuse(path, decorator, 'ail_ffi @export: name %s is not a dataclass '
+                                         'defined before the decorator runs' % name.id)
+                defined[node.name] = 'other'
+            elif isinstance(node, ast.ClassDef):
+                defined[node.name] = 'dataclass' if any(is_dataclass(d) for d in node.decorator_list) else 'other'
+            elif isinstance(node, ast.Assign):
+                for target in node.targets:
+                    for name in ast.walk(target):
+                        if isinstance(name, ast.Name):
+                            defined[name.id] = 'other'
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                defined[node.target.id] = 'other'
+            elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                for alias in node.names:
+                    defined[alias.asname or alias.name.split('.')[0]] = 'other'
+
     @staticmethod
     def _is_link(node, imported, module_names):
         if not isinstance(node, ast.Call):
@@ -250,6 +324,19 @@ class Session:
         if not libs or len(libs) != len(call.args):
             self._refuse(path, call, 'link("name", ...) takes library names or paths as string literals')
         self.links.setdefault(str(path), []).extend((lib, pkg, str(path.parent)) for lib in libs)
+
+    @staticmethod
+    def _is_export(node, imported, module_names):
+        if isinstance(node, ast.Call):
+            if node.args or node.keywords:
+                return False
+            node = node.func
+        if not isinstance(node, (ast.Name, ast.Attribute)):
+            return False
+        if isinstance(node, ast.Name):
+            return node.id == 'export' and 'export' in imported
+        return (node.attr == 'export' and isinstance(node.value, ast.Name)
+                and node.value.id in module_names)
 
     @staticmethod
     def _is_extern(node, imported, module_names):
