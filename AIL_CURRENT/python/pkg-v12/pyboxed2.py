@@ -53,6 +53,7 @@ except ImportError:
     pymix = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+import classname
 V2_DIR = os.path.join(os.path.dirname(HERE), 'out', 'boxed_rt', 'v2')
 AIL_OBJ2_H = os.path.join(V2_DIR, 'ail_obj2.h').replace(os.sep, '/')
 WIDE_EMBED = os.environ.get('AIL_V2_WIDE_EMBED') == '1'
@@ -2531,14 +2532,72 @@ class Compiler(boxclosure.ClosureMixin):
             and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
             and isinstance(n.args[1].value, str))
         self.assigned_attrs = frozenset(assigned_attrs)
+        # Names a user instance carries as a field: `self.x = ...` anywhere, or a class-level
+        # annotation (a dataclass field).  `obj.x(...)` on such a name with no class method of that
+        # name calls the field's value, as CPython looks the instance table up first.
+        inst_fields = set(assigned_attrs)
+        for cls_node in ast.walk(tree):
+            if isinstance(cls_node, ast.ClassDef):
+                for st in cls_node.body:
+                    if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name):
+                        inst_fields.add(st.target.id)
+        self.inst_field_names = frozenset(inst_fields)
+        # A bound method taken as a value (`Box(acc.add)`) is not modelled: the stored value would
+        # fail at run time when called.  With one in the program, a field call stays refused.
+        method_names = {m.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef)
+                        for m in c.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        called_funcs = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        module_names = {(a.asname or a.name).split('.')[0] for n in ast.walk(tree)
+                        if isinstance(n, ast.Import) for a in n.names}
+        builtin_attr_names = _builtin_callable_names()
+        # Any attribute read that is not called and could be a bound method (a user method, or
+        # `xs.append` / `"abc".upper` of a builtin type) turns the field call off.  A plain data
+        # field of a user class is not one, unless its name is also a builtin-type method.
+        self.method_taken_as_value = any(
+            isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load) and id(n) not in called_funcs
+            and not (isinstance(n.value, ast.Name) and n.value.id in module_names)
+            and not (n.attr.startswith('__') and n.attr.endswith('__'))
+            and (n.attr in method_names or n.attr in builtin_attr_names
+                 or n.attr not in inst_fields)
+            for n in ast.walk(tree))
+        # `self.upper = lambda: ...` where the name is also a method of a builtin type: a call
+        # `p.upper()` would run the builtin handler and fail at run time.  Refuse it here.  A class
+        # method of the same name already makes such a call check the instance table first
+        # (assigned_attrs above), so that case is left to it (pre278 list_method).
+        func_names = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+        called_attrs = {n.func.attr for n in ast.walk(tree)
+                        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign) and (isinstance(n.value, ast.Lambda) or
+                                              (isinstance(n.value, ast.Name) and n.value.id in func_names)):
+                for t in n.targets:
+                    if isinstance(t, ast.Attribute) and t.attr in called_attrs and not t.attr.startswith('__') \
+                            and t.attr not in method_names and t.attr in _builtin_names() and hasattr(self, '_m_' + t.attr):
+                        refusal = Unsupported(
+                            'a function stored in the field .%s, which is also a method of a builtin type: '
+                            'the call .%s() would run the builtin method\n'
+                            '  write instead: give the field a name no builtin type uses' % (t.attr, t.attr))
+                        refusal.source_line = getattr(n, 'lineno', None)
+                        raise refusal
         any_all_genargs = set()
         for call in ast.walk(tree):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr in ('__dataclass_fields__', '__dataclass_params__'):
+                refusal = Unsupported(
+                    '.%s: the table dataclass builds for a class is not modelled, so the read would fail '
+                    'at run time where CPython has it\n'
+                    '  write instead: the field names in a module-level tuple '
+                    '(`dataclasses.fields()` is not built either)' % node.attr)
+                refusal.source_line = getattr(node, 'lineno', None)
+                raise refusal
+        self._nested_ok_info = _nested_genexp_info(tree)
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)) and \
+                    not _nested_genexps_ok(gen, self._nested_ok_info):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -2804,6 +2863,8 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append(cruntime.BOXCASE)
         if getattr(self, 'needs_type_name', False):
             parts.append(TYPE_NAME_C)
+            if classname.active():
+                parts.append(classname.TYPE_IDENT_C)
         if getattr(self, 'needs_padfill', False):
             parts.append(PADFILL_C)
         if getattr(self, 'needs_noattr', False):
@@ -2878,7 +2939,10 @@ class Compiler(boxclosure.ClosureMixin):
             else:
                 base_expr = 'ail_box_none()'
             setup.append('    g_slots_arr[%d] = ail_class_new(cx, %s, %s);\n' %
-                         (self.global_slots['class:' + cname], c_str_literal(cname), base_expr))
+                         (self.global_slots['class:' + cname], c_str_literal(classname.display(cname)), base_expr))
+            if classname.module(cname) != '__main__':       # F2: a class of an imported module prints `module.Name`
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->module = %s;\n' %
+                             (self.global_slots['class:' + cname], c_str_literal(classname.module(cname))))
             for entry in cls.get('class_body', []):
                 # A class attribute read through a class VALUE (alias/argument/...) looks it up by
                 # name.  A method or property in the class body is a sentinel (slot -1): it hides a
@@ -6008,11 +6072,11 @@ class Compiler(boxclosure.ClosureMixin):
         def name_of(n):
             if type_call(n):
                 return ast.Attribute(value=ast.Attribute(value=n.args[0], attr='__class__', ctx=ast.Load()),
-                                     attr='__name__', ctx=ast.Load())
+                                     attr='__ail_ident__' if classname.active() else '__name__', ctx=ast.Load())
             if isinstance(n, ast.Name) and (n.id in self._TYPE_NAMES and n.id not in self.functions
                                             and n.id not in self.classes and n.id not in self.module_names
                                             or n.id in self.classes):
-                return ast.Constant(value=n.id)
+                return ast.Constant(value=classname.qualified(n.id))
             return None
         left, right = node.left, node.comparators[0]
         if not (type_call(left) or type_call(right)):
@@ -6288,8 +6352,9 @@ class Compiler(boxclosure.ClosureMixin):
             # context to read. Refuse by name instead of reaching the instance's (missing) field,
             # which would raise AttributeError where CPython returns a value.
             raise Unsupported('reading %s (exception chaining is not kept here)' % node.attr)
-        if node.attr == '__name__':
+        if node.attr in ('__name__', '__ail_ident__'):
             # `type(x).__name__` and `x.__class__.__name__`: the name of the run-time class
+            # (`__ail_ident__`: F2, the same with the module of a class of an imported module, from _type_identity)
             inner = None
             if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
                     and node.value.func.id == 'type' and len(node.value.args) == 1 and not node.value.keywords
@@ -6301,7 +6366,7 @@ class Compiler(boxclosure.ClosureMixin):
                 v = self.expr(inner, ctx)
                 t = ctx.tmp()
                 self.needs_type_name = True
-                ctx.emit('st = ail_type_name_of(cx, &%s, %s);' % (t, v))
+                ctx.emit('st = %s(cx, &%s, %s);' % ('ail_type_ident_of' if node.attr == '__ail_ident__' else 'ail_type_name_of', t, v))
                 ctx.check()
                 return t
         if isinstance(node.value, ast.Name) and (node.value.id in self.module_aliases or
@@ -6499,7 +6564,8 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)) and \
+                not _nested_genexps_ok(node, self._nested_ok_info):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -8590,7 +8656,7 @@ class Compiler(boxclosure.ClosureMixin):
             label = (qn + '.<locals>.' if qn else '') + '<lambda>'     # CPython's __qualname__
             if isinstance(f, ast.Name):
                 if f.id in self.classes:
-                    label = "<class '__main__.%s'>" % f.id
+                    label = "<class '%s.%s'>" % (classname.module(f.id), classname.display(f.id))
                 elif f.id in ('dict', 'float', 'tuple', 'bool', 'frozenset', 'bytes', 'bytearray', 'complex', 'object') \
                         and f.id not in self.module_names:
                     label = "<class '%s'>" % f.id
@@ -9066,7 +9132,8 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('next() with other than (iterator[, default])')
         if isinstance(args[0], ast.GeneratorExp):
             gen = args[0]
-            if any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+            if any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)) and \
+                    not _nested_genexps_ok(gen, self._nested_ok_info):
                 raise Unsupported('a generator expression nested inside another generator expression '
                                   '(the inner one would be materialised eagerly, not lazily)')
             first = gen.generators[0]
@@ -9540,7 +9607,8 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('%s() over a generator expression whose iterable is itself a '
                                   'generator expression (the inner generator would be materialised '
                                   'eagerly)' % name)
-            if any(n is not arg and isinstance(n, ast.GeneratorExp) for n in ast.walk(arg)):
+            if any(n is not arg and isinstance(n, ast.GeneratorExp) for n in ast.walk(arg)) and \
+                    not _nested_genexps_ok(arg, self._nested_ok_info):
                 raise Unsupported('a generator expression nested inside another generator expression '
                                   '(the inner one would be materialised eagerly, not lazily)')
             # fused: short-circuits at the first deciding element, like CPython's any()/all()
@@ -9842,6 +9910,30 @@ class Compiler(boxclosure.ClosureMixin):
                      ''.join(', ' + a for a in argcs)))
             ctx.check()
             return t
+        if (f.attr in getattr(self, 'inst_field_names', ()) and f.attr not in _builtin_names()
+                and not getattr(self, 'method_taken_as_value', True)
+                and not (self.classes and any(f.attr in self.classes[c]['methods'] for c in self.class_order))):
+            # `obj.action()` where `action` is only a field (a stored function): call the value the
+            # instance holds.  No builtin or library type has a method of this name (the name list
+            # below), so any other receiver fails as CPython does, with AttributeError.
+            if kwargs or any(isinstance(a, ast.Starred) for a in args):
+                raise Unsupported('calling the field .%s() with keyword or starred arguments' % f.attr)
+            self.attr_names.add(f.attr)
+            self._need_inst_findattr()
+            res, fld = ctx.tmp(), ctx.tmp()
+            ctx.emit('if (ail_inst_findattr(%s, g_attr_%s, &%s)) {' % (recv_c, f.attr, fld))
+            ctx.indent += 1
+            r = self._call_field_value(fld, args, ctx)
+            ctx.emit('%s = %s;' % (res, r))
+            ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
+            self.needs_noattr = True
+            ctx.emit('st = ail2_no_attr(cx, %s, "%s"); goto %s;' % (recv_c, f.attr, ctx.cur_err_target()))
+            ctx.uses_st = True
+            ctx.indent -= 1
+            ctx.emit('}')
+            return res
         raise Unsupported('the method .%s() (on a %s)' % (f.attr, kind or 'value of unknown '
                                                           'static kind'))
 
@@ -12441,6 +12533,60 @@ class NeedSlice(Exception):
     slice objects (safetyrt.SLICE_PRELUDE)."""
 
 
+def _builtin_method_names():
+    """Every attribute name of the builtin and standard-library types a program can hold, so a field
+    call `obj.name()` is only taken when no such object could have a method of that name."""
+    import collections
+    import datetime
+    import decimal
+    import fractions
+    import functools
+    import io
+    import itertools
+    import pathlib
+    import random
+    import re
+    import subprocess
+    import threading
+    import array
+    types_ = [str, bytes, bytearray, list, dict, set, frozenset, tuple, int, float, complex, bool,
+              range, slice, memoryview, object, type, BaseException, property, staticmethod, classmethod,
+              collections.deque, collections.Counter, collections.OrderedDict, collections.defaultdict,
+              type(re.compile('')), type(re.match('', '')), datetime.datetime, datetime.date,
+              datetime.time, datetime.timedelta, datetime.timezone, decimal.Decimal, fractions.Fraction,
+              io.StringIO, io.BytesIO, io.TextIOWrapper, io.BufferedReader, pathlib.Path,
+              random.Random, subprocess.Popen, subprocess.CompletedProcess, threading.Thread,
+              threading.Lock, threading.Event, array.array, type(iter([])), type((i for i in ())),
+              type(lambda: 0), type(len), functools.partial, type(functools.lru_cache()(len)),
+              type({}.items()), type({}.keys()), type({}.values()), type(itertools.chain()),
+              type(None), type(NotImplemented), type(Ellipsis)]
+    names = set()
+    callables = set()
+    for t in types_:
+        for n in dir(t):
+            names.add(n)
+            if callable(getattr(t, n, None)):
+                callables.add(n)
+    _BUILTIN_CALLABLE_CACHE.append(frozenset(callables))
+    return frozenset(names)
+
+
+_BUILTIN_METHOD_NAMES_CACHE = []
+_BUILTIN_CALLABLE_CACHE = []
+
+
+def _builtin_callable_names():
+    """The subset of `_builtin_names()` that is a method (callable on the type), not a property."""
+    _builtin_names()
+    return _BUILTIN_CALLABLE_CACHE[0]
+
+
+def _builtin_names():
+    # computed on first use only: most programs never call a field-held function
+    if not _BUILTIN_METHOD_NAMES_CACHE:
+        _BUILTIN_METHOD_NAMES_CACHE.append(_builtin_method_names())
+    return _BUILTIN_METHOD_NAMES_CACHE[0]
+
 _GENEXP_VALUE_REFUSAL = (
     'a generator expression used as a value.\n'
     '  write instead: consume it in place (`sum(x * x for x in xs)`, `any(...)`, `all(...)`), '
@@ -12467,6 +12613,34 @@ _GENEXP_SAFE_METHODS = frozenset({
     'rsplit', 'splitlines', 'partition', 'rpartition', 'removeprefix', 'removesuffix',
     'bit_length', 'bit_count', 'is_integer', 'get', 'keys', 'values', 'items',
 })
+
+
+def _nested_genexp_info(tree):
+    """What `_nested_genexps_ok` needs from the module: the names a program rebinds (so `list`,
+    `tuple`, `sorted` are the builtins) and whether any function or method is named `join`."""
+    bound = _bound_names(tree)
+    user_join = any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == 'join'
+                    for n in ast.walk(tree))
+    return bound, user_join
+
+
+def _nested_genexps_ok(outer, info):
+    """True iff every generator expression nested in `outer` is the only argument of `str.join`,
+    `list`, `tuple` or `sorted`: each reads the whole generator before it can fail on an element
+    (join and sorted build the full sequence first), so building the inner one eagerly, at the
+    point the call runs, is the same thing CPython does.  `sum`, `min`, `max`, `any`, `all`,
+    `next`, `set` and `dict` stop or fail part way through and stay refused."""
+    bound, user_join = info
+    ok = set()
+    for n in ast.walk(outer):
+        if isinstance(n, ast.Call) and len(n.args) == 1 and not n.keywords \
+                and isinstance(n.args[0], ast.GeneratorExp) and n.args[0] is not outer:
+            f = n.func
+            if isinstance(f, ast.Name) and f.id in ('list', 'tuple', 'sorted') and not bound.get(f.id):
+                ok.add(id(n.args[0]))
+            elif isinstance(f, ast.Attribute) and f.attr == 'join' and not user_join:
+                ok.add(id(n.args[0]))
+    return all(id(g) in ok for g in ast.walk(outer) if isinstance(g, ast.GeneratorExp) and g is not outer)
 
 
 def _genexp_consumed_in_place(node, parents):
@@ -12807,6 +12981,7 @@ def _build(source, report, allow_mix=True):
     if compiler.uplan is not None and not compiler.threads and os.environ.get('AIL_UNIFIED_POOL'):
         import safetyrt
         body = safetyrt.patch_gcpool(body)
+    body = classname.patch_runtime(body)     # F2: a class of an imported module prints with its module
     report['big_enum'] = getattr(compiler, 'need_big_enum', False)
     report['boxed'] = [n for n in compiler.boxed_names if n not in compiler.prelude_names]
     if compiler.threads:

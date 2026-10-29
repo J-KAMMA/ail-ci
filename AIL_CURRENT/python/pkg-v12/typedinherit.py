@@ -15,6 +15,7 @@
 Nothing here runs for a program without a base class or a class attribute.
 """
 import ast
+import classname
 import copy
 
 # Bases that are some library's class, not a class of the program: named in the refusal.
@@ -361,7 +362,7 @@ def lower_class_names(tree):
     for c in tree.body:
         if isinstance(c, ast.ClassDef):
             # the tuple pass's record classes are tuples to CPython (`type((1, 2)).__name__`)
-            name = 'tuple' if c.name.startswith('_AilT_') else c.name
+            name = 'tuple' if c.name.startswith('_AilT_') else classname.display(c.name)
             c.body.append(_attr_getter('_ail_classname', ast.Constant(value=name), 'str', c))
             c.body[-1].name = '_ail_classname'
 
