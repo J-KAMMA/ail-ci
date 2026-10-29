@@ -1,3 +1,27 @@
+## 2026-10-29 -- reex24 review: imports and classes are part of the definitions-only shape (job-reex24-10300433)
+
+The review found two shapes that the narrower no-op boundary broke. `_python_definitions_only`
+rejected any import, so `from functools import cache` + `@cache def f(...)` fell through to the
+file-reading tool shape (`usage: tool FILE`, exit 2, where CPython exits 0) instead of the new
+refusal; and a class module with a `@property` method lost the no-op and the default build failed
+with an unrelated no-parameter refusal (rc 3). `_python_definitions_only` now uses
+`_definitions_only_shape` for the module top level (imports, defs, classes, literal constants,
+docstrings, `pass`) and `_refuse_python_load_effect` refuses an effectful def **or class** by name
+on both builds, before entry-point selection. Classes with effect-free bodies still build as
+no-ops, and top-level code still builds as a program.
+
+The refusal runs on the python-surface output, which rewrites a literal tuple default to its record
+constructor (`("x", -1)` -> `_AilT_s_i('x', -1)`) and a `tuple[...]` annotation to `_AilT_*`;
+`_literal_value` and `_effect_free_annotation` accept those surface-generated spellings exactly as
+they already accepted `__ail_checked_*`, so the effect-free `annotations` module keeps its no-op.
+
+Probes in `/tmp/probes` (both builds, `cmp.sh`): `p_math`, `p_integer_series`, `p_import_module`,
+`p_import_from_module`, `p_ann_builtin`, `p_docstring_only`, `p_constants`, `p_class_plain` and
+`p_top_print` match CPython (`p_top_print` still prints); `p_cache_bare`, `p_def_decorated_top`,
+`p_decorator_local`, `p_class_prop`, `p_class_body_call`, `p_ann_attribute`, `p_ann_user_name`,
+`p_default_nonliteral`, `p_default_subscript` and `p_default_dict_value` are refused by name on
+both builds. Added the import/class cases to `test_ail_reex24.py`.
+
 ## 2026-10-29 -- reex24: pin the definitions-only no-op boundary; skip Rust tests without a usable rustc (job-reex24-10300433)
 
 `language_examples/math.ail` and `integer_series.ail` already built as no-op entries on this tree

@@ -7,10 +7,12 @@ CPython's.
 
 A definitions-only file is effect free when every top-level function has literal defaults and
 annotations built from builtin names, literals, subscripts and `|` unions (`list[int]`,
-`dict[str, int]`, `int | None`); literal module constants, docstrings, `pass` and classes with
-effect-free bodies are allowed. A decorator, a non-literal default or a non-builtin annotation
-runs code while CPython loads the module, so the compiler refuses it by name instead of silently
-losing the effect.
+`dict[str, int]`, `int | None`); literal module constants, docstrings, `pass`, imports and classes
+with effect-free bodies are allowed. A decorator, a non-literal default, a non-builtin annotation
+or a class-body statement that runs code runs code while CPython loads the module, so the compiler
+refuses it by name instead of silently building a no-op or falling into the file-reading tool shape
+(`usage: tool FILE`, exit 2). Imports are part of the definitions-only shape, so a decorated def in
+a module that also imports is refused the same way.
 
 Also checks `ail_testenv.rustc()`: under a task-local HOME the rustup proxy is on PATH but has no
 toolchain, so the helper must report no usable rustc rather than a path whose every call fails.
@@ -92,6 +94,12 @@ print("top", helper(2))
 
 main()
 ''',
+    'imports': '''import os
+from functools import cache
+
+def first(xs: list[int]) -> int:
+    return xs[0]
+''',
 }
 
 REFUSED = {
@@ -130,6 +138,36 @@ def f(x=[make()][0]):
 
 def f(x={"f": make}["f"]()):
     return x
+''',
+    # imports are part of the definitions-only shape: a decorated def in a module that also
+    # imports is refused, not built as a file-reading tool (exit 2 where CPython exits 0)
+    'decorator_imported_from': '''from functools import cache
+
+@cache
+def f(x: int = 1) -> int:
+    return x
+''',
+    'decorator_imported_module': '''import functools
+
+@functools.cache
+def f(x: int = 1) -> int:
+    return x
+''',
+    # a class whose body or method decorator runs code is refused instead of falling into
+    # entry-point selection (which used to fail with an unrelated no-parameter refusal)
+    'class_property': '''class P:
+    def __init__(self):
+        self._v = 0
+
+    @property
+    def v(self):
+        return self._v
+''',
+    'class_body_call': '''def make():
+    return 4
+
+class C:
+    x = make()
 ''',
 }
 
@@ -177,7 +215,7 @@ class ModuleOnlyTests(unittest.TestCase):
                 encoding='utf-8'))
 
     def test_effect_free_modules_match_cpython(self):
-        for slug in ('annotations', 'constants', 'class_module'):
+        for slug in ('annotations', 'constants', 'class_module', 'imports'):
             self.same_as_cpython(slug, MODULES[slug])
 
     def test_top_level_code_still_runs(self):
