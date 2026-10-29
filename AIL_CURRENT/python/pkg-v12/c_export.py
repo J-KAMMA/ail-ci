@@ -17,6 +17,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import subprocess
 import sys
@@ -111,7 +112,7 @@ def _c_type_doc(kind, type_name=None):
             'ints': 'const int64_t *, size_t', 'floats': 'const double *, size_t', 'void': 'void'}.get(kind) or type_name
 
 
-def public_header(name, manifest):
+def public_header(name, manifest, link_flags=()):
     upper = name.upper()
     structs = manifest['structs']
     lines = ['#ifndef %s_AIL_EXPORT_H' % upper, '#define %s_AIL_EXPORT_H' % upper,
@@ -134,7 +135,8 @@ def public_header(name, manifest):
              '',
              '   Threads: any thread may call at any time; one mutex serializes the calls. There is no',
              '   init or teardown function, no state survives a call, and calls may not be made from a',
-             '   signal handler. Link with -lm -lpthread when using lib%s.a. */' % name,
+             '   signal handler. Link with -lm -lpthread%s when using lib%s.a. */'
+             % (' ' + shlex.join(link_flags) if link_flags else '', name),
              '#include <stdbool.h>', '#include <stddef.h>', '#include <stdint.h>', '#ifdef __cplusplus', 'extern "C" {', '#endif',
              '#define %s_API __attribute__((visibility("default")))' % upper, '']
     for label, number, kind in STATUS:
@@ -202,7 +204,9 @@ def _tool(cc, flag, fallback):
     return shutil.which(found) or shutil.which(fallback)
 
 
-def build(source, manifest, name, output):
+def build(source, manifest, name, output, objects=(), link_flags=()):
+    """`objects`: the FFI adapter object of `@extern` stubs (built with --c-api-name <name>_core) and
+    `link_flags` its libraries (-lz): both go into the .so and the .a, and the flags into <name>.h."""
     if os.name == 'nt':
         raise Unsupported('ail build --lib is supported on Linux and macOS (Windows hosts: use compile-library)')
     if not re.fullmatch(r'[A-Za-z][A-Za-z0-9_]{0,41}', name) or name.startswith('ail_'):
@@ -222,8 +226,8 @@ def build(source, manifest, name, output):
     with tempfile.TemporaryDirectory(prefix='ail-lib-') as temporary:
         root = Path(temporary)
         report = c_api.build(source, root / 'core', core, [e['wrapper'] for e in manifest['exports']],
-                             internal=set(manifest['internal']), pic=True)
-        header = public_header(name, manifest)
+                             internal=set(manifest['internal']), pic=True, objects=objects)
+        header = public_header(name, manifest, link_flags)
         (root / (name + '.h')).write_text(header, encoding='utf8')
         shim = root / 'shim.c'
         shim.write_text(shim_source(name, manifest, core + '.h'), encoding='utf8')
@@ -234,7 +238,7 @@ def build(source, manifest, name, output):
         if result.returncode:
             raise PipelineError('C export shim compile failed: ' + result.stderr.decode(errors='replace')[-4000:])
         core_object = root / 'core' / (core + '.o')
-        libraries = ['-l' + lib for lib in report.get('link_libraries', [])]
+        libraries = ['-l' + lib for lib in report.get('link_libraries', [])] + list(link_flags)
         shared = root / targets[0].name
         link = [cc, '-shared', '-o', str(shared), str(shim_object), str(core_object), *libraries, '-lpthread']
         if sys.platform != 'darwin':
@@ -271,6 +275,8 @@ if __name__ == '__main__':
     parser.add_argument('--manifest', required=True, type=Path)
     parser.add_argument('--name', required=True)
     parser.add_argument('-o', '--output', type=Path, required=True)
+    parser.add_argument('--object', action='append', type=Path, default=[])
+    parser.add_argument('--ffi-link', action='append', default=[], help='a link flag the FFI object needs (use --ffi-link=-lz)')
     parser.add_argument('--native-report', help=argparse.SUPPRESS)
     parser.add_argument('--native-debug-dir', help=argparse.SUPPRESS)
     args = parser.parse_args()
@@ -278,7 +284,7 @@ if __name__ == '__main__':
         native_diagnostics.configure(args.native_report, args.native_debug_dir)
     try:
         print(json.dumps(build(args.source.read_text(encoding='utf8'), json.loads(args.manifest.read_text(encoding='utf8')),
-                               args.name, args.output)))
+                               args.name, args.output, tuple(args.object), tuple(args.ffi_link))))
     except (ValueError, Unsupported, PipelineError, OSError) as error:
         native_diagnostics.failure(error)
         parser.exit(1, str(error) + '\n')
