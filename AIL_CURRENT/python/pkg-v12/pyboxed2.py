@@ -2565,6 +2565,9 @@ class Compiler(boxclosure.ClosureMixin):
         self.uses_proc = False
         self.uses_path = False
         self.uses_clock = False
+        # the program's own classes, before this pass adds its preludes (threads, bytes, slice, NotImplemented):
+        # the runtime changes only such a class needs (object repr, rich comparisons, unary +) key on these
+        self.own_classes = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
         import threadlib
         self.threads = threadlib.inject(tree)                       # G12: the thread prelude (threadlib.py)
         if self.threads:
@@ -6052,7 +6055,8 @@ class Compiler(boxclosure.ClosureMixin):
         if type(op) not in self._RICH_CMP:
             return False
         own, reflected = self._RICH_CMP[type(op)]
-        if not any(m in self.classes[c]['methods'] for c in self.class_order for m in ('__gt__', '__le__', '__ge__')):
+        if not any(m in self.classes[c]['methods'] for c in self.class_order if c in self.own_classes
+                   for m in ('__gt__', '__le__', '__ge__')):
             return False
         def owners(mname):
             found = [c for c in self.class_order if self._resolve_method(c, mname)]
@@ -12875,8 +12879,8 @@ def _build(source, report, allow_mix=True):
         raise Unsupported('closures nested too deeply to settle their shared names')
     if compiler.dunder_ops:
         import dunderrt
-        body = dunderrt.patch(body, inplace=compiler.dunder_inplace)
-    if compiler.classes:
+        body = dunderrt.patch(body, inplace=compiler.dunder_inplace, own_classes=bool(compiler.own_classes))
+    if compiler.own_classes:
         import safetyrt
         body = safetyrt.patch_object_repr(body)
     import safetyrt

@@ -603,7 +603,7 @@ def _edits(inplace=False):
     return e
 
 
-def patch(text, inplace=False):
+def patch(text, inplace=False, own_classes=True):
     """The generated C with the operator-method dispatch added to the general-path runtime."""
     for old, new in _edits(inplace):
         if old == new:
@@ -620,7 +620,7 @@ def patch(text, inplace=False):
         raise RuntimeError('dunderrt: no unique anchor for the helpers')
     funcs = FUNCS
     import biggate
-    if biggate.ON:
+    if biggate.ON and own_classes:
         # `+x` of a big int is itself (AIL_T_BIG exists only in a big int build)
         pos = '    else if (x.tag == AIL_T_INT || x.tag == AIL_T_FLOAT) { *out = x; return AIL_OK; }\n'
         if funcs.count(pos) != 1:
