@@ -154,5 +154,5 @@ hash will differ. Continue with [the tutorial](TUTORIAL.md).
   fix it.
 - **`check` says `no def found`** for a script with no function: `check` needs at least one
   `def`. `compile` builds such a script normally.
-- **`hash mismatch: NAME`** from the test tools: a file pinned in `AIL_CURRENT/MANIFEST.json`
+- **`hash mismatch: NAME`** from the test tools: a file pinned in `AIL_CURRENT/manifest.d/`
   changed. Run `python3 tools/update_manifest.py`, then `python3 tools/update_manifest.py --check`.

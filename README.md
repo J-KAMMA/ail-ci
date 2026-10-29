@@ -18,8 +18,21 @@ python3 tools/par_check.py            # whole suite, 8 modules at a time
 python3 tools/par_check.py -j 4 test_ail_list_ops test_ail_check   # selected modules
 ```
 
-`par_check.py` first checks the SHA-256 pins in `AIL_CURRENT/MANIFEST.json`. After editing a
-pinned file, refresh them with `python3 tools/update_manifest.py`.
+`par_check.py` first checks the SHA-256 pins in `AIL_CURRENT/manifest.d/` (one `<sha256> <flags> <name>`
+line per file, 256 small shard files; `MANIFEST.json` keeps only the provenance fields). After editing a
+pinned file, or adding a new test, `git add` the new files and refresh the pins with
+`python3 tools/update_manifest.py`; `python3 tools/update_manifest.py --check` is what CI runs.
+
+**Adding a test module.** Create `AIL_CURRENT/test_<name>.py` and one registration file
+`AIL_CURRENT/tests.d/test_<name>.txt` that contains the module name on one line (`#` lines are
+comments). Do not edit the `LISTED_MODULES` tuple in `ail_check.py` and do not edit `MANIFEST.json`:
+those shared lines were what made concurrent pull requests conflict. `ail_check.MODULES` is the
+listed tuple followed by the `tests.d` modules sorted by name, so `par_check.py`, `tools/ci_shards.py`
+and the CI shards all see the union.
+
+**Merge conflicts in `manifest.d/`.** They happen only when two requests changed the very same file
+(or neighbouring lines of one shard). Keep either side (or leave the markers), then run
+`python3 tools/update_manifest.py`: it tolerates conflict markers and recomputes every pin from the files.
 
 The workflow in `.github/workflows/tests.yml` splits the module list into 20 shards and runs them in
 parallel on `ubuntu-24.04`.

@@ -4937,7 +4937,8 @@ def _source_check(args):
             if not re.fullmatch(r'[A-Za-z_]\w*', name):
                 raise ValueError('invalid bundled API module name: ' + name)
             try:
-                manifest = json.loads((ROOT / 'MANIFEST.json').read_text(encoding='utf8'))
+                import ail_manifest
+                manifest = ail_manifest.load(ROOT)
             except (json.JSONDecodeError, UnicodeError) as error:
                 raise ValueError('invalid bundled API manifest: ' + str(error)) from error
             selected = manifest.get('sdk_files') if isinstance(manifest, dict) else None
@@ -5560,7 +5561,8 @@ def main(argv=None):
         print(json.dumps(report, indent=2))
         return 2 if not report['python_supported'] or args.check and report['build_check']['status'] != 'passed' else 0
     if args.command == 'integrity':
-        manifest = json.loads((ROOT/'MANIFEST.json').read_text(encoding='utf8'))
+        import ail_manifest
+        manifest = ail_manifest.load(ROOT)
         pins = manifest['sha256']
         is_sdk = manifest.get('kind') == 'ail_language_sdk'
         # A source checkout's sha256 map also holds pins of files from earlier archive layouts that

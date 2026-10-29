@@ -710,10 +710,12 @@ def export_sdk(source_root: Path, output: Path) -> dict:
     if output.is_relative_to(root) or root.is_relative_to(output):
         raise ValueError('source and output directories must not contain each other')
 
+    import ail_manifest
     manifest_path = _local_file(root, root / 'MANIFEST.json')
-    manifest_bytes = manifest_path.read_bytes()
-    manifest_hash = _sha(manifest_bytes)
-    source_manifest = json.loads(manifest_bytes)
+    if (root / ail_manifest.SHARD_DIR).exists():
+        _no_links(root / ail_manifest.SHARD_DIR)
+    manifest_hash = ail_manifest.fingerprint(root)   # MANIFEST.json plus its pin shards (a plain file's own SHA-256 without shards)
+    source_manifest = ail_manifest.load(root)
     pins = source_manifest.get('sha256')
     if not isinstance(pins, dict):
         raise ValueError('source MANIFEST.json must contain a sha256 mapping')
@@ -735,7 +737,7 @@ def export_sdk(source_root: Path, output: Path) -> dict:
         selected = {root / name for name in required}
         # Newer legacy snapshots pin these CLI modules without sdk_files.
         # Older snapshots that predate the commands need neither module.
-        selected.update(root / name for name in ('ail_source_edit.py', 'ail_source_context.py', 'ail_api_contracts.py', 'ail_native_build.py', 'ail_builtin_api.py', 'ail_builtin_syntax_forms.py', 'ail_sexpr.py', 'ail_slow_patterns.py', 'ail_modules.py', 'ail_ffi.py', 'ail_export.py', 'ail_ffi_lower.py', 'ail_cbuf.py', 'ail_bindgen.py', 'ail_freestanding.py')
+        selected.update(root / name for name in ('ail_source_edit.py', 'ail_source_context.py', 'ail_api_contracts.py', 'ail_native_build.py', 'ail_builtin_api.py', 'ail_builtin_syntax_forms.py', 'ail_sexpr.py', 'ail_slow_patterns.py', 'ail_modules.py', 'ail_ffi.py', 'ail_export.py', 'ail_ffi_lower.py', 'ail_cbuf.py', 'ail_bindgen.py', 'ail_freestanding.py', 'ail_manifest.py')
                         if name in pins)
         compiler = root / 'python' / 'pkg-v12'
         examples = root / 'language_examples'
@@ -802,7 +804,7 @@ def export_sdk(source_root: Path, output: Path) -> dict:
             if (not isinstance(row, dict) or not isinstance(row.get('source'), str) or row.get('source') not in dependencies
                     or row.get('sha256') != dependencies[row['source']]):
                 raise ValueError('stale standard API module declaration')
-    if _sha(manifest_path.read_bytes()) != manifest_hash:
+    if ail_manifest.fingerprint(root) != manifest_hash:
         raise ValueError('source manifest changed during preflight')
     outside = _license_payloads(root, payloads)
     payloads['SDK_README_JA.md'] = README.encode('utf-8')
@@ -824,7 +826,7 @@ def export_sdk(source_root: Path, output: Path) -> dict:
         for name in payloads:
             if name != 'SDK_README_JA.md' and name not in outside and _sha(_local_file(root, root / name).read_bytes()) != hashes[name]:
                 raise ValueError(f'source changed during copy: {name}')
-        if _sha(manifest_path.read_bytes()) != manifest_hash:
+        if ail_manifest.fingerprint(root) != manifest_hash:
             raise ValueError('source manifest changed during copy')
         with (output / 'MANIFEST.json').open('xb') as stream:
             stream.write((json.dumps(result, ensure_ascii=False, indent=2) + '\n').encode('utf-8'))
