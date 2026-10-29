@@ -12523,13 +12523,17 @@ def _nested_genexp_needing_laziness(tree):
         if not isinstance(node, ast.GeneratorExp) or id(node) in any_all_args:
             continue
         nested = any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node))
+        # A generator below an any()/all() argument is left to `_any_all`, which names the
+        # iterable-is-a-generator / nested case with its own message (pre41).
+        under_any_all = False
         par = parents.get(node)
-        while par is not None and not nested:
+        while par is not None:
             if isinstance(par, ast.GeneratorExp):
                 nested = True
-                break
+                if id(par) in any_all_args:
+                    under_any_all = True
             par = parents.get(par)
-        if nested and not _genexp_fully_consumed(node, parents):
+        if nested and not under_any_all and not _genexp_fully_consumed(node, parents):
             return node
     return None
 
