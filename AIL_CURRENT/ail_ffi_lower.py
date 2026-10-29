@@ -174,7 +174,7 @@ class Session:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
+                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'export', 'exports', 'link', 'length', 'ptr', 'cptr', 'declarations'})
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
@@ -187,6 +187,7 @@ class Session:
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
+        data_classes = self._dataclass_names(tree)
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -195,6 +196,10 @@ class Session:
                 continue
             if not isinstance(node, ast.FunctionDef):
                 continue
+            for dec in node.decorator_list:
+                if self._is_export(dec, imported, module_names):
+                    self._check_export(path, node, data_classes)
+                    blank.append((dec.lineno, dec.end_lineno))
             deco = [d for d in node.decorator_list if self._is_extern(d, imported, module_names)]
             if not deco:
                 continue
@@ -250,6 +255,80 @@ class Session:
         if not libs or len(libs) != len(call.args):
             self._refuse(path, call, 'link("name", ...) takes library names or paths as string literals')
         self.links.setdefault(str(path), []).extend((lib, pkg, str(path.parent)) for lib in libs)
+
+    @staticmethod
+    def _is_export(node, imported, module_names):
+        """`@export` / `@export()` / `@ail_ffi.export` is a no-op in an ordinary executable."""
+        if isinstance(node, ast.Call):
+            node = node.func
+        if isinstance(node, ast.Name):
+            return node.id == 'export' and 'export' in imported
+        return (isinstance(node, ast.Attribute) and node.attr == 'export' and isinstance(node.value, ast.Name)
+                and node.value.id in module_names)
+
+    @staticmethod
+    def _dataclass_names(tree):
+        names = set()
+        future = any(isinstance(n, ast.ImportFrom) and n.module == '__future__'
+                     and any(a.name == 'annotations' for a in n.names) for n in tree.body)
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for dec in node.decorator_list:
+                target = dec.func if isinstance(dec, ast.Call) else dec
+                if ((isinstance(target, ast.Name) and target.id == 'dataclass')
+                        or (isinstance(target, ast.Attribute) and target.attr == 'dataclass')):
+                    fields = [n.annotation for n in node.body if isinstance(n, ast.AnnAssign)]
+                    names.add((node.name, not future and all(
+                        Session._export_annotation_ok(a, set(), result=False) for a in fields)))
+        return names
+
+    @staticmethod
+    def _export_annotation_ok(ann, data_classes, *, result):
+        """One annotation CPython's `@export` accepts; anything else is refused by name."""
+        if isinstance(ann, ast.Constant) and ann.value is None:
+            return result
+        if isinstance(ann, ast.Constant) and isinstance(ann.value, str):
+            text = ann.value.strip()
+            if text in ('int', 'float', 'bool', 'str', 'bytes'):
+                return True
+            ann = ast.Name(id=text)
+        if isinstance(ann, ast.Name):
+            if ann.id in ('int', 'float', 'bool', 'str', 'bytes'):
+                return True
+            if ann.id == 'None':
+                return result
+            return not result and any(ann.id == name and ok for name, ok in data_classes)
+        if isinstance(ann, ast.Attribute):
+            if ann.attr == 'NoneType':
+                return result
+            return False
+        if isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name) \
+                and ann.value.id in ('list', 'List'):
+            elt = ann.slice
+            if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
+                elt = ast.Name(id=elt.value.strip())
+            return isinstance(elt, ast.Name) and elt.id in ('int', 'float')
+        return False
+
+    def _check_export(self, path, node, data_classes):
+        """`@export` is an identity at run time, but CPython checks the signature first."""
+        if len(node.decorator_list) != 1:
+            self._refuse(path, node, '@export %s: no other decorator (CPython checks the decorated '
+                                     'function\'s annotations)' % node.name)
+        args = node.args
+        if args.posonlyargs or args.vararg or args.kwonlyargs or args.kwarg or args.defaults:
+            self._refuse(path, node, '@export %s: plain parameters without defaults only' % node.name)
+        if node.returns is None:
+            self._refuse(path, node, '@export %s: the result needs an annotation (-> None for no result)' % node.name)
+        for arg in args.args:
+            if arg.annotation is None or not self._export_annotation_ok(arg.annotation, data_classes, result=False):
+                self._refuse(path, node, '@export %s: parameter %s needs one of int float bool str bytes '
+                                         'list[int] list[float] or a dataclass of int/float/bool'
+                                         % (node.name, arg.arg))
+        if not self._export_annotation_ok(node.returns, data_classes, result=True):
+            self._refuse(path, node, '@export %s: the result must be int float bool str bytes list[int] '
+                                     'list[float] or None' % node.name)
 
     @staticmethod
     def _is_extern(node, imported, module_names):

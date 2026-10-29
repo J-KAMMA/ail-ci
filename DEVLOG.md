@@ -1,3 +1,34 @@
+## 2026-10-29 -- ex43: `@export` builds on the ordinary Python-syntax path
+
+The Python-syntax scan of `AIL_CURRENT/language_examples` found six `.ail` examples that the
+Python front end accepts (`hello`, `integer_series`, `math`, `stdin_sum`, `sum`, `use_math`) and
+the self-contained `.py` examples.  All of them build except `use_math` when it is compiled
+without its documented `--module math.ail` (CPython then raises `NameError` for the same missing
+name), and `language_examples/c_export/geometry.py`, which was refused with ``the decorator on
+def add (only @staticmethod on a method and @functools.lru_cache/@lru_cache/@cache are
+supported)``.  The other `.py` files under the directory are benchmark harnesses refused on
+`__file__`, local imports or `Path` as a value; they need runtime features outside this example
+and are not made to build here.
+
+`@export` from `ail_ffi` is an identity at run time: CPython validates the signature and returns
+the function unchanged.  The compile path's FFI session now blanks a bare `@export`, the
+`@export()` call form and `@ail_ffi.export` (also under `import ail_ffi as x` and
+`from ail_ffi import *`) after checking the same signature rules: one decorator only,
+positional-or-keyword parameters without defaults, a return annotation, and int/float/bool/str/
+bytes/list[int]/list[float]/None or a local dataclass of int/float/bool for parameters.  Any form
+CPython would reject is refused by name instead of being silently accepted (defaults, a missing
+annotation, a dataclass result, a dataclass under `from __future__ import annotations`, or a
+second decorator).  geometry.py now builds and prints CPython's line on both builds; a file
+without an `ail_ffi` `@export` is untouched.
+
+Probes in `/tmp/probes/ex43` via `cmp.sh` (with `PYTHONPATH=AIL_CURRENT` for CPython's
+`ail_ffi`): `p_bare`, `p_call`, `p_module`, `p_star`, `p_dataclass`, `p_none` match on both
+builds; `p_defaults`, `p_other_decorator`, `p_badann`, `p_noann`, `p_noret`,
+`p_dataclass_ret`, `p_future` are refused by name on both builds where CPython raises the
+matching `TypeError`; `p_user_export` (no `ail_ffi` import) keeps its pre-existing general-path
+refusal.  `geometry.py` matches CPython on both builds.  Added `test_ail_ex43.py` (3 tests: five
+valid forms, the geometry example, five named refusals, both builds).
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
