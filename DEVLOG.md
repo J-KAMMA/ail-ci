@@ -1,3 +1,30 @@
+## 2026-10-29 -- stdlib40: struct pack / unpack / unpack_from / calcsize (job-stdlib40-10291433)
+
+The import scan over `lab/corpus/programs` and `AIL_CURRENT/language_examples` found `struct` in 6
+programs, the most imported module that the compiler still refused outright (`argparse`,
+`subprocess` and `tempfile` are imported 7 times each but already build on the general path, so
+they are not refusals).  `structlib.py` now lowers literal integer formats to the plain-Python
+prelude in `prelude_struct.py`; `pack`, `unpack`, `unpack_from`, `calcsize` and `struct.error` are
+built, with the codes `b B h H i I l L q Q n N P` and `x` padding, repeats, explicit byte order,
+native alignment (padding before each aligned item, no trailing pad), `@n`/`@N`/`@P`, bytearray
+buffers, import aliases and `from struct import ...`.
+
+Floats, Pascal strings, `s`, `c`, `?`, `n`/`N`/`P` under an explicit byte order, `Struct`,
+`pack_into`, `*values`, a non-literal format, a format with no values passed to `unpack` and a
+literal non-bytes buffer are refused by name on both builds.  Exact-length `unpack`, the
+negative-offset rules of `unpack_from`, the CPython range texts for `b`/`B`/`h`/`H`/`i`/`I`/`q`
+and the pointer range `[-2**63, 2**63-1]` for `P` match CPython 3.12.3.  Unsigned `Q`/`N`/`P`
+values with bit 63 set still overflow on the typed int64 path (A1); the general path returns the
+exact big integer.
+
+`tools/update_manifest.py` was run and `--check` passes.  New module `test_ail_stdlib40.py`
+(10 tests) is registered in `ail_check.py` MODULES.  Final-state tests: test_ail_stdlib40,
+test_ail_stdlib5, test_ail_stdlib_batch4, test_ail_struct_list_inplace, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  Probes in `/tmp/probes/stdlib40` cover all codes
+and boundaries, native alignment and padding, empty/zero formats, negative offsets, exact-length
+errors, range texts, aliases, argument/list-item/attribute/dict routes, top-level and nested
+unpack, bytearray buffers, unsigned high values and every named refusal.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

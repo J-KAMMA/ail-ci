@@ -179,6 +179,14 @@ def _stdlib5():
     return _stdlib5.module
 
 
+def _structlib():
+    """python/pkg-v12/structlib.py (struct pack/unpack/calcsize lowered before the other source passes)."""
+    if not hasattr(_structlib, "module"):
+        import structlib
+        _structlib.module = structlib
+    return _structlib.module
+
+
 def _stdlib4():
     """python/pkg-v12/stdlib4.py (library batch 4: csv, datetime, ... lowered before the other source passes)."""
     if not hasattr(_stdlib4, "module"):
@@ -3390,6 +3398,8 @@ def _inline_type_aliases(source):
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    if "struct" in source:
+        source = _structlib().rewrite_text(source)
     source = _inline_type_aliases(source)
     if "raise" in source and " from " in source:
         source = _raisefrom().rewrite(source, notes)
