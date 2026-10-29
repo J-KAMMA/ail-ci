@@ -80,12 +80,24 @@ The compiled adapter casts a u64 argument with `(uint64_t)p` and has no check; t
 **[read, not run]**. So `tiny_ul(-1)` raises under CPython and returns `0` (`(2**64 - 1) + 1` wraps) in the compiled
 program. That is a silent difference, and it is not declared anywhere.
 
+**Measured [verified 2026-10-30]**, default build of `integ` 24aca219's parent (d68453f7), `strncmp("abc", "abd", n)` with
+`n: c_size_t`, each call in `try/except OverflowError as e: print(..., e)`:
+
+| `n` | CPython (shim) | compiled AIL |
+| --- | --- | --- |
+| `-1` | `OverflowError strncmp: n does not fit c_size_t` | `-1` (the call ran with `n = 2**64 - 1`): **silent** |
+| `2**63` | `-1` (valid argument) | `OverflowError integer overflow`: a valid argument refused at run time |
+| `2**64` | `OverflowError strncmp: n does not fit c_size_t` | `OverflowError integer overflow`: same class, different text |
+
+So the big-int case below is answered too: a big int at an int parameter raises a catchable `OverflowError("integer
+overflow")`. It does not truncate. F3a fixes all three rows.
+
 Two neighbours, found the same way:
 - Narrow ints (`c_int`, `c_uint32`, ...) out of range stop with `ail_die("C int32 argument out of range")` in the
   compiled program and raise a catchable `OverflowError` with a different text in the shim **[read, not run]**. Loud,
   not silent, but stdout differs when the program catches it. F3a aligns these too, since it is the same code.
-- A big int (general path, above 2**63 - 1) passed to any int parameter: what the boundary does with it is not known
-  **[unverified; first thing F3a checks]**. If it truncates, that is a second silent hole.
+- A big int (general path, above 2**63 - 1) passed to any int parameter raises `OverflowError("integer overflow")`
+  (measured above). It is not silent, but the text is not the shim's, and `2**63 .. 2**64-1` is refused although valid.
 
 ### 2.3 Buffers
 
@@ -272,8 +284,8 @@ Targeted runs only during each step: `test_ail_ffi_u64`, `test_ail_ffi`, `test_a
 
 ## 9. Stage plan (each one PR)
 
-**F3a. Argument checks** (D4; core-light: `ail_ffi_lower.py` wrapper, `c_object.py` checks). First, find out what a
-big int does at an int parameter today (section 2.2) and record it. Then every int parameter raises the shim's
+**F3a. Argument checks** (D4; core-light: `ail_ffi_lower.py` wrapper, `c_object.py` checks). The measured table of
+section 2.2 is the starting point. Every int parameter raises the shim's
 `OverflowError` text, catchable, instead of `ail_die`; u64 parameters reject negatives on the typed path.
 *Done when:* cases 2 and 6 of section 8 pass in all four builds; `test_ail_ffi` unchanged otherwise.
 
@@ -316,8 +328,6 @@ others.
 - **The argument fix changes behaviour of working programs.** A program that passed `-1` as "all ones" to a `size_t`
   parameter compiled and ran; after F3a it raises, as CPython always did. That is the point, but the DEVLOG entry must say
   so.
-- **Hidden third silent hole.** The big-int-to-int-parameter path (section 2.2) is not read to the end. If it truncates,
-  every int parameter type is affected, not just u64. F3a starts there.
 - **Callers of the conversion outside FFI.** `compile-c` objects keep `uint64_bits`; if a later change routes them through
   the new kind by mistake, their documented signed mapping changes. Keep the two kinds separate in `c_object.C_KINDS`.
 
