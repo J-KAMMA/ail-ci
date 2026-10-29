@@ -39,6 +39,8 @@ def run(tree, text, mods):
         run_array(tree, text)
     if 'io' in mods:
         run_io(tree, text)
+    if 'unicodedata' in mods:
+        run_unicodedata(tree, text)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -287,3 +289,75 @@ def run_io(tree, text):
     stdlib5.leftover(tree, b, 'io.StringIO(text) is the form that is built')
     if Lower.used_class:
         text.append(stdlib5.prelude('stringio'))
+
+
+# ---------------------------------------------------------------------------------------------------------------
+UNICODE_FUNCS = {'name': '_ail_uni_name', 'category': '_ail_uni_category', 'normalize': '_ail_uni_normalize'}
+
+# Seven CJK compatibility ideographs have a canonical decomposition above U+FFFF; the 16-bit v2 runtime
+# cannot hold that code point, so a literal form is refused by name instead of returning the character
+# unchanged.  A value that only reaches normalize at run time keeps the open 16-bit limitation.
+UNICODE_ASTRAL_DECOMP = {
+    0xFA6C: 0x242EE, 0xFACF: 0x2284A, 0xFAD0: 0x22844, 0xFAD1: 0x233D5,
+    0xFAD5: 0x25249, 0xFAD6: 0x25CD0, 0xFAD7: 0x27ED3,
+}
+
+
+def unicodedata_astral_decomp(cp):
+    return UNICODE_ASTRAL_DECOMP.get(cp)
+
+
+def run_unicodedata(tree, text):
+    b = stdlib5.take_imports(tree, 'unicodedata', set(UNICODE_FUNCS) | {'unidata_version'},
+                             unknown='name, category, normalize (NFC/NFD) and unidata_version are built')
+    if not b:
+        return
+    used = set()
+
+    def form_node(call):
+        if call.args:
+            return call.args[0]
+        for keyword in call.keywords:
+            if keyword.arg == 'form':
+                return keyword.value
+        return None
+
+    def fix(node):
+        if isinstance(node, ast.Call):
+            found = b.attr(node.func)
+            if found in ('name', 'category', 'normalize') and node.keywords:
+                refuse(node, 'unicodedata.%s takes no keyword arguments in CPython; write the arguments '
+                       'positionally' % found)
+            if found in ('name', 'category'):
+                used.add(UNICODE_FUNCS[found])
+                return ast.Call(func=stdlib5.name(UNICODE_FUNCS[found]),
+                                args=[stdlib5.Replace(fix).visit(a) for a in node.args],
+                                keywords=[ast.keyword(arg=k.arg, value=stdlib5.Replace(fix).visit(k.value))
+                                          for k in node.keywords])
+            if found == 'normalize':
+                if len(node.args) > 1 and isinstance(node.args[1], ast.Constant) \
+                        and isinstance(node.args[1].value, str):
+                    for ch in node.args[1].value:
+                        point = unicodedata_astral_decomp(ord(ch))
+                        if point is not None:
+                            refuse(node, "unicodedata.normalize: U+%04X decomposes to U+%X, above U+FFFF, "
+                                   "which the 16-bit v2 runtime cannot hold" % (ord(ch), point))
+                form = form_node(node)
+                if not (isinstance(form, ast.Constant) and isinstance(form.value, str)
+                        and form.value in ('NFC', 'NFD')):
+                    refuse(node, "unicodedata.normalize(%s...): only the literal forms 'NFC' and 'NFD' are built "
+                           "(canonical decomposition and composition); NFKC/NFKD and a form computed at run time "
+                           "are not" % (ast.unparse(form) if form is not None else ''))
+                used.add(UNICODE_FUNCS['normalize'])
+                return ast.Call(func=stdlib5.name(UNICODE_FUNCS['normalize']),
+                                args=[stdlib5.Replace(fix).visit(a) for a in node.args],
+                                keywords=[ast.keyword(arg=k.arg, value=stdlib5.Replace(fix).visit(k.value))
+                                          for k in node.keywords])
+        found = b.attr(node)
+        if found == 'unidata_version':
+            return ast.Constant(value='15.0.0')
+        return None
+    tree.body = [stdlib5.Replace(fix).visit(s) for s in tree.body]
+    b.names.clear()
+    stdlib5.leftover(tree, b, 'name, category, normalize (NFC/NFD) and unidata_version are built')
+    text.append(stdlib5.shake(stdlib5.prelude('unicodedata'), used))

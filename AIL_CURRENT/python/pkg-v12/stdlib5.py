@@ -30,7 +30,7 @@ HERE = Path(__file__).parent
 
 # a word of the program text that can mean one of the modules (the quick test before parsing)
 WORDS = ('fractions', 'enum', 'namedtuple', 'NamedTuple', 'ChainMap', 'keyword', 'calendar', 'abc', 'array',
-         'random', 'string', 'io', 'statistics', 'typing')
+         'random', 'string', 'io', 'statistics', 'typing', 'unicodedata')
 
 
 def prelude(name):
@@ -243,7 +243,7 @@ def rewrite_text(source, notes=None):
         return source
     mods = imported_modules(tree)
     if not (mods & {'fractions', 'enum', 'collections', 'typing', 'random', 'keyword', 'calendar', 'abc', 'array',
-                    'string', 'io', 'statistics'}):
+                    'string', 'io', 'statistics', 'unicodedata'}):
         return source
     text = []
     changed = False
@@ -260,7 +260,7 @@ def rewrite_text(source, notes=None):
         if 'random' in mods:
             import randlib
             randlib.run(tree, text)
-        if mods & {'keyword', 'calendar', 'abc', 'array', 'string', 'io', 'statistics'}:
+        if mods & {'keyword', 'calendar', 'abc', 'array', 'string', 'io', 'statistics', 'unicodedata'}:
             import smalllib5
             smalllib5.run(tree, text, mods)
         changed = ast.dump(tree) != before or bool(text)
