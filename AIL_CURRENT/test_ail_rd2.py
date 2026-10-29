@@ -15,6 +15,8 @@ general path. The traceback frames above the last line may differ.
   quote, a `\\n` escape and non-ASCII text; a path aliased by a print before the open.
 * Caught: `except OSError`, `except FileNotFoundError as e: print(e)`, and both re-raise spellings
   (`raise`, `raise e`) whose last stderr line still matches CPython.
+* A program that reads exception text (so the runtime words OSError itself) still names the path
+  when line iteration then fails on a directory: uncaught, and in a caught `print(e)`.
 """
 import os
 import sys
@@ -243,6 +245,28 @@ CAUGHT_OS_TEXT = body([
     "    show(\"nope_xyz\")",
     "    return 0",
 ])
+EXCSTR_THEN_ITER = body([
+    "def show(p: str) -> None:",
+    "    try:",
+    "        print(open(p).read())",
+    "    except OSError as e:",
+    "        print(e)",
+    "def main() -> int:",
+    "    print(\"before\")",
+    "    show(\"nope_xyz\")",
+    "    for line in open(\".\"):",
+    "        print(line)",
+    "    return 0",
+])
+CATCH_ITER_TEXT = body([
+    "def main() -> int:",
+    "    try:",
+    "        for line in open(\".\"):",
+    "            print(line)",
+    "    except OSError as e:",
+    "        print(e)",
+    "    return 0",
+])
 RERAISE = body([
     "def f() -> None:",
     "    try:",
@@ -344,6 +368,10 @@ class Rd2(unittest.TestCase):
         self.check("caught_os", CAUGHT_OS, rc=0)
         self.check("caught_text", CAUGHT_TEXT, rc=0)
         self.check("caught_os_text", CAUGHT_OS_TEXT, rc=0)
+
+    def test_excstr_iteration(self):
+        self.check("excstr_then_iter", EXCSTR_THEN_ITER)
+        self.check("catch_iter_text", CATCH_ITER_TEXT, rc=0)
 
     def test_reraise(self):
         self.check("reraise", RERAISE)

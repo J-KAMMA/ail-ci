@@ -651,6 +651,24 @@ PART_EDITS = {
         ('static void ail_file_fail(int err) {\n', 'static void ail_exc_os_fail(int err, ail_str path);\nstatic void ail_file_fail(int err) {\n'),
         ('    if (!f) ail_file_fail(open_errno);\n    return f;', '    if (!f) ail_exc_os_fail(open_errno, path);\n    return f;'),
         ('free(buf); ail_file_fail(read_errno); }', 'free(buf); ail_exc_os_fail(read_errno, path); }'),
+        # line iteration fails on the first read of a directory; the iterator keeps its own copy of
+        # the path so the failure can still name it after the caller's arena may have moved on.
+        ('typedef struct { FILE *file; unsigned char *buf; int64_t capacity; } ail_file_iter;\n',
+         'typedef struct { FILE *file; unsigned char *buf; int64_t capacity; ail_str path; } ail_file_iter;\n'),
+        ('    it->file = file;\n    return it;',
+         '    it->file = file;\n    it->path.p = NULL; it->path.n = 0; it->path.bytes = 0;\n'
+         '    if (path.n) {\n'
+         '        uint8_t *copy = (uint8_t *)malloc((size_t)path.n);\n'
+         '        if (!copy) { fclose(file); free(it); ail_die("out of memory"); }\n'
+         '        memcpy(copy, path.p, (size_t)path.n);\n'
+         '        it->path.p = copy; it->path.n = path.n;\n'
+         '    }\n    return it;'),
+        ('    fclose(it->file);\n    free(it->buf);\n    free(it);',
+         '    fclose(it->file);\n    free(it->buf);\n    free((void *)it->path.p);\n    free(it);'),
+        ('if (ferror(it->file)) ail_file_fail(errno);',
+         'if (ferror(it->file)) ail_exc_os_fail(errno, it->path);'),
+        ('if (next == EOF && ferror(it->file)) ail_file_fail(errno);',
+         'if (next == EOF && ferror(it->file)) ail_exc_os_fail(errno, it->path);'),
         ('    if (rc == 1) ail__str_to_int_fail(s);\n    if (rc == 2) ail_die("integer overflow");\n    if (rc == 3) {\n        char text[192];\n        int n = snprintf(text, sizeof text, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);\n        ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE, (const uint8_t *)text, n, 1));\n    }\n    return v;\n}\n/* `float(<str>)`',
          '    if (rc == 1) ail_exc_int_fail(s);\n    if (rc == 2) ail_die("integer overflow");\n    if (rc == 3) ail_exc_int_limit_fail(ndigits);\n    return v;\n}\n/* `float(<str>)`'),
         ('    int rc = ail__asc_to_float(b, len, &v);\n    if (b != stackbuf) free(b);\n    if (rc) ail_raise_named(AIL_EXC_VALUE);\n    return v;\n}\n/* AIL_TASK_strops_20260915.md Part A',

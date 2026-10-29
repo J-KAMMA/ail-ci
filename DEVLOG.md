@@ -6,8 +6,10 @@ right class with no message) where CPython names the subclass and the path:
 now calls `ail_file_fail_path`, which raises the errno's class with `[Errno N] strerror: repr(path)`
 (the exact str repr via STRREPR, the OSEXC constructor); an empty errno keeps the old plain OSError.
 The helper is a part of its own (OSFILEPATH), carried only by a program that opens a file whole, and
-it is skipped when the program reads exception text, whose exctext edits already word those failures
-with the same message.  A directory opens (fopen succeeds) and fails on the first read, so the three
+it is skipped when the program reads exception text, whose exctext edits word the open and whole-file
+read; line iteration is now covered there too, with the iterator keeping its path copy in that mode
+as well, so a default-build program that prints a caught OSError and then iterates a directory also
+ends on CPython's `IsADirectoryError: [Errno 21] Is a directory: '.'`.  A directory opens (fopen succeeds) and fails on the first read, so the three
 read-time failures now name the path as well: the text read (`ail_file_read`), the binary whole-file
 read (`read_bytes`, FILEBYTES), and line iteration, whose iterator keeps its own copy of the path.
 The three lowerings (whole-file text read, line iteration with a file slot, `read_bytes`) now ask for
