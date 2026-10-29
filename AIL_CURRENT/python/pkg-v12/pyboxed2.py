@@ -12465,51 +12465,222 @@ def _genexp_consumed_in_place(node, parents):
     return False
 
 
-# Consumers that read every element before they can produce an observable effect (a return
-# value, a mutation of the receiver, or a raise).  `next`/`any`/`all` are deliberately absent:
-# they stop early, so an eagerly materialised inner generator could raise or be observed where
-# CPython would not have reached.  A nested generator expression is only lowered eagerly when
-# every generator in the chain sits under one of these consumers.
-_GENEXP_FULL_CALLS = frozenset({
+# A nested generator expression is lowered eagerly (its elements are materialised when the
+# emitter evaluates it), while CPython creates a lazy object.  That is observationally safe only
+# when the construct around it reads every element immediately, with no other code running in
+# between: a trusted full consumer, or an iterable of an enclosing generator whose whole body is
+# side-effect free.  Everything else keeps the named refusal below.
+_GENEXP_TRUSTED_CALLS = frozenset({
     'list', 'tuple', 'set', 'frozenset', 'dict', 'sum', 'bytes', 'bytearray', 'Counter', 'array',
 })
 
 
-def _genexp_fully_consumed(node, parents):
-    """True iff `node` is read to exhaustion before its consumer can show an element or run an
-    observable effect.  Narrower than `_genexp_consumed_in_place`: `next`, `any` and `all` read a
-    prefix, and a `for` body or a comprehension element runs between reads (so a later element
-    that raises would leave different output).  The consumers kept here build a value silently;
-    `sorted`/`min`/`max` are left out because they compare while reading."""
+def _const_str(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _trusted_genexp_consumer(node, parents):
+    """True when `node` is the sole argument of a call that reads it to exhaustion without
+    running other code first.  `.join` is trusted only on a string-literal receiver: a user
+    object's `join` may read a prefix or do anything else."""
     par = parents.get(node)
-    if isinstance(par, ast.Starred):
+    if not isinstance(par, ast.Call) or len(par.args) != 1 or par.args[0] is not node:
+        return False
+    if par.keywords:
+        return False
+    f = par.func
+    if isinstance(f, ast.Name):
+        return f.id in _GENEXP_TRUSTED_CALLS
+    return isinstance(f, ast.Attribute) and f.attr == 'join' and _const_str(f.value)
+
+
+def _effect_free(node):
+    """An expression that cannot run user code or mutate state.  Deliberately small: names,
+    constants and pure operators; attribute/subscript access is trusted only on a literal
+    string.  Calls are excluded because any of them may have a side effect."""
+    if isinstance(node, (ast.Name, ast.Constant)):
         return True
-    if isinstance(par, (ast.Assign, ast.AnnAssign)):
-        target = par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1 else getattr(par, 'target', None)
-        if isinstance(target, (ast.Tuple, ast.List)):
-            return True
+    if isinstance(node, (ast.Tuple, ast.List, ast.Set)):
+        return all(_effect_free(e) for e in node.elts)
+    if isinstance(node, ast.Dict):
+        return all(_effect_free(k) for k in node.keys if k is not None) and \
+            all(_effect_free(v) for v in node.values)
+    if isinstance(node, ast.UnaryOp):
+        return _effect_free(node.operand)
+    if isinstance(node, ast.BinOp):
+        return _effect_free(node.left) and _effect_free(node.right)
+    if isinstance(node, ast.BoolOp):
+        return all(_effect_free(v) for v in node.values)
+    if isinstance(node, ast.Compare):
+        return _effect_free(node.left) and all(_effect_free(c) for c in node.comparators)
+    if isinstance(node, ast.IfExp):
+        return _effect_free(node.test) and _effect_free(node.body) and _effect_free(node.orelse)
+    if isinstance(node, ast.JoinedStr):
+        return all(_effect_free(v) for v in node.values)
+    if isinstance(node, ast.FormattedValue):
+        return _effect_free(node.value) and \
+            (node.format_spec is None or _effect_free(node.format_spec))
+    if isinstance(node, ast.Attribute):
+        return _const_str(node.value)
+    if isinstance(node, ast.Subscript):
+        return _const_str(node.value) and _effect_free(node.slice)
+    return False
+
+
+def _simple_target(node):
+    if isinstance(node, ast.Name):
+        return True
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return all(_simple_target(e) for e in node.elts)
+    return False
+
+
+def _genexp_body_effect_free(comp, skip_iter):
+    """Every part of `comp` other than the iterable `skip_iter` is side-effect free, so an
+    eagerly materialised inner generator cannot be observed differently while `comp` runs."""
+    if not _effect_free(comp.elt):
+        return False
+    for gen in comp.generators:
+        if gen.is_async:
+            return False
+        if gen.iter is not skip_iter and not _effect_free(gen.iter):
+            return False
+        if not _simple_target(gen.target):
+            return False
+        if any(not _effect_free(c) for c in gen.ifs):
+            return False
+    return True
+
+
+def _index_identity(seq, item):
+    for i, e in enumerate(seq):
+        if e is item:
+            return i
+    return -1
+
+
+def _prior_effect_free(node, stop, parents):
+    """Everything evaluated before `node` on its way up to the enclosing generator `stop` is
+    side-effect free, and `node` is not reached through a for-clause iterable (CPython evaluates
+    a non-outermost one later than the eager lowering does)."""
+    child = node
+    par = parents.get(child)
+    while par is not None and par is not stop:
+        if isinstance(par, ast.Call):
+            if child is par.func:
+                pass
+            else:
+                if not _effect_free(par.func):
+                    return False
+                idx = _index_identity(par.args, child)
+                if idx >= 0:
+                    if any(not _effect_free(a) for a in par.args[:idx]):
+                        return False
+                else:
+                    kwidx = next((i for i, kw in enumerate(par.keywords)
+                                  if kw.value is child), -1)
+                    if kwidx < 0:
+                        return False
+                    if any(not _effect_free(a) for a in par.args):
+                        return False
+                    if any(not _effect_free(kw.value) for kw in par.keywords[:kwidx]):
+                        return False
+        elif isinstance(par, ast.BinOp):
+            if child is par.right and not _effect_free(par.left):
+                return False
+        elif isinstance(par, ast.BoolOp):
+            idx = _index_identity(par.values, child)
+            if idx > 0 and any(not _effect_free(v) for v in par.values[:idx]):
+                return False
+        elif isinstance(par, ast.Compare):
+            parts = [par.left] + par.comparators
+            idx = _index_identity(parts, child)
+            if idx > 0 and any(not _effect_free(v) for v in parts[:idx]):
+                return False
+        elif isinstance(par, (ast.Tuple, ast.List, ast.Set)):
+            idx = _index_identity(par.elts, child)
+            if idx > 0 and any(not _effect_free(e) for e in par.elts[:idx]):
+                return False
+        elif isinstance(par, ast.Dict):
+            seq = []
+            for k, v in zip(par.keys, par.values):
+                if k is not None:
+                    seq.append(k)
+                seq.append(v)
+            idx = _index_identity(seq, child)
+            if idx > 0 and any(not _effect_free(e) for e in seq[:idx]):
+                return False
+        elif isinstance(par, ast.JoinedStr):
+            idx = _index_identity(par.values, child)
+            if idx > 0 and any(not _effect_free(v) for v in par.values[:idx]):
+                return False
+        elif isinstance(par, ast.FormattedValue):
+            if child is par.format_spec and not _effect_free(par.value):
+                return False
+        elif isinstance(par, ast.IfExp):
+            if child is par.body and not _effect_free(par.test):
+                return False
+            if child is par.orelse and not (_effect_free(par.test) and
+                                            _effect_free(par.body)):
+                return False
+        elif isinstance(par, ast.Subscript):
+            if child is par.slice and not _effect_free(par.value):
+                return False
+        elif isinstance(par, ast.Slice):
+            parts = [par.lower, par.upper, par.step]
+            idx = next((i for i, e in enumerate(parts) if e is child), -1)
+            if idx > 0 and any(e is not None and not _effect_free(e) for e in parts[:idx]):
+                return False
+        elif isinstance(par, ast.comprehension):
+            if child is par.iter:
+                return False
+            if child is par.target:
+                if not _effect_free(par.iter):
+                    return False
+            else:
+                if not _effect_free(par.iter):
+                    return False
+                idx = _index_identity(par.ifs, child)
+                if idx > 0 and any(not _effect_free(c) for c in par.ifs[:idx]):
+                    return False
+        elif isinstance(par, ast.Starred):
+            return False
+        child = par
+        par = parents.get(child)
+    return True
+
+
+def _enclosing_genexp(node, parents):
+    par = parents.get(node)
+    while par is not None and not isinstance(par, ast.GeneratorExp):
+        par = parents.get(par)
+    return par
+
+
+def _genexp_safe(node, parents, seen):
+    """True iff `node` can reuse the eager lowering in CPython's observable order."""
+    if id(node) in seen:
+        return False
+    seen = seen | {id(node)}
+    if _trusted_genexp_consumer(node, parents):
+        enclosing = _enclosing_genexp(node, parents)
+        return enclosing is None or _prior_effect_free(node, enclosing, parents)
+    par = parents.get(node)
     if isinstance(par, ast.comprehension) and par.iter is node:
-        # The outermost iterable of a generator expression is evaluated when the generator is
-        # made.  That is safe only when the generator itself is fully consumed by a silent
-        # consumer; a list/set/dict comprehension runs its element between reads.
         comp = parents.get(par)
-        return isinstance(comp, ast.GeneratorExp) and _genexp_fully_consumed(comp, parents)
-    if isinstance(par, ast.Call) and node in par.args:
-        f = par.func
-        if isinstance(f, ast.Name) and f.id in _GENEXP_FULL_CALLS:
-            return True
-        if isinstance(f, ast.Attribute) and f.attr == 'join':
-            return True
+        if isinstance(comp, ast.GeneratorExp) and _genexp_safe(comp, parents, seen):
+            return _genexp_body_effect_free(comp, node)
     return False
 
 
 def _nested_genexp_needing_laziness(tree):
-    """The first generator expression that contains another generator expression (or is itself
-    nested in one) and is not read to exhaustion at that point.  Such a chain must stay refused:
-    the emitter materialises the inner generator eagerly, which differs from CPython's lazy
-    object.  A chain where every generator is fully consumed (a join/list/sum over nested
-    generators) lowers exactly like CPython, so it is accepted.  The generator directly under
-    any()/all() is left to `_any_all`, which refuses it with its own message."""
+    """The first generator expression in a nested chain that eager materialisation cannot model.
+    A chain is accepted only when every link is read immediately and fully by a trusted consumer
+    (`list`/`sum`/a string-literal `.join`/...), or is the iterable of an enclosing generator
+    whose whole body is side-effect free.  Unpacking, a for-clause source, a stored value,
+    `next`/`any`/`all`, a user `join`, and mutation visible to the inner generator all keep the
+    named refusal.  A generator directly under any()/all() is left to `_any_all`, which refuses
+    it with its own message."""
     parents = {}
     for par in ast.walk(tree):
         for child in ast.iter_child_nodes(par):
@@ -12523,8 +12694,6 @@ def _nested_genexp_needing_laziness(tree):
         if not isinstance(node, ast.GeneratorExp) or id(node) in any_all_args:
             continue
         nested = any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node))
-        # A generator below an any()/all() argument is left to `_any_all`, which names the
-        # iterable-is-a-generator / nested case with its own message (pre41).
         under_any_all = False
         par = parents.get(node)
         while par is not None:
@@ -12533,7 +12702,7 @@ def _nested_genexp_needing_laziness(tree):
                 if id(par) in any_all_args:
                     under_any_all = True
             par = parents.get(par)
-        if nested and not under_any_all and not _genexp_fully_consumed(node, parents):
+        if nested and not under_any_all and not _genexp_safe(node, parents, frozenset()):
             return node
     return None
 

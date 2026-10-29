@@ -1,16 +1,16 @@
-"""cov48: a chain of generator expressions read to exhaustion matches CPython on both builds.
+"""cov48: a chain of generator expressions read immediately to exhaustion matches CPython.
 
 The general path materialises a generator expression eagerly, so it used to refuse every
-generator nested inside another one.  When every generator in the chain is read to exhaustion
-by the construct around it (`join`, `list`, `tuple`, `sum`, `sorted`, a `for` source, `*`, an
-unpacking target), eager materialisation has the same observable point as CPython's lazy
-object: the inner generator is created and consumed while the outer element is evaluated, and
-nothing outside can observe the difference.  Those chains now build.
+generator nested inside another one.  When a nested chain is read immediately and fully by a
+trusted consumer (`list`, `tuple`, `set`, `sum`, a string-literal `.join`, ...), or when the
+inner one is the iterable of an enclosing generator whose whole body is side effect free, eager
+materialisation has the same observable order as CPython's lazy object.  Those chains build.
 
-A chain is still refused by name when a generator is only read for a prefix (`next`, `any`,
-`all`) or stored as a value: there eager materialisation would run an element CPython never
-reaches, so the saved/lazy refusal stays.  Every program is built with the general path forced
-and with the default build; stdout and the exit status must match CPython 3.12.
+A chain is still refused by name when unpacking only reads a prefix, a for-clause source or a
+stored value keeps the lazy object, `next`/`any`/`all` stop early, a user object's `join` may
+read a prefix, or mutation during iteration could reach the inner generator.  Every accepted
+program is built with the general path forced and with the default build; stdout and the exit
+status must match CPython 3.12.
 """
 import os
 import subprocess
@@ -52,12 +52,12 @@ main()
 '''
 PROGRAMS['consume'] = r'''
 def main():
-    print(sum(x * 2 for x in (y for y in range(5))))
     print(list(x for x in (y for y in range(3))))
-    print(tuple(x for x in (y for y in [-1, 0, 1])))
-    print(sorted([x for x in (y for y in [3, 1, 2])]))
-    print("|".join(str(x) for x in (y for y in [])))
-    print(*[x for x in (y for y in [7, 8])])
+    print(list(x * 2 for x in (y for y in range(4))))
+    print(tuple(x for x in (y for y in range(3))))
+    print(sum(sum(x for x in (y for y in row)) for row in [[1, 2], [], [-3]]))
+    print("\n".join(x for x in (y for y in ["a", "b"])))
+    print(list(x for x in (y for y in [])))
 
 
 main()
@@ -65,7 +65,7 @@ main()
 PROGRAMS['three_levels'] = r'''
 def main():
     rows = [[1, 2], [3]]
-    print("\n".join(" ".join(str(v) for v in row) for row in (r for r in rows)))
+    print(", ".join("; ".join("x" for _ in row) for row in rows))
     print(len(list(x for x in (y for y in (z for z in range(4))))))
 
 
@@ -78,6 +78,32 @@ REFUSED = {
     'inner_list_item': 'items = [(j for j in (k for k in range(2)))]\nprint(next(items[0]))\n',
     'for_source_raises': 'for v in (str(1 // x) for x in (y for y in [1, 0])):\n    print(v)\n',
     'saved_value': 'g = (1 // x for x in [1, 0])\nprint(next(g))\n',
+    'mutation_during_iteration': (
+        'xs = [1, 2, 3]\n'
+        'def f(x):\n'
+        '    if x == 1:\n'
+        '        xs.append(4)\n'
+        '    return x\n'
+        'def main():\n'
+        '    print(list(f(x) for x in (y for y in xs)))\n'
+        'main()\n'),
+    'unpack_short': (
+        'def main():\n'
+        '    try:\n'
+        '        a, b = (x for x in (print("i", y) or y for y in range(5)))\n'
+        '        print("ok", a, b)\n'
+        '    except ValueError as e:\n'
+        '        print("err", e)\n'
+        'main()\n'),
+    'custom_join_receiver': (
+        'class C:\n'
+        '    def join(self, it):\n'
+        '        return next(it)\n'
+        'def main():\n'
+        '    print(C().join(x for x in (print("i", y) or y for y in range(3))))\n'
+        'main()\n'),
+    'unpack_nested': 'def main():\n    a, b = (x for x in (y for y in [4, 5]))\n    print(a, b)\nmain()\n',
+    'starred_nested': 'def main():\n    print(*(x for x in (y for y in [1, 2, 3])))\nmain()\n',
 }
 
 
@@ -118,7 +144,7 @@ class Cov48Tests(unittest.TestCase):
                                      (slug, general, got.stderr[-800:]))
                     self.assertEqual(got.returncode, want[1], (slug, general, got.stderr[-800:]))
 
-    def test_prefix_consumed_nested_generators_are_refused(self):
+    def test_unsafe_nested_generators_are_refused(self):
         with tempfile.TemporaryDirectory(prefix='ail-cov48-') as directory:
             for slug, text in REFUSED.items():
                 for general in (True, False):
