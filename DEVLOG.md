@@ -1,3 +1,23 @@
+## 2026-10-29 -- cov47: a nested generator expression consumed in place (job-cov47-10291503)
+
+Corpus refusal counts over all 219 programs in `lab/corpus/programs`, compiled on both builds:
+default 24 -> 22 and unified 24 -> 22.  The top non-import construct in the unified list was
+`a generator expression nested inside another generator expression` (3 programs).  Two of them
+(the two `t432` programs) nest `" ".join(...)` inside another `join` with a literal receiver:
+CPython reads every element of the outer generator before joining, so eager materialisation
+reaches the same elements in the same order.  The general path now allows a nested generator
+expression when it, and every inner one, is an argument of `str.join` with a literal receiver,
+`list()` or `tuple()`, with the name unshadowed in the module.  The third program (`t172`) has
+`sum(...)` inside the outer `join` and stays refused: `sum` adds each value as it arrives, so a
+later element is never evaluated once an addition has raised (even with no class in the program).
+A saved value, an outer element, `any`/`all`/`next`, a `for` with `break`, an object's own
+`update`/`join`, `set`/`dict`/`min`/`max`/`sorted`, and a shadowed `list`/`tuple`/`join` remain
+the named compile-time refusal.  Probes in `/tmp/probes/final` (`cov47_join`, `cov47_list_tuple`,
+`cov47_routes`, `cov47_join_filter_raise`, `cov47_list_of_inner_join`, and the `cov47_refuse_*`
+programs for saved/sum/any/element/break/update) match CPython or are refused by name on both
+builds.  Added `test_ail_cov47.py` (5 programs, 5 refusals) and registered it in
+`ail_check.MODULES`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

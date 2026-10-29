@@ -2531,6 +2531,11 @@ class Compiler(boxclosure.ClosureMixin):
             and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
             and isinstance(n.args[1].value, str))
         self.assigned_attrs = frozenset(assigned_attrs)
+        parents = {}
+        for par in ast.walk(tree):
+            for child in ast.iter_child_nodes(par):
+                parents[child] = par
+        bound_names = _bound_names(tree)
         any_all_genargs = set()
         for call in ast.walk(tree):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
@@ -2538,13 +2543,13 @@ class Compiler(boxclosure.ClosureMixin):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                    not _genexpr_nested_allowed(gen, parents, bound_names):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
                 refusal.source_line = getattr(gen, 'lineno', None)
                 raise refusal
-        lazy_genexp = _lazy_raising_genexp(tree)
+        lazy_genexp = _lazy_raising_genexp(tree, parents)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
             refusal.source_line = getattr(lazy_genexp, 'lineno', None)
@@ -6495,9 +6500,8 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
-            raise Unsupported('a generator expression nested inside another generator expression '
-                              '(the inner one would be materialised eagerly, not lazily)')
+        # A nested generator expression was screened in _compile_cond: it is allowed only when it
+        # and its parent are both consumed in place by a call that reads every element at once.
         t = self.expr_ListComp(node, ctx)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
@@ -12433,6 +12437,24 @@ _GENEXP_EAGER_CALLS = frozenset({
     'next', 'bytes', 'bytearray', 'Counter', 'array',
 })
 _GENEXP_EAGER_METHODS = frozenset({'join', 'extend', 'update', 'array'})
+# Nested generator expressions are allowed only under a consumer that first reads the whole
+# iterable and then works on it: list()/tuple() build the sequence first, and str.join() calls
+# PySequence_Fast, so every element is evaluated at the same point as in CPython.  sum() is NOT
+# such a consumer: it adds each value as it arrives, so a later element is never evaluated once an
+# addition has raised (even with no class in the program, `sum([[y] for y in row])` raises at the
+# first list).  any()/all()/next() and a for with break can stop early, and set/dict/bytes/min/max/
+# sorted call per-element user code (hash, __index__, comparison or key), so those stay refused.
+_GENEXP_NESTED_CALLS = frozenset({'list', 'tuple'})
+
+
+def _genexp_consumer_allowed(call, bound_names):
+    f = call.func
+    if isinstance(f, ast.Name):
+        if bound_names.get(f.id, 0):
+            return False
+        return f.id in _GENEXP_NESTED_CALLS
+    return (isinstance(f, ast.Attribute) and f.attr == 'join'
+            and isinstance(f.value, ast.Constant) and isinstance(f.value.value, str))
 # Builtins whose call cannot raise one of the five catchable traps this compiler models, so a
 # generator element that only uses them keeps the existing eager lowering.
 _GENEXP_SAFE_CALLS = frozenset({
@@ -12446,6 +12468,27 @@ _GENEXP_SAFE_METHODS = frozenset({
     'rsplit', 'splitlines', 'partition', 'rpartition', 'removeprefix', 'removesuffix',
     'bit_length', 'bit_count', 'is_integer', 'get', 'keys', 'values', 'items',
 })
+
+
+def _genexp_fully_consumed(node, parents, bound_names):
+    """True iff `node` is an argument of a call that reads every element before working on it
+    (see _GENEXP_NESTED_CALLS)."""
+    par = parents.get(node)
+    if not (isinstance(par, ast.Call) and node in par.args):
+        return False
+    return _genexp_consumer_allowed(par, bound_names)
+
+
+def _genexpr_nested_allowed(node, parents, bound_names):
+    """A generator expression containing another one keeps the eager lowering only when both are
+    consumed in place by an allowed full consumer: then CPython reaches each inner element at the
+    same point (the outer element) instead of holding a lazy generator that is created here and
+    consumed later."""
+    nested = [n for n in ast.walk(node) if n is not node and isinstance(n, ast.GeneratorExp)]
+    if not nested:
+        return True
+    return _genexp_fully_consumed(node, parents, bound_names) and all(
+        _genexp_fully_consumed(inner, parents, bound_names) for inner in nested)
 
 
 def _genexp_consumed_in_place(node, parents):
@@ -12659,15 +12702,16 @@ def _genexp_can_raise(node, user_functions, safe_classes, real_next):
     return False
 
 
-def _lazy_raising_genexp(tree):
+def _lazy_raising_genexp(tree, parents=None):
     """The first generator expression saved as a value whose body can raise, or None.  The typed
     path already refuses this construct by name; the general path used to materialise it eagerly,
     so an exception the CPython generator would raise only at `next()` aborted before the caller's
     `try` could catch it."""
-    parents = {}
-    for par in ast.walk(tree):
-        for child in ast.iter_child_nodes(par):
-            parents[child] = par
+    if parents is None:
+        parents = {}
+        for par in ast.walk(tree):
+            for child in ast.iter_child_nodes(par):
+                parents[child] = par
     user_functions = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
     counts = _bound_names(tree)
     mutated = _mutated_class_names(tree)
