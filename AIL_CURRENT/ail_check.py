@@ -12,7 +12,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parent
 MODULES = (
-    'test_ail_sdk', 'test_ail_sdk_environment', 'test_ail_packaging', 'test_ail_platforms', 'test_ail_fuzz_findings', 'test_ail_corpus_findings', 'test_ail_corpus_findings2', 'test_ail_spec_fixes', 'test_ail_quirks', 'test_ail_doctor', 'test_ail_integer_codec', 'test_ail_bytearray_decimal', 'test_ail_modconst', 'test_ail_sets_general',
+    'test_ail_sdk', 'test_ail_sdk_environment', 'test_ail_packaging', 'test_ail_platforms', 'test_ail_fuzz_findings', 'test_ail_corpus_findings', 'test_ail_corpus_findings2', 'test_ail_covtop1','test_ail_spec_fixes', 'test_ail_quirks', 'test_ail_doctor', 'test_ail_integer_codec', 'test_ail_bytearray_decimal', 'test_ail_modconst', 'test_ail_sets_general',
     'test_ail_handle_lists', 'test_ail_filesystem_mutation', 'test_ail_stdout_mixed',
     'test_ail_stdout_mixed_resources', 'test_ail_tcp_poll', 'test_ail_tcp_poll_resources',
     'test_ail_tcp_json_lines_poll_resources', 'test_ail_csv_writer', 'test_ail_csv_reference', 'test_ail_monotonic',

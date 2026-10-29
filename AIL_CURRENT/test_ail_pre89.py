@@ -3,8 +3,9 @@
 p13: a nested `def` with a mutable literal default copied the literal at every call, so
 `f(1), f(2)` printed `[1] [2]` where CPython shares the list built when the `def` ran and prints
 `[1] [1, 2]`. It is now evaluated once at the `def` into a hidden local, so the object is shared
-between calls as in CPython. p18 (a callable stored in an instance attribute) and p23 (keyword
-arguments through a function value) stay refused by name.
+between calls as in CPython. p18 (a callable stored in an instance attribute) builds since
+coverage-top and must match CPython; p23 (keyword arguments through a function value) stays
+refused by name.
 """
 import os
 import subprocess
@@ -162,11 +163,19 @@ class Pre89Tests(unittest.TestCase):
                 self.assertIsNotNone(got, build_err)
                 self.assertEqual(got, (want, want_rc), 'general=%s\n%s' % (general, build_err))
 
-    def test_p18_and_p23_stay_refused_by_name(self):
+    def test_p18_matches_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre89-') as directory:
+            want, want_rc, _ = _cpython(directory, 'p18', INSTANCE_ATTRIBUTE_CALL)
+            for general in (True, False):
+                got, build_err = _build_and_run(directory, 'p18_%s' % ('g' if general else 'd'),
+                                                INSTANCE_ATTRIBUTE_CALL, general)
+                self.assertIsNotNone(got, build_err)
+                self.assertEqual(got, (want, want_rc), 'general=%s\n%s' % (general, build_err))
+
+    def test_p23_stays_refused_by_name(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre89-') as directory:
             for slug, text, needle in (
-                    ('p18', INSTANCE_ATTRIBUTE_CALL, 'method .f()'),
-                    ('p23', KEYWORDS_THROUGH_VALUE, 'keyword arguments in a call through a function value')):
+                    ('p23', KEYWORDS_THROUGH_VALUE, 'keyword arguments in a call through a function value'),):
                 for general in (True, False):
                     built, build_err = _build_and_run(directory, '%s_%s' % (slug, 'g' if general else 'd'),
                                                       text, general, run=False)
