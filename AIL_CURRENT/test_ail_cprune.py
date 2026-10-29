@@ -5,7 +5,7 @@ variables, transitively), what it must keep (a name used anywhere outside a comm
 the macro is used, pasted names, pinned attributes, items it cannot cut cleanly), and that every line
 keeps its number. Each pruned text is also compiled and run against the unpruned one. The build cases
 compile programs on both paths with and without the pass (AIL_NO_PRUNE=1): the binaries must be
-byte-identical and the generated C smaller.
+byte-identical, the --debug-dir copy is the whole emitted unit either way, and its pruned text smaller.
 """
 import hashlib
 import os
@@ -161,7 +161,7 @@ class Build(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         c = max(debug.glob('*.c'), key=lambda p: p.stat().st_size)
         run = subprocess.run([str(out)], capture_output=True, text=True, timeout=30)
-        return hashlib.sha256(out.read_bytes()).hexdigest(), c.stat().st_size, run.stdout
+        return hashlib.sha256(out.read_bytes()).hexdigest(), c.read_text(), run.stdout
 
     def test_same_binary_smaller_source(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -171,7 +171,9 @@ class Build(unittest.TestCase):
                     pruned = self.build(tmp, name, source)
                     self.assertEqual(pruned[0], whole[0])
                     self.assertEqual(pruned[2], whole[2])
-                    self.assertLess(pruned[1], whole[1] * 0.8)
+                    # --debug-dir keeps the whole emitted unit; gcc was handed its pruned text
+                    self.assertEqual(pruned[1], whole[1])
+                    self.assertLess(len(cprune.prune(pruned[1])), len(pruned[1]) * 0.8)
                     expected = subprocess.run([sys.executable, '-c', source], capture_output=True, text=True).stdout
                     self.assertEqual(pruned[2], expected)
 
