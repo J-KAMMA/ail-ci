@@ -1,3 +1,27 @@
+## 2026-10-29 -- stdlib45: `struct.pack` / `unpack` / `calcsize` / `unpack_from` / `pack_into` (job-stdlib45-10291923)
+
+`struct` was the most imported module in `lab/corpus/programs` and `language_examples` that was
+still wholly refused (6 imports; the modules imported more often are already lowered).  A new
+batch-5 pass, `run_struct` in `python/pkg-v12/stdlib5.py`, lowers the five functions over an
+explicit byte-order prefix (`<`, `>`, `=`, `!`) and the standard-size codes `x ? b B h H i I l L
+q Q c s`, with repeat counts and whitespace.  The implementation is `prelude_struct.py`, written
+in AIL; values may arrive through arguments, list items, attributes and dict values.  Everything
+else is refused by name at compile time: native alignment (`@` or no prefix), the float codes
+`e f d`, `n N P`, the `Struct` class, `iter_unpack`, a non-literal format, and keyword arguments
+to `pack`/`pack_into`.  Error paths match CPython 3.12: range and argument texts for `pack`,
+`TypeError` for a non-bytes value and for a read-only `pack_into` buffer, and the
+`unpack_from`/`pack_into` offset and buffer-size messages (including negative offsets).  The one
+declared difference is the `repr` of a caught `struct.error`, which names the prelude class
+`__main__.error`; `struct.error.__name__`, `isinstance` and the message match.
+
+Probes in `/tmp/probes` (`s1`-`s19`, `m_struct`) exercised widths and signed/unsigned boundaries,
+`Q` values above int64, empty and `0`-count formats, `s`/`c`/`?` repeats, whitespace, all four
+prefixes, negative and out-of-range offsets, buffer and type errors, `from`/`as` imports, and the
+argument/list-item/attribute/dict routes; they match CPython on both builds, except the
+non-literal-format and unsupported-name probes, which are refused by name.  Added
+`test_ail_stdlib45.py` (3 tests: default build, `AIL_UNIFIED_FORCE=1`, named refusals) and
+registered it in `ail_check.MODULES`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

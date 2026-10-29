@@ -15,6 +15,7 @@ built on the general path, whose runtime dispatches operator methods by class (d
 * collections.namedtuple, typing.NamedTuple, collections.ChainMap (ntlib.py).
 * random.Random(seed) (randlib.py).
 * keyword, string constants, calendar, abc, array, io.StringIO, statistics.fmean (smalllib5.py).
+* struct.pack / unpack / calcsize / unpack_from / pack_into over integer, x, ?, c and s formats (prelude_struct.py).
 """
 import ast
 import sys
@@ -30,7 +31,7 @@ HERE = Path(__file__).parent
 
 # a word of the program text that can mean one of the modules (the quick test before parsing)
 WORDS = ('fractions', 'enum', 'namedtuple', 'NamedTuple', 'ChainMap', 'keyword', 'calendar', 'abc', 'array',
-         'random', 'string', 'io', 'statistics', 'typing')
+         'random', 'string', 'io', 'statistics', 'typing', 'struct')
 
 
 def prelude(name):
@@ -206,6 +207,80 @@ def call(func, args):
 
 
 # ---------------------------------------------------------------------------------------------------------------
+# struct
+# ---------------------------------------------------------------------------------------------------------------
+STRUCT_FUNCTIONS = {'pack': '_ail_st_pack', 'unpack': '_ail_st_unpack', 'calcsize': '_ail_st_calcsize',
+                    'unpack_from': '_ail_st_unpack_from', 'pack_into': '_ail_st_pack_into'}
+STRUCT_FORMAT_ARG = {'pack': 0, 'unpack': 0, 'calcsize': 0, 'unpack_from': 0, 'pack_into': 0}
+STRUCT_CODES = 'x?bBhHiIlLqQcs'
+STRUCT_SPACE = ' \t\n\r\x0b\x0c'
+
+
+def struct_format_error(fmt):
+    """A reason the literal format string `fmt` is not built, or None. CPython's standard sizes only, with an
+    explicit byte-order prefix ('@'/no prefix aligns to the C compiler's layout, which this is not)."""
+    if not fmt or fmt[0] not in '<>=!':
+        return ("the format string must start with '<', '>', '=' or '!': native alignment (the default or '@') "
+                "is not built")
+    i = 1
+    while i < len(fmt):
+        while i < len(fmt) and fmt[i] in STRUCT_SPACE:
+            i += 1
+        if i >= len(fmt):
+            break
+        while i < len(fmt) and fmt[i].isdigit():
+            i += 1
+        if i >= len(fmt):
+            return 'the repeat count at the end of the format string has no code'
+        code = fmt[i]
+        i += 1
+        if code not in STRUCT_CODES:
+            return ("format code %r is not built; use an integer code (b B h H i I l L q Q), x, ?, c or s"
+                    % code)
+    return None
+
+
+def run_struct(tree, text):
+    binder = take_imports(tree, 'struct', set(STRUCT_FUNCTIONS) | {'error'},
+                          unknown='pack, unpack, calcsize, unpack_from and pack_into are built')
+    if not binder:
+        return
+
+    def fix(node):
+        attr = binder.attr(node.func) if isinstance(node, ast.Call) else binder.attr(node)
+        if attr == 'error':
+            return name('error')
+        if attr in STRUCT_FUNCTIONS:
+            if not isinstance(node, ast.Call):
+                refuse(node, 'struct.%s used as a value is not built' % attr)
+            args = [Replace(fix).visit(arg) for arg in node.args]
+            keywords = [Replace(fix).visit(word) for word in node.keywords]
+            if keywords:
+                refuse(node, 'struct.%s does not take keyword arguments' % attr)
+            where = STRUCT_FORMAT_ARG[attr]
+            if len(args) <= where or not isinstance(args[where], ast.Constant) or not isinstance(
+                    args[where].value, str):
+                refuse(node, 'struct.%s: the format string must be a literal string' % attr)
+            literal = args[where]
+            why = struct_format_error(literal.value)
+            if why is not None:
+                refuse(literal, 'struct.%s: %s' % (attr, why))
+            if attr == 'pack' or attr == 'pack_into':
+                start = 1 if attr == 'pack' else 3
+                values = ast.Tuple(elts=list(args[start:]), ctx=ast.Load())
+                packed = list(args[:start]) + [values]
+                return ast.Call(func=name(STRUCT_FUNCTIONS[attr]), args=packed, keywords=[])
+            return ast.Call(func=name(STRUCT_FUNCTIONS[attr]), args=args, keywords=keywords)
+        return None
+    tree.body = [Replace(fix).visit(stmt) for stmt in tree.body]
+    for alias in [each for each, handled in binder.names.items() if handled == 'error']:
+        del binder.names[alias]
+    leftover(tree, binder, 'pack, unpack, calcsize, unpack_from and pack_into are built; '
+                           'the Struct class, iter_unpack, the float formats and n/N/P are not')
+    text.append(prelude('struct'))
+
+
+# ---------------------------------------------------------------------------------------------------------------
 # fractions
 # ---------------------------------------------------------------------------------------------------------------
 def run_fractions(tree, text):
@@ -243,7 +318,7 @@ def rewrite_text(source, notes=None):
         return source
     mods = imported_modules(tree)
     if not (mods & {'fractions', 'enum', 'collections', 'typing', 'random', 'keyword', 'calendar', 'abc', 'array',
-                    'string', 'io', 'statistics'}):
+                    'string', 'io', 'statistics', 'struct'}):
         return source
     text = []
     changed = False
@@ -251,6 +326,8 @@ def rewrite_text(source, notes=None):
         before = ast.dump(tree)
         if 'fractions' in mods:
             run_fractions(tree, text)
+        if 'struct' in mods:
+            run_struct(tree, text)
         if 'enum' in mods:
             import enumlib
             enumlib.run(tree, text)
