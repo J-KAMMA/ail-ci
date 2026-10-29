@@ -1,3 +1,27 @@
+## 2026-10-29 -- stdlib39: `struct.pack` / `unpack` / `unpack_from` / `calcsize` over a literal format (job-stdlib39-10291432)
+
+The next still-refused module after the existing `test_ail_stdlib*` batches was `struct` (6 imports in
+`lab/corpus/programs` and `AIL_CURRENT/language_examples`; `heapq` and `datetime` were already built
+and `hashlib` is out of scope).  `python/pkg-v12/structlib.py` now lowers `struct.pack`, `unpack`,
+`unpack_from` and `calcsize` over a string-literal format, for the standard prefixes `<`, `>`, `!`,
+`=` and the native prefixes `@` and no prefix (Linux x86-64 sizes and alignment), with the fields
+`x c b B ? h H i I l L q Q n N P s`.  The layout is computed at compile time; each integer is written
+by a prelude helper through `int.to_bytes` / `int.from_bytes`, `s` truncates or pads, `c` and `?`
+keep CPython's checks, and `unpack` requires exactly the format size while `unpack_from` accepts
+positive and negative offsets.  `calcsize` is an integer constant.  `struct.error` is `ValueError` in
+a compiled program and is mapped both from `struct.error` and from a from-imported `error`; the text
+is CPython's.  `f`, `e`, `d`, `p`, dynamic formats, `Struct`, `iter_unpack`, `pack_into` and the
+other names are refused by name.
+
+Added `AIL_CURRENT/test_ail_stdlib39.py` (registered in `ail_check.MODULES`): one program on the
+default build and AIL_IR=1 over two stdin inputs, a no-`struct` text-preservation test, and five
+named refusals (`d`, `Struct`, `pack_into`, a dynamic format and keyword arguments).  Probes in
+`/tmp/probes` on both builds via `cmp.sh`: `p39_basic`, `p39_widths`, `p39_width_errors`,
+`p39_native`, `p39_formats`, `p39_fromimport`, `p39_routes`, `p39_errs3`, `p39_unpack_exact`,
+`p39_unpack_from`, `p39_byteslike` and `p39_program` match CPython; `p39_float`, `p39_refuse_d`,
+`p39_refuse`, `p39_refuse_struct`, `p39_refuse_dynamic` and `p39_refuse_kw` are refused by name.
+Declared difference: `Q` is limited to 2**63-1 by the int64 design.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
