@@ -1,14 +1,19 @@
-"""Pre406: a constant-exponent power with a routed known base is refused by name.
+"""Pre406: a routed known base of a constant-exponent power matches CPython.
 
 A reviewer of pre391 recorded as pre-existing that the base of ``**`` (and of ``**=``) reached
 through a dict value, a list item or a function argument still trapped with ``integer
 overflow`` on both builds where CPython prints the exact bignum.  The constant-base rule only
 looked at a syntactically constant base, so a value read from a safe literal container or a
-known call-site argument was invisible.  The new route check resolves such a base through the
-same safe value map as the int() checks (and, for an augmented target, through a copy of the
-program with that statement removed), then refuses a constant exponent whose exact result
-leaves int64 by name.  A mutated container, a name with several bindings, disagreeing call
-sites, in-range results and the safe bases 0/1/-1 keep their CPython behaviour.
+known call-site argument was invisible.
+
+On an int64 build the route check resolves such a base through the same safe value map as the
+int() checks (and, for an augmented target, through a copy of the program with that statement
+removed), then refuses a constant exponent whose exact result leaves int64 by name.  A build
+whose integers are exact bigints (ail-ci#198) accepts the same programs and must print what
+CPython prints, so the expectation is chosen from the compiler's own integer semantics: the
+capability probe is an out-of-int64 ``**`` through no route.  A mutated container, a name with
+several bindings, disagreeing call sites, in-range results and the safe bases 0/1/-1 keep
+their CPython behaviour.
 """
 import os
 import subprocess
@@ -44,11 +49,44 @@ def build(directory, name, text, general):
                                capture_output=True, text=True, timeout=900, env=env)
 
 
-def check_refused(test, name, text):
+EXACT_INTEGERS = {}
+
+
+def exact_integers(general):
+    """Whether this build's int is a CPython-style exact bigint instead of int64."""
+    key = bool(general)
+    if key not in EXACT_INTEGERS:
+        with tempfile.TemporaryDirectory(prefix='ail-pre406-cap-') as directory:
+            exe, built = build(directory, 'capability' + ('g' if general else 'd'),
+                               'print(2 ** 63)\n', general)
+            if built.returncode != 0:
+                EXACT_INTEGERS[key] = False
+            else:
+                got = subprocess.run([str(exe)], capture_output=True, timeout=120,
+                                     cwd=directory)
+                EXACT_INTEGERS[key] = (got.returncode == 0
+                                       and got.stdout.strip() == b'9223372036854775808')
+    return EXACT_INTEGERS[key]
+
+
+def check_out_of_range(test, name, text):
     with tempfile.TemporaryDirectory(prefix='ail-pre406-') as directory:
+        want = cpython(directory, name, text)
         for general in (True, False):
-            _, built = build(directory, name + ('g' if general else 'd'), text, general)
-            test.assertNotEqual(built.returncode, 0, (name, general))
+            exe, built = build(directory, name + ('g' if general else 'd'), text, general)
+            if built.returncode == 0:
+                test.assertTrue(exact_integers(general),
+                                (name, general, 'an int64 build accepted an out-of-range power'))
+                got = subprocess.run([str(exe)], capture_output=True, timeout=120,
+                                     cwd=directory)
+                test.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0],
+                                 (name, general, got.stderr[-800:]))
+                test.assertEqual(got.returncode, want[1],
+                                 (name, general, got.stderr[-800:]))
+                continue
+            test.assertFalse(exact_integers(general),
+                             (name, general, 'an exact-integer build refused a CPython value',
+                              (built.stdout + built.stderr)[-1200:]))
             message = built.stdout + built.stderr
             test.assertIn('int64 constant expression out of range', message,
                           (name, general, message[-1200:]))
@@ -190,10 +228,10 @@ print(add(5))
 
 
 class Pre406Tests(unittest.TestCase):
-    def test_a_known_routed_base_out_of_int64_is_refused(self):
+    def test_a_known_routed_base_out_of_int64_matches_cpython(self):
         for slug, text in REFUSED.items():
             with self.subTest(case=slug):
-                check_refused(self, slug, text)
+                check_out_of_range(self, slug, text)
 
     def test_in_range_safe_and_mutated_routes_match_cpython(self):
         for slug, text in MATCH.items():

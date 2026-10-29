@@ -1,3 +1,21 @@
+## 2026-10-29 -- rbpre406: the power-route test follows the tree's integer semantics (job-rbpre406-10292334)
+
+`test_ail_pre406` still passed on this checkout, whose ints are int64: every routed
+out-of-int64 `**`/`**=` case is refused by name.  The exact-bigint integ described by the task
+(ail-ci#198) is not present in this snapshot, so the test now chooses its expectation from a
+capability probe (`print(2 ** 63)`).  An exact-integer build must print CPython's bignum for all
+nine routed cases, while an int64 build keeps the named `int64 constant expression out of
+range` refusal and never `integer overflow`.  The compiler route check still applies on this
+tree and is unchanged; on an exact-integer build it is no longer needed.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p406_dict`, `p406_list`, `p406_argument`,
+`p406_alias`, `p406_negative`, `p406_module_exp`, `p406_aug_dict`, `p406_aug_list`,
+`p406_aug_arg` and `p406_boundary` are refused by name (`int64 constant ... out of range`), and
+`p406_in_range`, `p406_safe_bases`, `p406_mutated`, `p406_container_call` and `p406_no_feature`
+match CPython.  The exact-integer branch could not be exercised because this tree has no such
+build.  Final-state tests: test_ail_pre406, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3; `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- rbpre406: keep the power-route check separate from the module_envs pass (job-rbpre406-10281810)
 
 Re-applying pre406 on today's integ left `test_ail_pre406` and `test_ail_safetynet` failing on
