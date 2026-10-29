@@ -2,8 +2,11 @@
 
 Formats use CPython 3.12's sizes for this host (little-endian x86-64): the standard
 sizes for `= < > !`, native sizes and alignment for `@`. Integer and string codes,
-`c`, `?`, `x`, `s`, `p`, `e f d`, and `P` in native mode are built. `iter_unpack`,
-`pack_into` and the buffer protocol are not built.
+`c`, `?`, `x`, `s`, `p`, `e f d`, and `P` in native mode are built. A format may be a
+`str` or `bytes`; any other type raises CPython's `TypeError`. Unpacking needs a bytes
+or bytearray buffer and raises CPython's `TypeError` for anything else. `iter_unpack`,
+`pack_into`, the buffer protocol and NaN payload bits (the sign is kept, the payload is
+canonicalized; see DIFFERENCES) are not built.
 """
 import math
 
@@ -18,9 +21,30 @@ def _bad(msg: str) -> None:
     raise error(msg)
 
 
+def _format_text(fmt: str) -> str:
+    if isinstance(fmt, str):
+        return fmt
+    if isinstance(fmt, bytes):
+        return fmt.decode("latin-1")
+    name = type(fmt).__name__
+    if (isinstance(fmt, bytearray) or isinstance(fmt, list) or isinstance(fmt, dict)
+            or isinstance(fmt, set)):
+        raise TypeError("unhashable type: '%s'" % name)
+    raise TypeError("Struct() argument 1 must be a str or bytes object, not %s" % name)
+
+
+def _buffer_bytes(buffer) -> bytes:
+    if isinstance(buffer, bytes):
+        return buffer
+    if isinstance(buffer, bytearray):
+        return bytes(buffer)
+    raise TypeError("a bytes-like object is required, not '%s'" % type(buffer).__name__)
+
+
 def _slots(fmt: str) -> list:
-    if not isinstance(fmt, str):
-        _bad("format must be a string")
+    fmt = _format_text(fmt)
+    if "\x00" in fmt:
+        _bad("embedded null character")
     if not fmt:
         return []
     native = True
@@ -86,6 +110,7 @@ def _size(ch: str, native: bool) -> int:
 
 
 def _layout(fmt: str) -> list:
+    fmt = _format_text(fmt)
     slots = _slots(fmt)
     if not fmt:
         return []
@@ -111,6 +136,7 @@ def calcsize(fmt: str) -> int:
 
 
 def _order(fmt: str) -> tuple:
+    fmt = _format_text(fmt)
     if not fmt:
         return "little", True
     first = fmt[0]
@@ -307,11 +333,12 @@ def pack(fmt: str, *values) -> bytes:
 
 
 def unpack_from(fmt: str, buffer, offset: int = 0) -> tuple:
+    fmt = _format_text(fmt)
+    total = calcsize(fmt)
     order, native = _order(fmt)
-    data = bytes(buffer)
+    data = _buffer_bytes(buffer)
     out = []
     original = offset
-    total = calcsize(fmt)
     if offset < 0:
         offset = len(data) + offset
         if offset < 0:
@@ -358,7 +385,7 @@ def unpack_from(fmt: str, buffer, offset: int = 0) -> tuple:
 
 def unpack(fmt: str, buffer) -> tuple:
     need = calcsize(fmt)
-    data = bytes(buffer)
+    data = _buffer_bytes(buffer)
     if len(data) != need:
         _bad("unpack requires a buffer of %d bytes" % need)
     return unpack_from(fmt, data, 0)

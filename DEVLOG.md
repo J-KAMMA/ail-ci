@@ -1,3 +1,28 @@
+## 2026-10-29 -- stdlib36 review: `struct` pin, buffer/format typing, NaN limit
+
+Fixed the four review findings on `stdlib/struct.py`. `test_ail_stdlib36.py` is now pinned (the
+first commit had registered it in `ail_check.py` but left it out of `MANIFEST.json`, so
+`update_manifest.py --check` failed and `par_check.py` stopped in preflight). `unpack` and
+`unpack_from` reject an `int`, list, tuple, str or `None` buffer with CPython's
+`TypeError: a bytes-like object is required, not '<type>'` instead of coercing through `bytes()`.
+A `bytes` format is decoded as Latin-1 and parses like the `str` spelling, while a non-`str`/`bytes`
+format raises CPython's `TypeError` (`Struct() argument 1 must be a str or bytes object, not int`,
+and `unhashable type: 'list'` for the unhashable shapes). The test now covers all three, plus
+bytearray buffers and bytes formats, on both builds.
+
+NaN payload bits remain a documented difference: the pure-AIL float path keeps a NaN's sign but
+canonicalizes its payload, whereas CPython round-trips the bits. A native bit-cast (C FFI or the
+`float64_decode`/`float64_encode` builtins) would give exact bits, but either forces the module
+onto the typed path or is unknown to the general path, and `struct.unpack` returns a dynamic,
+mixed-type tuple only the general path builds. The behavior and the exact probe values are recorded
+as `C?-job-stdlib36-10291029-2`; this is the review's allowed "document the unsupported
+bit-exactness" choice.
+
+Probes in `/tmp/probes` via `cmp.sh` on both builds, HEAD: `p7_bytesfmt`, `p8_strbuf`,
+`p11_unpack_types`, `min` (a plain `unpack`) match CPython; `p9_nan` differs only in the payload
+bits recorded above (sign and `nan` repr match). Tests: `test_ail_stdlib36`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`; `tools/update_manifest.py` then `--check`.
+
 ## 2026-10-29 -- stdlib36: `struct` (job-stdlib36-10291029)
 
 The corpus tally after library batches 3-5 left `struct` as the most used standard module still

@@ -147,6 +147,10 @@ def main() -> None:
     table = {"v": 10}
     print(through("<i", 5).hex(), through("<i", vals[1]).hex(), through("<i", box.value).hex(),
           through("<i", table["v"]).hex())
+    print(struct.calcsize(b"<I"), struct.pack(b"<I", 7).hex(),
+          struct.unpack(b"<I", b"\x07\x00\x00\x00"))
+    print(struct.pack(b"<3p", b"abcdef").hex(), struct.unpack(b"<3p", b"\x02ab")[0])
+    print(struct.unpack(b"<H", bytearray(b"\x01\x02")))
 
 
 main()
@@ -210,6 +214,12 @@ def main() -> None:
         struct.pack("0", 1)
     except struct.error as error:
         print("repeat", "error", str(error))
+    for value in ("<I\x00", b"<I\x00", b"\xff", "<z"):
+        try:
+            struct.calcsize(value)
+            print("format-text", "ok")
+        except struct.error as error:
+            print("format-text", "error", str(error))
     try:
         struct.unpack("<i", b"ab")
     except struct.error as error:
@@ -222,6 +232,23 @@ def main() -> None:
         struct.unpack_from("<i", b"12345678", -9)
     except struct.error as error:
         print("offset", "error", str(error))
+    for value in (5, 5.0, None, [1], {1: 2}, {1}, bytearray(b"<I")):
+        try:
+            struct.calcsize(value)
+            print("format", "ok")
+        except TypeError as error:
+            print("format", type(error).__name__, str(error))
+    for value in (4, [1, 2, 3, 4], (1, 2, 3, 4), "abcd", None):
+        try:
+            struct.unpack("<I", value)
+            print("buffer", "ok")
+        except TypeError as error:
+            print("buffer", type(error).__name__, str(error))
+        try:
+            struct.unpack_from("<H", value, 0)
+            print("from-buffer", "ok")
+        except TypeError as error:
+            print("from-buffer", type(error).__name__, str(error))
 
 
 main()
