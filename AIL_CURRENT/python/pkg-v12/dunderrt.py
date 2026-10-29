@@ -618,7 +618,15 @@ def patch(text, inplace=False):
     anchor = 'static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n'
     if text.count(anchor) != 1:
         raise RuntimeError('dunderrt: no unique anchor for the helpers')
-    text = text.replace(anchor, FUNCS + HASH_FUNC + anchor, 1)
+    funcs = FUNCS
+    import biggate
+    if biggate.ON:
+        # `+x` of a big int is itself (AIL_T_BIG exists only in a big int build)
+        pos = '    else if (x.tag == AIL_T_INT || x.tag == AIL_T_FLOAT) { *out = x; return AIL_OK; }\n'
+        if funcs.count(pos) != 1:
+            raise RuntimeError('dunderrt: no unique unary + arm')
+        funcs = funcs.replace(pos, pos.replace('x.tag == AIL_T_FLOAT)', 'x.tag == AIL_T_FLOAT || x.tag == AIL_T_BIG)'))
+    text = text.replace(anchor, funcs + HASH_FUNC + anchor, 1)
     # the conditions of the program's own code (if / while / and / or / ?:) ask the class of an instance
     mark = '/* ---- interned attribute-name ids ---- */'
     k = text.find(mark)

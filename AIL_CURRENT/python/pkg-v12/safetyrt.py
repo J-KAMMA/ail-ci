@@ -2935,3 +2935,108 @@ static ail_st ail2c_casefold(ail_ctx *cx, ail_obj *out, ail_obj sobj) {
 def text(needed):
     """The fragments `needed` names, in a fixed order (so the C does not depend on the order of first use)."""
     return ''.join(FRAGMENTS[k] for k in ORDER if k in needed)
+
+
+# ---- object.__repr__ and the '0' flag of a format spec: patched into the C of the programs that can reach them ----
+
+def patch_object_repr(c_text):
+    """The repr of an instance whose class has no __repr__ / __str__: CPython's `<__main__.Name object at 0x...>`
+    (the address differs from CPython's in any two runs, the shape does not). Applied to a program with a class."""
+    old = '            fputs("<", f); ail_str_write(ail_view_to_str(c->name), f); fputs(" object>", f);\n'
+    new = ('            fputs("<__main__.", f); ail_str_write(ail_view_to_str(c->name), f);\n'
+           '            fprintf(f, " object at 0x%llx>", (unsigned long long)(uintptr_t)x.o);\n')
+    if c_text.count(old) != 1:
+        raise AssertionError('safetyrt: no place for the object repr')
+    return c_text.replace(old, new)
+
+
+# (old, new): the format() / str.format() spec parser of the general runtime and the f-string / % one (FMT)
+_ZERO_FLAG_EDITS = (
+    # format() / str.format(): the '0' flag pads with '0' unless a fill was given, and aligns '=' (numbers) /
+    # '<' (str) unless an alignment was -- marked '0' here, resolved by the caller that knows the value's kind
+    ("    if (i < n && ail_chr(spec, i) == '0') { if (!f.align) { f.align = '='; f.fill = '0'; } i++; }\n"
+     "    while (i < n && ail_chr(spec, i) >= '0' && ail_chr(spec, i) <= '9') { f.width = f.width * 10 + (int)(ail_chr(spec, i) - '0'); i++; }\n"
+     "    if (i < n && (ail_chr(spec, i) == ',' || ail_chr(spec, i) == '_')) { f.group = (char)ail_chr(spec, i); i++; }\n",
+     "    if (i < n && ail_chr(spec, i) == '0') { if (!(n >= 2 && (c1 == '<' || c1 == '>' || c1 == '^'))) { f.fill = '0'; if (!f.align) f.align = '0'; } i++; }\n"
+     "    while (i < n && ail_chr(spec, i) >= '0' && ail_chr(spec, i) <= '9') { f.width = f.width * 10 + (int)(ail_chr(spec, i) - '0'); i++; }\n"
+     "    if (i < n && (ail_chr(spec, i) == ',' || ail_chr(spec, i) == '_')) { f.group = (char)ail_chr(spec, i); i++; }\n"),
+    ("static inline ail_obj ail__pad(ail_ctx *cx, const char *content, int64_t clen, ail_fmtspec f, int numeric) {\n"
+     "    char align = f.align ? f.align : (numeric ? '>' : '<');\n",
+     "static inline ail_obj ail__pad(ail_ctx *cx, const char *content, int64_t clen, ail_fmtspec f, int numeric) {\n"
+     "    char align = f.align ? f.align : (numeric ? '>' : '<');\n"
+     "    if (align == '0') align = numeric ? '=' : '<';\n"),
+    ("    if (f.align == '=' && f.fill == '0') while",
+     "    if ((f.align == '=' || f.align == '0') && f.fill == '0') while"),
+    ("        char align = f.align ? f.align : '<';\n        int64_t pad = f.width - cs.n; if (pad < 0) pad = 0;\n",
+     "        char align = f.align && f.align != '0' ? f.align : '<';\n        int64_t pad = f.width - cs.n; if (pad < 0) pad = 0;\n"),
+    # f-strings and %: the same rule (a fill given before the alignment makes the 0 the width's first digit)
+    ("    if (i < n && ail_chr(s, i) == '0') { f->zero = 1; i++; }\n",
+     "    if (i < n && ail_chr(s, i) == '0' && !(i >= 2 && AIL2F_ALIGN(ail_chr(s, 1)))) { f->zero = 1; i++; }\n"),
+    ("    char align = f->align ? f->align : (f->zero ? '=' : '>');\n"
+     "    uint16_t fill = (f->zero && !f->align) ? '0' : f->fill;\n",
+     "    char align = f->align ? f->align : (f->zero ? '=' : '>');\n"
+     "    uint16_t fill = f->zero ? '0' : f->fill;\n"),
+    ("    char align = f->align ? f->align : dflt;\n"
+     "    uint16_t fill = (f->zero && !f->align) ? '0' : f->fill;\n",
+     "    char align = f->align ? f->align : dflt;\n"
+     "    uint16_t fill = f->zero ? '0' : f->fill;\n"),
+    ("        if (f.zero && !left) { f.align = 0; }\n",
+     "        if (f.zero && !left) { f.align = 0; }\n"
+     "        if (left) f.zero = 0;                  /* printf: '-' overrides '0' */\n"),
+)
+
+
+def patch_zero_flag(c_text):
+    """`format(5, "<08d")` is '50000000' and `f"{s:05}"` of a str is 'ab000': the '0' flag fills with '0' whatever
+    the alignment (CPython 3.10+). The parts of the runtime this program does not carry are left alone."""
+    fmt = _ZERO_FLAG_EDITS[4][0] in c_text          # the f-string / % fragment is in this program's runtime
+    for k, (old, new) in enumerate(_ZERO_FLAG_EDITS):
+        count = c_text.count(old)
+        if count != (1 if k < 4 or fmt else 0):
+            raise AssertionError('safetyrt: %d places for the zero flag: %r' % (count, old[:60]))
+        c_text = c_text.replace(old, new)
+    return c_text
+
+
+_SPEC = None
+
+
+def wants_zero_flag(tree):
+    """Whether a format spec of the program can carry the '0' flag together with an alignment or apply it to a
+    str (where the runtime used to differ): a literal spec that does, or any spec built at run time."""
+    import ast
+    import re
+    global _SPEC
+    if _SPEC is None:
+        _SPEC = re.compile(r'^(?:.?([<>=^]))?[-+ ]?z?#?0\d*[,_]?(?:\.\d+)?([a-zA-Z%]?)$')
+
+    def literal(spec):
+        m = _SPEC.match(spec)
+        return bool(m) and (m.group(1) is not None or m.group(2) in ('', 's'))
+
+    def fields(text):
+        """The specs of a str.format template."""
+        out = []
+        for part in re.findall(r'\{[^{}]*\}', text.replace('{{', '').replace('}}', '')):
+            if ':' in part:
+                out.append(part[1:-1].split(':', 1)[1])
+        return out
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FormattedValue) and node.format_spec is not None:
+            parts = node.format_spec.values
+            if not all(isinstance(p, ast.Constant) for p in parts):
+                return True
+            if literal(''.join(p.value for p in parts)):
+                return True
+        elif isinstance(node, ast.Call):
+            f = node.func
+            if isinstance(f, ast.Name) and f.id == 'format' and len(node.args) >= 2:
+                spec = node.args[1]
+                if not (isinstance(spec, ast.Constant) and isinstance(spec.value, str)) or literal(spec.value):
+                    return True
+            elif isinstance(f, ast.Attribute) and f.attr == 'format':
+                if not (isinstance(f.value, ast.Constant) and isinstance(f.value.value, str)):
+                    return True
+                if any('{' in s or literal(s) for s in fields(f.value.value)):
+                    return True
+    return False

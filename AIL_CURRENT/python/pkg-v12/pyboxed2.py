@@ -3964,8 +3964,59 @@ class Compiler(boxclosure.ClosureMixin):
         for kind, what in body_order:
             class_body.append((kind,) + (class_attrs[what] if kind == 'a' else (what,)))
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
-                                   'class_body': class_body, 'dc': dc, 'dc_hide': hide}
+                                   'class_body': class_body, 'dc': dc, 'dc_hide': hide,
+                                   'slots': self._class_slots(node)}
         self.class_order.append(node.name)
+
+    @staticmethod
+    def _class_slots(node):
+        """The names a class body's `__slots__` declares (a str, or a tuple / list of str literals), or None
+        when it has no __slots__ (its instances keep a __dict__ and take any attribute)."""
+        found = None
+        for item in node.body:
+            if isinstance(item, ast.Assign) and any(isinstance(t, ast.Name) and t.id == '__slots__' for t in item.targets):
+                found = item.value
+            elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) and item.target.id == '__slots__':
+                found = item.value
+        if found is None:
+            return None
+        if isinstance(found, ast.Constant) and isinstance(found.value, str):
+            return (found.value,)
+        if isinstance(found, (ast.Tuple, ast.List)) and all(isinstance(e, ast.Constant) and isinstance(e.value, str)
+                                                            for e in found.elts):
+            return tuple(e.value for e in found.elts)
+        raise Unsupported('__slots__ of class %s that is not a str or a tuple / list of str literals'
+                          ' (which names an instance may hold has to be known here)' % node.name)
+
+    def _slots_guard(self, obj, attr, ctx):
+        """obj.NAME = v where an instance of a class whose whole base chain has __slots__ (no __dict__) and NAME
+        is not one of its slots: CPython's AttributeError instead of a new attribute. Emits nothing when no such
+        class exists."""
+        bad = []
+        for c in self.class_order:
+            if self.classes[c].get('slots') is None:
+                continue
+            chain, k = [], c
+            while k is not None:
+                chain.append(k)
+                k = self.classes[k]['base'] if k in self.classes else None
+            if any(k not in self.classes or self.classes[k].get('slots') is None for k in chain):
+                continue                          # a base without __slots__ (or Exception) gives a __dict__
+            if any(attr in self.classes[k]['slots'] for k in chain):
+                continue
+            if any(attr in self.classes[k]['methods'] or ('__ail_set_' + attr) in self.classes[k]['methods']
+                   for k in chain):
+                continue
+            fixed = any(attr == a[0] for k in chain for a in self.classes[k]['class_attrs'])
+            msg = ("'%s' object attribute '%s' is read-only" if fixed else "'%s' object has no attribute '%s'") % (c, attr)
+            bad.append((c, msg))
+        if not bad:
+            return
+        ctx.uses_st = True
+        for c, msg in bad:
+            ctx.emit('if (%s.tag == AIL_T_INST && ((ail_instobj *)%s.o)->cls.o == g_slots_arr[%d].o) { '
+                     'st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, %s); goto %s; }'
+                     % (obj, obj, self.global_slots['class:' + c], c_str_literal(msg), ctx.cur_err_target()))
 
     def _class_definition(self, cname, attr):
         """The last definition of `attr` in `cname`'s own class body: ('a', name, value, slot) for a
@@ -5940,6 +5991,10 @@ class Compiler(boxclosure.ClosureMixin):
         # with NotImplemented in the program the run time's dispatch decides (it tries the other operand next)
         cname = self._inst_class(an, ctx) if an is not None and not self.uses_ni else None
         dunder = {ast.Eq: '__eq__', ast.Lt: '__lt__'}.get(type(op))
+        rich = {ast.Gt: '__gt__', ast.LtE: '__le__', ast.GtE: '__ge__'}.get(type(op))
+        if cname and rich and self._resolve_method(cname, rich):
+            # `>` / `<=` / `>=` call the class's own method (the run time's ail_op_gt/le/ge only know __lt__)
+            dunder = rich
         invert = False
         if cname and type(op) is ast.NotEq:
             # C42: `!=` asks __ne__ when the class (or a subclass) defines it, otherwise it is the negation of __eq__
@@ -5981,9 +6036,47 @@ class Compiler(boxclosure.ClosureMixin):
              ast.LtE: 'ail_op_le', ast.Gt: 'ail_op_gt', ast.GtE: 'ail_op_ge'}.get(type(op))
         if fn is None:
             raise Unsupported('the %s comparison operator' % type(op).__name__)
+        if not self.uses_ni and self._rich_cmp_dispatch(a, op, b, t, fn, ctx):
+            return t
         ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, t, a, b))
         ctx.check()
         return t
+
+    _RICH_CMP = {ast.Gt: ('__gt__', '__lt__'), ast.LtE: ('__le__', '__ge__'), ast.GtE: ('__ge__', '__le__'),
+                 ast.Lt: ('__lt__', '__gt__')}
+
+    def _rich_cmp_dispatch(self, a, op, b, t, fn, ctx):
+        """`a OP b` on operands of no static class, in a program whose classes define __gt__ / __le__ / __ge__
+        (the run time's ail_op_* only know __lt__): a's own method when a is an instance of such a class, else
+        b's reflected one (CPython's order), else the run time's operator. False when no class defines one."""
+        if type(op) not in self._RICH_CMP:
+            return False
+        own, reflected = self._RICH_CMP[type(op)]
+        if not any(m in self.classes[c]['methods'] for c in self.class_order for m in ('__gt__', '__le__', '__ge__')):
+            return False
+        def owners(mname):
+            found = [c for c in self.class_order if self._resolve_method(c, mname)]
+            return sorted(found, key=lambda c: -sum(1 for k in self.classes if self._is_subclass_of(c, k)))
+        arms = [(a, b, c, own) for c in owners(own)]
+        arms += [(b, a, c, reflected) for c in owners(reflected) if reflected != '__lt__']
+        if not arms:
+            return False
+        first = True
+        for recv, other, c, mname in arms:
+            info = self._resolve_method(c, mname)
+            ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(recv, c)))
+            first = False
+            ctx.indent += 1
+            ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], t, recv, other))
+            ctx.check()
+            ctx.indent -= 1
+        ctx.emit('} else {')
+        ctx.indent += 1
+        ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, t, a, b))
+        ctx.check()
+        ctx.indent -= 1
+        ctx.emit('}')
+        return True
 
     _TYPE_NAMES = frozenset(('int', 'str', 'float', 'bool', 'list', 'dict', 'tuple', 'set', 'frozenset', 'bytes',
                              'bytearray', 'complex', 'range'))
@@ -7139,7 +7232,13 @@ class Compiler(boxclosure.ClosureMixin):
         import bigcap
         big_hard = bigcap.marked(tree, local=False)          # always stay general
         big_local = bigcap.marked(tree)
+        # A decorated function is bound to what its decorator returns (functools.lru_cache's
+        # memoised wrapper, ...): a clone of the undecorated body called in its place would skip
+        # the decorator (a cached recursion would run exponentially).
+        decorated = {n.name for n in tree.body if isinstance(n, ast.FunctionDef) and n.decorator_list}
         for name, cand in sorted(report.candidates.items()):
+            if name in decorated:
+                continue
             # A clone's ABI is int64 in and out (the boxed caller unboxes the result), so an
             # annotated function whose own local proof can leave int64 cannot be a clone either:
             # `build` returning 2**70 would overflow before its caller ever saw the shift count.
@@ -7976,6 +8075,7 @@ class Compiler(boxclosure.ClosureMixin):
         vs = []
         flags = []
         any_flat = False
+        shown = []          # (index in vs, class): print() calls __str__ only once every argument is evaluated
         for i, a in enumerate(args):
             leaves = self._str_concat_leaves(a, ctx)
             if leaves is None:
@@ -7983,7 +8083,11 @@ class Compiler(boxclosure.ClosureMixin):
                 cname = self._inst_class(a, ctx)
                 if cname and (self._str_lookup(cname) or
                               self._virtual_plan(cname, self._str_lookup)[1]):
-                    v = self._to_str_slot(v, cname, ctx)
+                    rest = list(args[i + 1:]) + list(kwargs.values())
+                    if any(isinstance(n, (ast.Call, ast.NamedExpr)) for r in rest for n in ast.walk(r)):
+                        shown.append((len(vs), cname))
+                    else:
+                        v = self._to_str_slot(v, cname, ctx)
                 vs.append(v)
                 flags.append('1' if i else '0')
             else:
@@ -7991,6 +8095,8 @@ class Compiler(boxclosure.ClosureMixin):
                 for j, leaf in enumerate(leaves):
                     vs.append(self._print_concat_leaf(leaf, ctx))
                     flags.append('1' if i and not j else '0')
+        for k, cname in shown:
+            vs[k] = self._to_str_slot(vs[k], cname, ctx)
         sep = self.expr(kwargs['sep'], ctx) if 'sep' in kwargs else self._str_lit_slot(' ', ctx)
         end = self.expr(kwargs['end'], ctx) if 'end' in kwargs else self._str_lit_slot('\n', ctx)
         if not vs:
@@ -8377,6 +8483,11 @@ class Compiler(boxclosure.ClosureMixin):
         if _literal_chain_attr(args[1]):
             raise Unsupported('writing %s (exception chaining is not kept here)' % args[1].value)
         o, n, v = (self.expr(a, ctx) for a in args)
+        if any(self.classes[c].get('slots') is not None for c in self.class_order):
+            if not (isinstance(args[1], ast.Constant) and isinstance(args[1].value, str)):
+                raise Unsupported('setattr() with a computed name in a program with a __slots__ class'
+                                  ' (which names an instance may hold is checked per literal name)')
+            self._slots_guard(o, args[1].value, ctx)
         self.rt_needs.add('attr')
         t = ctx.tmp()
         ctx.emit('st = ail2a_setattr(cx, &%s, %s, %s, %s);' % (t, o, n, v))
@@ -11427,6 +11538,7 @@ class Compiler(boxclosure.ClosureMixin):
             self._refuse_class_attr_store(target.value, target.attr, ctx)
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
+            self._slots_guard(obj, target.attr, ctx)
             setters = [c for c in self.class_order if '__ail_set_' + target.attr in self.classes[c]['methods']]
             if setters:
                 # obj.NAME = v where a class has a property setter for NAME
@@ -11730,6 +11842,7 @@ class Compiler(boxclosure.ClosureMixin):
             new = ctx.tmp()
             ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
             ctx.check()
+            self._slots_guard(obj, t.attr, ctx)
             ctx.emit('st = ail_inst_setattr_chk(cx, %s, g_attr_%s, %s);' % (obj, t.attr, new))
             ctx.check()
             return
@@ -12763,6 +12876,12 @@ def _build(source, report, allow_mix=True):
     if compiler.dunder_ops:
         import dunderrt
         body = dunderrt.patch(body, inplace=compiler.dunder_inplace)
+    if compiler.classes:
+        import safetyrt
+        body = safetyrt.patch_object_repr(body)
+    import safetyrt
+    if safetyrt.wants_zero_flag(ast.parse(source)):
+        body = safetyrt.patch_zero_flag(body)
     if compiler.generators:
         import safetyrt
         body = safetyrt.patch_generators(body)

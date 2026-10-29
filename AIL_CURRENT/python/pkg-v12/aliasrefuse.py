@@ -538,6 +538,16 @@ class _Walk(object):
             for n in ast.walk(node):
                 if isinstance(n, ast.Call):
                     self.call(n, st)
+        # a name passed to a call is read when that call runs, after the calls in its other arguments
+        # (`print(xs, h.take())` shows xs after take() wrote it): mention those names again
+        for node in nodes:
+            for n in ast.walk(node):
+                if isinstance(n, ast.Call):
+                    args = list(n.args) + [k.value for k in n.keywords]
+                    if any(isinstance(m, ast.Call) for a in args for m in ast.walk(a)):
+                        for a in args:
+                            if isinstance(a, ast.Name):
+                                self.mention(a.id)
 
     def target(self, t, value, rs, st):
         if isinstance(t, ast.Name):

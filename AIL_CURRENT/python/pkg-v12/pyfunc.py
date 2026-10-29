@@ -8751,7 +8751,7 @@ def _fstring_field(fv, ctx):
         return _list_text(val, kind, ctx)
     if kind not in (INT, FLT, STR):
         raise Unsupported('an f-string field of type %s; only an int, float or str expression '
-                          'is built inside {}' % kind)
+                          'is built inside {}' % (kind,))
     pre = None
     if fv.conversion == 114:
         pre = _repr_conv(val, kind, ctx)
@@ -22544,6 +22544,17 @@ def _try_finally_stmt(node, ctx, ind):
     return out
 
 
+# calls that read their arguments without changing them (a later print() argument calling one cannot change a list
+# shown before it)
+_PRINT_PURE_CALLS = frozenset(('len', 'sum', 'min', 'max', 'abs', 'round', 'str', 'repr', 'int', 'float', 'bool',
+                               'sorted', 'any', 'all', 'ord', 'chr', 'hex', 'oct', 'bin', 'format', 'range',
+                               'isinstance', 'divmod', 'pow', 'hash'))
+_PRINT_PURE_METHODS = frozenset(('count', 'index', 'find', 'rfind', 'startswith', 'endswith', 'join', 'split',
+                                 'rsplit', 'strip', 'lstrip', 'rstrip', 'lower', 'upper', 'replace', 'get', 'copy',
+                                 'keys', 'values', 'items', 'isdigit', 'isalpha', 'isspace', 'format', 'zfill',
+                                 'center', 'ljust', 'rjust', 'title', 'capitalize', 'encode', 'decode'))
+
+
 def _print_stmt(node, ctx, pad):
     """`print(...)` as a bare statement -- F3, the output channel the program itself controls
     (DESIGN_FOUNDATION_20260914.md section 5), replacing the harness `main` that used to be the
@@ -22605,7 +22616,23 @@ def _print_stmt(node, ctx, pad):
         return slot
 
     writers = []              # [(kind, staged value)], one per positional argument, in order
-    for a0 in node.args:
+    deferred = []             # (writers index, node, type): a list shown after the later arguments ran
+    def later_effects(index):
+        """A positional argument after `index`, or sep= / end=, can run code that mutates a list: `:=`, a call of
+        a function or class of the program, or a method other than the str / list / dict readers."""
+        rest = list(node.args[index + 1:]) + [kw.value for kw in node.keywords]
+        for n in (n for r in rest for n in ast.walk(r)):
+            if isinstance(n, ast.NamedExpr):
+                return True
+            if isinstance(n, ast.Call):
+                f = n.func
+                if isinstance(f, ast.Name) and f.id in _PRINT_PURE_CALLS:
+                    continue
+                if isinstance(f, ast.Attribute) and f.attr in _PRINT_PURE_METHODS:
+                    continue
+                return True
+        return False
+    for index, a0 in enumerate(node.args):
         if _is_bool_expr(a0, ctx):
             # A bool prints as True/False (boolkind.py); the note below is about the first case.
             # `print(s.isdigit())` -- AIL_TASK_strops_20260915.md stage 4. `.isdigit()` returns a
@@ -22657,7 +22684,17 @@ def _print_stmt(node, ctx, pad):
             _exc_text_parts(ctx)
             writers.append(('str', stage(STR, 'ail_exc_text(%s, &%s)' % (_exception_value(a0, ctx), ctx.sarena()))))
         elif _list_text_ok(a0, t, ctx):
-            writers.append(('str', stage(STR, _list_text(a0, t, ctx))))
+            if later_effects(index):
+                # CPython turns every argument into text only after all of them were evaluated:
+                # `print(xs, xs.pop())` shows the list without the popped element
+                if not isinstance(a0, ast.Name):
+                    raise Unsupported('print() of a list followed by an argument that runs code (a call) that may '
+                                      'change it: CPython shows the list as it is after that call.\n'
+                                      '  write instead: make the call first and print after (`v = f(); print(xs, v)`)')
+                deferred.append((len(writers), a0, t))
+                writers.append(None)
+            else:
+                writers.append(('str', stage(STR, _list_text(a0, t, ctx))))
         else:
             raise Unsupported('print() given a %s, not a number or a str.\n'
                                '  write instead: print an element or a measurement (`print(xs[0])`, '
@@ -22669,6 +22706,8 @@ def _print_stmt(node, ctx, pad):
             sepc = stage(STR, _str_value(kw.value, ctx))
         elif kw.arg == 'end':
             endc = stage(STR, _str_value(kw.value, ctx))
+    for k, a0, t in deferred:
+        writers[k] = ('str', stage(STR, _list_text(a0, t, ctx)))
 
     pre = ''.join(stages) + _flush(ctx, pad)
     ctx.uses_io = True
