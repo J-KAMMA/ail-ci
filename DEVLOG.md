@@ -1,3 +1,42 @@
+## 2026-10-29 -- pre443: the rbpre385 recorded items do not differ on this tree (job-pre443-10300212)
+
+The task text named no concrete item; the review it was cut from is the last review of the public
+branch `job-rbpre385-10281859`, whose "Pre-existing" prose was dropped by the task export.  That
+review recorded two pre-existing items: (a) a list/attribute/dict-held Invert base for `**`
+(`take(64)` with `vals = [~2]`, `Config.base = ~2` or `settings = {"base": ~2}`) compiled on
+both builds and stopped with `integer overflow`, where CPython prints the bignum 3**64; and
+(b) the `r14` fold-budget diagnostic value `2**64` where the exact value is `3**64`.  The first
+review of the same job (`job-rbpre385-10281430`) had also listed five pre-existing items: a
+default argument (`power(2)` with `e=100`), a keyword `power(e=..., b=...)`, a routed augmented
+`b **= e`, a loop with a mutated exponent, and a class-attribute assignment (already a named
+"not in the subset" refusal).
+
+Reproduced all of them on both builds with `cmp.sh`.  None still differs: this tree compiles a
+`--syntax python` program with exact big ints (`biggate.ON`, `docs/design/BIGINT.md`), so the
+int64 power refusals (`refuse_variable_int_pow`, `refuse_int_pow_overflow`,
+`_check_int64_pow_constants`, `_check_constant_power`) are skipped for Python syntax and the
+run-time trap is replaced by a big int.  `vals[0] ** 64`, `Config.base ** 64`,
+`settings["base"] ** 64`, their `pow()` spellings and `(~2) ** 64` directly, by module
+assignment, as a default, as a class value and in an f-string all print CPython's
+3433683820292512484657849089281 on the general and default builds; the huge-exponent forms
+`(~2) ** (1 << 20)` exit 1 with CPython's own 4300-digit `ValueError` text.  The earlier five
+items match CPython too (`power(2)`, keyword and augmented forms, loop-mutated exponent) or are
+refused by name as before (a function with defaults used first-class, a method on an unknown
+static kind); none produces a wrong value or a run-time trap.
+
+Probes in `/tmp/probes/pre443` (66 programs, both builds via `cmp.sh`): `q01`-`q06` list,
+attribute and dict Invert base through `**`/`pow()`; `q10`-`q15` constant `(~2) ** 64` direct,
+module assignment, default, class body and f-string; `a01`-`a18` exponents 63/64/65, `(-3)`,
+parameter and loop exponents, list/attr/dict routes, enclosing arithmetic and the
+`1 << 20` huge-exponent forms; `b01`-`b06` annotated/`typing` spellings; `c01`-`c10` alias,
+tuple, nested list, instance attribute, `dict.get`, function argument, `pow` alias, class
+assignment, module tuple and negative exponent; `p_r04*`-`p_r17*` the earlier review's default,
+keyword, augmented, loop and class-attribute shapes.  All match CPython except the three named
+refusals above.  No code, test or DIFFERENCES change; `test_ail_pre443.py` is not added because
+there is no differing case to pin.  Final-state tests on this commit: test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` run and `--check`
+passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
