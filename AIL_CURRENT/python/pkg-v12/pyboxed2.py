@@ -12429,6 +12429,11 @@ _GENEXP_EAGER_CALLS = frozenset({
     'next', 'bytes', 'bytearray', 'Counter', 'array',
 })
 _GENEXP_EAGER_METHODS = frozenset({'join', 'extend', 'update', 'array'})
+# A method call that may materialise the whole argument at the same point of the program.  Only
+# `join` qualifies for a *nested* generator: `extend`/`update` interleave their appends with the
+# argument's elements in CPython, so an element that inspects the receiver sees a different state
+# once this path has built the whole list first.
+_GENEXP_NESTED_AT_ONCE_METHODS = frozenset({'join'})
 # Builtins whose call cannot raise one of the five catchable traps this compiler models, so a
 # generator element that only uses them keeps the existing eager lowering.
 _GENEXP_SAFE_CALLS = frozenset({
@@ -12468,16 +12473,45 @@ def _genexp_consumed_in_place(node, parents):
     return False
 
 
+def _genexp_nested_outer_consumed_at_once(node, parents):
+    """True iff a generator expression is read to completion by one call or unpack at the point it
+    is built, with no user code between elements.  A `for`/comprehension source is excluded:
+    CPython pulls a generator lazily there, so the eager list would run ahead of the loop body
+    (break, short-circuit, or a mutation made by the body).  Only a lone positional argument is
+    allowed: a start/key/other argument is evaluated between generator creation and iteration in
+    CPython but after the whole eager list here."""
+    par = parents.get(node)
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, ast.Call) and len(par.args) == 1 and not par.keywords \
+            and par.args[0] is node:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in _GENEXP_EAGER_CALLS:
+            return True
+        if isinstance(f, ast.Attribute) and f.attr in _GENEXP_NESTED_AT_ONCE_METHODS:
+            return True
+    return False
+
+
+def _genexp_in_iterable_position(node, parents):
+    """True iff `node` is the iterable of a for/comprehension clause.  CPython creates such a
+    generator lazily and pulls it interleaved with the enclosing loop, so materialising it first
+    changes side-effect order, lets it run past break/short-circuit, and snapshots a source the
+    enclosing loop may mutate."""
+    par = parents.get(node)
+    return isinstance(par, (ast.For, ast.AsyncFor, ast.comprehension)) and par.iter is node
+
+
 def _nested_genexp_unconsumed(tree, skip=()):
     """The first nested generator expression that cannot keep the eager lowering, or None.
 
-    An inner generator may be materialised like the outer one only when both are read at the
-    same point: every generator expression in the nesting is consumed in place (a for source,
-    a comprehension source, a starred/unpacked value, or an argument to a builtin that reads
-    the whole value).  A saved outer generator still has to be refused: its inner generator
-    is created by CPython only when an element is reached, so materialising it while the
-    outer value is built would move its side effects (and the element would be a list, not a
-    generator)."""
+    An inner generator may be materialised like the outer one only when the whole value is read at
+    the same point: the outer generator is consumed at once by a builtin call or a starred unpack,
+    no generator in the nesting sits in another generator's iterable (where CPython would pull it
+    lazily, interleaved with the outer loop), and every inner generator is consumed in place.
+    A saved outer generator still has to be refused: its inner generator is created by CPython only
+    when an element is reached, so materialising it while the outer value is built would move its
+    side effects (and the element would be a list, not a generator)."""
     parents = {}
     for par in ast.walk(tree):
         for child in ast.iter_child_nodes(par):
@@ -12490,10 +12524,12 @@ def _nested_genexp_unconsumed(tree, skip=()):
                  if n is not node and isinstance(n, ast.GeneratorExp)]
         if not inner:
             continue
-        if not _genexp_consumed_in_place(node, parents):
+        if not _genexp_nested_outer_consumed_at_once(node, parents):
             return node
         for nested in inner:
-            if not _genexp_consumed_in_place(nested, parents):
+            if _genexp_in_iterable_position(nested, parents):
+                return nested
+            if not _genexp_nested_outer_consumed_at_once(nested, parents):
                 return nested
     return None
 

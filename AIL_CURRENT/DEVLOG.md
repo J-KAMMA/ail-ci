@@ -1,3 +1,29 @@
+## 2026-10-29 -- cov34 review fix: refuse lazy nested-generator shapes (job-cov34-10290857)
+
+The review found that admitting every consumed-in-place nesting still lowered an inner
+generator eagerly.  That changed CPython's interleaved side-effect order
+(`sum(g(y) for y in (f(z) for z in range(2)))`), ran the inner list past a `break`/
+short-circuit, and snapshotted a source the loop body appends to.  `_nested_genexp_unconsumed`
+now admits a nesting only when each generator in it is read to completion at once: a lone
+positional argument of a whole-value builtin call, a lone argument of `str.join` (the one method
+whose result does not observe a receiver being mutated), or a starred unpack.  A generator in
+another generator's iterable, an extra positional/keyword argument (start/key are evaluated at a
+different point), an unpacking assignment, and a saved generator stay refused by name with the
+existing message.  `extend`/`update` are excluded for a nested value because CPython interleaves
+their appends with the element evaluation; the old `_genexp_consumed_in_place` still governs a
+top-level generator, unchanged.
+
+The three corpus programs (deepseek t172, deepseek t432, glm t432) use join/sum in element
+position and still compile on both builds and match CPython with no stdin and their task input.
+Refusal counts stay at the previous result: default 24 -> 21, general 24 -> 21.  Probes
+ref_order, ref_break, ref_mutate, ref_for_outer, ref_comp_source, ref_outer_start,
+ref_inner_start, ref_unpack, ref_saved, ref_any and ref_extend are refused by name on both
+builds; pos_element (side-effect order), pos_containers (list/tuple/sorted/min/max/dict/set,
+empty and negative), pos_routes (argument, list item, attribute, dict value, alias) and pos_star
+(starred outer and inner) match CPython on both builds.
+Final-state tests: test_ail_cov34 (16 tests), test_ail_pre42, test_ail_corpus_findings3,
+test_ail_files and test_ail_safetynet pass; tools/update_manifest.py --check passes.
+
 ## 2026-10-29 -- cov34: nested generator expressions consumed in place (job-cov34-10290857)
 
 Re-ran the corpus refusals on this tree (219 programs, default and `AIL_UNIFIED_FORCE=1`):

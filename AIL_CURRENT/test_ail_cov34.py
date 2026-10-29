@@ -1,12 +1,15 @@
 """Cov34: nested generator expressions consumed in place, compared with CPython 3.12.
 
 A generator expression is materialised like a list comprehension on the general path.  An inner
-generator expression may take that same lowering when every generator expression in the nesting is
-read at the point it is built: the outer one is an argument of a whole-value builtin (sum, join,
-list, sorted, ...), a for/comprehension source, or a starred/unpacked value, and each inner one is
-consumed the same way.  Then the value is created and read at the same point as CPython.  A saved
-outer generator still names the refusal: CPython creates its inner generators lazily, so the eager
-inner lowering would move their side effects and store lists where CPython stores generators.
+generator expression may take that same lowering only when the whole value is read at the point it is
+built: each generator in the nesting is a lone positional argument of a whole-value builtin
+(sum, list, sorted, join, ...) or a starred unpack, and no generator in the nesting sits in another
+generator's iterable.  CPython pulls such an iterable lazily and interleaves it with the outer loop,
+so an eager list would change side-effect order, run past break/short-circuit, and snapshot a source
+the loop may mutate; those shapes stay named refusals.  Extra call arguments, receivers whose
+appends are interleaved (`extend`/`update`), and saved outer generators are refused for the same
+reason: CPython evaluates or consumes them at a different point, and its inner generators are lazy
+where this path stores lists.
 """
 import os
 import subprocess
@@ -30,12 +33,12 @@ def main() -> None:
     print(sum(sum(y for y in src(x)) for x in ys))
     print(" ".join(" ".join(str(v) for v in row) for row in [[], [1], [2, 3]]))
     print(list(list(z for z in range(y)) for y in [0, 1, 3]))
-    print(sum(y for y in (z for z in [1, 2, 3])))
+    print(sum(sum(y for y in [z]) for z in [1, 2, 3]))
     print(sum(x for x in [-1, 0, 2] if any(y for y in [x])))
     print(min(sum(y for y in range(x)) for x in [2, 4]))
     print(max(sum(y for y in range(x)) for x in [2, 4]))
     print(sorted(sum(y for y in range(x)) for x in [3, 1, 2]))
-    for value in (sum(y for y in range(x)) for x in [0, 2]):
+    for value in [sum(y for y in range(x)) for x in [0, 2]]:
         print("loop", value)
 
 
@@ -118,10 +121,151 @@ def main() -> None:
 main()
 """
 
+ORDER = r"""sum_seen = []
+join_seen = []
+any_seen = []
+
+
+def g(v):
+    sum_seen.append(v)
+    join_seen.append(v)
+    any_seen.append(v)
+    return v
+
+
+def main() -> None:
+    rows: list[list[int]] = [[1, 2], [3], [], [-4, 5]]
+    print(sum(sum(g(v) for v in row) for row in rows))
+    print(sum_seen)
+    print("|".join(",".join(str(g(v)) for v in row) for row in rows))
+    print(join_seen)
+    print(list(x for x in [0, 1, 2] if any(g(y) for y in [x])))
+    print(any_seen)
+
+
+main()
+"""
+
+NESTED_ITERABLE = r"""log = []
+
+
+def f(z):
+    log.append("f%d" % z)
+    return z
+
+
+def g(y):
+    log.append("g%d" % y)
+    return y
+
+
+def main() -> None:
+    print(sum(g(y) for y in (f(z) for z in range(2))))
+    print(log)
+
+
+main()
+"""
+
+NESTED_BREAK = r"""log = []
+
+
+def f(z):
+    log.append(z)
+    return z
+
+
+def main() -> None:
+    for y in (y for y in (f(z) for z in range(5))):
+        log.append("body")
+        break
+    print(log)
+
+
+main()
+"""
+
+NESTED_MUTATE = r"""xs = [1, 2]
+seen = []
+
+
+def main() -> None:
+    for y in (y for y in (x for x in xs)):
+        seen.append(y)
+        if y == 1:
+            xs.append(3)
+    print(seen)
+
+
+main()
+"""
+
+NESTED_START = r"""log = []
+
+
+def f(x):
+    log.append(x)
+    return x
+
+
+def start():
+    log.append("start")
+    return 0
+
+
+def main() -> None:
+    rows: list[list[int]] = [[1, 2]]
+    print(sum((sum(f(x) for x in row) for row in rows), start()))
+    print(log)
+
+
+main()
+"""
+
+NESTED_INNER_START = r"""log = []
+
+
+def f(x):
+    log.append(x)
+    return x
+
+
+def start():
+    log.append("start")
+    return 0
+
+
+def main() -> None:
+    rows: list[list[int]] = [[1, 2]]
+    print(sum(sum((f(x) for x in row), start()) for row in rows))
+    print(log)
+
+
+main()
+"""
+
+NESTED_EXTEND = r"""lst: list[int] = []
+
+
+def g(v):
+    lst.append(v)
+    return v
+
+
+def main() -> None:
+    rows: list[list[int]] = [[1, 2], [3]]
+    lst.extend(sum(g(v) for v in row) + len(lst) for row in rows)
+    print(lst)
+
+
+main()
+"""
+
 CASES = [
     ("sums", SUMS),
     ("routes", ROUTES),
     ("aliases", ALIASES),
+    ("order", ORDER),
 ]
 
 
@@ -173,6 +317,48 @@ class Refused(unittest.TestCase):
 
     def test_saved_nested_generator_default(self):
         self.refused(SAVED_NESTED, "nested inside another generator expression")
+
+    def test_nested_in_iterable(self):
+        self.refused(NESTED_ITERABLE, "nested inside another generator expression",
+                     AIL_UNIFIED_FORCE="1")
+
+    def test_nested_in_iterable_default(self):
+        self.refused(NESTED_ITERABLE, "nested inside another generator expression")
+
+    def test_break_outside_inner(self):
+        self.refused(NESTED_BREAK, "nested inside another generator expression",
+                     AIL_UNIFIED_FORCE="1")
+
+    def test_break_outside_inner_default(self):
+        self.refused(NESTED_BREAK, "nested inside another generator expression")
+
+    def test_mutation_during_iteration(self):
+        self.refused(NESTED_MUTATE, "nested inside another generator expression",
+                     AIL_UNIFIED_FORCE="1")
+
+    def test_mutation_during_iteration_default(self):
+        self.refused(NESTED_MUTATE, "nested inside another generator expression")
+
+    def test_outer_extra_argument(self):
+        self.refused(NESTED_START, "nested inside another generator expression",
+                     AIL_UNIFIED_FORCE="1")
+
+    def test_outer_extra_argument_default(self):
+        self.refused(NESTED_START, "nested inside another generator expression")
+
+    def test_inner_extra_argument(self):
+        self.refused(NESTED_INNER_START, "nested inside another generator expression",
+                     AIL_UNIFIED_FORCE="1")
+
+    def test_inner_extra_argument_default(self):
+        self.refused(NESTED_INNER_START, "nested inside another generator expression")
+
+    def test_mutating_method_receiver(self):
+        self.refused(NESTED_EXTEND, "nested inside another generator expression",
+                     AIL_UNIFIED_FORCE="1")
+
+    def test_mutating_method_receiver_default(self):
+        self.refused(NESTED_EXTEND, "nested inside another generator expression")
 
 
 if __name__ == "__main__":
