@@ -1,3 +1,29 @@
+## 2026-10-29 -- cov46: nested generator expressions built when fully consumed (job-cov46-10291457)
+
+The corpus census (all 283 programs in `lab/corpus/programs`, default build) had 24 compile-time
+refusals. Imports are the stdlib jobs' work; the most frequent remaining blocker was a generator
+expression nested inside another (3 programs: deepseek t172, deepseek t432, glm t432), all of the
+shape `" ".join(str(v) for v in row) for row in rows` in a `__repr__`, where the inner generator
+is handed straight to `join`.
+
+`pyboxed2.py` now allows the nested construct when the inner generator is the direct argument of
+a call that reads every element (`sum`, `join`, `list`, `tuple`, `set`, `frozenset`, `dict`,
+`sorted`, `min`, `max`, `bytes`, `bytearray`, `Counter`, `array`, `extend`, `update`) and the
+outer generator is itself consumed to the end at the same place: the sole positional argument of
+such a call, or a comprehension source. A saved generator, a `for` source (it may `break`), a call
+with later arguments, and the short-circuit consumers `any`/`all`/`next` keep the named refusal,
+because materialising there would run elements CPython has not reached. The three corpus programs
+now match CPython on all three inputs and both builds; default-build refusals fell from 24 to 21
+and the nested-generator blocker from 3 to 0. `test_ail_pre42.py`'s saved-outer case still refuses
+with the nested wording.
+
+Probes in `/tmp/probes/cov46` on both builds via `cmp.sh`: `p_join`, `p_sum`, `p_containers`,
+`p_methods`, `p_depth`, `p_comp_source` match CPython; `p_refuse_short`, `p_refuse_anyall`,
+`p_refuse_next`, `p_refuse_saved`, `p_refuse_for_break`, `p_refuse_iterable` are refused by name.
+Final-state tests: `test_ail_cov46`, `test_ail_pre42`, `test_ail_pre41`, `test_ail_pre116`,
+`test_ail_pre166`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

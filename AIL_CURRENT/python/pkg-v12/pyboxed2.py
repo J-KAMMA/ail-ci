@@ -2513,6 +2513,11 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _compile_cond(self, source):
         tree = ast.parse(source)
+        genexp_parents = {}
+        for par in ast.walk(tree):
+            for child in ast.iter_child_nodes(par):
+                genexp_parents[child] = par
+        self._genexp_parents = genexp_parents
         self.source_has_class = any(isinstance(n, ast.ClassDef) for n in ast.walk(tree))
         import exctext
         exctext.refuse_args_item_store(tree, Unsupported)
@@ -2537,13 +2542,14 @@ class Compiler(boxclosure.ClosureMixin):
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
         for gen in ast.walk(tree):
-            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
-                refusal = Unsupported(
-                    'a generator expression nested inside another generator expression '
-                    '(the inner one would be materialised eagerly, not lazily)')
-                refusal.source_line = getattr(gen, 'lineno', None)
-                raise refusal
+            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs:
+                inner = _unconsumed_nested_genexp(gen, genexp_parents)
+                if inner is not None:
+                    refusal = Unsupported(
+                        'a generator expression nested inside another generator expression '
+                        '(the inner one would be materialised eagerly, not lazily)')
+                    refusal.source_line = getattr(inner, 'lineno', None)
+                    raise refusal
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
@@ -6495,7 +6501,8 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        inner = _unconsumed_nested_genexp(node, getattr(self, '_genexp_parents', None))
+        if inner is not None:
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -9045,7 +9052,8 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('next() with other than (iterator[, default])')
         if isinstance(args[0], ast.GeneratorExp):
             gen = args[0]
-            if any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+            inner = _unconsumed_nested_genexp(gen)
+            if inner is not None:
                 raise Unsupported('a generator expression nested inside another generator expression '
                                   '(the inner one would be materialised eagerly, not lazily)')
             first = gen.generators[0]
@@ -9519,7 +9527,8 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('%s() over a generator expression whose iterable is itself a '
                                   'generator expression (the inner generator would be materialised '
                                   'eagerly)' % name)
-            if any(n is not arg and isinstance(n, ast.GeneratorExp) for n in ast.walk(arg)):
+            inner = _unconsumed_nested_genexp(arg)
+            if inner is not None:
                 raise Unsupported('a generator expression nested inside another generator expression '
                                   '(the inner one would be materialised eagerly, not lazily)')
             # fused: short-circuits at the first deciding element, like CPython's any()/all()
@@ -12470,6 +12479,70 @@ def _genexp_consumed_in_place(node, parents):
         if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
             return True
     return False
+
+
+_NESTED_GENEXP_FULL_CALLS = frozenset({
+    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max', 'bytes',
+    'bytearray', 'Counter', 'array',
+})
+_NESTED_GENEXP_FULL_METHODS = frozenset({'join', 'extend', 'update', 'array'})
+
+
+def _nested_genexp_consumed_fully(node, parents):
+    """True iff `node` is handed straight to a call that reads every element before returning.
+    `any`, `all` and `next` are deliberately absent: they stop after the deciding element, so
+    building the inner generator eagerly would run (and can raise from) elements CPython never
+    reaches."""
+    par = parents.get(node)
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in _NESTED_GENEXP_FULL_CALLS:
+            return True
+        if isinstance(f, ast.Attribute) and f.attr in _NESTED_GENEXP_FULL_METHODS:
+            return True
+    return False
+
+
+def _nested_genexp_outer_consumed_exactly(node, parents):
+    """True iff `node` is itself read to the end at the point it is written, with no other
+    argument evaluated after it: the sole argument of a fully consuming builtin/method, or the
+    source of a comprehension (which cannot stop early).  A saved generator, a `for` source (it
+    may `break`) and a call with later arguments are not exact: materialising the whole outer
+    generator there would run elements CPython has not reached yet."""
+    par = parents.get(node)
+    if isinstance(par, ast.Call) and len(par.args) == 1 and not par.keywords \
+            and par.args[0] is node:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in _NESTED_GENEXP_FULL_CALLS:
+            return True
+        if isinstance(f, ast.Attribute) and f.attr in _NESTED_GENEXP_FULL_METHODS:
+            return True
+    if isinstance(par, ast.comprehension) and par.iter is node:
+        return True
+    return False
+
+
+def _unconsumed_nested_genexp(node, parents=None):
+    """The first generator expression inside `node` (not `node` itself) that would be materialised
+    at a different point from CPython.  Such an inner generator can be observed before iteration,
+    so materialising it eagerly would be a silent difference.  An inner generator handed straight
+    to sum/join/... is materialised at the same point CPython consumes it, but only when the outer
+    generator itself is consumed to the end right there (see above); otherwise the outer one still
+    has to stay refused."""
+    if parents is None:
+        parents = {}
+        for par in ast.walk(node):
+            for child in ast.iter_child_nodes(par):
+                parents[child] = par
+    inner = [n for n in ast.walk(node) if n is not node and isinstance(n, ast.GeneratorExp)]
+    if not inner:
+        return None
+    if not _nested_genexp_outer_consumed_exactly(node, parents):
+        return inner[0]
+    for n in inner:
+        if not _nested_genexp_consumed_fully(n, parents):
+            return n
+    return None
 
 
 def _bound_names(tree):
