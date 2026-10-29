@@ -245,6 +245,7 @@ MODULES = (
     'test_ail_rdiff5',
     'test_ail_pre424',
     'test_ail_pre427',
+    'test_ail_pre431',
     'test_ail_pre328',
     'test_ail_pre345',
     'test_ail_pre353',
