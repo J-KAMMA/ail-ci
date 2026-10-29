@@ -1,3 +1,20 @@
+## 2026-10-29 -- job-ex27-10290951: `@export` is a checking no-op in an ordinary build
+
+`language_examples/c_export/geometry.py` is the Python-syntax AIL example for C export.  Run as a
+program it is ordinary Python: `ail_ffi.export` checks the signature and annotations, then returns
+the function unchanged.  The general path refused the decorator by name (`the decorator on def
+add ...`), so the example could not be built into an executable at all (the typed path happened to
+ignore it).  `ail_ffi_lower` now recognises `@export` (also `@ail_ffi.export` and `@export()`),
+checks CPython's contract statically and blanks the decorator before either build path: a missing or
+unsupported parameter/result annotation, a default, `*args`/keyword-only/`**kwargs`, a dataclass
+result, a non-scalar dataclass field, or a decorated class is refused by name; valid files build and
+run with CPython's stdout and exit code on both builds.  Added `test_ail_ex27.py` (two valid programs
+compared with CPython, nine refused shapes) and registered it in `ail_check.MODULES`.
+
+Probes in `/tmp/probes` run through `cmp.sh` on both builds: `ex27_types`, `ex27_routes`,
+`ex27_empty_dataclass` and `ex27_module_attr` match CPython; `ex27_refuse_missing_result`,
+`ex27_refuse_default`, `ex27_refuse_bad_dataclass` and `ex27_refuse_class` are refused by name.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
