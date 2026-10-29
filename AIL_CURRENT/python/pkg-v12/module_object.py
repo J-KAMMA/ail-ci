@@ -797,11 +797,12 @@ def load_objects(paths, *, require_dependencies=True, c_api_namespace=None):
 
 
 def link_objects(source, output, paths, *, unit_map=None):
-    from pyc import _io_main_for, _main_for, _finalize_output, to_c, build_link_units
+    from pyc import _io_main_for, _main_for, _finalize_output, to_c, build_link_units, refuse_typed_only_big
     from pyfunc import NORET
     metadata = load_objects(paths)
     _check_external_names(source, {**metadata['exports'], **metadata['constants'], **metadata['structs']})
     source = _constant_source(metadata['constants']) + source
+    refuse_typed_only_big(source)          # no general-path fallback here: refuse by name what the typed-only build refuses
     with tempfile.TemporaryDirectory(prefix='ail-object-entry-') as directory:
         staged_objects = []
         for index, original in enumerate(metadata['objects']):

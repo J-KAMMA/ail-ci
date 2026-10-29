@@ -829,6 +829,25 @@ def _refuse_big_capable(source, local=True):
                           % ('the module code' if name == '<module>' else 'function %s()' % name, marks[name]))
 
 
+def refuse_typed_only_big(source):
+    """The big-int gates of the typed-only build, for entry points that call `to_c(strict=True)` directly and have no
+    general-path fallback (`link_objects`, `build_link_units`): an `@extern` program is linked this way. Without them the
+    constant folder let `-2**63-1` through as INT64_MAX, a silent difference. Same refusals, same wording, as a typed-only
+    build of the plain program (`AIL_NO_GENERAL=1`); `**` with a runtime exponent and shifts keep their loud run-time stop."""
+    source = fold_int_constants(source)     # as `_build_unshadowed` does first: `-2**63` and `2**63 - 1` are in-range literals
+    saved = os.environ.get('AIL_NO_GENERAL')
+    os.environ['AIL_NO_GENERAL'] = '1'
+    try:
+        if _is_whole_program(source):
+            _refuse_big_capable(source, local=False)
+        _refuse_typed_big_store(source, False)
+    finally:
+        if saved is None:
+            os.environ.pop('AIL_NO_GENERAL', None)
+        else:
+            os.environ['AIL_NO_GENERAL'] = saved
+
+
 def _typed_only_ok(reason):
     """Whether the root of a bigcap reason (the construct, under any 'it calls f(), which can need a big int (..)' chain)
     is one a typed-only build still compiles."""
@@ -1288,6 +1307,7 @@ def build_link_units(source, out, unit_map, external=None):
     """Compile typed functions into distinct C objects with one shared runtime state."""
     out = pathlib.Path(out)
     info = {'_want_units': True, '_link_units': True, '_checked_arrays': True}
+    refuse_typed_only_big(source)
     to_c(source, strict=True, info=info, external=external)
     if 'c_units' not in info:
         raise Unsupported('separate linking requires typed functions')
