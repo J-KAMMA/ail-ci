@@ -48,6 +48,13 @@ class AilDT:
         self.off = off
         self.tzn = tzn
 
+    def __eq__(self, other) -> bool:
+        # a dict key / set member is equal by value (kind and key), as for the CPython types
+        return isinstance(other, AilDT) and self.kind == other.kind and self.k == other.k
+
+    def __hash__(self) -> int:
+        return self.k * 4 + self.kind
+
 
 def isleap(y: int) -> bool:
     return y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)

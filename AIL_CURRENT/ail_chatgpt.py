@@ -5098,7 +5098,8 @@ def _python_notes(message, notes, source):
             break
     # library batch 4 (csv, datetime, ...): the import is refused because a use was not built; say which
     found = re.search(r"import of '(csv|datetime|decimal|fractions|unicodedata|statistics|textwrap|enum|string)'; [^\n]*?by hand",
-                      message)
+                      message) or re.search(r"(decimal)\.\w+ is not built: decimal needs exact[^\n]*(?:\n  write instead: [^\n]*)?",
+                                            message) or re.search(r"(unicodedata|ipaddress|html)\.\w+ \(not yet published in NAMES_library\.json\)", message)
     if found:
         for entries in notes.values():
             named = [text.split(';')[0] for _, text in entries if found.group(1) in text.split(':')[0]]
