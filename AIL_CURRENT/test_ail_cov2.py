@@ -1016,6 +1016,7 @@ class PreludeCsv(unittest.TestCase):
 
     def test_reader(self):
         import csv
+        old_host = next(csv.reader(['\\1'], quoting=2, escapechar="\\")) == ["1"]
         rnd = random.Random(5)
         for _ in range(4000):
             kw = {}
@@ -1052,7 +1053,18 @@ class PreludeCsv(unittest.TestCase):
                         out.append((type(e).__name__, str(e)))
                 out.append(r.line_num)
                 return out
+            if old_host and kw.get("quoting") == 2 and "escapechar" in kw:
+                continue  # host CPython < 3.12.6 differs here (gh-113785); covered by test_reader_escape_numeric
             self.assertEqual(self.fix(run(csv.reader)), self.fix(run(self.ns["_ail_csv_reader"])), (text, kw))
+
+    def test_reader_escape_numeric(self):
+        # gh-113785 (CPython 3.12.6+, 3.13+): under QUOTE_NONNUMERIC a field that starts with the escapechar is
+        # numeric. Older hosts (e.g. 3.12.3) keep it a string, so AIL is checked against the new behaviour directly.
+        rd = self.ns["_ail_csv_reader"]
+        self.assertEqual(list(rd(['1\\.5,\\.5,.5'], quoting=2, escapechar="\\")), [[1.5, 0.5, 0.5]])
+        self.assertEqual(list(rd(['1\\.5,\\.5,"\\.5"'], quoting=2, escapechar="\\")), [[1.5, 0.5, ".5"]])
+        with self.assertRaises(Exception):
+            list(rd(['\\a1'], quoting=2, escapechar="\\"))
 
     def test_writer(self):
         import csv
