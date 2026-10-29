@@ -1,3 +1,26 @@
+## 2026-10-29 -- ex36: `@export` from ail_ffi compiles as the CPython identity decorator (job-ex36-10291446)
+
+The survey of the 14 Python-syntax examples under `language_examples` found two building on both
+builds (`c_export/geometry.py` and `c_headers_workflow/table_crc.py` once `ail_ffi` is on
+`PYTHONPATH`) and 12 refused.  The first refusal that blocks a whole example and can be supported
+exactly is `@export`: CPython's `ail_ffi.export` is the identity, while both AIL builds stopped on
+the decorator with `not in the subset: the decorator on def add (only @staticmethod on a method and
+@functools.lru_cache/@lru_cache/@cache are supported)`.  `@export` (bare, called, or through an
+`import ail_ffi as ffi` alias) now compiles as that identity in the general path, and
+`ail_ffi_lower` keeps the import only when the decorator is actually written, so an unused import
+stays off the general path and the default build keeps the typed C.  The checks match CPython's
+decorator: plain parameters without defaults, an annotated result, and parameter/result types
+`int`, `float`, `bool`, `str`, `bytes`, `list[int]`, `list[float]`, a dataclass of
+`int`/`float`/`bool`, or `None`; a dataclass parameter under `from __future__ import annotations`
+and a decorator name rebound before the `def` are refused by name.  `geometry.py` now builds on
+both builds and matches CPython; the `ail build --lib` lowering is unchanged.
+
+Probes in `/tmp/probes/ex36_export_{bare,call,alias}.py` and `ex36_unused_export.py` match CPython
+on both builds via `cmp.sh`; `ex36_export_rebind.py` is refused by name on both builds where
+CPython raises `TypeError`.  `test_ail_ex36` (8 tests), `test_ail_ffi`, `test_ail_c_export`,
+`test_ail_unified` (63 tests together), `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; `tools/update_manifest.py --check` exits 0.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

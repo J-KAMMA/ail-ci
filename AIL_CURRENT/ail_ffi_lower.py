@@ -169,6 +169,18 @@ class Session:
     def _lower(self, path, text, tree):
         imported = set()                # names bound by `from ail_ffi import`
         module_names = set()            # names bound by `import ail_ffi [as x]`
+        bare_export = False             # some `@export` / `@export(...)` is written
+        module_export = set()           # `@x.export` aliases whose `x` is written
+        for n in ast.walk(tree):
+            if not isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            for d in n.decorator_list:
+                dec = d.func if isinstance(d, ast.Call) else d
+                if isinstance(dec, ast.Name) and dec.id == 'export':
+                    bare_export = True
+                elif (isinstance(dec, ast.Attribute) and dec.attr == 'export'
+                      and isinstance(dec.value, ast.Name)):
+                    module_export.add(dec.value.id)
         blank = []                      # (first line, last line)
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
@@ -179,12 +191,15 @@ class Session:
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
                     imported.add(alias.name)
-                blank.append((node.lineno, node.end_lineno))
+                if not (bare_export and 'export' in imported):
+                    blank.append((node.lineno, node.end_lineno))
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == 'ail_ffi':
-                        module_names.add(alias.asname or 'ail_ffi')
-                        blank.append((node.lineno, node.end_lineno))
+                        name = alias.asname or 'ail_ffi'
+                        module_names.add(name)
+                        if name not in module_export:
+                            blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
         decls = []
