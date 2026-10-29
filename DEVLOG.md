@@ -1,3 +1,13 @@
+## 2026-10-29 -- ex24 suite fix: Rust tests skip when rustup has no toolchain for this HOME (job-ex24-10290744)
+
+The full suite runs with a task-local `HOME` that has no `~/.rustup`, so `shutil.which('rustc')`
+found the rustup proxy and the skip guards passed, but every invocation exited 1 with "could not
+choose a version of rustc ... no default is configured". `test_ail_c_export` and
+`test_ail_cratebridge` now take `RUSTC` from `ail_testenv.rustc()`, which probes `rustc --version`;
+a configured toolchain still runs the Rust tests, a missing usable one skips them. No compiler or
+behaviour change. `test_ail_ex24`, both modules (with and without `RUSTUP_HOME`) and
+`test_ail_safetynet` pass; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- ex24: a Python-syntax module of definitions builds as a no-op (job-ex24-10290744)
 
 `language_examples/math.ail` is a module (`LIMIT`, `sum_to`), not a program, and CPython prints

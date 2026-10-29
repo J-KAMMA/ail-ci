@@ -7,7 +7,7 @@ same calls are made
 * from Python through ctypes (the shared library),
 * from C (host.c, linked statically, built with AddressSanitizer and UBSan so a result that is not freed,
   a double free or an out-of-bounds read fails the test), including four threads calling at once, and
-* from Rust (host.rs, a subset of the calls; skipped when rustc is missing),
+* from Rust (host.rs, a subset of the calls; skipped when a usable rustc is missing),
 
 and every line of output must match the CPython line. Also covered: the header contents, the exported
 symbols, errors as status + geometry_last_error() (no crash), NULL arguments, the packaged `ail build --lib`,
@@ -26,13 +26,13 @@ import typing
 import unittest
 from pathlib import Path
 
-from ail_testenv import ASAN_DETECT_LEAKS, WINDOWS
+from ail_testenv import ASAN_DETECT_LEAKS, WINDOWS, rustc
 
 ROOT = Path(__file__).resolve().parent
 EXAMPLE = ROOT / 'language_examples' / 'c_export'
 CLI = str(ROOT / 'ail_chatgpt.py')
 CC = os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc')
-RUSTC = shutil.which('rustc')
+RUSTC = rustc()
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(EXAMPLE))
 
@@ -301,7 +301,7 @@ class ExportLibraryTests(unittest.TestCase):
             self.assertEqual(run.returncode, 0)
             self.assertEqual(run.stdout.decode('utf-8').splitlines()[:len(self.expected)], self.expected)
 
-    @unittest.skipUnless(RUSTC, 'rustc is not installed')
+    @unittest.skipUnless(RUSTC, 'a usable rustc is not installed')
     def test_rust_host_matches_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-rust-host-') as temporary:
             host = Path(temporary) / 'host_rs'
