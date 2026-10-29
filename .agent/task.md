@@ -1,12 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `rbpre400` recorded these as already present before that job:
+**Your own test module fails on the current integration branch.** In the full suite on top of integ, test_ail_pre431 fails. Integers are now exact bigints by default (ail-ci#198): a test that expects an int64 overflow refusal or wrap no longer holds.
 
-- `p10` loop-store-before, `p15` default argument, `q03` method, `q04` nested def, `q05` `*args`, `q15` class-body call: runtime `integer overflow` vs CPython on both builds.
-- `p14` `**kwargs` and `p05` class-attribute mutation: named refusal on both builds.
-- `q14` `if False: power(b=2,e=100)` is refused by the new pass (over-approximation); a named compile-time refusal, acceptable.
-
-**Unverified:** full-suite impact and runtime instruction counts (codegen is identical, so not applicable); worker's `test_ail_files`/`test_ail_corpus_findings3` runs were not repeated.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre431.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Run `cd AIL_CURRENT && python3 -m unittest -q test_ail_pre431` on today's integ, update the test to what CPython prints (exact integers) and keep your fix where it still applies; if the fix is no longer needed, say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
