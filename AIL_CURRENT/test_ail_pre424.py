@@ -1,17 +1,18 @@
-"""pre424: routed powers whose container mutation is unreachable are refused by name.
+"""pre424 follow-up: routed powers print CPython's exact integers.
 
 The pre415 review recorded as pre-existing, on both builds, that a constant
-power reached through a call still stopped with ``integer overflow`` when a
-list holding its operands was mutated only in unreachable code (an empty
-``for``, ``if False``, the dead ``else`` of ``if True`` or after a ``return``).
-The routed-power check read every use of the container, including those dead
-ones, as a possible mutation and therefore dropped the constant argument.
-
-The reachability mark is now consulted when a module or local container is
-screened for the fold, so a mutation no execution can reach does not stop the
-refusal, while a mutation that can run before the call (an item or slice
-store, an alias, a helper call or a module-level store) still matches CPython.
-The refusal never falls back to a module value that a function local shadows.
+power reached through a call stopped with ``integer overflow`` when a list
+holding its operands was mutated only in unreachable code.  pre424 added a
+routed-power pass that refused those calls by name.  Integers are now exact
+bigints by default (ail-ci#198), so a power reached through a call, a literal
+tuple/list, an alias, a list item, a class attribute, a dict value or a wrapper
+argument prints CPython's exact integer; the int64 routed-power pass is no
+longer needed and was removed.  A mutation that can run before the call (an
+item or slice store, an alias, a helper call or a module-level store) still
+matches CPython, and a function-local shadow never falls back to a module
+value.  The one remaining refusal is the separate unsupported mixed
+star/keyword call, which is refused by name on both builds.  On an int64-only
+build, which cannot print these values, the exact-output test skips.
 """
 import os
 import subprocess
@@ -22,7 +23,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-REFUSALS = {
+EXACT_INTEGERS = {
     'dead_loop_module': '''
 def power(b, e):
     return b ** e
@@ -137,13 +138,6 @@ def power(b, e):
 
 print(go())
 ''',
-    'mixed_star_keyword': '''
-def power(b, e):
-    return b ** e
-
-args = (2,)
-print(power(*args, e=100))
-''',
     'negative': '''
 def power(b, e):
     return b ** e
@@ -151,6 +145,16 @@ def power(b, e):
 args = (-2, 100)
 print(power(*args))
 ''',
+}
+
+NAMED_REFUSALS = {
+    'mixed_star_keyword': ('''
+def power(b, e):
+    return b ** e
+
+args = (2,)
+print(power(*args, e=100))
+''', 'a *argument in a call'),
 }
 
 MATCHING = {
@@ -297,10 +301,32 @@ def _build_and_run(directory, name, text, general):
             got.stderr.decode('utf-8', 'replace')[-1500:])
 
 
+EXACT_INT_PROBE = 'print(2 ** 100)\n'
+EXACT_INT_OUTPUT = b'1267650600228229401496703205376\n'
+
+
+def _exact_integers(directory):
+    got, _ = _build_and_run(directory, 'exact_int_probe', EXACT_INT_PROBE, False)
+    return got == (EXACT_INT_OUTPUT, 0)
+
+
 class Pre424Tests(unittest.TestCase):
-    def test_unreachable_mutation_and_starred_routes_are_refused_by_name(self):
+    def test_routed_and_dead_mutation_powers_print_exact_integers(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre424-') as directory:
-            for slug, text in REFUSALS.items():
+            if not _exact_integers(directory):
+                self.skipTest('int64-only build; exact integers need the bigint build')
+            for slug, text in EXACT_INTEGERS.items():
+                want = _run_cpython(directory, slug, text)
+                self.assertEqual(want[1], 0, slug)
+                for general in (True, False):
+                    got, build_err = _build_and_run(
+                        directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
+                    self.assertIsNotNone(got, '%s (general=%s)\n%s' % (slug, general, build_err))
+                    self.assertEqual(got, want, '%s (general=%s)\n%s' % (slug, general, build_err))
+
+    def test_mixed_star_keyword_is_still_refused_by_name(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre424-') as directory:
+            for slug, (text, message) in NAMED_REFUSALS.items():
                 self.assertEqual(_run_cpython(directory, slug, text)[1], 0, slug)
                 for general in (True, False):
                     _, built = _build(
@@ -308,9 +334,7 @@ class Pre424Tests(unittest.TestCase):
                     self.assertNotEqual(built.returncode, 0,
                                         '%s (general=%s) compiled\n%s'
                                         % (slug, general, built.stdout + built.stderr))
-                    self.assertIn('int64 constant expression out of range',
-                                  built.stdout + built.stderr, slug)
-                    self.assertIn('through a call', built.stdout + built.stderr, slug)
+                    self.assertIn(message, built.stdout + built.stderr, slug)
                     self.assertNotIn('integer overflow', built.stdout + built.stderr, slug)
 
     def test_reachable_mutations_shadowing_and_in_range_match_cpython(self):

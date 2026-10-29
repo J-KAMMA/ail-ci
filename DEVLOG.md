@@ -1,3 +1,26 @@
+## 2026-10-29 -- pre424 follow-up: exact integers retire the routed-power refusal (job-pre424-10292334)
+
+On today's integ (`d68453f`) `test_ail_pre424` failed because integers are now exact bigints
+(ail-ci#198): the 14 programs the module expected to be refused for an out-of-int64 routed power
+compile and print CPython's exact integer instead, and the exact-int integration no longer carries
+`_check_int64_routed_power` at all.  The module now compares those routed/dead-mutation programs
+with CPython on both builds (exact outputs, including `2**100`, negative bases and exponents,
+bools and the safe 0/1/-1 bases); reachable-mutation, shadow and in-range programs still match, and
+the separate mixed star/keyword call is still refused by name (`a *argument in a call`).  Removed
+the obsolete 468-line routed-power pass from this branch so merging it cannot reintroduce an int64
+refusal that exact integers no longer need.
+
+Probes in `/tmp/probes/pre424new` on both builds via `cmp.sh`, on today's integ with these changes:
+p01 routes (tuple/list/alias/list item/class attribute/dict value/wrapper), p02 unreachable
+mutations (empty `for`, `if False`, dead `else`, after `return`), p03 boundaries (`2**62`..`2**64`,
+`-(2**63)`, `10**100`, negative bases/exponents, `0**0`, `1**1000000`, `(-1)**1000001`, `pow`), p04
+reachable mutations before the call, p05 argument/list-item/attribute/dict-value scalar routes and
+p06 module scalar/tuple/list shadows all match CPython.  Final-state tests on that composition:
+test_ail_pre424, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 454 s,
+0 failed; all three pre424 tests ran there).  On this int64-only branch the same four modules pass in
+317 s with the exact-output test skipped (the branch cannot print `2**100`); the other two pre424
+tests still run.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre424: a routed power survives an unreachable container mutation (job-pre424-10281737)
 
 The pre415 review recorded as pre-existing, on both builds, the dead-mutation probes `p07_mut_in_empty_loop`, `p08_mut_in_false_if` and `p18_mut_in_dead_else`, where a constant power routed through a call stopped with `integer overflow` although the counter-example mutation could never run; `p03_class_mut` was already the named class-attribute-store refusal and `p12_mut_after_call` remains the pre-existing run-time trap.  The routed-power check used every `Name` use, including stores in unreachable code, as evidence that a list/dict might change, so it dropped the constant argument.  It now marks unreachable statements first and ignores dead uses when screening module and local containers, so the exact out-of-int64 result is refused by name (`int64 constant expression out of range ... through a call`) for an empty `for`, a literal-false `if`, the dead `else` of `if True` and statements after `return`.  The same pass binds starred call arguments (literal tuple/list, module/local name, alias, list item, class attribute, dict value, wrapper argument and mixed star/keyword), and a function-local shadow of a module constant no longer falls back to the stale module value.  Reachable mutation before the call (item, slice, alias, helper call, module store), in-range and int64-boundary powers, float/bool/negative exponents and safe bases 0/1/-1 still match CPython; a mutation after the call keeps the pre-existing trap.
