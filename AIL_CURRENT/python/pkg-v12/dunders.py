@@ -33,6 +33,7 @@ refuses a truth test this pass could not see through). Classes with a base class
 left alone (inheritance is a separate stage).
 """
 import ast
+import classname
 import copy
 import re
 import os
@@ -1064,7 +1065,7 @@ class _Pass:
             if name == '__repr__':
                 shown = [f for f in fields if f not in m.dataclass['hide']]
                 parts = ', '.join('%s={self.%s!r}' % (f, f) for f in shown)
-                text = 'def __repr__(self) -> __ail_checked_str__:\n    return f"%s(%s)"\n' % (m.name, parts.replace('"', '\\"'))
+                text = 'def __repr__(self) -> __ail_checked_str__:\n    return f"%s(%s)"\n' % (classname.display(m.name), parts.replace('"', '\\"'))
             elif name == '__eq__':
                 cmp = [f for f in fields if f not in m.dataclass['nocmp']]
                 body = ' and '.join('self.%s == other.%s' % (f, f) for f in cmp) or 'True'
