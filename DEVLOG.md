@@ -1,3 +1,31 @@
+## 2026-10-29 -- stdlib36: `struct` (job-stdlib36-10291029)
+
+The corpus tally after library batches 3-5 left `struct` as the most used standard module still
+refused: 2 corpus programs (`glm-5.3-flash-free/t475`, `deepseek-v4.1-flash-free/t475`) and 4
+language examples use it, while `unicodedata` (3), `statistics` (2) and `decimal` (2) are already
+covered by batches 4-5 (the `argparse`/`pathlib`/`subprocess` uses in `language_examples` are the
+research harness scripts, not compiled programs). Added `AIL_CURRENT/stdlib/struct.py`, Python
+source under the bundled standard-module directory, with `pack`, `unpack`, `unpack_from`,
+`calcsize` and `struct.error`; `pack_into`, `iter_unpack` and `Struct` are refused by name (they are
+not defined by the module, so the existing import check names them and lists the five names that
+are). The supported surface is the integer codes, `c ? x s p`, `e f d`, `P`, both byte orders,
+`=` and native `@` sizes/alignment, empty formats and zero repeats. The `s`/`p` arguments are
+checked as bytes/bytearray (CPython rejects str, int and list; `bytes(3)` used to invent three zero
+bytes), `c` takes exactly a one-byte bytes object, and `<0p` (and `<0s`) consume their item and pack
+nothing instead of writing a bogus length byte.
+
+Probes in `/tmp/probes/struct36` on both `cmp.sh` builds: `p_pack_edges` (s/p/c types, 0/1/2/5/255/
+256/300 counts, zero-size codes) matches CPython; `p_errors` (arity, bad repeats, bad chars, type
+errors) matches; `p_layout` (native alignment, all width codes, whitespace, invalid formats,
+`unpack_from` offsets) matches; `p_types_routes` (argument, list item, attribute, dict value,
+bytes/bytearray buffers, negative and short offsets, integer boundaries) matches; `p_float`
+(e/f/d, native and standard, subnormals, rounding boundaries, overflow, inf/nan) matches. The one
+exception is `p_zero_p_unpack`: CPython 3.12.3 itself raises `SystemError` for `unpack("0p", b"")`,
+which AIL cannot raise by name, so the module returns `b""`; this is recorded in DIFFERENCES. Final
+tests: `test_ail_stdlib36` (3 tests, both `AIL_IR` builds, 0 failed), `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`; `tools/update_manifest.py` and `--check`, and
+`tools/ci_shards.py --update` and `--check`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
