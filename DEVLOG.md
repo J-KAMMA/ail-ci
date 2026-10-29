@@ -1,3 +1,25 @@
+## 2026-10-29 -- cov50: nested generator expressions read by full-consumer calls (job-cov50-10291930)
+
+`lab/profile/run.py` is not in this export; the corpus was profiled by compiling every
+`lab/corpus/programs/*/*.py` with `AIL_CURRENT/ail_chatgpt.py compile ... --syntax python` (default
+build, so the general fallback is included), two at a time.  Before: 219 programs, 24 refusals
+(8 imports); the most frequent non-import construct was the general path's nested-generator rule
+(3 programs: deepseek/glm t432 and deepseek t172), which refused even when every level is read by
+a call that consumes its whole argument.  After: 21 refusals (7 imports), nested-generator
+refusals 3 -> 0; t172 and both t432 programs now build on the default and `AIL_UNIFIED_FORCE=1`
+builds and match CPython 3.12 on all three corpus inputs.
+
+`pyboxed2._nested_genexp_allowed` accepts a nested chain only when the outer and every inner
+generator expression is an argument of a full-consumer call (`join`, `list`, `sorted`, `sum`,
+`min`, `max`, `dict`, ...), excluding the early-stopping `any`/`all`/`next`.  A chain saved as a
+value, passed to a user function, read by a `for` that can break, or consumed by a lazy call such
+as `zip` keeps the named refusal.  Added `AIL_CURRENT/test_ail_cov50.py` (matching joins/sums/
+containers/exception/routes plus the refusal routes, both builds) and registered it in
+`ail_check.MODULES`.  Probes in `/tmp/probes/cov50`: `p_nested_join`, `p_nested_sum`,
+`p_nested_containers`, `p_nested_raise` and `p_nested_routes` match CPython on both builds;
+`p_nested_any_refused`, `p_nested_saved_refused`, `p_nested_user_refused`,
+`p_nested_for_refused` and `p_nested_zip_refused` are refused by name on both builds.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

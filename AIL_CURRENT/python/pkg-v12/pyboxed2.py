@@ -2500,6 +2500,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.reads_args = False    # the program reads `.args` (of an exception)
         self.uses_ni = False       # the program returns NotImplemented (safetyrt.patch_notimplemented)
         self.generators = False    # the program has generator functions (safetyrt.GEN)
+        self.nested_genexp_ok = frozenset()   # nested generator expressions whose every level a full consumer call reads
         self.want_slice = False    # compile with the class of slice objects (build() retries with it on NeedSlice)
         self.prelude_names = set() # functions and methods of the preludes added here (not the program's own)
         self.rt_needs = set()      # safetyrt.py fragments this program uses (none: the C it always had)
@@ -2536,9 +2537,11 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        self.nested_genexp_ok = _nested_genexp_allowed(tree, any_all_genargs)
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)) and \
+                    id(gen) not in self.nested_genexp_ok:
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6495,7 +6498,8 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)) and \
+                id(node) not in self.nested_genexp_ok:
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -12446,6 +12450,43 @@ _GENEXP_SAFE_METHODS = frozenset({
     'rsplit', 'splitlines', 'partition', 'rpartition', 'removeprefix', 'removesuffix',
     'bit_length', 'bit_count', 'is_integer', 'get', 'keys', 'values', 'items',
 })
+
+
+_GENEXP_FULL_CALLS = _GENEXP_EAGER_CALLS - frozenset({'any', 'all', 'next'})
+
+
+def _genexp_full_call_consumer(node, parents):
+    """True iff `node` is an argument of a call that reads every element before returning.
+    `any`/`all`/`next` are omitted: they stop early, so a nested generator must stay lazy.
+    Only calls count: a for loop can break after the first element."""
+    par = parents.get(node)
+    if not (isinstance(par, ast.Call) and node in par.args):
+        return False
+    f = par.func
+    if isinstance(f, ast.Name):
+        return f.id in _GENEXP_FULL_CALLS
+    if isinstance(f, ast.Attribute):
+        return f.attr in _GENEXP_EAGER_METHODS
+    return False
+
+
+def _nested_genexp_allowed(tree, skip_ids):
+    """Ids of generator expressions in a nested chain whose every level is an argument of a
+    full-consumer call.  Such a chain runs at one point, so the existing eager lowering (which
+    materialises each level where its consumer is evaluated) has CPython's order."""
+    parents = {}
+    for par in ast.walk(tree):
+        for child in ast.iter_child_nodes(par):
+            parents[child] = par
+    allowed = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.GeneratorExp) or id(node) in skip_ids:
+            continue
+        chain = [node] + [n for n in ast.walk(node)
+                          if n is not node and isinstance(n, ast.GeneratorExp)]
+        if len(chain) > 1 and all(_genexp_full_call_consumer(n, parents) for n in chain):
+            allowed.update(id(n) for n in chain)
+    return allowed
 
 
 def _genexp_consumed_in_place(node, parents):
