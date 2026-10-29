@@ -124,6 +124,49 @@ def count_up(n: int) -> None:
 print(weight(Point(2, 1.5, True)), weight(Point(2, 1.5, False)))
 count_up(3)
 ''',
+    'dataclass_inheritance': '''
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dataclass
+class Base:
+    x: int
+
+
+@dataclass
+class Point(Base):
+    y: float
+
+
+@export
+def weight(p: Point) -> int:
+    return p.x * 2 + int(p.y)
+
+
+print(weight(Point(3, 1.5)))
+''',
+    'plain_base_is_not_a_dataclass': '''
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+class Base:
+    label: str
+
+
+@dataclass
+class Point(Base):
+    x: int
+
+
+@export
+def weight(p: Point) -> int:
+    return p.x + 1
+
+
+print(weight(Point(2)))
+''',
 }
 
 REFUSED = [
@@ -201,6 +244,121 @@ def fib(n: int) -> int:
 
 print(fib(10))
 ''', '@export fib: no other decorator'),
+    ('dataclass_str_field', '''
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dataclass
+class Point:
+    name: str
+
+
+@export
+def weight(p: Point) -> int:
+    return len(p.name)
+
+
+print(weight(Point("ab")))
+''', '@export weight: parameter p needs one of'),
+    ('dataclass_bytes_field', '''
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dataclass
+class Point:
+    data: bytes
+
+
+@export
+def weight(p: Point) -> int:
+    return len(p.data)
+
+
+print(weight(Point(b"ab")))
+''', '@export weight: parameter p needs one of'),
+    ('dataclass_list_field', '''
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dataclass
+class Point:
+    values: list[int]
+
+
+@export
+def weight(p: Point) -> int:
+    return len(p.values)
+
+
+print(weight(Point([1, 2])))
+''', '@export weight: parameter p needs one of'),
+    ('dataclass_inherited_bad_field', '''
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dataclass
+class Base:
+    name: str
+
+
+@dataclass
+class Point(Base):
+    x: int
+
+
+@export
+def weight(p: Point) -> int:
+    return len(p.name) + p.x
+
+
+print(weight(Point("ab", 1)))
+''', '@export weight: parameter p needs one of'),
+    ('dataclass_shadowed_classvar_str', '''
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+ClassVar = str
+
+
+@dataclass
+class Point:
+    name: ClassVar
+
+
+@export
+def weight(p: Point) -> int:
+    return 1
+
+
+print(weight(Point("ab")))
+''', '@export weight: parameter p needs one of'),
+    ('export_call_argument', '''
+from ail_ffi import export
+
+
+@export(1)
+def twice(n: int) -> int:
+    return n * 2
+
+
+print(twice(2))
+''', '@export: the decorator takes no arguments'),
+    ('export_class', '''
+from ail_ffi import export
+
+
+@export
+class Point:
+    pass
+
+
+print(Point)
+''', '@export applies to a top-level function'),
 ]
 
 

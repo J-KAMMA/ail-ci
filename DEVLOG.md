@@ -1,3 +1,27 @@
+## 2026-10-29 -- ex43 follow-up: `@export` dataclass fields and non-function decorators
+
+The first ex43 change accepted `@export` on the ordinary Python-syntax build, but five boundary
+forms still differed silently.  CPython checks `dataclasses.fields`, so a dataclass parameter whose
+field is `str`, `bytes`, `list[int]` or inherited from a dataclass base is rejected, while the
+front end accepted it and ran the program; `@export(1)` and `@export` on a class likewise ran here
+where CPython raises `TypeError: @export applies to a top-level function`.  Dataclass acceptance
+now mirrors CPython: every field (including inherited local dataclass fields) must be exactly
+`int`, `float` or `bool`, `ClassVar` is skipped, a plain local base contributes nothing, and an
+imported base is treated as unknown.  A call-form decorator with arguments and a class decorator
+are named compile-time refusals.  `builtins.int` and inherited all-numeric dataclasses still build
+and match CPython.
+
+Probes in `/tmp/probes/ex43x` via `cmp.sh` (with `PYTHONPATH=AIL_CURRENT`): `p_dataclass_str`,
+`p_dataclass_bytes`, `p_dataclass_list`, `p_export_dataclass_inherit`,
+`p_dataclass_classvar_shadow_str`, `p_export_arg`, `p_export_nonfunction_kw` and `p_export_class`
+are now refused by name on both builds where CPython raises the matching `TypeError`;
+`p_export_dataclass_bool`, `p_dataclass_inherit_ok`, `p_dataclass_builtins` and
+`p_dataclass_nonbase` match CPython on both builds.  `p_export_method`, `p_export_nested`,
+`p_export_if` and `p_export_async` keep their pre-existing named refusals, and
+`p_dataclass_classvar`/`p_dataclass_typing_classvar` are refused by the separate unmodelled-
+ClassVar note.  Extended `test_ail_ex43.py` with the two positive dataclasses and the seven
+refused forms.
+
 ## 2026-10-29 -- ex43: `@export` builds on the ordinary Python-syntax path
 
 The Python-syntax scan of `AIL_CURRENT/language_examples` found six `.ail` examples that the
