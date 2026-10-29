@@ -33,7 +33,7 @@ MODULES = (
     'test_ail_pre68',
     'test_ail_pre13',
     'test_ail_pre15',
-    'test_ail_strict', 'test_ail_cratebridge', 'test_ail_typed_parallel', 'test_ail_freestanding', 'test_ail_freestanding2',
+    'test_ail_strict', 'test_ail_cratebridge', 'test_ail_cargo', 'test_ail_typed_parallel', 'test_ail_freestanding', 'test_ail_freestanding2',
     'test_ail_flush_exit', 'test_ail_mixed_bounds', 'test_ail_typed_submit', 'test_ail_typed_tuples',
     'test_ail_lsp', 'test_ail_project', 'test_ail_debug', 'test_ail_debug_lines', 'test_ail_debug_flush',
     'test_ail_typed_blockers2',
