@@ -1,3 +1,19 @@
+## 2026-10-29 -- pre433 under exact ints (job-rbpre433-10292335)
+
+Integers are exact by default now (ail-ci#198), so the pre433 items no longer stop with a named
+int64 refusal: a Python-syntax build prints the exact power CPython does.  `test_ail_pre433.py`
+now probes the compiler's integer mode with `10 ** 40`: in exact mode every default route
+(positional, leading, keyword-only, negative, module alias, list item, class attribute, dict
+value, empty/expanded `*`, explicit argument, the 10**19 and 2**63 boundaries) must build and
+match CPython on both builds; in int64 mode the old named refusal is required.  No compiler
+change was needed; the default-binding fix still applies where int64 is enforced, `ail check`
+for Python syntax (verified: it refuses the recorded default with `int64 constant expression out
+of range`).  Probes in `/tmp/probes`: 21 `p433_*.py` programs match CPython on both builds
+against today's integ (`origin/integ` d68453f plus the pre433 change); on this int64 tree the
+same out-of-range programs are refused by name and the safe ones match.  Final-state tests:
+test_ail_pre433, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre433: a power base from a function default is refused (job-rbpre433-10282254)
 
 The rbpre386 review's first still-differing item reproduced on this tree on both builds:
