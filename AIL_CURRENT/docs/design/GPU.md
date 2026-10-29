@@ -361,7 +361,8 @@ PyTorch + CUDA is run as the baseline of B0 (section 0).
   notebook checks it first. If it is there, Colab is a third device for the same SPIR-V (NVIDIA's f64, RTE and
   DenormPreserve support **[unverified per driver]**).
 - If Colab has no NVIDIA Vulkan driver, B0's NVIDIA half cannot run there; AIL does not add CUDA to work around it
-  (section 0). Another NVIDIA machine with a Vulkan driver is then needed (Q1).
+  (section 0). Decided (D3, 2026-10-29): B0 then runs on the AMD 780M only, and its NVIDIA half waits for an NVIDIA
+  machine with a Vulkan driver; no new spending.
 
 Notebook outline (`tools/colab/gpu_check.ipynb`, written in G3):
 1. Show the runtime: `nvidia-smi`, `cat /etc/os-release`, `python3 --version`; stop with a clear message if no GPU.
@@ -421,15 +422,15 @@ One element-wise chain (for example `gelu(x * w + b) * scale + residual`) where 
 on a Colab GPU. Measured with B2: median of 100 runs after warm-up, compile time reported separately. If it does not
 win, the result is written here and the claim is dropped.
 
-### 8.5 The precision problem (owner decision Q8)
+### 8.5 The precision problem (decided: D1, 2026-10-29, option (b))
 
 ML runs in binary32/bf16/fp16; CPython floats are binary64. A fused kernel that computes in binary32 is not what
 CPython computes, so under the zero-silent-differences rule it cannot be the meaning of ordinary Python float code. Two
 ways out: (a) ML kernels stay binary64 (exact, but slow on consumer GPUs, section 4.3), or (b) a separate typed array
 module whose element type is declared (`f32`) and whose arithmetic is defined by its own spec (rounded to binary32
 after every op, like `array('f')` storage but for arithmetic too), shipped with a CPython reference implementation of
-that module so the oracle comparison still works. (b) is what makes the targets above reachable; it is a semantics
-decision.
+that module so the oracle comparison still works. (b) is what makes the targets above reachable. The owner chose (b)
+on 2026-10-29 (D1, section 10): element types `f64`, `f32`, `f16`, `int8`, `int32`.
 
 ### 8.6 Staged plan (after G7; each one PR)
 
@@ -438,7 +439,7 @@ decision.
 | M1 | FFI bindings for CPU BLAS (`sgemm`/`dgemm`) and the typed array storage they read | B1 CPU numbers recorded against PyTorch eager; outputs equal the same BLAS called from CPython |
 | M2 | fusion of whole element-wise chains (G1 IR) over the typed arrays, on Vulkan | B2 numbers on the laptop iGPU; CPython-equal outputs on lavapipe in CI |
 | M3 | small-model inference example (MLP, small transformer) + Python tokenizer, end to end | B1, B3, B4, B6 recorded |
-| M4 | the declared-precision array module of 8.5 (f32, f16/bf16 storage, int8; only if Q8 says yes) | its CPython reference matches bit for bit |
+| M4 | GPU kernels for the declared-precision array module of 8.5 (D1: f64, f32, f16, int8, int32; the module itself is built in the modules/FFI stage) | bit-identical to the module's pure-Python reference under CPython |
 | M5 | vendor-neutral GPU matmul through an existing Vulkan library (8.7) | bit-equal to the module's CPython reference on lavapipe, the 780M and (if available) Colab NVIDIA, or restricted to the cases where it is; B0 first numbers |
 | M6 | own SPIR-V matmul kernels: exact binary64 tiled kernel, then `VK_KHR_cooperative_matrix` under the rules of 8.7 | every refusal and fallback of 8.7 tested; B0 and the 8.4 run on Colab against PyTorch + CUDA and `torch.compile`, result written here, win or not |
 
@@ -461,10 +462,10 @@ their own accumulation order, so M5 accepts a library kernel only for an operati
 | --- | --- | --- |
 | a matmul written as Python loops over `float` (`c[i][j] += a[i][k] * b[k][j]`, or `sum(... for k ...)`) | binary64, `k` in order, each op rounded; `sum()` is Neumaier | **exact kernel**: tile over `i, j` only, never split `k`; each output element runs its `k` loop in order with `NoContraction` (plain `+=` or Neumaier, as written). Never cooperative matrix (its multiply-add order and internal precision are not specified **[unverified: reading of VK_KHR_cooperative_matrix]**) |
 | the same loops over `int` (int64) | exact integers; overflow is the typed path's loud stop | exact kernel with overflow flags -> replay (section 3.3); order-independent, so `k` may be split |
-| module op `matmul(A, B)` on int8 inputs with int32 accumulation (Q8 module) | exact integer sum, defined by the module spec | **cooperative matrix allowed**: integer sums do not depend on order. Precondition checked before launch: `K * max|a| * max|b| < 2^31` (a max-abs reduction of each input, or a proof from the element type: int8 gives `K < 2^31 / 2^14`, so `K <= 131071`). Otherwise the exact scalar kernel in int64 runs |
-| module op on f16/bf16 inputs, f32 accumulation | spec: each output is the exact sum of exact products, rounded once to f32 | **cooperative matrix only when the sum is exact in f32 whatever the order**: products of f16 are exact in f32 (22 significant bits); the run-time check verifies that the exponent span of all nonzero products plus `log2(K)` fits in 24 bits, so every partial sum is exact. Otherwise flag -> the exact kernel (wide accumulation in software) runs. Real ML data rarely passes this check, so most f16 matmuls take the exact kernel |
+| module op `matmul(A, B)` on int8 inputs with int32 accumulation (D1 module) | exact integer sum, defined by the module spec | **cooperative matrix allowed**: integer sums do not depend on order. Precondition checked before launch: `K * max|a| * max|b| < 2^31` (a max-abs reduction of each input, or a proof from the element type: int8 gives `K < 2^31 / 2^14`, so `K <= 131071`). Otherwise the exact scalar kernel in int64 runs |
+| module op on f16 inputs, f32 accumulation | spec: each output is the exact sum of exact products, rounded once to f32 | **cooperative matrix only when the sum is exact in f32 whatever the order**: products of f16 are exact in f32 (22 significant bits); the run-time check verifies that the exponent span of all nonzero products plus `log2(K)` fits in 24 bits, so every partial sum is exact. Otherwise flag -> the exact kernel (wide accumulation in software) runs. Real ML data rarely passes this check, so most f16 matmuls take the exact kernel |
 | module op on f32 inputs | spec: sequential `k` order, f32 rounding per op | exact kernel only; cooperative matrix **refused** (f32 inputs are rounded to tf32 or similar inside many matrix units **[unverified per vendor]**) |
-| an "any order, faster" matmul whose bits differ per device | none: CPython has no such result | **not offered** unless the owner decides otherwise (Q10); it would break "exact on every vendor" |
+| an "any order, faster" matmul whose bits differ per device | none: CPython has no such result | **explicit opt-in only** (D2): compile flag plus per-call or per-module marker, a note at every use, tolerance tests in a separate suite; never default, never chosen silently |
 
 Cooperative matrix is on AMD RDNA3 (WMMA, the 780M's architecture), NVIDIA and Intel Arc hardware through their Vulkan
 drivers **[unverified per driver]**; whether lavapipe implements `VK_KHR_cooperative_matrix` is **[unverified]**. If it
@@ -489,10 +490,23 @@ cooperative-matrix path itself is tested only on the laptop and Colab, by hand (
 - **CI install time.** The lavapipe packages are about 240 MB installed if the runner image lacks them; caching may be
   needed (G3).
 
-## 10. Open questions for the owner
+## 10. Owner decisions
 
-- **Q1. NVIDIA test machine.** NVIDIA is reached only through Vulkan (no CUDA). If Colab does not expose NVIDIA's Vulkan
-  driver, which NVIDIA machine should the B0 benchmark use?
+- **D1 (2026-10-29, was Q8): declared-precision array module, yes.** A separate array module with declared element
+  types `f64`, `f32`, `f16`, `int8`, `int32` is planned under the modules/FFI stage (M4 is its GPU use). Each type has a
+  pure-Python reference implementation that runs on CPython and gives bit-identical results (for example rounding every
+  `f32`/`f16` result through `struct.pack('f'|'e')` / `array('f')`, and wrapping `int8`/`int32` as the spec says).
+  Programs that use the module are compared with that reference under CPython, like every other AIL test.
+- **D2 (2026-10-29, was Q10): exact is the default; inexact matmul only by explicit opt-in.** A fast matmul whose result
+  can depend on the device or the summation order may exist only when both a compile flag and a per-call or per-module
+  marker ask for it. The compiler prints a note naming every place it is used (file:line). It is never on by default and
+  never chosen silently. Its tests compare within a stated tolerance, in a suite separate from the exact one.
+- **D3 (2026-10-29, was Q1): no new spending, no CUDA.** First check whether Colab exposes NVIDIA's Vulkan driver
+  (notebook step 3). If it does not, B0 runs on the AMD 780M only, and its NVIDIA half waits until an NVIDIA machine with
+  a Vulkan driver is available.
+
+## 11. Open questions for the owner
+
 - **Q2. If Vulkan float rules fail on the iGPU** (G2 bit tests), switch to OpenCL, or keep the GPU off on that device?
 - **Q3. Stop rule.** If G7 shows little or no speed gain for float64 on the 780M, may the GPU work stop after G7 (code
   kept, `auto` not offered)?
@@ -501,10 +515,5 @@ cooperative-matrix path itself is tested only on the laptop and Colab, by hand (
 - **Q6. CI cost.** One extra CI job (target under 5 minutes) for GPU tests on lavapipe: acceptable?
 - **Q7. Windows laptop runs** need the Windows (MinGW) build path working for GPU programs. Is a by-hand run before each
   GPU merge enough, or do you want it scripted to run on a schedule?
-- **Q8. binary32 for ML.** Ordinary Python floats are binary64, so fast ML kernels need a separate array module whose
-  element type is declared `f32` and whose results follow its own spec, with a CPython reference version (section 8.5).
-  Build it, or keep ML kernels in binary64?
 - **Q9. Benchmark baseline.** For the PyTorch comparisons (section 8.2), which versions and machines count: the laptop
   CPU plus a Colab T4/L4, with `torch.compile` in its default mode?
-- **Q10. Inexact fast matmul.** Tensor cores are fastest when results may differ slightly between devices. Should AIL
-  ever offer such an opt-in function (named as inexact, never compared with CPython), or stay exact-only?
