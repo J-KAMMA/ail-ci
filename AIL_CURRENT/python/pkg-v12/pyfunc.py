@@ -44,6 +44,7 @@ import pathlower
 import proclib
 import urllower
 import hashlower
+import unilower
 import threadlib
 import iterlower
 import typedforms
@@ -7850,7 +7851,7 @@ def _fileprim_value(node, ctx):
                                           args=node.args, keywords=[]), node)
         name = specific
         ret, kinds = filelib.PRIMS[name]
-    ctx.parts.add({'proc': 'PROCIO', 'path': 'PATHIO', 'file': 'FILEIO', 'sql': 'SQLIO', 'http': 'HTTPIO', 'url': 'URLIO', 'hash': 'HASHIO'}[filelib.prim_kind(name)])
+    ctx.parts.add({'proc': 'PROCIO', 'path': 'PATHIO', 'file': 'FILEIO', 'sql': 'SQLIO', 'http': 'HTTPIO', 'url': 'URLIO', 'hash': 'HASHIO', 'uni': 'UNIIO'}[filelib.prim_kind(name)])
     ctx.has_try = True
     stages, names = [], []
     for arg, kind in zip(node.args, kinds):
@@ -35048,6 +35049,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     iterlower.rewrite(tree)
     typedforms.rewrite(tree)
     hashlower.rewrite_tree(tree, Unsupported)             # crypto: hashlib / hmac / secrets / base64, int.to_bytes -> primitives + prelude
+    unilower.rewrite_tree(tree, Unsupported)              # unicodedata.name / category / normalize (Unicode 15.0)
     filelib.rewrite_tree(tree, Unsupported)
     unbound.rewrite(tree, Unsupported, entry, info, library or any(external.values()))        # a local read before it is assigned raises UnboundLocalError (unbound.py)
     EXC_NAMES.clear()

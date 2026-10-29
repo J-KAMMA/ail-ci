@@ -16,6 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 import filelib
+import unirt
 
 with open(os.path.join(HERE, 'ailfile_core.h'), 'r', encoding='utf-8') as _f:
     CORE = _f.read()
@@ -529,7 +530,7 @@ static int64_t ailt_hs_b64n(void) { return ailhs_b64_n; }
 '''
 
 _TYPED_BY_KIND = {'file': TYPED, 'proc': TYPED_PROC, 'path': TYPED_PATH, 'sql': TYPED_SQL, 'http': TYPED_HTTP, 'url': TYPED_URL,
-                  'hash': TYPED_HASH}
+                  'hash': TYPED_HASH, 'uni': unirt.TYPED_UNI}
 for _name in filelib.PRIMS:
     if _name == '_ail_sq_bind':       # resolved to _ail_sq_bi / bf / bs / bb by pyfunc._fileprim_value
         continue
@@ -551,6 +552,7 @@ def register(ORDER, SOURCE, REQUIRES):
             ('HTTPIO', TYPED_HTTP, ['HTTPCORE', 'FILEIO', 'HTTPEXC']),
             ('HASHCORE', HASHCORE, ['TYPES', 'DIE']),
             ('HASHIO', TYPED_HASH, ['HASHCORE', 'STR', 'BYTES', 'DIE']),
+            ('UNIIO', unirt.TYPED_UNI, ['TYPES', 'STR', 'DIE']),
             ('SQLCORE', SQLCORE, ['FILECORE']),
             ('SQLIO', TYPED_SQL, ['SQLCORE', 'FILEIO', 'SQLEXC'])):
         ORDER.append(name)

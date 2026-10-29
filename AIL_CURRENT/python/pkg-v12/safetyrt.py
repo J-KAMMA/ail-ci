@@ -11,6 +11,7 @@ import randrt
 import jsonbrt
 import statbrt
 import rebrt
+import unirt
 
 
 def _strpred_tables():
@@ -2159,11 +2160,11 @@ static inline int ail2u_palindrome(ail_obj s) {
 '''
 
 FRAGMENTS = {'strpred': STRPRED2, 'slice': SLICE, 'bytes': BYTES, 'bytesfile': BYTESFILE, 'fmt': FMT, 'gen': GEN,
-             'misc': MISC, 'ddict': DDICT, 'attr': ATTR, 'exc': EXC, 'hash': HASH, 'rng': randrt.RNG,
+             'misc': MISC, 'ddict': DDICT, 'attr': ATTR, 'exc': EXC, 'hash': HASH, 'uni': unirt.UNI, 'rng': randrt.RNG,
              'rng_u': randrt.RNG_U,      # rng_u: only under AIL_UNIFIED=1 (unified.py)
              'ba_u': BA_U, 'str_u': STR_U,
              'jsn': jsonbrt.JSN, 'sta': statbrt.STA, 'rex': rebrt.REX}
-ORDER = ['strpred', 'slice', 'bytes', 'bytesfile', 'fmt', 'gen', 'misc', 'ddict', 'attr', 'exc', 'hash', 'rng', 'rng_u', 'ba_u', 'str_u', 'jsn', 'sta', 'rex']
+ORDER = ['strpred', 'slice', 'bytes', 'bytesfile', 'fmt', 'gen', 'misc', 'ddict', 'attr', 'exc', 'hash', 'uni', 'rng', 'rng_u', 'ba_u', 'str_u', 'jsn', 'sta', 'rex']
 
 GEN_PRELUDE = '''
 class generator:
@@ -2618,6 +2619,7 @@ PRIMS.update({name: (cfn, count, 'rng') for name, (cfn, count) in randrt.PRIMS.i
 PRIMS.update({name: (cfn, count, 'jsn') for name, (cfn, count) in jsonbrt.PRIMS.items()})   # json's loops (jsonbrt.py)
 PRIMS.update({name: (cfn, count, 'sta') for name, (cfn, count) in statbrt.PRIMS.items()})   # statistics' loops (statbrt.py)
 PRIMS.update({name: (cfn, count, 'rex') for name, (cfn, count) in rebrt.PRIMS.items()})   # re's Pike VM and DFA (rebrt.py)
+PRIMS.update(unirt.PRIMS)   # unicodedata.name / category / normalize (unirt.py)
 
 # The read-only methods bytes and bytearray share: name, parameters, arguments of the `_ail_bm_` function or
 # primitive (on the str `S`), and what the result is: `b` one bytes-like value, `L` a list of them, `T` a

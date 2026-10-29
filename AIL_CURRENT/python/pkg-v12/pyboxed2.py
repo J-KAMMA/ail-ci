@@ -38,6 +38,7 @@ from pyfront import (Unsupported, int_constant, refuse_complex_pow, refuse_varia
                       refuse_unrepresentable_delete_bounds, refuse_field_method_call)
 import filelib
 import hashlower
+import unilower
 import pyfunc
 import boxclosure
 import unified
@@ -2570,6 +2571,7 @@ class Compiler(boxclosure.ClosureMixin):
         if self.threads:
             self.allow_mix = False      # typed clones would run on the typed runtime, which has no lock
         hashlower.rewrite_tree(tree, Unsupported, general=True)    # crypto: hashlib / hmac / secrets / base64 (before the bytes prelude: it writes bytes)
+        unilower.rewrite_tree(tree, Unsupported)                   # unicodedata.name / category / normalize (Unicode 15.0)
         self._add_bytes_prelude(tree)                               # bytes / bytearray (safetyrt.py, prelude_bytes.py)
         self.reads_args = any(isinstance(n, ast.Attribute) and n.attr == 'args' for n in ast.walk(tree))
         _drop_type_aliases(tree)                                    # `Grid = list[list[int]]`, `T = TypeVar("T")`

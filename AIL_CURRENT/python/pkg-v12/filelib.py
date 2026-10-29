@@ -25,6 +25,7 @@ import proclib
 import urllower
 import sqllower
 import hashlower
+import unilower
 
 # ---------------------------------------------------------------------------------------------
 # The primitives. name -> (result kind, argument kinds), kinds in {'int', 'str', 'bytes'}.
@@ -74,6 +75,7 @@ PRIMS.update(PATHS)
 PRIMS.update(urllower.PRIMS)       # stage G12: urllib over libcurl (ailhttp_core.h) and urllib.parse (ailurl_core.h), parts of their own
 PRIMS.update(sqllower.SQLP)        # stage G11: the sqlite3 primitives (ailsql_core.h), a part of their own
 PRIMS.update(hashlower.HASHP)      # crypto: the hashlib / hmac / secrets / base64 primitives (ailhash_core.h), a part of their own
+PRIMS.update(unilower.UNIP)        # unicodedata.name / category / normalize (ailuni_core.h), a part of their own
 
 
 def is_sql_prim(prim):
@@ -82,6 +84,10 @@ def is_sql_prim(prim):
 
 def is_hash_prim(prim):
     return prim.startswith('_ail_hs_')
+
+
+def is_uni_prim(prim):
+    return prim.startswith('_ail_uni_')
 
 
 def is_proc_prim(prim):
@@ -103,7 +109,8 @@ def is_url_prim(prim):
 def prim_kind(prim):
     """'file' (ailfile_core.h), 'proc' (ailproc_core.h), 'path' (ailpath_core.h) 'sql' (ailsql_core.h), 'http' (ailhttp_core.h), 'url' (ailurl_core.h) or 'hash' (ailhash_core.h)."""
     return 'sql' if is_sql_prim(prim) else 'proc' if is_proc_prim(prim) else 'path' if is_path_prim(prim) \
-        else 'http' if is_http_prim(prim) else 'url' if is_url_prim(prim) else 'hash' if is_hash_prim(prim) else 'file'
+        else 'http' if is_http_prim(prim) else 'url' if is_url_prim(prim) else 'hash' if is_hash_prim(prim) \
+        else 'uni' if is_uni_prim(prim) else 'file'
 
 
 def c_name(prim):

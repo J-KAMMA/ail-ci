@@ -1,3 +1,26 @@
+## 2026-10-29 -- stdlib32: `unicodedata.name` / `category` / `normalize` (job-stdlib32-10291014)
+
+`unicodedata` was the next most-imported still-refused module in the corpus (`lab/corpus/programs`:
+four programs, `glm-5.3-flash-free/t081.py` and the two `t489.py` samples).  `unilower.py` lowers the
+three functions onto `_ail_uni_*` primitives; `unirt.py` has the typed and general adapters, and
+`ailuni_core.h` is generated from CPython 3.12.3 / Unicode 15.0 by `tools/gen_unicodedata.py`
+(categories, names including the CJK / Khitan / Nushu and Hangul algorithmic ranges, canonical and
+compatibility decompositions, combining classes and composition pairs).  `name` and `category` take
+one character; `name` also takes a string-constant default.  `normalize` takes NFC, NFD, NFKC or NFKD.
+Everything else in the module, a non-string default and a literal argument that is not a single string
+character are refused by name.
+
+Added `test_ail_stdlib32.py` (5 tests) and registered it in `ail_check.MODULES`; it compares the typed
+path (`AIL_NO_GENERAL=1`) and the default build with CPython over representative code points (every
+category, the algorithmic-name ranges, Hangul, compatibility, private use and unassigned) and over
+generated normalization strings in all four forms.  Probes in `/tmp/probes`: `u_smoke`, `u_more`,
+`u_astral`, `u_routes`, `u_alias`, `u_default_none`, `u_default_int`, `u_badargs`, `u_str_errors` and
+`u_exc_type` either match CPython on both builds or are refused by name (the general path refuses the
+non-BMP literal in `u_astral` by name; the invalid literal/default probes are refused by name on both
+builds).  Final-state tests: `test_ail_stdlib32`, `test_ail_stdlib_batch4`, `test_ail_check`,
+`test_ail_files`, `test_ail_corpus_findings3` and `test_ail_safetynet`; `tools/update_manifest.py
+--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
