@@ -1,4 +1,23 @@
-## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
+## 2026-10-29 -- rd3: `check` accepts a top-level-only script; strict construct keeps the whole type (job-rd3-10300430)
+
+`ail_chatgpt.py check` routed straight through `pyfunc.to_c`, which has no script mode, so a
+Python-syntax file with only top-level statements that `compile` builds fine (it synthesises a
+`main`, SEMANTICS section 33) failed with `no def found`.  `check` now uses the same entry point as
+`compile` (`pyc.to_c`) outside `--library` mode, so the synthesised `main` is seen; `--library`
+still uses `pyfunc.to_c`.  The `--strict` report's `construct:` line was cut at the comma inside a
+type (`print() given a dict[str`); `strictmode.split_message` now finds clause delimiters and the
+`': '` head split only at bracket/quote depth zero, so it reports `print() given a dict[str, int]`.
+
+Added `test_ail_rd3.py` (registered in `ail_check.py`): CPython is the oracle for a plain
+top-level script, a single `print`, and a class-only script (each checked, built, and compared to
+CPython), plus a top-level-only dict print refused by name instead of `no def found`, and the full
+strict construct text and JSON.  Probes in `/tmp/probes/rd3` (`p_top`, `p_print`, `p_class`,
+`p_guard`, `p_dict`, `p_const`, `p_neg`) match CPython on both builds via `cmp.sh`.  Ran
+`test_ail_rd3`, `test_ail_strict`, `test_ail_source_check`, `test_ail_check`,
+`test_ail_check_repair_context`, `test_ail_edit_check_report`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`; `tools/update_manifest.py --check` passes.
+
+
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
 literal whose contents are empty only after unpacking (`[*()]`, `(*(),)`, `{*()}`, `{**{}}`) was

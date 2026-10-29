@@ -4940,15 +4940,29 @@ def _source_check(args):
             check_objects.append(ffi.build(ROOT / 'ail_chatgpt.py'))
             os.environ['AIL_FFI_SYMBOLS'] = ' '.join(ffi.symbols())
             dependency = False
+        parsed = ast.parse(text)
         report['checked_functions'] = sum(isinstance(node, ast.FunctionDef)
-                                          for node in ast.walk(ast.parse(text)))
+                                          for node in ast.walk(parsed))
         compiler_path = str(ROOT / 'python/pkg-v12')
         previous_path = sys.path[:]
         previous_bytecode = sys.dont_write_bytecode
         try:
             sys.dont_write_bytecode = True
             sys.path.insert(0, compiler_path)
-            from pyfunc import Unsupported, to_c
+            from pyfunc import Unsupported
+            if getattr(args, 'library', False):
+                from pyfunc import to_c
+                unit_kwargs = {'library': True}
+            elif not any(isinstance(node, ast.FunctionDef) for node in parsed.body):
+                # A top-level-only script: use the same entry `compile` uses, so it gets the
+                # synthesised `main` of SEMANTICS section 33 instead of "no def found".  A file
+                # with a top-level `def` keeps pyfunc.to_c, whose diagnostics preserve the
+                # original source positions the `compile` pipeline maps separately.
+                from pyc import to_c
+                unit_kwargs = {}
+            else:
+                from pyfunc import to_c
+                unit_kwargs = {}
             external = None
             if check_objects:
                 dependency = True
@@ -4963,7 +4977,7 @@ def _source_check(args):
                 os.environ.pop('AIL_SURFACE', None)
             try:
                 to_c(text, strict=True, info={'_want_units': True, '_checked_arrays': True},
-                     library=args.library, external=external)
+                     external=external, **unit_kwargs)
             finally:
                 if saved_surface is None:
                     os.environ.pop('AIL_SURFACE', None)
