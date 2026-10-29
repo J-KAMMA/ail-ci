@@ -28669,6 +28669,34 @@ def repr_runtime_for_host(source):
     marker = 'static const uint32_t ail_repr_unprintable[][2] = {\n'
     before, remainder = source.split(marker, 1)
     _, after = remainder.split('};', 1)
+    return before + marker + _host_unprintable_rows() + '};' + after
+
+
+_HOST_ROWS = None
+
+
+def _host_unprintable_rows():
+    """The `{low, high},` rows of the code points above 127 that this Python's str.isprintable()
+    rejects. Scanning all 1.1M code points took ~0.15 s on every compile (2026-10-29 profile: 2-7% of
+    a build), so the rows are kept once per process and once per Python on disk; they depend only on
+    the interpreter's Unicode data, which the file name pins."""
+    global _HOST_ROWS
+    if _HOST_ROWS is not None:
+        return _HOST_ROWS
+    import os
+    import re
+    import unicodedata
+    cache = None
+    try:
+        import buildcache
+        cache = buildcache.root() / ('unprintable-%s-%s-%s.txt' % (
+            sys.implementation.name, '.'.join(map(str, sys.version_info[:3])), unicodedata.unidata_version))
+        text = cache.read_text(encoding='ascii')
+        if re.fullmatch(r'(    \{\d+, \d+\},\n)+', text):
+            _HOST_ROWS = text
+            return text
+    except Exception:
+        pass
     ranges = []
     start = end = None
     for codepoint in range(128, 0x110000):
@@ -28681,8 +28709,16 @@ def repr_runtime_for_host(source):
             end = codepoint
     if start is not None:
         ranges.append((start, end))
-    table = ''.join(f'    {{{low}, {high}}},\n' for low, high in ranges)
-    return before + marker + table + '};' + after
+    _HOST_ROWS = ''.join(f'    {{{low}, {high}}},\n' for low, high in ranges)
+    if cache is not None:
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            temporary = cache.with_name(cache.name + '.%d.tmp' % os.getpid())
+            temporary.write_text(_HOST_ROWS, encoding='ascii')
+            os.replace(temporary, cache)
+        except OSError:
+            pass
+    return _HOST_ROWS
 
 LIBM_FUNCS = {'sin': 1, 'cos': 1, 'tan': 1, 'asin': 1, 'acos': 1, 'atan': 1, 'sinh': 1, 'cosh': 1, 'tanh': 1, 'asinh': 1, 'acosh': 1, 'atanh': 1, 'exp': 1, 'exp2': 1, 'expm1': 1, 'log': 1, 'log1p': 1, 'log2': 1, 'log10': 1, 'cbrt': 1, 'floor': 1, 'ceil': 1, 'trunc': 1, 'fabs': 1, 'atan2': 2, 'pow': 2, 'fmod': 2, 'copysign': 2, 'hypot': 2}
 LIBM = r'''

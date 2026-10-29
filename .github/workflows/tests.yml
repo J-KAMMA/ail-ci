@@ -32,6 +32,10 @@ jobs:
           python-version: '3.12'
       - name: Check manifest pins
         run: python3 tools/update_manifest.py --check
+      - name: Byte-compile the compiler
+        # every build spawns `python3 -B pyc.py`, which never writes __pycache__: on a fresh checkout
+        # each compile re-parsed the whole compiler (1.3-1.6 s per build on the dev laptop, 2026-10-29)
+        run: python3 -m compileall -q -j 0 AIL_CURRENT tools
       - name: Run shard
         env:
           SHARD: ${{ matrix.shard }}
