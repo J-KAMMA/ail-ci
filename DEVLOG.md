@@ -1,3 +1,34 @@
+## 2026-10-29 -- cov36: nested generator expressions consumed at once (job-cov36-10291014)
+
+Building every program in `lab/corpus/programs` on both builds (default and `AIL_UNIFIED_FORCE=1`) gave 24
+compile-time refusals per build before this change; the most frequent non-import construct was `a generator
+expression nested inside another generator expression` (3 programs on the general path: deepseek t172 and
+both t432s).  The general path materialises a generator expression as a list, so a nested one was evaluated
+when the outer object was built.  When the outer expression is handed straight to `sum`, `sorted`, `list`,
+`tuple` or `str.join`, and every inner one is consumed the same way, that eager lowering happens at CPython's
+own iteration point, so those shapes now build and match CPython on both builds.  The same three programs now
+build on both builds, taking the corpus from 24 to 21 refusals per build.
+
+Unsafe shapes keep the named refusal: a saved outer generator, an inner one used as a loop/comprehension
+iterable, a `for`/comprehension source (which can stop early on `break` or a body exception), `min`/`max`
+(a key or comparison can stop early), `set`/`dict` (hashing), and the `next()`/`any()`/`all()` fused paths.
+Changed `python/pkg-v12/pyboxed2.py` (`_nested_genexp_ok` plus the new `_genexp_consumed_at_once`), added
+`AIL_CURRENT/test_ail_cov36.py` and registered it in `ail_check.MODULES`; updated the pre42 DIFFERENCES row.
+`tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `cov36_p1_join`, `cov36_p2_routes`,
+`cov36_p3_eager_calls`, `cov36_p5a`, `cov36_p6_side_effects`, `cov36_p7_shadow`, `cov36_p8_cond`,
+`cov36_p9_empty_negative`, `cov36_p18_sorted_key_raise`, `cov36_p22_capture`, `cov36_p23_mutation` and
+`cov36_p24_types` match CPython.  `cov36_p4_for`, `cov36_p5b`, `cov36_p10_refuse_saved`,
+`cov36_p11_refuse_iterable`, `cov36_p12_refuse_unconsumed`, `cov36_p14_for_break`, `cov36_p15_comp_error`,
+`cov36_p16_inner_for_break`, `cov36_p19_for_no_break`, `cov36_p20_minmax_refuse` and
+`cov36_p21_set_refuse` are refused by name on the general path; p10-p12, p14-p16, p19, p21 and p17 are refused
+on both builds (p17's typed refusal names the `bad()` call instead), while `cov36_p13_refuse_any` and
+`cov36_p20_minmax_refuse` are refused on the general path but the typed default path builds them and matches
+CPython (pre-existing typed-path behaviour, not changed here).  Final-state tests: `test_ail_cov36`,
+`test_ail_pre42`, `test_ail_pre41`, `test_ail_pre116`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` (7 modules, 0 failed).
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

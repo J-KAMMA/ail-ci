@@ -2536,9 +2536,14 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        genexp_parents = {}
+        for par in ast.walk(tree):
+            for child in ast.iter_child_nodes(par):
+                genexp_parents[child] = par
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)) and \
+                    not _nested_genexp_ok(gen, genexp_parents):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6495,7 +6500,7 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        if _genexp_has_iterable_nested(node):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -12446,6 +12451,66 @@ _GENEXP_SAFE_METHODS = frozenset({
     'rsplit', 'splitlines', 'partition', 'rpartition', 'removeprefix', 'removesuffix',
     'bit_length', 'bit_count', 'is_integer', 'get', 'keys', 'values', 'items',
 })
+
+
+def _nested_genexp_ok(node, parents):
+    """True iff a generator expression that contains another one can keep the eager lowering:
+    the whole outer expression is consumed at the point where it is built, and every inner
+    expression is consumed at once too (never an inner generator used as a loop iterable)."""
+    outer_consumed = _genexp_consumed_at_once(node, parents)
+    for inner in ast.walk(node):
+        if inner is node or not isinstance(inner, ast.GeneratorExp):
+            continue
+        par = parents.get(inner)
+        if isinstance(par, ast.comprehension) and par.iter is inner:
+            return False
+        if not outer_consumed or not _genexp_consumed_at_once(inner, parents):
+            return False
+    return True
+
+
+# Consumers that read every element before running any other code.  `min`/`max` (a key or a
+# comparison can stop early), `set`/`dict` (hashing), `next`/`any`/`all` (short-circuit) and
+# `update`/`array` (per-element conversion) are deliberately absent: a nested generator there
+# keeps the named refusal rather than becoming a silent difference.
+_NESTED_GENEXP_EAGER_CALLS = frozenset({'list', 'tuple', 'sorted', 'sum'})
+_NESTED_GENEXP_EAGER_METHODS = frozenset({'join'})
+
+
+def _genexp_consumed_at_once(node, parents):
+    """True iff `node` is read completely before the enclosing statement can do anything else:
+    a starred unpack, tuple/list unpacking, or one of the eager consumers above.  A
+    `for`/comprehension source can stop early (break, a body exception), so a nested generator
+    there keeps the named refusal; so does a saved generator."""
+    par = parents.get(node)
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, (ast.Assign, ast.AnnAssign)):
+        target = par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1 else getattr(par, 'target', None)
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return True
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in _NESTED_GENEXP_EAGER_CALLS:
+            return True
+        if isinstance(f, ast.Attribute) and f.attr in _NESTED_GENEXP_EAGER_METHODS:
+            return True
+    return False
+
+
+def _genexp_has_iterable_nested(node):
+    """True iff an inner generator expression is used as a for/comprehension iterable."""
+    parents = {}
+    for par in ast.walk(node):
+        for child in ast.iter_child_nodes(par):
+            parents[child] = par
+    for inner in ast.walk(node):
+        if inner is node or not isinstance(inner, ast.GeneratorExp):
+            continue
+        par = parents.get(inner)
+        if isinstance(par, ast.comprehension) and par.iter is inner:
+            return True
+    return False
 
 
 def _genexp_consumed_in_place(node, parents):
