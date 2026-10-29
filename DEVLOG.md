@@ -1,3 +1,29 @@
+## 2026-10-29 -- stdlib48: `struct` for literal integer/bytes formats
+
+`struct` was the next most-imported still-refused module after `decimal` in the corpus.  `struct.calcsize`,
+`pack`, `unpack` and `unpack_from` are now lowered for a literal format that starts with `<`, `>` or `!` and
+uses `x c b B ? h H i I l L q Q s p`, with repeat counts.  `calcsize` folds to its integer, `pack` becomes a
+`b''.join` of per-field byte expressions, and each literal format gets one generated unpack helper with a
+fixed element annotation, so the typed path builds these programs.  `structlib.py` refuses the native `@`/`=`
+forms, float codes `e f d`, native-only `n N`, non-literal formats, `Struct`, `iter_unpack`, `pack_into`,
+`struct.error` and empty-value unpack by name.  It also fixes `python_wording`, which used to turn
+`struct.pack` into `class.pack` in a refusal for a Python reader.  `prelude_struct.py` holds the few scalar
+checks; the generated helpers are in `structlib.py`.
+
+Probes in `/tmp/probes` and `/tmp/probes2` on both builds via `cmp.sh`: `s1`, `struct_int`,
+`struct_bytes`, `struct_values`, `struct_codes`, `struct_imports`, `struct_space`, `bool_int`,
+`bytearray_fields`, `q_max`, `offsets`, `zero_counts`, `unpack_length` and `pascal_lit` match CPython;
+the successful probes also match with `AIL_NO_GENERAL=1` (typed path).  `struct_int`, `struct_bytes`,
+`struct_values`, `struct_codes` and `struct_imports` were checked with the typed path explicitly.
+`refuse_float`, `refuse_native`, `refuse_native_code`, `refuse_nonliteral`, `refuse_struct`,
+`refuse_pack_into`, `refuse_empty`, `refuse_space` and `refuse_zero_p` are refused by name with a `struct.`
+note.  A float or string passed to an integer code, an out-of-range value and a short or long unpack buffer
+stop with `ValueError`, as declared.  The remaining limits are the int64 `Q` value/result and `ValueError`
+in place of `struct.error`.
+
+Final-state tests: test_ail_stdlib48 (6 tests, 0 failed), test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3; `tools/update_manifest.py` and `--check` are run at commit time.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

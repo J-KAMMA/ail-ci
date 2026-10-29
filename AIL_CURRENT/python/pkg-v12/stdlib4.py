@@ -25,7 +25,7 @@ if _here not in sys.path:
 
 import stdlib3
 
-TEXT_MODULES = ('csv', 'datetime')
+TEXT_MODULES = ('csv', 'datetime', 'struct')
 # modules that are named and refused, with what to write instead (module -> text; the text starts with the module)
 UNBUILT = {
     'zoneinfo': 'zoneinfo: a named time zone needs the tz database (and its rules), which is not built, so use a fixed '
@@ -113,6 +113,8 @@ LEFT_NOTE = {
            'sys.stdout are built, where the reader is assigned to a name, iterated by a for statement or '
            'comprehension, or passed to next() / list()',
     'datetime': 'see the reference for the datetime forms that are built',
+    'struct': 'struct builds calcsize, pack, unpack and unpack_from for a literal format that starts with '
+              "'<', '>' or '!' and uses integer, character, bool, string and pad codes",
 }
 
 
@@ -184,6 +186,9 @@ def rewrite_text(source, notes=None):
                     csvgen.run(imports, tree, helpers)
                 except Refused:
                     raise csv_refusal
+        if 'struct' in modules:
+            import structlib
+            structlib.run(imports, tree, helpers)
         if 'datetime' in modules:
             import dtlib
             dtlib.rewrite(imports, tree, helpers, time_used)
