@@ -1284,8 +1284,10 @@ def _bound_names(tree):
     for node in ast.walk(tree):
         if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             names.add(node.id)
-        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(node.name)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                              ast.Lambda)):
+            if not isinstance(node, ast.Lambda):
+                names.add(node.name)
             if not isinstance(node, ast.ClassDef):
                 args = node.args
                 names.update(a.arg for a in list(args.posonlyargs) + list(args.args)
@@ -1294,6 +1296,15 @@ def _bound_names(tree):
                     names.add(args.vararg.arg)
                 if args.kwarg:
                     names.add(args.kwarg.arg)
+        elif isinstance(node, ast.ExceptHandler):
+            if node.name:
+                names.add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)):
+            if node.name:
+                names.add(node.name)
+        elif isinstance(node, ast.MatchMapping):
+            if node.rest:
+                names.add(node.rest)
         elif isinstance(node, ast.ImportFrom):
             names.update(a.asname or a.name for a in node.names)
         elif isinstance(node, ast.Import):

@@ -1,3 +1,22 @@
+## 2026-10-29 -- cov52 review: lambda and except-as shadows keep the refusal (job-cov52-10292235)
+
+The review found that `_bound_names`, which decides whether a consumer name is the builtin, missed
+two binding forms: an `ast.Lambda` parameter and `ast.ExceptHandler.name`.  `lambda sum: list(sum(v
+for v in row) for row in ...)` therefore passed the eager-consumer gate and printed `[1, 3]` where
+CPython raises `TypeError: 'generator' object is not subscriptable`, and `except ValueError as sum:`
+printed `3\n3` where CPython raises `TypeError: 'ValueError' object is not callable`; both were named
+refusals on base.  Lambda parameters (positional-only, ordinary, keyword-only, `*args`, `**kwargs`)
+and except-as names are now collected, as are `match` captures (`MatchAs`, `MatchStar`,
+`MatchMapping.rest`), which had the same bypass.  No corpus program binds a consumer name this way,
+so the census stays at 42 refusal records over 21 programs after the feature (48 / 24 on base).
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p01_lambda_sum`, `p02_lambda_list`,
+`p03_except_sum`, `p04_except_join`, `p05_match_sum`, `p06_match_rest`, `p07_lambda_vararg`,
+`p08_lambda_kwonly` and `p12_lambda_default_sum` are refused by name; `p09_lambda_other_name_ok`,
+`p10_except_other_name_ok` and `p11_match_other_name_ok` still match CPython.  The lambda/except
+cases were added to `test_ail_cov52.py`.  Final-state tests: test_ail_cov52, test_ail_pre41,
+test_ail_pre42, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed).
+
 ## 2026-10-29 -- cov52: nested generator expressions with an eager consumer (job-cov52-10292235)
 
 A fresh compile census of all 219 programs in `lab/corpus/programs` (both builds) found 48

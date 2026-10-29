@@ -86,6 +86,15 @@ print(list(g))
 rows = [[1, 2], [3]]
 print("\\n".join(str(sum(v for v in row)) for row in rows))
 ''',
+    'lambda_parameter_shadow': '''f = lambda sum: list(sum(v for v in row) for row in [[1, 2], [3]])
+print(f(lambda g: g[0]))
+''',
+    'except_as_shadow': '''try:
+    raise ValueError("boom")
+except ValueError as sum:
+    rows = [[1, 2], [3]]
+    print("\\n".join(str(sum(v for v in row)) for row in rows))
+''',
     'any_all': '''rows = [[0, 1], [2]]
 print(any(x for x in (y for row in rows for y in row)))
 ''',
