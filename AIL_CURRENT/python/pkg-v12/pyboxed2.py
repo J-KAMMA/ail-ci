@@ -2531,19 +2531,13 @@ class Compiler(boxclosure.ClosureMixin):
             and len(n.args) >= 2 and isinstance(n.args[1], ast.Constant)
             and isinstance(n.args[1].value, str))
         self.assigned_attrs = frozenset(assigned_attrs)
-        any_all_genargs = set()
-        for call in ast.walk(tree):
-            if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
-                    call.func.id in ('any', 'all'):
-                any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
-        for gen in ast.walk(tree):
-            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
-                refusal = Unsupported(
-                    'a generator expression nested inside another generator expression '
-                    '(the inner one would be materialised eagerly, not lazily)')
-                refusal.source_line = getattr(gen, 'lineno', None)
-                raise refusal
+        nested_genexp = _nested_genexp_needing_laziness(tree)
+        if nested_genexp is not None:
+            refusal = Unsupported(
+                'a generator expression nested inside another generator expression '
+                '(the inner one would be materialised eagerly, not lazily)')
+            refusal.source_line = getattr(nested_genexp, 'lineno', None)
+            raise refusal
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
@@ -6495,9 +6489,8 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
-            raise Unsupported('a generator expression nested inside another generator expression '
-                              '(the inner one would be materialised eagerly, not lazily)')
+        # A nested chain was already checked by `_nested_genexp_needing_laziness`: only a chain
+        # whose every generator is read to exhaustion reaches this point.
         t = self.expr_ListComp(node, ctx)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
@@ -12470,6 +12463,75 @@ def _genexp_consumed_in_place(node, parents):
         if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
             return True
     return False
+
+
+# Consumers that read every element before they can produce an observable effect (a return
+# value, a mutation of the receiver, or a raise).  `next`/`any`/`all` are deliberately absent:
+# they stop early, so an eagerly materialised inner generator could raise or be observed where
+# CPython would not have reached.  A nested generator expression is only lowered eagerly when
+# every generator in the chain sits under one of these consumers.
+_GENEXP_FULL_CALLS = frozenset({
+    'list', 'tuple', 'set', 'frozenset', 'dict', 'sum', 'bytes', 'bytearray', 'Counter', 'array',
+})
+
+
+def _genexp_fully_consumed(node, parents):
+    """True iff `node` is read to exhaustion before its consumer can show an element or run an
+    observable effect.  Narrower than `_genexp_consumed_in_place`: `next`, `any` and `all` read a
+    prefix, and a `for` body or a comprehension element runs between reads (so a later element
+    that raises would leave different output).  The consumers kept here build a value silently;
+    `sorted`/`min`/`max` are left out because they compare while reading."""
+    par = parents.get(node)
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, (ast.Assign, ast.AnnAssign)):
+        target = par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1 else getattr(par, 'target', None)
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return True
+    if isinstance(par, ast.comprehension) and par.iter is node:
+        # The outermost iterable of a generator expression is evaluated when the generator is
+        # made.  That is safe only when the generator itself is fully consumed by a silent
+        # consumer; a list/set/dict comprehension runs its element between reads.
+        comp = parents.get(par)
+        return isinstance(comp, ast.GeneratorExp) and _genexp_fully_consumed(comp, parents)
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in _GENEXP_FULL_CALLS:
+            return True
+        if isinstance(f, ast.Attribute) and f.attr == 'join':
+            return True
+    return False
+
+
+def _nested_genexp_needing_laziness(tree):
+    """The first generator expression that contains another generator expression (or is itself
+    nested in one) and is not read to exhaustion at that point.  Such a chain must stay refused:
+    the emitter materialises the inner generator eagerly, which differs from CPython's lazy
+    object.  A chain where every generator is fully consumed (a join/list/sum over nested
+    generators) lowers exactly like CPython, so it is accepted.  The generator directly under
+    any()/all() is left to `_any_all`, which refuses it with its own message."""
+    parents = {}
+    for par in ast.walk(tree):
+        for child in ast.iter_child_nodes(par):
+            parents[child] = par
+    any_all_args = set()
+    for call in ast.walk(tree):
+        if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) \
+                and call.func.id in ('any', 'all'):
+            any_all_args.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.GeneratorExp) or id(node) in any_all_args:
+            continue
+        nested = any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node))
+        par = parents.get(node)
+        while par is not None and not nested:
+            if isinstance(par, ast.GeneratorExp):
+                nested = True
+                break
+            par = parents.get(par)
+        if nested and not _genexp_fully_consumed(node, parents):
+            return node
+    return None
 
 
 def _bound_names(tree):

@@ -1,3 +1,30 @@
+## 2026-10-29 -- cov48: a chain of fully consumed generator expressions matches (job-cov48-10291711)
+
+Rebuilt all 219 corpus programs (both builds, plus `AIL_IR=1`): 24 compile-time refusals per
+mode before this change, 21 after.  The largest language refusal was the nested generator
+expression (3 programs: deepseek t172/t432, glm t432); saved-generator-value refusals stay at 2
+(t437 on both models) because eager materialisation cannot model a lazily raised element there.
+Imports/other stdlib refusals (7 in the typed path, the rest in the general path) were not
+touched.
+
+`_nested_genexp_needing_laziness` replaces the old unconditional "nested generator expression"
+refusal in the general path.  A nested chain is accepted only when every generator in it is read
+to exhaustion at the point the emitter materialises it: an argument of `join`/`list`/`tuple`/
+`set`/`frozenset`/`dict`/`sum`/`bytes`/`bytearray`/`Counter`/`array`, a starred element, or a
+tuple/list unpacking target, including the outermost-iterable links of a generator that is itself
+so consumed.  `next`/`any`/`all`, `sorted`/`min`/`max`, a `for` source, a comprehension element
+and a stored value keep the named refusal: eager materialisation would run elements CPython never
+reaches, or show them in a different order.  `expr_GeneratorExp` now trusts that whole-tree
+screen instead of refusing every nested node again.
+
+Probes in `/tmp/probes/cov48` on both builds via `cmp.sh`: `p_join_argument`, `p_join_list_item`,
+`p_join_attribute`, `p_join_dict_value`, `p_sum_nested`, `p_three_levels`, `p_unpack_nested`,
+`p_alias_mutation`, `p_raise_outer` and `p_no_nested_control` match CPython; `p_refuse_next`,
+`p_refuse_saved`, `p_refuse_list_item`, `p_refuse_for_source`, `p_star_refused`,
+`p_refuse_any_iter` and `p_refuse_saved_value` are refused by name.  Added
+`test_ail_cov48.py` to `ail_check.py` MODULES.  `tools/update_manifest.py` and
+`tools/ci_shards.py --update` were run, and both `--check` forms pass.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
