@@ -38,9 +38,9 @@ a CPython 3.12.3 snippet in WSL (no AIL program was compiled); **[read, not run]
 ### 1.2 Out
 
 - numpy compatibility (names, broadcasting rules, dtype promotion, views). GPU.md Q5 asks whether a numpy subset is
-  wanted; this module is deliberately smaller and does not answer that question (open question Q6 here).
+  wanted; this module is deliberately smaller and is not that subset (decision TA6: a numpy subset may come later).
 - dtypes beyond D1: `bf16`, `uint8`, `int16`, `int64`, `bool`, complex. Refused by name (section 8).
-- Shapes with more than two dimensions (open question Q5).
+- Shapes with more than two dimensions (decision TA5).
 - Automatic differentiation, training, a model format.
 
 ### 1.3 What exists today
@@ -110,7 +110,7 @@ static goes to the general path, which dispatches on a dtype tag at run time (se
 1-D covers element-wise chains, reductions, and the buffers C and BLAS read. 2-D (C order, contiguous, `shape =
 (rows, cols)`) is added in T6 only because matrix multiply needs it (small-model inference, GPU.md 8.3). The only
 broadcasts are `(r, c) op (c,)` (a bias row) and array-scalar. General N-D arrays, strides and views are not planned:
-each one multiplies the lowering cases and the aliasing proofs (section 6) and no first target needs it (Q5).
+each one multiplies the lowering cases and the aliasing proofs (section 6) and no first target needs it (TA5).
 
 ## 3. Exact semantics
 
@@ -120,12 +120,12 @@ each one multiplies the lowering cases and the aliasing proofs (section 6) and n
 | --- | --- |
 | rounding | every element-wise op `x op y` gives `r_T(exact(x op y))` for `+ - * /` and `sqrt`: correctly rounded in `T`, ties to even. Nothing is fused: `a * b + c` is two ops, two roundings. f64 is IEEE binary64, f32 binary32 (24 bits), f16 IEEE binary16 (11 bits, exponent -14..15) |
 | overflow | to `+inf` / `-inf` (IEEE). **Float dtypes never raise for overflow**, in arithmetic, casts or stores. `array('f', [1e300])` stores `inf` on CPython 3.12 too **[verified]**; `struct.pack('f', 1e300)` raises `OverflowError` instead **[verified]**, so the reference catches it (section 4.2) |
-| division by zero | IEEE: `1/0 -> inf`, `-1/0 -> -inf`, `0/0 -> NaN`. This differs from Python's `float /` (which raises); it is the module's rule because SIMD and GPU code cannot raise per lane, and ML code expects it (open question Q2) |
+| division by zero | IEEE: `1/0 -> inf`, `-1/0 -> -inf`, `0/0 -> NaN`. This differs from Python's `float /` (which raises); it is the module's rule because SIMD and GPU code cannot raise per lane, and ML code expects it (decision TA2) |
 | NaN | every NaN **produced** by an op, a cast, or a store of a Python float NaN is the **canonical quiet NaN with the sign bit clear**: f64 `0x7ff8000000000000`, f32 `0x7fc00000`, f16 `0x7e00`. Reason: x86 produces a NaN with the sign set for `inf - inf` (`fff8000000000000` on CPython here **[verified]**; `math.copysign(1, inf - inf)` is `-1.0`), arm64 produces it with the sign clear **[unverified]**, and a GPU may produce yet another; canonicalising makes the bits device-independent. Bits that arrive through `frombytes` or a C call are stored unchanged until an op touches them |
 | NaN to Python | `a[i]` of a stored NaN gives the Python float the C conversion `(double)` gives. Under CPython the reference uses `struct.unpack('<f')`, which is that C cast; a signalling f32 NaN `7f800001` came back as `7ff8000020000000` (quieted, payload shifted) **[verified on x86-64]**; arm64 also quiets **[unverified]**. AIL does the same cast, so both agree on one machine |
 | -0.0 | kept as IEEE: `-0.0 + -0.0 = -0.0`, `0.0 + -0.0 = 0.0`, `-(0.0) = -0.0`, `abs(-0.0) = 0.0`; `r_f16(-0.0)` is `0x8000` **[verified]** |
 | subnormals | kept (gradual underflow) in all three dtypes, in arithmetic and conversion. f16: smallest `2^-24`, largest subnormal `2^-14 - 2^-24`; `2^-25` rounds to `0.0` (tie to even), anything above it to `2^-24` **[verified with `struct 'e'`]**. No flush-to-zero anywhere: the runtime never sets FTZ/DAZ, and a C callee that does is "trusted C" as in SEMANTICS.md section 48 |
-| `sqrt` | correctly rounded. Negative input gives NaN (canonical), not `ValueError` (Q2) |
+| `sqrt` | correctly rounded. Negative input gives NaN (canonical), not `ValueError` (TA2) |
 | `exp log tanh` | defined as `r_T(math.<f>(float(x)))`: CPython's libm result in binary64, rounded once to `T`. On one platform CPython and AIL call the same libm, so the bits agree; across platforms both follow that platform's libm, as plain `math.exp` already does. `log` of a negative is NaN, of zero `-inf` (IEEE, not `ValueError`). No vector libm (it gives other bits) except in the inexact mode (section 7) |
 | `minimum maximum clip` | element-wise; NaN in either operand gives NaN; `-0.0` is less than `0.0`. Order-independent on purpose (Python's `min(-0.0, 0.0)` returns the first argument **[verified]**; the module does not copy that position rule) |
 
@@ -226,7 +226,7 @@ and not numpy's pairwise sum; users who want Python's result call the builtin `s
 | int32 x int32 | int32 | exact, checked, order-free |
 
 `ta.dot(row, col)` (blocked order) and a `1 x K` by `K x 1` `matmul` (sequential) are therefore different functions
-for floats (open question Q4).
+for floats (decision TA4: kept separate for now).
 
 ## 4. The reference implementation
 
@@ -443,9 +443,9 @@ stages run as one sequential line (the "split core fixes" rule).
 | stage | content | done means | depends on |
 | --- | --- | --- | --- |
 | **T0** | this note | merged into `integ` | - |
-| **T1** | `ail_array.py` reference, all five dtypes, 1-D API of section 2 except FFI and matmul; `test_ail_array_ref.py` | the self-test of 4.3 passes on CPython 3.12 within its CI budget; the owner has answered Q1-Q3 (they change the reference) | T0 |
+| **T1** | `ail_array.py` reference, all five dtypes, 1-D API of section 2 except FFI and matmul; `test_ail_array_ref.py` | the self-test of 4.3 passes on CPython 3.12 within its CI budget; follows decisions TA1-TA3 | T0 |
 | **T2** | compiler: import pass, C runtime for **f64 and int32** 1-D, typed and general path, scalar loops (no SIMD work), errors, refusals of section 8 | differential tests of 9.2-9.3 and 9.7-9.9 pass in all build modes; size delta of a program using f64 arrays recorded | T1; IR core / typed path as today |
-| **T3** | **f32, f16, int8**, `astype`, canonical NaN, software f16 conversion, wrapping/saturating ops, `exp log tanh sqrt` | exhaustive f16 tests (9.4) and the edge sets pass; optional: lift the `array('f')` refusal using the same f32 store rule (Q8) | T2 |
+| **T3** | **f32, f16, int8**, `astype`, canonical NaN, software f16 conversion, wrapping/saturating ops, `exp log tanh sqrt` | exhaustive f16 tests (9.4) and the edge sets pass; the `array('f')` refusal is lifted using the same f32 store rule (TA8) | T2 |
 | **T4** | SIMD: vectorisable loops, int overflow flags with rescan, the 16-lane reductions, F16C in `x86-64-v3` | 9.6 neutrality passes; instruction counts (`tools/icount.c`) and RSS recorded per op family against the scalar T3 code and against C; no speed claim before that (`speed-claims`) | T3 |
 | **T5** | FFI: arrays as `ptr`/`cptr` arguments, zero copy in AIL and in the shim | 9.10 passes; borrowed-pointer rule documented in AIL_REFERENCE_MORE | T2; FFI F4 (#209: same files `ail_ffi.py`, `ail_ffi_lower.py`) merged first; F3 if u64 lengths are used |
 | **T6** | 2-D arrays, row broadcast, exact `matmul` (3.7) | CPython-equal on 3.7's cases incl. `K = 0`, int32 overflow, f16 exact sums; one MLP forward pass example matches the reference | T4 |
@@ -473,20 +473,21 @@ stages run as one sequential line (the "split core fixes" rule).
   proofs; the stages hold the line at section 2.
 - **Two names for "sum"** (`sum(a)` vs `ta.sum(a)`) with different digits may confuse users; only the docs help.
 
-## 12. Open questions for the owner
+## 12. Owner decisions (2026-10-30)
 
-- **Q1. Integer overflow.** int8/int32 `+ - *` raise `OverflowError` by default; wrap and saturate only through named
-  functions (`ta.wrapping_add`, `ta.saturating_add`). numpy and C wrap silently. Is raising the right default?
-- **Q2. Float errors.** Float arrays follow IEEE: `1/0` gives `inf`, `sqrt(-1)` and `log(-1)` give NaN, overflow gives
-  `inf`, nothing raises. Plain Python floats raise in these cases. Is IEEE right for the module?
-- **Q3. Sum order.** `ta.sum` and `ta.dot` use one fixed blocked order (16 lanes, blocks of 1024) so SIMD, threads and
-  GPUs give the same bits. It is not Python's sequential order and not numpy's. Acceptable?
-- **Q4. dot vs matmul.** `matmul` uses sequential `k` (GPU.md 8.7), `dot` uses the blocked order, so a `1 x K` matmul
-  and a dot of the same numbers can differ in the last bit. Keep two orders, or make matmul blocked along `k` too?
-- **Q5. Shapes.** 1-D, plus 2-D for matmul. Is that enough, or should general N-D arrays be planned now?
-- **Q6. numpy.** This module is not numpy-compatible (no views, no mixed-dtype promotion, no masks). Is a separate
-  numpy subset still wanted later (GPU.md Q5), or does this module replace that plan?
-- **Q7. Name and delivery.** The module is `ail_array`, a file copied beside the program for CPython (as `ail_ffi.py`
-  and `ail_cbuf.py` are today), later shipped in the `ail-lang` package at release. Is the name right?
-- **Q8. `array('f')`.** The same f32 store rule can lift today's refusal of `array.array('f')` (storage only;
-  arithmetic stays Python floats). Include it in T3?
+The owner accepted every recommendation of the first draft on 2026-10-30. There are no open questions left in this
+note; the decisions were questions Q1..Q8 of that draft.
+
+- **TA1 (was Q1). Integer overflow raises.** int8/int32 `+ - *` (and unary `-`, `abs`) raise `OverflowError` by
+  default; wrap and saturate only through the named functions `ta.wrapping_*` / `ta.saturating_*` (section 3.3).
+- **TA2 (was Q2). IEEE for float arrays.** `1/0` gives `inf`, `sqrt(-1)` and `log(-1)` give NaN, overflow gives `inf`;
+  float arrays never raise for these (section 3.1).
+- **TA3 (was Q3). The fixed sum order.** `ta.sum` and `ta.dot` use the 16-lane, 1024-block order of section 3.5; the
+  builtin `sum(a)` keeps CPython's meaning.
+- **TA4 (was Q4). `dot` and `matmul` stay separate for now**: blocked order for `dot`, sequential `k` for `matmul`
+  (section 3.7).
+- **TA5 (was Q5). 1-D and 2-D first**; N-D is not planned now.
+- **TA6 (was Q6). A numpy subset may come later**, as separate work; this module is not it.
+- **TA7 (was Q7). The name is `ail_array`**, a file beside the program for CPython, later in the `ail-lang` package.
+- **TA8 (was Q8). T3 lifts the `array('f')` refusal** with the same f32 store rule (storage only; arithmetic stays
+  Python floats).
