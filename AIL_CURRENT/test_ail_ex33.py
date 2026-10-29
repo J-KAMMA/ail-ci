@@ -130,6 +130,15 @@ def outer(n: int) -> int:
 
 print(outer(4))
 ''',
+    'future_scalar': '''from __future__ import annotations
+from ail_ffi import export
+
+@export
+def add(a: int, b: float) -> float:
+    return a + b
+
+print(add(2, 1.5))
+''',
 }
 
 REFUSED = {
@@ -158,6 +167,66 @@ print(take(Bad("a")))
                     '__ail_export__ marker'),
     'exports_registry': ('from ail_ffi import export, exports\n\n@export\ndef f(x: int) -> int:\n    return x\n\nprint([g.__name__ for g in exports()])\n',
                          "'exports' is not a known function/class/builtin"),
+    'shadowed_marker': ('''from ail_ffi import export
+def export(fn):
+    def g(a):
+        return fn(a) + 100
+    return g
+@export
+def f(x: int) -> int:
+    return x
+print(f(1))
+''', 'is rebound by this file'),
+    'hasattr_marker': ('from ail_ffi import export\n\n@export\ndef f(x: int) -> int:\n    return x\n\nprint(hasattr(f, "__ail_export__"))\n',
+                       '__ail_export__ marker'),
+    'getattr_marker': ('from ail_ffi import export\n\n@export\ndef f(x: int) -> int:\n    return x\n\nprint(getattr(f, "__ail_export__"))\n',
+                       '__ail_export__ marker'),
+    'future_dataclass': ('''from __future__ import annotations
+from dataclasses import dataclass
+from ail_ffi import export
+
+@dataclass
+class Point:
+    x: int
+
+@export
+def take(p: Point) -> int:
+    return p.x
+
+print(take(Point(1)))
+''', 'rejects under `from __future__ import annotations`'),
+    'forward_dataclass': ('''from dataclasses import dataclass
+from ail_ffi import export
+
+@export
+def take(p: Point) -> int:
+    return p.x
+
+@dataclass
+class Point:
+    x: int
+
+print(take(Point(1)))
+''', 'before it is defined'),
+    'lru_below_marker': ('''from functools import lru_cache
+from ail_ffi import export
+
+@export
+@lru_cache
+def fib(n: int) -> int:
+    return n if n < 2 else fib(n - 1) + fib(n - 2)
+
+print(fib(10))
+''', 'decorator below @export'),
+    'staticmethod_below_marker': ('''from ail_ffi import export
+
+@export
+@staticmethod
+def f(n: int) -> int:
+    return n + 1
+
+print(f(2))
+''', 'decorator below @export'),
 }
 
 

@@ -1,3 +1,33 @@
+## 2026-10-29 -- ex33 review: refuse the @export cases a plain build cannot match (job-ex33-10291115)
+
+The review of the plain-build `@export` change found four boundaries that compiled to a different
+value or exit code than CPython. All are now refused by name on both builds:
+
+- a rebound marker name (`def export`, `export = ...`, a module alias), where CPython calls the
+  file's own binding rather than the ail_ffi marker;
+- `__ail_export__` reached indirectly (`hasattr`, `getattr`, `setattr`, or a string held in a name),
+  as well as the direct attribute read;
+- a dataclass parameter under `from __future__ import annotations` (CPython's dataclass field types
+  stay strings) or a dataclass named before its definition (CPython raises NameError);
+- any decorator below `@export`, which CPython applies before the marker (`lru_cache`,
+  `staticmethod`, even an identity decorator).
+
+`@lru_cache` above `@export`, postponed annotations on scalar/numeric-list types, dataclasses
+defined earlier, and repeated `@export` markers still match CPython on both builds.
+
+Probes in `/tmp/probes` run with `PYTHONPATH=$PWD/AIL_CURRENT bash ~/tools/cmp.sh` on both builds:
+match `p_future_scalar`, `p_above_deco`, `p_future_list`, `p_dataclass_before`, `p_two_markers`,
+`p_types_export` (int/float/bool/str/bytes/list[int]/list[float]/None, negatives, empty lists),
+`p_routes_export2` (alias, argument, list item, dict value); refused by name `p_shadow2`,
+`p_shadow_assign`, `p_shadow_after`, `p_shadow_module`, `p_hasattr`, `p_getattr`,
+`p_hasattr_default`, `p_marker_value`, `p_setattr_marker`, `p_future_dc`, `p_forward_dc`,
+`p_forward_string`, `p_order_lru`, `p_order_static`, `p_ident_below`; `p_routes_export` is refused
+by name for the pre-existing instance attribute function call. `geometry.py` still matches on both
+paths. `test_ail_ex33` now pins these cases (9 matching forms, 14 refusals, geometry). Final-state
+tests: 6 modules, 524 s; test_ail_ex33, test_ail_ffi, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 pass, and test_ail_c_export fails only its Rust host test because this
+runner has no default rustc. `tools/update_manifest.py --check` passes.
+
 ## 2026-10-29 -- ex33: a plain build accepts a checked @export (job-ex33-10291115)
 
 Building every Python-syntax example under `AIL_CURRENT/language_examples` (the 14 `.py` files and

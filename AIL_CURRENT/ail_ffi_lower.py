@@ -170,9 +170,12 @@ class Session:
         imported = set()                # names bound by `from ail_ffi import`
         module_names = set()            # names bound by `import ail_ffi [as x]`
         blank = []                      # (first line, last line)
+        future_annotations = False
+        marker_imports = set()          # id(alias) of the ail_ffi import bindings themselves
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
+                    marker_imports.add(id(alias))
                     if alias.name == '*':
                         imported.update(set(INTS) | PARAM_ANN | {'extern', 'export', 'link', 'length', 'ptr', 'cptr', 'declarations'})
                         continue
@@ -183,8 +186,12 @@ class Session:
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == 'ail_ffi':
+                        marker_imports.add(id(alias))
                         module_names.add(alias.asname or 'ail_ffi')
                         blank.append((node.lineno, node.end_lineno))
+            elif (isinstance(node, ast.ImportFrom) and node.module == '__future__' and node.level == 0
+                  and any(alias.name == 'annotations' for alias in node.names)):
+                future_annotations = True
         if not imported and not module_names:
             return text
         exported = []
@@ -194,8 +201,17 @@ class Session:
                 if marks:
                     exported.append((node, marks))
         if exported:
+            names = set()
+            for _, marks in exported:
+                names.update(self._marker_names(marks))
+            shadowed = self._shadowed_marker(tree, names, marker_imports)
+            if shadowed is not None:
+                self._refuse(path, exported[0][0],
+                             '`%s` is rebound by this file, so the decorator used below is not the ail_ffi '
+                             '@export marker (remove the other binding, or do not use @export there)' % shadowed)
             for node in ast.walk(tree):
-                if isinstance(node, ast.Attribute) and node.attr == '__ail_export__':
+                if ((isinstance(node, ast.Attribute) and node.attr == '__ail_export__')
+                        or (isinstance(node, ast.Constant) and node.value == '__ail_export__')):
                     self._refuse(path, node, 'the __ail_export__ marker a plain build does not keep is read or '
                                  'written here (its @export contract is checked at compile time)\n'
                                  '  write instead: remove the marker access')
@@ -203,7 +219,13 @@ class Session:
             for node, marks in exported:
                 if any(self._is_extern(d, imported, module_names) for d in node.decorator_list):
                     self._refuse(path, node, '%s: an @export function cannot also be an @extern stub' % node.name)
-                self._check_export(path, node, dataclasses)
+                first = min(node.decorator_list.index(mark) for mark in marks)
+                for decorator in node.decorator_list[first + 1:]:
+                    if not self._is_export(decorator, imported, module_names):
+                        self._refuse(path, decorator,
+                                     '%s: a decorator below @export runs first, so CPython applies @export to '
+                                     'its result (only @export itself may be below the marker)' % node.name)
+                self._check_export(path, node, dataclasses, future_annotations)
                 for mark in marks:
                     blank.append((mark.lineno, mark.end_lineno))
         decls = []
@@ -282,8 +304,41 @@ class Session:
                 and isinstance(node.value, ast.Name) and node.value.id in module_names)
 
     @staticmethod
+    def _marker_names(marks):
+        """The `export`/module names the marker decorators actually use."""
+        names = set()
+        for mark in marks:
+            node = mark.func if isinstance(mark, ast.Call) else mark
+            if isinstance(node, ast.Name):
+                names.add(node.id)
+            elif isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+                names.add(node.value.id)
+        return names
+
+    @staticmethod
+    def _shadowed_marker(tree, names, marker_imports):
+        """A name the marker uses that some other binding replaces (CPython would call that binding)."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in names and isinstance(node.ctx, (ast.Store, ast.Del)):
+                return node.id
+            if (isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                    and node.name in names):
+                return node.name
+            if isinstance(node, ast.arg) and node.arg in names:
+                return node.arg
+            if isinstance(node, ast.ExceptHandler) and node.name in names:
+                return node.name
+            if isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name in names:
+                return node.name
+            if isinstance(node, ast.alias) and id(node) not in marker_imports:
+                bound = node.asname or node.name.split('.')[0]
+                if bound in names:
+                    return bound
+        return None
+
+    @staticmethod
     def _dataclasses(tree):
-        """{class name: field annotations} for plain top-level @dataclass classes (None when not simple)."""
+        """{class name: (line, field annotations)} for plain top-level @dataclass classes (None when not simple)."""
         found = {}
         for node in tree.body:
             if not isinstance(node, ast.ClassDef):
@@ -307,24 +362,40 @@ class Session:
                     fields.append(statement.annotation.id)
                 else:
                     simple = False
-            found[node.name] = fields if simple and fields else None
+            found[node.name] = (node.lineno, fields if simple and fields else None)
         return found
 
     @staticmethod
-    def _export_type(annotation, dataclasses, result):
+    def _dataclass_reason(annotation, dataclasses, future, line):
+        if isinstance(annotation, ast.Name) and annotation.id in dataclasses:
+            defined, _ = dataclasses[annotation.id]
+            if future:
+                return ('names dataclass %s, which CPython rejects under `from __future__ import annotations` '
+                        '(the field types stay strings)' % annotation.id)
+            if defined >= line:
+                return ('names dataclass %s before it is defined (CPython raises NameError there)'
+                        % annotation.id)
+        return None
+
+    @staticmethod
+    def _export_type(annotation, dataclasses, result, future, line):
         if isinstance(annotation, ast.Constant) and annotation.value is None:
             return result
         if isinstance(annotation, ast.Name):
             if annotation.id in ('int', 'float', 'bool', 'str', 'bytes'):
                 return True
-            fields = dataclasses.get(annotation.id)
-            return not result and fields is not None and all(f in ('int', 'float', 'bool') for f in fields)
+            entry = dataclasses.get(annotation.id)
+            if result or entry is None or future:
+                return False
+            defined, fields = entry
+            return (defined < line and fields is not None
+                    and all(f in ('int', 'float', 'bool') for f in fields))
         if (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
                 and annotation.value.id == 'list' and isinstance(annotation.slice, ast.Name)):
             return annotation.slice.id in ('int', 'float')
         return False
 
-    def _check_export(self, path, node, dataclasses):
+    def _check_export(self, path, node, dataclasses, future):
         """Check the @export decorator's CPython contract; the decorator itself does nothing at run time."""
         a = node.args
         if a.defaults or a.kw_defaults or a.posonlyargs or a.kwonlyargs or a.vararg or a.kwarg:
@@ -332,11 +403,14 @@ class Session:
         if node.returns is None:
             self._refuse(path, node, '%s: @export needs a result annotation (-> None for no result)' % node.name)
         for arg in a.args:
-            if arg.annotation is None or not self._export_type(arg.annotation, dataclasses, False):
+            reason = self._dataclass_reason(arg.annotation, dataclasses, future, node.lineno)
+            if reason is not None:
+                self._refuse(path, arg.annotation, '%s: parameter %s %s' % (node.name, arg.arg, reason))
+            if arg.annotation is None or not self._export_type(arg.annotation, dataclasses, False, future, node.lineno):
                 self._refuse(path, arg if arg.annotation is None else arg.annotation,
                              '%s: @export parameter %s needs int float bool str bytes list[int] list[float] '
                              'or a dataclass of int/float/bool' % (node.name, arg.arg))
-        if not self._export_type(node.returns, dataclasses, True):
+        if not self._export_type(node.returns, dataclasses, True, future, node.lineno):
             self._refuse(path, node.returns, '%s: @export result must be int float bool str bytes '
                          'list[int] list[float] or None' % node.name)
 
