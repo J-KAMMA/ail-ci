@@ -3969,6 +3969,10 @@ class Compiler(boxclosure.ClosureMixin):
         body_order = []          # class dict order: ('p'/'m', name) or ('a', class_attrs index)
         for item in node.body:
             if isinstance(item, ast.FunctionDef):
+                if item.name in ('__getattr__', '__getattribute__', '__setattr__', '__delattr__'):
+                    # attribute access hooks are not modelled: the plain lookup would silently skip them
+                    raise Unsupported('dunder method %s.%s: attribute access hooks are not built'
+                                      % (node.name, item.name))
                 mcname = 'pm_%s_%s' % (node.name, item.name)
                 setter = any(isinstance(d, ast.Attribute) and d.attr == 'setter' for d in item.decorator_list)
                 info = self._register_function(item, cname=mcname + ('__set' if setter else ''), is_method=True,
@@ -6622,6 +6626,23 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(v, ast.FormattedValue):
                 val = self.expr(v.value, ctx)
                 cname = self._inst_class(v.value, ctx)
+                if (v.conversion == -1 and v.format_spec is None
+                        and any('__format__' in c['methods'] for c in self.classes.values())
+                        and self.infer_kind(v.value, ctx) not in ('int', 'float', 'str', 'bool', 'none')):
+                    # f"{x}" is format(x, ""): a user __format__ is called with the empty spec
+                    t = ctx.tmp()
+                    ctx.emit('if (%s.tag == AIL_T_INST && ail_dun2(%s, AIL_D2_FORMAT)) {' % (val, val))
+                    ctx.indent += 1
+                    ctx.emit('st = ail_obj_format(cx, &%s, %s, %s);' % (t, val, self._str_lit_slot('', ctx)))
+                    ctx.check()
+                    ctx.indent -= 1
+                    ctx.emit('} else {')
+                    ctx.indent += 1
+                    ctx.emit('%s = %s;' % (t, self._to_str_slot(val, cname, ctx)))
+                    ctx.indent -= 1
+                    ctx.emit('}')
+                    pieces.append(t)
+                    continue
                 if v.conversion in (-1, ord('s')) and v.format_spec is None:
                     pieces.append(self._to_str_slot(val, cname, ctx))
                     continue
@@ -10097,7 +10118,7 @@ class Compiler(boxclosure.ClosureMixin):
         up on the value's type; a plain instance is not callable and names its class)."""
         owners = [c for c in self.class_order if '__call__' in self.classes[c]['methods']]
         if not owners:
-            return self.call_value(fld, args, {}, ctx)
+            return self.call_value(fld, args, {}, ctx, inst_call=False)
         res = ctx.tmp()
         ctx.emit('if (%s) {' % self._method_owners_check(fld, '__call__'))
         ctx.indent += 1
@@ -10126,7 +10147,7 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.indent -= 1
         ctx.emit('} else {')
         ctx.indent += 1
-        r = self.call_value(fld, args, {}, ctx)
+        r = self.call_value(fld, args, {}, ctx, inst_call=False)
         ctx.emit('%s = %s;' % (res, r))
         ctx.indent -= 1
         ctx.emit('}')
@@ -12208,7 +12229,7 @@ class Compiler(boxclosure.ClosureMixin):
                     ctx.uses_st = True
                     return
                 raise Unsupported('raising %s (only builtin or user Exception subclasses)' % tname)
-            if tname in EXC_IDS and self.reads_args and exc.args:
+            if tname in EXC_IDS and (self.reads_args or tname == 'KeyError') and exc.args:
                 # the value keeps the argument for e.args (KeyError('k').args is ('k',), not its message)
                 self.rt_needs.add('exc')
                 arr = ctx.new_cvar('ea')
