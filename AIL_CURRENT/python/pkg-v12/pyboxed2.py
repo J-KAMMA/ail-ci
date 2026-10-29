@@ -1212,15 +1212,10 @@ def _thread_preamble():
     return threadrt.patch_head(_PREAMBLE_HEAD) + threadrt.patch_tail(_PREAMBLE_TAIL)
 
 
-# The list/tuple index errors name the key's class when the program has a class: CPython says
-# "not Box", not "not instance". A no-class program keeps the base runtime's tag-based text
-# (and so its C) byte for byte; only a source that writes a class gets the class-name form.
+# The list/tuple item-assignment errors name the key's class when the program has a class:
+# CPython says "not Box", not "not instance". The read error is already class-aware in the
+# runtime; only a source that writes a class gets the class-name form for writes.
 _INDEX_ERROR_CLASS_EDITS = (
-    ("""                char buf[96]; snprintf(buf, sizeof buf, "%s indices must be integers or slices, not %s", c.tag == AIL_T_LIST ? "list" : "tuple", ail_type_name(key.tag));
-                return ail_raise_c(cx, AIL_B_TYPEERROR, buf);""",
-     """                char tnbuf[201], buf[280]; snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(key));
-                snprintf(buf, sizeof buf, "%s indices must be integers or slices, not %s", c.tag == AIL_T_LIST ? "list" : "tuple", tnbuf);
-                return ail_raise_c(cx, AIL_B_TYPEERROR, buf);""", 1),
     ("""        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) return ail_raise_c(cx, AIL_B_TYPEERROR, "list indices must be integers or slices");""",
      """        if (key.tag != AIL_T_INT && key.tag != AIL_T_BOOL) {
             char tnbuf[201], buf[280]; snprintf(tnbuf, sizeof tnbuf, "%s", ail__tname_c(key));

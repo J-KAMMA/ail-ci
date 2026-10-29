@@ -1,3 +1,31 @@
+## 2026-10-29 -- re-apply pre420: a list/tuple index error names the instance's class (job-rbpre420-10290915)
+
+Re-applied the accepted pre420 change on this tree. The pre411 review recorded as pre-existing,
+on both builds, that an instance without `__index__` used as a list or tuple index printed the
+runtime tag instead of the class: `list indices must be integers or slices, not instance` where
+CPython prints `not C` (and a subclass's name). The general path built that message with
+`ail_type_name(key.tag)`, the tag table; it now uses `ail__tname_c(key)`, the object-to-name
+helper that already serves the item errors, and the text is built in a dynamically sized buffer
+capped at 200 characters like CPython's `%.200s` (the old 96-byte stack buffer also truncated a
+long class name).
+
+This tree already carried an independent fix for the read error in
+`pyboxed2._INDEX_ERROR_CLASS_EDITS`, which rewrote the old runtime text at compile time. Keeping
+both sides' fixes: the runtime now owns the read error directly, so that first rewrite was
+removed, while the write-side rewrite (`ail_op_setitem`/`ail_op_delitem`) is retained.
+
+Added `AIL_CURRENT/test_ail_pre420.py` (both builds) and registered it in
+`ail_check.MODULES`; it covers a list, a tuple, an empty list/tuple, a subclass, a
+210-character class name, an instance that does define `__index__`, and float/str/None keys,
+with the value reaching the subscription directly and through an argument, a list item, an
+attribute and a dict value. Probes in `/tmp/probes` on both builds via `cmp.sh`:
+`pre420_types.py`, `pre420_long.py` and `pre420_exc.py` match CPython (the long probe uses
+class names of 200, 201, 210 and 500 characters; the only remaining line in `pre420_types.py`
+is the instance `KeyError` repr, whose address cannot match). A non-int `__index__` return
+(`list indices ... not float` instead of `__index__ returned non-int (type float)`) is a
+separate pre-existing cause, left unchanged. Final-state tests: test_ail_pre420,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3. `tools/diff_ids.py` is not
+present on this tree; `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
