@@ -10,7 +10,7 @@ results and `ptr(c_uint64)` reads to the exact-int path when big ints are on; re
 source); leave the C of an int64 result unchanged; keep the old behaviour with big ints off and say so in the test;
 measure the cost of one call in a loop with `tools/icount.c`. This note designs exactly that. It adds one thing the plan
 did not name: the **argument** side, because reading the code shows a silent difference there today (section 2.2).
-That addition is marked **[proposal]** wherever it appears.
+That addition was a proposal; the owner accepted it on 2026-10-30 (D4, section 12).
 
 Verification marks: **[verified 2026-10-30]** = read in the `integ` tree (d68453f7) or in the PR bodies while writing
 this note; **[read, not run]** = follows from reading the code, no program was compiled or run (this task compiles
@@ -35,7 +35,7 @@ allows it for the typed path.
 
 1. Results of u64 type: exact in every build that has exact ints (section 3.1).
 2. Arguments of u64 type: range-checked like the shim, `OverflowError` with the shim's text, and a big int below
-   2**64 accepted **[proposal]** (section 3.2).
+   2**64 accepted (section 3.2; owner decision D4).
 3. `ptr(c_uint64)` / `cptr(c_uint64)` buffers read and written exactly: `get_u64` / `put_u64` in `ail_cbuf.py`
    (section 3.3).
 4. `check=` on a u64 result: the rules that make `check` mean what it means under CPython (section 3.4).
@@ -72,7 +72,7 @@ Where it bites in real code: `(size_t)-1` is the error result of `iconv`, `mbsto
 (FNV-1a, xxHash, SipHash) return `uint64_t` with the top bit set half the time; `strtoull`; file offsets and inode numbers
 from Rust crates (`u64`).
 
-### 2.2 Arguments (a silent difference found while writing this note) [proposal to fix in F3]
+### 2.2 Arguments (a silent difference found while writing this note; fixed in F3a by D4)
 
 The shim checks every int argument against the C type's range and raises
 `OverflowError("tiny_ul: x does not fit c_ulong")` for `-1` or `2**64` **[verified 2026-10-30, `ail_ffi.py` call path]**.
@@ -100,7 +100,7 @@ The plan (2026-10-28) put F3 on the private repo because exact ints lived only t
 runtime: `python/pkg-v12/bigint_core.py`, `bigint_obj.py`, `bigcap.py`, `biggate.py`, `tint.py` and the A1 row that makes
 ints exact on the general path **[verified 2026-10-30]**. F3 still touches compiler-core files (`c_object.py`, the
 big-int gate, the tagged lowering), so by the standing rule it runs as **one sequential line**, not as parallel jobs.
-Whether it may run on public workers is open question Q5.
+The owner decided on 2026-10-30 that it runs in public `ail-ci` (D5).
 
 ## 3. Design
 
@@ -119,7 +119,7 @@ What changes is the conversion on the AIL side of the call, one per build kind:
 | tagged lowering (default build, IR) | small tagged int | big tagged int, the same cold call; like `int(text)`, a source of an unproven int (BIGINT.md section 10) |
 | legacy int64 emitter (`AIL_NO_GENERAL=1`, `_tint_legacy` retry) | int64, as today | loud stop: `integer overflow` on stderr, stdout flushed, exit 1 (A1); no `except` runs |
 | AIL-syntax program (brace surface) | int64 | `OverflowError("C uint64 result does not fit int")`, catchable, as A1 says for that surface **[proposal: text to be fixed in F3b]** |
-| `AIL_BIGINT=off` | int64 | the old bits (negative), as the plan says; the test names it as the declared behaviour of that switch (see Q1) |
+| `AIL_BIGINT=off` | int64 | loud stop: `integer overflow` on stderr, stdout flushed, exit 1 (owner decision D1; replaces the plan's "old bits") |
 
 The hot part is one compare on the result (`bits < 0`, i.e. top bit set) and a branch to a cold, `noinline` function. An
 int64-typed result (`c_int64`, `c_long`, `c_ssize_t`) keeps its C byte for byte: it never goes through the new kind.
@@ -135,7 +135,7 @@ program before choosing; the table above is the expected winner, not a measured 
 holds that budget and reports the measured delta for `crc32` (zlib, `c_ulong`) and `strlen` (`c_size_t`). A program with no
 u64 stub is byte-identical.
 
-### 3.2 Arguments: the shim's check, in the compiled program [proposal]
+### 3.2 Arguments: the shim's check, in the compiled program (D4)
 
 A u64 parameter accepts exactly what the shim accepts: an `int` with `0 <= v <= 2**64 - 1`.
 - Typed path: the value is an int64; `v < 0` raises `OverflowError("NAME: PARAM does not fit TYPE")`, the shim's text
@@ -168,12 +168,11 @@ with CPython (never fires), so such a check is dead code that looks alive. Propo
     write instead: check="allones" (the C value (size_t)-1, CPython's 18446744073709551615)
 
 `check="allones"` is new: the result equals `2**(8*sizeof) - 1` for its type. The shim implements it too, so the file
-still runs the same under CPython. Whether to add it is Q2; without it, the refusal says `write instead: compare the
-result with 18446744073709551615 yourself`.
+still runs the same under CPython. The owner accepted both the option and the refusal on 2026-10-30 (D2).
 
 ### 3.5 User-visible syntax
 
-No new annotation and no new decorator option, except `check="allones"` if Q2 says yes. A program changes behaviour only
+No new annotation and no new decorator option, except `check="allones"` (D2). A program changes behaviour only
 where it printed a different number than CPython before. `get_u64` / `put_u64` are new names in `ail_cbuf.py`.
 
     from ail_ffi import extern, link, c_size_t, c_uint64, c_char_p
@@ -192,7 +191,7 @@ Only the integer rows change. The others are listed so the table is complete; th
 
 | annotation | C | AIL/Python value, argument | result | changed by F3 |
 | --- | --- | --- | --- | --- |
-| `c_int8 .. c_int64`, `c_short c_int c_long c_longlong c_ssize_t` | signed | int in range, else `OverflowError` (shim text) | exact (fits int64) | argument error becomes `OverflowError` (was a stop) [proposal] |
+| `c_int8 .. c_int64`, `c_short c_int c_long c_longlong c_ssize_t` | signed | int in range, else `OverflowError` (shim text) | exact (fits int64) | argument error becomes `OverflowError` (was a stop) (D4) |
 | `c_uint8 .. c_uint32`, `c_ushort c_uint` | unsigned | int in range, else `OverflowError` | exact | as above |
 | `c_uint64 c_ulong c_ulonglong c_size_t` | `uint64_t` etc. | `0 .. 2**64-1`, big ints accepted | exact, big above 2**63-1 | **yes** |
 | `length("buf", T)` | T | supplied by the call | — | unchanged; `len()` fits int64 |
@@ -223,14 +222,13 @@ After F3 every u64 value prints as CPython prints it, or the program stops loudl
 
 Refused at compile time, by name, with file:line and `write instead:`:
 1. `check="negative"` or `check="minus1"` on an unsigned result (section 3.4).
-2. A u64 parameter given a value that is statically negative or a `bool` (a literal, a constant) [proposal]:
+2. A u64 parameter given a value that is statically negative or a `bool` (a literal, a constant) (D4):
    `write instead: pass an int in 0 .. 2**64 - 1`.
 3. An `__int128` or other non-`INTS` integer type in a stub: already refused, message unchanged.
 
 Not refused, declared in DIFFERENCES (unchanged or narrowed):
 - A63: `c_void_p` handles are ints below 2**63 (no change).
-- `AIL_BIGINT=off`: u64 results above 2**63-1 come back as bits. This is a debugging switch, not a language mode, and the
-  test says so (Q1 asks whether it should stop loudly instead).
+- `AIL_BIGINT=off`: no longer a difference. A u64 result above 2**63-1 stops loudly there (D1), as A1 stops.
 - The `uint64_bits` kind of the `compile-c` type JSON: signed by contract, documented in LANGUAGE_QUICKSTART_JA.md.
 
 ## 7. Build and linking
@@ -259,8 +257,8 @@ typed-only build (`AIL_NO_GENERAL=1`), whose expected output is the loud stop wh
 2. Arguments: `2**64 - 1` round trip; `2**63` from a computation (big); `-1`, `2**64`, `-2**70` each raise `OverflowError`
    with the shim's text, caught and printed; a narrow `c_int` out of range, caught.
 3. Buffers: `ptr(c_uint64)` out-parameter filled by C with `UINT64_MAX`, read with `get_u64`; `put_u64` then C reads.
-4. `check=`: `check="minus1"` on `c_size_t` is refused with file:line; `check="allones"` (if Q2) raises on `(size_t)-1`.
-5. `AIL_BIGINT=off`: the old bits, named in the test as that switch's declared behaviour.
+4. `check=`: `check="minus1"` on `c_size_t` is refused with file:line; `check="allones"` raises on `(size_t)-1`.
+5. `AIL_BIGINT=off`: a result above 2**63-1 stops with `integer overflow`, exit 1, stdout flushed (D1).
 6. Byte identity: six programs with only int64 stubs or no stubs, sha256 of the executable before and after, typed and
    general builds (as #209's `test_programs_without_handle_do_not_change`).
 7. `test_ail_ffi.test_uint64_above_int64_is_the_declared_difference` becomes `test_uint64_results_equal_cpython`.
@@ -274,7 +272,7 @@ Targeted runs only during each step: `test_ail_ffi_u64`, `test_ail_ffi`, `test_a
 
 ## 9. Stage plan (each one PR)
 
-**F3a. Argument checks** [proposal; core-light: `ail_ffi_lower.py` wrapper, `c_object.py` checks]. First, find out what a
+**F3a. Argument checks** (D4; core-light: `ail_ffi_lower.py` wrapper, `c_object.py` checks). First, find out what a
 big int does at an int parameter today (section 2.2) and record it. Then every int parameter raises the shim's
 `OverflowError` text, catchable, instead of `ail_die`; u64 parameters reject negatives on the typed path.
 *Done when:* cases 2 and 6 of section 8 pass in all four builds; `test_ail_ffi` unchanged otherwise.
@@ -289,7 +287,7 @@ body; an int64 result's C is unchanged (codegen diff).
 *Done when:* case 3 passes; AIL_REFERENCE_MORE.md lists the two helpers.
 
 **F3d. `check=` rules and docs** (`ail_ffi.py` shim, `ail_ffi_lower.py` refusal, docs). The refusal of section 3.4,
-`check="allones"` if Q2 says yes, the declared difference removed from the `ail_ffi.py` docstring, A63 reworded, a DEVLOG
+`check="allones"` (D2), the declared difference removed from the `ail_ffi.py` docstring, A63 reworded, a DEVLOG
 entry.
 *Done when:* case 4 passes; `grep -n "2\*\*63 - 1 come back" AIL_CURRENT/ail_ffi.py` finds nothing.
 
@@ -314,7 +312,7 @@ others.
   `crc32`/`strlen`-like stub moves off the typed path. Measured in F3b before choosing; if both forms cost more than the
   budget, F3b stops and asks.
 - **Size.** zlib users (`crc32` returns `c_ulong`) gain big-int pieces they never use for real values. Bounded by the
-  BIGINT.md budget, but it is a cost on a common library (Q3).
+  BIGINT.md budget, but it is a cost on a common library; the owner accepted it for now (D3).
 - **The argument fix changes behaviour of working programs.** A program that passed `-1` as "all ones" to a `size_t`
   parameter compiled and ran; after F3a it raises, as CPython always did. That is the point, but the DEVLOG entry must say
   so.
@@ -323,21 +321,21 @@ others.
 - **Callers of the conversion outside FFI.** `compile-c` objects keep `uint64_bits`; if a later change routes them through
   the new kind by mistake, their documented signed mapping changes. Keep the two kinds separate in `c_object.C_KINDS`.
 
-## 12. Open questions for the owner
+## 12. Owner decisions (2026-10-30)
 
-- **Q1. Big ints switched off.** With `AIL_BIGINT=off`, should a u64 result above 2**63-1 keep coming back as the negative
-  number (what the plan says), or stop loudly with `integer overflow`? Recommendation: stop loudly. The switch is for
-  debugging, but a loud stop keeps it from printing a wrong number.
-- **Q2. `check="allones"`.** C functions such as `iconv` return `(size_t)-1` on error. May I add `check="allones"` (both in
-  the compiled program and in the CPython shim), and refuse `check="minus1"` on unsigned results with a hint to use it?
-  Recommendation: yes.
-- **Q3. Size for zlib-style libraries.** A program that calls `crc32` (result `unsigned long`) would carry part of the
-  big-int code, up to about 25 KB, even though CRC values always fit. Accept that, or add a stub option that says "this
-  result always fits int64", checked at run time with a loud stop? Recommendation: accept the size for now; revisit only
-  if the measured number is near the budget.
-- **Q4. The argument-side fix.** The plan's F3 covers results only. Reading the code shows that `-1` passed to a `size_t`
-  parameter is silently turned into 2**64-1 (CPython raises `OverflowError`). May F3 include that fix (F3a), and change the
-  existing stop for out-of-range narrow ints into the same catchable `OverflowError` the shim raises? Recommendation: yes,
-  F3a first.
-- **Q5. Where the work runs.** The plan said "private only" because exact ints were private. They are now in public `integ`.
-  May the F3 line run in public `ail-ci` (one sequential line, since it touches compiler-core files)? Recommendation: yes.
+The owner accepted every recommendation of the first version of this note.
+
+- **D1. Big ints switched off.** With `AIL_BIGINT=off`, a u64 result above 2**63-1 stops loudly (`integer overflow` on
+  stderr, stdout flushed, exit 1). It no longer comes back as the negative number.
+- **D2. `check="allones"`.** Added, in the compiled program and in the CPython shim. `check="minus1"` (and
+  `check="negative"`) on an unsigned result is refused by name, with `write instead: check="allones"`.
+- **D3. Size.** A program with a u64 stub (zlib's `crc32` included) may carry big-int code up to the BIGINT.md section 9
+  budget. Accepted for now; there is no "always fits" stub option.
+- **D4. The argument side.** F3 includes F3a. Out-of-range int arguments, u64 and narrow alike, raise the shim's
+  catchable `OverflowError` instead of a stop or a silent wrap.
+- **D5. Where it runs.** The F3 line runs in public `ail-ci`, as one sequential line because it touches compiler-core
+  files.
+
+## 13. Open questions for the owner
+
+None at the moment. F3b may raise one if both forms of section 3.1 cost more than the budget (section 11).
