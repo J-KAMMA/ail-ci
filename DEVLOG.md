@@ -1,3 +1,29 @@
+## 2026-10-29 -- stdlib37: argparse long options and positionals (job-stdlib37-10291115)
+
+Before this change the imports still refused in `lab/corpus/programs` and
+`AIL_CURRENT/language_examples` (top-level modules, local project modules excluded) were:
+argparse 9, tempfile 7, struct 6, shutil 3, signal 2, resource 2, unittest 2, types 1, decimal 2.
+`argparse` was the most used.  It is now lowered by `argparselib.py` onto the Python prelude
+`prelude_argparse.py`: long `--name` options and positionals, `type=` int / float / str / Path /
+`pathlib.Path`, `default=` (None, a matching literal, or a string converted by `type=`), `dest=`,
+`required=`, `choices=`, `help=` (ignored), and `parse_args()` from `sys.argv` or an explicit list.
+A valid parse and CPython's missing-required, unknown-option, expected-one-argument, invalid-choice,
+invalid-int, invalid-float and bad-default errors match on both builds, including the usage line and
+the `--` separator; abbreviations and ambiguous prefixes are handled as CPython does, and a default
+`prog` is `os.path.basename(sys.argv[0])` as CPython does (an explicit `prog=''` is kept).  Short
+options, actions other than the default store, `nargs`, subparsers, groups, `metavar`, the help
+action's output (a literal `-h`/`--help`), empty `choices`, `choices=` with a type other than str,
+`dest=` or `required=` on a positional, `parse_args(None)`, an unsupported `default=`, writing a
+Namespace attribute and a Namespace used as a value stay named compile-time refusals.
+`test_ail_stdlib37.py` (added to `ail_check.MODULES`) compares thirteen programs with CPython on
+AIL_IR=0 and AIL_IR=1 and covers ten refusals.  Probes in `/tmp/probes/argparse_*` match CPython or
+are refused by name: the basic mix of options and a positional, typed and Path values and defaults,
+explicit lists, a function argument, a list item, a dict value and an attribute, `--opt=value`,
+negative int and float values (including `-.5`), an empty value, a missing optional (None),
+abbreviations, an ambiguous prefix, duplicate options, `--` with and without positionals, a
+positional default, `add_help=False`, an explicit `prog=''`, the missing / unknown / expected-one /
+invalid-choice / invalid-int / invalid-float / bad-default errors, and the refusal cases.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
