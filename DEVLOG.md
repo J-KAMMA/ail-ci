@@ -1,3 +1,29 @@
+## 2026-10-29 -- ex33: a plain build accepts a checked @export (job-ex33-10291115)
+
+Building every Python-syntax example under `AIL_CURRENT/language_examples` (the 14 `.py` files and
+the six `.ail` files the front end detects as Python) left `c_export/geometry.py` refused by
+`the decorator on def add (only @staticmethod on a method and @functools.lru_cache/@lru_cache/@cache
+are supported)`.  The other `.py` refusals are host benchmark scripts (`__file__`, research imports,
+run-time measurement) that are not AIL programs, and `use_math.ail` builds with its documented
+`--module language_examples/math.ail`.
+
+A plain `ail compile` now reads `@export` / `@export()` / `@ail_ffi.export` and checks the CPython
+decorator contract at compile time: plain positional parameters without defaults, a result
+annotation, and int/float/bool/str/bytes/list[int]/list[float] (or a simple `@dataclass` of
+int/float/bool) parameters.  The marker is then dropped, so the function and the rest of the file
+compile on both paths; `geometry.py` now builds and prints the same line as CPython on both.
+Invalid contracts are refused by name, as are reads/writes of `f.__ail_export__`; the `exports()`
+registry is already refused by name.  `ail build --lib` and `compile --lib` still use
+`ail_export.lower` unchanged.
+
+Probes `/tmp/probes/p_export_*.py` (15 programs) cover bare/called/attribute decorators, None
+results, dataclasses, numeric lists, `lru_cache`, nested functions, invalid annotations/defaults/
+varargs/missing result, an invalid dataclass, marker reads and the `exports()` registry; all match
+CPython or are refused by name on both builds.  `test_ail_ex33` (3 tests) pins the forms and the
+real geometry example.  Final-state tests: test_ail_ex33, test_ail_ffi, test_ail_ffi_parallel,
+test_ail_c_objects, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass;
+test_ail_c_export's Rust host test fails only because this runner has no default rustc.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
