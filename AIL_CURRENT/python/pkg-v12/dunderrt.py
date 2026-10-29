@@ -456,7 +456,9 @@ def _edits(inplace=False):
     # format(x, spec) / f"{x:spec}" of an instance whose class defines __format__ (an Enum / Flag member does)
     e.append(('static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
               'static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n'
-              '    if (x.tag == AIL_T_INST) { ail_d2_fn ff = ail_dun2(x, AIL_D2_FORMAT); if (ff) return ff(cx, out, x, specobj); }\n'))
+              '    if (x.tag == AIL_T_INST) { ail_d2_fn ff = ail_dun2(x, AIL_D2_FORMAT); if (ff) return ff(cx, out, x, specobj);\n'
+              '        /* object.__format__ with an empty spec is str(x) */\n'
+              '        if (ail_view_to_str(specobj).n == 0) { *out = ail_obj_str(cx, x); return AIL_OK; } }\n'))
     e.append(('static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
               'static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n'
               '    if (x.tag == AIL_T_INST) { ail_d2_fn ff = ail_dun2(x, AIL_D2_FORMAT); if (ff) return ff(cx, out, x, specobj); }\n'))

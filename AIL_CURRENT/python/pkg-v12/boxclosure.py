@@ -366,12 +366,17 @@ class ClosureMixin:
         return t
 
     # -- calling a value --------------------------------------------------------------------------------
-    def call_value(self, func_c, args, kwargs, ctx, class_dispatch=True):
+    def call_value(self, func_c, args, kwargs, ctx, class_dispatch=True, inst_call=True):
         from pyfront import Unsupported
         if kwargs:
             raise Unsupported('keyword arguments in a call through a function value')
         if any(isinstance(x, ast.Starred) for x in args):
             raise Unsupported('a starred argument in a call through a function value')
+        if inst_call and any('__call__' in c['methods'] for c in getattr(self, 'classes', {}).values()):
+            # an instance whose class defines __call__ is called through it
+            fvi = ctx.tmp()
+            ctx.emit('%s = %s;' % (fvi, func_c))
+            return self._call_field_value(fvi, args, ctx)
         fv = ctx.tmp()
         ctx.emit('%s = %s;' % (fv, func_c))
         argcs = [self.expr(x, ctx) for x in args]
