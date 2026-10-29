@@ -19,6 +19,31 @@ it hit something it must not decide itself.
 Verification status is given inline: **[verified 2026-10-29]** means checked on the laptop or with `apt-cache` while
 writing this note; **[unverified]** means taken from memory or vendor material and to be checked in the stage named.
 
+## 0. Strategy: vendor-neutral GPU (owner decision 2026-10-29)
+
+**Goal: break CUDA lock-in.** The same plain Python program runs on AMD, Intel, NVIDIA and mobile GPUs through one
+backend, Vulkan compute with SPIR-V, and prints CPython's output on every vendor. Users never write CUDA, a kernel
+language or a vendor API; they write Python loops and (section 8) call vendor-neutral array operations.
+
+- **Vulkan only.** No CUDA, HIP, Metal or D3D12 backend (section 2.3). A CUDA backend would make NVIDIA the best-tested
+  and fastest target and pull users back into the lock-in this work exists to break; it is rejected, not deferred.
+- **Exact on every vendor** follows from the rule above: the GPU only computes what it can compute bit for bit, and
+  everything else is refused, kept on the CPU or replayed. Two vendors cannot disagree, because neither may decide.
+- **What "mobile" means honestly**: many mobile GPUs have no `shaderFloat64` or `shaderInt64` **[unverified per device]**.
+  There, float64 and int64 loops run on the CPU (same output); only kernels the device supports exactly are offloaded.
+- **First benchmark goal (B0)**: one AIL program (a fused element-wise chain plus a matmul, section 8) on the laptop's AMD
+  780M and on a Colab NVIDIA GPU, both through Vulkan, against PyTorch + CUDA on the same Colab GPU. Report the ratio per
+  device. **Unmeasured**; it needs NVIDIA's Vulkan driver inside Colab, which is **[unverified]** (section 7).
+
+**Prior attempts and what AIL does differently.** Mojo/Modular offers a new language (a Python superset) with its own
+compiler and MAX runtime targeting several vendors; Triton is a Python-embedded kernel DSL compiled through each vendor's
+toolchain (mainly NVIDIA and AMD); tinygrad is a Python tensor library with many small backends (CUDA, HIP, Metal,
+OpenCL, WebGPU and others); ROCm/HIP is AMD's CUDA-like stack that ports CUDA code to AMD; SYCL (oneAPI DPC++,
+AdaptiveCpp) is single-source C++ over several vendors' runtimes **[descriptions from memory, unverified in detail]**.
+Each asks the user to learn a new language, a DSL, a tensor API or a vendor SDK, and none promises results equal to
+CPython's. AIL keeps **plain Python** that CPython also runs, **exact results** (CPython's output or a refusal by name),
+and **no vendor SDK**: only the Vulkan loader present on the system and SPIR-V that AIL emits itself.
+
 ## 1. Scope: what goes to the GPU
 
 ### 1.1 Eligible constructs (typed path only)
@@ -123,7 +148,7 @@ Rejected alternatives:
 | backend | why not |
 | --- | --- |
 | OpenCL (C source or SPIR-V) | Its float rules are better (OpenCL C requires correctly rounded `double` `/` and `sqrt`) **[unverified: from memory of the OpenCL C spec, re-read if Q2 reopens]**. But: the CPU implementation for CI, PoCL, pulls clang-16 and LLVM 16: `libpocl2t64` 83,673 KB + `libllvm16t64` 120,178 KB + `libclang-cpp16t64` 60,592 KB installed **[verified `apt-cache show`]**; no OpenCL vendor is registered under `HKLM\SOFTWARE\Khronos\OpenCL\Vendors` on the laptop **[verified empty; the AMD driver may register elsewhere, unverified]**; OpenCL C source means a compiler at run time on the user's machine; SPIR-V for OpenCL (`cl_khr_il_program`) support on AMD is doubtful **[unverified]**. Kept as the fallback if Vulkan's float controls fail in G2 (Q2). |
-| CUDA / PTX | No NVIDIA GPU on the laptop and no GPU in CI: nothing CUDA-specific could be tested where AIL is tested. Its float semantics are good (`add.rn.f64`, `div.rn.f64`, `sqrt.rn.f64`, f64 denormals kept) **[unverified: from memory of the PTX ISA]**. Possible later as a second backend from the same kernel IR (stage G9, owner decision Q1); see section 7 (Colab). |
+| CUDA / PTX | No NVIDIA GPU on the laptop and no GPU in CI: nothing CUDA-specific could be tested where AIL is tested. Its float semantics are good (`add.rn.f64`, `div.rn.f64`, `sqrt.rn.f64`, f64 denormals kept) **[unverified: from memory of the PTX ISA]**. **Rejected, not deferred**: a CUDA backend adds the vendor lock-in this work is meant to break (section 0). NVIDIA GPUs are reached through their Vulkan driver instead. |
 | HIP / ROCm | The 780M is not on the ROCm support list **[unverified]**; the stack is GBs; no CPU implementation for CI. |
 | D3D12 compute | WSL exposes `/dev/dxg` and `/usr/lib/wsl/lib/libd3d12.so` **[verified]**, so it would reach the real iGPU from WSL. But it is Windows/WSL only, needs DXIL and dxc, and has no CPU implementation in Ubuntu CI. Mesa's Vulkan-on-D3D12 driver (dozen) is not in Ubuntu's package: the ICD list here is asahi, gfxstream, intel, intel_hasvk, lvp, nouveau, radeon, virtio **[verified]**. |
 | WebGPU / wgpu, Metal | No binary64 in WGSL or Metal **[unverified for current spec revisions]**; Python floats are binary64, binary32 is a silent difference. So macOS gets no GPU offload (MoltenVK runs on Metal: no `shaderFloat64`). |
@@ -318,10 +343,10 @@ Each stage is one PR, CPython-compared as in section 5, and leaves programs with
 | **G6** | reductions: int sum with prefix range check, int/float min/max with index ties, float sum as GPU map + CPU reduce | CPython-equal on the edge cases of 3.4 (`[MAX, 1, -1]`, `-0.0/0.0` ties, NaN positions) | G4 |
 | **G7** | cost model constants measured on the laptop iGPU and lavapipe; `--gpu=auto` | measured table in this note; `auto` never slower than the CPU by more than the launch cost on the measured set, or the stage reports why it stops | G3..G6; tooling (bench harness) |
 | **G8** (optional) | zero copy on UMA, residency between consecutive launches | measured gain, outputs unchanged | G7 |
-| **G9** (optional, owner decision Q1) | second backend: CUDA via PTX text from the same kernel IR, `dlopen("libcuda.so.1")` | validated on Colab only (section 7); CI still covers the Vulkan backend and the shared IR | G7 |
 
 G1 can start as soon as the IR core and typed path are stable, but the roadmap order holds: GPU work is scheduled after
-release. G3 needs the Windows build of the FFI/modules stage for the laptop run.
+release. G3 needs the Windows build of the FFI/modules stage for the laptop run. The ML and matrix-multiply stages
+M1..M6 (section 8.6) follow G7. There is no CUDA stage (section 0).
 
 ## 7. Colab validation (owner-started, manual)
 
@@ -329,28 +354,26 @@ The owner has a paid Google Colab subscription with NVIDIA GPUs (T4/L4/A100 clas
 device, with three limits that keep it out of CI: every run spends paid compute units, there is no stable automation
 API, and the runtime image changes without notice. **CI never depends on Colab; a Colab run is started by the owner.**
 
-Does it change the backend choice? No:
-- The default backend must run on the AMD iGPU and on lavapipe in CI; CUDA runs on neither, so a CUDA-first design would
-  leave the CI and the owner's laptop untested.
-- Colab can still run the **Vulkan** backend if the container exposes the NVIDIA Vulkan driver (`nvidia_icd.json` and
+It does not change the backend: Colab is the NVIDIA device for the **same Vulkan/SPIR-V** code, and the place where
+PyTorch + CUDA is run as the baseline of B0 (section 0).
+- Colab runs the Vulkan backend only if the container exposes the NVIDIA Vulkan driver (`nvidia_icd.json` and
   `libGLX_nvidia`); whether Colab mounts the graphics part of the driver or only compute/utility is **[unverified]**. The
-  notebook checks it first. If it is there, Colab is a third device for the same SPIR-V (NVIDIA has full f64, RTE and
+  notebook checks it first. If it is there, Colab is a third device for the same SPIR-V (NVIDIA's f64, RTE and
   DenormPreserve support **[unverified per driver]**).
-- If Colab has no Vulkan, it only becomes useful through the optional CUDA/PTX backend (G9). PTX has the float rules
-  AIL needs natively (`.rn` division and sqrt, f64 denormals), so G9 would be cheap per kernel, but its code could only be
-  tested on Colab, by hand. That trade-off is Q1.
+- If Colab has no NVIDIA Vulkan driver, B0's NVIDIA half cannot run there; AIL does not add CUDA to work around it
+  (section 0). Another NVIDIA machine with a Vulkan driver is then needed (Q1).
 
 Notebook outline (`tools/colab/gpu_check.ipynb`, written in G3):
 1. Show the runtime: `nvidia-smi`, `cat /etc/os-release`, `python3 --version`; stop with a clear message if no GPU.
 2. Install build deps: `apt-get install -y gcc libvulkan1` (and `vulkan-tools` for `vulkaninfo`); install CPython 3.12
    if the image's Python is another version (the oracle must be 3.12).
 3. Probe Vulkan: list ICD files, run the AIL probe (`tools/gpu_probe.c`: device name, `shaderFloat64`, `shaderInt64`,
-   RTE, DenormPreserve). Print "Vulkan: NVIDIA device found" or "Vulkan: none (CUDA only)".
+   RTE, DenormPreserve, cooperative-matrix shapes). Print "Vulkan: NVIDIA device found" or "Vulkan: none" and stop.
 4. `git clone https://github.com/J-KAMMA/ail-ci` at a commit the owner types in a cell (default `integ`).
 5. Run `python3 -m unittest AIL_CURRENT/test_ail_gpu*.py` with `AIL_GPU=force` and the device chosen by
    `AIL_GPU_DEVICE=nvidia`; the modules compare with CPython in the notebook.
 6. Run the bit tests (section 5.1) on the device.
-7. (G9 only) the same modules with `AIL_GPU_BACKEND=cuda`.
+7. B0: run the AIL benchmark program through Vulkan, then the same model in PyTorch + CUDA in the same notebook.
 8. Write a short summary (commit, device, driver, pass/fail per module, wall time) the owner pastes into the PR.
 
 Cost control: the notebook does steps 1-3 first (seconds) and stops if nothing is usable; the whole run should fit in a
@@ -363,10 +386,11 @@ until the benchmark named next to it has been run and its numbers are written he
 
 ### 8.1 What AIL does not rewrite
 
-Matmul, convolution and attention kernels are not written by AIL. AIL calls the same vendor libraries PyTorch calls
-(cuBLAS/cuDNN on NVIDIA, rocBLAS/MIOpen on AMD, an optimized CPU BLAS such as OpenBLAS) through the FFI (`@extern`;
-library policy: big proven native libraries are linked, not rewritten). For those kernels the target is **parity**, not a
-win. They are loaded with `dlopen`, like Vulkan, so a binary without them still starts.
+On the CPU, matmul and convolution are not written by AIL: it calls an optimized CPU BLAS (OpenBLAS or the system BLAS)
+through the FFI (`@extern`; library policy: big proven native libraries are linked, not rewritten), so those kernels
+reach **parity**. On the GPU, vendor libraries (cuBLAS, rocBLAS, oneMKL) are not used, because each ties the program to
+one vendor (section 0); matrix multiply goes through a vendor-neutral Vulkan library first and AIL's own SPIR-V kernels
+later (section 8.7). All of them are loaded with `dlopen`, so a binary without them still starts.
 
 Exactness: a BLAS call is an FFI call, and the library defines its result, as with every `@extern` today. It is outside
 the CPython comparison, and the docs say so. AIL never *replaces* a matmul the user wrote as Python loops with a BLAS
@@ -414,10 +438,38 @@ decision.
 | M1 | FFI bindings for CPU BLAS (`sgemm`/`dgemm`) and the typed array storage they read | B1 CPU numbers recorded against PyTorch eager; outputs equal the same BLAS called from CPython |
 | M2 | fusion of whole element-wise chains (G1 IR) over the typed arrays, on Vulkan | B2 numbers on the laptop iGPU; CPython-equal outputs on lavapipe in CI |
 | M3 | small-model inference example (MLP, small transformer) + Python tokenizer, end to end | B1, B3, B4, B6 recorded |
-| M4 | the binary32 array module of 8.5 (only if Q8 says yes) | its CPython reference matches bit for bit |
-| M5 | GPU BLAS through `dlopen` (rocBLAS/cuBLAS) and the B2 run on Colab against `torch.compile` | the 8.4 result written here, win or not |
+| M4 | the declared-precision array module of 8.5 (f32, f16/bf16 storage, int8; only if Q8 says yes) | its CPython reference matches bit for bit |
+| M5 | vendor-neutral GPU matmul through an existing Vulkan library (8.7) | bit-equal to the module's CPython reference on lavapipe, the 780M and (if available) Colab NVIDIA, or restricted to the cases where it is; B0 first numbers |
+| M6 | own SPIR-V matmul kernels: exact binary64 tiled kernel, then `VK_KHR_cooperative_matrix` under the rules of 8.7 | every refusal and fallback of 8.7 tested; B0 and the 8.4 run on Colab against PyTorch + CUDA and `torch.compile`, result written here, win or not |
 
-Out of scope: automatic differentiation, training (distributed or not), a model zoo, ONNX import.
+Out of scope: automatic differentiation, training (distributed or not), a model zoo, ONNX import, any CUDA code.
+
+### 8.7 Vendor-neutral matrix multiply
+
+**First (M5): an existing vendor-neutral Vulkan library.** Candidates, none checked yet (license, size and API all
+**[unverified]**): the Vulkan backend of ggml (llama.cpp; MIT; matmul shaders, some with cooperative matrix), ncnn
+(Tencent; BSD-3-Clause; Vulkan inference kernels), IREE (Apache-2.0 with LLVM exceptions; a whole compiler, likely too
+big for the size budget), Kompute (Apache-2.0; a Vulkan compute framework without BLAS kernels, so it would not save
+the matmul work). VkFFT (MIT) is FFT only; CLBlast is OpenCL, so it fails "Vulkan only". M5 picks one after checking
+license, installed size, binary-size delta and whether its kernels are bit-identical across devices. Its kernels choose
+their own accumulation order, so M5 accepts a library kernel only for an operation whose result is order-independent
+(8.7 rules below) or whose order is fixed and documented; anything else stays on the CPU BLAS.
+
+**Later (M6): AIL's own kernels.** Two kinds, with these exactness rules:
+
+| matmul | CPython / spec result | rule |
+| --- | --- | --- |
+| a matmul written as Python loops over `float` (`c[i][j] += a[i][k] * b[k][j]`, or `sum(... for k ...)`) | binary64, `k` in order, each op rounded; `sum()` is Neumaier | **exact kernel**: tile over `i, j` only, never split `k`; each output element runs its `k` loop in order with `NoContraction` (plain `+=` or Neumaier, as written). Never cooperative matrix (its multiply-add order and internal precision are not specified **[unverified: reading of VK_KHR_cooperative_matrix]**) |
+| the same loops over `int` (int64) | exact integers; overflow is the typed path's loud stop | exact kernel with overflow flags -> replay (section 3.3); order-independent, so `k` may be split |
+| module op `matmul(A, B)` on int8 inputs with int32 accumulation (Q8 module) | exact integer sum, defined by the module spec | **cooperative matrix allowed**: integer sums do not depend on order. Precondition checked before launch: `K * max|a| * max|b| < 2^31` (a max-abs reduction of each input, or a proof from the element type: int8 gives `K < 2^31 / 2^14`, so `K <= 131071`). Otherwise the exact scalar kernel in int64 runs |
+| module op on f16/bf16 inputs, f32 accumulation | spec: each output is the exact sum of exact products, rounded once to f32 | **cooperative matrix only when the sum is exact in f32 whatever the order**: products of f16 are exact in f32 (22 significant bits); the run-time check verifies that the exponent span of all nonzero products plus `log2(K)` fits in 24 bits, so every partial sum is exact. Otherwise flag -> the exact kernel (wide accumulation in software) runs. Real ML data rarely passes this check, so most f16 matmuls take the exact kernel |
+| module op on f32 inputs | spec: sequential `k` order, f32 rounding per op | exact kernel only; cooperative matrix **refused** (f32 inputs are rounded to tf32 or similar inside many matrix units **[unverified per vendor]**) |
+| an "any order, faster" matmul whose bits differ per device | none: CPython has no such result | **not offered** unless the owner decides otherwise (Q10); it would break "exact on every vendor" |
+
+Cooperative matrix is on AMD RDNA3 (WMMA, the 780M's architecture), NVIDIA and Intel Arc hardware through their Vulkan
+drivers **[unverified per driver]**; whether lavapipe implements `VK_KHR_cooperative_matrix` is **[unverified]**. If it
+does not, the CI tests run the same kernels through the G1 CPU emulation and the exact fallback, and the
+cooperative-matrix path itself is tested only on the laptop and Colab, by hand (a risk, section 9).
 
 ## 9. Risks
 
@@ -431,13 +483,16 @@ Out of scope: automatic differentiation, training (distributed or not), a model 
   scheduling or memory. The laptop and Colab runs cover that, by hand only.
 - **Proof scope creep.** The eligible body is deliberately the `parallel for` body; widening it (structs, nested lists)
   is a typed-path project first.
+- **Cooperative matrix untested in CI** if lavapipe lacks it (8.7); and the exactness checks may make it rarely used.
+- **Vendor-neutral can mean slower.** PyTorch + CUDA uses tuned vendor kernels; B0 may show AIL well behind on NVIDIA.
+  The goal is to report how close it gets, not to assume parity.
 - **CI install time.** The lavapipe packages are about 240 MB installed if the runner image lacks them; caching may be
   needed (G3).
 
 ## 10. Open questions for the owner
 
-- **Q1. CUDA for NVIDIA (Colab)?** Vulkan is the main backend. Should a second CUDA backend (G9) be built later, knowing
-  it can only be tested by hand on Colab, never in CI? Or only use Colab to test the Vulkan backend if Colab supports it?
+- **Q1. NVIDIA test machine.** NVIDIA is reached only through Vulkan (no CUDA). If Colab does not expose NVIDIA's Vulkan
+  driver, which NVIDIA machine should the B0 benchmark use?
 - **Q2. If Vulkan float rules fail on the iGPU** (G2 bit tests), switch to OpenCL, or keep the GPU off on that device?
 - **Q3. Stop rule.** If G7 shows little or no speed gain for float64 on the 780M, may the GPU work stop after G7 (code
   kept, `auto` not offered)?
@@ -451,3 +506,5 @@ Out of scope: automatic differentiation, training (distributed or not), a model 
   Build it, or keep ML kernels in binary64?
 - **Q9. Benchmark baseline.** For the PyTorch comparisons (section 8.2), which versions and machines count: the laptop
   CPU plus a Colab T4/L4, with `torch.compile` in its default mode?
+- **Q10. Inexact fast matmul.** Tensor cores are fastest when results may differ slightly between devices. Should AIL
+  ever offer such an opt-in function (named as inexact, never compared with CPython), or stay exact-only?
