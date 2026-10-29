@@ -202,6 +202,8 @@ def lower_class(cls, kind, binder, enums):
                     value = ast.Constant(value=last + 1)
                 else:
                     refuse(item, 'enum class %s: auto() after a value that is not an int' % cls.name)
+            if kind_name == 'IntEnum':
+                check_intenum_member(item, cls.name, target, value)
             lit = literal(value)
             last = lit if lit is not None else last
             dump = ast.dump(value)
@@ -243,6 +245,22 @@ def lower_class(cls, kind, binder, enums):
     new._ail_enum_info = info
     enums[cls.name] = info
     return [new]
+
+
+def check_intenum_member(node, cls_name, member, value):
+    """CPython creates an IntEnum member with int(value) while the class statement runs (enum.py
+    __set_name__ -> _new_member_); a literal that int() rejects makes class creation raise."""
+    try:
+        val = ast.literal_eval(value)
+    except (ValueError, SyntaxError, TypeError):
+        return
+    args = val if isinstance(val, tuple) else (val,)
+    try:
+        int(*args)
+    except (ValueError, TypeError, OverflowError) as exc:
+        refuse(node, 'enum class %s: IntEnum member %s has the value %r, which int() rejects at class creation '
+               'in CPython (%s: %s); write a value int() accepts'
+               % (cls_name, member, val, type(exc).__name__, exc))
 
 
 def const_int(node, env, cls):
