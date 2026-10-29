@@ -16826,6 +16826,15 @@ static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {
     }
     if (seq.tag == AIL_T_LIST && ((ail_vecobj *)seq.o)->from_generator)
         return ail_raise_c(cx, AIL_B_TYPEERROR, "'generator' object is not reversible");
+    if (seq.tag == AIL_T_DICT) {
+        /* reversed(dict): the keys, last inserted first */
+        ail_obj ks = ail_dict_keys(cx, seq);
+        ((ail_vecobj *)ks.o)->hdr.aux = 0;
+        AIL_ROOT1(cx, frk, ks);
+        *out = ail__iter_wrap(cx, AIL_IT_REVERSED, ks, ail_box_none(), ((ail_vecobj *)ks.o)->n - 1);
+        AIL_FRAME_LEAVE(cx, frk);
+        return AIL_OK;
+    }
     if (seq.tag == AIL_T_LIST || seq.tag == AIL_T_TUPLE) n = ((ail_vecobj *)seq.o)->n;
     else if (seq.tag == AIL_T_STR) n = seq.sv.len;
     else { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not reversible", ail_type_name(seq.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
