@@ -169,25 +169,41 @@ class Session:
     def _lower(self, path, text, tree):
         imported = set()                # names bound by `from ail_ffi import`
         module_names = set()            # names bound by `import ail_ffi [as x]`
+        dataclass_names = set()         # names bound by `from dataclasses import dataclass`
+        dataclasses_names = set()       # names bound by `import dataclasses [as x]`
+        future_annotations = False      # `from __future__ import annotations`
         blank = []                      # (first line, last line)
         for node in tree.body:
-            if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
-                for alias in node.names:
-                    if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
-                        continue
-                    if alias.asname not in (None, alias.name):
-                        self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
-                    imported.add(alias.name)
-                blank.append((node.lineno, node.end_lineno))
+            if isinstance(node, ast.ImportFrom) and node.level == 0:
+                if node.module == 'ail_ffi':
+                    for alias in node.names:
+                        if alias.name == '*':
+                            imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
+                            continue
+                        if alias.asname not in (None, alias.name):
+                            self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
+                        imported.add(alias.name)
+                    blank.append((node.lineno, node.end_lineno))
+                elif node.module == 'dataclasses':
+                    for alias in node.names:
+                        if alias.name == 'dataclass':
+                            dataclass_names.add(alias.asname or alias.name)
+                elif node.module == '__future__' and any(alias.name == 'annotations' for alias in node.names):
+                    future_annotations = True
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == 'ail_ffi':
                         module_names.add(alias.asname or 'ail_ffi')
                         blank.append((node.lineno, node.end_lineno))
+                    elif alias.name == 'dataclasses':
+                        dataclasses_names.add(alias.asname or 'dataclasses')
         if not imported and not module_names:
             return text
-        dataclass_names = self._export_dataclasses(tree)
+        if any(isinstance(node, (ast.FunctionDef, ast.ClassDef))
+               and any(self._is_export(d, imported, module_names) for d in node.decorator_list)
+               for node in ast.walk(tree)):
+            self._refuse_export_attributes(path, tree)
+        class_info = {}                 # class name -> dataclass/field information, in definition order
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -197,12 +213,16 @@ class Session:
             if isinstance(node, ast.ClassDef):
                 if any(self._is_export(d, imported, module_names) for d in node.decorator_list):
                     self._refuse(path, node, '%s: @export applies to a top-level function, not a class' % node.name)
+                self._register_class(node, class_info, dataclass_names, dataclasses_names, future_annotations)
                 continue
             if not isinstance(node, ast.FunctionDef):
                 continue
             exports = [d for d in node.decorator_list if self._is_export(d, imported, module_names)]
             if exports:
-                self._check_export(path, node, dataclass_names)
+                if not self._is_export(node.decorator_list[-1], imported, module_names):
+                    self._refuse(path, node, '@export %s: @export must be the innermost decorator '
+                                 '(CPython checks the decorated object, not the raw function)' % node.name)
+                self._check_export(path, node, class_info)
                 for dec in exports:
                     blank.append((dec.lineno, dec.end_lineno))
             deco = [d for d in node.decorator_list if self._is_extern(d, imported, module_names)]
@@ -250,38 +270,61 @@ class Session:
                 and isinstance(node.value, ast.Name) and node.value.id in module_names)
 
     @staticmethod
-    def _is_dataclass(node):
+    def _is_dataclass(node, dataclass_names, dataclasses_names):
         if isinstance(node, ast.Call):
             node = node.func
         if isinstance(node, ast.Name):
-            return node.id == 'dataclass'
-        return isinstance(node, ast.Attribute) and node.attr == 'dataclass'
+            return node.id in dataclass_names
+        return (isinstance(node, ast.Attribute) and node.attr == 'dataclass'
+                and isinstance(node.value, ast.Name) and node.value.id in dataclasses_names)
 
-    def _export_dataclasses(self, tree):
-        """Names of @dataclass classes whose fields are only int, float or bool (an @export parameter may be one)."""
-        names = set()
-        for node in tree.body:
-            if not isinstance(node, ast.ClassDef) or not any(self._is_dataclass(d) for d in node.decorator_list):
+    def _register_class(self, node, class_info, dataclass_names, dataclasses_names, future_annotations):
+        """Record what `dataclasses.fields()` would see for this class at this point in the module."""
+        is_dataclass = any(self._is_dataclass(d, dataclass_names, dataclasses_names)
+                           for d in node.decorator_list)
+        known, inherits_dataclass, field_count, fields_ok = True, False, 0, True
+        for base in node.bases:
+            if not isinstance(base, ast.Name):
+                known = False
                 continue
-            fields = [stmt.annotation for stmt in node.body
-                      if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name)]
-            if all(isinstance(ann, ast.Name) and ann.id in ('int', 'float', 'bool') for ann in fields):
-                names.add(node.name)
-        return names
+            if base.id == 'object':
+                continue
+            info = class_info.get(base.id)
+            if info is None:
+                known = False
+                continue
+            if info['dataclass']:
+                inherits_dataclass = True
+                field_count += info['field_count']
+                fields_ok = fields_ok and info['fields_ok']
+        if is_dataclass:
+            for statement in node.body:
+                if not (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)):
+                    continue
+                field_count += 1
+                if not (isinstance(statement.annotation, ast.Name)
+                        and statement.annotation.id in ('int', 'float', 'bool')):
+                    fields_ok = False
+        if future_annotations and field_count:
+            fields_ok = False        # dataclasses keeps a string field type, which CPython's contract rejects
+        class_info[node.name] = {'dataclass': is_dataclass or inherits_dataclass, 'known': known,
+                                 'fields_ok': fields_ok, 'field_count': field_count}
 
     @staticmethod
     def _export_scalar(annotation):
         return isinstance(annotation, ast.Name) and annotation.id in ('int', 'float', 'bool', 'str', 'bytes')
 
-    def _export_type_ok(self, annotation, dataclass_names, *, result):
+    def _export_type_ok(self, annotation, class_info, *, result):
         if annotation is None:
             return False
         if isinstance(annotation, ast.Constant) and annotation.value is None:
             return result
         if self._export_scalar(annotation):
             return True
-        if isinstance(annotation, ast.Name) and not result and annotation.id in dataclass_names:
-            return True
+        if isinstance(annotation, ast.Name) and not result:
+            info = class_info.get(annotation.id)
+            if info and info['dataclass'] and info['known'] and info['fields_ok']:
+                return True
         if (isinstance(annotation, ast.Subscript) and isinstance(annotation.slice, ast.Name)
                 and annotation.slice.id in ('int', 'float')):
             core = annotation.value
@@ -292,7 +335,17 @@ class Session:
                 return True
         return False
 
-    def _check_export(self, path, node, dataclass_names):
+    def _refuse_export_attributes(self, path, tree):
+        """The lowered program cannot carry function attributes; never accept `f.__ail_export__` silently."""
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Attribute) and node.attr == '__ail_export__':
+                self._refuse(path, node, '@export: __ail_export__ is not available on an ordinary build')
+            if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'getattr'
+                    and len(node.args) >= 2 and isinstance(node.args[1], ast.Constant)
+                    and node.args[1].value == '__ail_export__'):
+                self._refuse(path, node, '@export: __ail_export__ is not available on an ordinary build')
+
+    def _check_export(self, path, node, class_info):
         """CPython's @export checks the signature and annotations; refuse the same shapes by name."""
         args = node.args
         if args.posonlyargs or args.vararg or args.kwonlyargs or args.kwarg:
@@ -302,11 +355,11 @@ class Session:
         if node.returns is None:
             self._refuse(path, node, '@export %s: the result needs an annotation (-> None for no result)' % node.name)
         for parameter in args.args:
-            if parameter.annotation is None or not self._export_type_ok(parameter.annotation, dataclass_names, result=False):
+            if parameter.annotation is None or not self._export_type_ok(parameter.annotation, class_info, result=False):
                 self._refuse(path, parameter, '@export %s: parameter %s needs one of int float bool str bytes '
                              'list[int] list[float] or a dataclass of int/float/bool'
                              % (node.name, parameter.arg))
-        if not self._export_type_ok(node.returns, dataclass_names, result=True):
+        if not self._export_type_ok(node.returns, class_info, result=True):
             self._refuse(path, node, '@export %s: the result must be int float bool str bytes list[int] '
                          'list[float] or None' % node.name)
 

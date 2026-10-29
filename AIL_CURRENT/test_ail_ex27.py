@@ -117,6 +117,54 @@ def main():
 main()
 '''
 
+FUTURE_SCALARS = r'''from __future__ import annotations
+from ail_ffi import export
+
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+@export
+def halves(values: list[int]) -> list[int]:
+    return [value // 2 for value in values]
+
+
+def main():
+    print(add(2, 3), halves([2, 5, 8]), add(-7, 4))
+
+
+main()
+'''
+
+INHERITED_DATACLASS = r'''from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dataclass
+class Base:
+    tag: int
+
+
+@dataclass
+class Point(Base):
+    x: int
+    y: float
+
+
+@export
+def total(p: Point) -> float:
+    return p.tag + p.x + p.y
+
+
+def main():
+    print(total(Point(1, 2, 3.5)))
+
+
+main()
+'''
+
 MODULE_ATTRIBUTE = r'''import ail_ffi
 
 
@@ -276,7 +324,120 @@ def main():
 
 main()
 ''',
+    'decorator_below_export': '''from functools import lru_cache
+from ail_ffi import export
+
+
+@export
+@lru_cache
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+def main():
+    print(add(2, 2))
+
+
+main()
+''',
+    'dataclass_future_annotations': '''from __future__ import annotations
+from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dataclass
+class Point:
+    x: int
+    y: int
+
+
+@export
+def add(p: Point) -> int:
+    return p.x + p.y
+
+
+def main():
+    print(add(Point(2, 2)))
+
+
+main()
+''',
+    'dataclass_inherited_bad_field': '''from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dataclass
+class Base:
+    tag: str
+
+
+@dataclass
+class Point(Base):
+    x: int
+
+
+@export
+def add(p: Point) -> int:
+    return p.x
+
+
+def main():
+    print(add(Point("a", 2)))
+
+
+main()
+''',
+    'dataclass_defined_after_export': '''from dataclasses import dataclass
+from ail_ffi import export
+
+
+@export
+def add(p: Point) -> int:
+    return p.x
+
+
+@dataclass
+class Point:
+    x: int
+
+
+def main():
+    print(add(Point(4)))
+
+
+main()
+''',
 }
+
+EXPORT_ATTRIBUTE = '''from ail_ffi import export
+
+
+@export
+def f(x: int) -> int:
+    return x
+
+
+def main():
+    print(f.__ail_export__, f.__name__)
+
+
+main()
+'''
+
+EXPORT_ATTRIBUTE_GETATTR = '''from ail_ffi import export
+
+
+@export
+def f(x: int) -> int:
+    return x
+
+
+def main():
+    print(getattr(f, "__ail_export__", False))
+
+
+main()
+'''
 
 
 def _cpython(directory, text):
@@ -326,13 +487,16 @@ class ExportTests(unittest.TestCase):
     def refused(self, text):
         self.assertNotEqual(_cpython(self.directory, text).returncode, 0,
                             'CPython accepted a shape @export rejects')
+        self.refused_by_name(text, '@export')
+
+    def refused_by_name(self, text, element='@export'):
         for general in (False, True):
             with self.subTest(general=general):
                 built, exe = _build(self.directory, text, general)
                 self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
                 self.assertFalse(exe.exists())
                 self.assertNotIn('Traceback', built.stdout + built.stderr)
-                self.assertIn('@export', built.stdout + built.stderr)
+                self.assertIn(element, built.stdout + built.stderr)
 
     def test_valid_export_builds_and_matches_cpython(self):
         self.same(VALID)
@@ -340,10 +504,20 @@ class ExportTests(unittest.TestCase):
     def test_export_through_module_attribute_and_call(self):
         self.same(MODULE_ATTRIBUTE)
 
+    def test_future_annotations_keep_scalar_and_list_annotations(self):
+        self.same(FUTURE_SCALARS)
+
+    def test_inherited_dataclass_with_scalar_fields(self):
+        self.same(INHERITED_DATACLASS)
+
     def test_invalid_export_shapes_are_refused(self):
         for name, text in REFUSED.items():
             with self.subTest(name=name):
                 self.refused(text)
+
+    def test_export_attribute_is_refused_by_name(self):
+        self.refused_by_name(EXPORT_ATTRIBUTE)
+        self.refused_by_name(EXPORT_ATTRIBUTE_GETATTR)
 
 
 if __name__ == '__main__':

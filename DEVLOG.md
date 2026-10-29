@@ -1,3 +1,24 @@
+## 2026-10-29 -- job-ex27-10290951 review: `@export` checks the decorated object and CPython's dataclasses
+
+The review of `ee3760e` found three places where the static `@export` check accepted programs CPython
+rejects, or lost a CPython effect.  It now mirrors the runtime decorator more closely:
+
+* `@export` must be the innermost decorator.  CPython's `export` receives the result of every
+  decorator below it, so `@export` over `@lru_cache` is rejected (CPython raises `TypeError`) instead
+  of validating the raw `FunctionDef` and then building a program that prints `4`.
+* The dataclass table is built in definition order and follows `dataclasses.fields`: only a dataclass
+  defined before the function exists when `typing.get_type_hints` runs (a forward name is CPython's
+  `NameError`), inherited dataclass fields count (a `str` base field is rejected), and
+  `from __future__ import annotations` leaves string field types, which CPython's contract rejects
+  (an empty dataclass still passes).  Scalar and `list[int]`/`list[float]` function annotations keep
+  working under the future import.
+* A program reading `__ail_export__` (directly or through `getattr`) is refused by name: the ordinary
+  build has no function attributes, so blanking the decorator would otherwise compile and fail with
+  `AttributeError` where CPython prints the attribute.
+
+`test_ail_ex27.py` now has four valid programs (including future annotations and inherited scalar
+dataclasses) and thirteen refused shapes, plus two `__ail_export__` programs refused by name.
+
 ## 2026-10-29 -- job-ex27-10290951: `@export` is a checking no-op in an ordinary build
 
 `language_examples/c_export/geometry.py` is the Python-syntax AIL example for C export.  Run as a
