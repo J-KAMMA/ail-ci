@@ -1,3 +1,24 @@
+## 2026-10-29 -- cov35: nested generator expressions consumed in place (job-cov35-10290946)
+
+The fresh corpus survey of `lab/corpus/programs` (219 programs, default and
+`AIL_UNIFIED_FORCE=1`) had 24 compile-time refusals per build.  Excluding imports, the most
+frequent construct was `a generator expression nested inside another generator expression`
+(3, all on the general path: deepseek t172/t432 and glm t432; all three were consumed by
+`join`/`sum`).  The general path now accepts a nested generator expression when every
+generator in the nest is read to exhaustion by its immediate consumer (`join`, `sum`,
+`list`, `sorted`, `min`/`max`, a comprehension source, a starred call or tuple unpacking).
+The refusal is kept by name for a nested generator saved as a value, consumed by `next`,
+or used with `any()`/`all()`, where eager materialisation could run elements CPython does
+not reach.  The three affected corpus programs now compile on both builds and match CPython
+on all three inputs; the refusal counts are 24 -> 21 programs per build and 3 -> 0 for this
+construct.
+
+Added `AIL_CURRENT/test_ail_cov35.py` (5 tests, both builds, plus saved/`next`/`any`
+refusal cases) and registered it in `ail_check.MODULES`.  Probes in `/tmp/probes`:
+`cov35_join.py`, `cov35_sum.py`, `cov35_boundaries.py` and `cov35_more.py` match CPython on
+both builds; `cov35_refuse_saved.py`, `cov35_refuse_next.py` and `cov35_refuse_any.py` are
+refused by name on both builds.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C

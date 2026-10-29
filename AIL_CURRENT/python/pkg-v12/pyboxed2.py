@@ -2536,14 +2536,19 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        gen_parents = {}
+        for par in ast.walk(tree):
+            for child in ast.iter_child_nodes(par):
+                gen_parents[child] = par
         for gen in ast.walk(tree):
-            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
-                refusal = Unsupported(
-                    'a generator expression nested inside another generator expression '
-                    '(the inner one would be materialised eagerly, not lazily)')
-                refusal.source_line = getattr(gen, 'lineno', None)
-                raise refusal
+            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs:
+                nested = [n for n in ast.walk(gen) if n is not gen and isinstance(n, ast.GeneratorExp)]
+                if nested and not all(_genexp_reads_all(n, gen_parents) for n in [gen] + nested):
+                    refusal = Unsupported(
+                        'a generator expression nested inside another generator expression '
+                        '(the inner one would be materialised eagerly, not lazily)')
+                    refusal.source_line = getattr(gen, 'lineno', None)
+                    raise refusal
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
             refusal = Unsupported(_GENEXP_VALUE_REFUSAL)
@@ -6495,9 +6500,6 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
-            raise Unsupported('a generator expression nested inside another generator expression '
-                              '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
@@ -12446,6 +12448,30 @@ _GENEXP_SAFE_METHODS = frozenset({
     'rsplit', 'splitlines', 'partition', 'rpartition', 'removeprefix', 'removesuffix',
     'bit_length', 'bit_count', 'is_integer', 'get', 'keys', 'values', 'items',
 })
+
+
+def _genexp_reads_all(node, parents):
+    """True iff `node` is read to exhaustion by its immediate consumer at that point.  This is
+    `_genexp_consumed_in_place` without `next`: `next` reads only the first element, so a nested
+    generator materialised eagerly behind it could run elements CPython never reaches."""
+    par = parents.get(node)
+    if isinstance(par, (ast.For, ast.AsyncFor)) and par.iter is node:
+        return True
+    if isinstance(par, ast.comprehension) and par.iter is node:
+        return True
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, (ast.Assign, ast.AnnAssign)):
+        target = par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1 else getattr(par, 'target', None)
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return True
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in (_GENEXP_EAGER_CALLS - {'next'}):
+            return True
+        if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
+            return True
+    return False
 
 
 def _genexp_consumed_in_place(node, parents):
