@@ -1,12 +1,10 @@
-**Compile time: cut the Python-side share of a build.**
+**Finish this compile-time change so it can be integrated.** Your branch already reuses the AST walk, and the generated C was byte-identical on 219/219 corpus programs. It was not accepted only because the records were missing.
 
-CI measurement (`lab/profile/run.py`): gcc is about 59% of a build, C generation about 18%, other Python about 19%. Removing all Python-side time bounds the win at about 1.6x; state the measured share you attack and its bound in the commit message before claiming any speedup.
-
-1. Profile the compiler (`python3 -m cProfile -s cumtime`) on 20 programs from `lab/corpus/programs`. Find the top functions by cumulative time.
-2. Speed up the worst one or two without changing behaviour. The generated C must be byte-identical before and after for every program in `lab/corpus/programs` (check this with a script and report the count). Only changes with identical C are allowed.
-3. Report the measured compile time before and after (median of 3 runs) for those 20 programs in the commit message.
-
-Run only the test modules of the files you touched and `test_ail_safetynet`. Then commit.
+1. Rebase mentally onto today's integ: make sure the change still applies and the generated C is still byte-identical on the corpus programs you checked before (`lab/corpus/programs`, both builds: default and `AIL_UNIFIED_FORCE=1`).
+2. Run `python3 tools/update_manifest.py` and `git add AIL_CURRENT/MANIFEST.json`; `python3 tools/update_manifest.py --check` must pass.
+3. Add a short DEVLOG.md entry: what is reused, the measured compile-time saving (laptop, user time or instruction counts, say which), and the byte-identity check.
+4. Commit with a message stating the same three facts.
+Run only the test modules of the files you touched and `test_ail_safetynet`.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
