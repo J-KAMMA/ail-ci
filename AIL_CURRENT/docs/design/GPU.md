@@ -348,6 +348,56 @@ G1 can start as soon as the IR core and typed path are stable, but the roadmap o
 release. G3 needs the Windows build of the FFI/modules stage for the laptop run. The ML and matrix-multiply stages
 M1..M6 (section 8.6) follow G7. There is no CUDA stage (section 0).
 
+### 6.1 G1 as built (2026-10-30)
+
+Code: `python/pkg-v12/gpu.py` (marker, proof, kernel IR, C emulation), hooks in `pyfunc.py` / `pyc.py` / `ail_chatgpt.py`,
+tests in `test_ail_gpu_g1.py`. Everything is off unless `compile --gpu` (or `AIL_GPU_BUILD=1`) is given: no marker, or no
+switch, gives byte-identical C and binary (tested).
+
+- **Shapes built.** `for i in range(a[, b]): ... out[i] = <expr>` (the store is the last statement; `out` is a local
+  `list[float]`/`list[int]` sized before the loop) and `ys = [<expr> for x in xs]` / `for i in range(a[, b])` (one `for`, no
+  `if`), also over the module-level numeric list constants. Body: locals, `if/elif/else`, an inner `for j in range(K)` with
+  a loop-invariant bound, `+ - *` (int and float), `//` and `%` (int), comparisons (chained, int against float), `and`/`or`/
+  `not`, conditional expressions, `abs`, two-argument `min`/`max` (the typed path takes only two; the kernel also takes three),
+  `float()`, `int()`, `math.floor/ceil/trunc` (the surface layer writes them `int(x // 1)`; a float `// 1` is exactly
+  floor and is built), `len(xs)`, reads `ys[j]` with any int index (negative normalised, bounds checked), and calls of
+  top-level functions over annotated `int`/`float` with one `return` at the end (inlined, recursion refused).
+- **The emulation** is one C function per kernel (`ail_gk<k>`), shared helpers in `gpu.RUNTIME`. It computes into a buffer,
+  ORs into a flag word instead of raising (index 1, zero division 2, int64 overflow 4, denormal 8, NaN 16, range 32) and
+  stops at the first flagged element. The glue commits the buffer on flag 0, otherwise runs the original loop (the C the
+  build makes without the marker). The float guards of 3.2 are in the emulation too (a NaN operand or result, an operand or
+  result below 2**-1000, a product whose exponents sum below -1000), so the G2 SPIR-V has a CPU twin to be tested against.
+- **Run time.** `AIL_GPU=0` skips every kernel; `AIL_GPU_TRACE=1` prints one line per launch on stderr
+  (`gpu: k0 n=4 device=emulation`, `gpu: k0 replay flags=0x4 (overflow )`, `gpu: k0 cpu (...)` when the glue did not launch:
+  a range that does not fit the output list, a negative start, an output that shares memory with an input).
+- **Refusals** (GPU.md 1.3), all `file:line:col: not in the subset: GPU loop: <why>; write instead: <hint>`, exit 3: a
+  marker that is not on a loop or list-comprehension assignment, `while`, a step or a non-`range` iterator, `for ... else`,
+  a body without the closing `out[i] = <expr>`, a call/print/append statement, `break`/`continue`/`return`/`try`/..., a
+  second store, the output list read in the body, a value carried between iterations (`s += x`: G6), a local read after the
+  loop, `/` and `math.sqrt` (G5), `**`, shifts, float `%` and `//`, libm calls, `round`, str/None constants, attributes,
+  tuples, unknown calls, recursion, a callee without annotations or with several returns, mixed int/float branches,
+  a local that changes type, a triangular inner loop, a GPU loop inside a GPU loop, comprehensions with `if` / two `for`s /
+  another iterator, `sum(...)`; and, on the typed path, a function with `try`, a method, a name that is not an int/float
+  scalar or a `list[int]`/`list[float]`.
+- **The proof has two halves.** The syntactic half runs on the file as the user wrote it (`ail_chatgpt.py`, before the
+  surface layer lowers anything) and again in `pyc.build` before either path is tried, so a refusal never depends on which
+  path would have built the program. The typed half (which names are int/float scalars and lists) runs when the typed path
+  has the function's C. A marked loop whose program is built on the general path is not offloaded (section 1.1) and the build
+  says so: `note: prog.py:12: '# ail: gpu' ignored: the loop is not on the typed path ...`.
+- **Integers.** The kernel is int64 with an overflow flag. Replay then gives whatever the same build gives without the
+  marker: the typed path's loud `integer overflow` stop, or exact big ints where the function is built on the general path.
+  A function that the default build keeps off the typed path because an int local or parameter is not provably int64 (the
+  tagged-int lowering of BIGINT.md) is not a candidate, exactly as `parallel for` (the IR emitter does not know the
+  region; the legacy emitter would use int64 where the unmarked build uses exact ints, a silent difference).
+
+Deviations from the text above, all recorded in the PR: no cost model and no `N_MIN` note (G7; `AIL_GPU=force` is accepted
+and means the same as unset); no `AIL_GPU_FAULT` (G4); no `--gpu=auto` (G7); float reductions, int `sum`/`min`/`max` and
+`s += expr` are refused with a G6 hint instead of being built; `ThreadPoolExecutor.map` / `Pool.map` loops and
+`array.array` storage are not built (the typed path has no `array` module; `typedpar` loops are lowered before the marker is
+read); strided writes (`out[i * K + j]`) and conditional stores are not built; a comprehension over `zip()` is proven but the
+typed path does not compile it, so such a program runs on the general path with the note; `float()` of a bool list and
+bool-valued results are stored as 0/1 ints.
+
 ## 7. Colab validation (owner-started, manual)
 
 The owner has a paid Google Colab subscription with NVIDIA GPUs (T4/L4/A100 class, CUDA). It is useful as a second real

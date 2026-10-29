@@ -23,6 +23,7 @@ Not built, refused by name: the functional API `Enum("Color", "RED GREEN")`, mix
 Difference: `isinstance(member, int)` is False for an IntEnum member.
 """
 import ast
+import classname
 import copy
 
 import stdlib5
@@ -419,7 +420,7 @@ def generated(info):
     lines = []
     for member, var in info.members:
         value, index = info.values[var]
-        lines.append('%s = %s(%r, %r, %s, %d)' % (var, info.name, info.name, member, ast.unparse(value), index))
+        lines.append('%s = %s(%r, %r, %s, %d)' % (var, info.name, classname.display(info.name), member, ast.unparse(value), index))
     lines.append('%s = [%s]' % (info.all, ', '.join(var for _, var in info.members)))
     entries = ['%r: %s' % (m, v) for m, v in info.members] + ['%r: %s' % (a, v) for a, v in info.aliases]
     lines.append('%s = {%s}' % (info.map, ', '.join(entries)))
@@ -452,7 +453,7 @@ class Uses(ast.NodeTransformer):
             if node.attr in info.attrs or node.attr.startswith('__'):
                 return node                         # a method taken from the class: left as written
             return ast.copy_location(ast.Call(func=ast.Name(id='_ail_en_noattr', ctx=ast.Load()),
-                                              args=[ast.Constant(value=info.name), ast.Constant(value=node.attr)],
+                                              args=[ast.Constant(value=classname.display(info.name)), ast.Constant(value=node.attr)],
                                               keywords=[]), node)
         return self.generic_visit(node)
 
