@@ -53,27 +53,52 @@ class _AilArgumentParser:
         return text
 
     def _usage(self) -> str:
-        parts = ["usage:", self._prog()]
+        prefix = "usage: "
+        prog = self._prog()
+        opt_parts = []
+        pos_parts = []
         if self.add_help:
-            parts.append("[-h]")
+            opt_parts.append("[-h]")
         i = 0
         while i < len(self.dests):
             if self.kinds[i] == "opt":
-                text = self.names[i]
                 if len(self.choices[i]) > 0:
-                    text = text + " {" + ",".join(self.choices[i]) + "}"
+                    metavar = "{" + ",".join(self.choices[i]) + "}"
                 else:
-                    text = text + " " + self.dests[i].upper()
-                if not self.reqs[i]:
-                    text = "[" + text + "]"
-                parts.append(text)
+                    metavar = self.dests[i].upper()
+                if self.reqs[i]:
+                    opt_parts.append(self.names[i])
+                    opt_parts.append(metavar)
+                else:
+                    opt_parts.append("[" + self.names[i] + " " + metavar + "]")
             else:
                 text = self.names[i]
                 if len(self.choices[i]) > 0:
                     text = "{" + ",".join(self.choices[i]) + "}"
-                parts.append(text)
+                pos_parts.append(text)
             i = i + 1
-        return " ".join(parts)
+        parts = [prog] + opt_parts + pos_parts
+        usage = " ".join(parts)
+        width = 78
+        if len(prefix) + len(usage) <= width:
+            return prefix + usage
+        if len(prefix) + len(prog) <= int(0.75 * width):
+            indent = " " * (len(prefix) + len(prog) + 1)
+            if len(opt_parts) > 0:
+                lines = _ail_argparse_lines([prog] + opt_parts, indent, prefix, width)
+                lines.extend(_ail_argparse_lines(pos_parts, indent, "", width))
+            elif len(pos_parts) > 0:
+                lines = _ail_argparse_lines([prog] + pos_parts, indent, prefix, width)
+            else:
+                lines = [prog]
+        else:
+            indent = " " * len(prefix)
+            lines = _ail_argparse_lines(opt_parts + pos_parts, indent, "", width)
+            if len(lines) > 1:
+                lines = _ail_argparse_lines(opt_parts, indent, "", width)
+                lines.extend(_ail_argparse_lines(pos_parts, indent, "", width))
+            lines = [prog] + lines
+        return prefix + "\n".join(lines)
 
     def _error(self, message: str) -> None:
         sys.stderr.write(self._usage() + "\n")
@@ -200,6 +225,30 @@ class _AilArgumentParser:
                 values[self.dests[i]] = self.defaults[i]
             i = i + 1
         return values
+
+
+def _ail_argparse_lines(parts: list[str], indent: str, prefix: str, text_width: int) -> list[str]:
+    lines: list[str] = []
+    line: list[str] = []
+    if len(prefix) > 0:
+        line_len = len(prefix) - 1
+    else:
+        line_len = len(indent) - 1
+    i = 0
+    while i < len(parts):
+        part = parts[i]
+        if line_len + 1 + len(part) > text_width and len(line) > 0:
+            lines.append(indent + " ".join(line))
+            line = []
+            line_len = len(indent) - 1
+        line.append(part)
+        line_len = line_len + 1 + len(part)
+        i = i + 1
+    if len(line) > 0:
+        lines.append(indent + " ".join(line))
+    if len(prefix) > 0:
+        lines[0] = lines[0][len(indent):]
+    return lines
 
 
 def _ail_argparse_negative(text: str) -> bool:

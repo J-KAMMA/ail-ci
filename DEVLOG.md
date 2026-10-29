@@ -1,3 +1,18 @@
+## 2026-10-29 -- stdlib37 review: usage order/wrapping and parser scopes (job-stdlib37-10291115)
+
+The review found two defects in the argparse lowering. The usage line walked arguments in
+`add_argument` order; it now prints optionals (with `-h` first when `add_help` is on) before
+positionals and wraps at CPython's 78-column formatter width with the same continuation indent,
+including a long `prog` on its own line. Parsers were keyed by the local variable name across the
+whole module, so two functions reusing `parser` / `args` leaked specs and conversions; parser and
+Namespace bindings are now annotated per lexical scope (functions, lambdas and class bodies), and a
+module-level parser stays visible to the functions that use it. `test_ail_stdlib37.py` gains
+`usage_order`, `usage_wrap` and `scopes` (a module parser plus same-named local parsers in nested
+functions). Probes in `/tmp/probes`: `usage_order`, `usage_order2`, `usage_wrap`,
+`usage_choices_pos`, `usage_help_off`, `usage_long_prog` (full stderr, both builds) and
+`scope_samevar`, `scope_type`, `dup_dest_scope`, `scope_nested`, `scope_module_use` match CPython
+on both builds.
+
 ## 2026-10-29 -- stdlib37: argparse long options and positionals (job-stdlib37-10291115)
 
 Before this change the imports still refused in `lab/corpus/programs` and

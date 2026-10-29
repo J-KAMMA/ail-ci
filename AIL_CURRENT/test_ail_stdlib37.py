@@ -227,6 +227,78 @@ def main() -> None:
 main()
 '''
 
+USAGE_ORDER = r'''import argparse
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog='prog')
+    parser.add_argument('target')
+    parser.add_argument('--x')
+    parser.add_argument('--name', required=True)
+    args = parser.parse_args([])
+    print(args.x, args.name)
+
+
+main()
+'''
+
+USAGE_WRAP = r'''import argparse
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(prog='prog')
+    parser.add_argument('--alpha', required=True)
+    parser.add_argument('--bravo', required=True)
+    parser.add_argument('--charlie', required=True)
+    parser.add_argument('--delta', required=True)
+    parser.add_argument('--echo', required=True)
+    parser.add_argument('--foxtrot', required=True)
+    parser.add_argument('input')
+    args = parser.parse_args([])
+    print(args.alpha, args.input)
+
+
+main()
+'''
+
+SCOPES = r'''import argparse
+
+parser = argparse.ArgumentParser(prog='prog')
+parser.add_argument('--shared', default='s')
+
+
+def first() -> None:
+    parser = argparse.ArgumentParser(prog='prog')
+    parser.add_argument('--n', type=int, default=1)
+    args = parser.parse_args(['--n', '5'])
+    print(args.n + 1)
+
+
+def second() -> None:
+    parser = argparse.ArgumentParser(prog='prog')
+    parser.add_argument('--n', default='x')
+    args = parser.parse_args(['--n', '7'])
+    print(args.n + '!')
+
+    def deeper() -> None:
+        inner = argparse.ArgumentParser(prog='inner')
+        inner.add_argument('--n', default='z')
+        args2 = inner.parse_args([])
+        print(args2.n + '?')
+
+    deeper()
+
+
+def shared() -> None:
+    args = parser.parse_args(['--shared', 'got'])
+    print(args.shared)
+
+
+first()
+second()
+shared()
+'''
+
 CASES = (
     ("basic", BASIC, False, ()),
     ("path", PATH, False, ()),
@@ -241,6 +313,9 @@ CASES = (
     ("invalid_float", INVALID_FLOAT, True, ()),
     ("bad_default", BAD_DEFAULT, True, ()),
     ("separator", SEPARATOR, True, ()),
+    ("usage_order", USAGE_ORDER, True, ()),
+    ("usage_wrap", USAGE_WRAP, True, ()),
+    ("scopes", SCOPES, False, ()),
 )
 
 

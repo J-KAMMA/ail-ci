@@ -161,19 +161,6 @@ def run(tree, text):
                                   unknown='ArgumentParser is the one name of the module that is built')
     if not binder:
         return
-    parsers = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) \
-                and isinstance(node.value, ast.Call) and binder.attr(node.value.func) == 'ArgumentParser':
-            help_on = True
-            for kw in node.value.keywords:
-                if kw.arg == 'add_help' and isinstance(kw.value, ast.Constant):
-                    help_on = bool(kw.value.value)
-            parsers[node.targets[0].id] = help_on
-    if not parsers:
-        binder.names.clear()
-        stdlib5.leftover(tree, binder, 'parser = argparse.ArgumentParser(...) is the form that is built')
-        return
     path_ctor = None
     for stmt in ast.walk(tree):
         if isinstance(stmt, ast.Import):
@@ -185,8 +172,173 @@ def run(tree, text):
             for alias in stmt.names:
                 if alias.name == 'Path':
                     path_ctor = name(alias.asname or 'Path')
+
+    parsers = {}
+    counter = [0]
+    needs_sys = [False]
+
+    class Scope:
+        def __init__(self, parent):
+            self.parent = parent
+            self.names = {}
+
+        def lookup(self, identifier):
+            scope = self
+            while scope is not None:
+                if identifier in scope.names:
+                    return scope.names[identifier]
+                scope = scope.parent
+            return None
+
+    def target_name(node):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name):
+            return node.targets[0]
+        if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            return node.target
+        return None
+
+    def walk_children(node, visit):
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                continue
+            visit(child)
+            walk_children(child, visit)
+
+    def scan(stmts, visit):
+        for stmt in stmts:
+            visit(stmt)
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            walk_children(stmt, visit)
+
+    def collect_parsers(stmts, scope):
+        def visit(node):
+            target = target_name(node)
+            if target is None or not isinstance(node.value, ast.Call) \
+                    or binder.attr(node.value.func) != 'ArgumentParser':
+                return
+            help_on = True
+            for kw in node.value.keywords:
+                if kw.arg == 'add_help' and isinstance(kw.value, ast.Constant):
+                    help_on = bool(kw.value.value)
+            parser = counter[0]
+            counter[0] = parser + 1
+            parsers[parser] = help_on
+            scope.names[target.id] = ('parser', parser)
+        scan(stmts, visit)
+
+    def collect_args(stmts, scope):
+        def visit(node):
+            target = target_name(node)
+            if target is None or not isinstance(node.value, ast.Call) \
+                    or not isinstance(node.value.func, ast.Attribute) \
+                    or node.value.func.attr != 'parse_args' \
+                    or not isinstance(node.value.func.value, ast.Name):
+                return
+            binding = scope.lookup(node.value.func.value.id)
+            if binding is not None and binding[0] == 'parser':
+                scope.names[target.id] = ('args', binding[1])
+        scan(stmts, visit)
+
+    def argument_names(args):
+        names = []
+        for arg in args.posonlyargs:
+            names.append(arg.arg)
+        for arg in args.args:
+            names.append(arg.arg)
+        if args.vararg is not None:
+            names.append(args.vararg.arg)
+        for arg in args.kwonlyargs:
+            names.append(arg.arg)
+        if args.kwarg is not None:
+            names.append(args.kwarg.arg)
+        return names
+
+    class Annotate(ast.NodeTransformer):
+        def __init__(self, scope):
+            self.scope = scope
+
+        def visit_Name(self, node):
+            if isinstance(node.ctx, ast.Load):
+                binding = self.scope.lookup(node.id)
+                if binding is not None:
+                    node._ail_binding = binding
+            return node
+
+        def fill(self, scope, body, params=()):
+            for parameter in params:
+                scope.names[parameter] = None
+            collect_parsers(body, scope)
+            collect_args(body, scope)
+
+        def visit_defaults(self, args):
+            for default in args.defaults:
+                self.visit(default)
+            for default in args.kw_defaults:
+                if default is not None:
+                    self.visit(default)
+            for arg in args.posonlyargs + args.args + args.kwonlyargs:
+                if arg.annotation is not None:
+                    self.visit(arg.annotation)
+            if args.vararg is not None and args.vararg.annotation is not None:
+                self.visit(args.vararg.annotation)
+            if args.kwarg is not None and args.kwarg.annotation is not None:
+                self.visit(args.kwarg.annotation)
+
+        def visit_body(self, body, params):
+            child = Scope(self.scope)
+            self.fill(child, body, params)
+            outer = self.scope
+            self.scope = child
+            for stmt in body:
+                self.visit(stmt)
+            self.scope = outer
+
+        def visit_FunctionDef(self, node):
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            self.visit_defaults(node.args)
+            if node.returns is not None:
+                self.visit(node.returns)
+            self.visit_body(node.body, argument_names(node.args))
+            return node
+
+        def visit_AsyncFunctionDef(self, node):
+            return self.visit_FunctionDef(node)
+
+        def visit_ClassDef(self, node):
+            for decorator in node.decorator_list:
+                self.visit(decorator)
+            for base in node.bases:
+                self.visit(base)
+            for keyword in node.keywords:
+                self.visit(keyword.value)
+            self.visit_body(node.body, [])
+            return node
+
+        def visit_Lambda(self, node):
+            self.visit_defaults(node.args)
+            child = Scope(self.scope)
+            self.fill(child, [], argument_names(node.args))
+            outer = self.scope
+            self.scope = child
+            self.visit(node.body)
+            self.scope = outer
+            return node
+
+    root = Scope(None)
+    collect_parsers(tree.body, root)
+    collect_args(tree.body, root)
+    annotate = Annotate(root)
+    for stmt in tree.body:
+        annotate.visit(stmt)
+
+    if not parsers:
+        binder.names.clear()
+        stdlib5.leftover(tree, binder, 'parser = argparse.ArgumentParser(...) is the form that is built')
+        return
     specs = {each: [] for each in parsers}
-    args_of = {}
 
     class Lower(ast.NodeTransformer):
         def visit_Call(self, node):
@@ -195,51 +347,46 @@ def run(tree, text):
                 node.keywords = _parser_call(node)
                 node.func = name('_AilArgumentParser')
                 return self.generic_visit(node)
-            if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) \
-                    and node.func.value.id in parsers:
-                parser = node.func.value.id
-                if node.func.attr == 'add_argument':
-                    spec = _add_argument(node)
-                    specs[parser].append(spec)
-                    option, dest, kind, conv, required, default, choices = spec
-                    return ast.copy_location(call(ast.Attribute(value=node.func.value, attr='add_argument',
-                                                                ctx=ast.Load()),
-                                                  [constant(option), constant(dest), constant(kind), constant(conv),
-                                                   constant(required), default, choices]), node)
-                if node.func.attr == 'parse_args':
-                    if len(node.args) > 1 or node.keywords:
-                        refuse(node, 'argparse.parse_args() is built with no argument or one list of strings')
-                    if node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value is None:
-                        refuse(node, 'argparse.parse_args(None) is not built; omit the argument or pass a list')
-                    if node.args and parsers.get(parser, True) \
-                            and isinstance(node.args[0], (ast.List, ast.Tuple)):
-                        for item in node.args[0].elts:
-                            if isinstance(item, ast.Constant) and item.value == '--':
-                                break
-                            if isinstance(item, ast.Constant) and item.value in ('-h', '--help'):
-                                refuse(item, 'argparse help output (-h/--help) is not built; '
-                                             'pass the values you need as a list')
-                    argv = node.args[0] if node.args else ast.Subscript(
-                        value=ast.Attribute(value=name('sys'), attr='argv', ctx=ast.Load()),
-                        slice=ast.Slice(lower=constant(1), upper=None, step=None), ctx=ast.Load())
-                    return ast.copy_location(call(ast.Attribute(value=node.func.value, attr='parse_args',
-                                                                ctx=ast.Load()), [argv]), node)
-                refuse(node, 'argparse.ArgumentParser.%s is not built' % node.func.attr)
+            if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name):
+                binding = getattr(node.func.value, '_ail_binding', None)
+                if binding is not None and binding[0] == 'parser':
+                    parser = binding[1]
+                    if node.func.attr == 'add_argument':
+                        spec = _add_argument(node)
+                        specs[parser].append(spec)
+                        option, dest, kind, conv, required, default, choices = spec
+                        return ast.copy_location(call(ast.Attribute(value=node.func.value, attr='add_argument',
+                                                                    ctx=ast.Load()),
+                                                      [constant(option), constant(dest), constant(kind),
+                                                       constant(conv), constant(required), default, choices]), node)
+                    if node.func.attr == 'parse_args':
+                        if len(node.args) > 1 or node.keywords:
+                            refuse(node, 'argparse.parse_args() is built with no argument or one list of strings')
+                        if node.args and isinstance(node.args[0], ast.Constant) and node.args[0].value is None:
+                            refuse(node, 'argparse.parse_args(None) is not built; omit the argument or pass a list')
+                        if node.args and parsers.get(parser, True) \
+                                and isinstance(node.args[0], (ast.List, ast.Tuple)):
+                            for item in node.args[0].elts:
+                                if isinstance(item, ast.Constant) and item.value == '--':
+                                    break
+                                if isinstance(item, ast.Constant) and item.value in ('-h', '--help'):
+                                    refuse(item, 'argparse help output (-h/--help) is not built; '
+                                                 'pass the values you need as a list')
+                        if node.args:
+                            argv = node.args[0]
+                        else:
+                            needs_sys[0] = True
+                            argv = ast.Subscript(
+                                value=ast.Attribute(value=name('sys'), attr='argv', ctx=ast.Load()),
+                                slice=ast.Slice(lower=constant(1), upper=None, step=None), ctx=ast.Load())
+                        return ast.copy_location(call(ast.Attribute(value=node.func.value, attr='parse_args',
+                                                                    ctx=ast.Load()), [argv]), node)
+                    refuse(node, 'argparse.ArgumentParser.%s is not built' % node.func.attr)
             return self.generic_visit(node)
 
-        def visit_Assign(self, node):
-            node = self.generic_visit(node)
-            if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) \
-                    and node.value.func.attr == 'parse_args' \
-                    and isinstance(node.value.func.value, ast.Name) and node.value.func.value.id in parsers:
-                if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-                    refuse(node, 'argparse.parse_args() is built when assigned to one name')
-                args_of[node.targets[0].id] = node.value.func.value.id
-            return node
-
     tree.body = [Lower().visit(stmt) for stmt in tree.body]
-    if args_of and not any(isinstance(s, ast.Import) and any(a.name == 'sys' for a in s.names)
-                           for s in tree.body):
+    if needs_sys[0] and not any(isinstance(s, ast.Import) and any(a.name == 'sys' for a in s.names)
+                                for s in tree.body):
         index = 0
         while index < len(tree.body) and (isinstance(tree.body[index], (ast.Import, ast.ImportFrom)) or (
                 isinstance(tree.body[index], ast.Expr) and isinstance(tree.body[index].value, ast.Constant))):
@@ -265,23 +412,29 @@ def run(tree, text):
 
         def visit_Attribute(self, node):
             node = self.generic_visit(node)
-            if isinstance(node.value, ast.Name) and node.value.id in args_of:
-                if isinstance(node.ctx, ast.Store):
-                    refuse(node, 'writing an argparse Namespace attribute is not built')
-                kept = ast.Name(id=node.value.id, ctx=ast.Load())
-                kept._ail_args_ok = True
-                return self.lower_read(args_of[node.value.id], node.attr, kept, node)
+            if isinstance(node.value, ast.Name):
+                binding = getattr(node.value, '_ail_binding', None)
+                if binding is not None and binding[0] == 'args':
+                    if isinstance(node.ctx, ast.Store):
+                        refuse(node, 'writing an argparse Namespace attribute is not built')
+                    kept = ast.Name(id=node.value.id, ctx=ast.Load())
+                    kept._ail_args_ok = True
+                    return self.lower_read(binding[1], node.attr, kept, node)
             if isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute) \
                     and node.value.func.attr == 'parse_args' \
-                    and isinstance(node.value.func.value, ast.Name) and node.value.func.value.id in parsers:
-                return self.lower_read(node.value.func.value.id, node.attr, node.value, node)
+                    and isinstance(node.value.func.value, ast.Name):
+                binding = getattr(node.value.func.value, '_ail_binding', None)
+                if binding is not None and binding[0] == 'parser':
+                    return self.lower_read(binding[1], node.attr, node.value, node)
             return node
 
     tree.body = [Read().visit(stmt) for stmt in tree.body]
 
     class Bare(ast.NodeVisitor):
         def visit_Name(self, node):
-            if isinstance(node.ctx, ast.Load) and node.id in args_of and not getattr(node, '_ail_args_ok', False):
+            binding = getattr(node, '_ail_binding', None)
+            if isinstance(node.ctx, ast.Load) and binding is not None and binding[0] == 'args' \
+                    and not getattr(node, '_ail_args_ok', False):
                 refuse(node, 'the argparse Namespace used as a value is not built; read args.name instead')
     for stmt in tree.body:
         Bare().visit(stmt)
