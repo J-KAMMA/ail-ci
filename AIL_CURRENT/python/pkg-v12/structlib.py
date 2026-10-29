@@ -169,13 +169,7 @@ def parse_format(fmt):
 
 def _range_lines(var, size, signed, ch):
     if signed:
-        if size == 8:
-            return []
         low, high = -(1 << (size * 8 - 1)), (1 << (size * 8 - 1)) - 1
-    elif size == 8:
-        low, high = 0, 18446744073709551615
-        return ['    if %s < 0:\n        raise error("\'%s\' format requires %d <= number <= %d")\n'
-                % (var, ch, low, high)]
     else:
         low, high = 0, (1 << (size * 8)) - 1
     return ['    if %s < %d or %s > %d:\n        raise error("\'%s\' format requires %d <= number <= %d")\n'

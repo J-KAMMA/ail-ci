@@ -1,3 +1,16 @@
+## 2026-10-29 -- stdlib47 review fix: 8-byte `q`/`Q` range errors (job-stdlib47-10292150)
+
+The review found that `_range_lines` skipped the range check for signed 8-byte fields and only
+rejected negatives for unsigned 8-byte fields, so an out-of-range `struct.pack(">q"/">Q", ...)`
+reached `int.to_bytes` and raised `OverflowError` where CPython 3.12 raises `struct.error` with
+the format's range text.  The same checks now cover every integer width, including `q`/`Q`.
+Probes in `/tmp/probes` (`p1_qrange`, `p2_smallrange`, `p3_paths`, `p4_types`, `p5_layout`) cover
+both 8-byte signs at min/max and one past each, the smaller widths, values through an argument,
+a list item, an attribute and a dict value, non-int types, endianness, counts, padding, unpack
+round trips and bytearray buffers; each matches CPython on both builds.  Final-state tests:
+test_ail_stdlib47, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-29 -- stdlib47: `struct` lowered onto bytes / int.to_bytes (job-stdlib47-10292150)
 
 `struct` is the next still-refused module used by compiled programs: 6 imports across
