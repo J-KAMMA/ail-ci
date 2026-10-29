@@ -12465,10 +12465,12 @@ _GENEXP_NESTED_EAGER_CALLS = _GENEXP_EAGER_CALLS - {'next', 'any', 'all'}
 
 def _genexp_consumed_now(node, parents):
     """True iff the construct around `node` reads every element at once: a comprehension's
-    iterable, a starred unpack, a tuple/list unpacking assignment, or an argument of an eager
-    call.  A `for` loop is excluded because it can break before the generator is exhausted, and a
-    partial consumer (`next`, `any`, `all`) is excluded because it would run the remaining
-    elements (and their side effects) early."""
+    iterable, a starred unpack, an exhaustive tuple/list unpacking assignment, or an argument of
+    an eager call.  A `for` loop is excluded because it can break before the generator is
+    exhausted, and a partial consumer (`next`, `any`, `all`) is excluded because it would run the
+    remaining elements (and their side effects) early.  A plain tuple/list unpack is excluded
+    too: CPython stops it after `len(target) + 1` elements, so materialising the rest would move
+    a later element's exception ahead of the `ValueError` for too many values."""
     par = parents.get(node)
     if isinstance(par, ast.comprehension) and par.iter is node:
         return True
@@ -12477,7 +12479,8 @@ def _genexp_consumed_now(node, parents):
     if isinstance(par, (ast.Assign, ast.AnnAssign)):
         target = (par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1
                   else getattr(par, 'target', None))
-        if isinstance(target, (ast.Tuple, ast.List)):
+        if isinstance(target, (ast.Tuple, ast.List)) and \
+                any(isinstance(e, ast.Starred) for e in target.elts):
             return True
     if isinstance(par, ast.Call) and node in par.args:
         f = par.func

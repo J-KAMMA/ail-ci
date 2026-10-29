@@ -1,3 +1,20 @@
+## 2026-10-29 -- cov31 review: only an exhaustive unpack consumes a nested generator
+
+The review found that `_genexp_consumed_now` counted a plain tuple/list unpacking target as reading
+the outer generator to exhaustion.  CPython stops that unpack after `len(target) + 1` elements and
+raises `ValueError` for an extra one; the eager lowering materialised every element first, so a
+later element's exception was seen instead.  `a, b = (xs[i] + y for i in range(4) for y in (z for
+z in [0]))` printed `indexerror` where CPython prints `valueerror`, on both builds; the base refused
+it by name.  The unpack branch now requires a `*` target (a starred unpack does read every
+element), so a plain tuple/list unpack stays a named compile-time refusal.  The three corpus
+programs (deepseek t172, deepseek t432, glm t432) do not use this shape and still build and match
+CPython on all inputs and both builds; an AST scan of `lab/corpus/programs` found no plain-unpack
+nested generator, so the refusal counts are unchanged (default 24 -> 21, forced general 21).
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p_starred_basic`, `p_starred_empty`,
+`p_starred_routes` and `p_starred_negative` match CPython; the reviewer's plain-unpack probe
+(`p_plain_extra`), `p_plain_toofew` and `p_plain_raise_late` are refused by name.  Added a starred
+matching case and a plain-unpack refusal to `test_ail_cov31.py`.
+
 ## 2026-10-29 -- cov31: nested generator expressions that are consumed eagerly (job-cov31-10290700)
 
 Profiled all 219 programs in `lab/corpus/programs` by compiling each one (the corpus runner's

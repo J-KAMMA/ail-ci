@@ -9,8 +9,10 @@ Then the inner list is made and read at the same point CPython creates and reads
 generator, so the values, order, exceptions and exit status match CPython 3.12 on both builds.
 
 Every other nested shape stays a named compile-time refusal: a partial consumer (`next`, `any`,
-`all`), a saved inner generator, a saved outer generator, a `for` loop that can break, and an
-inner element with an observable side effect (a user function call such as `print`).
+`all`), a saved inner generator, a saved outer generator, a `for` loop that can break, a plain
+tuple/list unpack (CPython stops it after `len(target) + 1` elements, not at exhaustion), and an
+inner element with an observable side effect (a user function call such as `print`).  A starred
+or otherwise exhaustive unpack reads every element, so that shape is built.
 
 The first program is the shape of corpus t172 (an f-string in a `join` over a `sum` genexp), the
 second that of corpus t432 (a `join` of a `join` in `__repr__`).
@@ -101,6 +103,35 @@ def main() -> None:
 
 main()
 ''',
+    'starred_unpack': r'''class Box:
+    def __init__(self, xs):
+        self.xs = xs
+
+
+def take(xs):
+    first, *rest = (v for v in xs for _ in (x for x in [0]))
+    return first, rest
+
+
+def main() -> None:
+    values = [10, -3, 7, 0]
+    first, *rest = (v * 2 for v in values for _ in (x for x in [0]))
+    print(first, rest)
+    *head, last = (v + 1 for v in values for _ in (x for x in ["s"]))
+    print(head, last)
+    one, *mid, end = (v for v in [1, 2, 3, 4] for _ in (x for x in [0]))
+    print(one, mid, end)
+    print(take(values))
+    data = {"k": [4, 5, 6]}
+    a, *b = (v for v in data["k"] for _ in (x for x in [0]))
+    print(a, b)
+    box = Box([7, 8, 9])
+    a, *b = (v for v in box.xs for _ in (x for x in [0]))
+    print(a, b)
+
+
+main()
+''',
 }
 
 REFUSED = {
@@ -138,6 +169,18 @@ main()
     for value in (sum(y for y in (z for z in row)) for row in rows):
         print(value)
         break
+
+
+main()
+''',
+    'plain_unpack': r'''def main() -> None:
+    xs = [10, 20, 30]
+    try:
+        a, b = (xs[i] + y for i in range(4) for y in (z for z in [0]))
+    except ValueError:
+        print("valueerror")
+    except IndexError:
+        print("indexerror")
 
 
 main()
