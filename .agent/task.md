@@ -1,13 +1,6 @@
-**Widen standard-library coverage: support the modules real programs import most.**
+**Your change breaks another test in the full suite.** On top of the current integration branch, test_ail_pre346 fails with your change and passes without it (culprit.yml run 40872719537 applied each job alone).
 
-Today a Python-syntax program may import only math, sys, collections, itertools, functools, heapq, bisect, re and json; any other import is refused by name. In a check of the 219 programs in `lab/corpus/programs`, 8 were refused for this reason alone.
-
-1. List the imports in `lab/corpus/programs` (and `AIL_CURRENT/language_examples`) that are outside that set, with counts.
-2. Pick the one or two most used modules that can be supported by lowering to code AIL already has, or by a small module written in AIL itself (house policy: small spec libraries are written in AIL; anything needing TLS, crypto or databases is out of scope here). Likely candidates are `string`, `typing` (annotations only), `dataclasses`, `enum`, `operator`, `random` (with CPython's exact Mersenne Twister sequence), `statistics`, `copy` and `time` (monotonic/perf_counter only); check which are already partly handled before choosing.
-3. Implement them. Every supported function must match CPython 3.12 output exactly. Anything not supported must stay a named compile-time refusal, never a wrong result.
-4. Add `AIL_CURRENT/test_ail_stdlib1.py`, registered in `ail_check.py` MODULES, that compares each newly supported function with CPython on both builds, plus at least one refusal case. Make the corpus programs that were refused only for this import build and match CPython.
-
-Run `python3 tools/update_manifest.py`, then only `test_ail_stdlib1`, the test modules of the files you touched, and `test_ail_safetynet`. Then commit.
+Run `cd AIL_CURRENT && python3 -m unittest -q test_ail_pre346`, find what your change broke, and fix it so it passes again while keeping your own fix and its test. If your fix cannot coexist with it, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
