@@ -1,3 +1,31 @@
+## 2026-10-29 -- reex24: pin the definitions-only no-op boundary; skip Rust tests without a usable rustc (job-reex24-10300433)
+
+`language_examples/math.ail` and `integer_series.ail` already built as no-op entries on this tree
+(`_python_runs_nothing` / `_python_defs_only_runs_nothing`), so the recorded refusal no longer
+reproduced; nothing was reverted into the old function/tool shape. The boundary of that fix was
+still open: a definitions-only Python-surface file whose `def` carried a decorator, a non-literal
+default or an annotation that is not built from builtin names, literals, subscripts and `|`
+unions (for example `def f(x=make())` or `def f(x: typing.Any)`) was silently built as a no-op,
+dropping code CPython runs while it loads the module. `_python_runs_nothing` now checks each
+definition's header, and such a file is refused by name ("runs code at load time") on both builds
+instead of exiting 0; `AIL_TOOL_MODE=1` still opts out. `_python_defs_only_runs_nothing` now adds
+the boxed path's trailing `pass` for effect-free literal-constant modules too.
+
+`test_ail_c_export` and `test_ail_cratebridge` took `shutil.which('rustc')`; under a task-local
+HOME the rustup proxy is found but every call exits 1 with no toolchain selected. Both use the new
+`ail_testenv.rustc()`, which probes `rustc --version` and returns None when it fails, so the Rust
+tests skip; a configured toolchain still runs them.
+
+Added `test_ail_reex24.py` (5 tests, both builds; registered in `ail_check.MODULES`) and the
+DIFFERENCES row below. Probes in `/tmp/probes/p_*.py` on both builds via `cmp.sh`:
+`p_mod_const`, `p_defs_only`, `p_ann_builtin`, `p_ann_nested`, `p_ann_const`, `p_default_literal`,
+`p_class_mod`, `p_mod_const_boxed`, `p_top_call` and `p_ann_name` (whose alias the surface resolves
+to `list`) match CPython; `p_decorator`, `p_default_call` and `p_ann_typing` are refused by name.
+Final
+tests: test_ail_reex24, test_ail_c_export, test_ail_cratebridge, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3, test_ail_pre170, test_ail_python_syntax and
+test_ail_modconst pass; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
