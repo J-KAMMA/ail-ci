@@ -441,6 +441,7 @@
   "test_ail_qtest2": 20.8,
   "test_ail_qtest4": 41.2,
   "test_ail_qtest5": 17.7,
+  "test_ail_quickstart_docs": 10.0,
   "test_ail_quirks": 721.4,
   "test_ail_raise_from": 132.2,
   "test_ail_range_checks": 11.7,
@@ -1088,6 +1089,7 @@
    "test_ail_pre215",
    "test_ail_pre254",
    "test_ail_pre267",
+   "test_ail_quickstart_docs",
    "test_ail_sets_general",
    "test_ail_tcp_poll"
   ],

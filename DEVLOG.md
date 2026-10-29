@@ -1,3 +1,19 @@
+## 2026-10-29 -- register the quickstart test module in the CI shard map (job-rel1-10292334)
+
+The install-guide/quickstart change added `test_ail_quickstart_docs` to `ail_check.MODULES` but
+not to `tools/ci_shards.json`.  Applied alone on the integration branch, `test_ail_pre346`
+failed because its shard contract requires every module to be assigned exactly once; the new
+module was unassigned.  `python3 tools/ci_shards.py --update` now places it on one shard
+(weight 10.0) with a two-line addition to the file, and `--check` exits 0.  No compiler code
+changed.
+
+Probes in `/tmp/probes/rel1` (both builds via `cmp.sh`): the three quickstart programs
+(`hello.py`, `word_counts.py`, `counter.py`) match CPython; `/tmp/probes/rel1/check_shards.py`
+reports every current module planned once and no stale or duplicated placement.  Final-state
+tests: test_ail_pre346, test_ail_quickstart_docs, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 with `-j 2`, 0 failed.  `tools/update_manifest.py` was run and
+`--check` passes.
+
 ## 2026-10-28 -- install guide and checked English quickstart (job-rel1-10282135)
 
 Added `docs/INSTALL.md` (Python 3.10+, gcc, cloning, `doctor`, `doctor --check`, first compile/run,
