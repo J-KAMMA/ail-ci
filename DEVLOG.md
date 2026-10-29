@@ -1,3 +1,31 @@
+## 2026-10-29 -- cov50 review: eager nested generators narrowed to exact consumers
+
+The review found three newly introduced differences in `_nested_genexp_allowed`'s whitelist.
+(1) A nested chain whose inner consumer was `extend`/`update` materialised the inner list before
+mutating, so a mid-iteration exception left the receiver unchanged instead of partially
+mutated.  Those mutating methods are no longer treated as consumers.  (2) A nested chain whose
+outer consumer was `min`/`max` moved every comparison after the last element (and the general
+path's comparison helper reflects a failed `<`, adding a user `__lt__` call CPython's min/max do
+not make), so nested min/max now keep the named refusal.  (3) Method consumers matched only by
+name, so a user-defined `join`/`extend`/`update` was lowered eagerly; a method is now trusted
+only when it is `join` on a string literal.  Builtin names are trusted only when the program
+does not bind them (`_bound_names`), so a user `list`/`sum` is refused too.  `sum` stays in the
+whitelist because `_b_sum` now fuses a generator argument: it pulls an element, adds it, then
+pulls the next, so a side-effecting `__add__`/`__radd__` sees CPython's order (this also keeps
+deepseek t172's nested sum matching).  `list`/`tuple`/`sorted` stay eager (they run no user
+code between pulls) and `str.join` on a literal stays eager (the result is immutable).
+
+Corpus profile after this change (219 programs, default build): 21 refusals, 7 of them imports
+(unchanged from the previous commit; the three nested-generator programs still build).  The
+three corpus programs match CPython 3.12 on all three inputs on both builds.  `test_ail_cov50`
+now adds the min/max/extend/update/method-spoof/name-spoof refusals and the `__add__` order
+case.  Probes in `/tmp/probes` via `cmp.sh` on both builds: `p_nested_valid`,
+`p_nested_containers`, `p_nested_sum_start`, `p_sum_order` match CPython; `p_extend_partial`,
+`p_update_partial`, `p_min_order`, `p_max_order`, `p_method_spoof`,
+`p_method_spoof_update`, `p_name_spoof_list`, `p_name_spoof_sum`, `p_join_var_refused` are
+refused by name (`p_min_simple` still shows the general path's pre-existing reflected-`__lt__`
+extra call, unchanged from `/tmp/base`).
+
 ## 2026-10-29 -- cov50: nested generator expressions read by full-consumer calls (job-cov50-10291930)
 
 `lab/profile/run.py` is not in this export; the corpus was profiled by compiling every

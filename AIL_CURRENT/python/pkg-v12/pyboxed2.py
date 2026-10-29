@@ -9424,12 +9424,35 @@ class Compiler(boxclosure.ClosureMixin):
         if not args or len(args) > 2 or (kwargs and set(kwargs) - {'start'}) or \
                 (len(args) == 2 and 'start' in kwargs):
             raise Unsupported('sum() with other than (iterable[, start])')
-        src = self._resolve_iter_src(args[0], ctx)
         acc = ctx.tmp()
         start_node = args[1] if len(args) == 2 else kwargs.get('start')
+        sst = "sumst_" + "".join(ch for ch in acc if ch.isalnum())
+        if isinstance(args[0], ast.GeneratorExp):
+            gen = args[0]
+            # A generator argument is pulled one element at a time: adding the previous element
+            # before the next one runs is observable when __add__/__radd__ has side effects.
+            first = gen.generators[0]
+            opened = ctx.tmp()
+            ctx.emit('st = ail_iter(cx, &%s, %s);' % (opened, self._resolve_iter_src(first.iter, ctx)))
+            ctx.check()
+            ctx.emit('%s = %s;' % (acc, self.expr(start_node, ctx) if start_node is not None else 'ail_box_int(0)'))
+            ctx.emit('ail_sumst %s; ail_sum_begin(&%s, %s);' % (sst, sst, acc))
+
+            def add(n, c, _t):
+                v = self.expr(n.elt, c)
+                c.emit('st = ail_sum_step(cx, &%s, &%s, %s);' % (acc, sst, v))
+                c.check()
+            saved = ctx.class_locals
+            try:
+                self._emit_comp_generators(gen.generators, 0, gen, ctx, acc, add, set(),
+                                           opened=opened)
+            finally:
+                ctx.class_locals = saved
+            ctx.emit('ail_sum_end(cx, &%s, &%s);' % (acc, sst))
+            return acc
+        src = self._resolve_iter_src(args[0], ctx)
         ctx.emit('%s = %s;' % (acc, self.expr(start_node, ctx) if start_node is not None else 'ail_box_int(0)'))
         it = ctx.tmp(); val = ctx.tmp()
-        sst = "sumst_" + "".join(ch for ch in acc if ch.isalnum())
         ctx.emit('ail_sumst %s; ail_sum_begin(&%s, %s);' % (sst, sst, acc))
         ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
         ctx.check()
@@ -12452,39 +12475,57 @@ _GENEXP_SAFE_METHODS = frozenset({
 })
 
 
-_GENEXP_FULL_CALLS = _GENEXP_EAGER_CALLS - frozenset({'any', 'all', 'next'})
+# Consumers that visit every element in order and run no user code between pulls, so
+# materialising a generator argument at the call is observationally the same point.
+_GENEXP_NESTED_EAGER_CALLS = frozenset({'list', 'tuple', 'sorted'})
+# Consumers that process each element (add) while pulling; _b_sum fuses this one over a
+# generator argument, so the pulling and the addition still interleave as in CPython.
+# min/max are NOT here: they compare while pulling, and the eager list would move every
+# comparison after the last element (and the general path's comparison also reflects, which
+# adds one more user __lt__ call than CPython's min/max).
+_GENEXP_FUSED_CALLS = frozenset({'sum'})
+_GENEXP_FULL_CALLS = _GENEXP_NESTED_EAGER_CALLS | _GENEXP_FUSED_CALLS
 
 
-def _genexp_full_call_consumer(node, parents):
-    """True iff `node` is an argument of a call that reads every element before returning.
-    `any`/`all`/`next` are omitted: they stop early, so a nested generator must stay lazy.
-    Only calls count: a for loop can break after the first element."""
+def _genexp_full_call_consumer(node, parents, trusted_names):
+    """True iff `node` is an argument of a call that visits every element in order and cannot
+    observe a materialised list: the eager consumers above and the fused sum.
+    `any`/`all`/`next` stop early; min/max compare while pulling; mutating methods
+    (`extend`/`update`) change the receiver between pulls, so none keeps a nested generator
+    lazy.  Only calls count: a for loop can break after the first element.  A method is trusted
+    only for `str.join` on a string literal: a user method with the same name may be lazy or
+    mutate incrementally."""
     par = parents.get(node)
     if not (isinstance(par, ast.Call) and node in par.args):
         return False
     f = par.func
     if isinstance(f, ast.Name):
-        return f.id in _GENEXP_FULL_CALLS
+        return f.id in trusted_names
     if isinstance(f, ast.Attribute):
-        return f.attr in _GENEXP_EAGER_METHODS
+        return f.attr == 'join' and isinstance(f.value, ast.Constant) \
+            and isinstance(f.value.value, str)
     return False
 
 
 def _nested_genexp_allowed(tree, skip_ids):
     """Ids of generator expressions in a nested chain whose every level is an argument of a
-    full-consumer call.  Such a chain runs at one point, so the existing eager lowering (which
-    materialises each level where its consumer is evaluated) has CPython's order."""
+    consumer call that visits every element in order.  Such a chain has CPython's evaluation
+    order: eager consumers materialise each level at the same point, and sum is fused so it
+    still pulls and adds one element at a time."""
     parents = {}
     for par in ast.walk(tree):
         for child in ast.iter_child_nodes(par):
             parents[child] = par
+    counts = _bound_names(tree)
+    trusted_names = {n for n in _GENEXP_FULL_CALLS if counts.get(n, 0) == 0}
     allowed = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.GeneratorExp) or id(node) in skip_ids:
             continue
         chain = [node] + [n for n in ast.walk(node)
                           if n is not node and isinstance(n, ast.GeneratorExp)]
-        if len(chain) > 1 and all(_genexp_full_call_consumer(n, parents) for n in chain):
+        if len(chain) > 1 and all(
+                _genexp_full_call_consumer(n, parents, trusted_names) for n in chain):
             allowed.update(id(n) for n in chain)
     return allowed
 

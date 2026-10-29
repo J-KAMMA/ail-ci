@@ -2,12 +2,13 @@
 
 The corpus profile found three programs refused only on the general path's blunt nested-
 generator rule (a nested generator expression was refused even when both levels are consumed
-by a call that reads every element, like ``" ".join("".join(...) for row in rows)``).  Such a
-chain is evaluated at one point, so the existing eager lowering keeps CPython's order; the
-general path now accepts it on both builds.  A nested generator that can stop early (``any``,
-``all``, ``next``), is saved as a value, is passed to a user function, or is walked by a
-``for`` loop that can break keeps the named refusal, because there the eager list would run
-code CPython has not run yet.
+by a call that reads every element, like ``" ".join("".join(...) for row in rows)``).  The
+general path now accepts a chain whose every level is read by ``list``/``tuple``/``sorted``,
+``sum`` (fused so it still pulls and adds one element at a time), or ``str.join`` on a string
+literal.  A nested generator that can stop early (``any``/``all``/``next``), compares while
+pulling (``min``/``max``), is consumed by a mutating method (``extend``/``update``), sits behind
+a user method with the same name as a consumer, is saved as a value, is passed to a user
+function, or is walked by a ``for`` loop that can break keeps the named refusal.
 """
 import os
 import subprocess
@@ -33,7 +34,7 @@ def main() -> None:
 
 main()
 """,
-    'sum_min_max': r"""def f(x: int) -> int:
+    'sums': r"""def f(x: int) -> int:
     print("f", x)
     return x * x
 
@@ -41,9 +42,31 @@ main()
 def main() -> None:
     rows = [[1, 2], [], [3, 4, 5]]
     print(sum(sum(f(v) for v in row) for row in rows))
-    print(max(max(f(v) for v in row) for row in rows if row))
-    print(min(min(f(v) for v in row) for row in rows if row))
     print(sum(sum(v + 0.5 for v in row) for row in rows))
+
+
+main()
+""",
+    'sum_order': r"""class Obj:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def __add__(self, other: "Obj") -> "Obj":
+        print("add", self.n, other.n)
+        return Obj(self.n + other.n)
+
+    def __radd__(self, other: int) -> "Obj":
+        print("radd", other, self.n)
+        return self
+
+
+def build(x: int) -> Obj:
+    print("build", x)
+    return Obj(x)
+
+
+def main() -> None:
+    print(sum(sum(build(v) for v in row) for row in [[3], [1], [2]]).n)
 
 
 main()
@@ -147,6 +170,115 @@ main()
 def main() -> None:
     xs = [1, 2, 3]
     take(v for v in (w * 2 for w in xs))
+
+
+main()
+""",
+    'extend_partial': r"""xs: list[int] = []
+
+
+def f(x: int) -> int:
+    print("f", x)
+    if x == 3:
+        raise ValueError("boom")
+    return x
+
+
+def main() -> None:
+    try:
+        print(list(xs.extend(f(v) for v in row) for row in [[1, 2, 3], [4]]))
+    except ValueError as e:
+        print("caught", e)
+    print(xs)
+
+
+main()
+""",
+    'update_partial': r"""d: dict[int, int] = {}
+
+
+def f(x: int) -> int:
+    print("f", x)
+    if x == 3:
+        raise ValueError("boom")
+    return x
+
+
+def main() -> None:
+    try:
+        print(list(d.update((f(v), v) for v in row) for row in [[1, 2, 3], [4]]))
+    except ValueError as e:
+        print("caught", e)
+    print(d)
+
+
+main()
+""",
+    'join_spoof': r"""class Box:
+    def join(self, g):
+        return next(g)
+
+
+def mark(x: int) -> int:
+    print("mark", x)
+    return x
+
+
+def main() -> None:
+    print(list(Box().join(mark(v) for v in row) for row in [[1, 2, 3], [4, 5, 6]]))
+
+
+main()
+""",
+    'extend_spoof': r"""class Box:
+    def extend(self, g):
+        return next(g)
+
+
+def mark(x: int) -> int:
+    print("mark", x)
+    return x
+
+
+def main() -> None:
+    print(list(Box().extend(mark(v) for v in row) for row in [[1, 2, 3], [4, 5, 6]]))
+
+
+main()
+""",
+    'update_spoof': r"""class Box:
+    def update(self, g):
+        return next(g)
+
+
+def mark(x: int) -> int:
+    print("mark", x)
+    return x
+
+
+def main() -> None:
+    print(list(Box().update(mark(v) for v in row) for row in [[1, 2, 3], [4, 5, 6]]))
+
+
+main()
+""",
+    'minmax_order': r"""class Obj:
+    def __init__(self, n: int) -> None:
+        self.n = n
+
+    def __lt__(self, other: "Obj") -> bool:
+        print("lt", self.n, other.n)
+        return self.n < other.n
+
+
+def build(x: int) -> Obj:
+    print("build", x)
+    return Obj(x)
+
+
+def main() -> None:
+    print(min(tuple(build(v) for v in row)[0] for row in [[3], [1], [2]]).n)
+    print(max(tuple(build(v) for v in row)[0] for row in [[3], [1], [2]]).n)
 
 
 main()
