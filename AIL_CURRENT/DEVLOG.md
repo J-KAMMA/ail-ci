@@ -1,3 +1,32 @@
+## 2026-10-29 -- cov34: nested generator expressions consumed in place (job-cov34-10290857)
+
+Re-ran the corpus refusals on this tree (219 programs, default and `AIL_UNIFIED_FORCE=1`):
+before 24 refused programs on each build; imports of `unicodedata` (3), `decimal` (2),
+`textwrap`, `collections`/`re`, plus `json.loads` type declarations (2),
+`sorted(d.items())` (2) and single-program shapes.  The most frequent non-import construct
+that could be supported exactly was the nested generator expression: the general path
+refused three programs (deepseek t172, deepseek t432, glm t432) for it.  After the change
+the same run of the previously refused programs leaves 21 refused on each build; those three
+programs compile on both builds and match CPython.
+
+The general path materialises a generator expression as a list, and refused every nested
+generator because the inner one would be built at outer-creation time.  `_nested_genexp_unconsumed`
+now allows the nested lowering only when every generator expression in the nesting is read at
+the point it is built: the outer one is consumed in place (a for/comprehension source, a
+starred/unpacked value, or an argument to a whole-value builtin such as sum, join, list,
+min, max, sorted) and each inner one is consumed the same way.  A saved outer generator keeps
+the named refusal, as do `next`/`any`/`all` over a nested generator: CPython creates the inner
+generators lazily, so the eager lowering would move their side effects and store lists where
+CPython stores generators.  `test_ail_pre42` still passes unchanged.
+
+Added `test_ail_cov34.py` (three programs on both builds plus saved-nested refusals on both
+builds) and registered it in `ail_check.MODULES`.  Before/after refusal counts: default
+24 -> 21, general 24 -> 21.  Probes `/tmp/probes/nested_gen.py`, `nested_gen_ok.py`,
+`nested_gen_bad.py`, `cov34_a.py`, `cov34_b.py`, `cov34_c.py` and `items_value.py` match
+CPython or are refused by name on both builds.  Final-state tests: test_ail_cov34,
+test_ail_pre42, test_ail_corpus_findings3, test_ail_files and test_ail_safetynet pass;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
