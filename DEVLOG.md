@@ -1,3 +1,23 @@
+## 2026-10-29 -- recsv1: QUOTE_NONNUMERIC on a csv reader is refused by name (job-recsv1-10300430)
+
+The typed `csvlib` reader accepted `quoting=csv.QUOTE_NONNUMERIC` and returned every cell as a str
+on both builds, where CPython converts each unquoted field to float (quoted fields stay str, an
+empty unquoted field stays '').  `csvlib.make_reader` now refuses the constructor by name
+(`csv.QUOTE_NONNUMERIC is not built for a reader: it yields float and str; the general path builds
+it`), so `stdlib4` hands the program to `csvgen.py` / `prelude_csv.py`, whose reader calls `float()`
+and already matched CPython (the escapechar-leading gh-113785 part was done in dadfa5cb).  The
+writer refusal is unchanged.  `csv.DictReader` is refused the same way.
+
+Probes in `/tmp/probes/` (both builds via `cmp.sh`, all match CPython): `p1_literal` (ints, floats,
+negatives, 1e3, nan/inf, quoted numerics and `""`, empty unquoted, 20-digit values),
+`p2_sources` (source through an argument, a list item, an attribute and a dict value, plus two
+readers aliasing one list), `p3_errors` (non-numeric `b` -> the same ValueError text, empty
+unquoted `''`, quoted `"1"` staying str, `1e400`, leading spaces, empty list, DictReader with a
+numeric header and a non-numeric header), `p5_forms` (`for`, `next`, `list`, `enumerate`,
+DictReader), `p4_defaults` (default / QUOTE_ALL / QUOTE_NONE readers unchanged).  With
+`AIL_NO_GENERAL=1` the three QUOTE_NONNUMERIC programs are refused by name.  Added
+`test_ail_recsv1.py` (registered in `ail_check.py` MODULES).
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

@@ -18,7 +18,8 @@ sees ordinary code plus a few helper functions appended to the program (only the
 * `csv.writer(sys.stdout, ...)` / `csv.DictWriter(sys.stdout, fieldnames, ...)`: `writerow`, `writerows`
   (and `writeheader`) write the record CPython writes (QUOTE_MINIMAL / ALL / NONE, doublequote,
   escapechar, lineterminator '\\r\\n' by default, the lone empty field written as ""), through
-  sys.stdout.write. QUOTE_NONNUMERIC is refused by name (the writer cannot tell a number from a str).
+  sys.stdout.write. QUOTE_NONNUMERIC is refused by name on both sides: the writer cannot tell a number
+  from a str, and the reader yields floats and str (the general path converts the unquoted fields).
 * `csv.Error` in an `except` clause is spelt ValueError (the helpers raise ValueError with CPython's text).
 """
 import ast
@@ -617,6 +618,9 @@ class Csv:
         positional = ['dialect'] if kind == 'reader' else ['fieldnames', 'restkey', 'restval', 'dialect']
         d, extras = self.dialect(call, positional, extra=('fieldnames', 'restkey', 'restval')
                                  if kind == 'DictReader' else ())
+        if d.quoting == NONNUMERIC:
+            self.refuse(call, 'csv.QUOTE_NONNUMERIC is not built for a reader: it yields float and str; '
+                        'the general path builds it')
         if d.quotechar is None and d.quoting != NONE:
             d.quoting = NONE
         info = Reader(name, kind, self.fresh('pos'), self.fresh('hdr') if kind == 'DictReader' else None,
