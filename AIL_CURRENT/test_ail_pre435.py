@@ -1,4 +1,4 @@
-"""pre435: int() of a default argument captured before a container mutation is refused.
+"""pre435: a default argument is evaluated when the def runs, not after later mutations.
 
 The pre393 review recorded as pre-existing that ``M = [1e300];
 def f(x=M[0]): return int(x); M[0] = 1; print(f())`` stopped with ``integer overflow`` on
@@ -6,14 +6,17 @@ both builds, where CPython prints the exact big integer.  The int() check read t
 constants after the whole body had run, so the later item store had already dropped ``M``;
 the default is evaluated once, when the definition runs, so it still holds 1e300.
 
-Each top-level definition now has its parameter defaults evaluated with the names visible at
-that statement, and the call-site int() wrapper check uses those values when a call omits the
-argument.  Direct conversions written in a default are checked at the definition too.  The
-same value is covered through a list, tuple, dict, alias, negative index, keyword-only
-parameter, a container default, an attribute, a module constant and a wrapper call, for a
-float, string and bytes, at and beyond the int64 boundaries.  In-range values, a mutation
-before the definition, an explicit argument overriding the default and an unused function
-still match CPython.
+On the int64 compiler this branch evaluates each top-level definition's parameter defaults
+with the names visible at that statement, and the call-site int() wrapper check uses those
+values when a call omits the argument; a direct conversion written in a default is checked at
+the definition too.  Integers are now exact bigints by default (ail-ci#198), so on that
+compiler the same programs print CPython's exact integer and the int64 refusal fix is no
+longer needed.  The two groups below select their expectation from the compiler: a bigint
+core means exact output, otherwise the legacy named refusal.  The value is covered through a
+list, tuple, dict, alias, negative index, keyword-only parameter, a container default, an
+attribute, a module constant and a wrapper call, for a float, string and bytes, at and beyond
+the int64 boundaries.  In-range values, a mutation before the definition, an explicit
+argument overriding the default and an unused function match CPython on both compilers.
 """
 import os
 import subprocess
@@ -24,6 +27,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 CHATGPT = str(ROOT / 'ail_chatgpt.py')
+EXACT_INTS = (ROOT / 'python' / 'pkg-v12' / 'bigint_core.py').is_file()
 
 
 def cpython(directory, name, text):
@@ -269,11 +273,19 @@ print(f())
 
 
 class Pre435Tests(unittest.TestCase):
+    @unittest.skipIf(EXACT_INTS, 'exact big integers are the default on this compiler')
     def test_out_of_int64_default_capture_is_refused_by_name(self):
         for name, (text, needle) in REFUSED.items():
             with self.subTest(name=name):
                 self.assertEqual(cpython(tempfile.gettempdir(), 'pre435_' + name, text)[1], 0)
                 check_refused(self, name, text, needle)
+
+    @unittest.skipUnless(EXACT_INTS, 'this legacy compiler has int64 integers only')
+    def test_out_of_int64_default_capture_matches_cpython(self):
+        for name, (text, _) in REFUSED.items():
+            with self.subTest(name=name):
+                self.assertEqual(cpython(tempfile.gettempdir(), 'pre435_' + name, text)[1], 0)
+                check_program(self, name, text)
 
     def test_in_range_default_capture_matches_cpython(self):
         for name, text in MATCHED.items():

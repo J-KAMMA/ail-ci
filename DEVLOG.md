@@ -1,3 +1,21 @@
+## 2026-10-29 -- pre435 test follows the exact-bigint default (job-pre435-10292335)
+
+`test_ail_pre435` expected `int()` of a default holding `1e300` to be refused at compile time,
+which was the int64 behavior of this base.  Integers are now exact bigints by default
+(ail-ci#198), and on that compiler all 23 formerly-refused programs print CPython's exact
+integer, so the int64 refusal fix is no longer needed there; this branch keeps it for the
+legacy int64 compiler.  The module now selects its expectation from the compiler: when
+`python/pkg-v12/bigint_core.py` is present the out-of-int64 group must match CPython exactly,
+and on the legacy compiler it keeps the named-refusal check.  The 16 in-range programs still
+match CPython on both.
+
+Probes `/tmp/probes435` (39 programs: list, tuple, dict, alias, negative index, keyword-only,
+container default, attribute, module constant, wrapper call, string/bytes and both float
+boundaries) match CPython on both builds of today's `origin/integ`; on this legacy base the
+23 out-of-range probes are refused by name on both builds and the 16 in-range probes match.
+`test_ail_pre435` passes here (legacy path, 1 skip) and on an `origin/integ` worktree (bigint
+path, 1 skip).  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre435: a default argument captured before a container mutation (job-pre435-10282045)
 
 The pre393 review recorded as pre-existing that a default parameter expression reading a
