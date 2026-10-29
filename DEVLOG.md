@@ -1,3 +1,24 @@
+## 2026-10-29 -- ex39 review: rebound `export`/`dataclass` names are not stripped (job-ex39-10291711)
+
+The review found two silent differences in `ail_export.strip_export_decorators`: a later binding
+of `export` (e.g. `export = NotCallable()`) was still treated as `ail_ffi.export`, and a later
+binding of `dataclass` (e.g. `dataclass = lambda cls: cls`) still made the following class a field
+class.  CPython raises `TypeError` at the def/class in both cases, while the stripper removed the
+decorator and the program built and ran.  Decorator names now resolve like module globals: the
+decorator counts only while the latest binding before it is the matching import, so a rebinding
+or `del` before the decorator is refused by name instead of being stripped.
+Aliased imports, module-qualified forms, rebinding after the decorated definition, a local name
+inside another function and a class-body name are unaffected.
+
+Probes in `/tmp/probes/ex39fix` (both `cmp.sh` builds): `p01_export_rebound_notcallable`,
+`p02_dataclass_rebound_lambda`, `p07_ffi_module_rebound` and `p08_dataclasses_module_rebound`
+are refused by name where CPython raises; `p04_export_rebound_after_def`,
+`p05_dataclass_rebound_after_class`, `p06_export_rebound_in_function`,
+`p09_alias_still_valid`, `p10_rebind_before_import` and `p12_rebound_export_in_class_body` match
+CPython; `p03`, `p11`, `p13`, `p14_delete_export`, `p15_delete_dataclass` and
+`p16_delete_module_alias` are refused by name.  Added two regression tests to `test_ail_ex39.py`
+(7 tests).
+
 ## 2026-10-29 -- ex39: `@export` programs outside `ail build --lib` build and match CPython (job-ex39-10291711)
 
 The only Python-syntax file under `AIL_CURRENT/language_examples` that was meant to run both on

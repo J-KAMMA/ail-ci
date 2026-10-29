@@ -178,6 +178,35 @@ class ExportOutsideLibraryTests(unittest.TestCase):
                         self.assertNotEqual(built.returncode, 0, output)
                         self.assertIn('@export applies' if function is None else '@export ' + function, output)
 
+    def refused_by_both(self, name, text, message):
+        with tempfile.TemporaryDirectory(prefix='ail-ex39-bound-') as directory:
+            source = Path(directory) / (name + '.py')
+            source.write_text(text, encoding='utf-8')
+            expected = _cpython(source)
+            self.assertNotEqual(expected.returncode, 0, expected.stderr)
+            for mode in ('default', 'typed', 'general'):
+                with self.subTest(mode=mode):
+                    built, _ = _build(directory, source, name, mode)
+                    output = built.stdout + built.stderr
+                    self.assertNotEqual(built.returncode, 0, output)
+                    self.assertIn(message, output)
+
+    def test_rebound_export_name_is_refused_not_stripped(self):
+        text = ('from ail_ffi import export\n\n'
+                'class NotCallable:\n    pass\n\n'
+                'export = NotCallable()\n\n'
+                '@export\ndef add(a: int, b: int) -> int:\n    return a + b\n\n'
+                'print(add(2, 3))\n')
+        self.refused_by_both('export_rebound', text, 'is rebound before the decorator')
+
+    def test_rebound_dataclass_name_is_refused_not_stripped(self):
+        text = ('from dataclasses import dataclass\nfrom ail_ffi import export\n\n'
+                'dataclass = lambda cls: cls\n\n'
+                '@dataclass\nclass P:\n    x: int\n\n'
+                '@export\ndef get(p: P) -> int:\n    return p.x\n\n'
+                'print(get(P(4)))\n')
+        self.refused_by_both('dataclass_rebound_name', text, 'is rebound before the decorator')
+
     def test_unused_unsupported_dataclass_is_not_refused(self):
         text = ('from dataclasses import dataclass\nfrom ail_ffi import export\n\n'
                 '@dataclass\nclass Bad:\n    s: str\n\n'

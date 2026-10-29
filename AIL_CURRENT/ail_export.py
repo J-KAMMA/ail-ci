@@ -50,56 +50,21 @@ def strip_export_decorators(text):
         tree = ast.parse(text)
     except SyntaxError:
         return text
-    export_names, module_names = set(), set()
-    dataclass_names, dataclasses_modules = set(), set()
     future_annotations = False
     for node in tree.body:
-        if isinstance(node, ast.ImportFrom):
-            if node.level:
-                continue
-            if node.module == '__future__':
-                future_annotations = future_annotations or any(alias.name == 'annotations' for alias in node.names)
-            elif node.module == 'ail_ffi':
-                for alias in node.names:
-                    if alias.name == 'export':
-                        export_names.add(alias.asname or alias.name)
-            elif node.module == 'dataclasses':
-                for alias in node.names:
-                    if alias.name == 'dataclass':
-                        dataclass_names.add(alias.asname or alias.name)
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name == 'ail_ffi':
-                    module_names.add(alias.asname or alias.name)
-                elif alias.name == 'dataclasses':
-                    dataclasses_modules.add(alias.asname or alias.name)
+        if isinstance(node, ast.ImportFrom) and not node.level and node.module == '__future__':
+            future_annotations = future_annotations or any(alias.name == 'annotations' for alias in node.names)
 
-    def is_name(node, names):
-        return isinstance(node, ast.Name) and node.id in names
+    # Every module-level binding of a decorator name, in source order.  A decorator is the real
+    # `ail_ffi.export`/`dataclasses.dataclass` only while the latest binding before it is the
+    # matching import; a rebinding or `del` between the import and the decorator shadows the name
+    # on CPython, so that spelling is refused by name instead of being stripped.
+    bindings = {}
+    order = [0]
 
-    def is_export_name(decorator):
-        if isinstance(decorator, ast.Call):
-            decorator = decorator.func
-        return (is_name(decorator, export_names)
-                or (isinstance(decorator, ast.Attribute) and decorator.attr == 'export'
-                    and is_name(decorator.value, module_names)))
-
-    def is_export(decorator):
-        return ((not isinstance(decorator, ast.Call)
-                 or (not decorator.args and not decorator.keywords))
-                and is_export_name(decorator))
-
-    def is_dataclass(decorator):
-        if isinstance(decorator, ast.Call):
-            decorator = decorator.func
-        return (is_name(decorator, dataclass_names)
-                or (isinstance(decorator, ast.Attribute) and decorator.attr == 'dataclass'
-                    and is_name(decorator.value, dataclasses_modules)))
-
-    bound_lines = {}
-
-    def bind(name, line):
-        bound_lines.setdefault(name, []).append(line)
+    def bind(name, line, tag=None):
+        bindings.setdefault(name, []).append((line, order[0], tag))
+        order[0] += 1
 
     class Binder(ast.NodeVisitor):
         def visit_FunctionDef(self, node):
@@ -127,11 +92,17 @@ def strip_export_decorators(text):
 
         def visit_Import(self, node):
             for alias in node.names:
-                bind(alias.asname or alias.name.split('.')[0], node.lineno)
+                bind(alias.asname or alias.name.split('.')[0], node.lineno, ('import', alias.name))
 
         def visit_ImportFrom(self, node):
             for alias in node.names:
-                bind(alias.asname or alias.name, node.lineno)
+                bind(alias.asname or alias.name, node.lineno, ('from', node.module, alias.name))
+
+        def visit_Delete(self, node):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    bind(target.id, node.lineno)
+            self.generic_visit(node)
 
         def visit_Name(self, node):
             if isinstance(node.ctx, ast.Store):
@@ -142,8 +113,57 @@ def strip_export_decorators(text):
     for node in tree.body:
         binder.visit(node)
 
+    def genuine(name, line, tag):
+        entries = [entry for entry in bindings.get(name, ()) if entry[0] < line]
+        return bool(entries) and max(entries, key=lambda entry: entry[1])[2] == tag
+
     def shadowed(name, line):
-        return any(bound < line for bound in bound_lines.get(name, ()))
+        return any(bound < line for bound, _, _ in bindings.get(name, ()))
+
+    def is_export_name(decorator):
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name):
+            return genuine(target.id, decorator.lineno, ('from', 'ail_ffi', 'export'))
+        return (isinstance(target, ast.Attribute) and target.attr == 'export'
+                and isinstance(target.value, ast.Name)
+                and genuine(target.value.id, decorator.lineno, ('import', 'ail_ffi')))
+
+    def is_export(decorator):
+        return ((not isinstance(decorator, ast.Call)
+                 or (not decorator.args and not decorator.keywords))
+                and is_export_name(decorator))
+
+    def is_dataclass(decorator):
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name):
+            return genuine(target.id, decorator.lineno, ('from', 'dataclasses', 'dataclass'))
+        return (isinstance(target, ast.Attribute) and target.attr == 'dataclass'
+                and isinstance(target.value, ast.Name)
+                and genuine(target.value.id, decorator.lineno, ('import', 'dataclasses')))
+
+    def imported_names(tag):
+        return {name for name, entries in bindings.items()
+                if any(entry[2] == tag for entry in entries)}
+
+    export_names = imported_names(('from', 'ail_ffi', 'export'))
+    module_names = imported_names(('import', 'ail_ffi'))
+    dataclass_names = imported_names(('from', 'dataclasses', 'dataclass'))
+    dataclasses_modules = imported_names(('import', 'dataclasses'))
+
+    def rebound_name(decorator):
+        """The imported decorator name this spelling uses, if a binding shadows it before use."""
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        if isinstance(target, ast.Name):
+            for names, check, label in ((export_names, is_export_name, 'export'),
+                                        (dataclass_names, is_dataclass, 'dataclass')):
+                if target.id in names and not check(decorator):
+                    return label
+        elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+            for names, check, attr, label in ((module_names, is_export_name, 'export', 'export'),
+                                              (dataclasses_modules, is_dataclass, 'dataclass', 'dataclass')):
+                if target.attr == attr and target.value.id in names and not check(decorator):
+                    return label
+        return None
 
     dataclasses = {}
     for node in tree.body:
@@ -174,7 +194,7 @@ def strip_export_decorators(text):
             if not result and annotation.id in dataclasses:
                 defined, fields = dataclasses[annotation.id]
                 # CPython evaluates the annotation at the def; a later class is a NameError there.
-                rebound = any(defined < bound < line for bound in bound_lines.get(annotation.id, ()))
+                rebound = any(defined < bound < line for bound, _, _ in bindings.get(annotation.id, ()))
                 return (defined < line and not rebound
                         and all(kind in ('int', 'float', 'bool') for kind in fields.values()))
             return False
@@ -188,6 +208,13 @@ def strip_export_decorators(text):
 
     targets, problems = [], []
     for node in ast.walk(tree):
+        for decorator in getattr(node, 'decorator_list', ()):
+            label = rebound_name(decorator)
+            if label:
+                problems.append('@%s %s: the name %s is rebound before the decorator, so this is '
+                                'not the imported %s' % (
+                                    label, getattr(node, 'name', '?'), label,
+                                    'ail_ffi.export' if label == 'export' else 'dataclasses.dataclass'))
         if isinstance(node, ast.ClassDef):
             if any(is_export_name(decorator) for decorator in node.decorator_list):
                 problems.append('@export applies to a top-level function')
