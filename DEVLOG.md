@@ -1,3 +1,54 @@
+## 2026-10-29 -- ex24 re-applied: module detection kept, load-time effects refused (job-rbex24-10291349)
+
+The accepted ex24 change did not apply cleanly to `pyc.py`: this tree already builds a
+Python-syntax module of definitions as a no-op through `_python_runs_nothing` / `_NOTHING_MAIN`.
+Kept that path and added ex24's effect analysis (`_python_definitions_only`,
+`_definition_has_no_effect`, `_refuse_python_load_effect`): a module definition whose decorator,
+annotation or default would run code while CPython loads the module is now refused by name on
+both builds instead of being silently dropped. Literal defaults (including `{}`, `()`, `[]` and
+`-1`) and the generated `__ail_checked...` result-contract annotations are effect free. Probes in
+`/tmp/probes` (`p_math`, `p_integer_series`, `p_subscript_ann`, `p_consts`, `p_empty`,
+`p_print_top`, `p_main_called`, `p_ann_dict*`, `p_ann_tuple`, `p_literal_defaults`) match CPython
+on both builds; `p_effect_default*`, `p_effect_annotation*`, `p_decorator`,
+`p_list_item_default`, `p_dict_value_default`, `p_attr_default` and `p_arg_annotation` are refused
+by name on both builds. Tests: test_ail_ex24, test_ail_python_syntax, test_ail_check,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3, test_ail_c_export and
+test_ail_cratebridge pass; `tools/update_manifest.py --check` passes.
+
+## 2026-10-29 -- ex24 suite fix: Rust tests skip when rustup has no toolchain for this HOME (job-ex24-10290744)
+
+The full suite runs with a task-local `HOME` that has no `~/.rustup`, so `shutil.which('rustc')`
+found the rustup proxy and the skip guards passed, but every invocation exited 1 with "could not
+choose a version of rustc ... no default is configured". `test_ail_c_export` and
+`test_ail_cratebridge` now take `RUSTC` from `ail_testenv.rustc()`, which probes `rustc --version`;
+a configured toolchain still runs the Rust tests, a missing usable one skips them. No compiler or
+behaviour change. `test_ail_ex24`, both modules (with and without `RUSTUP_HOME`) and
+`test_ail_safetynet` pass; `tools/update_manifest.py --check` passes.
+
+## 2026-10-28 -- ex24: a Python-syntax module of definitions builds as a no-op (job-ex24-10290744)
+
+`language_examples/math.ail` is a module (`LIMIT`, `sum_to`), not a program, and CPython prints
+nothing for it; the compiler called its last function and refused it with "the first parameter
+must be the sequence read from the file".  `integer_series.ail` is the same shape and compiled as
+a file-reading tool (`usage: tool FILE`, exit 2) where CPython exits 0 silently.  A Python-surface
+file whose top level is only effect-free definitions and literal module constants now builds a
+no-op entry (`pyc._python_module_only` / `_python_definitions_only`): annotations are effect free
+when built from builtin names, literals, subscripts and `|` unions (`list[int]`, `dict[str, int]`,
+`int | None`), defaults must be literals, and both builds get an empty `main` (the boxed path gets
+a trailing `pass` so it does not call the last function).  A definitions-only module with a
+decorator or a non-constant annotation/default would run code at load time, so it is refused by
+name instead of losing the effect; imports, class bodies and any top-level executable statement
+keep the old function/script path.
+
+Added `AIL_CURRENT/test_ail_ex24.py` (3 tests, both builds) and registered it in
+`ail_check.MODULES`; added DIFFERENCES row `C?-job-ex24-10290744-1`.  Probes in `/tmp/probes`:
+`ex24_math`, `ex24_integer_series`, `ex24_defs`, `ex24_consts_bytes_neg`, `ex24_empty_consts`,
+`ex24_subscript_ann`, `ex24_print_top` and `ex24_main` match CPython on both builds;
+`ex24_defaults_effect`, `ex24_annotation_effect` (also through a list item and a dict value) are
+refused by name on both builds.  Tests on the final tree: test_ail_ex24, test_ail_python_syntax,
+test_ail_check, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

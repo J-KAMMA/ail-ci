@@ -367,6 +367,151 @@ def _reads_global(fn, name):
     return loads and name not in bound
 
 
+_EFFECT_FREE_ANNOTATIONS = frozenset({
+    'bool', 'bytearray', 'bytes', 'dict', 'float', 'frozenset', 'int', 'list', 'object', 'set',
+    'str', 'tuple',
+    # result-contract markers the Python surface inserts for builtin return annotations
+    '__ail_checked_int__', '__ail_checked_float__', '__ail_checked_bool__', '__ail_checked_str__',
+    '__ail_checked_bytes__', '__ail_checked_void__', '__ail_checked_flist__',
+    '__ail_checked_list',
+})
+
+
+def _annotation_is_effect_free(node):
+    """An annotation whose evaluation at module load runs no user code.
+
+    `def f(x: make())` calls `make` while the module loads, so a definitions-only entry must not
+    silently drop it. A builtin type name, a literal, and a subscription or `|` union built only
+    from those (`list[int]`, `dict[str, int]`, `int | None`) evaluate no user code.
+    """
+    if isinstance(node, ast.Name):
+        # The Python surface rewrites `int | None` and similar result contracts into a generated
+        # `__ail_checked...` marker (and sometimes a generated class); referring to it runs no
+        # user code at module load.
+        return (node.id in _EFFECT_FREE_ANNOTATIONS
+                or node.id.startswith('__ail_checked__')
+                or node.id.startswith('__ail_checked_'))
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.Subscript):
+        return (_annotation_is_effect_free(node.value)
+                and _annotation_is_effect_free(node.slice))
+    if isinstance(node, ast.Tuple):
+        return all(_annotation_is_effect_free(element) for element in node.elts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return (_annotation_is_effect_free(node.left)
+                and _annotation_is_effect_free(node.right))
+    return False
+
+
+def _definition_has_no_effect(node):
+    """A top-level function definition CPython evaluates without an observable effect.
+
+    A class body, a decorator, a non-constant annotation or default all run code while the module
+    loads, which the compiled entry does not; those shapes keep the old path instead of silently
+    dropping the effect.
+    """
+    if not isinstance(node, ast.FunctionDef):
+        return False
+    if node.decorator_list or getattr(node, 'type_params', None):
+        return False
+    args = node.args
+    parameters = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+    parameters += [parameter for parameter in (args.vararg, args.kwarg) if parameter is not None]
+    if any(parameter.annotation is not None
+           and not _annotation_is_effect_free(parameter.annotation)
+           for parameter in parameters):
+        return False
+    if node.returns is not None and not _annotation_is_effect_free(node.returns):
+        return False
+    defaults = [value for value in [*args.defaults, *args.kw_defaults] if value is not None]
+    return all(_literal_has_no_effect(value) for value in defaults)
+
+
+def _literal_has_no_effect(node):
+    """A default expression CPython evaluates without running user code: any literal.
+
+    `{}`, `()`, `[1, 2]` and `-1` are literals too, not only `ast.Constant`; a call, name or
+    attribute is not, so it stays refused.
+    """
+    try:
+        ast.literal_eval(node)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+    return True
+
+
+def _python_definitions_only(source):
+    """The tree of a Python-surface file that only defines things, or None.
+
+    A `Pass`, a docstring, a function definition and a literal module constant are the shapes
+    that make up a module. Anything else -- a top-level call, an import, a class body -- is not
+    this shape, so the caller keeps the older function/script path.
+    """
+    if os.environ.get('AIL_SURFACE') != 'python' or not is_function(source):
+        return None
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return None
+    assigned = {}
+    for node in tree.body:
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)):
+            name = node.targets[0].id
+            assigned[name] = assigned.get(name, 0) + 1
+    for node in tree.body:
+        if _is_docstring_stmt(node) or isinstance(node, ast.Pass):
+            continue
+        if isinstance(node, ast.FunctionDef):
+            continue
+        if (isinstance(node, ast.Assign) and _is_module_const_assign(node)
+                and assigned[node.targets[0].id] == 1):
+            continue
+        return None
+    return tree
+
+
+def _python_load_effect(source):
+    """The first definition in a definitions-only Python module that runs code at load time.
+
+    A decorator, a non-constant annotation or default executes while CPython loads the module.
+    Such a module is not run by the compiled entry, so the old function-program path would print
+    the wrong thing (or read a file); name the effect instead of dropping it silently.
+    """
+    tree = _python_definitions_only(source)
+    if tree is None:
+        # The Python surface rewrites `int | None` into a generated class, and the module may
+        # contain imports or classes; `_python_runs_nothing` is this tree's broader notion of a
+        # module. Whenever the build will take the no-op module path, a definition with a
+        # load-time effect must be named instead of silently dropped.
+        if not _python_runs_nothing(source, True):
+            return None
+        try:
+            tree = ast.parse(source.strip())
+        except (SyntaxError, ValueError):
+            return None
+    for node in tree.body:
+        if isinstance(node, ast.FunctionDef) and not _definition_has_no_effect(node):
+            return node
+    return None
+
+
+def _refuse_python_load_effect(source):
+    """Refuse a definitions-only Python module whose own definition runs code while it loads."""
+    effect = _python_load_effect(source)
+    if effect is None:
+        return
+    refusal = Unsupported(
+        'a Python module whose definition %s runs code at load time (a decorator, a '
+        'non-constant annotation or default) is not run by the compiled entry; the effect would '
+        'be lost.\n'
+        '  write instead: run that code at module level, or use a literal default and an '
+        'annotation built from a builtin type' % effect.name)
+    refusal.source_line = effect.lineno
+    raise refusal
+
+
 def _entry_name(taken):
     if 'main' not in taken:
         return 'main'
@@ -552,6 +697,8 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
             raise refusal
     if is_function(source):
         rewritten = _rewrite_script(source, force=False)
+        if rewritten is None:
+            _refuse_python_load_effect(source)
         if rewritten is None:
             return func_to_c(source, name=name, strict=strict, info=info, external=external)
         # the rewritten text has lost its comments: keep the @dataclass markers for dunders.py
@@ -1113,6 +1260,7 @@ def _build_unshadowed_exact(source, out, strict, report, force_general):
 def _build_unshadowed_inner(source, out, strict, report, force_general, local_proof=True, legacy_int=False):
     out = pathlib.Path(out)
     c = out.with_suffix('.c')
+    _refuse_python_load_effect(source)
     info = {'_checked_arrays': True}
     if legacy_int:
         info['_tint_legacy'] = True
