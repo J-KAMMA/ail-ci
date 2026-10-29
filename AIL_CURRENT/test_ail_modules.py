@@ -17,7 +17,7 @@ compiler.
   that module's own.
 * `.py` and `.ail` (Python syntax) sources, for the entry and the modules; both existing is refused.
 * An import cycle that only meets in function bodies works; one that reads a name early is refused.
-* `_private` imports, imports below the top level, a module used as a value, a clashing class name
+* `_private` imports, imports below the top level, a module used as a value
   are refused by name.
 
 G2 (the classes after `SingleFilePrograms`) adds, each compared with CPython 3.12 on trees of files:
@@ -533,8 +533,10 @@ class Refusals(ModulesBase):
         self.refused({"main.py": "import main\nprint(1)\n"}, "entry file a second time")
 
     def test_class_name_defined_twice(self):
-        self.refused({"a.py": "class Item:\n    pass\n", "b.py": "class Item:\n    pass\n",
-                      "main.py": "import a\nimport b\nprint(a.Item is b.Item)\n"}, "'Item'")
+        """F2: two modules may define one class name (it was refused); test_ail_classnames compares the printed forms."""
+        out = self.same_as_cpython({"a.py": "class Item:\n    pass\n", "b.py": "class Item:\n    pass\n",
+                                    "main.py": "import a\nimport b\nprint(a.Item is b.Item, a.Item is a.Item)\n"})
+        self.assertEqual(out, "False True\n")
 
     def test_entry_name_that_hides_a_builtin_other_modules_use(self):
         self.refused({"lib.py": "def f(xs):\n    return sum(xs)\n",

@@ -20,6 +20,7 @@ same exception the typed path uses) -- never a silent gap, never a bare gcc erro
 """
 import ast
 import re
+import classname
 
 from pyfront import (Unsupported, int_constant, refuse_complex_pow, refuse_variable_int_pow,
                       refuse_int_float_literal, refuse_int_pow_overflow)
@@ -980,7 +981,7 @@ class Compiler:
         lines = []
         for cname in self.class_order:
             cid_ = self.classes[cname]['id']
-            lines.append('ail_class_names[%d] = %s;' % (cid_, c_str_literal(cname)))
+            lines.append('ail_class_names[%d] = %s;' % (cid_, c_str_literal(classname.display(cname))))
             rinfo = self._class_dunder(cname, '__repr__')
             sinfo = self._class_dunder(cname, '__str__')
             if rinfo:

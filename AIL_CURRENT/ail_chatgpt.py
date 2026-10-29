@@ -4271,6 +4271,12 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     entry_defs = None
             if local_imports and entry and syntax == 'python' and not module_only:
                 merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
+                # F2: the front end's own passes (enum lowering) print class names too; the compiler process gets it from _surface_env
+                class_names = _class_names_env(merged)
+                if class_names:
+                    os.environ['AIL_CLASS_NAMES'] = class_names
+                else:
+                    os.environ.pop('AIL_CLASS_NAMES', None)
                 if merged is not None:
                     _MERGED_ENTRIES[str(path)] = merged
                     text = merged.text
@@ -5058,7 +5064,19 @@ def _surface_env(args, source, env=None):
         env['AIL_SURFACE'] = 'python'
     else:
         env.pop('AIL_SURFACE', None)
+    # F2: the printed names of the classes the module merge renamed (python/pkg-v12/classname.py)
+    merged = _MERGED_ENTRIES.get(str(source)) or _MERGED_ENTRIES.get(str(Path(source).resolve()))
+    names = _class_names_env(merged)
+    if names:
+        env['AIL_CLASS_NAMES'] = names
+    else:
+        env.pop('AIL_CLASS_NAMES', None)
     return env
+
+
+def _class_names_env(merged):
+    classes = getattr(merged, 'classes', None)
+    return json.dumps({k: list(v) for k, v in classes.items()}, sort_keys=True) if classes else ''
 
 
 def _python_source(args, data):
@@ -5717,6 +5735,7 @@ def main(argv=None):
                         hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
                         if Path(str(object_path) + '.json').is_file() else '-')],
                     environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
+                    *(['classes', environment['AIL_CLASS_NAMES']] if environment.get('AIL_CLASS_NAMES') else []),
                     *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
                     *(['link', ffi_env['AIL_FFI_LINK']] if link else []),
                     *(['debug', hashlib.sha256(line_map.read_bytes()).hexdigest()] if debug else []))

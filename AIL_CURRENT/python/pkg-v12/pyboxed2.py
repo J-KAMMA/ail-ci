@@ -53,6 +53,7 @@ except ImportError:
     pymix = None
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+import classname
 V2_DIR = os.path.join(os.path.dirname(HERE), 'out', 'boxed_rt', 'v2')
 AIL_OBJ2_H = os.path.join(V2_DIR, 'ail_obj2.h').replace(os.sep, '/')
 WIDE_EMBED = os.environ.get('AIL_V2_WIDE_EMBED') == '1'
@@ -2804,6 +2805,8 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append(cruntime.BOXCASE)
         if getattr(self, 'needs_type_name', False):
             parts.append(TYPE_NAME_C)
+            if classname.active():
+                parts.append(classname.TYPE_IDENT_C)
         if getattr(self, 'needs_padfill', False):
             parts.append(PADFILL_C)
         if getattr(self, 'needs_noattr', False):
@@ -2878,7 +2881,10 @@ class Compiler(boxclosure.ClosureMixin):
             else:
                 base_expr = 'ail_box_none()'
             setup.append('    g_slots_arr[%d] = ail_class_new(cx, %s, %s);\n' %
-                         (self.global_slots['class:' + cname], c_str_literal(cname), base_expr))
+                         (self.global_slots['class:' + cname], c_str_literal(classname.display(cname)), base_expr))
+            if classname.module(cname) != '__main__':       # F2: a class of an imported module prints `module.Name`
+                setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->module = %s;\n' %
+                             (self.global_slots['class:' + cname], c_str_literal(classname.module(cname))))
             for entry in cls.get('class_body', []):
                 # A class attribute read through a class VALUE (alias/argument/...) looks it up by
                 # name.  A method or property in the class body is a sentinel (slot -1): it hides a
@@ -6004,11 +6010,11 @@ class Compiler(boxclosure.ClosureMixin):
         def name_of(n):
             if type_call(n):
                 return ast.Attribute(value=ast.Attribute(value=n.args[0], attr='__class__', ctx=ast.Load()),
-                                     attr='__name__', ctx=ast.Load())
+                                     attr='__ail_ident__' if classname.active() else '__name__', ctx=ast.Load())
             if isinstance(n, ast.Name) and (n.id in self._TYPE_NAMES and n.id not in self.functions
                                             and n.id not in self.classes and n.id not in self.module_names
                                             or n.id in self.classes):
-                return ast.Constant(value=n.id)
+                return ast.Constant(value=classname.qualified(n.id))
             return None
         left, right = node.left, node.comparators[0]
         if not (type_call(left) or type_call(right)):
@@ -6284,8 +6290,9 @@ class Compiler(boxclosure.ClosureMixin):
             # context to read. Refuse by name instead of reaching the instance's (missing) field,
             # which would raise AttributeError where CPython returns a value.
             raise Unsupported('reading %s (exception chaining is not kept here)' % node.attr)
-        if node.attr == '__name__':
+        if node.attr in ('__name__', '__ail_ident__'):
             # `type(x).__name__` and `x.__class__.__name__`: the name of the run-time class
+            # (`__ail_ident__`: F2, the same with the module of a class of an imported module, from _type_identity)
             inner = None
             if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
                     and node.value.func.id == 'type' and len(node.value.args) == 1 and not node.value.keywords
@@ -6297,7 +6304,7 @@ class Compiler(boxclosure.ClosureMixin):
                 v = self.expr(inner, ctx)
                 t = ctx.tmp()
                 self.needs_type_name = True
-                ctx.emit('st = ail_type_name_of(cx, &%s, %s);' % (t, v))
+                ctx.emit('st = %s(cx, &%s, %s);' % ('ail_type_ident_of' if node.attr == '__ail_ident__' else 'ail_type_name_of', t, v))
                 ctx.check()
                 return t
         if isinstance(node.value, ast.Name) and (node.value.id in self.module_aliases or
@@ -8569,7 +8576,7 @@ class Compiler(boxclosure.ClosureMixin):
             label = (qn + '.<locals>.' if qn else '') + '<lambda>'     # CPython's __qualname__
             if isinstance(f, ast.Name):
                 if f.id in self.classes:
-                    label = "<class '__main__.%s'>" % f.id
+                    label = "<class '%s.%s'>" % (classname.module(f.id), classname.display(f.id))
                 elif f.id in ('dict', 'float', 'tuple', 'bool', 'frozenset', 'bytes', 'bytearray', 'complex', 'object') \
                         and f.id not in self.module_names:
                     label = "<class '%s'>" % f.id
@@ -12786,6 +12793,7 @@ def _build(source, report, allow_mix=True):
     if compiler.uplan is not None and not compiler.threads and os.environ.get('AIL_UNIFIED_POOL'):
         import safetyrt
         body = safetyrt.patch_gcpool(body)
+    body = classname.patch_runtime(body)     # F2: a class of an imported module prints with its module
     report['big_enum'] = getattr(compiler, 'need_big_enum', False)
     report['boxed'] = [n for n in compiler.boxed_names if n not in compiler.prelude_names]
     if compiler.threads:
