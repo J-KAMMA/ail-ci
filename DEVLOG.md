@@ -1,3 +1,23 @@
+## 2026-10-29 -- ex42: `@export` in a normal executable is CPython's identity check (job-ex42-10291945)
+
+The Python-syntax examples under `AIL_CURRENT/language_examples` were built with plain `compile`.
+The `.ail` files detected as Python syntax (hello, integer_series, math, stdin_sum, sum, use_math)
+all build; `use_math.ail` needs its documented `--module math.ail`. Among the `.py` examples,
+`c_export/geometry.py` was refused (`a decorator on def add`) although CPython runs it. In an
+executable `@export` only checks the annotations and returns the function unchanged, so
+`ail_export.lower_executable` now runs the existing `lower()` signature checks and blanks only the
+`@export` decorator (and its `@`), preserving line positions; `ail_chatgpt._load_sources` calls it
+for non-library Python sources. Library builds and `@extern` use their existing paths.
+
+Probes in `/tmp/probes/ex42` on both builds via `cmp.sh` with `PYTHONPATH=AIL_CURRENT`:
+`p01_valid_dataclass`, `p02_dotted_call`, `p03_scalars`, `p04_routes`, `p05_no_export` and
+`p06_export_after_helper` match CPython; `p10_bad_list_str`, `p11_bad_missing_param`,
+`p12_bad_missing_result`, `p13_bad_default`, `p14_bad_result_dataclass`,
+`p15_bad_dataclass_field_str` and `p16_bad_varargs` are refused by name on both builds (CPython
+raises TypeError for each). `geometry.py` itself was run on CPython with `PYTHONPATH=AIL_CURRENT`
+and matches both builds. Added `AIL_CURRENT/test_ail_ex42.py` (4 tests) and registered it in
+`ail_check.MODULES`; `tools/update_manifest.py` was run.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

@@ -4259,6 +4259,11 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             if path.suffix.lower() == '.py':
                 syntax = 'python'
             merged = None
+            if syntax == 'python' and not module_only and 'ail_ffi' in text:
+                # In an executable @export is CPython's identity check, not a library marker: keep the
+                # definitions and drop the decorator (`--lib` already rewrote the file through lower()).
+                import ail_export
+                text = ail_export.lower_executable(text)
             if ffi is not None and syntax == 'python':
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
                 # a file that does not mention ail_ffi is returned untouched

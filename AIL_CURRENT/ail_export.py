@@ -202,3 +202,66 @@ def lower(text, library_name=None):
     internal = sorted(n.name for n in lowered if isinstance(n, (ast.FunctionDef, ast.ClassDef)))
     manifest = {'schema': 1, 'exports': manifest_exports, 'structs': structs, 'internal': internal}
     return ast.unparse(ast.fix_missing_locations(tree)) + '\n', manifest
+
+
+def _export_decorators(tree):
+    """The decorator nodes this file binds to ail_ffi.export, from its top-level imports."""
+    export_names, module_names = set(), set()
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
+            for alias in node.names:
+                if alias.name == '*':
+                    export_names.add('export')
+                elif alias.name == 'export':
+                    export_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == 'ail_ffi':
+                    module_names.add(alias.asname or alias.name)
+    found = []
+    for node in tree.body:
+        if not isinstance(node, ast.FunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            target = decorator.func if isinstance(decorator, ast.Call) else decorator
+            if (_is_name(target, export_names)
+                    or (isinstance(target, ast.Attribute) and target.attr == 'export'
+                        and _is_name(target.value, module_names))):
+                found.append(decorator)
+    return found
+
+
+def lower_executable(text):
+    """Remove `@export` from a normal executable, after checking it as CPython's decorator does.
+
+    In a library build `lower()` rewrites the decorated functions; in an executable the decorator
+    is an identity check, so the definitions stay and only the marker goes. A decorator the
+    CPython implementation would reject is refused here by name, never run with different meaning.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    marks = _export_decorators(tree)
+    if not marks:
+        return text
+    lower(text)            # the same signature checks CPython's export() applies at import time
+    lines = text.splitlines(keepends=True)
+    for decorator in marks:
+        for index in range(decorator.lineno - 1, decorator.end_lineno):
+            row = lines[index]
+            body = row.rstrip('\r\n')
+            ending = row[len(body):]
+            start = decorator.col_offset if index == decorator.lineno - 1 else 0
+            end = decorator.end_col_offset if index == decorator.end_lineno - 1 else len(body)
+            if index == decorator.lineno - 1:
+                at = start - 1
+                while at >= 0 and body[at] in ' \t':
+                    at -= 1
+                if at >= 0 and body[at] == '@':
+                    start = at
+            end = min(end, len(body))
+            if end < start:
+                continue
+            lines[index] = body[:start] + ' ' * (end - start) + body[end:] + ending
+    return ''.join(lines)
