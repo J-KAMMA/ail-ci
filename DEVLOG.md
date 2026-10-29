@@ -15,16 +15,17 @@ an uncaught wide round stays exit 1 with "integer overflow" and no `AIL limit`. 
 floats/int/bool and NaN/Infinity match CPython as before.  With exact ints the same programs
 print CPython's full integer, so both sides of the big-int gate are pinned.
 
-Probes in `/tmp/probes/pre429` through `cmp.sh`: `q01`, `q03`-`q05`, `q07`, `q09` and `t01`-`t02`
-match CPython with exact ints; under `AIL_BIGINT=off` the caught cases (`q01`, `q03`-`q05`, `q07`)
-print the same catch text and the uncaught cases (`q09`, `t01`-`t02`) are exit 1 with "integer
-overflow".  `q02` (negative), `q06` (finally-only), `q08` (constant) and `q10`-`q13`
-(argument/list/attribute/dict/alias routes) cover the remaining boundaries.  Added
+Probes in `/tmp/probes/pre429` through `cmp.sh`: `q01`-`q09` (caught/except variants, finally,
+in-range boundaries and widths, NaN/Inf, argument/list/attribute/dict/alias/dynamic routes,
+uncaught, constant and an empty iterable) all match CPython on both builds with exact ints.
+With `AIL_BIGINT=off`, `q04`, `q05` and `q09` still match CPython; `q01`-`q03` print the
+int64 catch text on both builds, and `q06`-`q08` stop exit 1 with
+`OverflowError: integer overflow` and no `AIL limit` (the declared int64 difference).  Added
 `AIL_CURRENT/test_ail_pre429.py` (8 tests, int64 four modes plus exact-int four modes) and
 registered it in `ail_check.MODULES` and `tools/ci_shards.json`; added DIFFERENCES row
-`C?-job-rbpre429-10290923-1`.  Final-state tests: test_ail_pre429, test_ail_fz2,
-test_ail_pre54, test_ail_pre104, test_ail_safetynet, test_ail_files and
-test_ail_corpus_findings3 (7 modules).
+`C?-job-rbpre429-10290923-1`.  Final-state tests on the code commit: test_ail_pre429 (8),
+test_ail_fz2 (7), test_ail_pre54 (4), test_ail_pre104 (1), test_ail_safetynet (5),
+test_ail_files (18, one skipped) and test_ail_corpus_findings3 (2), all OK.
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
