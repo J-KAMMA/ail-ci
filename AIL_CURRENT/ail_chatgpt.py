@@ -1297,7 +1297,7 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
 
 class _Int64CallChecker(ast.NodeVisitor):
     def __init__(self, known, passthrough, int_params, int_shadowed, attributes, program_bound,
-                 argument_containers=None):
+                 argument_containers=None, int_defaults=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
@@ -1305,6 +1305,7 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.attributes = attributes
         self.program_bound = program_bound
         self.argument_containers = argument_containers or {}
+        self.int_defaults = int_defaults or {}
         self.shadow = []
         self.value_scopes = [known]
 
@@ -1344,15 +1345,18 @@ class _Int64CallChecker(ast.NodeVisitor):
             self._check_conversion(node, self._value(node.args[0]))
         if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
                 and self._global_name(node.func.id)):
+            defaults = self.int_defaults.get(node.func.id, {})
             for name, (index, paths) in self.int_params[node.func.id].items():
                 argument = _bound_argument(node, name, index)
-                if argument is not None:
+                if argument is None:
+                    value = defaults.get(name, _UNKNOWN)
+                else:
                     value = self._value(argument)
                     if (value is _UNKNOWN and isinstance(argument, ast.Name)
                             and self._global_name(argument.id)):
                         value = self.argument_containers.get(argument.id, _UNKNOWN)
-                    for path in paths:
-                        self._check_conversion(node, _constant_path_value(value, path))
+                for path in paths:
+                    self._check_conversion(node, _constant_path_value(value, path))
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
@@ -1670,6 +1674,39 @@ def _call_argument_containers(tree, module_counts, global_names, parents, known)
     return values
 
 
+def _function_default_constants(tree, module_envs, known, module_counts, passthrough,
+                                attributes):
+    """Constant parameter defaults, evaluated with the names visible at the ``def``.
+
+    A default is evaluated once, when the definition runs, so a module container mutated by a
+    later statement still contributes the value it held at the definition; the final module
+    map would have dropped it.  Only unique top-level functions are recorded, matching the
+    call-site int() wrapper check that consumes this map.
+    """
+    scopes = {id(statement): local for statement, local in zip(tree.body, module_envs)}
+    defaults = {}
+    for fn in tree.body:
+        if (not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+                or fn.decorator_list or module_counts.get(fn.name) != 1):
+            continue
+        local = scopes.get(id(fn), known)
+        args = fn.args
+        positional = [arg.arg for arg in (*args.posonlyargs, *args.args)]
+        nodes = dict(zip(positional[len(positional) - len(args.defaults):], args.defaults))
+        for arg, node in zip(args.kwonlyargs, args.kw_defaults):
+            if node is not None:
+                nodes[arg.arg] = node
+        values = {}
+        for name, node in nodes.items():
+            value = _constant_value(node, lambda item: local.get(item, _UNKNOWN),
+                                    lambda unused: True, passthrough, attributes)
+            if value is not _UNKNOWN:
+                values[name] = value
+        if values:
+            defaults[fn.name] = values
+    return defaults
+
+
 def _fold_float_int_text(text):
     """Rewrite `float(<an exact int constant outside int64>)` to a float literal.
 
@@ -1771,14 +1808,24 @@ def _check_int64_literals(tree):
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes,
                                      known)
+    int_defaults = _function_default_constants(tree, module_envs, known, module_counts,
+                                               passthrough, attributes)
     argument_containers = _call_argument_containers(tree, module_counts, global_names, parents,
                                                    known)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
-                      program_bound, argument_containers).visit(tree)
+                      program_bound, argument_containers, int_defaults).visit(tree)
     module_checker = _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
-                                       program_bound, argument_containers)
+                                       program_bound, argument_containers, int_defaults)
     safe_calls = {'len', 'print', 'str', 'repr', 'int'} - program_bound
     for statement, local in zip(tree.body, module_envs):
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            module_checker.value_scopes = [local]
+            for decorator in statement.decorator_list:
+                module_checker.visit(decorator)
+            module_checker._visit_outer_arguments(statement.args)
+            if statement.returns is not None:
+                module_checker.visit(statement.returns)
+            continue
         if not _scope_simple_statement(statement):
             continue
         if (_scope_has_int_call(statement)
