@@ -125,7 +125,6 @@ REFUSED = {
     'unused': UNUSED,
     'outer_iterable': ITERABLE,
     'second_for_clause': DOUBLE_LOOP,
-    'fold_element': FOLD,
     'condition': CONDITION,
     'next_argument': NEXT,
     'any_element': ANY_ELEMENT,
@@ -156,6 +155,12 @@ ALLOWED = {
     'plain': PLAIN,
 }
 
+# The inner generator is consumed in place, but the outer one is saved and read later: CPython
+# creates its elements only at list(g), so the existing saved-generator screen refuses it by name.
+SAVED = {
+    'fold_element': FOLD,
+}
+
 
 @unittest.skipUnless(shutil.which('gcc'), 'needs gcc')
 class NestedGeneratorExpression(unittest.TestCase):
@@ -163,6 +168,11 @@ class NestedGeneratorExpression(unittest.TestCase):
         for name, text in sorted(REFUSED.items()):
             with self.subTest(name):
                 check_refused(self, 'pre42_' + name, text, ['generator expression', 'nested'])
+
+    def test_saved_nested_is_refused_by_name(self):
+        for name, text in sorted(SAVED.items()):
+            with self.subTest(name):
+                check_refused(self, 'pre42_' + name, text, ['generator expression', 'value'])
 
     def test_plain_generator_expression_matches_cpython(self):
         for name, text in sorted(ALLOWED.items()):

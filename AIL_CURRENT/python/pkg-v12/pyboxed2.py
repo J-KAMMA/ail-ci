@@ -2538,7 +2538,7 @@ class Compiler(boxclosure.ClosureMixin):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                    _nested_genexp_unsafe(gen) is not None:
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6495,7 +6495,7 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        if _nested_genexp_unsafe(node) is not None:
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -9045,7 +9045,7 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('next() with other than (iterator[, default])')
         if isinstance(args[0], ast.GeneratorExp):
             gen = args[0]
-            if any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+            if _nested_genexp_unsafe(gen) is not None:
                 raise Unsupported('a generator expression nested inside another generator expression '
                                   '(the inner one would be materialised eagerly, not lazily)')
             first = gen.generators[0]
@@ -12470,6 +12470,40 @@ def _genexp_consumed_in_place(node, parents):
         if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
             return True
     return False
+
+
+# Calls/methods that read the whole argument before returning.  `next`/`any`/`all` are NOT here:
+# they stop early, so materialising a nested generator when the outer one is built would run its
+# later elements (and their side effects) too soon.
+_NESTED_GENEXP_EAGER_CALLS = _GENEXP_EAGER_CALLS - {'next', 'any', 'all'}
+
+
+def _nested_genexp_unsafe(node):
+    """The first nested generator expression that is not fully consumed at the point where the
+    enclosing one is built, or None when the eager list lowering is observationally the same as
+    CPython's lazy generator.  A nested generator used as a for/comprehension iterable is refused
+    too: CPython interleaves its elements with the enclosing body, while eager materialisation
+    runs them all first."""
+    parents = {}
+    for par in ast.walk(node):
+        for child in ast.iter_child_nodes(par):
+            parents[child] = par
+    for n in ast.walk(node):
+        if n is node or not isinstance(n, ast.GeneratorExp):
+            continue
+        par = parents.get(n)
+        safe = isinstance(par, ast.Starred)
+        if isinstance(par, (ast.Assign, ast.AnnAssign)):
+            target = (par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1
+                      else getattr(par, 'target', None))
+            safe = isinstance(target, (ast.Tuple, ast.List))
+        elif isinstance(par, ast.Call) and n in par.args:
+            f = par.func
+            safe = ((isinstance(f, ast.Name) and f.id in _NESTED_GENEXP_EAGER_CALLS)
+                    or (isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS))
+        if not safe:
+            return n
+    return None
 
 
 def _bound_names(tree):

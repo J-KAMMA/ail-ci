@@ -1,3 +1,33 @@
+## 2026-10-29 -- cov40: build a nested generator expression when its inner one is consumed in place (job-cov40-10291030)
+
+The cov40 census over all 219 LLM-written corpus programs (built the way `lab/profile/run.py`
+does: `--syntax python`, cache off, then run on the three inputs) found 24 compile-time refusals.
+After imports, the most frequent construct was the nested generator expression: `deepseek/t172`,
+`deepseek/t432` and `glm/t432` were refused on the general path with `a generator expression
+nested inside another generator expression`, and two more (`deepseek/t437`, `glm/t437`) with the
+saved-generator message. The v2 general emitter materialises a generator expression as a list, so
+a nested one whose content is read by an eager call at the same point (`sum`, `max`, `join`,
+`list`, `sorted`, ...), a starred unpack or a tuple/list unpacking assignment is observationally
+the same as CPython's lazy generator and is now built; a nested one used as a for/comprehension
+iterable (CPython interleaves its elements with the enclosing body), as a plain element value, by
+`next`/`any`/`all`, or passed to an unknown call keeps the named refusal. The any()/all() and
+`next()` fused paths keep their existing stricter checks.
+
+Corpus refusal count before/after: **24 -> 21** (188 ok, 10 declared; no new DIFF or crash).
+`deepseek/t172`, `deepseek/t432` and `glm/t432` now match CPython on both builds. Probes in
+`/tmp/probes/cov40` on both builds via `cmp.sh`: `p_join_nested` (empty row, negative values,
+argument, list item, attribute and dict value), `p_sum_nested` (empty and missing groups),
+`p_routes`, `p_order_arg`, `p_order_direct` (inner/outer side-effect order through list, join,
+tuple, sorted, max and min) and `p_side_effects` match CPython; `p_unsafe_iterable`,
+`p_unsafe_element`, `p_unsafe_next` and `p_unsafe_any` are refused by name (the first three with
+`nested inside another generator expression`); `p_saved_nested` is refused as a saved generator
+expression, as before. Added `AIL_CURRENT/test_ail_cov40.py` (4 tests, both builds plus refusal
+cases) and registered it in `ail_check.MODULES`. `test_ail_pre42`'s saved `fold_element` case now
+expects the saved-generator refusal (the outer generator is read after `made`), not the nested
+one. Final-state tests: test_ail_cov40, test_ail_pre42, test_ail_pre41, test_ail_pre116,
+test_ail_pre166, test_ail_pre245, test_ail_pre381, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
