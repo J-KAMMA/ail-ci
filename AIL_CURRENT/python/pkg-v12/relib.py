@@ -1583,7 +1583,7 @@ def _ail_re_split(p: list[int], s: str, maxsplit: int) -> list[str]:
     mustadv = 0
     cnt = 0
     while pos <= n:
-        if maxsplit > 0 and cnt >= maxsplit:
+        if maxsplit != 0 and cnt >= maxsplit:
             break
         if p[16] != 0 and asc == 1:  #P
             pos = _ail_re_pre(p[2], t2 if dec == 1 else t, pos)  #P
@@ -1625,7 +1625,7 @@ def _ail_re_sublit(p: list[int], s: str, repl: str, count: int) -> str:
     mustadv = 0
     cnt = 0
     while pos <= n:
-        if count > 0 and cnt >= count:
+        if count != 0 and cnt >= count:
             break
         if p[16] != 0 and asc == 1:  #P
             pos = _ail_re_pre(p[2], t2 if dec == 1 else t, pos)  #P
@@ -1696,7 +1696,7 @@ def _ail_re_sub%(k)d(s: str, count: int) -> str:
     mustadv = 0
     cnt = 0
     while pos <= n:
-        if count > 0 and cnt >= count:
+        if count != 0 and cnt >= count:
             break
         if %(table)s[16] != 0 and asc == 1:  #P
             pos = _ail_re_pre(%(pid)d, t2 if dec == 1 else t, pos)  #P
@@ -1887,7 +1887,7 @@ def %(name)s(s: %(kind)s, fn%(ann)s, count: int) -> %(ret)s:
     last = 0
     cnt = 0
     for m in _ail_re_finditer%(sfx)s(%(table)s, s):
-        if count > 0 and cnt >= count:
+        if count != 0 and cnt >= count:
             break
         a = m.start(0)
         out.append(s[last:a])
@@ -1902,6 +1902,46 @@ def %(name)s(s: %(kind)s, fn%(ann)s, count: int) -> %(ret)s:
        'check': ('    if %s"\\\\" in fn:\n        raise ValueError("re.sub: a replacement with a backslash has to be a string literal")\n'
                  % ('b' if program.is_bytes else '')) if literal else '',
        'result': '(%s.join(out), cnt)' % empty if counted else '%s.join(out)' % empty})
+        return self.sub_keys[key]
+
+    def sub_any(self, index):
+        """Name of the generated function for `P.sub(repl, s, count)` when the replacement's kind is not known at
+        build time: a str/bytes template and a callable are both accepted at run time, as CPython does.  The
+        callable branch walks finditer's matches and calls it with each Match; the template branch is the ordinary
+        literal helper (a backslash in a run-time template is still refused, as CPython's own template parsing
+        would give a different result than this runtime's).  Typed programs fall back to the general path."""
+        key = (index, 'any')
+        if key not in self.sub_keys:
+            program = self.programs[index]
+            k = len(self.sub_keys)
+            name = '_ail_re_sub%d' % k
+            self.sub_keys[key] = name
+            sfx = 'B' if program.is_bytes else ''
+            kind = 'bytes' if program.is_bytes else 'str'
+            empty = 'b""' if program.is_bytes else '""'
+            self.subs.append("""
+
+def %(name)s(s: %(kind)s, repl, count: int) -> %(kind)s:
+    if callable(repl):
+        out: list[%(kind)s] = []
+        last = 0
+        cnt = 0
+        for m in _ail_re_finditer%(sfx)s(%(table)s, s):
+            if count != 0 and cnt >= count:
+                break
+            a = m.start(0)
+            out.append(s[last:a])
+            r = repl(m)
+            if r is None:
+                r = %(empty)s
+            out.append(r)
+            last = m.end(0)
+            cnt += 1
+        out.append(s[last:])
+        return %(join)s
+    return _ail_re_sublit%(sfx)s(%(table)s, s, repl, count)
+""" % {'name': name, 'kind': kind, 'sfx': sfx, 'table': self.table_name(index), 'empty': empty,
+       'join': '%s.join(out)' % empty})
         return self.sub_keys[key]
 
     def text(self):
