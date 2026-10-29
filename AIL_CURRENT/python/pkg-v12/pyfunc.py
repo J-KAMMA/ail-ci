@@ -8132,7 +8132,7 @@ def _str_value(node, ctx, *, owned_join_return=False):
             raise Unsupported('open(path).read(): the path must be a str (a literal, a str '
                               'name, sys.argv[i], ...); %s is not one'
                               % _kindword(call.args[0], ctx))
-        ctx.parts.add('STR')
+        ctx.parts.update(('STR', 'FILEEXC', 'OSFILEPATH'))
         ctx.has_try = True
         return 'ail_file_read(&%s, %s)' % (ctx.sarena(), _str_value(call.args[0], ctx))
     if _is_str_replace_call(node, ctx):
@@ -10406,7 +10406,7 @@ def _bytes_value(node, ctx):
             return 'ail_stdin_read_bytes(&%s, %s)' % (ctx.barena(), _expr(node.args[0], ctx))
         if node.keywords or len(node.args) not in (1, 3) or not _is_str_expr(node.args[0], ctx):
             raise Unsupported('read_bytes requires a positional str path, optionally followed by int offset and size')
-        ctx.parts.add('FILEBYTES')
+        ctx.parts.update(('FILEBYTES', 'FILEEXC', 'OSFILEPATH'))
         ctx.has_try = True
         if len(node.args) == 3:
             if any(_etype(arg, ctx) != INT for arg in node.args[1:]):
@@ -26305,6 +26305,8 @@ def _for_inner_impl(node, ctx, ind):
         v = ctx.declare(node.target.id, STR)
         pre = _flush(ctx, pad)
         ctx.parts.add('STR')
+        if file_slot:
+            ctx.parts.update(('FILEEXC', 'OSFILEPATH'))
         # Preserve the previous target on EOF.  Only loops with no escaping
         # string writes/calls may discard old line storage, keeping the final line live.
         batch = _stdin_batch_shape(node, ctx)

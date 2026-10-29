@@ -29815,6 +29815,8 @@ def _piece(p, want):
 
 
 def _piece_text(p, want):
+    if p == 'OSFILEPATH' and 'EXCSTR' in want:
+        return ''       # a program reading exception text words the failure itself (exctext.ail_exc_os_fail)
     text = (_overflow_exception(_assert_exception(SOURCE[p])) if p == 'DIE' and 'OVERFLOWEXC' in want
             else _assert_exception(SOURCE[p]) if p == 'DIE' and 'ASSERTEXC' in want else SOURCE[p])
     if p == 'DIE' and 'OSEXC' in want:
@@ -29833,7 +29835,7 @@ def _piece_text(p, want):
         if 'HTTPEXC' in want:
             text = _filert.http_exception(text)        # G12: URLError / HTTPError, codes 30, 31 (after the others)
     elif p in _filert.LEGACY_EDITS and 'FILEEXC' in want:
-        text = _filert.legacy_errno(p, text)
+        text = _filert.legacy_errno(p, text, 'OSFILEPATH' in want and 'EXCSTR' not in want)
     if p == 'DIE' and 'LISTDELMSG' in want:
         old = '    if (!strcmp(w, "list index out of range") || !strcmp(w, "pop index out of range")\n'
         if old in text:
@@ -30502,6 +30504,11 @@ REQUIRES['FILEEXC'] = ['ASSERTEXC', 'OVERFLOWEXC']
 REQUIRES['PROCEXC'] = ['FILEEXC']          # G8: CalledProcessError / TimeoutExpired codes (filert.proc_exception)
 REQUIRES['HTTPEXC'] = ['PROCEXC']          # G12: URLError / HTTPError codes (filert.http_exception)
 REQUIRES['SQLEXC'] = ['FILEEXC']           # G11: sqlite3 exception codes (filert.sql_exception)
+# C23: a whole-file open failure names its path as CPython does; the helper needs the exact repr and the
+# OSEXC constructor, so it is a part of its own, carried only by a program that opens files whole.
+ORDER.insert(max(ORDER.index(_p) for _p in ('STRREPR', 'OSEXC', 'EXCSTR')) + 1, 'OSFILEPATH')
+SOURCE['OSFILEPATH'] = _filert.PATH_FAIL
+REQUIRES['OSFILEPATH'] = ['STR', 'STRREPR', 'OSEXC', 'DIE', 'FILEEXC']
 
 # G9 the wall clock: time.time / time_ns / sleep, the OS time zone (clockrt.py)
 import clockrt as _clockrt

@@ -1,3 +1,28 @@
+## 2026-10-29 -- an uncaught OSError subclass names its class and CPython's message (job-rd2-10300248)
+
+A whole-file open whose failure surfaced on the typed path ended stderr with just `OSError` (or the
+right class with no message) where CPython names the subclass and the path:
+`FileNotFoundError: [Errno 2] No such file or directory: 'p'`.  The legacy `ail_file_open` failure
+now calls `ail_file_fail_path`, which raises the errno's class with `[Errno N] strerror: repr(path)`
+(the exact str repr via STRREPR, the OSEXC constructor); an empty errno keeps the old plain OSError.
+The helper is a part of its own (OSFILEPATH), carried only by a program that opens a file whole, and
+it is skipped when the program reads exception text, whose exctext edits already word those failures
+with the same message.  A directory opens (fopen succeeds) and fails on the first read, so the three
+read-time failures now name the path as well: the text read (`ail_file_read`), the binary whole-file
+read (`read_bytes`, FILEBYTES), and line iteration, whose iterator keeps its own copy of the path.
+The three lowerings (whole-file text read, line iteration with a file slot, `read_bytes`) now ask for
+FILEEXC and OSFILEPATH.  Wired the same cast to the FILEBYTES read; stdout and exit status are
+unchanged.  The general path already matched.
+
+Probes in `/tmp/probes/rd2` on both builds via `cmp.sh` (fresh `AIL_CACHE`): `read_arg`,
+`read_list`, `read_neg`, `read_attr`, `read_dict`, `read_concat`, `read_alias`, `read_empty`,
+`read_unicode`, `read_quote`, `read_nl`, `read_isdir`, `read_notdir`, `read_perm`, `iter_arg`,
+`iter_isdir`, `with_arg`, `with_isdir`, `rb_arg`, `rb_dict`, `rb_empty`, `rb_isdir`, `rb_notdir`,
+`x_exists`, `catch_os`, `catch_print`, `catch_bin`, `catch_os_text`, `reraise`, `raise_e` and
+`nested_reraise` all match CPython (exit status, stdout, last stderr line).  Added `test_ail_rd2.py`
+and registered it in `ail_check.py`; it compares CPython's last stderr line, stdout and exit status
+through the four build modes (typed AIL_IR=0/1, default, --general-only).
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

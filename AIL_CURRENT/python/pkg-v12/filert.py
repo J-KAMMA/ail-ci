@@ -192,12 +192,89 @@ LEGACY_EDITS = {
 }
 
 
-def legacy_errno(part, text):
+# A whole-file open failure names the path too, the way CPython does ("[Errno 2] No such file or
+# directory: 'x'"). The message needs the exact str repr (STRREPR) and the OSEXC constructor, so the
+# open edit turns into a call to ail_file_fail_path only when that part (OSFILEPATH) is present.
+PATH_LEGACY_EDITS = {
+    'STR': (
+        ('/* mode: 0 read, 1 replace, 2 append; binary on every platform. */\n',
+         'static void ail_file_fail_path(int err, ail_str path);\n'
+         '/* mode: 0 read, 1 replace, 2 append; binary on every platform. */\n', 1),
+        ('    if (!f) ail_file_fail(open_errno);\n',
+         '    if (!f) ail_file_fail_path(open_errno, path);\n', 1),
+        # A directory opens (fopen succeeds) and fails on the first read; the iterator keeps its own
+        # copy of the path so the failure can name it after the caller's arena may have moved on.
+        ('typedef struct { FILE *file; unsigned char *buf; int64_t capacity; } ail_file_iter;\n',
+         'typedef struct { FILE *file; unsigned char *buf; int64_t capacity; ail_str path; } ail_file_iter;\n', 1),
+        ('    it->file = file;\n    return it;',
+         '    it->file = file;\n    it->path.p = NULL; it->path.n = 0; it->path.bytes = 0;\n'
+         '    if (path.n) {\n'
+         '        uint8_t *copy = (uint8_t *)malloc((size_t)path.n);\n'
+         '        if (!copy) { fclose(file); free(it); ail_die("out of memory"); }\n'
+         '        memcpy(copy, path.p, (size_t)path.n);\n'
+         '        it->path.p = copy; it->path.n = path.n;\n'
+         '    }\n    return it;', 1),
+        ('    fclose(it->file);\n    free(it->buf);\n    free(it);',
+         '    fclose(it->file);\n    free(it->buf);\n    free((void *)it->path.p);\n    free(it);', 1),
+        ('if (ferror(it->file)) ail_file_fail(errno);',
+         'if (ferror(it->file)) ail_file_fail_path(errno, it->path);', 1),
+        ('if (next == EOF && ferror(it->file)) ail_file_fail(errno);',
+         'if (next == EOF && ferror(it->file)) ail_file_fail_path(errno, it->path);', 1),
+        ('    if (ferror(f)) { int read_errno = errno; fclose(f); free(buf); ail_file_fail(read_errno); }',
+         '    if (ferror(f)) { int read_errno = errno; fclose(f); free(buf); ail_file_fail_path(read_errno, path); }', 1),
+    ),
+    # The binary whole-file read has no class mapping of its own, so its read failure is only
+    # path-aware: it captures errno before fclose and names the path.
+    'FILEBYTES': (
+        ('    int failed = ferror(f);\n    if (fclose(f) != 0 || failed) { free(buf); ail_raise_named(AIL_EXC_OS); }\n'
+         '    ail_barena_push(A, buf);\n    return (ail_bytes){buf, n};',
+         '    int failed = ferror(f);\n    int read_errno = failed ? errno : 0;\n'
+         '    if (fclose(f) != 0 && !read_errno) { read_errno = errno; failed = 1; }\n'
+         '    if (failed) { free(buf); ail_file_fail_path(read_errno, path); }\n'
+         '    ail_barena_push(A, buf);\n    return (ail_bytes){buf, n};', 1),
+    ),
+}
+# FILEBYTES carries no class edits of its own: the empty tuple only makes legacy_errno visit it for
+# the path-aware edits above when the part is present.
+LEGACY_EDITS['FILEBYTES'] = ()
+
+
+def legacy_errno(part, text, with_path=False):
     for old, new, count in LEGACY_EDITS.get(part, ()):
         if text.count(old) != count:
             raise AssertionError('%s block changed; update filert.LEGACY_EDITS: %s' % (part, old))
         text = text.replace(old, new)
+    if with_path:
+        for old, new, count in PATH_LEGACY_EDITS.get(part, ()):
+            if text.count(old) != count:
+                raise AssertionError('%s block changed; update filert.PATH_LEGACY_EDITS: %s' % (part, old))
+            text = text.replace(old, new)
     return text
+
+
+# The path-aware half of ailing the whole-file open, in its own part (OSFILEPATH, cruntime.py):
+# defined after STR (its ail_file_fail), OSEXC (ail_exception_new_os) and STRREPR (ail_fmt_repr_str).
+PATH_FAIL = r'''
+/* C23: the errno's class plus CPython's message, "[Errno 2] No such file or directory: 'x'".
+   An empty errno keeps the old plain OSError with no text: there is nothing truthful to name. */
+static void ail_file_fail_path(int err, ail_str path) {
+    if (err <= 0) ail_file_fail(err);
+    const char *why = strerror(err);
+    ail_sarena A = {0};
+    ail_str rep = ail_fmt_repr_str(&A, path);
+    int64_t hl = (int64_t)strlen(why) + 2;
+    uint8_t *text = (uint8_t *)malloc((size_t)hl + (size_t)rep.n + 1);
+    if (!text) ail_die("out of memory");
+    memcpy(text, why, (size_t)(hl - 2));
+    text[hl - 2] = ':'; text[hl - 1] = ' ';
+    if (rep.n) memcpy(text + hl, rep.p, (size_t)rep.n);
+    ail_str t; t.p = text; t.n = hl + rep.n; t.bytes = 0;
+    ail_exception *value = ail_exception_new_os(err, t);
+    free(text);
+    ail_sarena_free(&A);
+    ail_raise_value_adopt(value);
+}
+'''
 
 
 def file_exception(text, with_flush):
