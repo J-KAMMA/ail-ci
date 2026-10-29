@@ -47,9 +47,25 @@ CHECKS = {'negative': '< 0', 'nonzero': '!= 0', 'null': '== 0', 'minus1': '== -1
 OPTIONS = ('lib', 'header', 'symbol', 'check', 'errno', 'exc', 'pkg_config', 'sources', 'trust')
 
 
+PARALLEL_CALLS = ('Thread', 'Process', 'start_new_thread', 'submit', 'map', 'starmap', 'apply', 'apply_async', 'map_async',
+                  'starmap_async', 'imap', 'imap_unordered')
+PARALLEL_LOOPS = ('par_range', '_ail_par_range')
+
+
+class HandleType:
+    """One `Handle(name, free=...)`: the AIL class that owns the pointer and the C helpers behind it."""
+
+    def __init__(self, name, free, cls, line):
+        self.name, self.free, self.cls, self.line = name, free, cls, line
+        self.emitted = False
+        tag = hashlib.sha1(('%s\0%s' % (name, free)).encode()).hexdigest()[:6]
+        self.reg, self.release, self.adopt, self.make = ('ffi_h%s_%s' % (tag, word) for word in ('reg', 'release', 'adopt', 'make'))
+
+
 class Param:
     def __init__(self, name, ann, default=None, has_default=False):
         self.name, self.ann, self.default, self.has_default = name, ann, default, has_default
+        self.handle = None             # an owned Handle parameter: its HandleType (ann is then c_void_p)
         self.length_of = None          # for length("x", T): the parameter name
         self.length_type = None
         self.elem = None               # ptr(T) / cptr(T): the element type name, else None
@@ -65,6 +81,7 @@ class Decl:
         self.trust = False             # trust=True: the header is included but its prototype is not compared
         self.params = []
         self.result = None             # annotation name, or None for void
+        self.result_handle = None      # an owned Handle result: its HandleType (result is then c_void_p)
         self.tag = None                # per-file hash
         self.local_header = False
         self.directory = None
@@ -138,6 +155,8 @@ class Session:
         self._owned = False
         self.library_entry = None       # `compile --lib`: the entry file, the only one that may say `@export`
         self.link_lines = {}            # (declaring file, library) -> line of its link() call
+        self.handles = {}               # (name, free) -> HandleType, in order of first mention (F4)
+        self.handle_aliases = {}        # `Db = Handle(...)`: alias -> (name, free)
 
     def close(self):
         if self._owned and self.workdir is not None:
@@ -176,7 +195,7 @@ class Session:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
+                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations', 'Handle'})
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
@@ -202,6 +221,11 @@ class Session:
             else:
                 self._refuse_export(path, tree, imported, module_names)
         decls = []
+        before = set(self.handles)      # HandleTypes first mentioned in this file get their class written here
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and self._is_handle_call(node.value, imported, module_names):
+                self._handle_alias(path, node, imported, module_names)
+                blank.append((node.lineno, node.end_lineno))
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
                 self._link(path, node.value)
@@ -230,8 +254,13 @@ class Session:
         for first, statement in keep:
             lines[first - 1] = statement
         self.decls.extend(decls)
+        handles_here = [ht for key, ht in self.handles.items() if key not in before]
+        if self.handles:
+            self._refuse_handle_use(path, tree)
         # a file that imports ail_ffi but declares nothing is left with its import blanked
         block = []
+        for ht in handles_here:
+            block.extend(self._handle_class(ht, tag))
         if decls:
             if any(d.has_bytearray for d in decls):
                 block.append('')
@@ -411,6 +440,11 @@ class Session:
                 param.elem = element
                 if default is not None:
                     self._refuse(path, default, '%s: a pointer parameter has no default' % node.name)
+            elif self._handle_ref(path, ann, imported, module_names) is not None:
+                param = Param(arg.arg, 'c_void_p')
+                param.handle = self._handle_ref(path, ann, imported, module_names)
+                if default is not None:
+                    self._refuse(path, default, '%s: a Handle parameter has no default' % node.name)
             else:
                 name = self._ann_name(path, node, ann, imported, module_names, node.name)
                 if name not in PARAM_ANN:
@@ -443,6 +477,9 @@ class Session:
             self._refuse(path, node, '%s: a missing return annotation is refused (write `-> None` for void)' % node.name)
         if isinstance(node.returns, ast.Constant) and node.returns.value is None:
             decl.result = None
+        elif self._handle_ref(path, node.returns, imported, module_names) is not None:
+            decl.result_handle = self._handle_ref(path, node.returns, imported, module_names)
+            decl.result = 'c_void_p'
         else:
             decl.result = self._ann_name(path, node, node.returns, imported, module_names, node.name)
             if decl.result not in RESULT_ANN:
@@ -465,6 +502,204 @@ class Session:
             decl.local_header = (path.parent / decl.header).is_file()
         return decl
 
+    # ------------------------------------------------------------------ owned handles (F4)
+
+    @staticmethod
+    def _is_handle_call(node, imported, module_names):
+        if not isinstance(node, ast.Call):
+            return False
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id == 'Handle' and 'Handle' in imported
+        return (isinstance(func, ast.Attribute) and func.attr == 'Handle' and isinstance(func.value, ast.Name)
+                and func.value.id in module_names)
+
+    def _handle_type(self, path, call, alias=None):
+        """The HandleType of a `Handle("name", free="c_function")` call, made on first mention."""
+        words = [a.value for a in call.args if isinstance(a, ast.Constant) and isinstance(a.value, str)]
+        free = [k.value.value for k in call.keywords if k.arg == 'free' and isinstance(k.value, ast.Constant)
+                and isinstance(k.value.value, str)]
+        if len(words) != 1 or len(call.args) != 1 or len(free) != 1 or len(call.keywords) != 1 \
+                or not words[0].isidentifier() or not free[0].isidentifier():
+            self._refuse(path, call, 'Handle("name", free="c_function"): the name and the free function are string literals '
+                                     'that are identifiers')
+        key = (words[0], free[0])
+        ht = self.handles.get(key)
+        if ht is not None:
+            if alias is not None and alias != ht.cls:
+                self._refuse(path, call, 'Handle(%r, free=%r) is already declared as %s\n  write instead: use %s for this type'
+                             % (key[0], key[1], ht.cls, ht.cls))
+            return ht
+        ht = HandleType(key[0], key[1], alias or 'Handle_%s' % key[0], call.lineno)
+        self.handles[key] = ht
+        return ht
+
+    def _handle_alias(self, path, node, imported, module_names):
+        """`Db = Handle("sqlite3", free="sqlite3_close")` at module level names the type; its class is written here."""
+        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+            self._refuse(path, node, 'a Handle type is bound to one plain name: `Db = Handle("sqlite3", free="sqlite3_close")`')
+        alias = node.targets[0].id
+        ht = self._handle_type(path, node.value, alias)
+        self.handle_aliases[alias] = (ht.name, ht.free)
+
+    def _handle_ref(self, path, ann, imported, module_names):
+        """The HandleType an annotation names (an alias or an inline `Handle(...)`), else None."""
+        if isinstance(ann, ast.Name) and ann.id in self.handle_aliases:
+            return self.handles[self.handle_aliases[ann.id]]
+        if self._is_handle_call(ann, imported, module_names):
+            return self._handle_type(path, ann)
+        return None
+
+    def _handle_class(self, ht, tag):
+        """The AIL class that owns the pointer, written at the end of the file that first names the type."""
+        ht.emitted = True
+        c, name = ht.cls, ht.name
+        return ['',
+                'class %s:' % c,
+                '    def __init__(self, p: int):',
+                '        self._p = p',
+                '',
+                '    def close(self) -> None:',
+                '        q = self._p',
+                '        if q != 0:',
+                '            self._p = 0',
+                '            %s(q)' % ht.release,
+                '',
+                '    def __enter__(self) -> "%s":' % c,
+                '        if self._p == 0:',
+                '            raise ValueError("%s handle is closed")' % name,
+                '        return self',
+                '',
+                '    def __exit__(self, kind, value, trace) -> bool:',
+                '        self.close()',
+                '        return False',
+                '',
+                '    @staticmethod',
+                '    def adopt(buffer: bytearray) -> "%s":' % c,
+                '        if len(buffer) != 8:',
+                '            raise ValueError("adopt takes the bytearray(8) of a ptr(c_void_p) out-parameter")',
+                '        q = %s(bytes(buffer))' % ht.adopt,
+                '        for i in range(8):',
+                '            buffer[i] = 0',
+                '        return %s(q)' % ht.make,
+                '',
+                'def %s(p: int) -> "%s":' % (ht.make, c),
+                '    h = %s(p)' % c,
+                '    if p != 0:',
+                '        %s(p)' % ht.reg,
+                '    return h']
+
+    def _refuse_handle_use(self, path, tree):
+        """A Handle is not a number and not shared between threads: arithmetic on one and a parallel worker that
+        takes one are refused by name. The values are followed by name inside each function (parameters annotated
+        with a Handle type, results of the stubs that return one, `Type.adopt(...)`, copies of those)."""
+        for d in self.decls:
+            for p in d.params:
+                if p.handle is not None and d.symbol == p.handle.free:
+                    raise ModuleRefusal(d.path, d.line, 1, '%s calls %s, the free function of the %s Handle: the handle frees it '
+                                        'itself, and a second free is a crash\n  write instead: call %s.close() and leave out '
+                                        'this stub' % (d.name, d.symbol, p.handle.name, p.name))
+        classes = set(self.handle_aliases) | {ht.cls for ht in self.handles.values()}
+        makers ={d.name for d in self.decls if d.result_handle is not None}
+        takers = {d.name for d in self.decls if any(p.handle is not None for p in d.params)}
+
+        def ann_is_handle(a):
+            if isinstance(a, ast.Constant) and isinstance(a.value, str):
+                return a.value in classes
+            return isinstance(a, ast.Name) and a.id in classes
+
+        def is_handle(e, names):
+            if isinstance(e, ast.Name):
+                return e.id in names
+            if isinstance(e, ast.Call):
+                f = e.func
+                return (isinstance(f, ast.Name) and f.id in makers) or (
+                    isinstance(f, ast.Attribute) and f.attr == 'adopt' and isinstance(f.value, ast.Name) and f.value.id in classes)
+            return False
+
+        def scope_nodes(body):
+            stack = list(reversed(body))
+            while stack:
+                node = stack.pop()
+                yield node
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+                    continue
+                stack.extend(reversed(list(ast.iter_child_nodes(node))))
+
+        def arithmetic(node, what):
+            self._refuse(path, node, 'arithmetic on the Handle %s: a handle is an owned object, not an address\n'
+                                     '  write instead: pass the handle to the stub that needs it, and compute with the plain '
+                                     'ints that stubs return' % what)
+
+        def parallel(node, what):
+            self._refuse(path, node, 'the Handle %s is passed into a parallel worker: a handle has one owner and its free '
+                                     'function runs once\n  write instead: call the stubs that take the handle in the calling '
+                                     'thread, and give the worker plain ints, bytes or bytearrays' % what)
+
+        def mentions(node, names):
+            for sub in ast.walk(node):
+                if isinstance(sub, ast.Name) and sub.id in names:
+                    return sub.id
+            return None
+
+        functions = {n.name: n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+
+        def scan(body, names, args=None):
+            names = set(names)
+            if args is not None:
+                for a in args.posonlyargs + args.args + args.kwonlyargs:
+                    if a.annotation is not None and ann_is_handle(a.annotation):
+                        names.add(a.arg)
+            nodes = list(scope_nodes(body))
+            for _ in range(2):
+                for n in nodes:
+                    if isinstance(n, ast.Assign) and is_handle(n.value, names):
+                        names.update(t.id for t in n.targets if isinstance(t, ast.Name))
+                    elif isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name) and (
+                            ann_is_handle(n.annotation) or (n.value is not None and is_handle(n.value, names))):
+                        names.add(n.target.id)
+                    elif isinstance(n, (ast.With, ast.AsyncWith)):
+                        for item in n.items:
+                            if isinstance(item.optional_vars, ast.Name) and is_handle(item.context_expr, names):
+                                names.add(item.optional_vars.id)
+            for n in nodes:
+                if isinstance(n, ast.BinOp):
+                    for side in (n.left, n.right):
+                        if is_handle(side, names):
+                            arithmetic(n, ast.unparse(side))
+                elif isinstance(n, ast.UnaryOp) and not isinstance(n.op, ast.Not) and is_handle(n.operand, names):
+                    arithmetic(n, ast.unparse(n.operand))
+                elif isinstance(n, ast.AugAssign):
+                    if is_handle(n.target, names) or is_handle(n.value, names):
+                        arithmetic(n, ast.unparse(n.target if is_handle(n.target, names) else n.value))
+                elif isinstance(n, ast.For) and isinstance(n.iter, ast.Call) and isinstance(n.iter.func, ast.Name) \
+                        and n.iter.func.id in PARALLEL_LOOPS:
+                    found = mentions(ast.Module(body=n.body, type_ignores=[]), names)
+                    if found:
+                        parallel(n, found)
+                elif isinstance(n, ast.Call):
+                    f = n.func
+                    word = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+                    if word in PARALLEL_CALLS:
+                        parts = list(n.args) + [k.value for k in n.keywords]
+                        for part in parts:
+                            found = mentions(part, names)
+                            if found:
+                                parallel(n, found)
+                            for sub in ast.walk(part):
+                                target = functions.get(sub.id) if isinstance(sub, ast.Name) else None
+                                if target is not None and (sub.id in takers or any(
+                                        a.annotation is not None and ann_is_handle(a.annotation)
+                                        for a in target.args.posonlyargs + target.args.args + target.args.kwonlyargs)):
+                                    parallel(n, '(an argument of %s)' % sub.id)
+            for n in nodes:
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    scan(n.body, names, n.args)
+                elif isinstance(n, ast.ClassDef):
+                    scan(n.body, names)
+
+        scan(tree.body, ())
+
     # ------------------------------------------------------------------ AIL wrappers
 
     def _wrapper(self, d):
@@ -473,11 +708,11 @@ class Session:
         for p in d.params:
             if p.length_of is not None:
                 continue
-            text = '%s: %s' % (p.name, python_type(p.ann))
+            text = '%s: %s' % (p.name, p.handle.cls if p.handle is not None else python_type(p.ann))
             if p.has_default:
                 text += ' = %r' % (p.default,)
             sig.append(text)
-        ret = {None: 'None'}.get(d.result) or python_type(d.result)
+        ret = d.result_handle.cls if d.result_handle is not None else {None: 'None'}.get(d.result) or python_type(d.result)
         out.append('def %s(%s) -> %s:' % (d.name, ', '.join(sig), ret))
         args = []
         for p in d.params:
@@ -487,9 +722,15 @@ class Session:
                 args.append('len(%s)' % p.length_of if size == 1 else 'len(%s) // %d' % (p.length_of, size))
             elif p.ann in ('bytearray', 'c_mut_void_p'):
                 args.append('bytes(%s)' % p.name)
+            elif p.handle is not None:
+                args.append('%s._p' % p.name)
             else:
                 args.append(p.name)
         call = '%s(%s)' % (d.export, ', '.join(args))
+        for p in d.params:
+            if p.handle is not None:
+                out.append('    if %s._p == 0:' % p.name)
+                out.append('        raise ValueError("%s handle is closed")' % p.handle.name)
         for p in d.params:
             if p.elem is not None and elem_info(p.elem)[1] > 1:
                 out.append('    if len(%s) %% %d != 0:' % (p.name, elem_info(p.elem)[1]))
@@ -520,7 +761,10 @@ class Session:
                     out.append('        raise %s("[Errno %%d] %%s" %% (ffi_e, ffi_%s__strerror(ffi_e)))' % (d.exc, d.tag))
             else:
                 out.append('        raise %s("%s failed with %%d" %% ffi_rc)' % (d.exc, d.name))
-        out.append('    return ffi_rc != 0' if d.result == 'c_bool' else '    return ffi_rc')
+        if d.result_handle is not None:
+            out.append('    return %s(ffi_rc)' % d.result_handle.make)
+        else:
+            out.append('    return ffi_rc != 0' if d.result == 'c_bool' else '    return ffi_rc')
         return out
 
     # ------------------------------------------------------------------ the C object
@@ -541,6 +785,9 @@ class Session:
                 writes=[p.name for p in d.params if p.ann in ('bytearray', 'c_mut_void_p')],
                 errors=None if d.check is None else dict(check=d.check, errno=d.errno, exception=d.exc),
                 pointer_arguments=[p.name for p in d.params if p.ann in ('bytes', 'bytearray', 'c_const_void_p', 'c_mut_void_p', 'c_char_p', 'c_mut_char_p', 'c_void_p')]))
+            owned = [p.name for p in d.params if p.handle is not None]
+            if owned or d.result_handle is not None:
+                rows[-1]['owned_handles'] = dict(parameters=owned, result=None if d.result_handle is None else d.result_handle.name)
         return rows
 
     def build(self, cli, env=None, c_api_name=None):
@@ -612,8 +859,49 @@ class Session:
             name = 'ffi_%s__strerror' % tag
             functions[name] = dict(symbol=name, params=[['code', 'int']], result='str')
             bodies.append('ail_c_utf8_view %s(int64_t code) { const char *s = strerror((int)code); return (ail_c_utf8_view){(const unsigned char *)s, strlen(s)}; }' % name)
+        owned = [ht for ht in self.handles.values() if ht.emitted]
+        if owned:
+            # F4: the pointers that Handle objects own are listed here, so what is still open when the program
+            # ends is freed (newest first) and close() frees one exactly once
+            extern_decls.append('#if defined(__APPLE__)\n#define FFI_SYM(x) "_" x\n#else\n#define FFI_SYM(x) x\n#endif')
+            bodies.append('typedef struct { void *p; void (*free)(void *); } ffi_owned_entry;\n'
+                          'static ffi_owned_entry *ffi_owned_v; static size_t ffi_owned_n, ffi_owned_cap; static int ffi_owned_hooked;\n'
+                          'static void ffi_owned_all(void) {\n'
+                          '    while (ffi_owned_n) { ffi_owned_entry e = ffi_owned_v[--ffi_owned_n]; e.free(e.p); }\n'
+                          '    free(ffi_owned_v); ffi_owned_v = NULL; ffi_owned_cap = 0;\n'
+                          '}\n'
+                          'static void ffi_owned_add(void *p, void (*fn)(void *)) {\n'
+                          '    if (ffi_owned_n == ffi_owned_cap) {\n'
+                          '        size_t cap = ffi_owned_cap ? ffi_owned_cap * 2 : 8;\n'
+                          '        ffi_owned_entry *grown = realloc(ffi_owned_v, cap * sizeof *grown); if (!grown) abort();\n'
+                          '        ffi_owned_v = grown; ffi_owned_cap = cap;\n'
+                          '    }\n'
+                          '    if (!ffi_owned_hooked) { ffi_owned_hooked = 1; atexit(ffi_owned_all); }\n'
+                          '    ffi_owned_v[ffi_owned_n].p = p; ffi_owned_v[ffi_owned_n].free = fn; ffi_owned_n++;\n'
+                          '}\n'
+                          'static void ffi_owned_release(void *p, void (*fn)(void *)) {\n'
+                          '    for (size_t i = ffi_owned_n; i-- > 0;) {\n'
+                          '        if (ffi_owned_v[i].p == p) {\n'
+                          '            memmove(ffi_owned_v + i, ffi_owned_v + i + 1, (ffi_owned_n - i - 1) * sizeof *ffi_owned_v);\n'
+                          '            ffi_owned_n--;\n'
+                          '            break;\n'
+                          '        }\n'
+                          '    }\n'
+                          '    fn(p);\n'
+                          '}')
+            for ht in owned:
+                fn = 'ffi_free_%s' % ht.reg
+                extern_decls.append('extern void %s(void *) __asm__(FFI_SYM("%s"));' % (fn, ht.free))
+                functions[ht.reg] = dict(symbol=ht.reg, params=[['p', 'int']], result='void')
+                bodies.append('void %s(int64_t p) { ffi_owned_add((void *)(intptr_t)p, %s); }' % (ht.reg, fn))
+                functions[ht.release] = dict(symbol=ht.release, params=[['p', 'int']], result='void')
+                bodies.append('void %s(int64_t p) { ffi_owned_release((void *)(intptr_t)p, %s); }' % (ht.release, fn))
+                functions[ht.adopt] = dict(symbol=ht.adopt, params=[['b', 'borrowed_bytes']], result='int')
+                bodies.append('int64_t %s(const unsigned char *b, size_t b_n) {\n'
+                              '    void *p = NULL;\n    if (b_n >= sizeof p) memcpy(&p, b, sizeof p);\n'
+                              '    return (int64_t)(intptr_t)p;\n}' % ht.adopt)
         # the per-declaration helpers must be exported under the declaration's own tag
-        source = '\n'.join(code + extern_decls + sorted(set(asserts)) + bodies) + '\n'
+        source ='\n'.join(code + extern_decls + sorted(set(asserts)) + bodies) + '\n'
         interface = dict(version=1, functions=functions)
         if headers_local:
             interface['headers'] = sorted(headers_local)
