@@ -25797,6 +25797,7 @@
     "python/pkg-v12/sqllower.py",
     "python/pkg-v12/exctext.py",
     "python/pkg-v12/userexc.py",
+    "python/pkg-v12/classname.py",
     "python/pkg-v12/unbound.py",
     "python/pkg-v12/typedinherit.py",
     "python/pkg-v12/nestfn.py",
