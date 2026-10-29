@@ -1,3 +1,26 @@
+## 2026-10-29 -- re-apply packaging (pip install) on the integration tree (job-rbrel2-10290923)
+
+Re-applied the accepted `job-rel2-10282133` packaging change on top of this tree.  Added the
+root `pyproject.toml` and `setup.py`: the wheel is built from the `MANIFEST.json` `sdk_files`
+selection, omitting only `python/pkg-v12/bench.py`, `test_all.py` and `test_pipeline.py`, so it
+carries `python/pkg-v12/SEMANTICS.md` and no compiler test/bench files; the build writes an
+installed `MANIFEST.json` whose `sdk_files` and `sha256` pins describe the packaged files, copies
+`LICENSE-APACHE`/`LICENSE-MIT` into the package root, and keeps `include-package-data` off so a
+stale `egg-info` cannot add files.  `ail_chatgpt.py` now puts its own directory on `sys.path`
+before importing its sibling modules (only that import hunk was applied; this tree's later
+`ail_chatgpt.py` work is untouched).  The incoming `test_ail_packaging.py` replaces the old
+backend test; its exclusions come from `sdk_files`, so this tree's newer `tasks-novel` wording in
+the old file needs no carry-over.  `.gitignore` ignores `build/` and `*.egg-info/`.
+
+Probes in `/tmp/probes` via `cmp.sh`: `packaging_hello`, `packaging_types` (ints beyond 32 bits,
+negatives, floats, empty and repeated strings, list/dict reads) and `packaging_zlib` match CPython
+on both builds.  `/tmp/probes/packaging_review_probe.py` passed: wheel selection 529 files,
+installed MANIFEST 526 files, installed compile/run outside the repository, `api-builtin abs`,
+`integrity` (526 checked, verified) and `export-sdk` (528 files).  Final-state tests:
+`test_ail_packaging`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`
+(4 modules, 576 s, 0 failed).  `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` exits 0.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
