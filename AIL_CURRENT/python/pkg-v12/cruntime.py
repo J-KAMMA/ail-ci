@@ -15738,6 +15738,25 @@ static inline ail_st ail__vec_merge_sort(ail_ctx *cx, ail_obj *p, ail_obj *keys,
     for (int64_t x = lo; x < hi; x++) { p[x] = tmp[x]; keys[x] = ktmp[x]; }
     return AIL_OK;
 }
+/* A NaN key gives no total order, so CPython's Timsort leaves a specific, input-dependent
+   permutation that this stable merge sort does not reproduce -- the sort would differ
+   silently. Refuse it by name instead (DIFFERENCES C?-job-refuzz95-10300605-1), the same stop the typed path's
+   ail_flist_sort already takes for a plain float list. A key function's result counts too,
+   and a tuple/list key is scanned item by item because its comparison can reach a NaN. */
+static inline ail_st ail__sort_nan_check(ail_ctx *cx, ail_obj *p, int64_t n, int depth) {
+    for (int64_t i = 0; i < n; i++) {
+        ail_obj k = p[i];
+        if (k.tag == AIL_T_FLOAT) {
+            if (isnan(ail_float_val(k)))
+                return ail_raise_c(cx, AIL_B_VALUEERROR, "sorted()/list.sort() over a NaN key: NaN has no total order, so this build refuses rather than differ silently from CPython (DIFFERENCES C?-job-refuzz95-10300605-1)");
+        } else if ((k.tag == AIL_T_TUPLE || k.tag == AIL_T_LIST) && depth < 32) {
+            ail_vecobj *e = (ail_vecobj *)k.o;
+            ail_st st = ail__sort_nan_check(cx, e->p, e->n, depth + 1);
+            if (st != AIL_OK) return st;
+        }
+    }
+    return AIL_OK;
+}
 /* ail_list_sort -- the key function (if not AIL_T_NONE) is called EXACTLY ONCE per
    element, into a scratch `keys` array (decorate), the merge sort above compares only
    those decorations (never re-invoking the key), then the element array is left permuted
@@ -15773,6 +15792,7 @@ static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_n
         ail_obj t = v->p[i]; v->p[i] = v->p[j]; v->p[j] = t;
         t = keys[i]; keys[i] = keys[j]; keys[j] = t;
     }
+    if (st == AIL_OK) st = ail__sort_nan_check(cx, keys, n, 0);
     if (st == AIL_OK) st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);
     AIL_FRAME_LEAVE(cx, fr);
     AIL_FRAME_LEAVE(cx, frl);

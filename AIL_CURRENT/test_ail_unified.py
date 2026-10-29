@@ -1685,8 +1685,8 @@ class Unified(unittest.TestCase):
     def test_u14_sort_tuples(self):
         """Step 6: a sort on float or int keys (natural merge sort on (key, index) records) and a tuple of up to 8 items in
         one allocation. Floats (ties, -0.0, inf, runs, descending), ints (int64 ends), reverse, mixed and generic keys, NaN
-        (the old path, the same bytes as before), tuples of every size around the inline limit, growth, keys, GC. Same bytes as CPython
-        (NaN: as the general path); the C has the fast paths with the plan only."""
+        (now refused by name on both builds: no silent difference from CPython), tuples of every size around the inline limit, growth, keys, GC. Same bytes as CPython
+        (NaN: refused by name); the C has the fast paths with the plan only."""
         with tempfile.TemporaryDirectory() as d:
             res = {}
             for name, src in (('sortprim', SORTPRIM), ('tuples15', TUPLES15), ('sortnan', SORTNAN)):
@@ -1704,11 +1704,21 @@ class Unified(unittest.TestCase):
                     c = Path(d, name + '_' + mode + '.d', 'program.c').read_text(encoding='utf-8', errors='replace')
                     self.assertEqual('ail2u_sort_prim' in c, mode == 'unified', (name, mode))
                     self.assertEqual('ail2u_sort_prim' in c, 'ktmp = NULL' in c, (name, mode))
-                self.assertEqual(res[name, 'general'][0], 0, res[name, 'general'])
-                self.assertEqual(res[name, 'general'][:2], res[name, 'unified'][:2], name)
-                if ON_312 and name != "sortnan":
-                    cp = run([sys.executable, str(Path(d, name + '.py'))])
-                    self.assertEqual(cp[:2], res[name, 'unified'][:2], name)
+                if name == 'sortnan':
+                    # a NaN key has no total order; both builds now stop by name (refuzz95) rather
+                    # than return a permutation that differs from CPython with no error
+                    for mode in ('general', 'unified'):
+                        code, out, err = res[name, mode]
+                        self.assertNotEqual(code, 0, res[name, mode])
+                        self.assertIn('ValueError', err, res[name, mode])
+                        self.assertIn('refuzz95', err, res[name, mode])
+                    self.assertEqual(res[name, 'general'][:2], res[name, 'unified'][:2], name)
+                else:
+                    self.assertEqual(res[name, 'general'][0], 0, res[name, 'general'])
+                    self.assertEqual(res[name, 'general'][:2], res[name, 'unified'][:2], name)
+                    if ON_312:
+                        cp = run([sys.executable, str(Path(d, name + '.py'))])
+                        self.assertEqual(cp[:2], res[name, 'unified'][:2], name)
 
 
 if __name__ == '__main__':
