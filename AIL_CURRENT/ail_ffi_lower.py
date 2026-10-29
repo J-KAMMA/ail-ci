@@ -43,6 +43,8 @@ INTS = {
 NATIVE = {'int8': 'int8_t', 'int16': 'int16_t', 'int32': 'int32_t', 'uint8': 'uint8_t', 'uint16': 'uint16_t',
           'uint32': 'uint32_t', 'int': 'int64_t', 'uint64_bits': 'uint64_t'}
 EXCEPTIONS = ('OSError', 'ValueError', 'RuntimeError', 'KeyError', 'IndexError', 'OverflowError', 'EOFError')
+EXPORT_SCALARS = frozenset(('int', 'float', 'bool', 'str', 'bytes'))
+EXPORT_LIST_ITEMS = frozenset(('int', 'float'))
 CHECKS = {'negative': '< 0', 'nonzero': '!= 0', 'null': '== 0', 'minus1': '== -1'}
 OPTIONS = ('lib', 'header', 'symbol', 'check', 'errno', 'exc', 'pkg_config', 'sources', 'trust')
 
@@ -169,24 +171,38 @@ class Session:
     def _lower(self, path, text, tree):
         imported = set()                # names bound by `from ail_ffi import`
         module_names = set()            # names bound by `import ail_ffi [as x]`
+        export_names = set()            # names bound by `from ail_ffi import export`
+        dataclass_names = set()         # names bound by `from dataclasses import dataclass`
+        dataclasses_modules = set()     # names bound by `import dataclasses [as x]`
         blank = []                      # (first line, last line)
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
+                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations', 'export'})
+                        export_names.add('export')
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
                     imported.add(alias.name)
+                    if alias.name == 'export':
+                        export_names.add(alias.name)
                 blank.append((node.lineno, node.end_lineno))
+            elif isinstance(node, ast.ImportFrom) and node.module == 'dataclasses' and node.level == 0:
+                for alias in node.names:
+                    if alias.name == 'dataclass':
+                        dataclass_names.add(alias.asname or alias.name)
             elif isinstance(node, ast.Import):
                 for alias in node.names:
                     if alias.name == 'ail_ffi':
                         module_names.add(alias.asname or 'ail_ffi')
                         blank.append((node.lineno, node.end_lineno))
+                    elif alias.name == 'dataclasses':
+                        dataclasses_modules.add(alias.asname or 'dataclasses')
         if not imported and not module_names:
             return text
+        if export_names or module_names:
+            self._lower_export(path, tree, export_names, module_names, dataclass_names, dataclasses_modules, blank)
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -227,6 +243,129 @@ class Session:
             for decl in decls:
                 block.extend(self._wrapper(decl))
         return '\n'.join(lines).rstrip('\n') + '\n' + '\n'.join(block) + ('\n' if block else '')
+
+    def _lower_export(self, path, tree, export_names, module_names, dataclass_names, dataclasses_modules, blank):
+        """Plain `compile` runs a file that uses `@export` as ordinary Python: the decorator marks a
+        function for `ail build --lib`, and CPython returns the function unchanged.  Validate the
+        annotations CPython checks, then blank the decorator so the function is compiled as usual."""
+        for node in ast.walk(tree):
+            if (isinstance(node, ast.Name) and node.id == '__ail_export__') or (
+                    isinstance(node, ast.Attribute) and node.attr == '__ail_export__'):
+                self._refuse(path, node, '@export sets __ail_export__; reading that marker is not supported by `compile`')
+
+        imported_names, rebound_names, class_names = set(), set(), set()
+
+        class _ModuleBindings(ast.NodeVisitor):
+            """Names bound in the module scope (not inside a function, lambda or class body)."""
+            def visit_Name(self, node):
+                if isinstance(node.ctx, (ast.Store, ast.Del)):
+                    rebound_names.add(node.id)
+
+            def visit_FunctionDef(self, node):
+                rebound_names.add(node.name)
+                # annotations and defaults are evaluated at module level, but they do not bind
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_ClassDef(self, node):
+                class_names.add(node.name)
+
+            def visit_Lambda(self, node):
+                pass
+
+            def visit_Import(self, node):
+                for alias in node.names:
+                    imported_names.add((alias.asname or alias.name).split('.')[0])
+
+            def visit_ImportFrom(self, node):
+                for alias in node.names:
+                    if alias.name != '*':
+                        imported_names.add(alias.asname or alias.name)
+
+        binder = _ModuleBindings()
+        for statement in tree.body:
+            binder.visit(statement)
+        # a scalar annotation name shadowed in the module is not the builtin CPython checks
+        shadowed = imported_names | rebound_names | class_names
+
+        def is_decorator(node, names, modules, attr):
+            bare = node.func if isinstance(node, ast.Call) and not node.args and not node.keywords else node
+            if isinstance(bare, ast.Name):
+                return bare.id in names and bare.id not in rebound_names and bare.id not in class_names
+            return (isinstance(bare, ast.Attribute) and bare.attr == attr and isinstance(bare.value, ast.Name)
+                    and bare.value.id in modules and bare.value.id not in rebound_names
+                    and bare.value.id not in class_names)
+
+        future_annotations = any(
+            isinstance(node, ast.ImportFrom) and node.module == '__future__'
+            and any(alias.name == 'annotations' for alias in node.names)
+            for node in tree.body)
+        structs = {}
+        # `from __future__ import annotations` keeps dataclass field types as strings, so CPython's
+        # @export check refuses such a parameter; do not treat the text as a usable field table.
+        for node in (() if future_annotations else tree.body):
+            if not isinstance(node, ast.ClassDef):
+                continue
+            if not any(is_decorator(d, dataclass_names, dataclasses_modules, 'dataclass') for d in node.decorator_list):
+                structs.pop(node.name, None)        # a later plain class replaces it
+                continue
+            fields = {}
+            for base in node.bases:
+                if not isinstance(base, ast.Name) or base.id not in structs:
+                    fields = None
+                    break
+                fields.update(structs[base.id])
+            if fields is None:
+                continue
+            for statement in node.body:
+                if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+                    if (isinstance(statement.annotation, ast.Name)
+                            and statement.annotation.id in ('int', 'float', 'bool')
+                            and statement.annotation.id not in shadowed):
+                        fields[statement.target.id] = statement.annotation.id
+                    else:
+                        fields = None
+                        break
+            if fields is not None:
+                structs[node.name] = fields
+
+        def annotation_ok(annotation, result):
+            if isinstance(annotation, ast.Constant):
+                return result and annotation.value is None
+            if isinstance(annotation, ast.Name):
+                if annotation.id in EXPORT_SCALARS and annotation.id not in shadowed:
+                    return True
+                return (not result and annotation.id in structs
+                        and annotation.id not in imported_names and annotation.id not in rebound_names)
+            return (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
+                    and annotation.value.id == 'list' and annotation.value.id not in shadowed
+                    and isinstance(annotation.slice, ast.Name)
+                    and annotation.slice.id in EXPORT_LIST_ITEMS and annotation.slice.id not in shadowed)
+
+        for node in tree.body:
+            marks = [d for d in getattr(node, 'decorator_list', ()) if is_decorator(d, export_names, module_names, 'export')]
+            if not marks:
+                continue
+            if not isinstance(node, ast.FunctionDef):
+                self._refuse(path, node, '@export applies to a top-level function')
+            if len(marks) != len(node.decorator_list):
+                self._refuse(path, node, '%s: @export takes no other decorator' % node.name)
+            if any(isinstance(d, ast.Call) and (d.args or d.keywords) for d in marks):
+                self._refuse(path, node, '@export takes no arguments')
+            args = node.args
+            if args.defaults or args.kw_defaults or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg:
+                self._refuse(path, node, '@export %s: plain parameters without defaults only' % node.name)
+            if node.returns is None:
+                self._refuse(path, node, '@export %s: the result needs an annotation (-> None for no result)' % node.name)
+            for arg in args.args:
+                if arg.annotation is None:
+                    self._refuse(path, node, '@export %s: parameter %s needs a type annotation' % (node.name, arg.arg))
+                if not annotation_ok(arg.annotation, False):
+                    self._refuse(path, arg, '@export %s: parameter %s has an unsupported annotation' % (node.name, arg.arg))
+            if not annotation_ok(node.returns, True):
+                self._refuse(path, node, '@export %s: unsupported result annotation' % node.name)
+            for decorator in marks:
+                blank.append((decorator.lineno, decorator.end_lineno))
 
     @staticmethod
     def _is_link(node, imported, module_names):

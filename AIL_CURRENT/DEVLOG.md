@@ -1,3 +1,33 @@
+## 2026-10-29 -- ex37: `@export` and `__file__` in Python-syntax examples (job-ex37-10291451)
+
+Of the 14 Python-syntax files under `AIL_CURRENT/language_examples`, 2 build (`c_export/geometry.py`,
+`c_headers_workflow/table_crc.py`) and 12 are still refused for unrelated causes (missing local
+modules such as `benchmark_current_rows`, `pyfunc` and `language_examples.c_headers_workflow.table_crc`;
+name collisions between merged imports; `Path` used as a value; imports that run code at module import
+time; int beyond int64).  Before this change `geometry.py` was refused because `from ail_ffi import
+export` is not a standard library and the decorated functions need the `ail build --lib` marker; it now
+builds on the general path and matches CPython on both builds.  Plain `compile` validates the same
+annotations CPython's decorator validates (int/float/bool/str/bytes, list[int]/list[float], and a
+same-file dataclass of int/float/bool fields), blanks the decorator, and refuses by name a missing or
+unsupported annotation, a default, another decorator and a read of `__ail_export__`.  Also refused:
+`from __future__ import annotations` dataclasses (CPython sees string field types), inherited
+unsupported fields, a dataclass/export name rebound in the module, and a module-level shadowed
+int/float/bool/str/bytes/list annotation name.
+
+The other common refusal in that directory is `__file__`/`m.__file__`, which CPython 3.12 sets to the
+module's absolute source path before the body runs.  Read-only loads are now substituted with that
+module's path (argument, list item, attribute, dict value, lambda, `os.path`/`Path`, aliases); any
+program that assigns or binds `__file__` is refused by name.  The compiler's module search still
+resolves source paths, so a module reached through a symlinked search-path directory reports the real
+path where CPython keeps the symlink; entry files match.
+
+Added `test_ail_ex37.py` (12 tests, both builds) and updated the `test_ail_modules` module-file test.
+Probes `/tmp/probes/p_ex37_*.py` (20 programs) match CPython or are refused by name, including the
+three silent-difference cases found here (future-annotations dataclass, inherited unsupported field,
+shadowed int/list annotation).  Tests: `test_ail_ex37`, `test_ail_modules`, `test_ail_ffi`,
+`test_ail_python_syntax`, `test_ail_reference_examples`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C

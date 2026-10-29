@@ -4258,6 +4258,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             syntax = ('ail' if detect(text) else 'python') if source_syntax == 'auto' else source_syntax
             if path.suffix.lower() == '.py':
                 syntax = 'python'
+            if syntax == 'python':
+                text = ail_modules.bind_file_dunder(text, path)
             merged = None
             if ffi is not None and syntax == 'python':
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);

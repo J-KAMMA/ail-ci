@@ -238,6 +238,59 @@ def _str_list(node):
 
 # ---------------------------------------------------------------- loading and analysis
 
+def bind_file_dunder(text, path):
+    """Replace read-only `__file__` reads by this module's absolute path (CPython 3.12 sets it
+    before the module body runs).  A program that binds `__file__` itself is refused by name:
+    one merged namespace cannot give each module a different mutable `__file__`."""
+    try:
+        tree = ast.parse(text, filename=str(path))
+    except SyntaxError:
+        return text
+    loads = []
+    binding = None
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and node.id == '__file__':
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                binding = binding or node
+            else:
+                loads.append(node)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) and node.name == '__file__':
+            binding = binding or node
+        elif isinstance(node, ast.arg) and node.arg == '__file__':
+            binding = binding or node
+        elif isinstance(node, ast.alias) and (node.asname == '__file__' or node.name.split('.')[0] == '__file__'):
+            binding = binding or node
+        elif isinstance(node, ast.Nonlocal) and '__file__' in node.names:
+            binding = binding or node
+        elif isinstance(node, ast.ExceptHandler) and node.name == '__file__':
+            binding = binding or node
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name == '__file__':
+            binding = binding or node
+        elif isinstance(node, ast.MatchMapping) and node.rest == '__file__':
+            binding = binding or node
+    if binding is not None:
+        raise ModuleRefusal(path, getattr(binding, 'lineno', 1), getattr(binding, 'col_offset', 0) + 1,
+                            "__file__ is assigned or bound here; the compiler fixes each module's file path "
+                            "at build time and keeps it read-only.\n"
+                            "  write instead: read __file__ without assigning it")
+    if not loads:
+        return text
+    literal = repr(os.path.abspath(str(path)))
+    data = text.encode('utf8')
+    starts, offset = [], 0
+    for line in text.splitlines(keepends=True):
+        starts.append(offset)
+        offset += len(line.encode('utf8'))
+    edits = []
+    for node in loads:
+        start = starts[node.lineno - 1] + node.col_offset
+        end = starts[node.end_lineno - 1] + node.end_col_offset
+        edits.append((start, end, literal.encode('utf8')))
+    for start, end, replacement in sorted(edits, reverse=True):
+        data = data[:start] + replacement + data[end:]
+    return data.decode('utf8')
+
+
 class Program:
     def __init__(self, entry_path, read):
         self.entry_path = Path(entry_path).resolve()
@@ -361,7 +414,7 @@ class Program:
             tree = ast.Module(body=[], type_ignores=[])
         else:
             try:
-                tree = ast.parse(self.read(path), filename=str(path))
+                tree = ast.parse(bind_file_dunder(self.read(path), path), filename=str(path))
             except SyntaxError as error:
                 raise ModuleRefusal(path, error.lineno or 1, error.offset or 1, error.msg)
         mod = Mod(fullname, path if path is not None else mdirs[0], tree, False, kind, mdirs if kind != 'module' else [])
@@ -1769,6 +1822,8 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
+        if attr == '__file__' and not stored and target.kind != 'namespace':
+            return ast.copy_location(ast.Constant(os.path.abspath(str(target.path))), node)
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
@@ -1920,6 +1975,7 @@ def merge_program(entry_path, entry_text, read=None):
         def read(path):
             return Path(path).read_bytes().decode('utf-8').replace('\r\n', '\n').replace('\r', '\n')
     program = Program(entry_path, read)
+    entry_text = bind_file_dunder(entry_text, program.entry_path)
     try:
         tree = ast.parse(entry_text, filename=str(program.entry_path))
     except SyntaxError:
