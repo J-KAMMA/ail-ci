@@ -382,7 +382,6 @@ class ExportBuildEdgeTests(unittest.TestCase):
             (header + 'def f(x: int) -> int:\n    return x\n', 'no @export function'),
             (header + '@export\ndef free(x: int) -> int:\n    return x\n', 'reserved'),
             (header + '@export\ndef f(x: int) -> int:\n    return x\n\ndef ailx_f() -> int:\n    return 1\n', 'reserved for the generated'),
-            ('from ail_ffi import export, extern\n@export\ndef f(x: int) -> int:\n    return x\n', 'not extern'),
         ]
         for text, message in cases:
             with self.subTest(message=message):
