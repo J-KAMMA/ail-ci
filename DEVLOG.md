@@ -1,3 +1,27 @@
+## 2026-10-29 -- ex32: a print-only integer constant expression on the typed path (job-ex32-10291111)
+
+`AIL_CURRENT/language_examples/hello.ail` (`print(40 + 2)`) was refused by the typed path with
+"a script that is only print(<expression>) needs general object semantics" although the argument
+is an int constant expression; the default build therefore took the general path.  The gate in
+`python/pkg-v12/pyc.py` now accepts a print argument that is a non-bool Constant or an integer
+constant expression proven by the same exact folder the big-int pass uses; an out-of-int64 result
+is left to the big-int check to name.  Bare bools, floats, text and containers keep the previous
+fallback, and the general path is unchanged.
+
+`hello.ail` now builds on the general, default and typed-only builds and prints `42` / exits 0 on
+all three, matching CPython.  Added `AIL_CURRENT/test_ail_ex32.py` (3 tests) and registered it in
+`ail_check.MODULES`; `test_ail_build_cache` now uses `print(True)` for its general-path-note case,
+since `print(40 + 2)` no longer takes that path.
+
+Probes in `/tmp/probes` (19) via `bash ~/tools/cmp.sh`: `p_ex32_add`, `negative`, `zero`, `sub`,
+`mul`, `floordiv`, `mod`, `shift`, `pow`, `int64`, `big`, `bool_leaf`, `bool_direct`, `float`,
+`str`, `list`, `sep`, `end` and `multi` match CPython on the general and default builds.  On the
+typed-only build the 14 int-expression probes including `hello` match; `bool_direct`, `float`,
+`str` and `list` keep the print refusal; `big` is refused by the big-int check.  Final-state
+tests: test_ail_ex32, test_ail_python_syntax, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (5 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
