@@ -1,3 +1,30 @@
+## 2026-10-29 -- cov35: a saved generator expression whose body can raise runs lazily (job-cov35-10290946)
+
+The fresh corpus census (compile every `lab/corpus/programs` program on both builds) had 21
+refusals, 198 accepted; the most frequent non-stdlib construct was "a generator expression used
+as a value" (2 programs, `t437` of both models).  Such an expression was refused on the general
+path whenever `_genexp_can_raise` saw a subscript/division that could raise, because the eager
+list lowering would raise before the caller's `try` was live.
+
+`pyboxed2._rewrite_lazy_genexps` now lowers a saved, potentially-raising generator expression to
+a real top-level generator function (a `yield` per element), passing the outermost iterable and
+any captured locals as arguments.  The body therefore runs on `next()`, a `break` never evaluates
+later elements, and `ZeroDivisionError`/`IndexError` are catchable exactly where CPython raises
+them.  A capture is passed only when it is definitely bound before creation and never stored
+after it; otherwise the construct keeps the named refusal `a generator expression used as a
+value`.  The body is screened too: a user function/class call stays refused rather than exposing
+an unrelated compiler gap (custom `__setattr__`, `__slots__`, a rebound class name).
+
+After the change the same census has 19 refusals, 200 accepted, on both the general path and the
+default build; both `t437` programs now match CPython on all three inputs.  The only remaining
+refusals are imports/stdlib (as expected) and named shape limits.  Extended
+`test_ail_cov35.py` (saved running-average generators through an argument, a list item, an
+attribute and a dict value; empty/negative/bool/float/large-int/aliasing; `islice`; lazy
+`ZeroDivisionError`/`IndexError`; early `break`; and the rebound-capture refusal).
+`tools/update_manifest.py` was run; `--check` passes.  Targeted tests: test_ail_cov35,
+test_ail_pre116, test_ail_pre211, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

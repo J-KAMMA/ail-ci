@@ -1,14 +1,16 @@
-"""Branch cov35: a generator expression nested inside another generator expression on the general
-path, when every nested one is read to exhaustion there (join/sum/list/sorted/min/max, a
-comprehension source, a starred call or a tuple unpacking assignment), each compared with CPython
-3.12.
+"""Branch cov35: generator expressions on the general path, each compared with CPython 3.12.
 
 * PROGRAMS are compiled twice (AIL_UNIFIED_FORCE=1, the general path; and the default build, which
-  falls back to it) and must print what CPython prints.  They cover empty and negative inputs,
-  bool/float/large int values, aliasing, a three-level nest, an inner generator as the outer
-  iterable, and values arriving through an argument, a list item, an attribute and a dict value.
-* a nested generator saved as a value, consumed by `next`, or used with any()/all() is not
-  materialised safely, so it stays a named compile-time refusal.
+  falls back to it) and must print what CPython prints.  They cover a generator expression nested
+  inside another generator expression read to exhaustion (join/sum/list/sorted/min/max, a
+  comprehension source, a starred call or a tuple unpacking assignment), and a generator expression
+  saved as a value whose body can raise: it is lowered to a real generator function, so a
+  subscript/division error is raised only at `next()`, a `break` never evaluates the elements after
+  it, and empty, negative, bool/float/large-int and aliased inputs all match.  Values arrive through
+  an argument, a list item, an attribute and a dict value.
+* a nested generator saved as a value, consumed by `next`, or used with any()/all() stays a named
+  compile-time refusal, and so does a saved generator whose captured local is rebound after it is
+  created (the module-level lowering would freeze the old value).
 """
 import os
 import subprocess
@@ -77,6 +79,60 @@ print(list(sum(v for v in row) for row in box.data["rows"]))
 print(set(sum(v for v in row) for row in [[1, 2], [3], [1, 2]]))
 '''
 
+PROGRAMS['running'] = r'''from itertools import islice
+
+class Holder:
+    def __init__(self, numbers):
+        self.numbers = numbers
+
+def running(values):
+    return (sum(values[:k]) / k for k in range(1, len(values) + 1))
+
+def first(gen, n):
+    out = []
+    for i, value in enumerate(gen):
+        if i >= n:
+            break
+        out.append(value)
+    return out
+
+def risky(pairs):
+    return (left // right for left, right in pairs)
+
+def pick(rows):
+    return (row[0] for row in rows)
+
+def show(values):
+    print(" ".join("%.2f" % v for v in first(running(values), 10)))
+
+show([42, 49, -20, 42])
+show([-46, -29, 19, 27, -31, 16, 9, 8, -31, 7, 1])
+show([])
+show([2 ** 40, -(2 ** 40), 0, 1])
+show([True, False, True])
+show([0.5, -1.5, 2.0])
+h = Holder([1, 2, 3, 4])
+d = {"numbers": [10, 20, 30]}
+rows = [[5, 6, 7], [8, 9, 10]]
+show(h.numbers)
+show(d["numbers"])
+show([rows[0][0], rows[1][0], rows[0][2]])
+g1 = running([1, 2, 3])
+g2 = running([1, 2, 3])
+print(first(g1, 2), first(g2, 2), first(g1, 10))
+print(list(islice(running([3, 4, 5, 6]), 2)))
+print(first(risky([(10, 2), (20, 0), (30, 1)]), 1))
+try:
+    next(risky([(10, 0)]))
+except ZeroDivisionError as e:
+    print(type(e).__name__)
+try:
+    next(pick([[], [1]]))
+except IndexError as e:
+    print(type(e).__name__)
+print(next(pick([[7], [8]])))
+'''
+
 REFUSED = (
     ("saved", "g = (x for x in (y for y in [1, 2, 3]))\nprint(list(g))\n",
      "nested inside another generator expression"),
@@ -84,6 +140,14 @@ REFUSED = (
      "nested inside another generator expression"),
     ("any", "print(any(x > 1 for x in (y for y in [0, 1, 2])))\n",
      "generator expression whose iterable is itself"),
+    ("rebound", """def make(values):
+    numbers = values
+    gen = (numbers[k] * 2 for k in range(2))
+    numbers = [100, 200]
+    return gen
+
+print(list(make([1, 2])))
+""", "generator expression used as a value"),
 )
 
 
@@ -139,6 +203,10 @@ class Refused(unittest.TestCase):
 
     def test_nested_generator_under_any(self):
         self.refused(REFUSED[2][1], REFUSED[2][2], AIL_UNIFIED_FORCE="1")
+
+    def test_rebound_capture_keeps_the_named_refusal(self):
+        self.refused(REFUSED[3][1], REFUSED[3][2], AIL_UNIFIED_FORCE="1")
+        self.refused(REFUSED[3][1], REFUSED[3][2])
 
 
 if __name__ == "__main__":

@@ -2513,6 +2513,7 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _compile_cond(self, source):
         tree = ast.parse(source)
+        _rewrite_lazy_genexps(tree, _bound_names(tree))
         self.source_has_class = any(isinstance(n, ast.ClassDef) for n in ast.walk(tree))
         import exctext
         exctext.refuse_args_item_store(tree, Unsupported)
@@ -12685,8 +12686,8 @@ def _genexp_can_raise(node, user_functions, safe_classes, real_next):
     return False
 
 
-def _lazy_raising_genexp(tree):
-    """The first generator expression saved as a value whose body can raise, or None.  The typed
+def _lazy_raising_genexps(tree):
+    """Every generator expression saved as a value whose body can raise (in AST order).  The typed
     path already refuses this construct by name; the general path used to materialise it eagerly,
     so an exception the CPython generator would raise only at `next()` aborted before the caller's
     `try` could catch it."""
@@ -12704,11 +12705,304 @@ def _lazy_raising_genexp(tree):
             if arity is not None:
                 safe_classes[n.name] = arity
     real_next = counts.get('next', 0) == 0
+    found = []
     for node in ast.walk(tree):
         if isinstance(node, ast.GeneratorExp) and not _genexp_consumed_in_place(node, parents) \
                 and _genexp_can_raise(node, user_functions, safe_classes, real_next):
-            return node
+            found.append(node)
+    return found, parents
+
+
+def _lazy_raising_genexp(tree):
+    found, _ = _lazy_raising_genexps(tree)
+    return found[0] if found else None
+
+
+def _pattern_names(pattern):
+    names = set()
+    for n in ast.walk(pattern):
+        if isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+            names.add(n.name)
+        elif isinstance(n, ast.MatchMapping) and n.rest:
+            names.add(n.rest)
+    return names
+
+
+def _function_local_records(fn):
+    """(parameters, local names, {name: [(line, direct), ...]}) for one function, without
+    descending into nested def / lambda / class / comprehension scopes.  `direct` is true only
+    for a store written as a top-level statement of the function body (no if / loop / try / with
+    around it), which is what makes 'bound before the generator, never rebound after' checkable."""
+    params = {a.arg for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs}
+    if fn.args.vararg:
+        params.add(fn.args.vararg.arg)
+    if fn.args.kwarg:
+        params.add(fn.args.kwarg.arg)
+    records = {}
+    declared = set()
+
+    def rec(name, line, direct):
+        records.setdefault(name, []).append((line or 0, direct))
+
+    def walk_expr(e, direct):
+        if isinstance(e, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda)):
+            return
+        if isinstance(e, ast.NamedExpr):
+            rec(e.target.id, getattr(e, 'lineno', 0), False)
+        for child in ast.iter_child_nodes(e):
+            if isinstance(child, ast.expr):
+                walk_expr(child, direct)
+
+    def walk(stmts, direct):
+        for n in stmts:
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                rec(n.name, n.lineno, direct)
+                continue
+            if isinstance(n, (ast.Global, ast.Nonlocal)):
+                declared.update(n.names)
+                continue
+            if isinstance(n, ast.Assign):
+                for t in n.targets:
+                    for name in _assign_target_names(t):
+                        rec(name, n.lineno, direct)
+                walk_expr(n.value, direct)
+            elif isinstance(n, ast.AnnAssign):
+                for name in _assign_target_names(n.target):
+                    rec(name, n.lineno, direct)
+                if n.value is not None:
+                    walk_expr(n.value, direct)
+            elif isinstance(n, ast.AugAssign):
+                for name in _assign_target_names(n.target):
+                    rec(name, n.lineno, direct)
+                walk_expr(n.value, direct)
+            elif isinstance(n, (ast.For, ast.AsyncFor)):
+                for name in _assign_target_names(n.target):
+                    rec(name, n.lineno, False)
+                walk_expr(n.iter, False)
+                walk(n.body, False)
+                walk(n.orelse, False)
+            elif isinstance(n, ast.While):
+                walk_expr(n.test, False)
+                walk(n.body, False)
+                walk(n.orelse, False)
+            elif isinstance(n, ast.If):
+                walk_expr(n.test, False)
+                walk(n.body, False)
+                walk(n.orelse, False)
+            elif isinstance(n, ast.Try):
+                walk(n.body, False)
+                for h in n.handlers:
+                    if h.name:
+                        rec(h.name, getattr(h, 'lineno', 0), False)
+                    walk(h.body, False)
+                walk(n.orelse, False)
+                walk(n.finalbody, False)
+            elif isinstance(n, (ast.With, ast.AsyncWith)):
+                for item in n.items:
+                    walk_expr(item.context_expr, False)
+                    if item.optional_vars is not None:
+                        for name in _assign_target_names(item.optional_vars):
+                            rec(name, n.lineno, False)
+                walk(n.body, False)
+            elif isinstance(n, ast.Match):
+                walk_expr(n.subject, False)
+                for case in n.cases:
+                    for name in _pattern_names(case.pattern):
+                        rec(name, getattr(case.pattern, 'lineno', n.lineno), False)
+                    walk(case.body, False)
+            elif isinstance(n, (ast.Import, ast.ImportFrom)):
+                for a in n.names:
+                    rec((a.asname or a.name).split('.')[0], n.lineno, direct)
+            elif isinstance(n, ast.Delete):
+                for t in n.targets:
+                    for name in _assign_target_names(t):
+                        rec(name, n.lineno, False)
+                    walk_expr(t, False)
+            else:
+                for child in ast.iter_child_nodes(n):
+                    if isinstance(child, ast.expr):
+                        walk_expr(child, direct)
+                    elif isinstance(child, ast.stmt):
+                        walk([child], direct)
+
+    walk(fn.body, True)
+    locals_ = set(params) | {name for name in records if name not in declared}
+    return params, locals_, records
+
+
+_SCOPE_BOUNDARIES = (ast.Module, ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef,
+                     ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _nearest_scope(node, parents):
+    current = parents.get(node)
+    while current is not None:
+        if isinstance(current, _SCOPE_BOUNDARIES):
+            return current
+        current = parents.get(current)
     return None
+
+
+_GENEXP_LOWER_CALLS = frozenset({
+    'len', 'sum', 'min', 'max', 'abs', 'str', 'int', 'float', 'bool', 'round', 'sorted',
+    'list', 'tuple', 'set', 'dict', 'enumerate', 'zip', 'range', 'any', 'all',
+})
+
+
+def _safe_to_lower(gen, bound_names):
+    """The body moved into the synthetic generator function must use only constructs whose
+    behaviour this compiler already matches there: arithmetic, subscripts/slices, and calls to
+    builtins the program does not shadow.  A user function or class constructor is excluded --
+    its own gaps (custom __setattr__, __slots__, a rebound class name) would otherwise turn a
+    named refusal into a silent difference.  The first iterable is NOT moved (it stays at the
+    call site, in the enclosing scope), so it is not screened here."""
+    roots = [gen.elt]
+    roots.extend(g.iter for g in gen.generators[1:])
+    roots.extend(cond for g in gen.generators for cond in g.ifs)
+    for root in roots:
+        for n in ast.walk(root):
+            if isinstance(n, (ast.Yield, ast.YieldFrom, ast.Await, ast.Lambda, ast.NamedExpr,
+                              ast.Attribute, ast.ListComp, ast.SetComp, ast.DictComp,
+                              ast.GeneratorExp, ast.Starred)):
+                return False
+            if isinstance(n, ast.Call):
+                if not isinstance(n.func, ast.Name) or n.keywords \
+                        or any(isinstance(a, ast.Starred) for a in n.args):
+                    return False
+                if n.func.id in bound_names or n.func.id not in _GENEXP_LOWER_CALLS:
+                    return False
+    return True
+
+
+def _captures_for(gen, parents, local_cache):
+    """The local names the generator expression reads, and whether each is safe to pass by value
+    at creation (definitely bound before it, never stored again after it).  Returns None when the
+    expression is outside a supported scope or a capture cannot be shown safe."""
+    scope = _nearest_scope(gen, parents)
+    if scope is None or isinstance(scope, (ast.Lambda, ast.ClassDef, ast.ListComp, ast.SetComp,
+                                           ast.DictComp, ast.GeneratorExp)):
+        return None
+    if isinstance(scope, ast.Module):
+        return []
+    captures = []
+    seen = set()
+    for name in _free_reads(gen, set()):
+        if name in seen:
+            continue
+        seen.add(name)
+        current = scope
+        found = None
+        while current is not None:
+            if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if id(current) not in local_cache:
+                    local_cache[id(current)] = _function_local_records(current)
+                params, locals_, records = local_cache[id(current)]
+                if name in locals_:
+                    found = (params, records)
+                    break
+            current = parents.get(current)
+        if found is None:
+            continue
+        params, records = found
+        if name in params:
+            if records.get(name):
+                return None
+            captures.append(name)
+            continue
+        stores = records.get(name)
+        if not stores:
+            return None
+        if not all(direct and line < gen.lineno for line, direct in stores):
+            return None
+        captures.append(name)
+    return captures
+
+
+def _rewrite_lazy_genexps(tree, bound_names):
+    """Lower a saved, potentially-raising generator expression to a real generator function
+    (top level, named `_lzgen_N`) so its body runs at `next()`/iteration, exactly as CPython's
+    generator object does, instead of being materialised eagerly or refused.  Only expressions
+    whose free local names are provably stable are rewritten; the rest stay the named refusal."""
+    found, parents = _lazy_raising_genexps(tree)
+    if not found:
+        return
+    found_ids = {id(node) for node in found}
+    chosen = []
+    for node in found:
+        current = parents.get(node)
+        nested = False
+        while current is not None:
+            if id(current) in found_ids:
+                nested = True
+                break
+            current = parents.get(current)
+        if not nested:
+            chosen.append(node)
+    local_cache = {}
+    plans = []
+    for node in chosen:
+        captures = _captures_for(node, parents, local_cache)
+        if captures is None or any(isinstance(n, ast.GeneratorExp) for n in ast.walk(node)
+                                   if n is not node):
+            continue
+        if not _safe_to_lower(node, bound_names):
+            continue
+        plans.append((node, captures))
+    if not plans:
+        return
+    used = set(bound_names)
+    new_defs = []
+    calls = {}
+    for index, (node, captures) in enumerate(plans, 1):
+        name = '_lzgen_%d' % index
+        while name in used:
+            index += 1
+            name = '_lzgen_%d' % index
+        used.add(name)
+        it_name = '_lz_it_%d' % index
+        while it_name in captures or it_name in used:
+            it_name += '_'
+        gener = copy.deepcopy(node.generators)
+        body = [ast.Expr(value=ast.Yield(value=copy.deepcopy(node.elt)))]
+        for position in range(len(gener) - 1, -1, -1):
+            clause = gener[position]
+            for condition in reversed(clause.ifs):
+                body = [ast.If(test=condition, body=body, orelse=[])]
+            source = ast.Name(id=it_name, ctx=ast.Load()) if position == 0 else clause.iter
+            body = [ast.For(target=clause.target, iter=source, body=body, orelse=[])]
+        fn = ast.FunctionDef(
+            name=name,
+            args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=n) for n in captures + [it_name]],
+                               vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+            body=body, decorator_list=[], returns=None, type_comment=None, type_params=[])
+        ast.copy_location(fn, node)
+        for child in ast.walk(fn):
+            if 'lineno' in child._attributes and not hasattr(child, 'lineno'):
+                ast.copy_location(child, node)
+        new_defs.append(fn)
+        call = ast.Call(func=ast.Name(id=name, ctx=ast.Load()),
+                        args=[ast.Name(id=n, ctx=ast.Load()) for n in captures]
+                        + [copy.deepcopy(node.generators[0].iter)],
+                        keywords=[])
+        ast.copy_location(call, node)
+        calls[id(node)] = call
+
+    class Replace(ast.NodeTransformer):
+        def visit_GeneratorExp(self, node):
+            if id(node) in calls:
+                return calls[id(node)]
+            return self.generic_visit(node)
+
+    Replace().visit(tree)
+    at = 0
+    body = tree.body
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+            and isinstance(body[0].value.value, str):
+        at = 1
+    while at < len(body) and isinstance(body[at], ast.ImportFrom) and body[at].module == '__future__':
+        at += 1
+    body[at:at] = new_defs
+    ast.fix_missing_locations(tree)
 
 
 def build(source, report, allow_mix=True):
