@@ -57,6 +57,20 @@ d["a"] = 1
 print(d)
 '''
 
+POSITIONED = '''# a comment
+
+d = {}
+d["a"] = 1
+print(d)
+'''
+
+NESTED = '''rows = [1, 2, 3]
+d = {}
+for n in rows:
+    d[n] = n
+    print(d)
+'''
+
 
 class Rd3Tests(unittest.TestCase):
     def setUp(self):
@@ -117,6 +131,24 @@ class Rd3Tests(unittest.TestCase):
         self.assertEqual(diagnostic['code'], 'type')
         self.assertIn('dict', diagnostic['message'])
         self.assertNotIn('no def found', diagnostic['message'])
+        self.assertEqual((diagnostic['line'], diagnostic['column']), (3, 1), diagnostic)
+        self.assertEqual(Path(diagnostic['path']).resolve(), source.resolve())
+        self.assertEqual(diagnostic['location_kind'], 'source_statement')
+
+    def test_check_reports_the_refused_statement_position(self):
+        # The rewrite that gives a top-level-only script its `main` unparses the tree and renumbers
+        # its lines; the diagnostic must still name the statement as the source has it (comments,
+        # blank lines and indentation included), not the rewritten text's own line.
+        cases = ((POSITIONED, 5, 1), (TOP_DICT_PRINT, 3, 1), (NESTED, 5, 5))
+        for text, line, column in cases:
+            with self.subTest(line=line):
+                source = self.write(text, 'positioned.py')
+                result, report = self.check(source)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                diagnostic = report['diagnostics'][0]
+                self.assertEqual((diagnostic['line'], diagnostic['column']), (line, column), diagnostic)
+                self.assertEqual(Path(diagnostic['path']).resolve(), source.resolve())
+                self.assertEqual(diagnostic['location_kind'], 'source_statement')
 
     def test_strict_construct_line_keeps_the_whole_type(self):
         source = self.write(DICT_PRINT, 'strict_dict.py')

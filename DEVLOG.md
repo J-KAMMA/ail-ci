@@ -1,3 +1,30 @@
+## 2026-10-29 -- rd3 review fix: top-level-only `check` diagnostics name the source statement (job-rd3-10300430)
+
+Routing a top-level-only script through `pyc.to_c` (the rd3 change) made `_rewrite_script` move
+its statements into a synthesised `def` and unparse the tree; a refusal's `source_line` then
+counted the rewritten text's lines, while `check` maps it through a `source_map` keyed by the
+caller's own lines.  The diagnostic named a neighbouring statement (`print(d)` on line 5 reported
+line 4) or none at all (`line=null, path=null` on a short script).  `pyc` now records
+{rewritten line: source line} before the unparse (`_rewrite_line_map`) and maps a refusal's
+`source_line` back in `_to_c` (`_restore_source_lines`); the leading-blank adjustment is no longer
+`--debug`-only.  `--debug` builds are unchanged (`pyfunc.to_c` has already restored the lines
+there), and `--debug-dir` `program.c` for accepted scripts is byte-identical to `4c79b34`.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `s_types` (int, negative, float, bool,
+int64 max/min), `s_empty` (empty list/str), `s_alias` (list aliasing) and `s_through` (a value
+reaching `print` through a method argument, a list item, an attribute and a dict value) match
+CPython.  Refused by name, with their source line: `r_line` (line 5), `r_line3` (3), `r_line10`
+(10), `r_lead` (leading blank lines, 5), `r_nest` (nested in a `for`, 5:5), `r_afterdef` /
+`r_afterdef2` (def file with a dangling statement), `r_method` (inside a kept method, 9),
+`r_listexpr` (single print, line 1) and `r_strict_def` unchanged at 4:5.  `r_single`, `r_empty`,
+`r_comment`, `r_listitem`, `r_attr`, `r_dictval` pass `check` as before.  Every probe's `check`
+JSON is identical to `4c79b34` except the corrected `line`/`column`/`path` fields above.  Added
+the position assertions to `test_ail_rd3.py`.  Ran `test_ail_rd3`, `test_ail_strict`,
+`test_ail_check`, `test_ail_source_check`, `test_ail_check_repair_context`,
+`test_ail_edit_check_report`, `test_ail_debug_lines`, `test_ail_unbound`, `test_ail_fallback_note`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-29 -- rd3: `check` accepts a top-level-only script; strict construct keeps the whole type (job-rd3-10300430)
 
 `ail_chatgpt.py check` routed straight through `pyfunc.to_c`, which has no script mode, so a
