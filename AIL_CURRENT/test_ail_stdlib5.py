@@ -1070,7 +1070,7 @@ class Refusals(unittest.TestCase):
 
     def test_refusals_name_the_use(self):
         cases = {
-            "decimal": ("from decimal import Decimal\n\nprint(Decimal('1.10') + Decimal('2.20'))\n", "decimal"),
+            "decimal": ("from decimal import Decimal, BasicContext\n\nprint(Decimal('1.10') + Decimal('2.20'))\n", "decimal.BasicContext"),
             "flag": ("from enum import Flag\n\nclass P(Flag):\n    A = len('ab')\n\nprint(P.A)\n", "Flag member"),
             "mixin": ("from enum import Enum\n\nclass P(str, Enum):\n    A = 'a'\n\nprint(P.A)\n", "mixed-in"),
             "unseeded": ("import random\n\nr = random.Random()\nprint(r.random())\n", "seed"),

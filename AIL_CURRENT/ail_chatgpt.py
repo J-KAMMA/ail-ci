@@ -4273,6 +4273,12 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     entry_defs = None
             if local_imports and entry and syntax == 'python' and (not module_only or merge_library):
                 merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
+                # F2: the front end's own passes (enum lowering) print class names too; the compiler process gets it from _surface_env
+                class_names = _class_names_env(merged)
+                if class_names:
+                    os.environ['AIL_CLASS_NAMES'] = class_names
+                else:
+                    os.environ.pop('AIL_CLASS_NAMES', None)
                 if merged is not None:
                     _MERGED_ENTRIES[str(path)] = merged
                     text = merged.text
@@ -4435,7 +4441,34 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) else None)
             if name is not None:
                 if name in names:
-                    raise ValueError(f'duplicate AIL name: {name}')
+                    duplicate = ValueError(
+                        f'duplicate AIL name: {name}'
+                        + ('' if syntax == 'ail' else
+                           f' (`def {name}` / `class {name}` is bound a second time at module level; a '
+                           'function here has one definition, which also rules out the `@f.register` / '
+                           '`def _(...)` overload pattern)\n  write instead: give each function its own name '
+                           'and call the right one (or dispatch with isinstance in one function)'))
+                    duplicate.source_line = getattr(node, 'lineno', None)
+                    duplicate.source_column = getattr(node, 'col_offset', 0)
+                    if syntax == 'python' and getattr(node, 'lineno', None):
+                        where = (merged.positions.get(node.lineno) if merged is not None
+                                 else (str(path), node.lineno, node.col_offset + 1))
+                        if merged is None:
+                            # the lowered text carries the prelude: find the second definition in the file as written
+                            try:
+                                found = [i for i, source_line in enumerate(
+                                    Path(path).read_text(encoding='utf-8').splitlines(), 1)
+                                    if re.match(r'(?:async\s+)?(?:def|class)\s+%s\b' % re.escape(name), source_line)]
+                            except (OSError, UnicodeError):
+                                found = []
+                            if len(found) >= 2:
+                                where = (str(path), found[1], 1)
+                        if where is not None:
+                            located = ValueError(f'AIL {"source" if entry else "module"} {where[0]}: '
+                                                 f'line {where[1]}: {duplicate}')
+                            located.refusal = (where[0], where[1], where[2], str(duplicate))
+                            raise located from duplicate
+                    raise duplicate
                 names.add(name)
             if isinstance(node, ast.FunctionDef):
                 functions.append(node)
@@ -5064,7 +5097,19 @@ def _surface_env(args, source, env=None):
         env['AIL_SURFACE'] = 'python'
     else:
         env.pop('AIL_SURFACE', None)
+    # F2: the printed names of the classes the module merge renamed (python/pkg-v12/classname.py)
+    merged = _MERGED_ENTRIES.get(str(source)) or _MERGED_ENTRIES.get(str(Path(source).resolve()))
+    names = _class_names_env(merged)
+    if names:
+        env['AIL_CLASS_NAMES'] = names
+    else:
+        env.pop('AIL_CLASS_NAMES', None)
     return env
+
+
+def _class_names_env(merged):
+    classes = getattr(merged, 'classes', None)
+    return json.dumps({k: list(v) for k, v in classes.items()}, sort_keys=True) if classes else ''
 
 
 def _python_source(args, data):
@@ -5098,7 +5143,8 @@ def _python_notes(message, notes, source):
             break
     # library batch 4 (csv, datetime, ...): the import is refused because a use was not built; say which
     found = re.search(r"import of '(csv|datetime|decimal|fractions|unicodedata|statistics|textwrap|enum|string)'; [^\n]*?by hand",
-                      message)
+                      message) or re.search(r"(decimal)\.\w+ is not built: decimal needs exact[^\n]*(?:\n  write instead: [^\n]*)?",
+                                            message) or re.search(r"(unicodedata|ipaddress|html)\.\w+ \(not yet published in NAMES_library\.json\)", message)
     if found:
         for entries in notes.values():
             named = [text.split(';')[0] for _, text in entries if found.group(1) in text.split(':')[0]]
@@ -5359,6 +5405,10 @@ def main(argv=None):
              'with --json the blockers are printed as ail.strict/1 JSON')
     compile_cmd.add_argument('--static', action='store_true',
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
+    compile_cmd.add_argument('--gpu', action='store_true',
+        help="build the loops marked '# ail: gpu' as GPU kernels (docs/design/GPU.md; stage G1 runs the kernel on the "
+             "CPU as an emulation, same output): a marked loop that is not provably eligible is refused by name "
+             "(also AIL_GPU_BUILD=1)")
     compile_cmd.add_argument('--lib', metavar='NAME',
         help='build the @export functions of the source as a C library: -o DIR receives lib<NAME>.so, '
              'lib<NAME>.a and <NAME>.h (error codes, NAME_last_error(), NAME_free(); see NATIVE_LIBRARIES.md)')
@@ -5409,6 +5459,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if getattr(args, 'no_cache', False):
         os.environ['AIL_NO_CACHE'] = '1'
+    if getattr(args, 'gpu', False):
+        os.environ['AIL_GPU_BUILD'] = '1'
     if getattr(args, 'static', False):
         if sys.platform == 'darwin' and not getattr(args, 'target', None):
             parser.error('--static is not supported on macOS: Apple ships no static C library, so the '
@@ -5618,6 +5670,24 @@ def main(argv=None):
         if source.suffix.lower() not in ('.ail', '.py') or not source.is_file():
             parser.error('source must be an existing .ail or .py file')
         notes = {}
+        gpu_sites = []
+        if args.command == 'compile' and os.environ.get('AIL_GPU_BUILD', '').strip().lower() in ('1', 'on', 'yes', 'true') \
+                and source.suffix.lower() == '.py':
+            # `compile --gpu`: the syntactic half of the proof on the file as written (python/pkg-v12/gpu.py)
+            sys.path.insert(0, str(ROOT / 'python/pkg-v12'))
+            import gpu
+            try:
+                gpu_sites = gpu.sites_of(source.read_text(encoding='utf-8'))
+            except gpu.GpuRefusal as refusal:
+                line = getattr(refusal, 'source_line', None)
+                lines = source.read_text(encoding='utf-8').strip().splitlines()
+                where = _relpath(source)
+                if line is not None and 0 < line <= len(lines):
+                    text = lines[line - 1]
+                    where += ':%d:%d' % (line, len(text) - len(text.lstrip()) + 1)
+                return native_build.emit(args, {}, 3, message='%s: not in the subset: %s' % (where, refusal))
+            except (SyntaxError, ValueError, OSError):
+                gpu_sites = []
         loading = native_build.loading(args) or {'source_map': {}}
         ffi = None if library and not export_lib else _ffi_session(args)
         if export_lib and (separate or args.target):
@@ -5737,6 +5807,7 @@ def main(argv=None):
                         hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
                         if Path(str(object_path) + '.json').is_file() else '-')],
                     environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
+                    *(['classes', environment['AIL_CLASS_NAMES']] if environment.get('AIL_CLASS_NAMES') else []),
                     *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
                     *(['link', ffi_env['AIL_FFI_LINK']] if link else []),
                     *(['debug', hashlib.sha256(line_map.read_bytes()).hexdigest()] if debug else []))
@@ -5796,6 +5867,15 @@ def main(argv=None):
                 for line in _fallback_notes(args, source, result.stderr, locate=not objects and not separate,
                                              source_map=loading['source_map']):
                     print(line, file=sys.stderr)
+                if gpu_sites:                                             # gpu.py: a marked loop that got no kernel
+                    import gpu
+                    applied = set()
+                    for line in (result.stderr or '').splitlines():
+                        if line.startswith('ail-gpu-applied:'):
+                            applied = {int(n) for n in line.split(':', 1)[1].split()}
+                    for number in gpu_sites:
+                        if number not in applied:
+                            print('note: %s:%d: %s' % (_relpath(source), number, gpu.IGNORED), file=sys.stderr)
                 # typedpar.py: why a thread / executor / pool use runs under the general path's lock
                 for path, entries in notes.items():
                     for line, text in entries:
