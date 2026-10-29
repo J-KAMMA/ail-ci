@@ -1,3 +1,28 @@
+## 2026-10-29 -- cov31: nested generator expressions that are consumed eagerly (job-cov31-10290700)
+
+Profiled all 219 programs in `lab/corpus/programs` by compiling each one (the corpus runner's
+compile step, one process at a time per build).  The default build refused 24 programs (195
+compiled); the largest non-import construct was a generator expression nested in another
+generator expression, 3 programs (deepseek t172, deepseek t432, glm t432).  The general path now
+builds a nested generator expression when the outer generator is read to exhaustion at once (an
+eager call/consumer, a comprehension iterable, a starred or tuple/list unpack) and every inner
+generator is read by an eager consumer (`sum`, `join`, `list`, `sorted`, `min`/`max`, `set`, ...),
+provided the elements and lazy clauses have no observable side effect.  Materialising the inner
+list there is the same point CPython creates and reads its generator, so values, order,
+exceptions and exit status match CPython on both builds.  All other nested shapes stay refused
+by name: a partial consumer (`next`, `any`, `all`), a saved inner or outer generator, a `for`
+loop that can break, and an inner element with a user call/`print`/walrus side effect.
+
+After the change the default build refuses 21 programs (198 compiled), and the forced general
+build also refuses 21 (the same three programs now build and match CPython on all three corpus
+inputs).  Probes under `/tmp/probes` on both builds: `p_cov31_nested_eager`,
+`p_cov31_consumers`, `p_cov31_min_join` match CPython; `p_cov31_nested_refuse`,
+`p_cov31_nested_refuse_saved`, `p_cov31_refuse_any_inner`, `p_cov31_refuse_for_break`,
+`p_cov31_refuse_saved_outer` and `p_cov31_side_effects` are refused by name.  Added
+`AIL_CURRENT/test_ail_cov31.py` (4 matching programs and 6 refusal shapes, both builds) and
+registered it in `ail_check.MODULES`; `test_ail_pre41`, `test_ail_pre42` and the other generator
+modules still pass.  `tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

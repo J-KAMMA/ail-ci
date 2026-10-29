@@ -2536,13 +2536,24 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        parents = {}
+        for par in ast.walk(tree):
+            for child in ast.iter_child_nodes(par):
+                parents[child] = par
         for gen in ast.walk(tree):
-            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+            if not isinstance(gen, ast.GeneratorExp) or id(gen) in any_all_genargs:
+                continue
+            if not any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                continue
+            # A nested generator is only safe when the outer one is read to exhaustion at the
+            # same point CPython starts reading it, and every inner one is read by an eager call.
+            inner = (gen if not _genexp_consumed_now(gen, parents) or not _genexp_side_effect_free(gen)
+                     else _nested_genexp_not_eager(gen, parents))
+            if inner is not None:
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
-                refusal.source_line = getattr(gen, 'lineno', None)
+                refusal.source_line = getattr(inner, 'lineno', None) or getattr(gen, 'lineno', None)
                 raise refusal
         lazy_genexp = _lazy_raising_genexp(tree)
         if lazy_genexp is not None:
@@ -6495,9 +6506,10 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
-            raise Unsupported('a generator expression nested inside another generator expression '
-                              '(the inner one would be materialised eagerly, not lazily)')
+        # A nested generator expression is allowed only when _compile_cond has shown that its
+        # inner generator is consumed at once by an eager call (sum/join/list/...): materialising
+        # it there is observationally the same point in the program.  Every other nested shape
+        # was refused by name before this emitter ran.
         t = self.expr_ListComp(node, ctx)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
@@ -12446,6 +12458,81 @@ _GENEXP_SAFE_METHODS = frozenset({
     'rsplit', 'splitlines', 'partition', 'rpartition', 'removeprefix', 'removesuffix',
     'bit_length', 'bit_count', 'is_integer', 'get', 'keys', 'values', 'items',
 })
+
+
+_GENEXP_NESTED_EAGER_CALLS = _GENEXP_EAGER_CALLS - {'next', 'any', 'all'}
+
+
+def _genexp_consumed_now(node, parents):
+    """True iff the construct around `node` reads every element at once: a comprehension's
+    iterable, a starred unpack, a tuple/list unpacking assignment, or an argument of an eager
+    call.  A `for` loop is excluded because it can break before the generator is exhausted, and a
+    partial consumer (`next`, `any`, `all`) is excluded because it would run the remaining
+    elements (and their side effects) early."""
+    par = parents.get(node)
+    if isinstance(par, ast.comprehension) and par.iter is node:
+        return True
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, (ast.Assign, ast.AnnAssign)):
+        target = (par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1
+                  else getattr(par, 'target', None))
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return True
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in _GENEXP_NESTED_EAGER_CALLS:
+            return True
+        if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
+            return True
+    return False
+
+
+_GENEXP_PURE_CALLS = _GENEXP_SAFE_CALLS | _GENEXP_EAGER_CALLS
+_GENEXP_PURE_METHODS = _GENEXP_SAFE_METHODS | {'join'}
+
+
+def _genexp_side_effect_free(node):
+    """True iff the element and the lazy clauses of `node` have no observable side effect.
+    The outermost iterable is excluded: CPython evaluates it when the generator object is made,
+    and the eager lowering makes it at the same point.  A call is trusted only when it is one of
+    the pure builtins/methods above (the eager list/join/sum consumers included); a user
+    function, `print`, a walrus, yield/await or an inner list/set/dict comprehension is not.
+    Reading a subscript or an attribute is pure (it can raise, but both orders raise at the same
+    element, and the outer generator is already read to exhaustion here)."""
+    roots = [node.elt]
+    for i, gen in enumerate(node.generators):
+        if i:
+            roots.append(gen.iter)
+        roots.extend(gen.ifs)
+    for root in roots:
+        for n in ast.walk(root):
+            if isinstance(n, ast.Call):
+                f = n.func
+                if isinstance(f, ast.Name) and f.id in _GENEXP_PURE_CALLS:
+                    continue
+                if isinstance(f, ast.Attribute) and f.attr in _GENEXP_PURE_METHODS:
+                    continue
+                return False
+            if isinstance(n, (ast.NamedExpr, ast.Yield, ast.YieldFrom, ast.Await)):
+                return False
+            if isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp)):
+                return False
+    return True
+
+
+def _nested_genexp_not_eager(outer, parents):
+    """The first generator expression nested in `outer` that is not consumed at once by an eager
+    call, or None when every nested one is.  Such an inner generator is materialised where CPython
+    would create it, but the surrounding call reads every element at that point, so the eager
+    list is observationally the same.  Its element must also be side-effect free, or the eager
+    materialisation would move those effects ahead of the outer element that consumes it."""
+    for node in ast.walk(outer):
+        if node is outer or not isinstance(node, ast.GeneratorExp):
+            continue
+        if not _genexp_consumed_now(node, parents) or not _genexp_side_effect_free(node):
+            return node
+    return None
 
 
 def _genexp_consumed_in_place(node, parents):
