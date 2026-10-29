@@ -250,11 +250,13 @@ def _pack_helper(fields, order, fmt, number):
         elif kind == 'p':
             p = 'p%d' % arg
             arg += 1
-            n, i = '_pn%d' % arg, '_pi%d' % arg
+            n, i, l = '_pn%d' % arg, '_pi%d' % arg, '_pl%d' % arg
             lines += ['    %s = len(%s)' % (n, p)]
+            lines += ['    %s = %s' % (l, n)]
             if count > 0:
-                lines += ['    if %s > %d:' % (n, count - 1), '        %s = %d' % (n, count - 1)]
-            lines += ['    out.append(%s)' % n, '    %s = 0' % i,
+                lines += ['    if %s > %d:' % (l, count - 1), '        %s = %d' % (l, count - 1)]
+            lines += ['    if %s > 255:' % l, '        %s = 255' % l]
+            lines += ['    out.append(%s)' % l, '    %s = 0' % i,
                       '    while %s < %d:' % (i, max(count - 1, 0)),
                       '        out.append(%s[%s] if %s < %s else 0)' % (p, i, i, n),
                       '        %s += 1' % i]

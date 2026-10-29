@@ -1,3 +1,19 @@
+## 2026-10-29 -- stdlib26 review: Pascal strings above 256 bytes and the exported SDK (job-stdlib26-10290642)
+
+The review found two defects in the previous commit.  `struct.pack("<%dp", ...)` with a count
+above 256 crashed (`bytes must be in range(0, 256)`) because the lowering clamped the data length
+and then reused that clamped value as the Pascal length byte.  CPython stores `min(len, count-1,
+255)` in the byte but copies `min(len, count-1)` data bytes, so `structlib.py` now computes the
+length byte separately from the copy bound.  `<255p`, `<256p`, `<257p`, `<300p`, `>257p`, `@257p`,
+a short value in a wide field and input reached through an argument, an alias, a list item, an
+attribute and a dict value match CPython on both `cmp.sh` builds.  The four new files
+(`python/pkg-v12/structlib.py`, `stdlib/struct.py`, `stdlib/struct_glue.c`, `stdlib/struct_glue.h`)
+are now listed in `MANIFEST.json` `sdk_files`, so the exported SDK contains them and
+`test_ail_sdk` passes.  Regression cases for the Pascal boundaries were added to
+`test_ail_stdlib26`.  Tests: `test_ail_stdlib26`, `test_ail_sdk`, `test_ail_files`,
+`test_ail_safetynet` and `test_ail_corpus_findings3`, all 0 failed; `tools/update_manifest.py`
+and `--check` pass on the committed files.
+
 ## 2026-10-28 -- stdlib26: `struct` pack / unpack / unpack_from / calcsize with a literal format (job-stdlib26-10290642)
 
 The most-imported standard module still refused in `lab/corpus/programs` and

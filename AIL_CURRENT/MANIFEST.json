@@ -7016,8 +7016,11 @@
     "test_ail_pre421.py": "7d3889b891c3f1c6ac531b2627791215f30941505733d981dd54adb2fdb76b6a",
     "test_ail_pre422.py": "3179d0ad7c3a7e4125c9bb6bab28de7a4a2c521afd12d6ef53e4dfbeb9c0e7ff",
     "test_ail_pre423.py": "e1505577d1aec7dbf07a96677979351537b54dab19e4669825b3068668db67da",
-    "python/pkg-v12/structlib.py": "15dfd0f0a54fffdd1c4e9bc1ad57212be290f7da7973341c0171d7c6117d26ad",
-    "test_ail_stdlib26.py": "651244f20b83a782b02d177426c9ab884b34d81c1fccb8038b99ec95f7d1422f"
+    "python/pkg-v12/structlib.py": "2e6db1350af82f50c5cac45754ffe0f83076393ace74c1a79f51cf040cb99c15",
+    "test_ail_stdlib26.py": "ed9c070d643f284cff7354ff15c9c38a289cb497debd9f236ee66beea8550eac",
+    "stdlib/struct.py": "66c672745b5f6781a886136cb3c6148fc1bb72c00cc261bfa288eb231bd28bef",
+    "stdlib/struct_glue.c": "f68770c9f5998f82e2b1ac6bd1c0e8a62e453eb1164bc573349906aeb7229df0",
+    "stdlib/struct_glue.h": "adfc88ff43e5c5e4844c59942cfcbd34a56324e39384d766d47a7fbc3baab9da"
   },
   "release": "R1.40+xlang-304d34f+native-round72+windows-cpython+workflow-tests-candidate+bracket-read-candidate+n0-v4-candidate+r8-fuzz-plan-v2+r9-byte-arena-sanitizer+r10-native-ledger-n0+r11-n0-fresh-evidence+r12-optimizer-current-chain+r13-xlang-arm64-emulated-gate+r14-native-r11-historical-inputs+r15-native-r11-regression+r16-native-recovered-inputs+r20-native-versioned-scope+r21-native-pinned-input-recovery+r22-provenance-precision+r23-direct-indexed-undefined+r24-protected-lock-line-endings+r25-current-r6-seeds+r26-nullish-ternary+r27-seed777-coercion+r28-includes+r30-indexof+r32-native-model-inputs+r33-native-checkpoint+r36-xlang-dynamic-array+r37-source-bound-gate+r38-host-matrix+r51-native-f32-successor+r52-native-f32-migration-candidate+r53-v1-string-width+r54-v1-runtime-repair+r55-windows-cli-intake",
   "work_id": "r140-xlang-304d34f-integration-20260926",
@@ -24956,8 +24959,11 @@
     "test_ail_pre421.py": "7d3889b891c3f1c6ac531b2627791215f30941505733d981dd54adb2fdb76b6a",
     "test_ail_pre422.py": "3179d0ad7c3a7e4125c9bb6bab28de7a4a2c521afd12d6ef53e4dfbeb9c0e7ff",
     "test_ail_pre423.py": "e1505577d1aec7dbf07a96677979351537b54dab19e4669825b3068668db67da",
-    "python/pkg-v12/structlib.py": "15dfd0f0a54fffdd1c4e9bc1ad57212be290f7da7973341c0171d7c6117d26ad",
-    "test_ail_stdlib26.py": "651244f20b83a782b02d177426c9ab884b34d81c1fccb8038b99ec95f7d1422f"
+    "python/pkg-v12/structlib.py": "2e6db1350af82f50c5cac45754ffe0f83076393ace74c1a79f51cf040cb99c15",
+    "test_ail_stdlib26.py": "ed9c070d643f284cff7354ff15c9c38a289cb497debd9f236ee66beea8550eac",
+    "stdlib/struct.py": "66c672745b5f6781a886136cb3c6148fc1bb72c00cc261bfa288eb231bd28bef",
+    "stdlib/struct_glue.c": "f68770c9f5998f82e2b1ac6bd1c0e8a62e453eb1164bc573349906aeb7229df0",
+    "stdlib/struct_glue.h": "adfc88ff43e5c5e4844c59942cfcbd34a56324e39384d766d47a7fbc3baab9da"
   },
   "base_local_change_scope": "Cross-language pipeline hardened to real-world measurement. incr.py: two new incrementalization pattern classes -- dict argmax (d[k]=d.get(k,0)+POS writes plus keys() rescan with tiebreak become update-site tracking) and sliding window sum (del xs[0] sites emit _wacc-=xs[0]); probe 64/64, mode/wma translations fire with byte-identical oracles. pkg-v12: str(<float>) enabled via existing ail_str_from_float FMT machinery (SEMANTICS.md updated). jstrans.py: deterministic JS->subset translator -- float profile (Number/parseFloat, JS Number->String formatting: integral doubles without .0, NaN/Infinity, -0->0, true / on floats, IEEE remainder), plus parser-surface hardening (ASI, shebang, new Array, function-expr arrows, stdin line-terminator fix via rstrip, null-sentinel re-kinding via vartypes/zero_of, trivial-function inlining, named TErrs for all remaining unsupported constructs). Corpus 17/17 byte-identical vs Node; real-world corpus 0->2 end-to-end with zero generic crashes (12 named TErrs). dominfer.py: machine-derived input domains via differential probing (found 2^53+ integer JS precision boundary on all add-protocol programs).",
   "integration": {
@@ -25791,6 +25797,10 @@
     "stdlib/zlib.py",
     "stdlib/zlib_glue.c",
     "stdlib/zlib_glue.h",
+    "stdlib/struct.py",
+    "stdlib/struct_glue.c",
+    "stdlib/struct_glue.h",
+    "python/pkg-v12/structlib.py",
     "python/pkg-v12/ailsql_core.h",
     "python/pkg-v12/sqllower.py",
     "python/pkg-v12/exctext.py",
