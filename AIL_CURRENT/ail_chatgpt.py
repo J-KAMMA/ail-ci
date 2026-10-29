@@ -5629,6 +5629,25 @@ def main(argv=None):
                 entry_text = ''
             if ail_export.uses_export(entry_text):
                 try:
+                    entry_tree = ast.parse(entry_text)
+                except SyntaxError:
+                    entry_tree = None
+                if entry_tree is not None:
+                    for node in ast.walk(entry_tree):
+                        reads_flag = (isinstance(node, ast.Attribute)
+                                      and node.attr == '__ail_export__')
+                        if (not reads_flag and isinstance(node, ast.Call)
+                                and isinstance(node.func, ast.Name)
+                                and node.func.id == 'getattr' and len(node.args) >= 2
+                                and isinstance(node.args[1], ast.Constant)
+                                and node.args[1].value == '__ail_export__'):
+                            reads_flag = True
+                        if reads_flag:
+                            _refuse_load(ValueError(
+                                'reading __ail_export__ from a function is not modelled: the compiled '
+                                'program has no decorator registry.\n'
+                                '  write instead: call the function directly'))
+                try:
                     ail_export.lower(entry_text)
                 except ail_export.ExportError as error:
                     if 'no @export function found' not in str(error):

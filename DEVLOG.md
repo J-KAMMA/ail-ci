@@ -23,9 +23,9 @@ Probes in `/tmp/probes/ex25` on both builds via `cmp.sh`: `p01_basic`, `p02_call
 instance attribute, then `Box().fn()`) and `p12_method` are refused by name; the invalid export
 contracts `p08_invalid_list_str`, `p09_invalid_default`, `p10_invalid_missing_return` and
 `p11_second_decorator` are refused by name where CPython raises `TypeError`; `p15_mixed_extern`
-(a file with both `@extern` and `@export`) is refused by name by the export validator.  `p13_export_attribute`
-(`getattr` of `__ail_export__`) still stops at the pre-existing general-path function-`getattr`
-limit and `p14_export_registry` is refused by name.  Added `AIL_CURRENT/test_ail_ex25.py` (3 tests)
+(a file with both `@extern` and `@export`) is refused by name by the export validator.
+`p13_export_attribute` (`getattr` of `__ail_export__`) is refused by name because the compiled
+program has no decorator registry, and `p14_export_registry` is refused by name.  Added `AIL_CURRENT/test_ail_ex25.py` (3 tests)
 and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
 test_ail_ex25, test_ail_c_export, test_ail_ffi, test_ail_python_syntax, test_ail_unified,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was

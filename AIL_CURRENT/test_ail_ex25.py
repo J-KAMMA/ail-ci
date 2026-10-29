@@ -107,6 +107,14 @@ def f(x: int) -> int:
 
 print(f(1))
 ''',
+    'export_flag_introspection': '''from ail_ffi import export
+
+@export
+def f(x: int) -> int:
+    return x
+
+print(getattr(f, "__ail_export__", None))
+''',
     'method': '''from ail_ffi import export
 
 class C:
@@ -187,6 +195,7 @@ class ExportDecoratorTests(unittest.TestCase):
                                     or 'needs a type annotation' in output
                                     or 'annotate the result' in output
                                     or 'only @export' in output
+                                    or 'reading __ail_export__' in output
                                     or 'the decorator on def' in output,
                                     (slug, general, output[-1200:]))
 
