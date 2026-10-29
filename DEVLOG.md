@@ -1,3 +1,28 @@
+## 2026-10-29 -- stdlib30: `struct` pack / unpack / unpack_from / calcsize (job-stdlib30-10290935)
+
+The next most-imported module still refused in `lab/corpus/programs` and `AIL_CURRENT/language_examples` that
+could be lowered to a small AIL prelude was `struct` (6 files: 2 corpus programs, 4 language_examples; the
+larger `argparse` / `tempfile` imports occur only in the research harness scripts). `structlib.py` lowers a
+literal format before the batch-4 pass: prefixes `<`, `>`, `!` and `=` (standard sizes, no alignment), the
+integer codes `b B h H i I l L q Q`, `c`, `s`, `x`, `?`, and repeat counts. `pack`, `unpack`, `unpack_from`,
+`calcsize` and `struct.error` are built; `calcsize` is folded at compile time. The prelude is plain Python
+(`prelude_struct.py`) and keeps unsigned 64-bit values exact; `unpack_from` follows CPython's negative-offset
+semantics (including the two different error texts for a too-short negative offset and an out-of-range one).
+Everything else is refused by name: `@` / no prefix (native alignment), `e f d` (floats), `p`, `n N P`, a
+computed format, `pack_into`, `iter_unpack`, `Struct`, keyword/starred arguments, and a program that binds
+`error` (including an `except ... as error` target) or a name starting with `_ail_struct_`. The one recorded
+runtime gap is an object that is not an int but defines `__index__` (DIFFERENCES row
+`C?-job-stdlib30-10290935-1`): CPython accepts it, both AIL builds raise `struct.error`, and the index-slot call
+cannot be built on the AIL_IR=1 path.
+
+`test_ail_stdlib30.py` (registered in `ail_check.py` MODULES) compares the prelude with CPython on 20,000 random
+formats, values and positive/negative offsets; compares compiled programs with CPython on both `AIL_IR=0` and
+`AIL_IR=1`; and pins the refusals by name. Probes in `/tmp/probes/p_struct_*.py` (types and widths, strings /
+padding / zero counts, `unpack_from` offsets and routes, argument / list-item / attribute / dict-value routes,
+aliases, calcsize, uint64, error texts) all match CPython on both builds via `cmp.sh`; the refusal probes
+(`ref_computed`, `ref_from`, `ref_import`, `ref_import2`, `ref_bind_except`, `ref_keyword`, `ref_struct_class`)
+are refused by name on both builds. `p_struct_index` shows the recorded `__index__` gap.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

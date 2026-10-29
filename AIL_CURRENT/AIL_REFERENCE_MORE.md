@@ -1052,6 +1052,23 @@ slower than typed code), where operator methods dispatch on the run-time class (
   __round__ __floor__ __ceil__ __trunc__ __index__ __hash__ __eq__ __len__ __getitem__ __setitem__ __delitem__ __contains__`; instances hash and compare by identity unless the
   class says otherwise. `d1 | d2` on dicts, `type(x).__name__`, `x.__class__.__name__`, `Cls(*xs)` for a class with a fixed `__init__`.
 
+### Library batch 6 (struct)
+
+Lowered in the front end (structlib.py) onto `prelude_struct.py`; a program that does not import `struct` is unchanged.
+
+- `struct.pack`, `struct.unpack`, `struct.unpack_from`, `struct.calcsize`, `struct.error`. The format must be a
+  literal at the call: `<` little-endian, `>` and `!` big-endian, `=` native byte order (standard sizes), with the
+  integer codes `b B h H i I l L q Q`, the byte/string codes `c s x` and the boolean `?`, with repeat counts.
+  `calcsize` is folded at compile time. `struct.error` is the prelude's `error` class, an `Exception` subclass; a
+  program that binds `error` or a name starting with `_ail_struct_` is refused by name.
+- Values are Python ints on the general path, so an unsigned 64-bit value read from a buffer keeps its exact
+  value; packing the same value back works. `unpack_from` follows CPython's negative offsets.
+- Refused by name: `@` and no prefix (native alignment), `e f d` (floats), `p` (Pascal strings), `n N P`
+  (native-only codes), a computed format, `pack_into`, `iter_unpack`, `Struct`, keyword arguments and a
+  starred format. A built call matches CPython 3.12 for int/bool values, bytes/bytearray for `s`, and the
+  truth value of any object for `?`. One recorded exception: an object that is not an int but defines
+  `__index__` is not accepted (see DIFFERENCES).
+
 ### Tooling: projects, language server, debugging (last section of this file)
 
 `ail` (packaging/ail_lang/cli.py) is the command; `python -m ail_lang` is the same. With `AIL_SDK_DIR=<AIL_CURRENT>` it runs from a source checkout.

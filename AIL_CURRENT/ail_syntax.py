@@ -179,6 +179,17 @@ def _stdlib5():
     return _stdlib5.module
 
 
+def _structlib():
+    """python/pkg-v12/structlib.py (library batch 6: struct pack/unpack/calcsize, lowered before batch 4)."""
+    if not hasattr(_structlib, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import structlib
+        _structlib.module = structlib
+    return _structlib.module
+
+
 def _stdlib4():
     """python/pkg-v12/stdlib4.py (library batch 4: csv, datetime, ... lowered before the other source passes)."""
     if not hasattr(_stdlib4, "module"):
@@ -3408,6 +3419,8 @@ def python_surface(source, notes=None, library=False):
     if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
                                        "abc", "array", "Random", "string", "io", "statistics")):
         source = _stdlib5().rewrite_text(source, notes)
+    if "struct" in source:
+        source = _structlib().rewrite_text(source, notes)
     if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "time", "zoneinfo")):
         source = _stdlib4().rewrite_text(source, notes)
     if "collections" in source:
@@ -3445,5 +3458,5 @@ def python_wording(message):
     message = re.sub(r'`([^`\n]*)`', snippet, message)
     message = re.sub(r'\ba let\b', 'an assignment', message)
     message = re.sub(r'(?<!C )\bstructs\b', 'class instances', message)
-    message = re.sub(r'(?<!C )\bstruct\b', 'class', message)
+    message = re.sub(r"(?<!C )(?<!')\bstruct\b(?!\.\w)(?!')", 'class', message)
     return message
