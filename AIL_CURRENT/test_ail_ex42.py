@@ -93,6 +93,23 @@ def negate(flag: bool) -> bool:
 print(negate(True), negate(False))
 '''
 
+FUTURE_SCALARS = '''from __future__ import annotations
+from ail_ffi import export
+
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+@export
+def total(values: list[int]) -> int:
+    return sum(values)
+
+
+print(add(2, 3), total([1, 2, 3]))
+'''
+
 REFUSED = {
     'unsupported_type': ('from ail_ffi import export\n\n@export\ndef f(x: list[str]) -> int:\n'
                          '    return 1\n\nprint(f([]))\n', 'unsupported type list[str]'),
@@ -102,6 +119,17 @@ REFUSED = {
                        '    return x\n\nprint(f(1))\n', 'annotate the result'),
     'default_parameter': ('from ail_ffi import export\n\n@export\ndef f(x: int = 3) -> int:\n'
                           '    return x\n\nprint(f())\n', 'plain parameters without defaults only'),
+    'forward_reference': ('from dataclasses import dataclass\nfrom ail_ffi import export\n\n'
+                          '@export\ndef f(p: Point) -> float:\n    return p.x\n\n'
+                          '@dataclass\nclass Point:\n    x: float\n\nprint(f(Point(2.0)))\n',
+                          "NameError: name 'Point' is not defined"),
+    'future_dataclass': ('from __future__ import annotations\nfrom dataclasses import dataclass\n'
+                         'from ail_ffi import export\n\n@dataclass\nclass Point:\n    x: int\n    y: int\n\n'
+                         '@export\ndef f(p: Point) -> int:\n    return p.x + p.y\n\nprint(f(Point(2, 3)))\n',
+                         'a dataclass is only allowed as a parameter whose fields are int, float or bool'),
+    'shadowed_builtin': ('from ail_ffi import export\nint = list\n\n'
+                         '@export\ndef f(x: int) -> int:\n    return 1\n\nprint("ok")\n',
+                         'TypeError: list is not one of int float bool str bytes list[int] list[float]'),
 }
 
 
@@ -124,6 +152,10 @@ class Ex42Tests(unittest.TestCase):
     def test_dotted_and_called_export_forms(self):
         with tempfile.TemporaryDirectory(prefix='ail-ex42-') as directory:
             self.compare(directory, 'aliased', ALIASED)
+
+    def test_future_annotations_still_resolve_scalars_and_aliases(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex42-') as directory:
+            self.compare(directory, 'future_scalars', FUTURE_SCALARS)
 
     def test_the_reference_example_builds_and_matches_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-ex42-') as directory:

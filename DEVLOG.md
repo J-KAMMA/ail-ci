@@ -1,3 +1,20 @@
+## 2026-10-29 -- ex42 review: resolve annotations at @export time, not from the AST (job-ex42-10291945)
+
+The review found three silent differences in `lower_executable`: an annotation naming a class
+defined later (`NameError` in CPython), a dataclass parameter under `from __future__ import
+annotations` (CPython's field types are strings, so `export()` raises `TypeError`) and a shadowed
+builtin (`int = list` then `x: int`, `TypeError`) were all accepted because validation used the
+AST names through `lower()`. `lower_executable` now walks the module's top-level bindings in order
+(imports and aliases, assignments, classes and their dataclass fields, functions, and conservative
+`if`/`for`/`while`/`try` merges) and resolves each exported parameter/result as CPython's
+`typing.get_type_hints` would: a string annotation is dereferenced, a name not yet bound is a
+`NameError`, a shadowed or non-scalar name is a `TypeError`, and a dataclass field is only valid
+when its own resolved type is int/float/bool. All three cases are now refused by name on both
+builds. Probes `r01_point_after.py`, `r02_future_dc.py` and `r15_shadow.py` fail by name; the
+positive `r14_future_scalar.py` and `r09_dataclass_import.py` still match CPython (a type alias in an
+annotation is refused by name by `lower()` itself, as before). `test_ail_ex42.py` covers the three
+refusals and a future-annotations scalar build (5 tests, 6 programs).
+
 ## 2026-10-29 -- ex42: `@export` in a normal executable is CPython's identity check (job-ex42-10291945)
 
 The Python-syntax examples under `AIL_CURRENT/language_examples` were built with plain `compile`.

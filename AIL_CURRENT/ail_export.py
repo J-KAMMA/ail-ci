@@ -231,6 +231,251 @@ def _export_decorators(tree):
     return found
 
 
+_BUILTIN_TYPES = {'int': ('type', 'int'), 'float': ('type', 'float'), 'bool': ('type', 'bool'),
+                  'str': ('type', 'str'), 'bytes': ('type', 'bytes'), 'list': ('type', 'list')}
+
+
+def _env_lookup(name, env):
+    if name in env:
+        return env[name]
+    if name in _BUILTIN_TYPES:
+        return _BUILTIN_TYPES[name]
+    import builtins
+    if hasattr(builtins, name):
+        return ('object', name)
+    return ('unbound', name)
+
+
+def _decorator_target(decorator):
+    return decorator.func if isinstance(decorator, ast.Call) else decorator
+
+
+def _resolve_value(node, env):
+    """A symbolic value for one module-level expression, enough to resolve export annotations."""
+    if isinstance(node, ast.Name):
+        return _env_lookup(node.id, env)
+    if isinstance(node, ast.Constant):
+        if node.value is None:
+            return ('none',)
+        if isinstance(node.value, str):
+            return ('string', node.value)
+        return ('object', ast.unparse(node))
+    if isinstance(node, ast.Subscript):
+        base = _resolve_value(node.value, env)
+        if base == ('type', 'list'):
+            element = node.slice
+            if isinstance(element, ast.Tuple) and len(element.elts) == 1:
+                element = element.elts[0]
+            if isinstance(element, ast.Name):
+                return ('list', _env_lookup(element.id, env))
+        return ('object', 'subscript')
+    if isinstance(node, ast.Attribute):
+        base = _resolve_value(node.value, env)
+        if base == ('module', 'dataclasses') and node.attr == 'dataclass':
+            return ('marker', 'dataclass')
+        if base == ('module', 'ail_ffi') and node.attr == 'export':
+            return ('marker', 'export')
+        return ('object', 'attribute')
+    if isinstance(node, ast.BinOp):
+        return ('object', 'union')
+    return ('object', 'expression')
+
+
+def _deref(value, env, depth=0):
+    """Follow a string annotation as CPython's typing.get_type_hints does."""
+    if value[0] == 'string' and depth < 8:
+        try:
+            expression = ast.parse(value[1], mode='eval').body
+        except SyntaxError:
+            return ('object', 'forward reference')
+        return _deref(_resolve_value(expression, env), env, depth + 1)
+    return value
+
+
+def _hint_ok(value, *, result):
+    if value[0] == 'none':
+        return result
+    if value[0] == 'type':
+        return value[1] in SCALARS
+    if value[0] == 'list':
+        return value[1] in (('type', 'int'), ('type', 'float'))
+    if value[0] == 'dataclass':
+        if result:
+            return False
+        return all(field[0] == 'type' and field[1] in ('int', 'float', 'bool')
+                   for field in value[2])
+    return False
+
+
+def _describe(value):
+    if value[0] == 'type':
+        return value[1]
+    if value[0] == 'list':
+        return 'list[%s]' % _describe(value[1])
+    if value[0] == 'dataclass':
+        return 'dataclass %s' % value[1]
+    if value[0] == 'string':
+        return repr(value[1])
+    if value[0] == 'none':
+        return 'None'
+    if value[0] == 'unbound':
+        return 'name %r' % value[1]
+    return str(value[1])
+
+
+def _hint_problem(value):
+    if value[0] == 'unbound':
+        return "NameError: name %r is not defined (CPython resolves annotations when @export runs)" % value[1]
+    if value[0] == 'dataclass':
+        return 'TypeError: a dataclass is only allowed as a parameter whose fields are int, float or bool'
+    return 'TypeError: %s is not one of int float bool str bytes list[int] list[float]' % _describe(value)
+
+
+def _bind_target(target, value, env):
+    if isinstance(target, ast.Name):
+        env[target.id] = value
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            if isinstance(element, ast.Starred):
+                element = element.value
+            _bind_target(element, ('object', 'unpacked'), env)
+
+
+def _merge_envs(first, second):
+    merged = {}
+    for name in set(first) | set(second):
+        a, b = first.get(name), second.get(name)
+        merged[name] = a if a == b else ('object', 'conditional')
+    return merged
+
+
+def _walk_environment(statements, env, exported, future):
+    """Run the top-level statements over the symbolic module namespace, validating @export defs."""
+    for node in statements:
+        if isinstance(node, ast.ImportFrom) and node.module == '__future__':
+            if any(alias.name == 'annotations' for alias in node.names):
+                future = True
+            continue
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == '*':
+                    continue
+                name = alias.asname or alias.name
+                if node.module == 'dataclasses' and alias.name == 'dataclass':
+                    env[name] = ('marker', 'dataclass')
+                elif node.module == 'ail_ffi' and alias.name == 'export':
+                    env[name] = ('marker', 'export')
+                elif node.module == 'ail_ffi' and alias.name == 'exports':
+                    env[name] = ('object', 'exports')
+                else:
+                    env[name] = ('object', '%s.%s' % (node.module, alias.name))
+            continue
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                name = alias.asname or alias.name
+                top = alias.name.split('.')[0]
+                if top == 'dataclasses':
+                    env[name] = ('module', 'dataclasses')
+                elif top == 'ail_ffi':
+                    env[name] = ('module', 'ail_ffi')
+                else:
+                    env[name] = ('module', top)
+            continue
+        if isinstance(node, ast.ClassDef):
+            dataclass = any(_resolve_value(_decorator_target(d), env) == ('marker', 'dataclass')
+                            for d in node.decorator_list)
+            if dataclass:
+                fields = []
+                for statement in node.body:
+                    if (isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name)
+                            and statement.annotation is not None):
+                        fields.append(('string', ast.unparse(statement.annotation)) if future
+                                      else _resolve_value(statement.annotation, env))
+                env[node.name] = ('dataclass', node.name, fields)
+            else:
+                env[node.name] = ('class', node.name)
+            continue
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if any(id(d) in exported for d in node.decorator_list):
+                _validate_export(node, env)
+            env[node.name] = ('function', node.name)
+            continue
+        if isinstance(node, ast.Assign):
+            value = _resolve_value(node.value, env)
+            for target in node.targets:
+                _bind_target(target, value, env)
+            continue
+        if isinstance(node, ast.AnnAssign):
+            value = _resolve_value(node.value, env) if node.value is not None else ('object', 'annotation')
+            _bind_target(node.target, value, env)
+            continue
+        if isinstance(node, ast.AugAssign):
+            _bind_target(node.target, ('object', 'augmented'), env)
+            continue
+        if isinstance(node, ast.Delete):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    env.pop(target.id, None)
+            continue
+        if isinstance(node, ast.If):
+            body = _walk_environment(node.body, dict(env), exported, future)
+            other = _walk_environment(node.orelse, dict(env), exported, future)
+            env.clear()
+            env.update(_merge_envs(body, other))
+            continue
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            base = dict(env)
+            loop = dict(env)
+            _bind_target(node.target, ('object', 'loop'), loop)
+            loop = _walk_environment(node.body, loop, exported, future)
+            env.clear()
+            env.update(_merge_envs(base, loop))
+            _walk_environment(node.orelse, env, exported, future)
+            continue
+        if isinstance(node, ast.While):
+            base = dict(env)
+            loop = _walk_environment(node.body, dict(env), exported, future)
+            env.clear()
+            env.update(_merge_envs(base, loop))
+            _walk_environment(node.orelse, env, exported, future)
+            continue
+        if isinstance(node, ast.Try):
+            ends = [_walk_environment(node.body, dict(env), exported, future)]
+            for handler in node.handlers:
+                branch = dict(env)
+                if handler.name:
+                    branch[handler.name] = ('object', 'exception')
+                ends.append(_walk_environment(handler.body, branch, exported, future))
+            merged = ends[0]
+            for branch in ends[1:]:
+                merged = _merge_envs(merged, branch)
+            merged = _walk_environment(node.orelse, merged, exported, future)
+            merged = _walk_environment(node.finalbody, merged, exported, future)
+            env.clear()
+            env.update(merged)
+            continue
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    _bind_target(item.optional_vars, ('object', 'with'), env)
+            _walk_environment(node.body, env, exported, future)
+            continue
+    return env
+
+
+def _validate_export(function, env):
+    where = 'function %s' % function.name
+    for argument in function.args.args:
+        if argument.annotation is None:
+            continue
+        value = _deref(_resolve_value(argument.annotation, env), env)
+        if not _hint_ok(value, result=False):
+            raise ExportError('%s, parameter %s: %s' % (where, argument.arg, _hint_problem(value)))
+    value = _deref(_resolve_value(function.returns, env), env)
+    if not _hint_ok(value, result=True):
+        raise ExportError('%s, result: %s' % (where, _hint_problem(value)))
+
+
 def lower_executable(text):
     """Remove `@export` from a normal executable, after checking it as CPython's decorator does.
 
@@ -246,6 +491,7 @@ def lower_executable(text):
     if not marks:
         return text
     lower(text)            # the same signature checks CPython's export() applies at import time
+    _walk_environment(tree.body, {}, {id(mark) for mark in marks}, False)
     lines = text.splitlines(keepends=True)
     for decorator in marks:
         for index in range(decorator.lineno - 1, decorator.end_lineno):
