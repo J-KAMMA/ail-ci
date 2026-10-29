@@ -1,6 +1,6 @@
-**Your change fails tests on top of the current integration branch.** Applied alone on today's integ, one or more of these test modules fail: test_ail_pre406 test_ail_safetynet.
+**Your own test module fails on the current integration branch.** In the full suite on top of integ, test_ail_pre406 fails. Integers are now exact bigints by default (ail-ci#198): a test that expects an int64 overflow refusal or wrap no longer holds.
 
-Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find why it fails here (another change may have altered behaviour or output your test expects), and fix it so they pass while keeping your fix and its test. Commit.
+Run `cd AIL_CURRENT && python3 -m unittest -q test_ail_pre406` on today's integ, update the test to what CPython prints (exact integers) and keep your fix where it still applies; if the fix is no longer needed, say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
