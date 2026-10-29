@@ -80,7 +80,7 @@ The compiled adapter casts a u64 argument with `(uint64_t)p` and has no check; t
 **[read, not run]**. So `tiny_ul(-1)` raises under CPython and returns `0` (`(2**64 - 1) + 1` wraps) in the compiled
 program. That is a silent difference, and it is not declared anywhere.
 
-**Measured [verified 2026-10-30]**, default build of `integ` 24aca219's parent (d68453f7), `strncmp("abc", "abd", n)` with
+**Measured [verified 2026-10-30]**, default build of `integ` d68453f7, `strncmp("abc", "abd", n)` with
 `n: c_size_t`, each call in `try/except OverflowError as e: print(..., e)`:
 
 | `n` | CPython (shim) | compiled AIL |
