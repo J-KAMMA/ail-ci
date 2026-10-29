@@ -3398,6 +3398,20 @@ def _inline_type_aliases(source):
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
+    if 'lambda' in source and '/' in source:
+        try:
+            original = ast.parse(source)
+        except SyntaxError:
+            original = None
+        if original is not None:
+            for node in ast.walk(original):
+                if isinstance(node, ast.Lambda) and node.args.posonlyargs:
+                    raise SyntaxErrorAIL(
+                        'not in the subset: a lambda with a positional-only parameter '
+                        '(`lambda x, /: ...`) is not built\n'
+                        '  write instead: use a nested `def` with positional-only parameters, '
+                        'or list every lambda parameter as a plain positional one',
+                        lineno=node.lineno, offset=node.col_offset + 1)
     source = _inline_type_aliases(source)
     if "raise" in source and " from " in source:
         source = _raisefrom().rewrite(source, notes)
