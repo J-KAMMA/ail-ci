@@ -1,3 +1,32 @@
+## 2026-10-29 -- ex39: `@export` programs outside `ail build --lib` build and match CPython (job-ex39-10291711)
+
+The only Python-syntax file under `AIL_CURRENT/language_examples` that was meant to run both on
+CPython and through `ail compile` was `c_export/geometry.py`; both builds refused it with
+`not in the subset: the decorator on def add (only @staticmethod on a method and
+@functools.lru_cache/@lru_cache/@cache are supported)`.  `@export` returns the function unchanged
+after checking its signature on CPython, so `ail_export.strip_export_decorators` now performs the
+same checks in the front end and blanks the decorator before lowering.  A bad signature keeps a
+named refusal; a valid one builds on the default, typed and general paths.  The checks follow
+direct/aliased `from ail_ffi import export` and `ail_ffi.export`, `@export`/`@export()`,
+decorators above `@export`, nested functions, and plain dataclasses of int/float/bool defined
+before the function.  A dataclass defined later or rebound, a dataclass with another decorator or
+a base, a shadowed scalar/list annotation, `from __future__ import annotations` dataclass
+parameters, extra decorator arguments, classes, defaults, `*args`/`**kwargs`,
+positional-only/keyword-only parameters and unsupported annotations are refused by name.
+
+Probes in `/tmp/probes` (35 files, both `cmp.sh` builds against CPython with
+`PYTHONPATH=AIL_CURRENT`): `valid_basic`, `valid_types`, `valid_decorator_above`,
+`valid_future_scalar`, `valid_nested` and `valid_values` (values through arguments, list items,
+attributes and dict values) match CPython; `valid_forms` is refused by name (`ail_ffi` aliased
+import); `invalid_*`, `forward_dataclass`, `dataclass_rebound`, `class_extra_decorator`,
+`shadow_*` and `alias_annotation` are refused by name where CPython raises or, for
+`alias_annotation`/`shadow_scalar_int`/`shadow_scalar_bool`/`shadow_list_name`, where a simple
+alias/shadow is outside the static model.  Added `test_ail_ex39.py` (5 tests) and registered it in
+`ail_check.MODULES`.
+
+Final-state checks: `test_ail_ex39`, `test_ail_c_export`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`; `tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

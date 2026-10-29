@@ -37,6 +37,205 @@ def uses_export(text):
     return '@' in text and 'export' in text and 'ail_ffi' in text
 
 
+def strip_export_decorators(text):
+    """Check CPython's @export rules and remove the decorator before a normal build.
+
+    @export returns the function unchanged after checking its signature, so a normal program that
+    runs on CPython behaves as if the decorator were absent.  Removing it also lets the general
+    path, which refuses unknown decorators, build the same program.  A signature CPython refuses
+    keeps a named refusal instead of compiling with different behaviour."""
+    if not uses_export(text):
+        return text
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return text
+    export_names, module_names = set(), set()
+    dataclass_names, dataclasses_modules = set(), set()
+    future_annotations = False
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom):
+            if node.level:
+                continue
+            if node.module == '__future__':
+                future_annotations = future_annotations or any(alias.name == 'annotations' for alias in node.names)
+            elif node.module == 'ail_ffi':
+                for alias in node.names:
+                    if alias.name == 'export':
+                        export_names.add(alias.asname or alias.name)
+            elif node.module == 'dataclasses':
+                for alias in node.names:
+                    if alias.name == 'dataclass':
+                        dataclass_names.add(alias.asname or alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == 'ail_ffi':
+                    module_names.add(alias.asname or alias.name)
+                elif alias.name == 'dataclasses':
+                    dataclasses_modules.add(alias.asname or alias.name)
+
+    def is_name(node, names):
+        return isinstance(node, ast.Name) and node.id in names
+
+    def is_export_name(decorator):
+        if isinstance(decorator, ast.Call):
+            decorator = decorator.func
+        return (is_name(decorator, export_names)
+                or (isinstance(decorator, ast.Attribute) and decorator.attr == 'export'
+                    and is_name(decorator.value, module_names)))
+
+    def is_export(decorator):
+        return ((not isinstance(decorator, ast.Call)
+                 or (not decorator.args and not decorator.keywords))
+                and is_export_name(decorator))
+
+    def is_dataclass(decorator):
+        if isinstance(decorator, ast.Call):
+            decorator = decorator.func
+        return (is_name(decorator, dataclass_names)
+                or (isinstance(decorator, ast.Attribute) and decorator.attr == 'dataclass'
+                    and is_name(decorator.value, dataclasses_modules)))
+
+    bound_lines = {}
+
+    def bind(name, line):
+        bound_lines.setdefault(name, []).append(line)
+
+    class Binder(ast.NodeVisitor):
+        def visit_FunctionDef(self, node):
+            bind(node.name, node.lineno)
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_ClassDef(self, node):
+            bind(node.name, node.lineno)
+
+        def visit_Lambda(self, node):
+            pass
+
+        def visit_ListComp(self, node):
+            pass
+
+        def visit_SetComp(self, node):
+            pass
+
+        def visit_DictComp(self, node):
+            pass
+
+        def visit_GeneratorExp(self, node):
+            pass
+
+        def visit_Import(self, node):
+            for alias in node.names:
+                bind(alias.asname or alias.name.split('.')[0], node.lineno)
+
+        def visit_ImportFrom(self, node):
+            for alias in node.names:
+                bind(alias.asname or alias.name, node.lineno)
+
+        def visit_Name(self, node):
+            if isinstance(node.ctx, ast.Store):
+                bind(node.id, node.lineno)
+            self.generic_visit(node)
+
+    binder = Binder()
+    for node in tree.body:
+        binder.visit(node)
+
+    def shadowed(name, line):
+        return any(bound < line for bound in bound_lines.get(name, ()))
+
+    dataclasses = {}
+    for node in tree.body:
+        if (not isinstance(node, ast.ClassDef) or node.bases
+                or not node.decorator_list
+                or not all(is_dataclass(d) for d in node.decorator_list)):
+            continue
+        fields = {}
+        for statement in node.body:
+            if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+                annotation = statement.annotation
+                fields[statement.target.id] = (annotation.id
+                                               if isinstance(annotation, ast.Name)
+                                               and annotation.id in SCALARS
+                                               and not shadowed(annotation.id, statement.lineno)
+                                               else None)
+        dataclasses[node.name] = (node.lineno, fields)
+    if future_annotations:
+        # CPython's dataclass fields stay strings there, so @export refuses a dataclass parameter.
+        dataclasses.clear()
+
+    def allowed(annotation, result, line):
+        if result and isinstance(annotation, ast.Constant) and annotation.value is None:
+            return True
+        if isinstance(annotation, ast.Name):
+            if annotation.id in SCALARS:
+                return not shadowed(annotation.id, line)
+            if not result and annotation.id in dataclasses:
+                defined, fields = dataclasses[annotation.id]
+                # CPython evaluates the annotation at the def; a later class is a NameError there.
+                rebound = any(defined < bound < line for bound in bound_lines.get(annotation.id, ()))
+                return (defined < line and not rebound
+                        and all(kind in ('int', 'float', 'bool') for kind in fields.values()))
+            return False
+        if (isinstance(annotation, ast.Subscript) and isinstance(annotation.value, ast.Name)
+                and annotation.value.id == 'list' and not shadowed('list', line)
+                and isinstance(annotation.slice, ast.Name)
+                and annotation.slice.id in ('int', 'float')
+                and not shadowed(annotation.slice.id, line)):
+            return True
+        return False
+
+    targets, problems = [], []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            if any(is_export_name(decorator) for decorator in node.decorator_list):
+                problems.append('@export applies to a top-level function')
+            continue
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        export_marks = [decorator for decorator in node.decorator_list if is_export_name(decorator)]
+        if not export_marks:
+            continue
+        if any(isinstance(decorator, ast.Call) and (decorator.args or decorator.keywords)
+               for decorator in export_marks):
+            problems.append('@export %s: the decorator takes no arguments' % node.name)
+            continue
+        marks = [decorator for decorator in node.decorator_list if is_export(decorator)]
+        if any(is_export(decorator) and any(not is_export(lower) for lower in node.decorator_list[index + 1:])
+               for index, decorator in enumerate(node.decorator_list)):
+            problems.append('@export %s: no decorator below @export (CPython sees its result, '
+                            'which may not be a function)' % node.name)
+            continue
+        args = node.args
+        if (args.defaults or any(default is not None for default in args.kw_defaults)
+                or args.posonlyargs or args.kwonlyargs or args.vararg or args.kwarg):
+            problems.append('@export %s: plain parameters without defaults only' % node.name)
+            continue
+        if node.returns is None:
+            problems.append('@export %s: the result needs an annotation (-> None for no result)' % node.name)
+            continue
+        for argument in args.args:
+            if argument.annotation is None or not allowed(argument.annotation, False, node.lineno):
+                problems.append('@export %s: parameter %s needs one of int float bool str bytes '
+                                'list[int] list[float] or a dataclass of int/float/bool'
+                                % (node.name, argument.arg))
+        if not allowed(node.returns, True, node.lineno):
+            problems.append('@export %s: the result must be int float bool str bytes list[int] '
+                            'list[float] or None' % node.name)
+        targets.extend(marks)
+    if problems:
+        raise ExportError('\n'.join(problems))
+    if not targets:
+        return text
+    lines = text.splitlines(keepends=True)
+    for decorator in targets:
+        for index in range(decorator.lineno - 1, decorator.end_lineno):
+            ending = '\n' if lines[index].endswith('\n') else ''
+            lines[index] = ' ' * (len(lines[index]) - len(ending)) + ending
+    return ''.join(lines)
+
+
 def _kind(annotation, structs, *, result, where):
     if isinstance(annotation, ast.Constant) and annotation.value is None:
         if result:

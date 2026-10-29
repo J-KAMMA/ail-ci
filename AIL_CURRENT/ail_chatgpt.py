@@ -17,6 +17,7 @@ import tempfile
 from ail_syntax import SyntaxErrorAIL, detect, fold_constants, python_surface, python_wording, translate
 import ail_sexpr
 import ail_modules
+import ail_export
 
 sys.path.append(str(Path(__file__).resolve().parent / 'python/pkg-v12'))
 import fastwalk
@@ -4259,6 +4260,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             if path.suffix.lower() == '.py':
                 syntax = 'python'
             merged = None
+            if syntax == 'python':
+                text = ail_export.strip_export_decorators(text)
             if ffi is not None and syntax == 'python':
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
                 # a file that does not mention ail_ffi is returned untouched
@@ -4276,6 +4279,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     text = merged.text
                     for line in merged.notes:
                         print(line, file=sys.stderr)
+                    if syntax == 'python':
+                        text = ail_export.strip_export_decorators(text)
             imports = []
             declarations = {}
             locations = {}
