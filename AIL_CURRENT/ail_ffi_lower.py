@@ -256,27 +256,88 @@ class Session:
         return '\n'.join(lines).rstrip('\n') + '\n' + '\n'.join(block) + ('\n' if block else '')
 
     @classmethod
+    def _target_binds_name(cls, target, name):
+        """True when an assignment/for/with target (including unpacking) binds `name`."""
+        if isinstance(target, ast.Name):
+            return target.id == name
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return any(cls._target_binds_name(element, name) for element in target.elts)
+        if isinstance(target, ast.Starred):
+            return cls._target_binds_name(target.value, name)
+        return False
+
+    @classmethod
+    def _pattern_binds_name(cls, pattern, name):
+        """True when a `match` pattern captures `name`."""
+        if isinstance(pattern, ast.MatchAs):
+            return pattern.name == name or (pattern.pattern is not None
+                                            and cls._pattern_binds_name(pattern.pattern, name))
+        if isinstance(pattern, ast.MatchStar):
+            return pattern.name == name
+        if isinstance(pattern, ast.MatchMapping):
+            return pattern.rest == name or any(cls._pattern_binds_name(p, name) for p in pattern.patterns)
+        if isinstance(pattern, ast.MatchSequence):
+            return any(cls._pattern_binds_name(p, name) for p in pattern.patterns)
+        if isinstance(pattern, ast.MatchClass):
+            return any(cls._pattern_binds_name(p, name) for p in pattern.patterns + pattern.kwd_patterns)
+        if isinstance(pattern, ast.MatchOr):
+            return any(cls._pattern_binds_name(p, name) for p in pattern.patterns)
+        return False
+
+    @classmethod
+    def _expr_binds_name(cls, node, name):
+        """True when an expression evaluated at module level contains `name := ...`.
+
+        A walrus in a lambda body binds the lambda's scope, not the module; a lambda's default
+        arguments are still evaluated at module level. Comprehensions bind in the enclosing scope,
+        so they are walked."""
+        if node is None:
+            return False
+        if isinstance(node, ast.NamedExpr):
+            return cls._target_binds_name(node.target, name) or cls._expr_binds_name(node.value, name)
+        if isinstance(node, ast.Lambda):
+            return any(cls._expr_binds_name(default, name) for default in
+                       node.args.defaults + [d for d in node.args.kw_defaults if d is not None])
+        return any(cls._expr_binds_name(child, name) for child in ast.iter_child_nodes(node))
+
+    @classmethod
     def _binds_name(cls, node, name):
-        """True when a top-level statement binds `name` again."""
+        """True when a top-level statement binds `name` again (including walrus and unpacking)."""
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             return node.name == name
         if isinstance(node, ast.Assign):
-            return any(isinstance(t, ast.Name) and t.id == name for t in node.targets)
+            return (any(cls._target_binds_name(t, name) for t in node.targets)
+                    or cls._expr_binds_name(node.value, name))
         if isinstance(node, (ast.AnnAssign, ast.AugAssign)):
-            return isinstance(node.target, ast.Name) and node.target.id == name
+            return cls._target_binds_name(node.target, name) or cls._expr_binds_name(node.value, name)
         if isinstance(node, ast.Import):
             return any((a.asname or a.name.split('.')[0]) == name for a in node.names)
         if isinstance(node, ast.ImportFrom):
             return any(a.name != '*' and (a.asname or a.name) == name for a in node.names)
         if isinstance(node, (ast.For, ast.AsyncFor)):
-            return isinstance(node.target, ast.Name) and node.target.id == name
+            return (cls._target_binds_name(node.target, name) or cls._expr_binds_name(node.iter, name)
+                    or any(cls._binds_name(s, name) for s in node.body + node.orelse))
         if isinstance(node, (ast.With, ast.AsyncWith)):
-            return any(isinstance(v.optional_vars, ast.Name) and v.optional_vars.id == name for v in node.items)
+            return (any(cls._expr_binds_name(v.context_expr, name)
+                        or (v.optional_vars is not None and cls._target_binds_name(v.optional_vars, name))
+                        for v in node.items)
+                    or any(cls._binds_name(s, name) for s in node.body))
         if isinstance(node, (ast.Try, getattr(ast, 'TryStar', ast.Try))):
             return (any(cls._binds_name(s, name) for part in (node.body, node.orelse, node.finalbody) for s in part)
-                    or any(h.name == name for h in node.handlers))
-        if isinstance(node, ast.If):
-            return any(cls._binds_name(s, name) for s in node.body + node.orelse)
+                    or any(h.name == name or cls._expr_binds_name(h.type, name)
+                           or any(cls._binds_name(s, name) for s in h.body) for h in node.handlers))
+        if isinstance(node, (ast.If, ast.While)):
+            return (cls._expr_binds_name(node.test, name)
+                    or any(cls._binds_name(s, name) for s in node.body + node.orelse))
+        if isinstance(node, ast.Expr):
+            return cls._expr_binds_name(node.value, name)
+        if isinstance(node, ast.Assert):
+            return cls._expr_binds_name(node.test, name) or cls._expr_binds_name(node.msg, name)
+        if isinstance(node, ast.Match):
+            return (cls._expr_binds_name(node.subject, name)
+                    or any(cls._pattern_binds_name(case.pattern, name)
+                           or cls._expr_binds_name(case.guard, name)
+                           or any(cls._binds_name(s, name) for s in case.body) for case in node.cases))
         return False
 
     @classmethod

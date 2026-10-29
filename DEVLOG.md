@@ -1,3 +1,29 @@
+## 2026-10-29 -- ex41 review: shadowing through walrus, unpacking and match captures
+
+The ex41 review found the annotation-shadow set only examined simple assignment targets. A
+module-level `(int := 1)` was invisible to `_binds_name`, so `@export def size(x: int)` still
+accepted the textual annotation, built on both paths and printed `1` (exit 0) while CPython 3.12
+raises the `@export` `TypeError` (exit 1); the base refused the program by name. `_binds_name` now
+recognises `NamedExpr` at module scope (including compound-statement tests, `for` iterables,
+`with` context expressions, `try`/`except` expressions and comprehension bodies, but not a
+function or lambda body), tuple/list/starred assignment and `for`/`with` targets, and every
+`match` capture pattern (`MatchAs`, `MatchStar`, `MatchMapping` rest, sequence/class/mapping
+children). Each form now reaches the same `@export` named refusal as a simple rebinding.
+Walruses in a nested function or lambda still leave the module names alone and match CPython.
+Added those forms to `test_ail_ex41.py` (two tests, 9 total).
+
+Probes in `/tmp/probes/ex41fix` on both builds via `cmp.sh`: 15 refused by name
+(`p_walrus_expr`, `p_walrus_if`, `p_walrus_while`, `p_walrus_try`, `p_walrus_comprehension`,
+`p_tuple_target`, `p_list_target`, `p_starred_target`, `p_for_tuple_target`, `p_with_target`,
+`p_match_as`, `p_match_sequence`, `p_match_mapping`, `p_match_star`, `p_match_class`, all showing
+the `@export` message on both builds) and 4 matching CPython (`p_attr_subscript_targets`,
+`p_lambda_walrus`, `p_nested_function_walrus`, `p_values_routes`); no silent difference remains.
+Final-state
+tests: test_ail_ex41, test_ail_ffi, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (5 modules, 0 failed); test_ail_cratebridge still has one environmental
+failure (`rustup` has no default toolchain) unrelated to this change.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-29 -- ex41 review: refuse `exports()` after the name is rebound
 
 The ex41 review found a silent difference in the runtime-marking guard. `_refuse_export_state` only

@@ -234,6 +234,53 @@ print(add(-2, 5), shout(""))
                 self.refused(source)
                 self.refused(source + '\nprint("ran")\n')
 
+    def test_shadowing_through_walrus_unpacking_and_match_is_refused_by_name(self):
+        programs = [
+            'from ail_ffi import export\n\n'
+            '(int := 1)\n\n\n'
+            '@export\ndef size(x: int) -> int:\n    return 1\n',
+            'from ail_ffi import export\n\n'
+            'if (float := 1.0):\n    pass\n\n\n'
+            '@export\ndef size(x: float) -> float:\n    return 1.0\n',
+            'from ail_ffi import export\n\n'
+            'int, y = 1, 0\n\n\n'
+            '@export\ndef size(x: int) -> int:\n    return 1\n',
+            'from ail_ffi import export\n\n'
+            'int, *rest = 1, 2\n\n\n'
+            '@export\ndef size(x: int) -> int:\n    return 1\n',
+            'from ail_ffi import export\n\n'
+            'match 1:\n    case int:\n        pass\n\n\n'
+            '@export\ndef size(x: int) -> int:\n    return 1\n',
+        ]
+        for source in programs:
+            with self.subTest(source=source.splitlines()[3]):
+                self.refused(source)
+
+    def test_walrus_in_a_function_or_lambda_does_not_shadow_the_module(self):
+        self.same(r'''from ail_ffi import export
+
+
+def local_walrus():
+    (int := 1)
+    return int
+
+
+marker = lambda: (float := 1.0)
+
+
+@export
+def size(x: int) -> int:
+    return x
+
+
+@export
+def scale(x: float) -> float:
+    return x
+
+
+print(size(3), scale(2.5), local_walrus(), marker())
+''')
+
     def test_runtime_marking_is_refused_by_name(self):
         programs = [
             'from ail_ffi import export\n\n\n@export\ndef add(a: int) -> int:\n    return a\n\n\n'
