@@ -2546,9 +2546,19 @@ class Compiler(boxclosure.ClosureMixin):
         method_names = {m.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef)
                         for m in c.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))}
         called_funcs = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        module_names = {(a.asname or a.name).split('.')[0] for n in ast.walk(tree)
+                        if isinstance(n, ast.Import) for a in n.names}
+        builtin_attr_names = _builtin_callable_names()
+        # Any attribute read that is not called and could be a bound method (a user method, or
+        # `xs.append` / `"abc".upper` of a builtin type) turns the field call off.  A plain data
+        # field of a user class is not one, unless its name is also a builtin-type method.
         self.method_taken_as_value = any(
-            isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load) and n.attr in method_names
-            and id(n) not in called_funcs for n in ast.walk(tree))
+            isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load) and id(n) not in called_funcs
+            and not (isinstance(n.value, ast.Name) and n.value.id in module_names)
+            and not (n.attr.startswith('__') and n.attr.endswith('__'))
+            and (n.attr in method_names or n.attr in builtin_attr_names
+                 or n.attr not in inst_fields)
+            for n in ast.walk(tree))
         # `self.upper = lambda: ...` where the name is also a method of a builtin type: a call
         # `p.upper()` would run the builtin handler and fail at run time.  Refuse it here.
         func_names = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
@@ -12521,12 +12531,24 @@ def _builtin_method_names():
               type({}.items()), type({}.keys()), type({}.values()), type(itertools.chain()),
               type(None), type(NotImplemented), type(Ellipsis)]
     names = set()
+    callables = set()
     for t in types_:
-        names.update(dir(t))
+        for n in dir(t):
+            names.add(n)
+            if callable(getattr(t, n, None)):
+                callables.add(n)
+    _BUILTIN_CALLABLE_CACHE.append(frozenset(callables))
     return frozenset(names)
 
 
 _BUILTIN_METHOD_NAMES_CACHE = []
+_BUILTIN_CALLABLE_CACHE = []
+
+
+def _builtin_callable_names():
+    """The subset of `_builtin_names()` that is a method (callable on the type), not a property."""
+    _builtin_names()
+    return _BUILTIN_CALLABLE_CACHE[0]
 
 
 def _builtin_names():
