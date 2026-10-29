@@ -1,3 +1,22 @@
+## 2026-10-29 -- cov44: nested generator expressions consumed in place (job-cov44-10291433)
+
+The corpus build census before this change had 24 compile-time refusals per build; after it has
+21 on the default build and on `AIL_UNIFIED_FORCE=1`.  The most frequent non-import refusal was a
+generator expression nested inside another one (3 programs in the unified build, and the same 3
+programs fell back to that refusal on the default build after the typed path refused them):
+`glm-5.3-flash-free/t432` and `deepseek-v4.1-flash-free/t432` join nested `join`/`str` generator
+expressions, and `deepseek-v4.1-flash-free/t172` puts a `sum` generator inside a `join`
+generator.  The general path materialises generators eagerly, which is exact when the outer
+generator is itself an argument of a call that reads every element at once (`join`, `sum`,
+`list`, `sorted`, ...) and every inner generator is consumed the same way in that expression:
+the inner body then runs at exactly the point CPython creates and consumes it.  `pyboxed2.py`
+now allows that shape and keeps the named refusal for a saved inner generator, a generator used
+as a `for` iterable, and the `next()`/`any()`/`all()` fused paths (pre41/pre42).  Added
+`test_ail_cov44.py` (9 matching programs, 4 refusal programs, both builds) and registered it in
+`ail_check.MODULES`.  Probes `/tmp/probes/p44_*` (14 programs) were run through `cmp.sh`: the 9
+consumed-in-place probes match CPython on both builds and the 5 unsafe ones are refused by name
+on both builds.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C

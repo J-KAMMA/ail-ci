@@ -2536,9 +2536,17 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        parents = {}
+        for par in ast.walk(tree):
+            for child in ast.iter_child_nodes(par):
+                parents[child] = par
         for gen in ast.walk(tree):
-            if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+            if not isinstance(gen, ast.GeneratorExp) or id(gen) in any_all_genargs:
+                continue
+            nested = any(n is not gen and isinstance(n, ast.GeneratorExp)
+                         for n in ast.walk(gen))
+            if nested and not (_genexp_direct_eager_consumer(gen, parents) and
+                               _nested_genexp_eager_safe(gen, parents)):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6495,7 +6503,11 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+        parents = {}
+        for par in ast.walk(node):
+            for child in ast.iter_child_nodes(par):
+                parents[child] = par
+        if not _nested_genexp_eager_safe(node, parents):
             raise Unsupported('a generator expression nested inside another generator expression '
                               '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
@@ -12433,6 +12445,33 @@ _GENEXP_EAGER_CALLS = frozenset({
     'next', 'bytes', 'bytearray', 'Counter', 'array',
 })
 _GENEXP_EAGER_METHODS = frozenset({'join', 'extend', 'update', 'array'})
+# `next`, `any` and `all` read only as much as they need, so a nested generator expression inside
+# one of them stays refused by their own fused paths (pre41/pre42).  The other consumers above read
+# every element at the call, which is the one point where the eager inner lowering is exact.
+_GENEXP_NESTED_EAGER_CALLS = _GENEXP_EAGER_CALLS - {'next', 'any', 'all'}
+
+
+def _genexp_direct_eager_consumer(node, parents):
+    """True iff `node` is a positional argument of a call that reads every element at once."""
+    par = parents.get(node)
+    if not (isinstance(par, ast.Call) and node in par.args):
+        return False
+    f = par.func
+    if isinstance(f, ast.Name):
+        return f.id in _GENEXP_NESTED_EAGER_CALLS
+    if isinstance(f, ast.Attribute):
+        return f.attr in _GENEXP_EAGER_METHODS
+    return False
+
+
+def _nested_genexp_eager_safe(node, parents):
+    """True iff every generator expression nested in `node` is consumed in place by an eager
+    call in the same expression.  Such an inner generator is materialised at exactly the point
+    CPython creates and consumes it, so the eager lowering cannot reorder side effects.  A saved
+    inner generator (an element, a value, a name) is still refused by name."""
+    inner = [n for n in ast.walk(node)
+             if n is not node and isinstance(n, ast.GeneratorExp)]
+    return all(_genexp_direct_eager_consumer(n, parents) for n in inner)
 # Builtins whose call cannot raise one of the five catchable traps this compiler models, so a
 # generator element that only uses them keeps the existing eager lowering.
 _GENEXP_SAFE_CALLS = frozenset({
