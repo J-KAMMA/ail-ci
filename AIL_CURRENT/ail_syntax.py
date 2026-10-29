@@ -190,6 +190,17 @@ def _stdlib4():
     return _stdlib4.module
 
 
+def _unicodecat():
+    """python/pkg-v12/unicodecat.py (the generated general-category ranges for unicodedata.category)."""
+    if not hasattr(_unicodecat, "module"):
+        spec = importlib.util.spec_from_file_location(
+            "_ail_unicodecat", Path(__file__).parent / "python" / "pkg-v12" / "unicodecat.py")
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _unicodecat.module = module
+    return _unicodecat.module
+
+
 _OPTIONAL =re.compile(r'\bOptional\s*\[\s*([A-Za-z_]\w*)\s*\]')
 
 
@@ -1395,6 +1406,35 @@ _MATH_HELPERS['tw_dedent'] = (
     '        else:\n'
     '            out.append(line[len(margin):])\n'
     '    return "\\n".join(out)\n')
+
+
+def _ud_category_helper():
+    """The helper for unicodedata.category: a binary search over the fixed-width generated ranges."""
+    return ('def _ail_ud_category(ch: str) -> str:\n'
+            '    if ch is None:\n'
+            '        raise TypeError("category() argument must be a unicode character, not None")\n'
+            '    if not isinstance(ch, str):\n'
+            '        raise TypeError("category() argument must be a unicode character, not " + type(ch).__name__)\n'
+            '    if len(ch) != 1:\n'
+            '        raise TypeError("category() argument must be a unicode character, not str")\n'
+            '    cp = ord(ch)\n'
+            '    table = ' + repr(_unicodecat().RANGES) + '\n'
+            '    lo = 0\n'
+            '    hi = (len(table) + 1) // 15 - 1\n'
+            '    while lo <= hi:\n'
+            '        mid = (lo + hi) // 2\n'
+            '        row = table[mid * 15:mid * 15 + 14]\n'
+            '        start = int(row[:6], 16)\n'
+            '        end = int(row[6:12], 16)\n'
+            '        if cp < start:\n'
+            '            hi = mid - 1\n'
+            '        elif cp > end:\n'
+            '            lo = mid + 1\n'
+            '        else:\n'
+            '            return row[12:14]\n'
+            '    return "Cn"\n')
+
+
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',)}
 import string as _string_module
 
@@ -1413,6 +1453,7 @@ _OPERATOR_COMPARE = {'lt': ast.Lt, 'le': ast.LtE, 'gt': ast.Gt, 'ge': ast.GtE, '
 _OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv': ast.Invert}
 _SMALL_MODULES = {
     'textwrap': ('wrap', 'fill', 'dedent'),
+    'unicodedata': ('category',),
     'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
     'string': tuple(_STRING_CONSTANTS),
     'os': ('cpu_count',),
@@ -1421,6 +1462,8 @@ _SMALL_MODULES = {
 _SMALL_NOTE = {
     'textwrap': 'textwrap.wrap(text[, width]), fill(text[, width]) and dedent(text) are built; the other options '
                 'and functions are not',
+    'unicodedata': 'unicodedata.category(ch) is built for one character; name(), normalize(), lookup() and the '
+                   'other functions are not',
     'time': 'time.perf_counter() / monotonic() / time() (and the _ns forms), sleep(), localtime(), gmtime(), '
             'strftime() and mktime() are built (the wall clock is an input: AIL_CLOCK=<seconds> pins it); '
             'asctime, ctime, struct_time, tzset and the zone constants are not',
@@ -1431,7 +1474,7 @@ _SMALL_NOTE = {
                 'neg/pos/invert/not_/abs/getitem called directly, and itemgetter(k) as a key= are built',
 }
 _TYPING = {'List': 'list', 'Dict': 'dict', 'Set': 'set', 'Tuple': 'tuple', 'FrozenSet': 'frozenset'}
-_DROPPED = ('heapq', 'bisect', 'textwrap', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator', 're')
+_DROPPED = ('heapq', 'bisect', 'textwrap', 'unicodedata', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator', 're')
 _STDOUT_STATEMENTS = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdout.flush',
                       'sys.stdout.buffer.flush', 'sys.setrecursionlimit')
 _ALIASABLE = ('sys.stdout.write', 'sys.stdout.buffer.write', 'sys.stdin.readline',
@@ -2387,6 +2430,12 @@ class _Surface:
         """time / string / os / operator, mapped onto what is built (None keeps the call as written)."""
         args = node.args
         plain = not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args)
+        if plain and module == 'unicodedata' and name == 'category' and len(args) == 1:
+            if 'ud_category' not in _MATH_HELPERS:
+                _MATH_HELPERS['ud_category'] = _ud_category_helper()
+            if 'ud_category' not in self.helpers:
+                self.helpers.append('ud_category')
+            return ast.Call(func=ast.Name(id='_ail_ud_category', ctx=ast.Load()), args=args, keywords=[])
         if plain and module == 'time' and name in _TIME_CLOCKS and not args:
             return ast.Call(func=ast.Name(id=_TIME_CLOCKS[name], ctx=ast.Load()), args=[], keywords=[])
         if module == 'textwrap' and name in ('wrap', 'fill', 'dedent') and not any(

@@ -1,3 +1,36 @@
+## 2026-10-29 -- stdlib29: `unicodedata.category()` from a generated table (job-stdlib29-10290853)
+
+The corpus/example census left `unicodedata` as the most-imported still-refused module (3 imports,
+2 refused programs): `glm-5.3-flash-free/t081.py` needs only `category()`, while the two `t489.py`
+programs also use `name()` / `normalize()`. The other refused module imports were `decimal` (2) and
+the `textwrap.shorten()` function (1; the module itself is already built). `category()` is the small
+part of `unicodedata`, so it is the one built here: `tools/gen_unicodecat.py` folds CPython 3.12's
+(Unicode 15.0) `unicodedata.category` into 4007 inclusive ranges (60,104 bytes) in
+`python/pkg-v12/unicodecat.py`; `ail_syntax.py` loads that table lazily and copies it, with a binary
+search, into the helper a program using `category()` gets. The import is dropped when every use is
+built, so the executable needs no Python runtime or Unicode database.
+
+`category()` returns the same two-letter category for one BMP character through `import
+unicodedata`, an alias, a from-import, a function argument, a list item, a dict value, an instance
+attribute, a reassigned local and `chr(n)`. Empty/longer strings and non-str values raise CPython's
+exact `TypeError` (`not str/int/float/bytes/None`). `name()`, `normalize()`, `lookup()`, extra
+arguments, keyword arguments and `category` read as a value stay named compile-time refusals.
+Remaining limits: the 16-bit runtime cannot hold a non-BMP character (so its literal/`chr()` is
+refused before `category()` is reached), and the typed-only path still refuses a helper call whose
+str result is used as a value, as it does for the other str helpers.
+
+Probes in `/tmp/probes` with both `cmp.sh` builds: `udcat_basic` (NUL/tab/newline, BMP max, Cn),
+`udcat_routes` (alias/from-import/argument/list/dict/attribute/mutation/`chr`), `udcat_empty`,
+`udcat_nonstr` (int), `udcat_nonstr2` (None/bytes/float), `udcat_refuse_tuple` (empty/multi-char)
+and `udcat_import_only` match CPython; `udcat_name`, `udcat_two_args`, `udcat_value` and
+`udcat_from_name` are refused by name on both builds. `test_ail_stdlib29.py` pins 77 BMP code points
+covering 29 of the 30 general categories (all but Cs), the error messages and six refusals.
+Final-state targeted tests (10 modules, 0 failed, 685s at `-j 2`): test_ail_stdlib29,
+test_ail_stdlib_batch4, test_ail_stdlib5, test_ail_pre360, test_ail_modules,
+test_ail_refusal_messages, test_ail_check, test_ail_files, test_ail_safetynet and
+test_ail_corpus_findings3. `tools/update_manifest.py` was run and `--check` passes;
+`tools/ci_shards.py --update` added `test_ail_stdlib29` and `--check` exits 0.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
