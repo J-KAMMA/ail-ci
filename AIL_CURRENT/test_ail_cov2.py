@@ -1016,25 +1016,8 @@ class PreludeCsv(unittest.TestCase):
 
     def test_reader(self):
         import csv
-        old_host = next(csv.reader(['\\1'], quoting=2, escapechar="\\")) == ["1"]
-        rnd = random.Random(5)
-        for _ in range(4000):
-            kw = {}
-            if rnd.random() < .3:
-                kw["delimiter"] = rnd.choice([";", "|", "\t"])
-            if rnd.random() < .2:
-                kw["quotechar"] = rnd.choice(["'", '"', "|"])
-            if rnd.random() < .2:
-                kw["escapechar"] = rnd.choice(["\\", "x"])
-            if rnd.random() < .2:
-                kw["doublequote"] = rnd.random() < .5
-            if rnd.random() < .2:
-                kw["skipinitialspace"] = rnd.random() < .5
-            if rnd.random() < .2:
-                kw["strict"] = rnd.random() < .5
-            if rnd.random() < .3:
-                kw["quoting"] = rnd.choice([0, 1, 2, 3])
-            text = "".join(rnd.choice('ab ,"\n\r;\\x1') for _ in range(rnd.randint(0, 25)))
+
+        def compare(text, kw):
             lines = io.StringIO(text, newline="").readlines()
 
             def run(make):
@@ -1053,18 +1036,50 @@ class PreludeCsv(unittest.TestCase):
                         out.append((type(e).__name__, str(e)))
                 out.append(r.line_num)
                 return out
-            if old_host and kw.get("quoting") == 2 and "escapechar" in kw:
-                continue  # host CPython < 3.12.6 differs here (gh-113785); covered by test_reader_escape_numeric
             self.assertEqual(self.fix(run(csv.reader)), self.fix(run(self.ns["_ail_csv_reader"])), (text, kw))
 
+        # CI's Python 3.12.5+ parses a QUOTE_NONNUMERIC field that starts with the escapechar as a number;
+        # 3.12.0-3.12.4 left it a str. The prelude follows the interpreter it is built with, which is the oracle.
+        for text, kw in (("1\\.5,\\.5,.5", {"quoting": csv.QUOTE_NONNUMERIC, "escapechar": "\\"}),
+                         ('\\a"1 xa; 1aa', {"quoting": csv.QUOTE_NONNUMERIC, "escapechar": "\\",
+                                             "delimiter": "|"}),
+                         ("\\1,\\ 2,\\0", {"quoting": csv.QUOTE_NONNUMERIC, "escapechar": "\\"}),
+                         ('"'.join(["", "\\.5", ""]), {"quoting": csv.QUOTE_NONNUMERIC, "escapechar": "\\"})):
+            compare(text, kw)
+        rnd = random.Random(5)
+        for _ in range(4000):
+            kw = {}
+            if rnd.random() < .3:
+                kw["delimiter"] = rnd.choice([";", "|", "\t"])
+            if rnd.random() < .2:
+                kw["quotechar"] = rnd.choice(["'", '"', "|"])
+            if rnd.random() < .2:
+                kw["escapechar"] = rnd.choice(["\\", "x"])
+            if rnd.random() < .2:
+                kw["doublequote"] = rnd.random() < .5
+            if rnd.random() < .2:
+                kw["skipinitialspace"] = rnd.random() < .5
+            if rnd.random() < .2:
+                kw["strict"] = rnd.random() < .5
+            if rnd.random() < .3:
+                kw["quoting"] = rnd.choice([0, 1, 2, 3])
+            text = "".join(rnd.choice('ab ,"\n\r;\\x1') for _ in range(rnd.randint(0, 25)))
+            compare(text, kw)
+
     def test_reader_escape_numeric(self):
-        # gh-113785 (CPython 3.12.6+, 3.13+): under QUOTE_NONNUMERIC a field that starts with the escapechar is
-        # numeric. Older hosts (e.g. 3.12.3) keep it a string, so AIL is checked against the new behaviour directly.
+        # gh-113785 (CPython 3.12.5+, 3.13+): under QUOTE_NONNUMERIC a field that starts with the escapechar is
+        # numeric. Older hosts (e.g. 3.12.3) keep it a string, and the prelude follows the host.
         rd = self.ns["_ail_csv_reader"]
-        self.assertEqual(list(rd(['1\\.5,\\.5,.5'], quoting=2, escapechar="\\")), [[1.5, 0.5, 0.5]])
-        self.assertEqual(list(rd(['1\\.5,\\.5,"\\.5"'], quoting=2, escapechar="\\")), [[1.5, 0.5, ".5"]])
-        with self.assertRaises(Exception):
-            list(rd(['\\a1'], quoting=2, escapechar="\\"))
+        new = sys.version_info >= (3, 12, 5)
+        self.assertEqual(list(rd(['1\\.5,\\.5,.5'], quoting=2, escapechar="\\")),
+                         [[1.5, 0.5, 0.5]] if new else [[1.5, ".5", 0.5]])
+        self.assertEqual(list(rd(['1\\.5,\\.5,"\\.5"'], quoting=2, escapechar="\\")),
+                         [[1.5, 0.5, ".5"]] if new else [[1.5, ".5", ".5"]])
+        if new:
+            with self.assertRaises(Exception):
+                list(rd(['\\a1'], quoting=2, escapechar="\\"))
+        else:
+            self.assertEqual(list(rd(['\\a1'], quoting=2, escapechar="\\")), [["a1"]])
 
     def test_writer(self):
         import csv

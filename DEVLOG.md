@@ -1,3 +1,21 @@
+## 2026-10-29 -- csv: QUOTE_NONNUMERIC fields that start with the escapechar (re-apply job-csv1)
+
+Re-applied accepted job csv1 on a tree that had already forced the new gh-113785 behaviour on every
+host.  `PreludeCsv.test_reader` failed on CI but not on the maintainer's 3.12.3: CI's setup-python
+installs the latest 3.12 (3.12.15 here).  CPython 3.12.5 made a QUOTE_NONNUMERIC field that begins
+with the escapechar numeric, so `list(csv.reader(['1\\.5,\\.5,.5'], escapechar='\\',
+quoting=csv.QUOTE_NONNUMERIC))` is `[[1.5, 0.5, 0.5]]`; 3.12.0-3.12.4 left those fields as strings.
+The prelude now follows the interpreter it runs under (the raw module checks `sys.version_info`;
+csvgen replaces that line with a literal for the compiler's CPython), so both the 3.12.3 sandbox
+and the 3.12.15 CI oracle match CPython.  `test_ail_cov2` pins the escaped-start cases (`1\\.5`,
+`\\.5`, `\\a"1...`, a quoted `"\\.5"`) as well as the random reader comparison; the direct test keeps
+both hosts' expected rows.
+
+The typed csvlib reader accepted QUOTE_NONNUMERIC but returned every cell as a str (and the
+default build could fail to compile such a program); it is now refused by name at compile time,
+and the general path (which converts the numbers) takes the program.  `tools/diff_ids.py` is not
+present on this tree; `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
