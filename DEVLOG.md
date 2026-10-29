@@ -1,3 +1,34 @@
+## 2026-10-29 -- stdlib42: struct.pack / unpack / calcsize / error (job-stdlib42-10291457)
+
+The still-refused import counts in `lab/corpus/programs` plus `AIL_CURRENT/language_examples`
+left `struct` as the best next small module: 6 uses (2 in corpus programs, the rest in the
+examples), ahead of the larger `unicodedata` and the host-only `argparse` / `tempfile` /
+`contextlib` / `shutil` scripts, while `pathlib`, `subprocess`, `statistics` and `dataclasses`
+were already built. `structlib.py` lowers a statically known `import struct` /
+`from struct import ...` to `prelude_struct.py`: `pack`, `unpack`, `calcsize` and `error` for a
+str literal format whose first character is `<`, `>` or `!`, with `x b B h H i I l L q Q ?`
+(`?` is pack-only, because CPython's unpack result is a bool). `unpack` is lowered through a
+small generated wrapper per format so the typed path gets a fixed-shape tuple; `pack` values
+go through a list, and `unpack` rejects a format with no values because the typed path has no
+empty-tuple value. Native `@` / `=`, floats, `c s p`, `n N`, `Struct`, `pack_into`,
+`unpack_from`, `iter_unpack`, run-time formats, `*` arguments and keyword arguments are refused
+by name. On the typed path the unsigned `Q` results are limited to int64; the general path keeps
+exact big ints. `pyfunc.py` now names an unsupported struct use in the import refusal instead of
+the blanket "module not modelled" text, and `python_wording` no longer respells the quoted
+module name `struct` as `class` in that message.
+
+Probes in `/tmp/probes/struct42` on both builds via `cmp.sh`: `p1b`, `p2`, `p3`, `p4`, `p10`,
+`p11`, `p12` and `p13` match CPython (integer widths and boundaries, range and buffer errors,
+empty/whitespace/repeat formats, aliases, from-imports, argument/list-item/attribute/dict-value
+routes, wide unsigned within int64, generated round trips); `p8` and `p1` are refused by name at
+`struct.unpack` with a zero-value format, and `r1`-`r4` are refused by name for `Struct`,
+`pack_into`, a run-time format and `unpack(">?")`. Added `test_ail_stdlib42.py` (registered in
+`ail_check.MODULES`) covering the same supported surface on both builds plus those refusal
+cases. Final-state tests: test_ail_stdlib42, test_ail_python_syntax, test_ail_pre105,
+test_ail_refusal_messages, test_ail_pre346, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (0 failed); `tools/update_manifest.py --check` and
+`tools/ci_shards.py --check` pass.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

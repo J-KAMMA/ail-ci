@@ -2175,6 +2175,14 @@ def _scan_module_consts(tree):
                                     "search, findall, finditer, split, sub, escape, and NAME = re.compile(literal)): "
                                     "write `import re`, or match by indexing and comparing the str itself "
                                     "(s[i] == 'a', s[a:b] == 'foo')" % regex)
+            elif 'struct' in named:
+                # structlib.py (run by ail_syntax.python_surface) lowers every use it builds and
+                # drops the import; the use it could not build kept it here, and its `note:` lines
+                # say which.
+                error = Unsupported("import of 'struct' with a use that is not built: pack, unpack, "
+                                    "calcsize and error are built for a str literal format starting "
+                                    "with '<', '>' or '!' and the integer format characters "
+                                    "x b B h H i I l L q Q ? -- the notes below name the use")
             elif builtin is not None:
                 # The Python front end (ail_syntax.python_surface) drops these imports when every
                 # use is a function that is built in; one that is not is what kept it here.
