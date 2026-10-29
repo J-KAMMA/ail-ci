@@ -29,11 +29,37 @@ Annotations (the stub's whole contract; a missing parameter or return annotation
     str        c_char_p             const char *            UTF-8, NUL terminated copy (embedded NUL: error)
                c_mut_char_p         char *                  the same, for a C prototype without const; C must not write it
     handles    c_void_p             void *                  an int (0 is NULL); the program owns lifetime
+    owned      Handle(name, free=)  void *                  an object that owns the pointer (see below)
     raw views  c_const_void_p       const void *  (takes bytes)      c_mut_void_p   void *  (takes bytearray)
     length     length("buf", T)     the C parameter that carries len(buf) (elements for ptr/cptr); the call
                                     supplies it, it is not a parameter of the Python function
     results    any of the above except bytes/bytearray; `c_char_p` is copied and decoded (NULL gives "");
                `None` is void; a missing return annotation is refused
+
+Owned handles (F4). `Db = Handle("sqlite3", free="sqlite3_close")` at module level (or `Handle(...)` written
+inline as an annotation) makes a type for an `@extern` stub's parameter or result: the value is an object that
+holds the pointer and frees it exactly once with the C function `free` (declared by no stub; it is looked up in
+the libraries of the stubs that use the type).
+
+    Db = Handle("sqlite3", free="sqlite3_close")
+    @extern(lib="sqlite3", trust=True)
+    def sqlite3_open(path: c_char_p, out: ptr(c_void_p)) -> c_int: ...
+    @extern(lib="sqlite3", trust=True)
+    def sqlite3_exec(db: Db, sql: c_char_p, cb: c_void_p, arg: c_void_p, err: c_void_p) -> c_int: ...
+
+    out = bytearray(8)
+    sqlite3_open(":memory:", out)
+    db = Db.adopt(out)          # takes the pointer out of the out-parameter (the buffer is zeroed)
+    sqlite3_exec(db, "create table t(x)", 0, 0, 0)
+    db.close()                  # calls sqlite3_close once, zeroes the pointer; a second close() does nothing
+    sqlite3_exec(db, "...", 0, 0, 0)    # ValueError: sqlite3 handle is closed
+
+`with db:` closes the handle on the way out. A result that is NULL is a handle that is already closed.
+An unclosed handle is freed when its last reference drops (CPython) and, for what is still open, at program
+exit in the reverse order of creation. A bare `c_void_p` is an int and works as before. A Handle is not a number:
+arithmetic on one, or passing one into a parallel worker, is refused when compiling.
+The compiled program frees an unclosed handle at program exit (or at close()), not when the last reference
+drops: the two differ only if the C library's free function does something the program can observe earlier.
 
 `link("m", "z")` at module level names libraries for every stub of the file that has no `lib=`.
 `ptr(c_void_p)` is `void **`, the out-parameter that returns a handle (sqlite3_open). A struct passed by pointer
@@ -66,7 +92,7 @@ import ctypes.util
 import os
 import sys
 
-__all__ = ['extern', 'export', 'exports', 'link', 'length', 'ptr', 'cptr', 'declarations', 'c_int', 'c_uint', 'c_short', 'c_ushort', 'c_long', 'c_ulong',
+__all__ = ['extern', 'export', 'exports', 'link', 'length', 'ptr', 'cptr', 'declarations', 'Handle','c_int', 'c_uint', 'c_short', 'c_ushort', 'c_long', 'c_ulong',
            'c_longlong', 'c_ulonglong', 'c_size_t', 'c_ssize_t', 'c_int8', 'c_int16', 'c_int32', 'c_int64',
            'c_uint8', 'c_uint16', 'c_uint32', 'c_uint64', 'c_byte', 'c_ubyte', 'c_bool', 'c_double', 'c_float',
            'c_char_p', 'c_mut_char_p', 'c_void_p', 'c_const_void_p', 'c_mut_void_p']
@@ -165,8 +191,103 @@ class length:
         return 'length(%r, %s)' % (self.name, self.ctype)
 
 
+_HANDLE_TYPES = {}                      # (name, free) -> the class Handle() made for it
+_LIVE = {}                              # creation number -> weakref of an open handle
+_COUNTER = [0]
+_HOOKED = [False]
+
+
+def _close_all():
+    """At exit: free what is still open, newest first (a statement before its database)."""
+    for number in sorted(_LIVE, reverse=True):
+        handle = _LIVE.get(number)
+        handle = None if handle is None else handle()
+        if handle is not None:
+            try:
+                handle.close()
+            except Exception:
+                pass
+
+
+class _HandleBase:
+    """The object an owned handle type (`Handle(name, free=...)`) makes: it owns one pointer."""
+    _name = ''
+    _free = ''
+
+    def __init__(self, address=0):
+        if type(address) is not int or not 0 <= address < (1 << 64):
+            raise TypeError('a handle is made by a stub that returns it, or by %s.adopt(buffer)' % type(self).__name__)
+        self._p = address
+        self._number = 0
+        if address:
+            import atexit
+            import weakref
+            _COUNTER[0] += 1
+            self._number = _COUNTER[0]
+            _LIVE[self._number] = weakref.ref(self)
+            if not _HOOKED[0]:
+                _HOOKED[0] = True
+                atexit.register(_close_all)
+
+    def _check(self):
+        if not self._p:
+            raise ValueError('%s handle is closed' % self._name)
+
+    def close(self):
+        """Free the pointer (once) and zero it; closing a closed handle does nothing."""
+        address = self._p
+        if address:
+            self._p = 0
+            _LIVE.pop(self._number, None)
+            cls = type(self)
+            for library in cls._libraries + [ctypes.CDLL(None)]:
+                try:
+                    free = getattr(library, cls._free)
+                except AttributeError:
+                    continue
+                free.argtypes = [ctypes.c_void_p]
+                free.restype = None
+                free(address)
+                return
+            raise RuntimeError('cannot find %s to free a %s handle' % (cls._free, cls._name))
+
+    def __enter__(self):
+        self._check()
+        return self
+
+    def __exit__(self, kind, value, trace):
+        self.close()
+        return False
+
+    def __del__(self):
+        try:
+            self.close()
+        except Exception:
+            pass
+
+    @classmethod
+    def adopt(cls, buffer):
+        """The handle for the pointer a C function stored through a `ptr(c_void_p)` out-parameter. The buffer
+        (a bytearray of 8 bytes) is zeroed, so the pointer has one owner."""
+        if type(buffer) is not bytearray or len(buffer) != 8:
+            raise ValueError('adopt takes the bytearray(8) of a ptr(c_void_p) out-parameter')
+        address = int.from_bytes(buffer, sys.byteorder)
+        buffer[:] = bytes(8)
+        return cls(address)
+
+
+def Handle(name, *, free):
+    """An owned handle type: `Handle("sqlite3", free="sqlite3_close")`. The same name and free give the same type."""
+    if not isinstance(name, str) or not name.isidentifier() or not isinstance(free, str) or not free.isidentifier():
+        raise TypeError('Handle("name", free="c_function"): both are identifiers')
+    key = (name, free)
+    if key not in _HANDLE_TYPES:
+        _HANDLE_TYPES[key] = type('Handle_' + name, (_HandleBase,), dict(_name=name, _free=free, _libraries=[]))
+    return _HANDLE_TYPES[key]
+
+
 _DECLARED = []
-_LINKED = {}                            # declaring file -> [library name or path, ...] from link()
+_LINKED = {}                         # declaring file -> [library name or path, ...] from link()
 
 
 def link(*libs, pkg_config=None):
@@ -211,6 +332,10 @@ def _classify(annotation):
         raise TypeError('annotate with a C type (c_int, c_double, ...), not %s' % annotation.__name__)
     if isinstance(annotation, (CType, length, ptr)):
         return annotation
+    if isinstance(annotation, type) and issubclass(annotation, _HandleBase) and annotation is not _HandleBase:
+        owned = CType('Handle(%s)' % annotation._name, 'owned', ctypes.c_void_p)
+        owned.handle = annotation
+        return owned
     raise TypeError('unsupported FFI annotation: %r' % (annotation,))
 
 
@@ -314,6 +439,9 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
         def bind():
             cdll = _build_sources(sources, lib, record['file']) if sources else _load(lib, record['file'])
             cfn = getattr(cdll, c_name)
+            for _, kind, _ in params + [('return', result, None)]:
+                if getattr(kind, 'kind', None) == 'owned' and cdll not in kind.handle._libraries:
+                    kind.handle._libraries.append(cdll)
             argtypes = []
             for _, kind, _ in params:
                 if isinstance(kind, length):
@@ -400,6 +528,11 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
                     if type(value) is not int or not 0 <= value < (1 << 64):
                         raise TypeError('%s: %s must be an address (int)' % (function.__name__, name))
                     converted.append(value)
+                elif kind.kind == 'owned':
+                    if not isinstance(value, kind.handle):
+                        raise TypeError('%s: %s must be a %s handle' % (function.__name__, name, kind.handle._name))
+                    value._check()
+                    converted.append(value._p)
                 elif kind.kind == 'bytes':
                     if type(value) is not bytes:
                         raise TypeError('%s: %s must be bytes' % (function.__name__, name))
@@ -420,7 +553,7 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
             del keep[:]
             if result is None:
                 return None
-            probe = (0 if rc is None else 1) if result.kind == 'str' else (rc or 0) if result.kind == 'handle' else rc
+            probe = (0 if rc is None else 1) if result.kind == 'str' else (rc or 0) if result.kind in ('handle', 'owned') else rc
             if check is not None and CHECKS[check](probe):
                 failure = exc if exc is not None else (OSError if errno else RuntimeError)
                 if errno:
@@ -432,6 +565,8 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
                 return '' if rc is None else rc.decode('utf-8')
             if result.kind == 'handle':
                 return rc or 0
+            if result.kind == 'owned':
+                return result.handle(rc or 0)
             return rc
 
         call.__name__ = function.__name__
