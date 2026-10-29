@@ -242,6 +242,7 @@ MODULES = (
     'test_ail_rdiff3',
     'test_ail_rdiff4',
     'test_ail_rdiff5',
+    'test_ail_rd1',
     'test_ail_pre328',
     'test_ail_pre345',
     'test_ail_pre353',
