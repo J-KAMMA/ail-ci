@@ -29821,7 +29821,8 @@ def _piece_text(p, want):
         text = _os_exception(text)
         if 'EXCSTR' in want:
             text = _exctext.apply(text, _exctext.DIE_EDITS, 'the DIE block')
-            text = text.replace('!strcmp(w, "integer overflow")', '!strcmp(w, "integer overflow") || !strcmp(w, "cannot convert float infinity to integer")')
+            if 'cannot convert float infinity' not in text:      # (the Python-syntax edit has it already)
+                text = text.replace('!strcmp(w, "integer overflow")', '!strcmp(w, "integer overflow") || !strcmp(w, "cannot convert float infinity to integer")')
     if p == 'OSEXC' and 'EXCSTR' in want:
         text = _exctext.apply(text, _exctext.OSEXC_EDITS, 'the OSEXC part')
     if p == 'DIE' and 'FILEEXC' in want:
@@ -29913,8 +29914,24 @@ _OVERFLOW_EXCEPTION_EDITS = (
 )
 
 
+# CPython ints never overflow, so a Python-syntax program (AIL_SURFACE=python) must not see its int64
+# boundary as a catchable OverflowError: `except OverflowError`, `except Exception` or a bare `except`
+# would run a handler CPython never enters (a silent difference). There the "integer overflow" trap stays
+# what A1 declares, a loud uncatchable stop (stderr, exit 1). The float-power range error (34, ...) is
+# CPython's own OverflowError and stays catchable. A program in the AIL syntax keeps the catchable
+# int64 OverflowError (A1).
+_OVERFLOW_EXCEPTION_PYTHON_EDIT = (
+    _OVERFLOW_EXCEPTION_EDITS[-1][0],
+    _OVERFLOW_EXCEPTION_EDITS[-1][0]
+    + '    if (!strcmp(w, "(34, \'Numerical result out of range\')") || !strcmp(w, "cannot convert float infinity to integer"))\n'
+    '        return AIL_EXC_OVERFLOW;\n')
+
+
 def _overflow_exception(text):
-    for old, new in _OVERFLOW_EXCEPTION_EDITS:
+    edits = _OVERFLOW_EXCEPTION_EDITS
+    if _os.environ.get('AIL_SURFACE') == 'python':
+        edits = edits[:-1] + (_OVERFLOW_EXCEPTION_PYTHON_EDIT,)
+    for old, new in edits:
         if text.count(old) != 1:
             raise AssertionError('DIE block changed; update _OVERFLOW_EXCEPTION_EDITS: ' + old)
         text = text.replace(old, new)
