@@ -1,8 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `pre416` recorded these as already present before that job:
+**Your change breaks hundreds of other tests in the full suite.** Your diff changes the runtime C line `char na[101], nb[101], buf[256];`, and `python/pkg-v12/dunderrt.py` patches that exact text: every program with operator dunders now fails to build with `RuntimeError: dunderrt: 0 places match '    char na[101], nb[101], buf[256];\n'` (test_ail_fuzz*, test_ail_pre*, test_ail_unified and ~300 more modules).
 
-**Unverified.** Did not re-run the worker's exact probes (inspected them; equivalents were run). Speed not measured: the edited paths are cold error paths. Did not compare `--debug-dir` text for unrelated programs because these runtime-template edits necessarily change every general-path C file; behaviour controls (r8) match CPython.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre428.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Fix it so dunderrt.py and your change agree (update the text dunderrt.py matches, or keep that line unchanged), keep your fix and its test, and run `cd AIL_CURRENT && python3 -m unittest -q test_ail_unified test_ail_fuzz20 test_ail_pre428` before committing. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
