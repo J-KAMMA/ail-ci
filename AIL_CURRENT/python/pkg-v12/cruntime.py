@@ -14975,6 +14975,7 @@ static inline ail_st ail_obj_hash(ail_ctx *cx, int64_t *out, ail_obj x) {
         }
     }
 }
+static inline const char *ail__tname_c(ail_obj x);
 static inline ail_st ail_obj_cmp_op(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, const char *op) {
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) {
         if (a.tag == AIL_T_FLOAT && b.tag == AIL_T_FLOAT) {
@@ -15017,8 +15018,10 @@ static inline ail_st ail_obj_cmp_op(ail_ctx *cx, int64_t *out, ail_obj a, ail_ob
     }
 /*B|*/
 /*B>*/
-    char buf[128];
-    snprintf(buf, sizeof buf, "'%s' not supported between instances of '%s' and '%s'", op, ail_type_name(a.tag), ail_type_name(b.tag));
+    char buf[420], na[160], nb[160];
+    snprintf(na, sizeof na, "%s", ail__tname_c(a));
+    snprintf(nb, sizeof nb, "%s", ail__tname_c(b));
+    snprintf(buf, sizeof buf, "'%s' not supported between instances of '%s' and '%s'", op, na, nb);
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b) { return ail_obj_cmp_op(cx, out, a, b, "<"); }

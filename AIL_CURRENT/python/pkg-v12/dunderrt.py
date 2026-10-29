@@ -134,7 +134,7 @@ __attribute__((noinline)) static ail_st ail_dun_binop(ail_ctx *cx, ail_obj *out,
         snprintf(buf, sizeof buf, "can only concatenate %s (not \\"%s\\") to %s", n, nb, n);
         return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
     }
-    if (op[0] == '*') {
+    if (op[0] == '*' && op[1] != '*') {   /* `*`: not `**` / `** or pow()` */
         int aseq = a.tag == AIL_T_LIST || a.tag == AIL_T_TUPLE || a.tag == AIL_T_STR
                 || (a.tag == AIL_T_INST && (!strcmp(na, "bytes") || !strcmp(na, "bytearray")
                                              || !strcmp(na, "collections.deque")));
@@ -196,8 +196,8 @@ __attribute__((noinline)) static int ail_dun_cmp_gt(ail_ctx *cx, int64_t *out, a
     if (ail_obj_truthy(r)) { *out = 1; *stp = AIL_OK; return 1; }
     return 0;
 }
-__attribute__((noinline)) static int ail_dun_cmp_rev(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, ail_st *stp) {
-    (void)a;
+__attribute__((noinline)) static int ail_dun_cmp_rev(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, const char *op, ail_st *stp) {
+    (void)a; (void)op;
     for (ail_obj k = ((ail_instobj *)b.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
         ail_classobj *kc = (ail_classobj *)k.o;
         ail_obj r;
@@ -286,7 +286,47 @@ OPTIONAL = (
             '"must be real number, not %s", ail_type_name(arg.tag)',
             'static inline ail_st ail2f_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj specobj) {\n',
             '            int64_t iv;\n',
-            '            double d;\n            if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);\n')
+            '            double d;\n            if (arg.tag == AIL_T_FLOAT) d = ail_float_val(arg);\n',
+            'static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj exp, int has_mod, ail_obj modv) {\n'
+            '    if (!has_mod) return ail_op_pow(cx, out, base, exp);\n')
+
+BI_POW_OLD = ('static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj exp, int has_mod, ail_obj modv) {\n'
+              '    if (!has_mod) return ail_op_pow(cx, out, base, exp);\n')
+BI_POW_NEW = (
+    'static inline int ail__bi_intenum(ail_obj x) {\n'
+    '    if (x.tag != AIL_T_INST || ((ail_instobj *)x.o)->cls.tag != AIL_T_CLASS) return 0;\n'
+    '    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {\n'
+    '        ail_str s = ail_view_to_str(((ail_classobj *)k.o)->name);\n'
+    '        static const char *names[2] = {"_AilIntEnum", "_AilIntFlag"};\n'
+    '        for (int n = 0; n < 2; n++) {\n'
+    '            int64_t len = n ? 12 : 11; if (s.n != len) continue; int64_t i = 0;\n'
+    '            while (i < len && ail_chr(s, i) == (uint8_t)names[n][i]) i++;\n'
+    '            if (i == len) return 1;\n'
+    '        }\n'
+    '    }\n'
+    '    return 0;\n'
+    '}\n'
+    'static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj exp, int has_mod, ail_obj modv) {\n'
+    '    if (!has_mod || modv.tag == AIL_T_NONE) return ail_op_pow(cx, out, base, exp);\n'
+    '    if ((base.tag == AIL_T_INST || exp.tag == AIL_T_INST || modv.tag == AIL_T_INST)\n'
+    '        && base.tag != AIL_T_FLOAT && exp.tag != AIL_T_FLOAT && modv.tag != AIL_T_FLOAT) {\n'
+    '        ail_obj ops[3] = {base, exp, modv};\n'
+    '        for (int i = 0; i < 3; i++) {\n'
+    '            if (ops[i].tag != AIL_T_INST) continue;\n'
+    '            ail_d1_fn ix = ail__bi_intenum(ops[i]) ? ail_dun1(ops[i], AIL_D1_INDEX) : 0;\n'
+    '            if (!ix) {\n'
+    '                char buf[500], na[160], nb[160], nc[160];\n'
+    '                snprintf(na, sizeof na, "%s", ail__tname_c(base));\n'
+    '                snprintf(nb, sizeof nb, "%s", ail__tname_c(exp));\n'
+    '                snprintf(nc, sizeof nc, "%s", ail__tname_c(modv));\n'
+    '                snprintf(buf, sizeof buf, "unsupported operand type(s) for ** or pow(): \'%s\', \'%s\', \'%s\'", na, nb, nc);\n'
+    '                return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n'
+    '            }\n'
+    '            ail_obj r; ail_st st = ix(cx, &r, ops[i]); if (st != AIL_OK) return st;\n'
+    '            ops[i] = r;\n'
+    '        }\n'
+    '        base = ops[0]; exp = ops[1]; modv = ops[2];\n'
+    '    }\n')
 
 
 def _binop_guard(fwd, rev, op):
@@ -381,7 +421,7 @@ def _edits(inplace=False):
         '                    "a generator expression used as a hash key is not supported: AIL stores it as a list (no generator identity hash or repr)");\n')
     default_hash = ('        default: {\n' + big + genexpr_hash_refusal +
                     '            char buf[64]; snprintf(buf, sizeof buf, "unhashable type: \'%s\'", ail_type_name(x.tag));\n'
-                    '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline ail_st ail_obj_cmp_op(')
+                    '            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n        }\n    }\n}\nstatic inline const char *ail__tname_c(ail_obj x);\nstatic inline ail_st ail_obj_cmp_op(')
     e.append((default_hash, HASH_CASE + default_hash))
     # hash() of an instance whose class has __hash__ is that method's int (CPython: -1 becomes -2), not the table hash
     e.append(('static inline ail_st ail_pyhash_inst(ail_ctx *cx, int64_t *out, ail_obj x) { return ail_obj_hash(cx, out, x); }\n',
@@ -401,7 +441,7 @@ def _edits(inplace=False):
               '            if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }\n'
               '            else { ail_st gst; if (ail_dun_cmp_gt(cx, out, a, b, &gst)) return gst; }\n'
               '            *out = 0; return AIL_OK;\n        }\n    }\n'
-              '    if (b.tag == AIL_T_INST && a.tag != AIL_T_INST) { ail_st rst; if (ail_dun_cmp_rev(cx, out, a, b, &rst)) return rst; }\n'))
+              '    if (b.tag == AIL_T_INST && a.tag != AIL_T_INST) { ail_st rst; if (ail_dun_cmp_rev(cx, out, a, b, op, &rst)) return rst; }\n'))
     # (an attribute of a value that is not an instance is an AttributeError: cruntime's ail_inst_getattr checks the tag itself)
     # str() of an instance: the first class of the chain that defines __str__ wins, whether or not a class below it defines
     # __repr__ (object.__str__ only falls back to repr when no class defines __str__)
@@ -416,8 +456,18 @@ def _edits(inplace=False):
               '    ' + _binop_guard('MUL', 'RMUL', '*') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'"'))
     for sym, fwd, rev in (('//', 'FLOORDIV', 'RFLOORDIV'), ('%', 'MOD', 'RMOD'), ('/', 'TRUEDIV', 'RTRUEDIV'),
                           ('**', 'POW', 'RPOW')):
+        disp = '** or pow()' if sym == '**' else sym
+        if sym == '**':
+            # CPython names both operands and says `** or pow()`; no instance reaches here (the guard above dispatches it)
+            new_err = ('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for ** or pow(): \'%s\' and \'%s\'", '
+                       'ail__tname_c(a), ail__tname_c(b));\n    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);')
+        else:
+            new_err = '    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % disp
         e.append(('    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym,
-                  '    ' + _binop_guard(fwd, rev, sym) + 'return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym))
+                  '    ' + _binop_guard(fwd, rev, disp) + new_err))
+    # pow(base, exp, mod): an IntEnum/IntFlag argument is its int value; a float keeps CPython's int-only message and any
+    # other instance gets the three-operand operand-type message
+    e.append((BI_POW_OLD, BI_POW_NEW))
     # divmod(): CPython asks __divmod__, then the reflected method; __floordiv__/__mod__
     # alone do not make divmod work on a user class (Fraction/IntEnum define __divmod__).
     # (only the head of the type-error arm is replaced: the arms after it differ between the plain and the big-int text)

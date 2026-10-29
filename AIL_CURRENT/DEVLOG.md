@@ -1,3 +1,27 @@
+## 2026-10-29 -- reintenum4: IntEnum/IntFlag `**`, cross-kind equality, plain-enum ordering and divmod (job-reintenum4-10300605)
+
+Re-checked on today's integ first; only the differences that still reproduced were changed.
+`C.B ** 2`, `pow(C.B, 2)`, `pow(C.B, 2, 5)` and `2 ** C.B` are the int power of the member's value
+(`_AilIntEnum.__pow__`/`__rpow__`); `pow(x, y, None)` is the binary power, a float anywhere keeps
+CPython's int-only 3-argument message, and any other instance gets the three-operand
+`unsupported operand type(s) for ** or pow()` message naming all three classes (the 3-argument
+`ail_bi_pow` now unwraps an IntEnum/IntFlag through `__index__`).  Binary `**` on a non-instance
+pair names both operands (`'str' and 'int'`), and the sequence-multiply error no longer
+misreads the operator text `** or pow()` as `*`.
+
+Plain `Enum.__eq__` is object's: it returns NotImplemented, so the other operand's `__eq__` runs
+before the identity answer (tested with a class that prints from `__eq__`).  IntEnum/IntFlag
+compare with int/float and an IntEnum/IntFlag value, not with another enum kind; StrEnum compares
+with str and another StrEnum's value, not with a plain Enum.  Plain-enum ordering raises the
+operator-specific TypeError naming both classes (`'E' and 'int'`, `'E' and 'F'` for every operator
+and both directions; the core's error copied each class name before `snprintf`, since
+`ail__tname_c` shares one buffer).  `divmod` follows `__divmod__`/`__rdivmod__`: IntEnum/IntFlag
+use the int pair, a class with only `__index__` is refused with CPython's message, `5 % 0` says
+"integer modulo by zero" and `//`/`divmod` keep "integer division or modulo by zero".  Values were
+checked through a parameter, a list item, an attribute and a dict value on both builds.
+Probes p0-p9 in `/tmp/probes/` match CPython; `test_ail_reintenum4.py` (6 programs, general and
+default builds) passes.
+
 ## 2026-10-30 -- GPU stage G1: `# ail: gpu`, the eligibility proof, kernel IR and its CPU emulation
 
 `compile --gpu` (or `AIL_GPU_BUILD=1`) reads `# ail: gpu` on the line before a loop (or at the end of a list-comprehension

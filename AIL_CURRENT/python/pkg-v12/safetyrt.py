@@ -2412,10 +2412,10 @@ static void ail2n_tname(char *buf, size_t n, ail_obj x) {
     }
     snprintf(buf, n, "%s", ail_type_name(x.tag));
 }
-__attribute__((noinline, cold)) static ail_st ail2n_lt_error(ail_ctx *cx, ail_obj a, ail_obj b) {
+__attribute__((noinline, cold)) static ail_st ail2n_cmp_error(ail_ctx *cx, ail_obj a, ail_obj b, const char *op) {
     char buf[240], na[80], nb[80];
     ail2n_tname(na, sizeof na, a); ail2n_tname(nb, sizeof nb, b);
-    snprintf(buf, sizeof buf, "'<' not supported between instances of '%s' and '%s'", na, nb);
+    snprintf(buf, sizeof buf, "'%s' not supported between instances of '%s' and '%s'", op, na, nb);
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 '''
@@ -2435,7 +2435,7 @@ def patch_notimplemented(c_text):
     c_text = c_text.replace(first, NI_DECLS + first, 1)
     c_text = one(c_text, 'ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;',
                  'ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;\n'
-                 '            if (ail2n_is(r)) return ail2n_lt_error(cx, a, b);')
+                 '            if (ail2n_is(r)) return ail2n_cmp_error(cx, a, b, op);')
     c_text = one(c_text, 'if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }',
                  'if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (!ail2n_is(r) && ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }')
     c_text = one(c_text, '    ail_d2_fn f = ail_dun2(a, fwd);\n    if (f) return f(cx, out, a, b);\n    f = ail_dun2(b, rev);\n    if (f) return f(cx, out, b, a);\n',
@@ -2473,7 +2473,7 @@ def patch_notimplemented(c_text):
                  'if (gf) { *stp = gf(cx, &r, b, a); if (*stp != AIL_OK) return 1; if (!ail2n_is(r) && ail_obj_truthy(r))')
     c_text = one(c_text, '        *stp = kc->lt_fn(cx, &r, b, a); if (*stp != AIL_OK) return 1;\n        if (ail_obj_truthy(r)) {',
                  '        *stp = kc->lt_fn(cx, &r, b, a); if (*stp != AIL_OK) return 1;\n'
-                 '        if (ail2n_is(r)) { *stp = ail2n_lt_error(cx, a, b); return 1; }\n        if (ail_obj_truthy(r)) {')
+                 '        if (ail2n_is(r)) { *stp = ail2n_cmp_error(cx, a, b, op); return 1; }\n        if (ail_obj_truthy(r)) {')
     return c_text
 
 
