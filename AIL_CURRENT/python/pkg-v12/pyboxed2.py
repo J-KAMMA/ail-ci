@@ -3821,6 +3821,22 @@ class Compiler(boxclosure.ClosureMixin):
         pass  # validated in Pass 0 (_check_importfrom); nothing to emit
 
     # ------------------------------------------------------------------------- function register
+    def _is_ffi_export(self, dec):
+        """`@export` / `@export()` from ail_ffi, also through `import ail_ffi` or an alias.
+
+        CPython's decorator checks the C signature and returns the function unchanged.  `--lib`
+        lowers the decorator separately, so a normal build runs the decorated function as the
+        ordinary function CPython runs."""
+        if isinstance(dec, ast.Call):
+            if dec.args or dec.keywords:
+                return False
+            dec = dec.func
+        if isinstance(dec, ast.Name):
+            return self.from_imports.get(dec.id) == ('ail_ffi', 'export')
+        return (isinstance(dec, ast.Attribute) and dec.attr == 'export'
+                and isinstance(dec.value, ast.Name)
+                and self.module_aliases.get(dec.value.id) == 'ail_ffi')
+
     def _register_function(self, node, cname=None, is_method=False, owner_class=None):
         posonly = [a.arg for a in node.args.posonlyargs]
         params = posonly + [a.arg for a in node.args.args]
@@ -3861,6 +3877,8 @@ class Compiler(boxclosure.ClosureMixin):
                 is_setter = True         # called on each obj.NAME = value
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'classmethod' and len(node.decorator_list) == 1:
                 is_classmethod = True    # the first parameter is the class (of the instance it is called on)
+            elif not is_method and self._is_ffi_export(dec):
+                pass                     # ail_ffi.export returns the function unchanged
             else:
                 raise Unsupported('the decorator on def %s (only @staticmethod on a method and '
                                   '@functools.lru_cache/@lru_cache/@cache are supported)' %

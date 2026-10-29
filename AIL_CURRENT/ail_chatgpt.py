@@ -5621,6 +5621,18 @@ def main(argv=None):
             import ail_export
             lowered_text, lowered['manifest'] = ail_export.lower(text)
             return lowered_text
+        if not library:
+            import ail_export
+            try:
+                entry_text = source.read_text(encoding='utf-8-sig')
+            except (OSError, UnicodeError):
+                entry_text = ''
+            if ail_export.uses_export(entry_text):
+                try:
+                    ail_export.lower(entry_text)
+                except ail_export.ExportError as error:
+                    if 'no @export function found' not in str(error):
+                        _refuse_load(error)
         try:
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,

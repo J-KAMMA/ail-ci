@@ -1,3 +1,36 @@
+## 2026-10-29 -- ex25: a normal build of ail_ffi's `@export` decorator (job-ex25-10290857)
+
+The Python-syntax examples in `AIL_CURRENT/language_examples` are `hello.ail`, `integer_series.ail`,
+`math.ail`, `stdin_sum.ail`, `sum.ail`, `use_math.ail` and `c_export/geometry.py`.  `hello`,
+`integer_series`, `stdin_sum` and `sum` build directly; `math.ail` is refused as a standalone
+program (`the first parameter must be the sequence read from the file`), `use_math.ail` without
+`--module math.ail` (`the name 'sum_to' is not a known function/class/builtin`), and
+`geometry.py` (`not in the subset: the decorator on def add`).  The first two are module fragments
+whose documented builds use `--module`; `geometry.py` is the refused standalone program with a
+CPython oracle (`5 3 HÉLLO! [1, 4, 9] 3.0`, exit 0).
+
+`@export` / `@export()` from `ail_ffi` (also through an alias and `@ail_ffi.export`) is now a no-op
+on a top-level function in a normal build, which is what CPython's decorator does after checking
+the C signature (it returns the function unchanged; `--lib` still lowers it separately).  The
+`@extern` lowering keeps the `export` import only when an export decorator is actually present, so
+extern-only programs keep their previous source, and a normal compile validates the export
+contract through `ail_export.lower`, refusing an invalid signature by name instead of silently
+accepting it.  `geometry.py` now builds on both the general and default builds and matches CPython.
+
+Probes in `/tmp/probes/ex25` on both builds via `cmp.sh`: `p01_basic`, `p02_call_and_alias`,
+`p03_module_attribute`, `p04_routes` (argument, list item, dict value), `p05_dataclass`,
+`p06_import_only`, `p07_no_feature` match CPython; `p04b_attribute` (a function stored in an
+instance attribute, then `Box().fn()`) and `p12_method` are refused by name; the invalid export
+contracts `p08_invalid_list_str`, `p09_invalid_default`, `p10_invalid_missing_return` and
+`p11_second_decorator` are refused by name where CPython raises `TypeError`; `p15_mixed_extern`
+(a file with both `@extern` and `@export`) is refused by name by the export validator.  `p13_export_attribute`
+(`getattr` of `__ail_export__`) still stops at the pre-existing general-path function-`getattr`
+limit and `p14_export_registry` is refused by name.  Added `AIL_CURRENT/test_ail_ex25.py` (3 tests)
+and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.  Final-state tests:
+test_ail_ex25, test_ail_c_export, test_ail_ffi, test_ail_python_syntax, test_ail_unified,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` was
+run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

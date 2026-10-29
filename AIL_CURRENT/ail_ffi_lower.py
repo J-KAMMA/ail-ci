@@ -170,11 +170,21 @@ class Session:
         imported = set()                # names bound by `from ail_ffi import`
         module_names = set()            # names bound by `import ail_ffi [as x]`
         blank = []                      # (first line, last line)
+        kept = []                       # `export` imports a normal program still needs
+        export_names = set()            # bare names bound to ail_ffi.export
+        wildcard_export = False
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
                         imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
+                        wildcard_export = True
+                        kept.append('from ail_ffi import export')
+                        continue
+                    if alias.name == 'export':
+                        export_names.add(alias.asname or alias.name)
+                        kept.append('from ail_ffi import export' +
+                                    (' as ' + alias.asname if alias.asname else ''))
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
@@ -184,9 +194,25 @@ class Session:
                 for alias in node.names:
                     if alias.name == 'ail_ffi':
                         module_names.add(alias.asname or 'ail_ffi')
+                        kept.append('import ail_ffi' +
+                                    (' as ' + alias.asname if alias.asname else ''))
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
+
+        def is_export(dec):
+            if isinstance(dec, ast.Call):
+                if dec.args or dec.keywords:
+                    return False
+                dec = dec.func
+            if isinstance(dec, ast.Name):
+                return wildcard_export or dec.id in export_names
+            return (isinstance(dec, ast.Attribute) and dec.attr == 'export'
+                    and isinstance(dec.value, ast.Name) and dec.value.id in module_names)
+
+        export_used = any(isinstance(node, ast.FunctionDef)
+                          and any(is_export(dec) for dec in node.decorator_list)
+                          for node in tree.body)
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -213,6 +239,8 @@ class Session:
         for first, last in blank:
             for index in range(first - 1, last):
                 lines[index] = ''
+        if export_used:
+            lines.extend(kept)
         self.decls.extend(decls)
         # a file that imports ail_ffi but declares nothing is left with its import blanked
         block = []

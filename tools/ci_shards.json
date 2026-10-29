@@ -69,6 +69,7 @@
   "test_ail_edit_dependencies": 0.9,
   "test_ail_element_views": 52.3,
   "test_ail_empty_blocks": 1.6,
+  "test_ail_ex25": 10.0,
   "test_ail_exc_str": 262.2,
   "test_ail_exception_aggregate_objects": 20.0,
   "test_ail_exception_context": 8.8,
@@ -816,6 +817,7 @@
   [
    "test_ail_api_contracts",
    "test_ail_bytearray_refs",
+   "test_ail_ex25",
    "test_ail_fuzz47",
    "test_ail_fuzz59",
    "test_ail_fuzz62",
