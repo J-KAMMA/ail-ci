@@ -1,6 +1,6 @@
-**Your change breaks hundreds of other tests in the full suite.** Your diff changes the runtime C line `char na[101], nb[101], buf[256];`, and `python/pkg-v12/dunderrt.py` patches that exact text: every program with operator dunders now fails to build with `RuntimeError: dunderrt: 0 places match '    char na[101], nb[101], buf[256];\n'` (test_ail_fuzz*, test_ail_pre*, test_ail_unified and ~300 more modules).
+**Your change fails tests on top of the current integration branch.** Applied alone on today's integ, one or more of these test modules fail: test_ail_obj_refs test_ail_pre428 test_ail_safetynet test_ail_unified test_ail_virtual_dispatch.
 
-Fix it so dunderrt.py and your change agree (update the text dunderrt.py matches, or keep that line unchanged), keep your fix and its test, and run `cd AIL_CURRENT && python3 -m unittest -q test_ail_unified test_ail_fuzz20 test_ail_pre428` before committing. Commit.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find why it fails here (another change may have altered behaviour or output your test expects), and fix it so they pass while keeping your fix and its test. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
