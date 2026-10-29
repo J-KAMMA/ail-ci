@@ -1,3 +1,29 @@
+## 2026-10-29 -- stdlib48 review: starred `pack` evaluates once; unpack rejects non-buffers
+
+The review found two defects in the new `struct` lowering.  A starred `struct.pack` argument was
+deep-copied once for the length check and again for every field, so `struct.pack('<2i', *vals())` ran
+`vals()` three times; a literal `*[f(), g()]` ran each element twice.  A non-literal sequence now goes
+through one generated pack helper (annotated `list[int]` / `list[bytes]`), a literal list/tuple is
+indexed element by element, and a name or constant keeps direct indexing.  The sequence is therefore
+evaluated once, and the helper is also used for a list slice or comprehension (wrapped in `list(...)`).
+The generated unpack helper also indexes its buffer directly, so `struct.unpack('<i', [1, 2, 3, 4])`
+silently decoded a list where CPython raises `TypeError`.  It now starts with `_ail_struct_buffer`, a
+new prelude helper (injected only on the general/default builds, because the typed path refuses a
+non-buffer at compile time) that accepts bytes/bytearray and raises CPython's `TypeError` text for
+anything else.
+
+Probes in `/tmp/probes/defects` on both builds via `cmp.sh`: `star_call`, `star_list_side`,
+`star_tuple_side`, `star_gen`, `star_gen_range`, `star_variable`, `star_bytes_pack`, `star_bytes`,
+`star_tuple_call`, `star_mixed_literal`, `star_empty`, `unpack_bytearray` match CPython on the
+general/default builds; the same probes match or are refused by name on the typed build
+(`star_tuple_call` and generator expressions are refused by name there).  `unpack_list`,
+`unpack_list_c`, `unpack_str` and `unpack_from_list` now exit 1 with empty stdout and CPython's
+`TypeError` text on both general/default builds; the typed build refuses them at compile time.
+
+Tests: `test_ail_stdlib48` (7 tests, 0 failed), plus `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_source_check` and `test_ail_check`; `tools/update_manifest.py`
+and `--check` pass.
+
 ## 2026-10-29 -- stdlib48: `struct` for literal integer/bytes formats
 
 `struct` was the next most-imported still-refused module after `decimal` in the corpus.  `struct.calcsize`,

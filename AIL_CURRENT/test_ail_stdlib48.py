@@ -24,16 +24,18 @@ if str(PKG) not in sys.path:
     sys.path.insert(0, str(PKG))
 
 import prelude_struct
+import prelude_struct_buffer
 import stdlib4
 
 
 def compile_python(directory, text, name, **env):
     source, exe = Path(directory, name + ".ail"), Path(directory, name)
     source.write_text(text, encoding="utf-8")
+    environment = dict(os.environ, AIL_NO_GENERAL="1")
+    environment.update(env)
     built = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", source.name,
                             "--syntax", "python", "-o", exe.name], cwd=directory, capture_output=True,
-                           text=True, timeout=900,
-                           env=dict(os.environ, AIL_NO_GENERAL="1", **env))
+                           text=True, timeout=900, env=environment)
     return built, source, exe
 
 
@@ -44,6 +46,21 @@ class Header:
     def __init__(self, magic: int, size: int) -> None:
         self.magic = magic
         self.size = size
+
+
+def star_pair():
+    print('star_pair')
+    return [1, 2]
+
+
+def star_one():
+    print('star_one')
+    return 1
+
+
+def star_two():
+    print('star_two')
+    return 2
 
 
 def main() -> None:
@@ -112,6 +129,9 @@ def main() -> None:
     print(built.hex(), magic, size, flags)
     args = [1, 2, 3]
     print(struct.pack('<3h', *args).hex())
+    print(struct.pack('<2i', *star_pair()).hex())
+    print(struct.pack('<2i', *[star_one(), star_two()]).hex())
+    print(struct.pack('<2i', *(3, 4)).hex())
     print(struct.calcsize('<3h2xQI'), struct.calcsize('<i h'), struct.pack('').hex(), struct.calcsize(''))
 
 
@@ -153,6 +173,10 @@ class Prelude(unittest.TestCase):
                 prelude_struct._ail_struct_int_bytes(bad, 4, 'little', True, 'i')
         with self.assertRaises(ValueError):
             prelude_struct._ail_struct_int_bytes(-1, 4, 'little', False, 'I')
+        self.assertEqual(prelude_struct_buffer._ail_struct_buffer(bytearray(b'ab')), b'ab')
+        for bad in ([1, 2], 'ab', None):
+            with self.assertRaises(TypeError):
+                prelude_struct_buffer._ail_struct_buffer(bad)
 
 
 class Compiled(unittest.TestCase):
@@ -200,6 +224,22 @@ class Compiled(unittest.TestCase):
                 self.assertNotEqual(built.returncode, 0, "compiled but should be refused: " + name)
                 self.assertIn(wanted, built.stdout + built.stderr)
                 self.assertFalse(exe.exists())
+
+    def test_unpack_non_buffer_stops(self):
+        programs = {
+            'list int': "import struct\nprint(struct.unpack('<i', [1, 2, 3, 4]))\n",
+            'list char': "import struct\nprint(struct.unpack('<c', [65])[0].hex())\n",
+            'list string': "import struct\nprint(struct.unpack('<2s', [65, 66])[0].hex())\n",
+            'str': "import struct\nprint(struct.unpack('<c', 'A'))\n",
+            'unpack_from list': "import struct\nprint(struct.unpack_from('<i', [1, 2, 3, 4], 0))\n",
+        }
+        for name, text in programs.items():
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as directory:
+                built, source, exe = compile_python(directory, text, "nonbuffer", AIL_NO_GENERAL="")
+                self.assertEqual(built.returncode, 0, "%s%s" % (built.stdout, built.stderr))
+                got = subprocess.run([str(exe)], capture_output=True, timeout=300)
+                self.assertNotEqual(got.returncode, 0, "ran but should stop: " + name)
+                self.assertEqual(got.stdout, b'', name)
 
     def test_unused_module_text_is_unchanged(self):
         text = "def main() -> None:\n    print('struct is only a word here')\n\nmain()\n"

@@ -11,7 +11,7 @@ format gets one generated unpack helper with a fixed tuple annotation; neither p
 of mixed value types, so the typed path can take it.
 """
 import ast
-import copy
+import os
 import re
 from pathlib import Path
 
@@ -80,7 +80,8 @@ def _parse(node, fmt):
 
 
 def _call(node, name, args):
-    return ast.copy_location(ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=args, keywords=[]), node)
+    call = ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=args, keywords=[])
+    return ast.copy_location(call, node) if node is not None else call
 
 
 def _byte(value):
@@ -103,28 +104,8 @@ def _pack_value(node, code, count, value, order):
         ast.Constant(value=code in SIGNED), ast.Constant(value=code)])
 
 
-def _pack(node, fmt, raw_values):
-    text, ops, size, fields = _parse(node, fmt)
-    order = 'little' if not text or text[0] == '<' else 'big'
-    starred = len(raw_values) == 1 and isinstance(raw_values[0], ast.Starred)
-    if not starred and any(isinstance(value, ast.Starred) for value in raw_values):
-        stdlib4.refuse(node, 'struct.pack: a * argument mixed with other values is not built; collect every '
-                             'value in one list or tuple and pass it as *values')
-    if starred:
-        sequence = raw_values[0].value
-    else:
-        if len(raw_values) != fields:
-            stdlib4.refuse(node, 'struct.pack: the format needs %d values but %d were given' %
-                           (fields, len(raw_values)))
-        sequence = None
-    def value(index):
-        if sequence is None:
-            return raw_values[index]
-        return ast.Subscript(value=copy.deepcopy(sequence), slice=ast.Constant(value=index), ctx=ast.Load())
+def _parts(node, ops, order, value):
     parts = []
-    if starred:
-        length = ast.Call(func=ast.Name(id='len', ctx=ast.Load()), args=[copy.deepcopy(sequence)], keywords=[])
-        parts.append(_call(node, '_ail_struct_arity', [length, ast.Constant(value=fields)]))
     used = 0
     for code, count in ops:
         if code == 'x':
@@ -140,11 +121,91 @@ def _pack(node, fmt, raw_values):
         for _ in range(count):
             parts.append(_pack_value(node, code, 1, value(used), order))
             used += 1
+    return parts
+
+
+def _join(node, parts):
     if not parts:
         return _byte(b'')
     joined = ast.Call(func=ast.Attribute(value=_byte(b''), attr='join', ctx=ast.Load()),
                       args=[ast.List(elts=parts, ctx=ast.Load())], keywords=[])
-    return ast.copy_location(joined, node)
+    return ast.copy_location(joined, node) if node is not None else joined
+
+
+class Packer:
+    """One generated helper per literal format, so a starred sequence is evaluated once."""
+
+    def __init__(self):
+        self.names = {}
+
+    def helper(self, node, text, ops, fields):
+        kind = 'bytes' if all(code in 'csp' for code, count in ops if code != 'x') else 'int'
+        key = (text, kind)
+        if key not in self.names:
+            self.names[key] = (self._source(text, ops, fields, kind), len(self.names))
+        source, number = self.names[key]
+        return '_ail_struct_lowered_pack_%d' % number, source
+
+    def _source(self, text, ops, fields, kind):
+        order = 'little' if not text or text[0] == '<' else 'big'
+        values = ast.Name(id='values', ctx=ast.Load())
+
+        def value(index):
+            return ast.Subscript(value=values, slice=ast.Constant(value=index), ctx=ast.Load())
+
+        parts = _parts(None, ops, order, value)
+        arity = ast.Expr(value=_call(None, '_ail_struct_arity', [
+            ast.Call(func=ast.Name(id='len', ctx=ast.Load()), args=[values], keywords=[]),
+            ast.Constant(value=fields)]))
+        body = [arity, ast.Return(value=_join(None, parts))]
+        function = ast.FunctionDef(
+            name='PLACEHOLDER',
+            args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='values', annotation=ast.Subscript(
+                value=ast.Name(id='list', ctx=ast.Load()), slice=ast.Name(id=kind, ctx=ast.Load()), ctx=ast.Load()))],
+                               vararg=None, kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+            body=body, decorator_list=[], returns=ast.Name(id='bytes', ctx=ast.Load()))
+        module = ast.Module(body=[function], type_ignores=[])
+        return ast.unparse(ast.fix_missing_locations(module))
+
+    def finish(self, key, number):
+        source = self.names[key][0]
+        return source.replace('def PLACEHOLDER(', 'def _ail_struct_lowered_pack_%d(' % number, 1)
+
+
+def _pack(node, fmt, raw_values, packer, generated):
+    text, ops, size, fields = _parse(node, fmt)
+    order = 'little' if not text or text[0] == '<' else 'big'
+    starred = len(raw_values) == 1 and isinstance(raw_values[0], ast.Starred)
+    if not starred and any(isinstance(value, ast.Starred) for value in raw_values):
+        stdlib4.refuse(node, 'struct.pack: a * argument mixed with other values is not built; collect every '
+                             'value in one list or tuple and pass it as *values')
+    if not starred:
+        if len(raw_values) != fields:
+            stdlib4.refuse(node, 'struct.pack: the format needs %d values but %d were given' %
+                           (fields, len(raw_values)))
+        return _join(node, _parts(node, ops, order, lambda index: raw_values[index]))
+    sequence = raw_values[0].value
+    literal = isinstance(sequence, (ast.List, ast.Tuple)) and not any(
+        isinstance(element, ast.Starred) for element in sequence.elts)
+    if literal and len(sequence.elts) == fields:
+        return _join(node, _parts(node, ops, order, lambda index: sequence.elts[index]))
+    if fields == 0:
+        length = ast.Call(func=ast.Name(id='len', ctx=ast.Load()), args=[sequence], keywords=[])
+        return _join(node, [_call(node, '_ail_struct_arity', [length, ast.Constant(value=fields)])] +
+                     _parts(node, ops, order, lambda index: None))
+    if isinstance(sequence, (ast.Name, ast.Constant)):
+        def index_value(index):
+            return ast.Subscript(value=sequence, slice=ast.Constant(value=index), ctx=ast.Load())
+        length = ast.Call(func=ast.Name(id='len', ctx=ast.Load()), args=[sequence], keywords=[])
+        return _join(node, [_call(node, '_ail_struct_arity', [length, ast.Constant(value=fields)])] +
+                     _parts(node, ops, order, index_value))
+    argument = sequence
+    if isinstance(sequence, (ast.ListComp, ast.GeneratorExp, ast.Subscript)):
+        argument = _call(node, 'list', [sequence])
+    helper, source = packer.helper(node, text, ops, fields)
+    if source not in generated:
+        generated.append(source)
+    return _call(node, helper, [argument])
 
 
 def _unpack_type(code):
@@ -156,7 +217,8 @@ def _unpack_type(code):
 
 
 class Unpacker:
-    def __init__(self):
+    def __init__(self, check_buffer):
+        self.check_buffer = check_buffer
         self.names = {}
 
     def helper(self, node, fmt):
@@ -186,10 +248,10 @@ class Unpacker:
                 types.append('bytes')
                 name = '_v%d' % index
                 if code == 's':
-                    lines.append('    %s: bytes = bytes(data[pos + %d:pos + %d])' %
+                    lines.append('    %s: bytes = bytes(buf[pos + %d:pos + %d])' %
                                  (name, position, position + count))
                 else:
-                    lines.append('    %s: bytes = _ail_struct_pascal(data, pos + %d, %d)' %
+                    lines.append('    %s: bytes = _ail_struct_pascal(buf, pos + %d, %d)' %
                                  (name, position, count))
                 position += count
                 index += 1
@@ -198,23 +260,27 @@ class Unpacker:
                 types.append(_unpack_type(code))
                 name = '_v%d' % index
                 if code == 'c':
-                    lines.append('    %s: bytes = bytes(data[pos + %d:pos + %d])' %
+                    lines.append('    %s: bytes = bytes(buf[pos + %d:pos + %d])' %
                                  (name, position, position + 1))
                 elif code == '?':
-                    lines.append('    %s: bool = data[pos + %d] != 0' % (name, position))
+                    lines.append('    %s: bool = buf[pos + %d] != 0' % (name, position))
                 else:
                     signed = 'True' if code in SIGNED else 'False'
-                    lines.append("    %s: int = int.from_bytes(data[pos + %d:pos + %d], '%s', signed=%s)" %
+                    lines.append("    %s: int = int.from_bytes(buf[pos + %d:pos + %d], '%s', signed=%s)" %
                                  (name, position, position + UNITS[code], order, signed))
                 position += UNITS[code]
                 index += 1
         annotation = 'tuple[%s]' % ', '.join(types)
         # the number is filled in by helper() so the name and the call agree
-        head = ['def PLACEHOLDER(data: bytes, offset: int, exact: bool) -> %s:' % annotation,
-                '    pos: int = offset',
+        head = ['def PLACEHOLDER(data: bytes, offset: int, exact: bool) -> %s:' % annotation]
+        if self.check_buffer:
+            head.append('    buf: bytes = _ail_struct_buffer(data)')
+        else:
+            head.append('    buf: bytes = data')
+        head += ['    pos: int = offset',
                 '    if pos < 0:',
-                '        pos = len(data) + pos',
-                '    if pos < 0 or len(data) < pos + %d or (exact and len(data) != pos + %d):' % (size, size),
+                '        pos = len(buf) + pos',
+                '    if pos < 0 or len(buf) < pos + %d or (exact and len(buf) != pos + %d):' % (size, size),
                 f'        raise ValueError("unpack requires a buffer of %d bytes" % {size})']
         names = ', '.join('_v%d' % i for i in range(index))
         if index == 1:
@@ -235,7 +301,9 @@ class Rewrite(ast.NodeTransformer):
 
 
 def run(imports, tree, helpers):
-    unpacker = Unpacker()
+    check_buffer = not os.environ.get('AIL_NO_GENERAL')
+    unpacker = Unpacker(check_buffer)
+    packer = Packer()
     generated = []
 
     class Lower(ast.NodeTransformer):
@@ -256,7 +324,7 @@ def run(imports, tree, helpers):
             if name == 'pack':
                 if not args:
                     stdlib4.refuse(node, 'struct.pack needs a format string')
-                return _pack(node, args[0], args[1:])
+                return _pack(node, args[0], args[1:], packer, generated)
             if name in ('unpack', 'unpack_from'):
                 if (name == 'unpack' and len(args) != 2) or (
                         name == 'unpack_from' and len(args) not in (2, 3)):
@@ -279,4 +347,9 @@ def run(imports, tree, helpers):
     for text, (source, number) in unpacker.names.items():
         if source in generated:
             helpers.append(unpacker.finish(text, number))
+    for key, (source, number) in packer.names.items():
+        if source in generated:
+            helpers.append(packer.finish(key, number))
     helpers.append(Path(__file__).with_name('prelude_struct.py').read_text(encoding='utf-8'))
+    if check_buffer:
+        helpers.append(Path(__file__).with_name('prelude_struct_buffer.py').read_text(encoding='utf-8'))
