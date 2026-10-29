@@ -28,6 +28,8 @@ def _ail_struct_parts(fmt: str) -> list[str]:
     while i < len(fmt):
         ch = fmt[i]
         if ch in _STRUCT_WS:
+            if num != "":
+                raise error("bad char in struct format")
             i += 1
             continue
         if ch >= "0" and ch <= "9":
@@ -104,12 +106,16 @@ def _ail_struct_total(fmt: str) -> int:
             pos += n
         else:
             size = _ail_struct_size(prefix, ch)
-            k = 0
-            while k < n:
+            if n == 0:
                 if prefix == "@":
                     pos += _ail_struct_padding(pos, size)
-                pos += size
-                k += 1
+            else:
+                k = 0
+                while k < n:
+                    if prefix == "@":
+                        pos += _ail_struct_padding(pos, size)
+                    pos += size
+                    k += 1
         i += 1
     return pos
 
@@ -133,15 +139,19 @@ def _ail_struct_value_meta(fmt: str, idx: int) -> list[str]:
             pos += n
         else:
             size = _ail_struct_size(prefix, ch)
-            k = 0
-            while k < n:
+            if n == 0:
                 if prefix == "@":
                     pos += _ail_struct_padding(pos, size)
-                if vi == idx:
-                    return [str(pos), str(size), ch]
-                vi += 1
-                pos += size
-                k += 1
+            else:
+                k = 0
+                while k < n:
+                    if prefix == "@":
+                        pos += _ail_struct_padding(pos, size)
+                    if vi == idx:
+                        return [str(pos), str(size), ch]
+                    vi += 1
+                    pos += size
+                    k += 1
         i += 1
     return ["0", "0", "x"]
 
@@ -263,6 +273,8 @@ def _ail_struct_pack_bytes(fmt: str, idx: int, value) -> bytes:
     take = len(value)
     if take > size - 1:
         take = size - 1
+    if take > 255:
+        take = 255
     length = bytes([take])
     return gap + length + bytes(value[:take]) + _ail_struct_zeros(size - 1 - take)
 
@@ -279,7 +291,21 @@ def _ail_struct_pack_join(fmt: str, chunks: list[bytes]) -> bytes:
     return out
 
 
+def _ail_struct_require_buffer(data) -> None:
+    if not (isinstance(data, bytes) or isinstance(data, bytearray)):
+        raise TypeError("a bytes-like object is required, not '" + type(data).__name__ + "'")
+
+
+def _ail_struct_require_write_buffer(buf) -> None:
+    if not isinstance(buf, bytearray):
+        name = type(buf).__name__
+        if buf is None:
+            name = "None"
+        raise TypeError("argument must be read-write bytes-like object, not " + name)
+
+
 def _ail_struct_check(fmt: str, data) -> None:
+    _ail_struct_require_buffer(data)
     total = _ail_struct_total(fmt)
     if len(data) != total:
         raise error("unpack requires a buffer of " + str(total) + " bytes")
@@ -307,10 +333,12 @@ def _ail_struct_adjust(fmt: str, buf, offset: int, pack: bool) -> int:
 
 
 def _ail_struct_check_from(fmt: str, data, offset: int) -> int:
+    _ail_struct_require_buffer(data)
     return _ail_struct_adjust(fmt, data, offset, False)
 
 
 def _ail_struct_check_into(fmt: str, buf, offset: int) -> int:
+    _ail_struct_require_write_buffer(buf)
     offset = _ail_struct_adjust(fmt, buf, offset, True)
     total = _ail_struct_total(fmt)
     p = offset

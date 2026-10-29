@@ -7017,9 +7017,9 @@
     "test_ail_pre422.py": "3179d0ad7c3a7e4125c9bb6bab28de7a4a2c521afd12d6ef53e4dfbeb9c0e7ff",
     "test_ail_pre423.py": "e1505577d1aec7dbf07a96677979351537b54dab19e4669825b3068668db67da",
     "test_ail_ffi_parallel.py": "0b2edc0deb9a287134da00873128872a5d617063dd8324d207dfe5dc5e8c0b40",
-    "python/pkg-v12/prelude_struct.py": "84e3df6fbe4f6878edcbe9a8b9c0a0757e1d01af00668dff3203f6499bc68279",
-    "python/pkg-v12/structlib.py": "ea2585a32782e06af3a0b674c592e58038b15afa1bca60f8186c08de444695ee",
-    "test_ail_stdlib44.py": "4a7bd064bf955c4f4895cacb6e6e85837e20669ffedb53371d023c996608d129"
+    "python/pkg-v12/prelude_struct.py": "c95740932ede06be3bc3c03819acaabd3ccb616875f1f76468added3f0accda3",
+    "python/pkg-v12/structlib.py": "d68930b9cb3bbd197b5f5655ca6c23ea2f7f12bde8a11e663db9635086d6b44c",
+    "test_ail_stdlib44.py": "a302c956d99f99f2a98f64aadbde7f03e93cdd78f4ac9d49ad2f303c41a924aa"
   },
   "release": "R1.40+xlang-304d34f+native-round72+windows-cpython+workflow-tests-candidate+bracket-read-candidate+n0-v4-candidate+r8-fuzz-plan-v2+r9-byte-arena-sanitizer+r10-native-ledger-n0+r11-n0-fresh-evidence+r12-optimizer-current-chain+r13-xlang-arm64-emulated-gate+r14-native-r11-historical-inputs+r15-native-r11-regression+r16-native-recovered-inputs+r20-native-versioned-scope+r21-native-pinned-input-recovery+r22-provenance-precision+r23-direct-indexed-undefined+r24-protected-lock-line-endings+r25-current-r6-seeds+r26-nullish-ternary+r27-seed777-coercion+r28-includes+r30-indexof+r32-native-model-inputs+r33-native-checkpoint+r36-xlang-dynamic-array+r37-source-bound-gate+r38-host-matrix+r51-native-f32-successor+r52-native-f32-migration-candidate+r53-v1-string-width+r54-v1-runtime-repair+r55-windows-cli-intake",
   "work_id": "r140-xlang-304d34f-integration-20260926",
@@ -24959,9 +24959,9 @@
     "test_ail_pre422.py": "3179d0ad7c3a7e4125c9bb6bab28de7a4a2c521afd12d6ef53e4dfbeb9c0e7ff",
     "test_ail_pre423.py": "e1505577d1aec7dbf07a96677979351537b54dab19e4669825b3068668db67da",
     "test_ail_ffi_parallel.py": "0b2edc0deb9a287134da00873128872a5d617063dd8324d207dfe5dc5e8c0b40",
-    "python/pkg-v12/prelude_struct.py": "84e3df6fbe4f6878edcbe9a8b9c0a0757e1d01af00668dff3203f6499bc68279",
-    "python/pkg-v12/structlib.py": "ea2585a32782e06af3a0b674c592e58038b15afa1bca60f8186c08de444695ee",
-    "test_ail_stdlib44.py": "4a7bd064bf955c4f4895cacb6e6e85837e20669ffedb53371d023c996608d129"
+    "python/pkg-v12/prelude_struct.py": "c95740932ede06be3bc3c03819acaabd3ccb616875f1f76468added3f0accda3",
+    "python/pkg-v12/structlib.py": "d68930b9cb3bbd197b5f5655ca6c23ea2f7f12bde8a11e663db9635086d6b44c",
+    "test_ail_stdlib44.py": "a302c956d99f99f2a98f64aadbde7f03e93cdd78f4ac9d49ad2f303c41a924aa"
   },
   "base_local_change_scope": "Cross-language pipeline hardened to real-world measurement. incr.py: two new incrementalization pattern classes -- dict argmax (d[k]=d.get(k,0)+POS writes plus keys() rescan with tiebreak become update-site tracking) and sliding window sum (del xs[0] sites emit _wacc-=xs[0]); probe 64/64, mode/wma translations fire with byte-identical oracles. pkg-v12: str(<float>) enabled via existing ail_str_from_float FMT machinery (SEMANTICS.md updated). jstrans.py: deterministic JS->subset translator -- float profile (Number/parseFloat, JS Number->String formatting: integral doubles without .0, NaN/Infinity, -0->0, true / on floats, IEEE remainder), plus parser-surface hardening (ASI, shebang, new Array, function-expr arrows, stdin line-terminator fix via rstrip, null-sentinel re-kinding via vartypes/zero_of, trivial-function inlining, named TErrs for all remaining unsupported constructs). Corpus 17/17 byte-identical vs Node; real-world corpus 0->2 end-to-end with zero generic crashes (12 named TErrs). dominfer.py: machine-derived input domains via differential probing (found 2^53+ integer JS precision boundary on all add-protocol programs).",
   "integration": {

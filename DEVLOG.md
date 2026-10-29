@@ -1,3 +1,23 @@
+## 2026-10-29 -- stdlib44 review: pascal cap, zero-count alignment, format whitespace, buffer types
+
+The review found four defects in the `struct` lowering. The pascal `p` pack now stores
+`min(len(value), size - 1, 255)` in its length byte, so `struct.pack('300p', b'y' * 260)` gives
+`300 255` and unpacks 255 bytes like CPython. A zero repeat count still applies the native `@`
+alignment padding for its type (`calcsize('@b0i') == 4`, `calcsize('@c0lx') == 9`, `@b0h/@b0l/@b0q`
+= 2/8/8) in both the layout and the helper. Whitespace between a repeat count and its format
+character (`'3 i'`, `'3\tI'`, `'2\nh'`) is now `bad char in struct format` instead of being
+accepted, while whitespace before the count (`' 3i'`) still works. `unpack`/`unpack_from` reject a
+non-buffer with CPython's `TypeError: a bytes-like object is required, not '<type>'`, and
+`pack_into` rejects a non-writeable buffer with `argument must be read-write bytes-like object,
+not <type>` (including `None` for `None`).
+
+Probes in `/tmp/probes/review44` on both builds via `cmp.sh`: `p_pascal` (cap through a direct
+value, an argument, a list item, an attribute and a dict value, plus 0/255/260/300/500-byte inputs),
+`p_zerocount` (all sizes and pack output, values through the same routes), `p_types` (unpack,
+unpack_from and pack_into with list/str/int/None/float, and valid bytearray input) match CPython;
+`p_ws` is refused by name (`bad char in struct format`). Added `test_review_cases_match_cpython`
+and the two whitespace refusal cases to `test_ail_stdlib44.py`.
+
 ## 2026-10-29 -- stdlib44: `struct` integer, bool, char, string and padding formats (job-stdlib44-10291920)
 
 `struct` was the most-imported standard-library module still refused after the earlier stdlib batches

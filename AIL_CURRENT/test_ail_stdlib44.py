@@ -78,6 +78,62 @@ main()
 """
 
 
+REVIEW_PROGRAM = r"""import struct
+
+
+def main() -> None:
+    big = b"y" * 260
+    packed = struct.pack("300p", big)
+    print(len(packed), packed[0], struct.unpack("300p", packed)[0])
+    print(struct.calcsize("@b0i"), struct.calcsize("@c0lx"))
+    print(struct.calcsize("@b0h"), struct.calcsize("@b0l"), struct.calcsize("@b0q"))
+    print(struct.calcsize(" 3i"), struct.calcsize("@b0i2x"), struct.calcsize("<b0i"), struct.calcsize(">b0i"))
+    print(struct.pack("@b0i", 1), struct.pack("@c0lx", b"z"), struct.pack("@0ib", 2))
+    try:
+        struct.unpack("<I", [1, 2, 3, 4])
+    except TypeError as exc:
+        print("unpack", type(exc).__name__, str(exc))
+    try:
+        struct.unpack("<I", "abc")
+    except TypeError as exc:
+        print("unpack", type(exc).__name__, str(exc))
+    try:
+        struct.unpack("<I", None)
+    except TypeError as exc:
+        print("unpack", type(exc).__name__, str(exc))
+    try:
+        struct.unpack_from("<I", [1, 2, 3, 4])
+    except TypeError as exc:
+        print("from", type(exc).__name__, str(exc))
+    try:
+        struct.unpack_from("<I", "abc")
+    except TypeError as exc:
+        print("from", type(exc).__name__, str(exc))
+    try:
+        struct.pack_into("<I", b"abcde", 0, 1)
+    except TypeError as exc:
+        print("into", type(exc).__name__, str(exc))
+    try:
+        struct.pack_into("<I", [0, 0, 0, 0], 0, 1)
+    except TypeError as exc:
+        print("into", type(exc).__name__, str(exc))
+    try:
+        struct.pack_into("<I", "abcd", 0, 1)
+    except TypeError as exc:
+        print("into", type(exc).__name__, str(exc))
+    try:
+        struct.pack_into("<I", None, 0, 1)
+    except TypeError as exc:
+        print("into", type(exc).__name__, str(exc))
+    buf = bytearray(4)
+    struct.pack_into("<I", buf, 0, 0x01020304)
+    print(buf, struct.unpack("<I", buf)[0], struct.unpack_from("<I", buf)[0])
+
+
+main()
+"""
+
+
 def compile_python(directory, text, name, **env):
     source, exe = Path(directory, name + ".ail"), Path(directory, name)
     source.write_text(text, encoding="utf-8")
@@ -121,6 +177,11 @@ class CompiledPrograms(unittest.TestCase):
             with self.subTest(ir=ir):
                 self.check("fixed", FIXED_PROGRAM, [""], ir)
 
+    def test_review_cases_match_cpython(self):
+        for ir in (False, True):
+            with self.subTest(ir=ir):
+                self.check("review", REVIEW_PROGRAM, [""], ir)
+
 
 class Refusals(unittest.TestCase):
     def refused(self, text, wanted):
@@ -137,6 +198,8 @@ class Refusals(unittest.TestCase):
             "struct_class": ("from struct import Struct\n\nprint(Struct)\n", "struct.Struct is not built"),
             "keyword": ("import struct\n\nprint(struct.pack(format='<q', v=1))\n", "keyword arguments are not built"),
             "starred": ("import struct\n\nv = [1]\nprint(struct.pack('<q', *v))\n", "starred arguments are not built"),
+            "count_space": ("import struct\n\nprint(struct.calcsize('3 i'))\n", "bad char in struct format"),
+            "count_tab": ("import struct\n\nprint(struct.pack('3\\tI', 1, 2, 3))\n", "bad char in struct format"),
         }
         for name, (text, wanted) in cases.items():
             with self.subTest(name):

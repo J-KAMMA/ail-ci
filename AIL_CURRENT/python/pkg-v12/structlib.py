@@ -61,6 +61,8 @@ def _layout(fmt):
     while i < len(fmt):
         ch = fmt[i]
         if ch in WS:
+            if num != '':
+                raise FormatError('bad char in struct format')
             i += 1
             continue
         if ch >= '0' and ch <= '9':
@@ -83,13 +85,17 @@ def _layout(fmt):
             pos += n
         else:
             size = _elem_size(prefix, ch)
-            k = 0
-            while k < n:
+            if n == 0:
                 if prefix == '@':
                     pos += _padding(pos, size)
-                pos += size
-                values.append(ch)
-                k += 1
+            else:
+                k = 0
+                while k < n:
+                    if prefix == '@':
+                        pos += _padding(pos, size)
+                    pos += size
+                    values.append(ch)
+                    k += 1
         num = ''
         i += 1
     if num != '':
@@ -108,6 +114,8 @@ def _has_zero_p(fmt):
     while i < len(fmt):
         ch = fmt[i]
         if ch in WS:
+            if num != "":
+                raise FormatError("bad char in struct format")
             i += 1
             continue
         if ch >= "0" and ch <= "9":
