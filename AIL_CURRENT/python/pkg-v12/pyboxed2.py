@@ -2536,9 +2536,11 @@ class Compiler(boxclosure.ClosureMixin):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
                     call.func.id in ('any', 'all'):
                 any_all_genargs.update(id(a) for a in call.args if isinstance(a, ast.GeneratorExp))
+        genexp_parents = _genexp_parents(tree)
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
-                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)):
+                    any(n is not gen and isinstance(n, ast.GeneratorExp) for n in ast.walk(gen)) \
+                    and not _nested_genexps_consumed(gen, genexp_parents):
                 refusal = Unsupported(
                     'a generator expression nested inside another generator expression '
                     '(the inner one would be materialised eagerly, not lazily)')
@@ -6495,9 +6497,6 @@ class Compiler(boxclosure.ClosureMixin):
         return self._emit_comp(node, ctx, 'ail_list_new(cx)', add)
 
     def expr_GeneratorExp(self, node, ctx):
-        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
-            raise Unsupported('a generator expression nested inside another generator expression '
-                              '(the inner one would be materialised eagerly, not lazily)')
         t = self.expr_ListComp(node, ctx)
         ctx.emit('((ail_vecobj *)(%s).o)->from_generator = 1;' % t)
         return t
@@ -12470,6 +12469,48 @@ def _genexp_consumed_in_place(node, parents):
         if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
             return True
     return False
+
+
+def _genexp_parents(tree):
+    parents = {}
+    for par in ast.walk(tree):
+        for child in ast.iter_child_nodes(par):
+            parents[child] = par
+    return parents
+
+
+# Builtins and methods whose call reads every element of the argument before returning.  `next`
+# is excluded: it pulls one element, so materialising the rest would be a different program.
+_GENEXP_FULL_CALLS = _GENEXP_EAGER_CALLS - frozenset({'next'})
+
+
+def _genexp_fully_consumed(node, parents):
+    """True iff the construct around `node` reads all of its elements at that point."""
+    par = parents.get(node)
+    if isinstance(par, ast.Call) and node in par.args:
+        f = par.func
+        if isinstance(f, ast.Name) and f.id in _GENEXP_FULL_CALLS:
+            return True
+        if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
+            return True
+    if isinstance(par, ast.Starred):
+        return True
+    if isinstance(par, (ast.Assign, ast.AnnAssign)):
+        target = (par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1
+                  else getattr(par, 'target', None))
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return True
+    return False
+
+
+def _nested_genexps_consumed(gen, parents):
+    """True iff `gen` and every generator expression nested in it is fully consumed in place.
+    Materialising such an inner generator at that point is observationally the same as CPython's
+    lazy one, which the consumer reads to exhaustion before the surrounding expression goes on."""
+    if not _genexp_fully_consumed(gen, parents):
+        return False
+    return all(n is gen or not isinstance(n, ast.GeneratorExp) or _genexp_fully_consumed(n, parents)
+               for n in ast.walk(gen))
 
 
 def _bound_names(tree):

@@ -1,3 +1,22 @@
+## 2026-10-29 -- cov43: nested generator expressions fully consumed in place (job-cov43-10291349)
+
+The corpus survey (219 programs, both builds) had 24 compile-time refusals per build.  The most
+frequent non-import construct was a generator expression nested inside another generator
+expression (3 programs: deepseek t172 and both models' t432); the general path refused every such
+nesting except an any/all argument because the inner expression would be materialised eagerly.
+`_nested_genexps_consumed` now permits the nesting when the outer expression and every nested one
+is fully consumed at that point: an argument of join/sum/list/sorted/... or a starred/tuple
+unpack, whose callee reads every element before returning, so the materialisation point is the one
+CPython's lazy generator uses.  A nested expression saved as a value, passed to `next()` (one
+element only), read in a condition or passed to any/all still raises the named refusal.
+
+Probes in `/tmp/probes/cov43` on both builds via `cmp.sh`: `p_join_join`, `p_join_sum`,
+`p_three_levels`, `p_arg_list`, `p_attr`, `p_dict_value`, `p_negative`, `p_tuple_elements` match
+CPython; `p_saved_outer`, `p_saved_inner`, `p_next_inner`, `p_inner_condition` are refused by name
+on both builds; `p_any_nested` is refused by name on the forced build and matches on the default
+build (the typed path already handled it).  The three corpus programs match CPython on all three
+inputs in both builds.  Refusals per build went from 24 to 21.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
