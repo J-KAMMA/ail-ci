@@ -1,3 +1,17 @@
+## 2026-10-29 -- stdlib1: register test_ail_stdlib1 on its own line (job-stdlib1-10292333)
+
+The pre346 CI-shard check failed when the stdlib1 diff was applied alone to the current
+integration tree: `ail_check.MODULES` keeps hundreds of module names on one physical line, and
+the previous job inserted `test_ail_stdlib1` into that line. A concurrent integration change
+touched the same line, so `git apply --3way` left conflict markers in `ail_check.py` and
+`test_ail_pre346` stopped at import (or, with the module hunk dropped, saw a stale
+`test_ail_stdlib1` shard entry). The registration now sits on its own line at the end of the
+tuple, so the diff from the job base is a pure insertion that applies cleanly on top of current
+integration; the module remains in `MODULES` and `ci_shards.json`. Reproduced by applying the
+job diff to `origin/integ` in /tmp: `test_ail_pre346` passes (5 tests) and `ail_check.py` has no
+conflict. Final-state tests: test_ail_pre346, test_ail_stdlib1, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-28 -- stdlib1 review: shorten duplicate `width`, capwords bytes, indent bytes (job-stdlib1-10282143)
 
 The review found three defects in the stdlib1 change. `textwrap.shorten(text, width, width=...)`
