@@ -282,6 +282,7 @@ MODULES = (
     'test_ail_bigint', 'test_ail_tint',
     'test_ail_pre346',
     'test_ail_pre378',
+    'test_ail_ex26',
     'test_ail_pre26', 'test_ail_hostile_input', 'test_ail_pre29', 'test_ail_pre44', 'test_ail_pre27', 'test_ail_pre36', 'test_ail_pre213', 'test_ail_pre279', 'test_ail_pre283', 'test_ail_pre285', 'test_ail_pre298', 'test_ail_pre296', 'test_ail_pre201', 'test_ail_pre204', 'test_ail_pre273', 'test_ail_fuzz42', 'test_ail_pre263', 'test_ail_pre269',
     'test_ail_pre280',
     'test_ail_pre47',

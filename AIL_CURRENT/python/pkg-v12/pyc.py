@@ -528,6 +528,13 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
     runs -- SEMANTICS section 33), or a script with no `def` at all (section 33 again, via
     `_rewrite_script(force=True)`)."""
     tree = ast.parse(source.strip())
+    if os.environ.get('AIL_SOURCE_FILE') and any(
+            (isinstance(n, ast.Name) and n.id == '__file__')
+            or (isinstance(n, ast.Attribute) and n.attr == '__file__') for n in ast.walk(tree)):
+        # The typed path turns top-level statements into locals; CPython's implicit module-level
+        # __file__ binding (pyboxed2's _inject_source_file) is exact there, so let the general
+        # path build every program that reads or rebinds it.
+        raise Unsupported('the Python name __file__ is built on the general path')
     refuse_field_method_call(tree)
     import threadlib
     threadlib.refuse_typed(tree, Unsupported)        # G12: threads are built on the general path only
@@ -644,6 +651,46 @@ def _has_main_entry(source):
     except SyntaxError:
         return False
     return any(isinstance(n, ast.FunctionDef) and n.name == 'main' for n in tree.body)
+
+
+def _module_constant_source(source):
+    """A Python module CPython loads without running anything observable.
+
+    The top level may hold a docstring, plain function definitions and literal module constants,
+    with at least one constant and no `main`, import, class, decorator, annotation or default that
+    would run code while the module loads.  CPython binds those names and exits 0 with no output;
+    the general path already builds the same no-op, while the typed path otherwise tries to pick
+    the last definition as a file-reading entry point (the refusal `language_examples/math.ail`
+    hit).  Anything outside this shape keeps its ordinary handling rather than losing an effect.
+    """
+    if _has_main_entry(source):
+        return False
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    has_constant = False
+    for node in tree.body:
+        if _is_docstring_stmt(node):
+            continue
+        if isinstance(node, ast.FunctionDef):
+            args = node.args
+            parameters = [*args.posonlyargs, *args.args, *args.kwonlyargs]
+            parameters += [parameter for parameter in (args.vararg, args.kwarg)
+                           if parameter is not None]
+            defaults = [value for value in [*args.defaults, *args.kw_defaults] if value is not None]
+            if node.decorator_list or node.returns is not None \
+                    or any(parameter.annotation is not None for parameter in parameters) \
+                    or any(not isinstance(value, ast.Constant) for value in defaults):
+                return False
+            continue
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and _is_module_const_assign(node)):
+            has_constant = True
+            continue
+        return False
+    return has_constant and _rewrite_script(source, force=False) is None
 
 
 def _general_failure(typed, use_typed, failure):
@@ -1223,7 +1270,12 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
+    if not force_general and _module_constant_source(source):
+        # CPython loads this module (definitions and constants, no effect) and exits 0; there is
+        # no entry function to call, so build the same observable no-op as the general path.
+        main = '\nint main(void) { return 0; }\n'
+    else:
+        main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
@@ -1295,6 +1347,13 @@ def build_link_units(source, out, unit_map, external=None):
     return _finalize_output(out)
 
 
+def _entry_file_name(path):
+    """CPython's `__file__` for the script: absolute as invoked, without normalising a relative
+    path (so `./p.py` keeps the dot)."""
+    path = os.fspath(path)
+    return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description='compile one Python expression or function to a '
                                              'standalone program')
@@ -1333,6 +1392,7 @@ def main(argv=None):
 
     if a.file:
         src = pathlib.Path(a.file).read_text(encoding='utf-8')
+        os.environ.setdefault('AIL_SOURCE_FILE', _entry_file_name(a.file))
     elif a.source is not None:
         src = a.source
     else:

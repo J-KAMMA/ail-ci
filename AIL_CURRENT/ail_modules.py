@@ -103,6 +103,38 @@ def _is_brace_or_sexpr(text):
     return ail_sexpr.detect(text) or detect(text)
 
 
+def _uses_file_dunder(tree):
+    return any((isinstance(n, ast.Name) and n.id == '__file__')
+               or (isinstance(n, ast.Attribute) and n.attr == '__file__')
+               or (isinstance(n, ast.alias) and (n.name == '__file__' or n.asname == '__file__'))
+               for n in ast.walk(tree))
+
+
+def entry_file_name(path):
+    """CPython's `__file__` for the entry script: the path as invoked, made absolute without
+    normalising it (a relative path is joined to the current directory, `./p.py` keeps its dot)."""
+    path = os.fspath(path)
+    return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+
+
+def _file_dunder_assignment(mod):
+    """CPython's implicit module-level `__file__`, as a normal assignment at the start of the body.
+
+    The value is the module's own absolute path (a namespace package has None, as CPython sets
+    it); the entry keeps the spelling it was invoked with.  A later user assignment rebinds it and
+    a function-local name shadows it exactly as the interpreter's binding does."""
+    if mod.kind == 'namespace':
+        value = None
+    elif mod.entry and os.environ.get('AIL_SOURCE_FILE'):
+        value = os.environ['AIL_SOURCE_FILE']
+    else:
+        value = str(mod.path)
+    node = ast.Assign(targets=[ast.Name(id='__file__', ctx=ast.Store())], value=ast.Constant(value))
+    node.lineno, node.col_offset = 1, 0
+    ast.fix_missing_locations(node)
+    return node
+
+
 class Mod:
     def __init__(self, name, path, tree, entry, kind='module', dirs=None):
         self.name = name                # dotted name; '__main__' for the entry
@@ -1195,7 +1227,7 @@ class Program:
     def bound_except(self, mod, node):
         """Names `mod` binds apart from the import statement `node` (for a package importing from itself)."""
         rest = [s for s in mod.tree.body if s is not node]
-        names = set(_scan_scope(rest)[0])
+        names = set(_scan_scope(rest)[0]) | {'__file__'}
         for n in ast.walk(mod.tree):
             if isinstance(n, ast.Global):
                 names.update(n.names)
@@ -1299,7 +1331,9 @@ class Program:
         if mod.bound_busy:
             return mod.bound_partial
         mod.bound_busy = True
-        names = set(_scan_scope(mod.tree.body)[0]) - mod.lazy_only
+        # `__file__` is bound implicitly before the body runs (the merge inserts the assignment once
+        # any module mentions it), so a from-import may name it before the injection happens.
+        names = (set(_scan_scope(mod.tree.body)[0]) - mod.lazy_only) | {'__file__'}
         for node in ast.walk(mod.tree):
             if isinstance(node, ast.Global):
                 names.update(node.names)
@@ -1386,6 +1420,24 @@ class Program:
     def analyse(self, mod):
         body = mod.tree.body
         stores, _, _, sites = _scan_scope(body)
+        if not mod.entry:
+            # A module-level `del __file__`, or one a function makes through `global __file__`, removes
+            # the module attribute in CPython; the merged program has one variable and would read a
+            # stale value or raise NameError, so it is refused instead.  A purely function-local
+            # deletion shadows the module name and is harmless.
+            deleted = next((site for name, site in sites
+                            if name == '__file__' and isinstance(site, ast.Name)
+                            and isinstance(site.ctx, ast.Del)), None)
+            if deleted is None and any(isinstance(n, ast.Global) and '__file__' in n.names
+                                       for n in ast.walk(mod.tree)):
+                deleted = next((n for n in ast.walk(mod.tree)
+                                if isinstance(n, ast.Name) and n.id == '__file__'
+                                and isinstance(n.ctx, ast.Del)), None)
+            if deleted is not None:
+                self.refuse(mod, deleted, "`del __file__` in an imported module: CPython removes the module "
+                            "attribute, so a later `%s.__file__` raises AttributeError, and the merged "
+                            "program cannot remove a module's name.\n  write instead: assign a placeholder "
+                            "(`%s.__file__ = None`) or leave `__file__` alone" % (mod.name, mod.name))
         counts, imports = {}, {}
         for name, site in sites:
             counts[name] = counts.get(name, 0) + 1
@@ -1769,7 +1821,7 @@ class Rewriter(ast.NodeTransformer):
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
-        if attr in MODULE_DUNDERS and not stored:
+        if attr in MODULE_DUNDERS and not stored and not (attr == '__file__' and attr in target.merged):
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
         if attr.startswith('_') and not (attr.startswith('__') and attr.endswith('__')):
@@ -1933,6 +1985,9 @@ def merge_program(entry_path, entry_text, read=None):
     program.prepare_entry(entry)
     program.discover(entry)
     program.check_star_packages()
+    if any(_uses_file_dunder(mod.tree) for mod in program.mods.values()):
+        for mod in program.mods.values():
+            mod.tree.body.insert(0, _file_dunder_assignment(mod))
     order = program.analyse_all(entry)
     reachable = [m for m in order if m is not entry]
     if not reachable:

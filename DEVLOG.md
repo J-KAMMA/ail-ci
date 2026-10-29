@@ -1,3 +1,38 @@
+## 2026-10-29 -- ex26: Python modules load as CPython does; `__file__` is the source path (job-ex26-10290946)
+
+Step 1 built all 17 Python-syntax examples under `AIL_CURRENT/language_examples`: 6 `.ail`
+(`hello`, `integer_series`, `math`, `stdin_sum`, `sum`, `use_math`) and 11 `.py` research drivers.
+Among the `.ail` files only `math.ail` was refused, on the default build, with `not in the subset:
+the first parameter must be the sequence read from the file`; CPython loads its `LIMIT = 6` and
+`def sum_to(n)`, prints nothing and exits 0 (the general build already matched). All 11 `.py`
+files were refused: five first at `__file__` (`row_codec_compare`, `row_decimal_quad`,
+`row_state_quad_compare`, `row_store_identity_compare`, `test_row_cpu_profile`), two at a missing
+`benchmark_current_rows`/`pyfunc` import, six at a standard-library name collision or re-export
+read, one at `os.environ` used as a value and one at a duplicate import binding. `__file__`
+blocked the most examples, so it is now supported exactly; the typed path additionally emits
+CPython's no-op `main` for a definitions-plus-constants Python module, which makes the real
+`math.ail` example build and match on both builds.
+
+`__file__` is installed as CPython's implicit module-level binding. The entry keeps the path as
+invoked (made absolute without normalising, so `./p.py` keeps its dot); an imported module gets its
+own absolute path and a namespace package gets `None`. A read before a user assignment sees the
+path; a later assignment, `del`, parameter, lambda argument, import alias or `except ... as`
+binding follows the ordinary name rules. An imported module's module-level `del __file__` and a
+`module.__file__` store are refused by name. The no-op `main` applies only when the top level is a
+docstring, plain definitions and literal module constants (at least one constant), with no `main`,
+import, class, decorator, annotation or non-constant default that could run code at load time;
+anything else keeps its ordinary build or named refusal, so no load-time effect is dropped.
+
+Probes via `cmp.sh` on both builds (`/tmp/probes/ex26`, `/tmp/probes/ex26mod`): `p_basic`,
+`p_bind` and `p_fdebug` match CPython; `p_math`, `p_const_only`, `p_top_print`, `p_main_called`,
+`p_default_effect`, `p_class` and `p_import` (general) match, while `p_decorator_effect`,
+`p_import` (default), `p_empty` and `p_expression` are refused by name. The `.py` examples still
+stop at their other pre-existing causes (none at `__file__`).
+
+Final-state tests: `test_ail_ex26`, `test_ail_modules`, `test_ail_python_syntax`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (6 modules, 609 s, 0
+failed). `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
