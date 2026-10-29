@@ -1,3 +1,18 @@
+## 2026-10-29 -- ex40: `@export` examples build as ordinary Python programs
+
+`language_examples/c_export/geometry.py` is both the source of `libgeometry` and a normal program, but
+compiling it directly was refused (`the decorator on def add (only @staticmethod ... is supported)`).
+`ail_ffi_lower` now removes `@export` from a top-level function whose annotations CPython's
+`ail_ffi.export` accepts (int/float/bool/str/bytes, list[int]/list[float], `-> None`, and dataclass
+parameters of int/float/bool), including `@export()` and `@ail_ffi.export`; every other shape is
+refused by name. A later definition or assignment of `export` is treated as the program's own
+decorator again, so the marker is never removed silently. The geometry example and bare/called/module/
+types/no-export programs print what CPython 3.12 prints, with the same exit code, on both builds;
+invalid argument, default, annotated, class, nested, dict-annotation, dataclass-result and bad-dataclass
+shapes are refused by name. Probes in `/tmp/probes/ex40` (geometry, bare forms, module alias, star
+import, dataclass defaults/frozen, all scalar/list types, argument/list/attribute/dict routes,
+invalid shapes and a user-defined `export`) match CPython or are refused by name.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

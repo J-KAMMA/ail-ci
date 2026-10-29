@@ -115,6 +115,21 @@ PARAM_ANN = set(INTS) | {'c_bool', 'c_double', 'c_float', 'c_char_p', 'c_mut_cha
                          'c_const_void_p', 'c_mut_void_p'}
 RESULT_ANN = set(INTS) | {'c_bool', 'c_double', 'c_float', 'c_char_p', 'c_mut_char_p', 'c_void_p', 'str'}
 
+EXPORT_SCALARS = ('int', 'float', 'bool', 'str', 'bytes')
+EXPORT_LISTS = ('int', 'float')
+
+
+def _export_annotation(ann, structs, *, result):
+    if isinstance(ann, ast.Constant) and ann.value is None:
+        return result
+    if isinstance(ann, ast.Name):
+        if ann.id in EXPORT_SCALARS:
+            return True
+        return not result and structs.get(ann.id, False)
+    return (isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
+            and ann.value.id == 'list' and isinstance(ann.slice, ast.Name)
+            and ann.slice.id in EXPORT_LISTS)
+
 
 def python_type(ann):
     """The AIL/Python type the wrapper uses for a stub annotation."""
@@ -174,7 +189,7 @@ class Session:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations'})
+                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'export', 'link', 'length', 'ptr', 'cptr', 'declarations'})
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
@@ -187,6 +202,57 @@ class Session:
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
+        # `from ail_ffi import export` followed by a definition or assignment of `export` is an
+        # ordinary decorator again (CPython uses the later binding); do not remove it as the FFI marker.
+        if any(self._statement_binds(node, 'export') for node in tree.body
+               if not (isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi')):
+            imported.discard('export')
+        for name in list(module_names):
+            if any(self._statement_binds(node, name) for node in tree.body
+                   if not (isinstance(node, ast.Import)
+                           and any(alias.name == 'ail_ffi' and (alias.asname or alias.name) == name
+                                   for alias in node.names))):
+                module_names.discard(name)
+        dataclass_names, dataclasses_modules = set(), set()
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom) and node.module == 'dataclasses' and node.level == 0:
+                dataclass_names.update(alias.asname or alias.name for alias in node.names
+                                       if alias.name == 'dataclass')
+            elif isinstance(node, ast.Import):
+                dataclasses_modules.update(alias.asname or alias.name for alias in node.names
+                                           if alias.name == 'dataclasses')
+        structs = {}
+        for node in tree.body:
+            if not isinstance(node, ast.ClassDef):
+                continue
+            for dec in node.decorator_list:
+                bare = dec.func if isinstance(dec, ast.Call) else dec
+                is_dataclass = ((isinstance(bare, ast.Name) and bare.id in dataclass_names)
+                                or (isinstance(bare, ast.Attribute) and bare.attr == 'dataclass'
+                                    and isinstance(bare.value, ast.Name) and bare.value.id in dataclasses_modules))
+                if not is_dataclass:
+                    continue
+                fields = []
+                for statement in node.body:
+                    if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
+                        fields.append(isinstance(statement.annotation, ast.Name)
+                                      and statement.annotation.id in ('int', 'float', 'bool'))
+                structs[node.name] = bool(fields) and all(fields)
+                break
+        for node in ast.walk(tree):
+            if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            for dec in list(node.decorator_list):
+                if not self._is_export_ref(dec, imported, module_names):
+                    continue
+                if (isinstance(node, ast.FunctionDef) and node in tree.body
+                        and self._is_export(dec, imported, module_names) and self._export_ready(node, structs)):
+                    blank.append((dec.lineno, dec.end_lineno))
+                    node.decorator_list.remove(dec)
+                else:
+                    self._refuse(path, node, '%s: @export marks a top-level function with plain annotated '
+                                 'parameters and an int/float/bool/str/bytes/list[int]/list[float] result'
+                                 % getattr(node, 'name', '?'))
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -260,6 +326,75 @@ class Session:
             return func.id == 'extern' and 'extern' in imported
         return (isinstance(func, ast.Attribute) and func.attr == 'extern' and isinstance(func.value, ast.Name)
                 and func.value.id in module_names)
+
+    @classmethod
+    def _binds_target(cls, target, name):
+        if isinstance(target, ast.Name):
+            return target.id == name
+        if isinstance(target, (ast.Tuple, ast.List)):
+            return any(cls._binds_target(item, name) for item in target.elts)
+        if isinstance(target, ast.Starred):
+            return cls._binds_target(target.value, name)
+        return False
+
+    @classmethod
+    def _statement_binds(cls, node, name):
+        """True when a module-level statement binds `name` (it does not look inside def/class bodies)."""
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return node.name == name
+        if isinstance(node, ast.Assign):
+            return any(cls._binds_target(target, name) for target in node.targets)
+        if isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            return cls._binds_target(node.target, name)
+        if isinstance(node, ast.Import):
+            return any((alias.asname or alias.name.split('.')[0]) == name for alias in node.names)
+        if isinstance(node, ast.ImportFrom):
+            return any(alias.name != '*' and (alias.asname or alias.name) == name for alias in node.names)
+        if isinstance(node, (ast.For, ast.AsyncFor)):
+            return (cls._binds_target(node.target, name)
+                    or any(cls._statement_binds(statement, name) for statement in node.body + node.orelse))
+        if isinstance(node, (ast.With, ast.AsyncWith)):
+            return (any(item.optional_vars is not None and cls._binds_target(item.optional_vars, name)
+                        for item in node.items)
+                    or any(cls._statement_binds(statement, name) for statement in node.body))
+        if isinstance(node, (ast.If, ast.While)):
+            return any(cls._statement_binds(statement, name) for statement in node.body + node.orelse)
+        if isinstance(node, ast.Try):
+            found = [*node.body, *node.orelse, *node.finalbody]
+            for handler in node.handlers:
+                found.extend(handler.body)
+                if handler.name == name:
+                    return True
+            return any(cls._statement_binds(statement, name) for statement in found)
+        if isinstance(node, ast.Match):
+            return any(cls._statement_binds(statement, name)
+                       for case in node.cases for statement in case.body)
+        return False
+
+    @staticmethod
+    def _is_export_ref(node, imported, module_names):
+        func = node.func if isinstance(node, ast.Call) else node
+        if isinstance(func, ast.Name):
+            return func.id == 'export' and 'export' in imported
+        return (isinstance(func, ast.Attribute) and func.attr == 'export' and isinstance(func.value, ast.Name)
+                and func.value.id in module_names)
+
+    @classmethod
+    def _is_export(cls, node, imported, module_names):
+        if isinstance(node, ast.Call) and (node.args or node.keywords):
+            return False                # @export(1) and @export(function=...) are not the marker form
+        return cls._is_export_ref(node, imported, module_names)
+
+    @staticmethod
+    def _export_ready(node, structs):
+        """True for a top-level function the CPython `@export` decorator would accept unchanged."""
+        args = node.args
+        if args.posonlyargs or args.vararg or args.kwonlyargs or args.kwarg or args.defaults:
+            return False
+        if node.returns is None or not _export_annotation(node.returns, structs, result=True):
+            return False
+        return all(arg.annotation is not None and _export_annotation(arg.annotation, structs, result=False)
+                   for arg in args.args)
 
     def _ann_name(self, path, node, ann, imported, module_names, what):
         if isinstance(ann, ast.Name):
