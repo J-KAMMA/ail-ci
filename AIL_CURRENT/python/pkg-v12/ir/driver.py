@@ -420,6 +420,9 @@ def _apply(P, args, kwargs, result, current):
         _d = bigcap._Defined(set(getattr(ctx, 'funcs', {})) | set(getattr(ctx, 'classes', {})))
         _d.classes = frozenset(getattr(ctx, 'classes', {}))
         _d.module_ints = bigcap.module_int_consts(getattr(ctx, 'modconsts', None) or {})
+        # the emitter has typed this function: an expression it types float (`b.x` of a dataclass field `x: float`,
+        # `xs[i]` of a list[float]) is a float for the proof too, so `dx = b1.x - b2.x` is no int operation
+        _d.float_oracle = lambda _n: P._etype(_n, ctx) == P.FLT
         _proven = bigcap.proven_int_names(fn, _d)
         _bounds = bigcap.local_int_bounds(fn, _d)
         _names = set(bigcap._lp_params(fn)) | set(bigcap._lp_locals(fn.body))

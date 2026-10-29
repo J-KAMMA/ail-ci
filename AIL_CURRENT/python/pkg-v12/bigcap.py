@@ -271,6 +271,7 @@ class _Defined(set):
     """The program's function names, plus the class names (a class call builds a non-int object)."""
     classes = frozenset()
     module_ints = {}        # module constants (assigned once, never rebound) -> their int value
+    float_oracle = None     # optional: node -> True when the typed emitter's own typing says the expression is a float
 
 
 def module_int_consts(table):
@@ -335,6 +336,44 @@ def _lp_seq(node):
                              ast.GeneratorExp, ast.JoinedStr))
 
 
+def _lp_oracle_float(node, defined):
+    """The typed emitter's own type of `node` is float (an attribute of a dataclass field `x: float`, an element of a
+    list[float], the result of a function declared `-> float`). The oracle is given only where the emitter has already typed
+    the function (ir/driver.py); a proof without one (the source-level `marked` scan) keeps these values unknown."""
+    oracle = getattr(defined, 'float_oracle', None)
+    if oracle is None:
+        return False
+    try:
+        return bool(oracle(node))
+    except Exception:
+        return False
+
+
+def _lp_range_value(node, vals):
+    """The value of the counter of `for i in range(...)` (also in a comprehension): the join of the bounded arguments when
+    every argument is bounded; otherwise, for a bounded start and a constant nonzero step, the start plus at most _LP_LEN
+    steps. A counter moves one step per iteration, so reaching 2**48 steps from its start takes some 2.8e14 iterations of
+    one loop (days of run time); the same physical limit as a len() (_LP_LEN) and as the IR's int counters
+    (ir/lower.py `_counters`). Arithmetic on the counter is still checked against its bounds (`i * i` is not proven).
+    Returns None when nothing is proven."""
+    if all(v[0] in _LP_INTS and v[1] is not None for v in vals):
+        return _lp_int(min(v[1] for v in vals), max(v[2] for v in vals))
+    args = node.args          # (the stop is not looked at: its kind and size do not move the counter's start)
+    if len(args) == 1:
+        start, step = _lp_int(0, 0), 1
+    elif len(args) == 2:
+        start, step = vals[0], 1
+    else:
+        start, step = vals[0], _const_int(args[2])
+    if step is None or step == 0 or abs(step) > 1 << 8:
+        return None
+    if start[0] not in _LP_INTS or start[1] is None or start[2] is None:
+        return None
+    if step > 0:
+        return _lp_int(start[1], start[2] + _LP_LEN * step)
+    return _lp_int(start[1] + _LP_LEN * step, start[2])
+
+
 def _lp_eval(node, env, defined, bad):
     """One expression's local value: ('int', lo, hi), float, bool, str, other or unknown.  `bad` is a list while the proof is
     being checked (an unproven int operation is appended there); None during the fixed-point iteration."""
@@ -359,6 +398,8 @@ def _lp_eval(node, env, defined, bad):
             known = getattr(defined, 'module_ints', {}).get(node.id)
             if known is not None:
                 return _lp_int(known, known)
+        if (got is None or got[0] == 'unknown') and _lp_oracle_float(node, defined):
+            return _LP_FLOAT
         return got or _LP_UNKNOWN
     if isinstance(node, ast.UnaryOp):
         if isinstance(node.op, (ast.USub, ast.UAdd)):
@@ -539,12 +580,12 @@ def _lp_eval(node, env, defined, bad):
         if isinstance(node.value, ast.Name) and node.value.id == 'math' \
                 and node.attr in ('pi', 'e', 'tau', 'inf', 'nan'):
             return _LP_FLOAT
-        return _LP_UNKNOWN
+        return _LP_FLOAT if _lp_oracle_float(node, defined) else _LP_UNKNOWN
     if isinstance(node, ast.Subscript):
         _lp_eval(node.value, env, defined, bad)
         if not isinstance(node.slice, ast.Slice):
             _lp_eval(node.slice, env, defined, bad)
-        return _LP_UNKNOWN
+        return _LP_FLOAT if _lp_oracle_float(node, defined) else _LP_UNKNOWN
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         for x in node.elts:
             _lp_eval(x.value if isinstance(x, ast.Starred) else x, env, defined, bad)
@@ -564,8 +605,9 @@ def _lp_eval(node, env, defined, bad):
                     and 'range' not in defined and not it.keywords and 1 <= len(it.args) <= 3 \
                     and not any(isinstance(a, ast.Starred) for a in it.args):
                 vals = [_lp_eval(a, sub, defined, bad) for a in it.args]
-                if all(v[0] in _LP_INTS and v[1] is not None for v in vals):
-                    _lp_assign(gen.target, _lp_int(min(v[1] for v in vals), max(v[2] for v in vals)), sub, defined)
+                counter = _lp_range_value(it, vals)
+                if counter is not None:
+                    _lp_assign(gen.target, counter, sub, defined)
                 else:
                     _lp_bad(bad, 'a loop over an unproven range')
                     _lp_assign(gen.target, _lp_int(), sub, defined)
@@ -598,7 +640,7 @@ def _lp_eval(node, env, defined, bad):
             if name in _LP_EXC_CALLS:
                 return _LP_OTHER
             if name in defined:
-                return _LP_UNKNOWN
+                return _LP_FLOAT if _lp_oracle_float(node, defined) else _LP_UNKNOWN
             if name in _LP_COLLECTION_CALLS:
                 return _LP_OTHER
             if name in _LP_STR_CALLS:
@@ -951,11 +993,8 @@ def _lp_run(stmts, env, defined, fixed=None, seqmap=None):
                     and 'range' not in defined and not it.keywords and 1 <= len(it.args) <= 3 \
                     and not any(isinstance(a, ast.Starred) for a in it.args):
                 vals = [_lp_eval(a, env, defined, None) for a in it.args]
-                if all(v[0] in _LP_INTS and v[1] is not None for v in vals):
-                    lo = min(v[1] for v in vals)
-                    hi = max(v[2] for v in vals)
-                    iv = _lp_int(lo, hi)
-                else:
+                iv = _lp_range_value(it, vals)
+                if iv is None:
                     iv = _lp_int()
             else:
                 lit = _lp_iter_value(it, env, defined)
