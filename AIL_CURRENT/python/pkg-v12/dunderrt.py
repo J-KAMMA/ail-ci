@@ -400,8 +400,10 @@ def _edits(inplace=False):
               '    ' + _binop_guard('ADD', 'RADD', '+') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for +: \'%s\' and \'%s\'"'))
     e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"',
               '    ' + _binop_guard('SUB', 'RSUB', '-') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"'))
-    e.append(('    char na[101], nb[101], buf[256];\n',
-              '    ' + _binop_guard('MUL', 'RMUL', '*') + 'char na[101], nb[101], buf[256];\n'))
+    # anchor on the error formatting, not the buffer declaration, so a change to the
+    # declaration text does not silently drop __mul__/__rmul__ dispatch
+    e.append(('    snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'", na, nb);\n',
+              '    ' + _binop_guard('MUL', 'RMUL', '*') + 'snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'", na, nb);\n'))
     for sym, fwd, rev in (('//', 'FLOORDIV', 'RFLOORDIV'), ('%', 'MOD', 'RMOD'), ('/', 'TRUEDIV', 'RTRUEDIV'),
                           ('**', 'POW', 'RPOW')):
         e.append(('    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym,

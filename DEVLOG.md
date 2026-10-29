@@ -1,3 +1,22 @@
+## 2026-10-29 -- pre428 follow-up: make the dunderrt multiplication anchor independent of the error buffers (job-pre428-10291723)
+
+The review of the pre428 change reported that editing the general runtime's
+`char na[101], nb[101], buf[256];` declaration would leave `dunderrt.py` unable to find the
+insertion point for `__mul__`/`__rmul__` dispatch.  On this tree the anchor already matched the
+current declaration, but it was still tied to that exact line, so the same break would return
+on the next buffer edit.  The anchor is now the stable error-formatting line
+(`snprintf(buf, sizeof buf, "unsupported operand type(s) for *: '%s' and '%s'", na, nb);`), so
+the operand-name change and the dunder patch no longer depend on the declaration text; the
+guard is still inserted before the error is raised.  No behaviour changes: the generated
+message and the `__mul__`/`__rmul__` route are unchanged.
+
+Probes in `/tmp/probes/pre428fix` on both builds via `cmp.sh`: `p1_dunder` (mul/rmul and
+add/sub/floordiv/mod/truediv/pow dunders), `p2_err` (exception operands both orders and same
+class), `p3_routes` (argument, list item, dict value, attribute, return and alias),
+`p4_long` (99/100/101/150-character class names) all match CPython.  Final-state tests:
+test_ail_pre428, test_ail_unified, test_ail_fuzz20, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre428: multiplication names exception operands by their class (job-pre428-10281850)
 
 The pre416 review recorded as pre-existing on both builds that `E() * F()` printed
