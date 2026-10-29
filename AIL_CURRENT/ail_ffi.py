@@ -61,6 +61,37 @@ arithmetic on one, or passing one into a parallel worker, is refused when compil
 The compiled program frees an unclosed handle at program exit (or at close()), not when the last reference
 drops: the two differ only if the C library's free function does something the program can observe earlier.
 
+Callbacks (F7). `callback(ret, arg1, ...)` is a parameter type: a C function pointer the C function calls during
+the call. The argument is the name of a module-level `def` whose annotations are the Python types of the C types.
+
+    Cmp = callback(c_int, cptr(c_int), cptr(c_int), on_error=0)
+    @extern(header="stdlib.h", trust=True)
+    def qsort(base: ptr(c_int), n: length("base", c_size_t), size: c_size_t, cmp: Cmp) -> None: ...
+
+    def by_value(a: int, b: int) -> int:
+        return a - b
+
+    qsort(buf, 4, by_value)
+
+    ret        None (void), an integer type, c_double, c_float, c_bool or c_void_p (an int)
+    arguments  integer types, c_double, c_float, c_bool (the value); c_void_p, c_const_void_p (the address, an int);
+               c_char_p, c_mut_char_p (str: UTF-8, NULL gives ""); cptr(T) (`const T *` to one T: the T it points
+               at, NULL gives 0); array(T, k) (`T *` with as many elements as the integer argument number k, 0-based,
+               says: a list; T an integer type, c_double, c_float, c_bool, c_char_p or c_mut_char_p)
+    on_error=  the value C gets back when the callback raises (required unless ret is None)
+
+An exception raised in the callback is stored, the callback returns `on_error` to C, and every later call of a
+callback during the same C call returns `on_error` without running the function; when the C call returns, the
+stored exception is raised (before `check=`). Plain ctypes would print "Exception ignored" and go on; this module
+and the compiled program both store and re-raise. A result that does not fit ret is an OverflowError, raised the
+same way. A callback is valid only during the call: `retain=True` (C stores it) and `threads=True` (C calls it from
+another thread) are refused, and a call from another thread or after the C call returned aborts the program.
+The callback is a module-level def: a lambda, a closure, a method or a variable is refused when compiling (and is a
+TypeError here). The compiled program runs the C function on a stack of its own and runs the callback in between,
+on the caller's stack and thread; a bytearray argument is copied in and out around the whole call there, so the
+callback sees the bytearray as it was before the call.
+A stub that takes a callback is called in the file that declares it; another module calls a def of that file.
+
 `link("m", "z")` at module level names libraries for every stub of the file that has no `lib=`.
 `ptr(c_void_p)` is `void **`, the out-parameter that returns a handle (sqlite3_open). A struct passed by pointer
 is a bytearray (`c_mut_void_p`) / bytes (`c_const_void_p`) laid out by hand with the C offsets; give a stub whose
@@ -80,6 +111,9 @@ program links them into its adapter object, CPython builds them into a shared li
 What the compiled program does differently (the declared differences):
   * `c_ulong`, `c_size_t` and `c_uint64` results above 2**63 - 1 come back as the negative int with the
     same bits in the compiled program (AIL ints are 64 bit); CPython gives the positive value.
+    The same holds for callback arguments of those types.
+  * a callback reads a bytearray that was passed to the same C call as it was before the call (the compiled program
+    copies it in and out around the whole call); C's writes are seen after the call returns.
   * a bytearray argument is copied in and out around the call in the compiled program; two names for one
     bytearray in one call see C's writes only after it returns.
   * `e.errno`, `e.strerror` and `str(e)` of an OSError are built in the compiled program only on a name bound by
@@ -92,7 +126,7 @@ import ctypes.util
 import os
 import sys
 
-__all__ = ['extern', 'export', 'exports', 'link', 'length', 'ptr', 'cptr', 'declarations', 'Handle','c_int', 'c_uint', 'c_short', 'c_ushort', 'c_long', 'c_ulong',
+__all__ = ['extern', 'export', 'exports', 'link', 'length', 'ptr', 'cptr', 'declarations', 'Handle', 'callback', 'array', 'c_int', 'c_uint', 'c_short', 'c_ushort', 'c_long', 'c_ulong',
            'c_longlong', 'c_ulonglong', 'c_size_t', 'c_ssize_t', 'c_int8', 'c_int16', 'c_int32', 'c_int64',
            'c_uint8', 'c_uint16', 'c_uint32', 'c_uint64', 'c_byte', 'c_ubyte', 'c_bool', 'c_double', 'c_float',
            'c_char_p', 'c_mut_char_p', 'c_void_p', 'c_const_void_p', 'c_mut_void_p']
@@ -189,6 +223,167 @@ class length:
 
     def __repr__(self):
         return 'length(%r, %s)' % (self.name, self.ctype)
+
+
+class array:
+    """Callback argument type: `T *` with as many elements as the integer argument number `count` (0-based) says.
+    The callback gets a list."""
+
+    def __init__(self, ctype, count):
+        if not isinstance(ctype, CType) or ctype.kind not in ('int', 'float', 'bool', 'str') or type(count) is not int:
+            raise TypeError('array(integer, float, bool or c_char_p C type, index of the count argument)')
+        self.ctype, self.count = ctype, count
+
+    def __repr__(self):
+        return 'array(%s, %d)' % (self.ctype, self.count)
+
+
+_CB_RESULTS = ('int', 'float', 'bool', 'handle')
+
+
+class callback:
+    """Parameter type: a C function pointer that C calls during the call; the argument is a module-level def."""
+    kind = 'callback'
+
+    def __init__(self, ret, *args, on_error=None, retain=False, threads=False):
+        if retain:
+            raise TypeError('callback(retain=True): C would keep the callback after the call returns, and a callback '
+                            'is valid only during the call')
+        if threads:
+            raise TypeError('callback(threads=True): C would call the callback from another thread, and a callback runs '
+                            'only on the thread that made the call')
+        if ret is not None and (not isinstance(ret, CType) or ret.kind not in _CB_RESULTS):
+            raise TypeError('callback result: None, an integer type, c_double, c_float, c_bool or c_void_p')
+        if len(args) > 16:
+            raise TypeError('callback: at most 16 arguments')
+        for index, arg in enumerate(args):
+            if isinstance(arg, array):
+                if not 0 <= arg.count < len(args) or not isinstance(args[arg.count], CType) or args[arg.count].kind != 'int':
+                    raise TypeError('callback: array(T, %d) must name an integer argument' % arg.count)
+            elif isinstance(arg, ptr):
+                if not arg.const:
+                    raise TypeError('callback: ptr(T) is not an argument type (write cptr(T): the value it points at)')
+            elif not isinstance(arg, CType) or arg.kind not in ('int', 'float', 'bool', 'handle', 'str') and arg is not c_const_void_p:
+                raise TypeError('callback argument %d: unsupported type %r' % (index, arg))
+        if ret is None:
+            if on_error is not None:
+                raise TypeError('callback: a void callback has no on_error')
+        else:
+            if on_error is None:
+                raise TypeError('callback(%s, ...) needs on_error=<value>: what C gets back when the callback raises' % ret)
+            _cb_result(ret, on_error, 'on_error')
+        self.ret, self.args, self.on_error = ret, args, on_error
+        self._cfunctype = None
+
+    def __repr__(self):
+        return 'callback(%s)' % ', '.join(repr(x) for x in (self.ret,) + self.args)
+
+    def cfunctype(self):
+        if self._cfunctype is None:
+            def ctype_of(arg):
+                if isinstance(arg, array):
+                    return ctypes.POINTER(ctypes.c_char_p if arg.ctype.kind == 'str' else arg.ctype.ctype)
+                if isinstance(arg, ptr):
+                    return ctypes.POINTER(arg.ctype.ctype)
+                if arg.kind in ('handle', 'bytes'):
+                    return ctypes.c_void_p
+                if arg.kind == 'str':
+                    return ctypes.c_char_p
+                return arg.ctype
+            restype = None if self.ret is None else ctypes.c_void_p if self.ret.kind == 'handle' else self.ret.ctype
+            self._cfunctype = ctypes.CFUNCTYPE(restype, *[ctype_of(a) for a in self.args])
+        return self._cfunctype
+
+    def python_types(self):
+        """The annotations a callback def must have: ([parameter types], result type)."""
+        def one(arg):
+            if isinstance(arg, array):
+                return list[_PYTHON[arg.ctype.kind]]
+            if isinstance(arg, ptr):
+                return _PYTHON[arg.ctype.kind]
+            return int if arg is c_const_void_p else _PYTHON[arg.kind]
+        return [one(a) for a in self.args], None if self.ret is None else _PYTHON[self.ret.kind]
+
+
+_PYTHON = {'int': int, 'float': float, 'bool': bool, 'str': str, 'handle': int}
+
+
+def _cb_result(ret, value, what):
+    """Check a callback result (or on_error) against ret; the C value."""
+    if ret.kind == 'int':
+        if type(value) is not int:
+            raise TypeError('%s must be an int' % what)
+        low, high = ret.limits()
+        if not low <= value <= high:
+            raise OverflowError('%s does not fit %s' % (what, ret))
+        return value
+    if ret.kind == 'handle':
+        if type(value) is not int:
+            raise TypeError('%s must be an int' % what)
+        if not 0 <= value < (1 << 64):
+            raise OverflowError('%s does not fit %s' % (what, ret))
+        return value
+    if ret.kind == 'bool':
+        if type(value) is not bool:
+            raise TypeError('%s must be a bool' % what)
+        return value
+    if type(value) not in (int, float):
+        raise TypeError('%s must be a float' % what)
+    return float(value)
+
+
+def _cb_function(stub, name, cb, value):
+    """The checks the compiler makes on a callback argument: a module-level def with the annotations of cb."""
+    import inspect
+    import typing
+    where = '%s: the callback %s' % (stub, name)
+    if not inspect.isfunction(value):
+        if inspect.ismethod(value):
+            raise TypeError('%s is a method; a callback is a module-level def' % where)
+        raise TypeError('%s must be a module-level def' % where)
+    if value.__name__ == '<lambda>':
+        raise TypeError('%s is a lambda; a callback is a module-level def' % where)
+    if value.__closure__ or '<locals>' in value.__qualname__:
+        raise TypeError('%s is a closure; a callback is a module-level def' % where)
+    if '.' in value.__qualname__:
+        raise TypeError('%s is a method; a callback is a module-level def' % where)
+    params, result = cb.python_types()
+    try:
+        hints = typing.get_type_hints(value)
+    except Exception:
+        hints = {}
+    names = list(inspect.signature(value).parameters)
+    got = [hints.get(n) for n in names]
+    want_result = type(None) if result is None else result
+    if got != params or hints.get('return', inspect.Parameter.empty) != want_result:
+        raise TypeError('%s: %s must be `def %s(%s) -> %s`' % (
+            where, value.__name__, value.__name__,
+            ', '.join('a%d: %s' % (i, _type_text(t)) for i, t in enumerate(params)), _type_text(result)))
+    return value
+
+
+def _type_text(t):
+    return 'None' if t is None else t.__name__ if isinstance(t, type) else repr(t)
+
+
+def _cb_argument(arg, raw, args):
+    """The Python value a callback def gets for one C argument."""
+    if isinstance(arg, array):
+        n = args[arg.count]
+        if not raw or n <= 0:
+            return []
+        if arg.ctype.kind == 'str':
+            return ['' if raw[i] is None else raw[i].decode('utf-8') for i in range(n)]
+        return [raw[i] for i in range(n)]
+    if isinstance(arg, ptr):
+        if not raw:
+            return {'float': 0.0, 'bool': False}.get(arg.ctype.kind, 0)
+        return raw[0]
+    if arg.kind in ('handle', 'bytes'):
+        return raw or 0
+    if arg.kind == 'str':
+        return '' if raw is None else raw.decode('utf-8')
+    return raw
 
 
 _HANDLE_TYPES = {}                      # (name, free) -> the class Handle() made for it
@@ -330,7 +525,7 @@ def _classify(annotation):
         return c_char_p
     if annotation is int or annotation is float or annotation is bool:
         raise TypeError('annotate with a C type (c_int, c_double, ...), not %s' % annotation.__name__)
-    if isinstance(annotation, (CType, length, ptr)):
+    if isinstance(annotation, (CType, length, ptr, callback)):
         return annotation
     if isinstance(annotation, type) and issubclass(annotation, _HandleBase) and annotation is not _HandleBase:
         owned = CType('Handle(%s)' % annotation._name, 'owned', ctypes.c_void_p)
@@ -376,7 +571,7 @@ def _signature(function):
         raise TypeError('%s: a missing return annotation is refused (write `-> None` for void)' % function.__name__)
     result = annotations['return']
     result = None if result is None else _classify(result)
-    if result is not None and result.kind in ('bytes', 'bytearray', 'length'):
+    if result is not None and result.kind in ('bytes', 'bytearray', 'length', 'callback'):
         raise TypeError('%s: bytes, bytearray and length cannot be results' % function.__name__)
     return params, result
 
@@ -412,6 +607,31 @@ def _build_sources(sources, lib, filename):
             raise OSError('cannot build FFI sources %s:\n%s' % (', '.join(sources), done.stderr[-2000:]))
         os.replace(target + '.tmp.%d' % os.getpid(), target)
     return ctypes.CDLL(target, use_errno=True)
+
+
+def _trampoline(stub, cb, fn, stored):
+    """The Python function behind a CFUNCTYPE: runs fn on C's arguments; an exception is stored (the first one) and C
+    gets on_error, here and on every later call during the same C call."""
+    import threading
+    owner = threading.get_ident()
+
+    def call(*raw):
+        if threading.get_ident() != owner:
+            sys.stdout.flush()
+            sys.stderr.write('ail_ffi: the callback of %s was called from another thread or after its C call returned\n' % stub)
+            sys.stderr.flush()
+            os.abort()
+        if stored:
+            return cb.on_error
+        try:
+            value = fn(*[_cb_argument(arg, r, raw) for arg, r in zip(cb.args, raw)])
+            if cb.ret is None:
+                return None
+            return _cb_result(cb.ret, value, '%s: the result of %s' % (stub, fn.__name__))
+        except BaseException as error:
+            stored.append(error)
+            return cb.on_error
+    return call
 
 
 def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=None, pkg_config=None, sources=None, trust=False):
@@ -454,6 +674,8 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
                     argtypes.append(ctypes.c_void_p)
                 elif kind.kind == 'str':
                     argtypes.append(ctypes.c_char_p)
+                elif kind.kind == 'callback':
+                    argtypes.append(kind.cfunctype())
                 else:
                     argtypes.append(kind.ctype)
             cfn.argtypes = argtypes
@@ -491,6 +713,7 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
                 else:
                     raise TypeError('%s() missing required argument %r' % (function.__name__, name))
             converted = []
+            stored = []                 # the first exception a callback raised during this call
             for name, kind, _ in params:
                 if isinstance(kind, length):
                     target = next(k for n, k, _ in params if n == kind.name)
@@ -544,13 +767,19 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
                         raise TypeError('%s: %s must be a bytearray' % (function.__name__, name))
                     if isinstance(kind, ptr) and len(value) % ctypes.sizeof(kind.ctype.ctype):
                         raise ValueError('%s: %s must hold a whole number of %s' % (function.__name__, name, kind.ctype))
-                    array = (ctypes.c_ubyte * len(value)).from_buffer(value)
-                    keep.append(array)
-                    converted.append(ctypes.addressof(array))
+                    buffer = (ctypes.c_ubyte * len(value)).from_buffer(value)
+                    keep.append(buffer)
+                    converted.append(ctypes.addressof(buffer))
+                elif kind.kind == 'callback':
+                    trampoline = kind.cfunctype()(_trampoline(function.__name__, kind, _cb_function(function.__name__, name, kind, value), stored))
+                    keep.append(trampoline)
+                    converted.append(trampoline)
             ctypes.set_errno(0)
             rc = cfn(*converted)
             err = ctypes.get_errno()
             del keep[:]
+            if stored:
+                raise stored[0]
             if result is None:
                 return None
             probe = (0 if rc is None else 1) if result.kind == 'str' else (rc or 0) if result.kind in ('handle', 'owned') else rc

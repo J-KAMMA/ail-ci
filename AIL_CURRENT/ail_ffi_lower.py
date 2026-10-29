@@ -14,6 +14,15 @@ back byte for byte, so programs without FFI compile exactly as before. For a fil
   `compile-c` machinery (c_object.py). Nothing here changes how a program without stubs compiles.
 
 Link flags (`-lz`, a shared library path with its rpath) travel in `Session.link_args`.
+
+Callbacks (F7). A stub parameter `callback(ret, arg, ...)` takes the name of a module-level def. Each call of such a
+stub is rewritten in place to a wrapper made for that def (`ffi_<tag>_<stub>__via_<def>`; the callback argument
+becomes `0`), so the C side never holds an AIL function value. The adapter runs the C function on a stack of its
+own (ucontext): its trampoline stores C's arguments and switches back to the wrapper, which reads them, calls the
+def and switches into C again with the result. An exception leaves the wrapper's loop; its `finally` lets the C call
+run to the end with every callback returning `on_error`, copies the bytearrays back, and the exception goes on.
+A stub that takes a callback has no plain wrapper, so it is called in the file that declares it (another module calls
+a def of that file which makes the call).
 """
 import ast
 import hashlib
@@ -51,6 +60,62 @@ PARALLEL_CALLS = ('Thread', 'Process', 'start_new_thread', 'submit', 'map', 'sta
                   'starmap_async', 'imap', 'imap_unordered')
 PARALLEL_LOOPS = ('par_range', '_ail_par_range')
 
+CB_RESULT_ANN = set(INTS) | {'c_bool', 'c_double', 'c_float', 'c_void_p'}
+CB_ARG_ANN = set(INTS) | {'c_bool', 'c_double', 'c_float', 'c_void_p', 'c_const_void_p', 'c_char_p', 'c_mut_char_p'}
+CB_ELEM_ANN = set(INTS) | {'c_bool', 'c_double', 'c_float', 'c_char_p', 'c_mut_char_p'}
+CB_MAX = 16
+# array element codes the adapter's accessors switch on
+CB_CODES = {'int8_t': 1, 'uint8_t': 2, 'int16_t': 3, 'short': 3, 'uint16_t': 4, 'unsigned short': 4, 'int32_t': 5, 'int': 5,
+            'uint32_t': 6, 'unsigned int': 6, 'int64_t': 7, 'long': 7, 'long long': 7, 'ssize_t': 7, 'uint64_t': 8,
+            'unsigned long': 8, 'unsigned long long': 8, 'size_t': 8, '_Bool': 9, 'double': 10, 'float': 11,
+            'const char *': 12, 'char *': 12}
+
+
+class CbArg:
+    """One argument of a callback type: `kind` is value, cptr or array; `ann` the C type name; `count` (array) the
+    index of the argument that holds the number of elements."""
+
+    def __init__(self, kind, ann, count=None):
+        self.kind, self.ann, self.count = kind, ann, count
+
+    def ctype(self):
+        if self.kind == 'cptr':
+            return 'const %s *' % elem_info(self.ann)[0]
+        if self.kind == 'array':
+            inner = cb_value_ctype(self.ann)
+            return inner + ('*' if inner.endswith('*') else ' *')
+        return cb_value_ctype(self.ann)
+
+    def python(self):
+        if self.kind == 'array':
+            return 'list[%s]' % python_type(self.ann)
+        return 'int' if self.ann == 'c_const_void_p' else python_type(self.ann)
+
+
+class CallbackType:
+    """One `callback(ret, arg, ...)` parameter type."""
+
+    def __init__(self, ret, args, on_error, text):
+        self.ret, self.args, self.on_error, self.text = ret, args, on_error, text
+
+    def ctype(self):
+        return '%s (*)(%s)' % ('void' if self.ret is None else result_ctype(self.ret),
+                               ', '.join(a.ctype() for a in self.args) or 'void')
+
+    def python_result(self):
+        return 'None' if self.ret is None else python_type(self.ret)
+
+    def signature(self, name):
+        return 'def %s(%s) -> %s:' % (name, ', '.join('a%d: %s' % (i, a.python()) for i, a in enumerate(self.args)),
+                                       self.python_result())
+
+
+def cb_value_ctype(ann):
+    if ann in INTS:
+        return INTS[ann][0]
+    return {'c_bool': '_Bool', 'c_double': 'double', 'c_float': 'float', 'c_void_p': 'void *', 'c_const_void_p': 'const void *',
+            'c_char_p': 'const char *', 'c_mut_char_p': 'char *'}[ann]
+
 
 class HandleType:
     """One `Handle(name, free=...)`: the AIL class that owns the pointer and the C helpers behind it."""
@@ -69,6 +134,7 @@ class Param:
         self.length_of = None          # for length("x", T): the parameter name
         self.length_type = None
         self.elem = None               # ptr(T) / cptr(T): the element type name, else None
+        self.callback = None           # callback(...): its CallbackType (ann is then 'callback')
 
 
 class Decl:
@@ -85,6 +151,11 @@ class Decl:
         self.tag = None                # per-file hash
         self.local_header = False
         self.directory = None
+        self.variants = {}             # F7: (callback def names) -> the wrapper made for them
+
+    @property
+    def has_callbacks(self):
+        return any(p.callback is not None for p in self.params)
 
     @property
     def has_bytearray(self):
@@ -110,6 +181,8 @@ def elem_info(name):
 
 
 def p_ctype(p):
+    if p.callback is not None:
+        return p.callback.ctype()
     if p.length_of is not None:
         return INTS[p.length_type][0]
     if p.elem is not None:
@@ -142,6 +215,85 @@ def python_type(ann):
             'c_mut_void_p': 'bytearray'}[ann]
 
 
+# F7: the adapter's callback machinery, written only when a stub takes a callback. A C call that takes a callback runs on
+# a stack of its own; a trampoline stores C's arguments in the call's record and switches back to the AIL wrapper,
+# which calls the def and switches into C again with the result (all on the caller's thread).
+CB_RUNTIME = r"""#include <stdio.h>
+#include <ucontext.h>
+#define FFI_CB_STACK ((size_t)8 << 20)
+typedef struct ffi_cb_rec {
+    ucontext_t ctx, caller;
+    void *stack;
+    struct ffi_cb_rec *outer;
+    const char *mark;
+    void (*run)(struct ffi_cb_rec *);
+    int stub, done, failed, event, err;
+    int64_t ai[16]; double af[16]; void *ap[16]; size_t an[16];
+    int64_t ci[16]; double cf[16]; const void *cp[16]; int ck[16];
+    int64_t ri; double rf;
+    int64_t rc_i; double rc_f; const char *rc_s;
+} ffi_cb_rec;
+static ffi_cb_rec *ffi_cb_top, *ffi_cb_entering;
+static _Thread_local char ffi_cb_mark;
+static void ffi_cb_entry(void) { ffi_cb_rec *r = ffi_cb_entering; r->run(r); r->done = 1; }
+static void *ffi_cb_dup(const void *p, size_t n) { void *q = malloc(n ? n : 1); if (!q) abort(); if (n) memcpy(q, p, n); return q; }
+static ffi_cb_rec *ffi_cb_new(void (*run)(ffi_cb_rec *), int stub) {
+    ffi_cb_rec *r = calloc(1, sizeof *r);
+    if (!r || !(r->stack = malloc(FFI_CB_STACK)) || getcontext(&r->ctx) != 0) abort();
+    r->ctx.uc_stack.ss_sp = r->stack; r->ctx.uc_stack.ss_size = FFI_CB_STACK; r->ctx.uc_link = &r->caller;
+    makecontext(&r->ctx, ffi_cb_entry, 0);
+    r->run = run; r->stub = stub; r->mark = &ffi_cb_mark; r->outer = ffi_cb_top; ffi_cb_top = r;
+    return r;
+}
+static int64_t ffi_cb_go(ffi_cb_rec *r) {
+    ffi_cb_entering = r; r->event = 0;
+    if (swapcontext(&r->caller, &r->ctx) != 0) abort();
+    return r->done ? 0 : r->event;
+}
+static ffi_cb_rec *ffi_cb_enter(int stub, const char *name) {
+    ffi_cb_rec *r = ffi_cb_top;
+    if (!r || r->mark != &ffi_cb_mark || r->stub != stub || r->done) {
+        fflush(stdout);
+        fprintf(stderr, "ail_ffi: the callback of %s was called from another thread or after its C call returned\n", name);
+        fflush(stderr);
+        abort();
+    }
+    return r;
+}
+static int ffi_cb_yield(ffi_cb_rec *r, int slot) {
+    if (r->failed) return 0;
+    r->event = slot;
+    if (swapcontext(&r->ctx, &r->caller) != 0) abort();
+    return !r->failed;
+}
+static ffi_cb_rec *ffi_cb_end(void) {
+    ffi_cb_rec *r = ffi_cb_top;
+    if (!r->done) { r->failed = 1; ffi_cb_go(r); }
+    ffi_cb_top = r->outer;
+    ffi_last_errno = r->err;
+    free(r->stack);
+    return r;
+}
+static ail_c_utf8_view ffi_cb_view(const char *s) {
+    return s ? (ail_c_utf8_view){(const unsigned char *)s, strlen(s)} : (ail_c_utf8_view){NULL, 0};
+}
+static int64_t ffi_cb_item_i(ffi_cb_rec *r, int64_t k, int64_t i) {
+    const void *p = r->cp[k];
+    switch (r->ck[k]) {
+    case 1: return ((const int8_t *)p)[i];
+    case 2: return ((const uint8_t *)p)[i];
+    case 3: return ((const int16_t *)p)[i];
+    case 4: return ((const uint16_t *)p)[i];
+    case 5: return ((const int32_t *)p)[i];
+    case 6: return ((const uint32_t *)p)[i];
+    case 7: return ((const int64_t *)p)[i];
+    case 8: return (int64_t)((const uint64_t *)p)[i];
+    case 9: return ((const _Bool *)p)[i];
+    }
+    return 0;
+}"""
+
+
 class Session:
     def __init__(self, workdir=None, forbid=False):
         self.workdir = None if workdir is None else Path(workdir)
@@ -157,6 +309,7 @@ class Session:
         self.link_lines = {}            # (declaring file, library) -> line of its link() call
         self.handles = {}               # (name, free) -> HandleType, in order of first mention (F4)
         self.handle_aliases = {}        # `Db = Handle(...)`: alias -> (name, free)
+        self.cb_aliases = {}            # `Cmp = callback(...)` in the file being lowered: alias -> CallbackType (F7)
 
     def close(self):
         if self._owned and self.workdir is not None:
@@ -195,7 +348,8 @@ class Session:
             if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
                 for alias in node.names:
                     if alias.name == '*':
-                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations', 'Handle'})
+                        imported.update(set(INTS) | PARAM_ANN | {'extern', 'link', 'length', 'ptr', 'cptr', 'declarations', 'Handle',
+                                                                 'callback', 'array'})
                         continue
                     if alias.asname not in (None, alias.name):
                         self._refuse(path, node, 'ail_ffi: import its names plainly (`from ail_ffi import extern, c_int`)')
@@ -226,6 +380,13 @@ class Session:
             if isinstance(node, ast.Assign) and self._is_handle_call(node.value, imported, module_names):
                 self._handle_alias(path, node, imported, module_names)
                 blank.append((node.lineno, node.end_lineno))
+        self.cb_aliases = {}
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and self._is_named_call(node.value, 'callback', imported, module_names):
+                if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+                    self._refuse(path, node, 'a callback type is bound to one plain name: `Cmp = callback(c_int, c_void_p, on_error=0)`')
+                self.cb_aliases[node.targets[0].id] = self._callback_type(path, node.value, imported, module_names)
+                blank.append((node.lineno, node.end_lineno))
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
                 self._link(path, node.value)
@@ -253,6 +414,8 @@ class Session:
                 lines[index] = ''
         for first, statement in keep:
             lines[first - 1] = statement
+        if any(d.has_callbacks for d in decls):
+            self._callback_sites(path, tree, decls, lines, tag)
         self.decls.extend(decls)
         handles_here = [ht for key, ht in self.handles.items() if key not in before]
         if self.handles:
@@ -270,7 +433,11 @@ class Session:
                 block.append('    dst.extend(src[at:at + n])')
                 block.append('    return at + n')
             for decl in decls:
-                block.extend(self._wrapper(decl))
+                if decl.has_callbacks:
+                    for names, wrapper in decl.variants.items():
+                        block.extend(self._cb_wrapper(decl, wrapper, names))
+                else:
+                    block.extend(self._wrapper(decl))
         return '\n'.join(lines).rstrip('\n') + '\n' + '\n'.join(block) + ('\n' if block else '')
 
     def _refuse_export(self, path, tree, imported, module_names):
@@ -440,6 +607,11 @@ class Session:
                 param.elem = element
                 if default is not None:
                     self._refuse(path, default, '%s: a pointer parameter has no default' % node.name)
+            elif self._callback_ref(path, ann, imported, module_names) is not None:
+                param = Param(arg.arg, 'callback')
+                param.callback = self._callback_ref(path, ann, imported, module_names)
+                if default is not None:
+                    self._refuse(path, default, '%s: a callback parameter has no default' % node.name)
             elif self._handle_ref(path, ann, imported, module_names) is not None:
                 param = Param(arg.arg, 'c_void_p')
                 param.handle = self._handle_ref(path, ann, imported, module_names)
@@ -477,6 +649,9 @@ class Session:
             self._refuse(path, node, '%s: a missing return annotation is refused (write `-> None` for void)' % node.name)
         if isinstance(node.returns, ast.Constant) and node.returns.value is None:
             decl.result = None
+        elif self._callback_ref(path, node.returns, imported, module_names) is not None:
+            self._refuse(path, node.returns, '%s: a callback cannot be a result: an AIL callback is valid only during the call '
+                                             'that receives it\n  write instead: return a c_void_p' % node.name)
         elif self._handle_ref(path, node.returns, imported, module_names) is not None:
             decl.result_handle = self._handle_ref(path, node.returns, imported, module_names)
             decl.result = 'c_void_p'
@@ -488,6 +663,8 @@ class Session:
                 decl.result = 'c_char_p'
         if decl.check is not None and (decl.result is None or decl.result in ('c_double', 'c_float', 'c_bool', 'c_char_p', 'c_mut_char_p')):
             self._refuse(path, node, '%s: check= needs an integer or handle result' % node.name)
+        if len(decl.params) > CB_MAX and decl.has_callbacks:
+            self._refuse(path, node, '%s: a stub that takes a callback has at most %d parameters' % (node.name, CB_MAX))
         if decl.has_bytearray and decl.result in ('c_char_p', 'c_mut_char_p'):
             self._refuse(path, node, '%s: a str result together with a bytearray parameter is not supported' % node.name)
         body = [n for n in node.body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
@@ -700,6 +877,287 @@ class Session:
 
         scan(tree.body, ())
 
+    # ------------------------------------------------------------------ callbacks (F7)
+
+    @staticmethod
+    def _is_named_call(node, word, imported, module_names):
+        if not isinstance(node, ast.Call):
+            return False
+        func = node.func
+        if isinstance(func, ast.Name):
+            return func.id == word and word in imported
+        return (isinstance(func, ast.Attribute) and func.attr == word and isinstance(func.value, ast.Name)
+                and func.value.id in module_names)
+
+    def _callback_ref(self, path, ann, imported, module_names):
+        """The CallbackType an annotation names (an alias or an inline `callback(...)`), else None."""
+        if isinstance(ann, ast.Name) and ann.id in self.cb_aliases:
+            return self.cb_aliases[ann.id]
+        if self._is_named_call(ann, 'callback', imported, module_names):
+            return self._callback_type(path, ann, imported, module_names)
+        return None
+
+    def _callback_type(self, path, call, imported, module_names):
+        """`callback(ret, arg, ..., on_error=value)`: the C function pointer type of a stub parameter."""
+        text = ast.unparse(call)
+        if not call.args:
+            self._refuse(path, call, '%s: callback(result C type or None, argument C types...)' % text)
+        options = {}
+        for keyword in call.keywords:
+            if keyword.arg == 'retain':
+                self._refuse(path, keyword.value, '%s: retain= declares a callback that C stores and calls after the call '
+                             'returns, and an AIL callback is valid only during the call that receives it\n  write instead: '
+                             'pass the callback to a C function that calls it before it returns (qsort, bsearch, '
+                             'sqlite3_exec), and keep what C must remember as data (a c_void_p context)' % text)
+            if keyword.arg == 'threads':
+                self._refuse(path, keyword.value, '%s: threads= declares a callback that C calls from another thread, and an '
+                             'AIL callback runs only on the thread that made the C call\n  write instead: make the C call '
+                             'from the thread that runs the callback, or let C queue the work and read the results after '
+                             'the call with plain stubs' % text)
+            if keyword.arg != 'on_error':
+                self._refuse(path, keyword.value, '%s: unknown callback option %s (only on_error= is an option)' % (text, keyword.arg))
+            options[keyword.arg] = keyword.value
+        first = call.args[0]
+        if isinstance(first, ast.Constant) and first.value is None:
+            ret = None
+        else:
+            ret = self._ann_name(path, call, first, imported, module_names, text)
+            if ret not in CB_RESULT_ANN:
+                self._refuse(path, first, '%s: `%s` cannot be a callback result (None, an integer type, c_double, '
+                             'c_float, c_bool or c_void_p)' % (text, ret))
+        args = []
+        for node in call.args[1:]:
+            if self._is_named_call(node, 'cptr', imported, module_names) or self._is_named_call(node, 'ptr', imported, module_names):
+                word = node.func.id if isinstance(node.func, ast.Name) else node.func.attr
+                if word == 'ptr':
+                    self._refuse(path, node, '%s: ptr(T) cannot be a callback argument: the callback cannot write through it\n'
+                                 '  write instead: cptr(T), which gives the callback the value it points at' % text)
+                if len(node.args) != 1 or node.keywords:
+                    self._refuse(path, node, '%s: cptr(element C type)' % text)
+                element = self._ann_name(path, call, node.args[0], imported, module_names, text)
+                if element not in INTS and element not in ('c_double', 'c_float', 'c_bool'):
+                    self._refuse(path, node, '%s: cptr in a callback takes an integer, float or bool C type' % text)
+                args.append(CbArg('cptr', element))
+            elif self._is_named_call(node, 'array', imported, module_names):
+                if len(node.args) != 2 or node.keywords or not isinstance(node.args[1], ast.Constant) \
+                        or type(node.args[1].value) is not int:
+                    self._refuse(path, node, '%s: array(element C type, index of the count argument)' % text)
+                element = self._ann_name(path, call, node.args[0], imported, module_names, text)
+                if element not in CB_ELEM_ANN:
+                    self._refuse(path, node, '%s: array takes an integer, float, bool or c_char_p element type' % text)
+                args.append(CbArg('array', element, node.args[1].value))
+            else:
+                name = self._ann_name(path, call, node, imported, module_names, text)
+                if name not in CB_ARG_ANN:
+                    self._refuse(path, node, '%s: `%s` cannot be a callback argument' % (text, name))
+                args.append(CbArg('value', name))
+        if len(args) > CB_MAX:
+            self._refuse(path, call, '%s: a callback takes at most %d arguments' % (text, CB_MAX))
+        for a in args:
+            if a.kind == 'array' and not (0 <= a.count < len(args) and args[a.count].kind == 'value' and args[a.count].ann in INTS):
+                self._refuse(path, call, '%s: array(T, %d) must name an integer argument (0-based)' % (text, a.count))
+        on_error = None
+        if ret is None:
+            if 'on_error' in options:
+                self._refuse(path, options['on_error'], '%s: a callback without a result has no on_error' % text)
+        else:
+            if 'on_error' not in options:
+                self._refuse(path, call, '%s needs on_error=<value>: the value C gets back when the callback raises (the '
+                             'exception is raised again when the C call returns)\n  write instead: %s'
+                             % (text, text[:-1] + ', on_error=%s)' % {'c_double': '0.0', 'c_float': '0.0', 'c_bool': 'False'}.get(ret, '0')))
+            try:
+                on_error = ast.literal_eval(options['on_error'])
+            except (ValueError, SyntaxError):
+                on_error = None
+            kind = python_type(ret)
+            ok = (type(on_error) is int if kind == 'int' else type(on_error) is bool if kind == 'bool'
+                  else type(on_error) in (int, float))
+            if ok and ret in INTS:
+                bits, signed = INTS[ret][2], INTS[ret][3]
+                low, high = (-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if signed else (0, (1 << bits) - 1)
+                ok = low <= on_error <= high
+            elif ok and ret == 'c_void_p':
+                ok = 0 <= on_error < (1 << 64)
+            if not ok:
+                self._refuse(path, options['on_error'], '%s: on_error must be a %s literal that fits %s' % (text, kind, ret))
+        return CallbackType(ret, args, on_error, text)
+
+    def _callback_sites(self, path, tree, decls, lines, tag):
+        """Each call of a stub that takes a callback names a module-level def; the call is rewritten (in `lines`, columns
+        move, lines do not) to the wrapper made for that def. Everything else that would hand C a callback it cannot
+        call safely is refused by name."""
+        stubs = {d.name: d for d in decls if d.has_callbacks}
+        module_defs = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        functions = [n for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]
+        # functions that make such a call, directly or through each other: never in a parallel worker
+        users = set()
+        while True:
+            more = {f.name for f in functions if f.name not in users and f.name not in stubs and any(
+                isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and (n.func.id in stubs or n.func.id in users)
+                for n in ast.walk(f))}
+            if not more:
+                break
+            users |= more
+
+        def parallel(node, what):
+            self._refuse(path, node, '%s is passed into a parallel worker: a C call that takes a callback runs the callback '
+                         'on the thread that made the call, between its own steps\n  write instead: make the C call that '
+                         'takes the callback in the calling thread, and give the worker plain data' % what)
+
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Call):
+                f = n.func
+                word = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+                if word in PARALLEL_CALLS:
+                    for part in list(n.args) + [k.value for k in n.keywords]:
+                        for sub in ast.walk(part):
+                            if isinstance(sub, ast.Name) and (sub.id in stubs or sub.id in users):
+                                parallel(n, sub.id if sub.id in stubs else '%s (which makes a C call that takes a callback)' % sub.id)
+            elif isinstance(n, ast.For) and isinstance(n.iter, ast.Call) and isinstance(n.iter.func, ast.Name) \
+                    and n.iter.func.id in PARALLEL_LOOPS:
+                for sub in ast.walk(ast.Module(body=n.body, type_ignores=[])):
+                    if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name) and (sub.func.id in stubs or sub.func.id in users):
+                        parallel(sub, 'a call of %s in a par_range body' % sub.func.id)
+
+        def local_names(fn):
+            """Names a function (or lambda) binds itself: parameters, assignments, nested defs and classes, imports."""
+            names = {}
+            a = fn.args
+            for arg in a.posonlyargs + a.args + a.kwonlyargs + [x for x in (a.vararg, a.kwarg) if x is not None]:
+                names[arg.arg] = 'parameter'
+            stack = list(fn.body) if isinstance(fn.body, list) else [fn.body]
+            declared = set()
+            while stack:
+                node = stack.pop()
+                if isinstance(node, (ast.Global, ast.Nonlocal)):
+                    declared.update(node.names)
+                    continue
+                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    names[node.name] = 'def' if not isinstance(node, ast.ClassDef) else 'class'
+                    continue
+                if isinstance(node, ast.Lambda):
+                    continue
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                    names.setdefault(node.id, 'variable')
+                elif isinstance(node, (ast.Import, ast.ImportFrom)):
+                    for alias in node.names:
+                        names.setdefault((alias.asname or alias.name).split('.')[0], 'variable')
+                stack.extend(ast.iter_child_nodes(node))
+            for name in declared:
+                names.pop(name, None)
+            return names
+
+        edits = []
+        handled = set()
+
+        def visit(node, scopes):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                for d in getattr(node, 'decorator_list', []):
+                    visit(d, scopes)
+                inner = scopes + [local_names(node)]
+                for child in (node.body if isinstance(node.body, list) else [node.body]):
+                    visit(child, inner)
+                for default in node.args.defaults + [d for d in node.args.kw_defaults if d is not None]:
+                    visit(default, scopes)
+                return
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in stubs \
+                    and not any(node.func.id in scope for scope in scopes):
+                handled.add(id(node.func))
+                self._callback_call(path, node, stubs[node.func.id], scopes, module_defs, stubs, edits, tag)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in stubs and id(node) not in handled \
+                    and not any(node.id in scope for scope in scopes):
+                self._refuse(path, node, '%s takes a callback, so it is called by name with the callback written in the call; '
+                             'it is not a value\n  write instead: a def that calls %s(...) directly, and use that def'
+                             % (node.id, node.id))
+            for child in ast.iter_child_nodes(node):
+                visit(child, scopes)
+
+        for node in tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name in stubs:
+                continue
+            visit(node, [])
+        # apply right to left on each line; ast columns count UTF-8 bytes
+        for lineno, start, end, text in sorted(edits, key=lambda e: (e[0], e[1]), reverse=True):
+            data = lines[lineno - 1].encode('utf-8')
+            lines[lineno - 1] = (data[:start] + text.encode('utf-8') + data[end:]).decode('utf-8')
+
+    def _callback_call(self, path, call, d, scopes, module_defs, stubs, edits, tag):
+        """One call of a stub that takes callbacks: check each callback argument and rewrite the call."""
+        visible = [p for p in d.params if p.length_of is None]
+        bound = {}
+        for index, arg in enumerate(call.args):
+            if isinstance(arg, ast.Starred):
+                self._refuse(path, arg, '%s takes a callback: write its arguments out (no *args)' % d.name)
+            if index < len(visible):
+                bound[visible[index].name] = arg
+        for keyword in call.keywords:
+            if keyword.arg is None:
+                self._refuse(path, keyword.value, '%s takes a callback: write its arguments out (no **kwargs)' % d.name)
+            bound[keyword.arg] = keyword.value
+        names = []
+        for p in visible:
+            if p.callback is None:
+                continue
+            node = bound.get(p.name)
+            if node is None:
+                self._refuse(path, call, '%s: the callback %s is missing' % (d.name, p.name))
+            names.append(self._callback_def(path, d, p, node, scopes, module_defs, stubs))
+            edits.append((node.lineno, node.col_offset, node.end_col_offset, '0'))
+        key = tuple(names)
+        if key not in d.variants:
+            d.variants[key] = 'ffi_%s_%s__via_%s' % (tag, d.name, '__'.join(names))
+        edits.append((call.func.lineno, call.func.col_offset, call.func.end_col_offset, d.variants[key]))
+
+    def _callback_def(self, path, d, p, node, scopes, module_defs, stubs):
+        """The name of the module-level def passed as the callback p; anything else is refused by name."""
+        cb = p.callback
+        hint = '\n  write instead: a module-level `%s` (state it needs goes in module-level variables or a c_void_p ' \
+               'context argument), and pass its name' % cb.signature('name')
+        where = '%s: the callback %s' % (d.name, p.name)
+        if isinstance(node, ast.Lambda):
+            self._refuse(path, node, '%s is a lambda; C calls a callback through a fixed C function, and a lambda is a '
+                         'value made at run time%s' % (where, hint))
+        if isinstance(node, ast.Attribute):
+            self._refuse(path, node, '%s is the method %s; a method needs its object, and C passes only the C '
+                         'arguments%s' % (where, ast.unparse(node), hint))
+        if not isinstance(node, ast.Name):
+            self._refuse(path, node, '%s must be the name of a module-level def, not `%s`%s' % (where, ast.unparse(node), hint))
+        for scope in reversed(scopes):
+            if node.id in scope:
+                if scope[node.id] == 'def':
+                    self._refuse(path, node, '%s is %s, a def inside a function (a closure): it can read that '
+                                 'function\'s variables, which C cannot pass%s' % (where, node.id, hint))
+                self._refuse(path, node, '%s is the local %s %s; a callback is a module-level def, known when '
+                             'compiling%s' % (where, scope[node.id], node.id, hint))
+        fn = module_defs.get(node.id)
+        if fn is None or node.id in stubs:
+            self._refuse(path, node, '%s: %s is not a module-level def%s' % (where, node.id, hint))
+        a = fn.args
+        problem = None
+        if isinstance(fn, ast.AsyncFunctionDef):
+            problem = 'is async'
+        elif fn.decorator_list:
+            problem = 'has a decorator'
+        elif a.vararg or a.kwarg or a.kwonlyargs or a.posonlyargs:
+            problem = 'has *args, **kwargs or keyword-only parameters'
+        elif len(a.args) != len(cb.args):
+            problem = 'takes %d parameters and the callback type %d' % (len(a.args), len(cb.args))
+        else:
+            for arg, want in zip(a.args, cb.args):
+                if arg.annotation is None or ast.unparse(arg.annotation).replace(' ', '') != want.python().replace(' ', ''):
+                    problem = 'annotates %s as %s, and the C argument is %s' % (
+                        arg.arg, '<nothing>' if arg.annotation is None else ast.unparse(arg.annotation), want.python())
+                    break
+            else:
+                ret = fn.returns
+                got = None if ret is None else 'None' if isinstance(ret, ast.Constant) and ret.value is None else ast.unparse(ret)
+                if got != cb.python_result():
+                    problem = 'has the result annotation %s, and the C result is %s' % (got or '<nothing>', cb.python_result())
+        if problem is not None:
+            self._refuse(path, node, '%s: %s %s; a callback is a fully C-typed def\n  write instead: `%s`'
+                         % (where, node.id, problem, cb.signature(node.id)))
+        return node.id
+
     # ------------------------------------------------------------------ AIL wrappers
 
     def _wrapper(self, d):
@@ -749,6 +1207,13 @@ class Session:
             return out
         else:
             out.append('    ffi_rc = ' + call)
+        out.extend(self._result_lines(d))
+        return out
+
+    @staticmethod
+    def _result_lines(d):
+        """The wrapper's lines after `ffi_rc` holds the C result: the check= failure and the conversion."""
+        out = []
         if d.check is not None:
             out.append('    if ffi_rc %s:' % CHECKS[d.check])
             if d.errno:
@@ -765,6 +1230,102 @@ class Session:
             out.append('    return %s(ffi_rc)' % d.result_handle.make)
         else:
             out.append('    return ffi_rc != 0' if d.result == 'c_bool' else '    return ffi_rc')
+        return out
+
+    def _cb_wrapper(self, d, wrapper, names):
+        """The AIL function that a call of a callback-taking stub was rewritten to, for one choice of callback defs.
+        It starts the C call, serves each callback C makes (event k: the k-th callback parameter) and finishes the
+        call in `finally`, so an exception from a callback is raised after C has returned."""
+        t = d.tag
+        out = ['']
+        sig, args = [], []
+        for p in d.params:
+            if p.length_of is not None:
+                target = next(q for q in d.params if q.name == p.length_of)
+                size = elem_info(target.elem)[1] if target.elem is not None else 1
+                args.append('len(%s)' % p.length_of if size == 1 else 'len(%s) // %d' % (p.length_of, size))
+                continue
+            if p.callback is not None:
+                sig.append('%s: int' % p.name)          # the call site passes 0 here
+                continue
+            text = '%s: %s' % (p.name, p.handle.cls if p.handle is not None else python_type(p.ann))
+            if p.has_default:
+                text += ' = %r' % (p.default,)
+            sig.append(text)
+            if p.ann in ('bytearray', 'c_mut_void_p'):
+                args.append('bytes(%s)' % p.name)
+            elif p.handle is not None:
+                args.append('%s._p' % p.name)
+            else:
+                args.append(p.name)
+        ret = d.result_handle.cls if d.result_handle is not None else {None: 'None'}.get(d.result) or python_type(d.result)
+        out.append('def %s(%s) -> %s:' % (wrapper, ', '.join(sig), ret))
+        for p in d.params:
+            if p.handle is not None:
+                out.append('    if %s._p == 0:' % p.name)
+                out.append('        raise ValueError("%s handle is closed")' % p.handle.name)
+        for p in d.params:
+            if p.elem is not None and elem_info(p.elem)[1] > 1:
+                out.append('    if len(%s) %% %d != 0:' % (p.name, elem_info(p.elem)[1]))
+                out.append('        raise ValueError("%s: %s must hold a whole number of %s")' % (d.name, p.name, p.elem))
+        out.append('    ffi_ev = %s__start(%s)' % (d.export, ', '.join(args)))
+        out.append('    try:')
+        out.append('        while ffi_ev != 0:')
+        slots = [p for p in d.params if p.callback is not None]
+        for slot, (p, fn) in enumerate(zip(slots, names), 1):
+            cb = p.callback
+            values, lists = [], []
+            for k, a in enumerate(cb.args):
+                kind = python_type(a.ann) if a.ann != 'c_const_void_p' else 'int'
+                if a.kind == 'array':
+                    reader = {'str': 'cbas', 'float': 'cbaf'}.get(kind, 'cbai')
+                    item = 'ffi_%s__%s(%d, ffi_i)' % (t, reader, k)
+                    if kind == 'bool':
+                        item += ' != 0'
+                    # bound to a name first: a comprehension is not an argument everywhere in the typed subset
+                    lists.append('                ffi_l%d_%d = [%s for ffi_i in range(ffi_%s__cbn(%d, %d))]' % (slot, k, item, t, k, a.count))
+                    values.append('ffi_l%d_%d' % (slot, k))
+                else:
+                    reader = {'str': 'cbs', 'float': 'cbf'}.get(kind, 'cbi')
+                    values.append('ffi_%s__%s(%d)%s' % (t, reader, k, ' != 0' if kind == 'bool' else ''))
+            call = '%s(%s)' % (fn, ', '.join(values))
+            out.append('            %s ffi_ev == %d:' % ('if' if slot == 1 else 'elif', slot))
+            out.extend(lists)
+            if cb.ret is None:
+                out.append('                ' + call)
+                out.append('                ffi_ev = ffi_%s__resume_v()' % t)
+            elif cb.ret == 'c_bool':
+                out.append('                ffi_ev = ffi_%s__resume_i(1 if %s else 0)' % (t, call))
+            elif cb.ret in ('c_double', 'c_float'):
+                out.append('                ffi_ev = ffi_%s__resume_f(%s)' % (t, call))
+            else:
+                v = 'ffi_v%d' % slot
+                out.append('                %s = %s' % (v, call))
+                if cb.ret == 'c_void_p' or (cb.ret in INTS and not INTS[cb.ret][3] and INTS[cb.ret][2] == 64):
+                    test = '%s < 0' % v
+                elif INTS[cb.ret][2] == 64:
+                    test = None
+                else:
+                    bits, signed = INTS[cb.ret][2], INTS[cb.ret][3]
+                    low, high = (-(1 << (bits - 1)), (1 << (bits - 1)) - 1) if signed else (0, (1 << bits) - 1)
+                    test = '%s < %d or %s > %d' % (v, low, v, high)
+                if test is not None:
+                    out.append('                if %s:' % test)
+                    out.append('                    raise OverflowError("%s: the result of %s does not fit %s")' % (d.name, fn, cb.ret))
+                out.append('                ffi_ev = ffi_%s__resume_i(%s)' % (t, v))
+        out.append('    finally:')
+        if d.has_bytearray:
+            out.append('        ffi_r = %s__finish()' % d.export)
+            out.append('        ffi_o = 0')
+            for p in d.params:
+                if p.ann in ('bytearray', 'c_mut_void_p'):
+                    out.append('        ffi_o = ffi_put_%s(%s, ffi_r, ffi_o)' % (t, p.name))
+        else:
+            out.append('        %s__finish()' % d.export)
+        if d.result is None:
+            return out
+        out.append('    ffi_rc = %s__%s()' % (d.export, 'rcs' if d.result in ('c_char_p', 'c_mut_char_p') else 'rc'))
+        out.extend(self._result_lines(d))
         return out
 
     # ------------------------------------------------------------------ the C object
@@ -785,6 +1346,9 @@ class Session:
                 writes=[p.name for p in d.params if p.ann in ('bytearray', 'c_mut_void_p')],
                 errors=None if d.check is None else dict(check=d.check, errno=d.errno, exception=d.exc),
                 pointer_arguments=[p.name for p in d.params if p.ann in ('bytes', 'bytearray', 'c_const_void_p', 'c_mut_void_p', 'c_char_p', 'c_mut_char_p', 'c_void_p')]))
+            callbacks = [dict(parameter=p.name, type=p.callback.text) for p in d.params if p.callback is not None]
+            if callbacks:
+                rows[-1]['callbacks'] = callbacks
             owned = [p.name for p in d.params if p.handle is not None]
             if owned or d.result_handle is not None:
                 rows[-1]['owned_handles'] = dict(parameters=owned, result=None if d.result_handle is None else d.result_handle.name)
@@ -829,6 +1393,9 @@ class Session:
         code.append('static int ffi_last_errno;')
         code.append('static const unsigned char ffi_empty[1] = {0};')
         code.append('static unsigned char *ffi_scratch; static size_t ffi_scratch_cap;')
+        callbacks = [d for d in self.decls if d.has_callbacks]
+        if callbacks:
+            code.append(CB_RUNTIME)
         functions = {}
         tags = []
         extern_decls = []
@@ -851,7 +1418,16 @@ class Session:
                 asserts.append('_Static_assert(sizeof(long) == 8, "ail_ffi: c_long/c_ulong need a 64 bit long");')
             if any(t == 'c_size_t' or t == 'c_ssize_t' for t in [p.ann for p in d.params] + [d.result]):
                 asserts.append('_Static_assert(sizeof(size_t) == 8, "ail_ffi: c_size_t needs a 64 bit size_t");')
-            self._emit(d, functions, bodies)
+            if d.has_callbacks:
+                inner = [a.ann for p in d.params if p.callback is not None for a in p.callback.args] + \
+                        [p.callback.ret for p in d.params if p.callback is not None]
+                if any(t in ('c_long', 'c_ulong') for t in inner):
+                    asserts.append('_Static_assert(sizeof(long) == 8, "ail_ffi: c_long/c_ulong need a 64 bit long");')
+                if any(t in ('c_size_t', 'c_ssize_t') for t in inner):
+                    asserts.append('_Static_assert(sizeof(size_t) == 8, "ail_ffi: c_size_t needs a 64 bit size_t");')
+                self._emit_cb(d, callbacks.index(d) + 1, functions, bodies)
+            else:
+                self._emit(d, functions, bodies)
         for tag in tags:
             name = 'ffi_%s__errno' % tag
             functions[name] = dict(symbol=name, params=[], result='int')
@@ -859,6 +1435,8 @@ class Session:
             name = 'ffi_%s__strerror' % tag
             functions[name] = dict(symbol=name, params=[['code', 'int']], result='str')
             bodies.append('ail_c_utf8_view %s(int64_t code) { const char *s = strerror((int)code); return (ail_c_utf8_view){(const unsigned char *)s, strlen(s)}; }' % name)
+            if any(d.tag == tag for d in callbacks):
+                self._emit_cb_access(tag, functions, bodies)
         owned = [ht for ht in self.handles.values() if ht.emitted]
         if owned:
             # F4: the pointers that Handle objects own are listed here, so what is still open when the program
@@ -1039,6 +1617,188 @@ class Session:
             lines.append('return %s;' % convert)
         functions[d.export] = dict(symbol=d.export, params=params, result=ret_kind)
         bodies.append('%s %s(%s) {\n%s\n}' % (native_ret, d.export, ', '.join(c_params) or 'void', '\n'.join(lines)))
+
+    def _emit_cb(self, d, number, functions, bodies):
+        """A stub that takes callbacks (F7): `E__start` copies the arguments and runs the C call on its own stack until
+        the first callback or the end (the event it returns), `E__finish` runs it to the end and releases it, and
+        `E__rc` / `E__rcs` give the C result. Each callback parameter gets a trampoline with the C signature."""
+        e = d.export
+        params, c_params, copy, call_args, owned = [], [], [], [], []
+        for index, p in enumerate(d.params):
+            n = 'p%d' % index
+            slot = 'r->a%%s[%d]' % index
+            if p.callback is not None:
+                call_args.append('ffi_tr_%s_%d' % (e, index))
+                continue
+            if p.length_of is not None or p.ann in INTS:
+                kind = INTS[p.length_type if p.length_of is not None else p.ann][1]
+                params.append([n, kind])
+                c_params.append('%s %s' % (NATIVE[kind], n))
+                copy.append('%s = (int64_t)%s;' % (slot % 'i', n))
+                call_args.append('(%s)%s' % (INTS[p.length_type if p.length_of is not None else p.ann][0], slot % 'i'))
+            elif p.ann == 'c_bool':
+                params.append([n, 'bool'])
+                c_params.append('_Bool %s' % n)
+                copy.append('%s = %s;' % (slot % 'i', n))
+                call_args.append('(_Bool)%s' % (slot % 'i'))
+            elif p.ann in ('c_double', 'c_float'):
+                params.append([n, 'float' if p.ann == 'c_double' else 'float32'])
+                c_params.append('%s %s' % ('double' if p.ann == 'c_double' else 'float', n))
+                copy.append('%s = %s;' % (slot % 'f', n))
+                call_args.append('(%s)%s' % ('double' if p.ann == 'c_double' else 'float', slot % 'f'))
+            elif p.ann in ('c_char_p', 'c_mut_char_p'):
+                params.append([n, 'cstr'])
+                c_params.append('const char *%s' % n)
+                copy.append('%s = ffi_cb_dup(%s, strlen(%s) + 1);' % (slot % 'p', n, n))
+                call_args.append('(%s)%s' % ('const char *' if p.ann == 'c_char_p' else 'char *', slot % 'p'))
+                owned.append(index)
+            elif p.ann == 'c_void_p':
+                params.append([n, 'int'])
+                c_params.append('int64_t %s' % n)
+                copy.append('%s = %s;' % (slot % 'i', n))
+                call_args.append('(void *)(intptr_t)%s' % (slot % 'i'))
+            else:
+                writable = p.ann in ('bytearray', 'c_mut_void_p')
+                params.append([n, 'bytes' if writable else 'borrowed_bytes'])
+                c_params.append('const unsigned char *%s, size_t %s_n' % (n, n))
+                copy.append('%s = ffi_cb_dup(%s ? (const void *)%s : (const void *)ffi_empty, %s_n); r->an[%d] = %s_n;'
+                            % (slot % 'p', n, n, n, index, n))
+                if p.elem is not None:
+                    cast = ('%s *' if writable else 'const %s *') % elem_info(p.elem)[0]
+                else:
+                    cast = {'bytes': 'const unsigned char *', 'c_const_void_p': 'const void *', 'bytearray': 'unsigned char *',
+                            'c_mut_void_p': 'void *'}[p.ann]
+                call_args.append('(%s)%s' % (cast, slot % 'p'))
+                owned.append(index)
+        res = d.result
+        if d.trust:
+            real = '((%s (*)(%s))%s)(%s)' % ('void' if res is None else result_ctype(res), ', '.join(d.c_params()) or 'void',
+                                             d.symbol, ', '.join(call_args))
+        else:
+            real = '%s(%s)' % (d.symbol, ', '.join(call_args))
+        # trampolines
+        for index, p in enumerate(d.params):
+            if p.callback is None:
+                continue
+            cb = p.callback
+            slot = 1 + [q for q in d.params if q.callback is not None].index(p)
+            ret = 'void' if cb.ret is None else result_ctype(cb.ret)
+            lines = ['    ffi_cb_rec *r = ffi_cb_enter(%d, "%s");' % (number, d.name)]
+            for k, a in enumerate(cb.args):
+                if a.kind == 'array':
+                    lines.append('    r->cp[%d] = (const void *)a%d; r->ck[%d] = %d;' % (k, k, k, CB_CODES[cb_value_ctype(a.ann)]))
+                elif a.kind == 'cptr':
+                    field = 'cf' if a.ann in ('c_double', 'c_float') else 'ci'
+                    cast = 'double' if field == 'cf' else 'int64_t'
+                    lines.append('    r->%s[%d] = a%d ? (%s)*a%d : 0;' % (field, k, k, cast, k))
+                elif a.ann in ('c_double', 'c_float'):
+                    lines.append('    r->cf[%d] = a%d;' % (k, k))
+                elif a.ann in ('c_char_p', 'c_mut_char_p'):
+                    lines.append('    r->cp[%d] = a%d;' % (k, k))
+                elif a.ann in ('c_void_p', 'c_const_void_p'):
+                    lines.append('    r->ci[%d] = (int64_t)(intptr_t)a%d;' % (k, k))
+                else:
+                    lines.append('    r->ci[%d] = (int64_t)a%d;' % (k, k))
+            if cb.ret is None:
+                lines.append('    ffi_cb_yield(r, %d);' % slot)
+            else:
+                value = cb.on_error
+                if type(value) is bool:
+                    literal = '1' if value else '0'
+                elif type(value) is float:
+                    literal = repr(value)
+                elif cb.ret in ('c_double', 'c_float'):
+                    literal = repr(float(value))
+                else:
+                    literal = '%dULL' % value if value > (1 << 63) - 1 else '%dLL' % value
+                if cb.ret == 'c_void_p':
+                    fail, ok = '(void *)(uintptr_t)%s' % literal, '(void *)(intptr_t)r->ri'
+                elif cb.ret in ('c_double', 'c_float'):
+                    fail, ok = '(%s)%s' % (ret, literal), '(%s)r->rf' % ret
+                elif cb.ret == 'c_bool':
+                    fail, ok = '(_Bool)%s' % literal, 'r->ri != 0'
+                else:
+                    fail, ok = '(%s)%s' % (ret, literal), '(%s)r->ri' % ret
+                lines.append('    if (!ffi_cb_yield(r, %d)) return %s;' % (slot, fail))
+                lines.append('    return %s;' % ok)
+            arglist = ', '.join('%s a%d' % (a.ctype(), k) for k, a in enumerate(cb.args)) or 'void'
+            bodies.append('static %s ffi_tr_%s_%d(%s) {\n%s\n}' % (ret, e, index, arglist, '\n'.join(lines)))
+        # the C call itself, on the call's own stack
+        run = ['    errno = 0;']
+        if res is None:
+            run.append('    %s;' % real)
+        else:
+            run.append('    %s v = %s;' % (result_ctype(res), real))
+        run.append('    r->err = errno;')
+        if res in ('c_double', 'c_float'):
+            run.append('    r->rc_f = v;')
+        elif res in ('c_char_p', 'c_mut_char_p'):
+            run.append('    r->rc_s = v;')
+        elif res == 'c_void_p':
+            run.append('    r->rc_i = (int64_t)(intptr_t)v;')
+        elif res is not None:
+            run.append('    r->rc_i = (int64_t)v;')
+        bodies.append('static void ffi_run_%s(ffi_cb_rec *r) {\n%s\n}' % (e, '\n'.join(run)))
+        functions[e + '__start'] = dict(symbol=e + '__start', params=params, result='int')
+        bodies.append('int64_t %s__start(%s) {\n    ffi_cb_rec *r = ffi_cb_new(ffi_run_%s, %d);\n%s\n    return ffi_cb_go(r);\n}'
+                      % (e, ', '.join(c_params) or 'void', e, number, '\n'.join('    ' + line for line in copy)))
+        finish = ['    ffi_cb_rec *r = ffi_cb_end();']
+        if res in ('c_double', 'c_float'):
+            bodies.append('static double ffi_rc_%s;' % e)
+            finish.append('    ffi_rc_%s = r->rc_f;' % e)
+        elif res in ('c_char_p', 'c_mut_char_p'):
+            bodies.append('static const char *ffi_rc_%s;' % e)
+            finish.append('    ffi_rc_%s = r->rc_s;' % e)
+        elif res is not None:
+            bodies.append('static int64_t ffi_rc_%s;' % e)
+            finish.append('    ffi_rc_%s = r->rc_i;' % e)
+        bytearrays = [i for i, p in enumerate(d.params) if p.ann in ('bytearray', 'c_mut_void_p')]
+        if bytearrays:
+            finish.append('    size_t total = %s;' % ' + '.join('r->an[%d]' % i for i in bytearrays))
+            finish.append('    if (total > ffi_scratch_cap) { unsigned char *grown = realloc(ffi_scratch, total ? total : 1); '
+                          'if (!grown) abort(); ffi_scratch = grown; ffi_scratch_cap = total; }')
+            finish.append('    size_t at = 0;')
+            for i in bytearrays:
+                finish.append('    if (r->an[%d]) memcpy(ffi_scratch + at, r->ap[%d], r->an[%d]); at += r->an[%d];' % (i, i, i, i))
+        for i in owned:
+            finish.append('    free(r->ap[%d]);' % i)
+        finish.append('    free(r);')
+        if bytearrays:
+            finish.append('    return (ail_c_bytes_view){ffi_scratch, total};')
+        functions[e + '__finish'] = dict(symbol=e + '__finish', params=[], result='bytes' if bytearrays else 'void')
+        bodies.append('%s %s__finish(void) {\n%s\n}' % ('ail_c_bytes_view' if bytearrays else 'void', e, '\n'.join(finish)))
+        if res in ('c_char_p', 'c_mut_char_p'):
+            functions[e + '__rcs'] = dict(symbol=e + '__rcs', params=[], result='str')
+            bodies.append('ail_c_utf8_view %s__rcs(void) { const char *s = ffi_rc_%s; '
+                          'return s ? (ail_c_utf8_view){(const unsigned char *)s, strlen(s)} : (ail_c_utf8_view){NULL, 0}; }' % (e, e))
+        elif res is not None:
+            kind = 'float' if res in ('c_double', 'c_float') else 'int'
+            functions[e + '__rc'] = dict(symbol=e + '__rc', params=[], result=kind)
+            bodies.append('%s %s__rc(void) { return ffi_rc_%s; }' % ('double' if kind == 'float' else 'int64_t', e, e))
+
+    @staticmethod
+    def _emit_cb_access(tag, functions, bodies):
+        """What the wrappers of one file read and resume a callback with: the innermost running call's arguments."""
+        t = 'ffi_%s__' % tag
+        rows = [
+            ('cbi', [['k', 'int']], 'int', 'int64_t %s(int64_t k) { return ffi_cb_top->ci[k]; }'),
+            ('cbf', [['k', 'int']], 'float', 'double %s(int64_t k) { return ffi_cb_top->cf[k]; }'),
+            ('cbs', [['k', 'int']], 'str', 'ail_c_utf8_view %s(int64_t k) { return ffi_cb_view((const char *)ffi_cb_top->cp[k]); }'),
+            ('cbn', [['k', 'int'], ['c', 'int']], 'int',
+             'int64_t %s(int64_t k, int64_t c) { ffi_cb_rec *r = ffi_cb_top; return r->cp[k] && r->ci[c] > 0 ? r->ci[c] : 0; }'),
+            ('cbai', [['k', 'int'], ['i', 'int']], 'int', 'int64_t %s(int64_t k, int64_t i) { return ffi_cb_item_i(ffi_cb_top, k, i); }'),
+            ('cbaf', [['k', 'int'], ['i', 'int']], 'float',
+             'double %s(int64_t k, int64_t i) { const void *p = ffi_cb_top->cp[k]; '
+             'return ffi_cb_top->ck[k] == 11 ? (double)((const float *)p)[i] : ((const double *)p)[i]; }'),
+            ('cbas', [['k', 'int'], ['i', 'int']], 'str',
+             'ail_c_utf8_view %s(int64_t k, int64_t i) { return ffi_cb_view(((const char *const *)ffi_cb_top->cp[k])[i]); }'),
+            ('resume_i', [['v', 'int']], 'int', 'int64_t %s(int64_t v) { ffi_cb_rec *r = ffi_cb_top; r->ri = v; return ffi_cb_go(r); }'),
+            ('resume_f', [['v', 'float']], 'int', 'int64_t %s(double v) { ffi_cb_rec *r = ffi_cb_top; r->rf = v; return ffi_cb_go(r); }'),
+            ('resume_v', [], 'int', 'int64_t %s(void) { return ffi_cb_go(ffi_cb_top); }'),
+        ]
+        for word, params, result, body in rows:
+            functions[t + word] = dict(symbol=t + word, params=params, result=result)
+            bodies.append(body % (t + word))
 
     def _flags(self, lib, directory, pkg_config):
         if '/' in lib or lib.endswith(('.so', '.dylib', '.dll', '.a')) or '.so.' in lib:
