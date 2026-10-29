@@ -247,6 +247,137 @@ print(f(Bad('x')))
 }
 
 
+
+GLOBAL_INSTALL = '''from ail_ffi import export
+
+
+def install():
+    global export
+
+    def wrap(fn):
+        def inner(x: int) -> int:
+            return fn(x) * 6
+
+        return inner
+
+    export = wrap
+
+
+install()
+
+
+@export
+def add(x: int) -> int:
+    return x
+
+
+print(add(2))
+'''
+
+DATACLASS_REBIND = '''from dataclasses import dataclass
+from ail_ffi import export
+
+
+@dataclass
+class P:
+    x: int
+
+
+P = 3
+
+
+@export
+def f(p: P) -> int:
+    return 7
+
+
+print(f(1))
+'''
+
+ATTR_DIRECT = '''from ail_ffi import export
+
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+print(add.__ail_export__)
+'''
+
+DEL_MARKER = '''from ail_ffi import export
+
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+del export
+print(add(2, 3))
+'''
+
+ATTR_INDIRECT = {
+    'alias': '''from ail_ffi import export
+
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+alias = add
+print(alias.__ail_export__)
+''',
+    'argument': '''from ail_ffi import export
+
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+def show(fn):
+    print(fn.__ail_export__)
+
+
+show(add)
+''',
+    'list_item': '''from ail_ffi import export
+
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+items = [add]
+print(items[0].__ail_export__)
+''',
+    'dict_value': '''from ail_ffi import export
+
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+values = {'f': add}
+print(values['f'].__ail_export__)
+''',
+    'assignment': '''from ail_ffi import export
+
+
+@export
+def add(a: int, b: int) -> int:
+    return a + b
+
+
+add.__ail_export__ = False
+print(add.__ail_export__)
+''',
+}
+
 def cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -307,6 +438,50 @@ class Ex40Tests(unittest.TestCase):
                 output = built.stdout + built.stderr
                 self.assertNotEqual(built.returncode, 0, (general, output[-1200:]))
                 self.assertIn('the decorator on def f', output, (general, output[-1200:]))
+
+
+    def test_runtime_bindings_are_refused_instead_of_stripped(self):
+        cases = {
+            'global': (GLOBAL_INSTALL, 'the decorator on def add'),
+            'delete': (DEL_MARKER, 'deleting an ail_ffi name'),
+        }
+        with tempfile.TemporaryDirectory(prefix='ail-ex40-rebind-') as directory:
+            for slug, (text, expected) in cases.items():
+                for general in (True, False):
+                    _, built = build(directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
+                    output = built.stdout + built.stderr
+                    self.assertNotEqual(built.returncode, 0, (slug, general, output[-1200:]))
+                    self.assertIn(expected, output, (slug, general, output[-1200:]))
+                    self.assertNotIn('Traceback', output, (slug, general, output[-1200:]))
+
+    def test_a_rebound_dataclass_parameter_is_refused(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex40-dataclass-') as directory:
+            for general in (True, False):
+                _, built = build(directory, 'dataclass_%s' % ('g' if general else 'd'),
+                                 DATACLASS_REBIND, general)
+                output = built.stdout + built.stderr
+                self.assertNotEqual(built.returncode, 0, (general, output[-1200:]))
+                self.assertIn(MESSAGE, output, (general, output[-1200:]))
+
+    def test_a_direct_marker_read_matches_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex40-attr-') as directory:
+            want = cpython(directory, 'attr_direct', ATTR_DIRECT)
+            for general in (True, False):
+                exe, built = build(directory, 'attr_direct_%s' % ('g' if general else 'd'),
+                                   ATTR_DIRECT, general)
+                self.assertEqual(built.returncode, 0, (general, built.stdout + built.stderr))
+                got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+                self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0], (general, got.stderr[-800:]))
+                self.assertEqual(got.returncode, want[1], (general, got.stderr[-800:]))
+
+    def test_indirect_marker_reads_are_refused_by_name(self):
+        with tempfile.TemporaryDirectory(prefix='ail-ex40-attr-refused-') as directory:
+            for slug, text in ATTR_INDIRECT.items():
+                for general in (True, False):
+                    _, built = build(directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
+                    output = built.stdout + built.stderr
+                    self.assertNotEqual(built.returncode, 0, (slug, general, output[-1200:]))
+                    self.assertIn('observing __ail_export__', output, (slug, general, output[-1200:]))
 
 
 if __name__ == '__main__':

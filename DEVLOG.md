@@ -1,3 +1,18 @@
+## 2026-10-29 -- ex40 review: `@export` stripping is conservative, not silently wrong
+
+The ex40 review found four silent differences in the first cut. A `global export` installed by a
+called function, and a dataclass name rebound (`P = 3`) after the class, were still stripped as the
+marker; reading `add.__ail_export__` failed at run time without the decorator's marker; and `del
+export` reached an internal `KeyError`. The lowering now computes module bindings (including
+`global`/`nonlocal`, deletes, alias attribute stores and `setattr`) and only strips `@export` when
+`export` is bound once and the annotations resolve to builtin scalars or to a dataclass defined
+before the function with exactly one binding, no bases and int/float/bool fields. A direct
+`func.__ail_export__` read is rewritten to `True` (the decorator's only observable effect besides
+registration); any other `__ail_export__` read is refused by name. Deleting an imported `ail_ffi`
+name is refused by name instead of crashing. The four review reproducers and the alias/argument/
+list/dict/assignment routes now match CPython or are refused by name on both builds; `test_ail_ex40`
+covers them.
+
 ## 2026-10-29 -- ex40: `@export` examples build as ordinary Python programs
 
 `language_examples/c_export/geometry.py` is both the source of `libgeometry` and a normal program, but

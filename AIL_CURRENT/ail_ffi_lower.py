@@ -119,14 +119,17 @@ EXPORT_SCALARS = ('int', 'float', 'bool', 'str', 'bytes')
 EXPORT_LISTS = ('int', 'float')
 
 
-def _export_annotation(ann, structs, *, result):
+def _export_annotation(ann, structs, scalar_ok, *, result, line):
     if isinstance(ann, ast.Constant) and ann.value is None:
         return result
     if isinstance(ann, ast.Name):
         if ann.id in EXPORT_SCALARS:
-            return True
-        return not result and structs.get(ann.id, False)
-    return (isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
+            return scalar_ok
+        if result:
+            return False
+        entry = structs.get(ann.id)
+        return bool(entry and entry[0] and entry[1] < line)
+    return (scalar_ok and isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
             and ann.value.id == 'list' and isinstance(ann.slice, ast.Name)
             and ann.slice.id in EXPORT_LISTS)
 
@@ -202,34 +205,84 @@ class Session:
                         blank.append((node.lineno, node.end_lineno))
         if not imported and not module_names:
             return text
-        # `from ail_ffi import export` followed by a definition or assignment of `export` is an
-        # ordinary decorator again (CPython uses the later binding); do not remove it as the FFI marker.
-        if any(self._statement_binds(node, 'export') for node in tree.body
-               if not (isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi')):
+        # A name rebound through `global`/`nonlocal` (or by a module-level statement) is the program's
+        # own decorator/object again: CPython resolves the decorator at run time, so never strip it.
+        rebound = set()
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Global, ast.Nonlocal)):
+                rebound.update(node.names)
+        total, other = {}, {}           # module-level bindings: all, and those not from ail_ffi import
+        for node in tree.body:
+            names = self._bound_names(node)
+            if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi':
+                here = {alias.asname or alias.name for alias in node.names if alias.name != '*'}
+                names_other = names - here
+            elif isinstance(node, ast.Import) and any(alias.name == 'ail_ffi' for alias in node.names):
+                here = {alias.asname or alias.name.split('.')[0] for alias in node.names if alias.name == 'ail_ffi'}
+                names_other = names - here
+            else:
+                names_other = names
+            for name in names:
+                total[name] = total.get(name, 0) + 1
+            for name in names_other:
+                other[name] = other.get(name, 0) + 1
+        # Deleting an imported ail_ffi name used to reach an internal KeyError in the front end.
+        for node in tree.body:
+            if isinstance(node, ast.Delete):
+                for target in node.targets:
+                    for name in sorted(imported | module_names):
+                        if self._binds_target(target, name):
+                            self._refuse(path, node, '%s: deleting an ail_ffi name is not supported' % name)
+        if 'export' in rebound or other.get('export', 0):
             imported.discard('export')
         for name in list(module_names):
-            if any(self._statement_binds(node, name) for node in tree.body
-                   if not (isinstance(node, ast.Import)
-                           and any(alias.name == 'ail_ffi' and (alias.asname or alias.name) == name
-                                   for alias in node.names))):
+            if name in rebound or other.get(name, 0):
                 module_names.discard(name)
-        dataclass_names, dataclasses_modules = set(), set()
+                continue
+            # `ail_ffi.export = ...` (or setattr/`del`) changes the decorator without rebinding `ail_ffi`.
+            for node in ast.walk(tree):
+                if (isinstance(node, ast.Attribute) and node.attr == 'export'
+                        and isinstance(node.value, ast.Name) and node.value.id == name
+                        and isinstance(node.ctx, (ast.Store, ast.Del))):
+                    module_names.discard(name)
+                    break
+                if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                        and node.func.id in ('setattr', 'delattr') and node.args
+                        and isinstance(node.args[0], ast.Name) and node.args[0].id == name):
+                    module_names.discard(name)
+                    break
+        dataclass_names, dataclasses_modules = {}, {}
         for node in tree.body:
             if isinstance(node, ast.ImportFrom) and node.module == 'dataclasses' and node.level == 0:
-                dataclass_names.update(alias.asname or alias.name for alias in node.names
-                                       if alias.name == 'dataclass')
+                for alias in node.names:
+                    if alias.name == 'dataclass':
+                        name = alias.asname or alias.name
+                        dataclass_names[name] = min(dataclass_names.get(name, node.lineno), node.lineno)
             elif isinstance(node, ast.Import):
-                dataclasses_modules.update(alias.asname or alias.name for alias in node.names
-                                           if alias.name == 'dataclasses')
+                for alias in node.names:
+                    if alias.name == 'dataclasses':
+                        name = alias.asname or alias.name
+                        dataclasses_modules[name] = min(dataclasses_modules.get(name, node.lineno), node.lineno)
+
+        def stable(name):
+            """The name is bound once at module level (and never through global/nonlocal)."""
+            return name not in rebound and total.get(name, 0) == 1
+
+        dataclass_names = {name: line for name, line in dataclass_names.items() if stable(name)}
+        dataclasses_modules = {name: line for name, line in dataclasses_modules.items() if stable(name)}
+        scalar_ok = not any(name in rebound or total.get(name, 0) for name in EXPORT_SCALARS + ('list',))
         structs = {}
         for node in tree.body:
             if not isinstance(node, ast.ClassDef):
                 continue
             for dec in node.decorator_list:
                 bare = dec.func if isinstance(dec, ast.Call) else dec
-                is_dataclass = ((isinstance(bare, ast.Name) and bare.id in dataclass_names)
+                is_dataclass = ((isinstance(bare, ast.Name) and bare.id in dataclass_names
+                                 and dataclass_names[bare.id] < node.lineno)
                                 or (isinstance(bare, ast.Attribute) and bare.attr == 'dataclass'
-                                    and isinstance(bare.value, ast.Name) and bare.value.id in dataclasses_modules))
+                                    and isinstance(bare.value, ast.Name)
+                                    and bare.value.id in dataclasses_modules
+                                    and dataclasses_modules[bare.value.id] < node.lineno))
                 if not is_dataclass:
                     continue
                 fields = []
@@ -237,8 +290,12 @@ class Session:
                     if isinstance(statement, ast.AnnAssign) and isinstance(statement.target, ast.Name):
                         fields.append(isinstance(statement.annotation, ast.Name)
                                       and statement.annotation.id in ('int', 'float', 'bool'))
-                structs[node.name] = bool(fields) and all(fields)
+                # A base class may add fields the scanner cannot see, and a later binding changes the
+                # class object that `typing.get_type_hints` resolves: both would be a silent difference.
+                structs[node.name] = (not node.bases and bool(fields) and all(fields)
+                                      and stable(node.name), node.lineno)
                 break
+        exported = {}
         for node in ast.walk(tree):
             if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 continue
@@ -246,13 +303,26 @@ class Session:
                 if not self._is_export_ref(dec, imported, module_names):
                     continue
                 if (isinstance(node, ast.FunctionDef) and node in tree.body
-                        and self._is_export(dec, imported, module_names) and self._export_ready(node, structs)):
+                        and self._is_export(dec, imported, module_names)
+                        and self._export_ready(node, structs, scalar_ok)):
                     blank.append((dec.lineno, dec.end_lineno))
                     node.decorator_list.remove(dec)
+                    exported[node.name] = node
                 else:
                     self._refuse(path, node, '%s: @export marks a top-level function with plain annotated '
                                  'parameters and an int/float/bool/str/bytes/list[int]/list[float] result'
                                  % getattr(node, 'name', '?'))
+        edits = []
+        if exported and '__ail_export__' in text:
+            for node in ast.walk(tree):
+                if not (isinstance(node, ast.Attribute) and node.attr == '__ail_export__'):
+                    continue
+                if (isinstance(node.ctx, ast.Load) and isinstance(node.value, ast.Name)
+                        and node.value.id in exported and stable(node.value.id)):
+                    edits.append((node.lineno, node.col_offset, node.end_lineno, node.end_col_offset, 'True'))
+                else:
+                    self._refuse(path, node, 'observing __ail_export__ is only supported directly on '
+                                 'the decorated function name')
         decls = []
         for node in tree.body:
             if isinstance(node, ast.Expr) and self._is_link(node.value, imported, module_names):
@@ -275,6 +345,22 @@ class Session:
         for decl in decls:
             decl.tag = tag
             decl.export = 'ffi_%s_%s' % (tag, decl.name)
+        if edits:
+            starts = [0]
+            for line in text.split('\n'):
+                starts.append(starts[-1] + len(line) + 1)
+
+            def offset(lineno, col):
+                return starts[lineno - 1] + col
+
+            pieces, last = [], 0
+            for first_line, first_col, last_line, last_col, replacement in sorted(
+                    edits, key=lambda edit: offset(edit[0], edit[1])):
+                begin, end = offset(first_line, first_col), offset(last_line, last_col)
+                pieces.extend((text[last:begin], replacement))
+                last = end
+            pieces.append(text[last:])
+            text = ''.join(pieces)      # no newline is added or removed, so `blank` line numbers hold
         lines = text.split('\n')
         for first, last in blank:
             for index in range(first - 1, last):
@@ -338,38 +424,68 @@ class Session:
         return False
 
     @classmethod
-    def _statement_binds(cls, node, name):
-        """True when a module-level statement binds `name` (it does not look inside def/class bodies)."""
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            return node.name == name
-        if isinstance(node, ast.Assign):
-            return any(cls._binds_target(target, name) for target in node.targets)
-        if isinstance(node, (ast.AnnAssign, ast.AugAssign)):
-            return cls._binds_target(node.target, name)
-        if isinstance(node, ast.Import):
-            return any((alias.asname or alias.name.split('.')[0]) == name for alias in node.names)
-        if isinstance(node, ast.ImportFrom):
-            return any(alias.name != '*' and (alias.asname or alias.name) == name for alias in node.names)
-        if isinstance(node, (ast.For, ast.AsyncFor)):
-            return (cls._binds_target(node.target, name)
-                    or any(cls._statement_binds(statement, name) for statement in node.body + node.orelse))
-        if isinstance(node, (ast.With, ast.AsyncWith)):
-            return (any(item.optional_vars is not None and cls._binds_target(item.optional_vars, name)
-                        for item in node.items)
-                    or any(cls._statement_binds(statement, name) for statement in node.body))
-        if isinstance(node, (ast.If, ast.While)):
-            return any(cls._statement_binds(statement, name) for statement in node.body + node.orelse)
-        if isinstance(node, ast.Try):
-            found = [*node.body, *node.orelse, *node.finalbody]
-            for handler in node.handlers:
-                found.extend(handler.body)
-                if handler.name == name:
-                    return True
-            return any(cls._statement_binds(statement, name) for statement in found)
-        if isinstance(node, ast.Match):
-            return any(cls._statement_binds(statement, name)
-                       for case in node.cases for statement in case.body)
-        return False
+    def _bound_names(cls, node):
+        """Names bound by a module-level statement (no descent into def/class bodies)."""
+        names = set()
+
+        def target(item):
+            if isinstance(item, ast.Name):
+                names.add(item.id)
+            elif isinstance(item, (ast.Tuple, ast.List)):
+                for child in item.elts:
+                    target(child)
+            elif isinstance(item, ast.Starred):
+                target(item.value)
+
+        def visit(statement):
+            if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(statement.name)
+            elif isinstance(statement, ast.Assign):
+                for item in statement.targets:
+                    target(item)
+            elif isinstance(statement, ast.AnnAssign):
+                if statement.value is not None:
+                    target(statement.target)
+            elif isinstance(statement, ast.AugAssign):
+                target(statement.target)
+            elif isinstance(statement, ast.Delete):
+                for item in statement.targets:
+                    target(item)
+            elif isinstance(statement, ast.Import):
+                for alias in statement.names:
+                    names.add(alias.asname or alias.name.split('.')[0])
+            elif isinstance(statement, ast.ImportFrom):
+                for alias in statement.names:
+                    if alias.name != '*':
+                        names.add(alias.asname or alias.name)
+            elif isinstance(statement, (ast.For, ast.AsyncFor)):
+                target(statement.target)
+                for child in statement.body + statement.orelse:
+                    visit(child)
+            elif isinstance(statement, (ast.With, ast.AsyncWith)):
+                for item in statement.items:
+                    if item.optional_vars is not None:
+                        target(item.optional_vars)
+                for child in statement.body:
+                    visit(child)
+            elif isinstance(statement, (ast.If, ast.While)):
+                for child in statement.body + statement.orelse:
+                    visit(child)
+            elif isinstance(statement, ast.Try):
+                for child in statement.body + statement.orelse + statement.finalbody:
+                    visit(child)
+                for handler in statement.handlers:
+                    if handler.name:
+                        names.add(handler.name)
+                    for child in handler.body:
+                        visit(child)
+            elif isinstance(statement, ast.Match):
+                for case in statement.cases:
+                    for child in case.body:
+                        visit(child)
+
+        visit(node)
+        return names
 
     @staticmethod
     def _is_export_ref(node, imported, module_names):
@@ -386,14 +502,16 @@ class Session:
         return cls._is_export_ref(node, imported, module_names)
 
     @staticmethod
-    def _export_ready(node, structs):
+    def _export_ready(node, structs, scalar_ok):
         """True for a top-level function the CPython `@export` decorator would accept unchanged."""
         args = node.args
         if args.posonlyargs or args.vararg or args.kwonlyargs or args.kwarg or args.defaults:
             return False
-        if node.returns is None or not _export_annotation(node.returns, structs, result=True):
+        if node.returns is None or not _export_annotation(node.returns, structs, scalar_ok, result=True,
+                                                         line=node.lineno):
             return False
-        return all(arg.annotation is not None and _export_annotation(arg.annotation, structs, result=False)
+        return all(arg.annotation is not None
+                   and _export_annotation(arg.annotation, structs, scalar_ok, result=False, line=node.lineno)
                    for arg in args.args)
 
     def _ann_name(self, path, node, ann, imported, module_names, what):
