@@ -528,6 +528,13 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
     runs -- SEMANTICS section 33), or a script with no `def` at all (section 33 again, via
     `_rewrite_script(force=True)`)."""
     tree = ast.parse(source.strip())
+    if os.environ.get('AIL_SOURCE_FILE') and any(
+            (isinstance(n, ast.Name) and n.id == '__file__')
+            or (isinstance(n, ast.Attribute) and n.attr == '__file__') for n in ast.walk(tree)):
+        # The typed path turns top-level statements into locals; CPython's implicit module-level
+        # __file__ binding (pyboxed2's _inject_source_file) is exact there, so let the general
+        # path build every program that reads or rebinds it.
+        raise Unsupported('the Python name __file__ is built on the general path')
     refuse_field_method_call(tree)
     import threadlib
     threadlib.refuse_typed(tree, Unsupported)        # G12: threads are built on the general path only
@@ -1338,6 +1345,13 @@ def build_link_units(source, out, unit_map, external=None):
     return _finalize_output(out)
 
 
+def _entry_file_name(path):
+    """CPython's `__file__` for the script: absolute as invoked, without normalising a relative
+    path (so `./p.py` keeps the dot)."""
+    path = os.fspath(path)
+    return path if os.path.isabs(path) else os.path.join(os.getcwd(), path)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(description='compile one Python expression or function to a '
                                              'standalone program')
@@ -1376,6 +1390,7 @@ def main(argv=None):
 
     if a.file:
         src = pathlib.Path(a.file).read_text(encoding='utf-8')
+        os.environ.setdefault('AIL_SOURCE_FILE', _entry_file_name(a.file))
     elif a.source is not None:
         src = a.source
     else:

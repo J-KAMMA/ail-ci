@@ -2453,6 +2453,34 @@ def _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow, state=N
     return ''.join(body), proto
 
 
+def _inject_source_file(tree):
+    """Give the program CPython's implicit module-level `__file__` binding.
+
+    The interpreter sets `__file__` before the module body runs, so a read before any user
+    assignment still sees it, a later assignment rebinds it, and a function-local `__file__`
+    (a parameter or a local) shadows it as usual.  AIL is invoked on the path of the source,
+    which the caller passes in AIL_SOURCE_FILE.  The assignment is a normal tree statement:
+    unlike a prepended source line it does not renumber the user's lines."""
+    path = os.environ.get('AIL_SOURCE_FILE')
+    if not path:
+        return
+    if not any((isinstance(n, ast.Name) and n.id == '__file__')
+               or (isinstance(n, ast.Attribute) and n.attr == '__file__')
+               for n in ast.walk(tree)):
+        return
+    node = ast.Assign(targets=[ast.Name(id='__file__', ctx=ast.Store())], value=ast.Constant(path))
+    node.lineno, node.col_offset = 1, 0
+    ast.fix_missing_locations(node)
+    index = 0
+    if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant) \
+            and isinstance(tree.body[0].value.value, str):
+        index = 1
+    while index < len(tree.body) and isinstance(tree.body[index], ast.ImportFrom) \
+            and tree.body[index].module == '__future__':
+        index += 1
+    tree.body.insert(index, node)
+
+
 class Compiler(boxclosure.ClosureMixin):
     def __init__(self, allow_mix=True):
         self.allow_mix = allow_mix
@@ -2513,6 +2541,7 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _compile_cond(self, source):
         tree = ast.parse(source)
+        _inject_source_file(tree)
         self.source_has_class = any(isinstance(n, ast.ClassDef) for n in ast.walk(tree))
         import exctext
         exctext.refuse_args_item_store(tree, Unsupported)

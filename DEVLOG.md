@@ -1,3 +1,43 @@
+## 2026-10-29 -- ex26: Python modules load as CPython does; `__file__` is the source path (job-ex26-10290946)
+
+Step 1 built all 17 Python-syntax examples under `AIL_CURRENT/language_examples`: 6 `.ail`
+(`hello`, `integer_series`, `math`, `stdin_sum`, `sum`, `use_math`) and 11 `.py` research drivers.
+Among the `.ail` files only `math.ail` was refused, on the default build, with `not in the subset:
+the first parameter must be the sequence read from the file`; CPython loads its `LIMIT = 6` and
+`def sum_to(n)`, prints nothing and exits 0 (the general build already matched). All 11 `.py`
+files were refused: five first at `__file__` (`row_codec_compare`, `row_decimal_quad`,
+`row_state_quad_compare`, `row_store_identity_compare`, `test_row_cpu_profile`), two at a missing
+`benchmark_current_rows`/`pyfunc` import, six at a standard-library name collision or re-export
+read, one at `os.environ` used as a value and one at a duplicate import binding. `__file__`
+blocked the most examples, so it is now supported exactly; the typed path additionally emits
+CPython's no-op `main` for a definitions-plus-constants Python module, which makes the real
+`math.ail` example build and match on both builds.
+
+`__file__` is installed as CPython's implicit module-level binding. The entry keeps the path as
+invoked (made absolute without normalising, so `./p.py` keeps its dot); an imported module gets its
+own absolute path and a namespace package gets `None`. A read before a user assignment sees the
+path; a later assignment, `del`, parameter, lambda argument, import alias or `except ... as`
+binding follows the ordinary name rules. An imported module's module-level `del __file__` is refused
+by name because the merged program has one variable; a `module.__file__` store follows that variable
+and matches CPython. This tree already emitted CPython's no-op `main` for definition/constant-only
+sources through `_python_runs_nothing(source, True)`, so that part of the accepted change was kept
+as the current implementation rather than duplicated; `language_examples/math.ail` builds and
+matches on both builds.
+
+Replay probes on both builds with `cmp.sh` (`/tmp/probes`): `p_file_basic` (read, alias, list item,
+dict value, attribute, rebind, local parameter, loop target and `except ... as`), `p_file_future_doc`
+(docstring plus `from __future__`), `p_file_local_del`, `p_file_lambda`, `p_const_only`, `p_math`,
+`p_class_noop`, `p_script_print`, `p_main_called` and `language_examples/math.ail` all matched
+CPython. Copied-directory probes `import_case`, `namespace_case` and `store_case` matched; the
+`./main.py` spelling kept its dot on both builds; `from_case` was refused by name (imported
+`__file__` also implicitly assigned) and `del_case` was refused by name (`del __file__` in an
+imported module), as intended.
+
+Final-state tests: `test_ail_ex26`, `test_ail_modules`, `test_ail_python_syntax` (80 tests, 226.5 s),
+`test_ail_safetynet` (5, 147.9 s), `test_ail_files` (18, 139.0 s, 1 skipped) and
+`test_ail_corpus_findings3` (2, 238.0 s), 0 failed. `tools/update_manifest.py` was run and `--check`
+passes; `tools/diff_ids.py` is not present in this tree.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
