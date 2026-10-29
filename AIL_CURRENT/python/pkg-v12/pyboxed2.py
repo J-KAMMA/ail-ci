@@ -2560,7 +2560,9 @@ class Compiler(boxclosure.ClosureMixin):
                  or n.attr not in inst_fields)
             for n in ast.walk(tree))
         # `self.upper = lambda: ...` where the name is also a method of a builtin type: a call
-        # `p.upper()` would run the builtin handler and fail at run time.  Refuse it here.
+        # `p.upper()` would run the builtin handler and fail at run time.  Refuse it here.  A class
+        # method of the same name already makes such a call check the instance table first
+        # (assigned_attrs above), so that case is left to it (pre278 list_method).
         func_names = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
         called_attrs = {n.func.attr for n in ast.walk(tree)
                         if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
@@ -2569,7 +2571,7 @@ class Compiler(boxclosure.ClosureMixin):
                                               (isinstance(n.value, ast.Name) and n.value.id in func_names)):
                 for t in n.targets:
                     if isinstance(t, ast.Attribute) and t.attr in called_attrs and not t.attr.startswith('__') \
-                            and t.attr in _builtin_names() and hasattr(self, '_m_' + t.attr):
+                            and t.attr not in method_names and t.attr in _builtin_names() and hasattr(self, '_m_' + t.attr):
                         refusal = Unsupported(
                             'a function stored in the field .%s, which is also a method of a builtin type: '
                             'the call .%s() would run the builtin method\n'
