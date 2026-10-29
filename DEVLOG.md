@@ -1,3 +1,54 @@
+## 2026-10-29 -- reex26: `__file__` is the implicit module-level binding (job-reex26-10300433)
+
+`__file__` was still the top blocker: `print(__file__)` was refused as an undefined name on both
+builds, where CPython 3.12 prints the script's path.  It is now bound the way CPython's import
+system binds it, in the general path only; the typed path refuses every use by name so the default
+build falls back instead of silently treating a later `__file__ = ...` as a module constant.
+
+The entry's value is the path as invoked, made absolute by prefixing the working directory and
+*without* normalising: `python3 ./p.py` sees `/dir/./p.py` and `/dir/a/../p.py` keeps its `..`, as
+CPython does.  `ail_chatgpt.py compile` now takes the source as a `str` (a `Path` dropped the dot),
+computes that text in `_invoked_absolute`, passes it as `AIL_SOURCE_FILE`, and includes it in the
+frontend cache key; `pyboxed2.Compiler` emits a setup store into the `g:__file__` slot only when the
+combined tree actually mentions the name, so unrelated programs' C is unchanged.  A non-ASCII path
+is refused by name on the general path (its string literals are ASCII-only).
+
+Imported modules get their own absolute path: `ail_modules.load` prepends `__file__ = <mod.path>`
+when the module mentions the name (otherwise `m.__file__` stays a constant), so a read before a
+user assignment sees the path and a later assignment, `del`, parameter, lambda argument, loop
+target or `except ... as` binding follows the ordinary merged-name rules.  A namespace package's
+`m.__file__` is `None`.  The three shapes the merged program cannot reproduce exactly are refused
+by name: an import that binds the name (`import m as __file__` / `from m import __file__`), a
+top-level `del __file__` in an imported module (CPython removes the attribute; we would raise
+`NameError`), a module-level (or `global`-declared) `except ... as __file__` in an imported module
+(CPython deletes the handler name at the end, so `m.__file__` is an `AttributeError`), and
+`m.__file__ = value` (module attributes are fixed at build time).  The entry's own `del __file__`
+and `except ... as __file__` match CPython and raise `NameError` on the later read.  A star import
+does not rebind the entry's name, `import lib as L` works, and `getattr(lib, '__file__')` /
+`globals()['__file__']` are already refused by name (module as a value / unknown builtin).
+
+Probes in `/tmp/probes/reex26/` on both builds via `cmp.sh`: `basic`, `flow` (argument, list item,
+dict value, attribute), `fstring`, `assign_before`, `assign_after`, `aug`, `loop_target`,
+`param_shadow`, `lambda_arg`, `except_as`, `closure`, `class_body`, `global_func`, `del_read`
+(exit 1 with the same stdout), `types`, `widths`, `empty`, `negative` (negative indices/slices and
+an out-of-range `IndexError`) and `aliasing` (aliases, tuple unpacking, a default argument, dict
+and list copies) -- 19 programs, every one matching CPython's stdout and exit status on both
+builds.  The path-as-invoked probes `./main.py` and `<dir>/../dot/main.py` match on both builds.
+Module probes `/tmp/probes/mods/m_func`, `m_pkg`, `m_assign` and `m_ns` match; `m_del`, `m_store`,
+`m_from` and `mhandler` (an imported module's `except ... as __file__`) are refused by name (exit 2,
+`write instead`), as are `import lib as __file__` and `from lib import X as __file__`.  The star
+import (`from lib import *`) and aliased module (`import lib as L`) probes match CPython on both
+builds, and the dynamic-access probes (`getattr(lib, '__file__')`, `globals()['__file__']`) are
+refused by name (module as a value / unknown builtin).  A non-ASCII entry path and the typed-only
+(`AIL_NO_GENERAL=1` / `--strict`) path are refused by name (exit 3).  During isolation
+`assign_after.py` printed `False`
+on the default build because the typed path swallowed the rebinding; the blanket typed-path
+refusal fixed it (it now matches on both).
+
+Tests: `test_ail_reex26` (new, 10 tests, both builds), `test_ail_modules`, `test_ail_python_syntax`,
+`test_ail_build_cache`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

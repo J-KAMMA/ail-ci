@@ -5085,6 +5085,13 @@ def _class_names_env(merged):
     return json.dumps({k: list(v) for k, v in classes.items()}, sort_keys=True) if classes else ''
 
 
+def _invoked_absolute(path):
+    """CPython's `__file__` for a script: the path as invoked, made absolute by prefixing the cwd,
+    without normalising (`"./p.py"` keeps its dot, `"a/../p.py"` keeps its `..`)."""
+    text = os.fspath(path)
+    return text if os.path.isabs(text) else os.path.join(os.getcwd(), text)
+
+
 def _python_source(args, data):
     """Whether the entry source is written in the Python syntax (refusals are respelled for it)."""
     if getattr(args, 'syntax', 'auto') != 'auto':
@@ -5265,7 +5272,7 @@ def _compile_freestanding(args, parser, native_build):
     """`compile --freestanding`: one module to C or an object with no runtime and no libc (python/pkg-v12/freestanding.py)."""
     if args.module or args.object or args.separate or args.static or args.target or args.module_path:
         parser.error('--freestanding builds one module alone; drop --module, --object, --separate, --static, --target and -I')
-    source = args.source.resolve()
+    source = Path(args.source).resolve()
     output = Path(os.path.abspath(args.output))
     if source.suffix.lower() != '.py' or not source.is_file():
         parser.error('--freestanding takes an existing Python-syntax .py module')
@@ -5357,7 +5364,8 @@ def main(argv=None):
     build_http_cmd.add_argument('-o', '--output', required=True, type=Path)
     build_http_cmd.add_argument('--compare', action='store_true')
     compile_cmd = sub.add_parser('compile', help='compile AIL source to a standalone executable')
-    compile_cmd.add_argument('source', type=Path)
+    # str, not Path: Path('./p.py') drops the dot, and `__file__` must name the path as invoked
+    compile_cmd.add_argument('source', type=str)
     compile_cmd.add_argument('-o', '--output', required=True, type=Path)
     compile_cmd.add_argument('--module', action='append', type=Path, default=[],
         help='additional .ail file containing functions and literal numeric constants')
@@ -5629,7 +5637,7 @@ def main(argv=None):
         lowered = {}
         objects = getattr(args, 'object', [])
         separate = getattr(args, 'separate', False)
-        source = args.source.resolve()
+        source = Path(args.source).resolve()
         output = Path(os.path.abspath(args.output))
         if sys.version_info < (3, 10):
             parser.error('AIL compilation requires Python 3.10 or newer')
@@ -5741,6 +5749,10 @@ def main(argv=None):
                 debug_env = {'AIL_DEBUG': '1', 'AIL_LINE_MAP': str(line_map)}
             environment = _surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
                                                 **({'AIL_NO_GENERAL': '1'} if contracts or strict else {}), **ffi_env, **debug_env})
+            if environment.get('AIL_SURFACE') == 'python':
+                environment['AIL_SOURCE_FILE'] = _invoked_absolute(args.source)
+            else:
+                environment.pop('AIL_SOURCE_FILE', None)
             if prelude_units:
                 environment['AIL_PRELUDE_UNITS'] = '\n'.join(prelude_units)
             cache = None if separate or getattr(args, 'target', None) else _build_cache(args)
@@ -5755,6 +5767,7 @@ def main(argv=None):
                         hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
                         if Path(str(object_path) + '.json').is_file() else '-')],
                     environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
+                    environment.get('AIL_SOURCE_FILE', ''),
                     *(['classes', environment['AIL_CLASS_NAMES']] if environment.get('AIL_CLASS_NAMES') else []),
                     *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
                     *(['link', ffi_env['AIL_FFI_LINK']] if link else []),

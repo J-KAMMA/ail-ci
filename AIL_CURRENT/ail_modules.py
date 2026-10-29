@@ -368,10 +368,25 @@ class Program:
                 raise ModuleRefusal(path, error.lineno or 1, error.offset or 1, error.msg)
         mod = Mod(fullname, path if path is not None else mdirs[0], tree, False, kind, mdirs if kind != 'module' else [])
         self.mods[fullname] = mod
+        if kind != 'namespace':
+            self._bind_file(mod)
         self.drop_main_guards(mod)
         self.take_all(mod)
         self.discover(mod)
         return mod
+
+    def _bind_file(self, mod):
+        """CPython binds `__file__` in a module's namespace before its body runs; install the same
+        binding when the module uses the name, so a read before a user assignment (or inside a
+        function) sees the module's path. A later assignment, a parameter or a local of the same
+        name follows the ordinary name rules and wins, as in CPython. A module that never mentions
+        the name is left byte-for-byte alone (readers get a constant instead)."""
+        if not any(isinstance(n, ast.Name) and n.id == '__file__' for n in ast.walk(mod.tree)):
+            return
+        node = ast.Assign(targets=[ast.Name(id='__file__', ctx=ast.Store())],
+                          value=ast.Constant(str(mod.path)))
+        ast.fix_missing_locations(node)
+        mod.tree.body.insert(0, node)
 
     def drop_main_guards(self, mod):
         """In an imported module `if __name__ == "__main__":` is false: replace it by its else branch."""
@@ -1365,6 +1380,15 @@ class Program:
 
     def bind(self, mod, imp, index, key, entry):
         node = imp.node
+        if key == '__file__':
+            # `import m as __file__` / `from m import __file__` rebinds the module's own path; the
+            # merged program installs that path at the top of the body, so a read placed before the
+            # import would see the wrong value. Refused by name rather than merged.
+            self.refuse(mod, node, "an import binds the name __file__ in %s; that name is the module's own "
+                        "path, which the merged program installs when the body starts, so only a plain "
+                        "assignment can change it.\n"
+                        "  write instead: give the import another name, or read `%s.__file__`"
+                        % (mod.path.name, entry[1].name if entry[0] in ('mod', 'member') else 'the module'))
         if entry[0] == 'std':
             self._std(mod, key, entry[1], node)
             return
@@ -1728,6 +1752,18 @@ class Rewriter(ast.NodeTransformer):
         name = node.id
         if self.dry or not self.module_level(name):
             return node
+        if name == '__file__':
+            if self.mod.entry:
+                # the entry keeps the binding: pyboxed2 installs it from AIL_SOURCE_FILE
+                if isinstance(node.ctx, ast.Load):
+                    return node
+            elif isinstance(node.ctx, ast.Del):
+                # CPython removes the module attribute; `m.__file__` would then raise AttributeError,
+                # which the merged program raises as NameError (an unbound variable). Refused by name.
+                self.program.refuse(self.mod, node, "`del __file__` in an imported module removes the "
+                                    "module's path, and a later read of it is an AttributeError in CPython; "
+                                    "the merged program cannot tell that apart from an unbound variable.\n"
+                                    "  write instead: leave the binding alone, or shadow it inside a function")
         if name == '__name__' and isinstance(node.ctx, ast.Load):
             return ast.copy_location(ast.Constant('__main__' if self.mod.entry else self.mod.name), node)
         if name in self.mod.std:
@@ -1776,9 +1812,18 @@ class Rewriter(ast.NodeTransformer):
             self.program.refuse(self.mod, node, "`del %s.%s` removes a module attribute; the compiler fixes every "
                                 "module's names at build time.\n  write instead: assign a placeholder value "
                                 "(`%s.%s = None`)" % (target.name, attr, target.name, attr))
+        if attr == '__file__':
+            if stored:
+                self.program.refuse(self.mod, node, "`%s.__file__` is stored; a module's path is fixed at "
+                                    "build time.\n  write instead: keep the value in a variable of your own"
+                                    % target.name)
+            if target.kind == 'namespace':
+                return ast.copy_location(ast.Constant(None), node)      # CPython: a namespace package has None
+            if '__file__' not in target.kinds:
+                return ast.copy_location(ast.Constant(str(target.path)), node)
         if attr == '__name__' and not stored:
             return ast.copy_location(ast.Constant(target.name), node)
-        if attr in MODULE_DUNDERS and not stored:
+        if attr in MODULE_DUNDERS and attr != '__file__' and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
         if attr.startswith('_') and not (attr.startswith('__') and attr.endswith('__')):
@@ -1832,6 +1877,15 @@ class Rewriter(ast.NodeTransformer):
 
     def visit_ExceptHandler(self, node):
         if node.name and not self.dry:
+            if node.name == '__file__' and not self.mod.entry and self.module_level('__file__'):
+                # CPython deletes a module-level handler name when the handler ends, so the module's
+                # `__file__` attribute is gone and `m.__file__` raises AttributeError; the merged
+                # program would read an unbound variable (NameError). Refused by name.
+                self.program.refuse(self.mod, node, "`except ... as __file__` in an imported module deletes "
+                                    "that module's own path when the handler ends; a later `m.__file__` is an "
+                                    "AttributeError in CPython, which the merged program cannot tell apart "
+                                    "from an unbound variable.\n"
+                                    "  write instead: use another name for the exception")
             node.name = self.rename_binding(node.name)
         self.generic_visit(node)
         return node
