@@ -154,6 +154,9 @@ class _AilCsvReader:
             elif c == d.quotechar and d.quoting != 3:
                 self.state = 4
             elif c == d.escapechar:
+                # CPython >= 3.12.6 (gh-113785): a field starting with the escapechar is still an unquoted field
+                if d.quoting == 2:
+                    self.numeric = True
                 self.state = 2
             elif c == " " and d.skipinitialspace:
                 pass

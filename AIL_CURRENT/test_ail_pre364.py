@@ -124,8 +124,6 @@ class Pre364(unittest.TestCase):
         # exact ints: the power is a big int on both builds, as in CPython (it was refused for the int64 era)
         with tempfile.TemporaryDirectory(prefix='ail-pre364-') as directory:
             for name, text in REFUSED:
-                if name == 'never_called':
-                    continue   # defines only a function: a program with no top-level statement is a library 'tool' (usage line, exit 2), not a script
                 want = subprocess.run([sys.executable, '-B', '-c', text], capture_output=True, timeout=120)
                 for general in (False, True):
                     with self.subTest(case=name, general=general):
@@ -133,6 +131,25 @@ class Pre364(unittest.TestCase):
                         self.assertEqual(status, want.returncode, output)
                         self.assertEqual(got, want.stdout.replace(b'\r\n', b'\n'), output)
                         self.assertNotIn('Traceback', output)
+
+    def test_a_script_that_only_defines_things_prints_nothing_and_exits_0(self):
+        # like CPython: no top-level statement runs anything, so the program is not a library "tool"
+        # (no `usage: tool FILE` line, no exit 2)
+        shapes = (
+            ('only_def', 'def power(b):\n    print(pow(b, 3))\n'),
+            ('typed_def', 'def step(x: int) -> int:\n    return x + 1\n'),
+            ('def_const_class', 'import math\nLIMIT = 5\n\n\nclass Box:\n    pass\n\n\n'
+                                'def area(r):\n    return math.pi * r * r\n'),
+        )
+        with tempfile.TemporaryDirectory(prefix='ail-pre364-') as directory:
+            for name, text in shapes:
+                want = subprocess.run([sys.executable, '-B', '-c', text], capture_output=True, timeout=120)
+                self.assertEqual((want.returncode, want.stdout), (0, b''))
+                for general in (False, True):
+                    with self.subTest(case=name, general=general):
+                        status, got, output = build_run(directory, text, name, general)
+                        self.assertEqual(status, 0, output)
+                        self.assertEqual(got, b'', output)
 
     def test_safe_bases_and_exponents_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre364-') as directory:
