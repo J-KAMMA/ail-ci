@@ -542,6 +542,8 @@ class Batch4Tests(unittest.TestCase):
         head = "import csv\nimport sys\n\n\ndef main():\n"
         self.refused(head + "    w = csv.writer(sys.stdout, quoting=csv.QUOTE_NONNUMERIC)\n    w.writerow([1])\n\n\nmain()\n",
                      "QUOTE_NONNUMERIC")
+        self.refused(head + "    for row in csv.reader(sys.stdin, quoting=csv.QUOTE_NONNUMERIC):\n"
+                                "        print(row)\n\n\nmain()\n", "QUOTE_NONNUMERIC")
         self.refused(head + "    r = csv.reader(sys.stdin)\n    print(r.line_num)\n\n\nmain()\n", "line_num")
         self.refused(head + "    r = csv.reader(sys.stdin)\n    f(r)\n\n\nmain()\n", "is used as a value here")
         self.refused(head + "    r = csv.reader(sys.stdin, dialect='nope')\n\n\nmain()\n", "dialect has to be")
