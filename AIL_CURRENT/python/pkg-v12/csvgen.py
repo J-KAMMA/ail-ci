@@ -10,6 +10,7 @@ and `sys.stdout` as the file of a writer becomes an object that prints. Dialect 
 """
 import ast
 import os
+import sys
 
 import stdlib4
 import stdlib5
@@ -65,4 +66,7 @@ def run(imports, tree, helpers):
         if isinstance(each, ast.Name) and each.id in imports.aliases and isinstance(each.ctx, ast.Load):
             stdlib4.refuse(each, '%s used as a value is not built' % imports.aliases[each.id])
     if roots:
-        helpers.append(stdlib5.shake(open(os.path.join(HERE, 'prelude_csv.py'), encoding='utf-8').read(), roots))
+        text = open(os.path.join(HERE, 'prelude_csv.py'), encoding='utf-8').read()
+        marker = '_AIL_CSV_ESCAPE_NUMERIC = __import__("sys").version_info >= (3, 12, 5)'
+        text = text.replace(marker, '_AIL_CSV_ESCAPE_NUMERIC = %r' % (sys.version_info >= (3, 12, 5)))
+        helpers.append(stdlib5.shake(text, roots))
