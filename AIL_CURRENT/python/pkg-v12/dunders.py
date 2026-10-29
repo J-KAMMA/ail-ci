@@ -2080,7 +2080,9 @@ class _Rewriter(ast.NodeTransformer):
             km = self.kmodel(vt)
             if km is not None and node.attr not in km.statics and node.attr not in km.classmethods \
                     and node.attr not in km.methods and node.attr not in km.deferred:
-                self.refuse(node, '%s.%s is not a class attribute of %s' % (km.name, node.attr, km.name))
+                self.refuse(node, '%s.%s is not a class attribute of %s' % (km.name, node.attr, km.name)
+                            + ('; write instead: the field names in a module-level tuple'
+                               if node.attr in ('__dataclass_fields__', '__dataclass_params__') else ''))
         return self.generic_visit(node)
 
     def visit_FormattedValue(self, node):

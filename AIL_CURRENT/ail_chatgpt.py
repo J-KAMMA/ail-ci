@@ -4429,7 +4429,34 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) else None)
             if name is not None:
                 if name in names:
-                    raise ValueError(f'duplicate AIL name: {name}')
+                    duplicate = ValueError(
+                        f'duplicate AIL name: {name}'
+                        + ('' if syntax == 'ail' else
+                           f' (`def {name}` / `class {name}` is bound a second time at module level; a '
+                           'function here has one definition, which also rules out the `@f.register` / '
+                           '`def _(...)` overload pattern)\n  write instead: give each function its own name '
+                           'and call the right one (or dispatch with isinstance in one function)'))
+                    duplicate.source_line = getattr(node, 'lineno', None)
+                    duplicate.source_column = getattr(node, 'col_offset', 0)
+                    if syntax == 'python' and getattr(node, 'lineno', None):
+                        where = (merged.positions.get(node.lineno) if merged is not None
+                                 else (str(path), node.lineno, node.col_offset + 1))
+                        if merged is None:
+                            # the lowered text carries the prelude: find the second definition in the file as written
+                            try:
+                                found = [i for i, source_line in enumerate(
+                                    Path(path).read_text(encoding='utf-8').splitlines(), 1)
+                                    if re.match(r'(?:async\s+)?(?:def|class)\s+%s\b' % re.escape(name), source_line)]
+                            except (OSError, UnicodeError):
+                                found = []
+                            if len(found) >= 2:
+                                where = (str(path), found[1], 1)
+                        if where is not None:
+                            located = ValueError(f'AIL {"source" if entry else "module"} {where[0]}: '
+                                                 f'line {where[1]}: {duplicate}')
+                            located.refusal = (where[0], where[1], where[2], str(duplicate))
+                            raise located from duplicate
+                    raise duplicate
                 names.add(name)
             if isinstance(node, ast.FunctionDef):
                 functions.append(node)
