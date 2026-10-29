@@ -1,3 +1,16 @@
+## 2026-10-29 -- fz205: the try/else reproducer no longer differs on this tree (job-fz205-10300805)
+
+Re-ran the daily-fuzzer reproducer (seed `2075520206`, CPython 3.12) with `bash ~/tools/cmp.sh` on
+both modes the fuzzer uses (`default` and `AIL_IR=1`): both binaries print the same 18 lines as
+CPython, exit 1, and stop with `ZeroDivisionError` at the same `int((1e-7 / i17))` inside the
+try's `else`.  The recorded `ail='2 2 0'` continuation was the fz1 defect (the `else` body was
+emitted inside the try body, so the sibling `except ZeroDivisionError` caught it), already fixed
+by `test_ail_fz1.py`.  Also checked `AIL_UNIFIED_FORCE=1` and `AIL_NO_GENERAL=1` with `AIL_IR=0`
+and `1` on the reproducer and on two minimized probes (`/tmp/probes/fz205.py`,
+`else_catch.py`, `else_catch2.py`): general/IR match CPython; the typed path refuses the full
+program by name (`al14 = v4` aliasing) and matches CPython on the probes.  `test_ail_fz1`
+passes (1 test).  No code, test or DIFFERENCES change; no other difference was seen.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
