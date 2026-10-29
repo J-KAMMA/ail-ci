@@ -1,3 +1,22 @@
+## 2026-10-29 -- fz201: an int power beyond int64 was hidden by a later benign proof failure
+
+The daily fuzzer (seed 2075507942) found `assert v10 ** 3 == v10` with `v10 = 850360125720`:
+CPython raises AssertionError and the program prints `-60` and exits 0, while the IR build computed
+the power in int64 and stopped with `integer overflow` (exit 1).  The local proof already marked the
+power as possible beyond int64, but `bigcap._lp_reason` returned the FIRST failure it met; a later
+`abs(1.5)` only says the value's kind is unproven (a float abs can never need a big int) and hid the
+power.  `_lp_reason` now takes `prefer_int`, and the IR driver asks for it, so the program takes the
+exact general path (as it already did without the masking line).  The power stays exact through a
+local, an alias, a function-local value, an argument, a list item, an attribute, a dict value and a
+call result; a negative base, a negative exponent, a float exponent, an in-range power and the safe
+bases 0/1/-1 match CPython on both builds.
+
+Probes in `/tmp/probes` via `cmp.sh`: `fz201`, `minD`, `fz201_local`, `fz201_function_local`,
+`fz201_alias`, `fz201_argument`, `fz201_list_item`, `fz201_attribute`, `fz201_dict_value`,
+`fz201_argument_dict`, `fz201_call_result`, `fz201_negative`, `fz201_neg_exp_odd`,
+`fz201_float_exp`, `fz201_exp_neg`, `fz201_in_range`, `fz201_safe_base` match CPython on both
+builds.  Added `test_ail_fz201.py`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
