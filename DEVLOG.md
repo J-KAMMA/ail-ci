@@ -1,3 +1,25 @@
+## 2026-10-29 -- ex25 review fix: gate export validation on real `ail_ffi.export` use
+
+The review found the normal-build export gate was a substring test (`'@' in text and 'export' in
+text and 'ail_ffi' in text`), so an unrelated `@extern` program that merely contained the word
+`export` was sent through `ail_export.lower` and refused (`C libraries use only \`export\` from
+ail_ffi, not extern` / `not *`) on both builds.  `ail_export.uses_export` now parses the file and
+returns true only for a real `@export` / `@export()` / `export(...)` use of an `ail_ffi` import
+(direct, aliased, `import ail_ffi` attribute, or star import); a mere import, comment, string,
+identifier or unrelated `@extern` file leaves `lower()` untouched and keeps its previous C.
+Added `extern_call_word_export` to `test_ail_ex25.py` so the actual `@extern` regression is
+covered on both builds.
+
+Probes in `/tmp/probes/ex25fix` on both builds via `cmp.sh`: `g01_extern_comment_word`,
+`g02_extern_string_word`, `g03_star_word`, `g04_no_ffi_word`, `g05_import_unused`,
+`g06_alias_values` (negative/empty/bytes/list/dataclass fields through an argument, list item,
+dict value and attribute) and `g07_module_attr` match CPython; `g08_alias_invalid`
+(`unsupported type list[str]`) and `g09_attr_invalid` (`reading __ail_export__`) are refused by
+name.  Re-ran `/tmp/rprobes/r01`-`r09`: r01-r05 and r07-r09 match CPython on both builds; r06
+(write to `__ail_export__`) and r08 (`f = export(f)`) are the pre-existing refusals.  Final-state
+tests: test_ail_ex25, test_ail_c_export, test_ail_ffi, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-29 -- ex25: a normal build of ail_ffi's `@export` decorator (job-ex25-10290857)
 
 The Python-syntax examples in `AIL_CURRENT/language_examples` are `hello.ail`, `integer_series.ail`,

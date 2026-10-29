@@ -34,7 +34,45 @@ class ExportError(ValueError):
 
 
 def uses_export(text):
-    return '@' in text and 'export' in text and 'ail_ffi' in text
+    """True only when `text` really uses `export` from ail_ffi.
+
+    A mere import, or the word `export` in a string or identifier, does not count: this decides
+    whether `lower()` validates a normal build, and an unrelated `@extern` program that happens to
+    contain the word must keep building exactly as before.
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return False
+    export_names, module_names, star = set(), set(), False
+    for node in tree.body:
+        if isinstance(node, ast.ImportFrom) and node.module == 'ail_ffi' and node.level == 0:
+            for alias in node.names:
+                if alias.name == 'export':
+                    export_names.add(alias.asname or alias.name)
+                elif alias.name == '*':
+                    star = True
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == 'ail_ffi':
+                    module_names.add(alias.asname or alias.name)
+    if star:
+        export_names.add('export')
+
+    def is_export_ref(node):
+        return (_is_name(node, export_names)
+                or (isinstance(node, ast.Attribute) and node.attr == 'export'
+                    and _is_name(node.value, module_names)))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and is_export_ref(node.func):
+            return True
+        for decorator in getattr(node, 'decorator_list', ()):
+            if isinstance(decorator, ast.Call) and not decorator.args and not decorator.keywords:
+                decorator = decorator.func
+            if is_export_ref(decorator):
+                return True
+    return False
 
 
 def _kind(annotation, structs, *, result, where):

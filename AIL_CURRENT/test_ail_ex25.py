@@ -62,6 +62,34 @@ print(double(21))
 
 print("unused import")
 ''',
+    'extern_import_word_export': '''from dataclasses import dataclass
+from ail_ffi import extern
+
+@dataclass
+class Point:
+    x: int
+
+print("export", Point(3).x)
+''',
+    'extern_call_word_export': '''from ail_ffi import extern, c_char_p, c_size_t
+
+@extern(lib="c", header="string.h", symbol="strlen")
+def c_strlen(s: c_char_p) -> c_size_t: ...
+
+def main():
+    print("export", c_strlen("abc"))
+
+main()
+''',
+    'star_import_word_export': '''from dataclasses import dataclass
+from ail_ffi import *
+
+@dataclass
+class Point:
+    x: int
+
+print("export", Point(4).x)
+''',
 }
 
 INVALID = {
