@@ -1,3 +1,28 @@
+## 2026-10-29 -- stdlib43: `struct` with a literal format (job-stdlib43-10291548)
+
+The still-refused imports in `lab/corpus/programs` and `AIL_CURRENT/language_examples` were counted; `struct`
+(6 files) was the most-used one that can be lowered without networking, crypto, databases or TLS. The new
+`AIL_CURRENT/python/pkg-v12/structlib.py` runs from `stdlib4.rewrite_text` (registered in
+`ail_syntax.python_surface`) and turns `pack` / `unpack` / `calcsize` / `pack_into` / `unpack_from` with a
+literal format into small helpers, leaving the import and values in place. The integer (`b B h H i I l L q Q
+n N P`), bool (`?`), char (`c`), string (`s`) and padding (`x`) codes, repeat counts, whitespace, empty
+formats and all byte orders (`< > = ! @`, native alignment) match CPython 3.12. Out-of-range integers,
+non-integer values, wrong char/string types, short/long buffers and negative/invalid offsets reproduce
+CPython's `struct.error` / `TypeError` texts. `struct.error` is catchable through the module, a `from`
+import or an alias. Float, double, half-float and Pascal-string codes, a non-literal format, `Struct` and
+`iter_unpack` remain named compile-time refusals. `test_ail_stdlib43.py` compares the supported cases with
+CPython on the default and forced-general builds, checks the typed path for `calcsize`, and pins the named
+refusals.
+
+Probes in `/tmp/probes/stdlib43` on both builds via `cmp.sh`: `p1_formats` (about 130 literal formats,
+widths/boundaries, native alignment, empty and zero-count formats), `p2_errors` (range/type/buffer/offset
+errors, `pack_into`, `unpack_from`, bytes and bool offsets), `p3_routes` (values through an argument, a list
+item, a loop item, an attribute and a dict value, for pack, unpack, pack_into and unpack_from), `p4_imports`
+(module alias, `from` import, `error` alias), `p5_error_value`, `p6_star` (starred pack arguments) match
+CPython. The refusal probes `r1_float`, `r2_double`, `r3_half` (calcsize is supported), `r4_pascal`,
+`r5_nonliteral`, `r6_struct_class`, `r7_iter` and `r8_alias_value` are refused by name on both builds;
+`p7_memoryview` is refused because `memoryview` itself is not a built name.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

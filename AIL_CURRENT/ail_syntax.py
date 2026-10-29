@@ -3408,7 +3408,7 @@ def python_surface(source, notes=None, library=False):
     if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
                                        "abc", "array", "Random", "string", "io", "statistics")):
         source = _stdlib5().rewrite_text(source, notes)
-    if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "time", "zoneinfo")):
+    if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "struct", "time", "zoneinfo")):
         source = _stdlib4().rewrite_text(source, notes)
     if "collections" in source:
         source = _collib().rewrite(source, notes)

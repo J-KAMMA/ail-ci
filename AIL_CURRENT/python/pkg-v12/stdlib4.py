@@ -25,7 +25,7 @@ if _here not in sys.path:
 
 import stdlib3
 
-TEXT_MODULES = ('csv', 'datetime')
+TEXT_MODULES = ('csv', 'datetime', 'struct')
 # modules that are named and refused, with what to write instead (module -> text; the text starts with the module)
 UNBUILT = {
     'zoneinfo': 'zoneinfo: a named time zone needs the tz database (and its rules), which is not built, so use a fixed '
@@ -113,12 +113,16 @@ LEFT_NOTE = {
            'sys.stdout are built, where the reader is assigned to a name, iterated by a for statement or '
            'comprehension, or passed to next() / list()',
     'datetime': 'see the reference for the datetime forms that are built',
+    'struct': 'use pack, unpack, calcsize, pack_into or unpack_from with a literal format and the integer, '
+              'bool, char, string and padding codes',
 }
 
 
 def leftovers(tree, imports):
     """Name the first use of one of the modules' names that is still in the tree."""
     for each in ast.walk(tree):
+        if getattr(each, '_ail_struct_error', False):
+            continue
         if isinstance(each, ast.Attribute):
             found = imports.resolve(each)
             if found is not None:
@@ -190,6 +194,9 @@ def rewrite_text(source, notes=None):
         elif time_used:
             import dtlib
             dtlib.attach_only(tree, helpers, time_used)
+        if 'struct' in modules:
+            import structlib
+            structlib.run(imports, tree, helpers)
         leftovers(tree, imports)
         # the helper functions go in after the imports, before the program's own definitions
         added = []
