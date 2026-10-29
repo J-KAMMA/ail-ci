@@ -317,6 +317,7 @@ MODULES = (
     'test_ail_qtest3',
     'test_ail_fz1',
     'test_ail_ffi_f3a',
+    'test_ail_ffi_f3b',
 )
 
 

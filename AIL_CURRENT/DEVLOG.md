@@ -1,3 +1,16 @@
+## 2026-10-30 -- FFI F3b: exact unsigned 64-bit results and arguments, `check="allones"`
+
+An `@extern` result of `c_uint64 c_ulong c_ulonglong c_size_t` above 2**63 - 1 used to come back as the negative int
+with the same bits; F3a refused a constant argument in `2**63 .. 2**64-1` because the program held int64 only. Both are exact
+now, as under the CPython shim. The C adapter and the object format are unchanged (the adapter still returns the int64 bits);
+`ail_ffi_lower.py` writes the conversion into the AIL wrapper with constants that all fit int64 (`bits + 4 * 2**62`, so no
+wide literal reaches the typed gates of PR #230), and the tagged lowering adds them exactly. A constant argument in the upper
+half is rebuilt from a generated C function that returns its bits. The legacy int64 emitter (`AIL_NO_GENERAL=1 AIL_IR=0`)
+stops with `integer overflow` (exit 1) when such a value appears. `check="allones"` fires on the unsigned `(T)-1`;
+`check="minus1"` / `"negative"` on an unsigned result never fire and are refused by name. 64-bit signed parameters are
+checked against int64 as well. Binary-size and call-cost numbers are in the PR. `test_ail_ffi_f3b.py`; F3a's refusal tests
+for the upper-half constants became exactness tests.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C
