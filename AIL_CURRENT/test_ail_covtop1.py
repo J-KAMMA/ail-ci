@@ -197,7 +197,77 @@ def main():
 main()
 """
 
-CASES = [('field_calls', FIELD_CALLS), ('nested_genexp', NESTED_GENEXP)]
+BOUND_METHOD_FIELD = r"""class Doubler:
+    def __call__(self, x):
+        return 2 * x
+
+
+class Acc:
+    def __init__(self):
+        self.t = 0
+
+    def add(self, x):
+        self.t += x
+        return self.t
+
+
+class Box:
+    def __init__(self, fn):
+        self.fn = fn
+
+
+acc = Acc()
+for b in [Box(Doubler()), Box(acc.add), Box(len)]:
+    try:
+        print(b.fn(5))
+    except TypeError as e:
+        print("TE", e)
+"""
+
+BUILTIN_NAMED_FIELD = r"""class P:
+    def __init__(self):
+        self.upper = lambda: "field"
+
+
+p = P()
+print(p.upper())
+"""
+
+BUILTIN_BOUND_FIELD = r"""class Box:
+    def __init__(self, fn):
+        self.fn = fn
+
+
+xs = []
+b = Box(xs.append)
+b.fn(1)
+b.fn(2)
+print(xs)
+c = Box("abc".upper)
+print(c.fn())
+"""
+
+FUNCTION_VALUES = r"""import math
+from dataclasses import dataclass
+from typing import Callable
+
+
+def sq(x):
+    return x * x
+
+
+@dataclass
+class Step:
+    name: str
+    action: Callable
+
+
+steps = [Step("sq", sq), Step("sqrt", math.sqrt), Step("abs", abs)]
+for s in steps:
+    print(s.name, s.action(16))
+"""
+
+CASES = [('field_calls', FIELD_CALLS), ('nested_genexp', NESTED_GENEXP), ('function_values', FUNCTION_VALUES)]
 
 
 def compile_program(directory, text, name, force):
@@ -253,6 +323,19 @@ class CovTop1(unittest.TestCase):
 
     def test_duplicate_def_has_line_and_hint(self):
         self.refused('duplicate_def', DUPLICATE_DEF, 'duplicate_def.py:15', 'duplicate AIL name: _', 'write instead')
+
+    def test_field_with_bound_method_value_refused(self):
+        # a bound method taken as a value (`acc.add`) is not modelled: refuse, do not crash at run time
+        self.refused('bound_method_field', BOUND_METHOD_FIELD, '.fn()')
+        self.refused('bound_method_field_force', BOUND_METHOD_FIELD, '.fn()', force=True)
+
+    def test_field_with_builtin_bound_method_refused(self):
+        self.refused('builtin_bound_field', BUILTIN_BOUND_FIELD, '.fn()')
+        self.refused('builtin_bound_field_force', BUILTIN_BOUND_FIELD, '.fn()', force=True)
+
+    def test_field_named_like_builtin_method_refused(self):
+        self.refused('builtin_named_field', BUILTIN_NAMED_FIELD, 'builtin_named_field.py:3', 'write instead')
+        self.refused('builtin_named_field_force', BUILTIN_NAMED_FIELD, 'write instead', force=True)
 
     def test_unknown_method_still_refused(self):
         self.refused('unknown_method', UNKNOWN_METHOD, '.nothing()')

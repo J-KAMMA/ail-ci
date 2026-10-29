@@ -2541,6 +2541,31 @@ class Compiler(boxclosure.ClosureMixin):
                     if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name):
                         inst_fields.add(st.target.id)
         self.inst_field_names = frozenset(inst_fields)
+        # A bound method taken as a value (`Box(acc.add)`) is not modelled: the stored value would
+        # fail at run time when called.  With one in the program, a field call stays refused.
+        method_names = {m.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef)
+                        for m in c.body if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        called_funcs = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        self.method_taken_as_value = any(
+            isinstance(n, ast.Attribute) and isinstance(n.ctx, ast.Load) and n.attr in method_names
+            and id(n) not in called_funcs for n in ast.walk(tree))
+        # `self.upper = lambda: ...` where the name is also a method of a builtin type: a call
+        # `p.upper()` would run the builtin handler and fail at run time.  Refuse it here.
+        func_names = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+        called_attrs = {n.func.attr for n in ast.walk(tree)
+                        if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)}
+        for n in ast.walk(tree):
+            if isinstance(n, ast.Assign) and (isinstance(n.value, ast.Lambda) or
+                                              (isinstance(n.value, ast.Name) and n.value.id in func_names)):
+                for t in n.targets:
+                    if isinstance(t, ast.Attribute) and t.attr in called_attrs and not t.attr.startswith('__') \
+                            and t.attr in _builtin_names() and hasattr(self, '_m_' + t.attr):
+                        refusal = Unsupported(
+                            'a function stored in the field .%s, which is also a method of a builtin type: '
+                            'the call .%s() would run the builtin method\n'
+                            '  write instead: give the field a name no builtin type uses' % (t.attr, t.attr))
+                        refusal.source_line = getattr(n, 'lineno', None)
+                        raise refusal
         any_all_genargs = set()
         for call in ast.walk(tree):
             if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and \
@@ -9846,6 +9871,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.check()
             return t
         if (f.attr in getattr(self, 'inst_field_names', ()) and f.attr not in _builtin_names()
+                and not getattr(self, 'method_taken_as_value', True)
                 and not (self.classes and any(f.attr in self.classes[c]['methods'] for c in self.class_order))):
             # `obj.action()` where `action` is only a field (a stored function): call the value the
             # instance holds.  No builtin or library type has a method of this name (the name list
