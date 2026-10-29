@@ -4,6 +4,11 @@ name: split-lab
 # time, and whether the instruction count of the program changes.  Nothing in the compiler uses lab/profile/split.py.
 # No secrets or API keys are used; the jobs have read-only repository access.
 on:
+  push:
+    branches: [ctime-lab]
+    paths:
+      - lab/profile/split*.py
+      - .github/workflows/split-lab.yml
   workflow_dispatch:
     inputs:
       programs:
@@ -43,8 +48,8 @@ jobs:
       - name: Split lab
         run: |
           python3 -m compileall -q -j 0 AIL_CURRENT tools
-          python3 lab/profile/splitlab.py --out out/shard-${{ matrix.shard }} --n ${{ inputs.programs }} \
-            --variants ${{ inputs.variants }} --shard ${{ matrix.shard }} --of 2
+          python3 lab/profile/splitlab.py --out out/shard-${{ matrix.shard }} --n ${{ inputs.programs || '36' }} \
+            --variants ${{ inputs.variants || 'none,40,12' }} --shard ${{ matrix.shard }} --of 2
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
         with:
@@ -70,7 +75,7 @@ jobs:
           path: shards
       - name: Merge
         run: |
-          python3 lab/profile/splitlab.py report split.md ${{ inputs.variants }} shards/*/shard-*/split.jsonl
+          python3 lab/profile/splitlab.py report split.md ${{ inputs.variants || 'none,40,12' }} shards/*/shard-*/split.jsonl
           cat split.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
