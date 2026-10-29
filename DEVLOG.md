@@ -1,3 +1,9 @@
+## 2026-10-29 -- fz201 review fix: register the regression module in the suite
+
+The review found `test_ail_fz201` was not listed in `AIL_CURRENT/ail_check.py` `MODULES`, so
+`ci_shards`/`ail_check`/default `par_check` never ran it.  Added `'test_ail_fz201'` to `MODULES`
+and refreshed `MANIFEST.json` with `tools/update_manifest.py`; `--check` passes.
+
 ## 2026-10-29 -- fz201: an int power beyond int64 was hidden by a later benign proof failure
 
 The daily fuzzer (seed 2075507942) found `assert v10 ** 3 == v10` with `v10 = 850360125720`:
