@@ -1,3 +1,28 @@
+## 2026-10-29 -- stdlib41: `struct.pack` / `unpack` / `calcsize` (job-stdlib41-10291451)
+
+The next most-imported module still refused in `lab/corpus/programs` and
+`AIL_CURRENT/language_examples` was `struct` (6 imports; `csv`, `datetime`, `hashlib` and `heapq` are
+already built). Added `python/pkg-v12/structlib.py` and `prelude_struct.py`, wired from
+`ail_syntax.python_surface`, so both builds lower `pack` / `unpack` / `calcsize` onto
+`int.to_bytes` / `int.from_bytes`. Built `<`, `>`, `=` (native little-endian on x86-64) and `!`
+with the codes `b B h H i I l L q ? c s p x`, repeat counts, empty/whitespace-only formats and
+zero repeats of `s`/`x`/the integer codes. Runtime errors use CPython's `struct.error` name and
+messages (the helper class is named `error`; a program that binds `error` gets an `_AilStructError`
+fallback so it still builds). Native byte order, `e f d`, `n N P`, `Q`, zero-repeat `p`,
+`unpack_from`, `Struct`, `error`, keyword arguments, a computed `unpack` format and a used-as-value
+name stay named compile-time refusals. Added `test_ail_stdlib41.py` (4 tests) and registered it in
+`ail_check.MODULES`; its 6000 generated formats match CPython against the prelude directly, and its
+seven compiled programs match CPython on AIL_IR=0 and 1, plus five refusal cases.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `s_basic`, `s_bounds`, `s_empty`, `s_strings`,
+`s_bool_pad`, `s_native_eq`, `s_routes`, `s_from_import`, `s_computed`, `s_types`, `s_whitespace`,
+`s_format_bytes`, `s_errtype`, `s_user_error`, `s_bytes_types`, `s_t475` and `s_t475g` match
+CPython; `s_refuse_native`, `s_refuse_unpack_from`, `s_refuse_float`, `s_refuse_q`,
+`s_refuse_error`, `s_refuse_computed_unpack`, `s_refuse_star` and `s_refuse_0p` are refused by
+name. Final-state tests: `test_ail_stdlib41`, `test_ail_stdlib5`, `test_ail_stdlib_batch3`,
+`test_ail_stdlib_batch4`, `test_ail_python_syntax`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (76 tests, 1 skipped); `tools/update_manifest.py --check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

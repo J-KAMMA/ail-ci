@@ -190,6 +190,17 @@ def _stdlib4():
     return _stdlib4.module
 
 
+def _structlib():
+    """python/pkg-v12/structlib.py (struct.pack / unpack / calcsize lowered onto int.to_bytes / from_bytes)."""
+    if not hasattr(_structlib, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import structlib
+        _structlib.module = structlib
+    return _structlib.module
+
+
 _OPTIONAL =re.compile(r'\bOptional\s*\[\s*([A-Za-z_]\w*)\s*\]')
 
 
@@ -3405,6 +3416,8 @@ def python_surface(source, notes=None, library=False):
         source = typedpar.rewrite_text(source, notes)
     if any(name in source for name in ("threading", "queue", "concurrent")):
         source = _threadlib().rewrite_text(source, notes)
+    if "struct" in source:
+        source = _structlib().rewrite_text(source, notes)
     if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
                                        "abc", "array", "Random", "string", "io", "statistics")):
         source = _stdlib5().rewrite_text(source, notes)

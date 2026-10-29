@@ -5090,8 +5090,16 @@ def _python_notes(message, notes, source):
             message = message.replace(found.group(0), next(n for n in named if n.startswith(found.group(1) + '.'))
                                       + ' (see the note below)')
             break
+    # struct: python_wording spells the module name `class`; name the use that was not built instead
+    found = re.search(r"class\.(pack|unpack|calcsize) \(not yet published in NAMES_library\.json\)", message)
+    if found:
+        for entries in notes.values():
+            named = [text for _, text in entries if text.startswith('struct.')]
+            if named:
+                message = message.replace(found.group(0), named[0] + ' (see the note below)')
+                break
     # library batch 4 (csv, datetime, ...): the import is refused because a use was not built; say which
-    found = re.search(r"import of '(csv|datetime|decimal|fractions|unicodedata|statistics|textwrap|enum|string)'; [^\n]*?by hand",
+    found = re.search(r"import of '(csv|datetime|decimal|fractions|unicodedata|statistics|textwrap|enum|string|struct)'; [^\n]*?by hand",
                       message)
     if found:
         for entries in notes.values():
