@@ -400,10 +400,14 @@ def _edits(inplace=False):
               '    ' + _binop_guard('ADD', 'RADD', '+') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for +: \'%s\' and \'%s\'"'))
     e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"',
               '    ' + _binop_guard('SUB', 'RSUB', '-') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"'))
-    # anchor on the error formatting, not the buffer declaration, so a change to the
-    # declaration text does not silently drop __mul__/__rmul__ dispatch
-    e.append(('    snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'", na, nb);\n',
-              '    ' + _binop_guard('MUL', 'RMUL', '*') + 'snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'", na, nb);\n'))
+    # name the operand classes in the multiplication error and insert the __mul__/__rmul__
+    # guard before it in one edit, so the two changes cannot drift apart or be lost to a
+    # separate insertion point (the runtime may keep the error in a hot or a slow helper)
+    e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'", ail_type_name(a.tag), ail_type_name(b.tag));',
+              '    ' + _binop_guard('MUL', 'RMUL', '*') + 'char na[101], nb[101], buf[256];\n'
+              '    snprintf(na, sizeof na, "%.100s", ail__tname_c(a));\n'
+              '    snprintf(nb, sizeof nb, "%.100s", ail__tname_c(b));\n'
+              '    snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'", na, nb);'))
     for sym, fwd, rev in (('//', 'FLOORDIV', 'RFLOORDIV'), ('%', 'MOD', 'RMOD'), ('/', 'TRUEDIV', 'RTRUEDIV'),
                           ('**', 'POW', 'RPOW')):
         e.append(('    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %s");' % sym,

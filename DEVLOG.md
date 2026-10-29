@@ -1,3 +1,23 @@
+## 2026-10-29 -- pre428 suite fix: class-name multiplication error travels with the dunder guard (job-pre428-10292000)
+
+On today's integration branch the multiplication type error exists in two runtime helpers: the
+hot fallback still had it, and a new cold `ail__mul_slow` helper (used by the big-int/unified
+build) had a copy of the same line.  Applying only the old cruntime hunk changed the hot copy
+and left the slow one naming the tag (`'exception'`), and the follow-up's dunder anchor then
+found no insertion point in the big-int build.  The class-name formatting is now part of the
+`dunderrt.py` edit that also inserts the `__mul__`/`__rmul__` guard, so whichever helper a build
+keeps gets both the guard and the object-to-name `%.100s` buffers; the cruntime line is back to
+its original text.  This applies unchanged to both the branch and the integration runtime.
+
+Probes in `/tmp/probes` on both builds through `cmp.sh`, on this branch and with only this change
+applied onto `origin/integ`: `p428_classes` (exception and ordinary instances, both orders,
+subclasses, mixed int/float/bool/None/str/list/dict), `p428_routes` (alias, argument, list item,
+attribute, dict value, return) and `p428_controls` (99/100/101/150-character class names,
+`__mul__`/`__rmul__`, in-range arithmetic) all match CPython.  Final-state tests on the branch:
+test_ail_pre428, test_ail_obj_refs, test_ail_safetynet, test_ail_unified,
+test_ail_virtual_dispatch; the same five pass on `origin/integ` plus this change.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-29 -- pre428 follow-up: make the dunderrt multiplication anchor independent of the error buffers (job-pre428-10291723)
 
 The review of the pre428 change reported that editing the general runtime's

@@ -15005,10 +15005,7 @@ static inline ail_st ail_op_mul(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
         char sbuf[112]; snprintf(sbuf, sizeof sbuf, "can't multiply sequence by non-int of type '%s'", tn);
         return ail_raise_c(cx, AIL_B_TYPEERROR, sbuf);
     }
-    char na[101], nb[101], buf[256];
-    snprintf(na, sizeof na, "%.100s", ail__tname_c(a));
-    snprintf(nb, sizeof nb, "%.100s", ail__tname_c(b));
-    snprintf(buf, sizeof buf, "unsupported operand type(s) for *: '%s' and '%s'", na, nb);
+    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: '%s' and '%s'", ail_type_name(a.tag), ail_type_name(b.tag));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 /* CPython's float_divmod: one computation for //, % and divmod, so the sign of a zero
