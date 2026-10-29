@@ -2566,6 +2566,24 @@ class slice:
         return _ail_slice_indices(self.start, self.stop, self.step, n)
 '''
 
+# the object functools.lru_cache(maxsize=None).cache_info() returns, compiled with the program on the
+# general path when a cached function's cache_info is read (pyboxed2._emit_lru_wrapper keeps hits / misses)
+CACHEINFO_PRELUDE = '''
+class _AilCacheInfo:
+    def __init__(self, hits, misses, maxsize, currsize):
+        self.hits = hits
+        self.misses = misses
+        self.maxsize = maxsize
+        self.currsize = currsize
+
+    def __repr__(self):
+        return ("CacheInfo(hits=" + str(self.hits) + ", misses=" + str(self.misses) + ", maxsize="
+                + str(self.maxsize) + ", currsize=" + str(self.currsize) + ")")
+
+    def __str__(self):
+        return self.__repr__()
+'''
+
 # name -> (C call, argument count, fragment): primitives the preludes call
 PRIMS = {
     '_ail_slice_indices': ('ail2s_indices(cx, &{t}, {a0}, {a1}, {a2}, {a3})', 4, 'slice'),

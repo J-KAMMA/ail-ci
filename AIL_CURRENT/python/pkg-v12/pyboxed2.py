@@ -2472,6 +2472,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.top_decls = []
         self.top_defs = []
         self.global_slots = {}     # 'class:Name' or 'g:pyname' -> g_slots index
+        self.lru_stats = {}        # lru function C name -> (hits slot, misses slot, entry-count slot)
         self.next_global_slot = 0
         self.lambda_n = 0
         self.pkf_done = set()      # key-function wrappers (pkf_<name>) already emitted: one per def, however often it is used
@@ -3550,6 +3551,16 @@ class Compiler(boxclosure.ClosureMixin):
         the class of slice objects."""
         own = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
         own |= _scan_assigned_names(tree.body)
+        if (any(isinstance(n, ast.Attribute) and n.attr == 'cache_info' for n in ast.walk(tree))
+                and '_AilCacheInfo' not in own):
+            import safetyrt
+            pre = ast.parse(safetyrt.CACHEINFO_PRELUDE).body
+            for n in pre:
+                n._ail_safety = True
+                for m in ast.walk(n):
+                    if isinstance(m, ast.FunctionDef):
+                        self.prelude_names.add(m.name)
+            tree.body[0:0] = pre
         if 'slice' in own:
             self.want_slice = False
             return
@@ -3841,6 +3852,7 @@ class Compiler(boxclosure.ClosureMixin):
                                   'requires every keyword-only parameter to have a default)' %
                                   (pname, node.name))
         lru = False
+        lru_unbounded = False
         is_static = False
         is_property = is_setter = is_classmethod = False
         for dec in node.decorator_list:
@@ -3852,6 +3864,12 @@ class Compiler(boxclosure.ClosureMixin):
                 nm = dec_bare.attr
             if nm == 'lru_cache' or nm == 'cache':
                 lru = True
+                if nm == 'cache':
+                    lru_unbounded = True
+                elif isinstance(dec, ast.Call):
+                    values = list(dec.args) + [k.value for k in dec.keywords if k.arg == 'maxsize']
+                    if values and isinstance(values[0], ast.Constant) and values[0].value is None:
+                        lru_unbounded = True
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'staticmethod':
                 is_static = True
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'property' and len(node.decorator_list) == 1:
@@ -3871,11 +3889,19 @@ class Compiler(boxclosure.ClosureMixin):
         info = {'node': node, 'params': params, 'posonly': posonly, 'kwonly': kwonly, 'vararg': vararg, 'kwarg': kwarg,
                'defaults': defaults, 'kw_defaults': kw_defaults, 'cname': cname,
                'is_method': is_method, 'is_static': is_static, 'owner_class': owner_class,
-               'lru_cache': lru, 'all_params': all_params,
+               'lru_cache': lru, 'lru_unbounded': lru_unbounded, 'all_params': all_params,
                'is_property': is_property, 'is_setter': is_setter, 'is_classmethod': is_classmethod,
                'generator': bool(self.generators and _own_yields(node))}
         if info['generator'] and lru:
             raise Unsupported('@lru_cache on the generator function %s' % node.name)
+        if lru:
+            hits_slot = self.next_global_slot
+            self.next_global_slot += 1
+            misses_slot = self.next_global_slot
+            self.next_global_slot += 1
+            n_glob = self.next_global_slot
+            self.next_global_slot += 1
+            self.lru_stats[cname] = (hits_slot, misses_slot, n_glob)
         if not is_method:
             self.functions[node.name] = info
         return info
@@ -4423,21 +4449,28 @@ class Compiler(boxclosure.ClosureMixin):
         impl = cname + '_impl'
         params = info['params']
         nargs = len(params)
-        maxn = 256
+        prev = self.lru_stats.get(cname)
         keys_slot0 = self.next_global_slot
-        self.next_global_slot += maxn
+        self.next_global_slot += 1
         vals_slot0 = self.next_global_slot
-        self.next_global_slot += maxn
-        n_glob = self.next_global_slot
-        self.next_global_slot += 1  # count of live entries, stored as an INT in g_slots too
+        self.next_global_slot += 1
+        if prev is None:
+            hits_slot = self.next_global_slot
+            self.next_global_slot += 1
+            misses_slot = self.next_global_slot
+            self.next_global_slot += 1
+            n_glob = self.next_global_slot
+            self.next_global_slot += 1
+            self.lru_stats[cname] = (hits_slot, misses_slot, n_glob)
+        else:
+            hits_slot, misses_slot, n_glob = prev
         sig = ''.join(', ail_obj %s' % cid(p) for p in params)
         lines = []
         # The key tuple lives in frame slot 0 for the whole call: it is allocated here, the cached
         # body then allocates (so a collection may run), and only afterwards is the key stored.
-        # A C local is not a GC root, so the old wrapper stored a freed tuple. The entry count is
-        # read again after the body, because recursion through the wrapper adds entries meanwhile
-        # (a count read before the call would overwrite those and shrink the cache).
-        lines.append('    AIL_FRAME_ENTER(cx, f, 1);')
+        # A C local is not a GC root, so the old wrapper stored a freed tuple. The keys and values
+        # are lists in global slots (GC roots) so an unbounded cache grows past any fixed capacity.
+        lines.append('    AIL_FRAME_ENTER(cx, f, 2);')
         lines.append('    ail_st st = AIL_OK;')
         if nargs:
             lines.append('    ail_obj _items[%d] = { %s };' %
@@ -4445,19 +4478,26 @@ class Compiler(boxclosure.ClosureMixin):
             lines.append('    f.slots[0] = ail_tuple_new(cx, _items, %d);' % nargs)
         else:
             lines.append('    f.slots[0] = ail_tuple_new(cx, NULL, 0);')
-        lines.append('    int64_t _n = g_slots_arr[%d].tag == AIL_T_UNBOUND ? 0 : g_slots_arr[%d].i;'
-                     % (n_glob, n_glob))
-        lines.append('    for (int64_t _i = 0; _i < _n; _i++) '
-                     'if (ail_obj_eq_raw(g_slots_arr[%d + _i], f.slots[0])) '
-                     '{ *out = g_slots_arr[%d + _i]; AIL_FRAME_LEAVE(cx, f); return AIL_OK; }'
+        lines.append('    if (g_slots_arr[%d].tag == AIL_T_UNBOUND) { g_slots_arr[%d] = ail_list_new(cx); '
+                     'g_slots_arr[%d] = ail_list_new(cx); }' % (keys_slot0, keys_slot0, vals_slot0))
+        lines.append('    ail_obj _keys = g_slots_arr[%d]; ail_obj _vals = g_slots_arr[%d];'
                      % (keys_slot0, vals_slot0))
+        lines.append('    int64_t _n = ((ail_vecobj *)_keys.o)->n;')
+        lines.append('    for (int64_t _i = 0; _i < _n; _i++) '
+                     'if (ail_obj_eq_raw(((ail_vecobj *)_keys.o)->p[_i], f.slots[0])) '
+                     '{ g_slots_arr[%d] = ail_box_int((g_slots_arr[%d].tag == AIL_T_UNBOUND ? 0 '
+                     ': g_slots_arr[%d].i) + 1); '
+                     '*out = ((ail_vecobj *)_vals.o)->p[_i]; AIL_FRAME_LEAVE(cx, f); return AIL_OK; }'
+                     % (hits_slot, hits_slot, hits_slot))
+        lines.append('    g_slots_arr[%d] = ail_box_int((g_slots_arr[%d].tag == AIL_T_UNBOUND ? 0 '
+                     ': g_slots_arr[%d].i) + 1);' % (misses_slot, misses_slot, misses_slot))
         lines.append('    st = %s(cx, out%s); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, f); return st; }' %
                      (impl, ''.join(', ' + cid(p) for p in params)))
-        lines.append('    _n = g_slots_arr[%d].tag == AIL_T_UNBOUND ? 0 : g_slots_arr[%d].i;'
-                     % (n_glob, n_glob))
-        lines.append('    if (_n < %d) { g_slots_arr[%d + _n] = f.slots[0]; g_slots_arr[%d + _n] = *out; '
-                     'g_slots_arr[%d] = ail_box_int(_n + 1); }' %
-                     (maxn, keys_slot0, vals_slot0, n_glob))
+        lines.append('    f.slots[1] = *out;')
+        lines.append('    _n = ((ail_vecobj *)g_slots_arr[%d].o)->n;' % keys_slot0)
+        lines.append('    ail_list_append(cx, g_slots_arr[%d], f.slots[0]);' % keys_slot0)
+        lines.append('    ail_list_append(cx, g_slots_arr[%d], f.slots[1]);' % vals_slot0)
+        lines.append('    g_slots_arr[%d] = ail_box_int(_n + 1);' % n_glob)
         lines.append('    AIL_FRAME_LEAVE(cx, f);')
         lines.append('    return AIL_OK;')
         self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out%s);\n' % (cname, sig))
@@ -6674,6 +6714,23 @@ class Compiler(boxclosure.ClosureMixin):
             node = ast.copy_location(ast.Call(func=ast.Attribute(value=f.args[0], attr=f.args[1].value, ctx=ast.Load()),
                                               args=node.args, keywords=node.keywords), node)
             f = node.func
+        if (isinstance(f, ast.Attribute) and f.attr == 'cache_info' and isinstance(f.value, ast.Name)
+                and not node.args and not node.keywords and '_AilCacheInfo' in self.classes):
+            info = self.functions.get(f.value.id)
+            stats = self.lru_stats.get(info['cname']) if info else None
+            if info and info.get('lru_cache') and info.get('lru_unbounded') and stats is not None:
+                hits_slot, misses_slot, n_glob = stats
+                hits = ctx.tmp()
+                misses = ctx.tmp()
+                currsize = ctx.tmp()
+                ctx.emit('%s = g_slots_arr[%d].tag == AIL_T_UNBOUND ? ail_box_int(0) : g_slots_arr[%d];'
+                         % (hits, hits_slot, hits_slot))
+                ctx.emit('%s = g_slots_arr[%d].tag == AIL_T_UNBOUND ? ail_box_int(0) : g_slots_arr[%d];'
+                         % (misses, misses_slot, misses_slot))
+                ctx.emit('%s = g_slots_arr[%d].tag == AIL_T_UNBOUND ? ail_box_int(0) : ail_box_int(g_slots_arr[%d].i);'
+                         % (currsize, n_glob, n_glob))
+                return self._call_class('_AilCacheInfo', [_PreC(hits), _PreC(misses), _PreC('ail_box_none()'),
+                                                          _PreC(currsize)], {}, ctx)
         # A single starred argument and nothing else (`f(*xs)`) -- xs's LENGTH is not known
         # until runtime, but every shape below still has a fixed-arity C calling convention
         # available: print(*xs) (the runtime's print already takes a (vals, n) array+count
@@ -7155,6 +7212,8 @@ class Compiler(boxclosure.ClosureMixin):
             info = self.functions.get(name)
             if info is None or info.get('vararg') or info.get('kwarg') or info.get('kwonly'):
                 continue
+            if info.get('lru_cache'):
+                continue                                     # cache_info reads the boxed wrapper's counters
             params = list(cand['params'].items())
             if any(k not in _MIX_SCALAR_KINDS and k not in _MIX_LIST_KINDS_OK for _, k in params):
                 continue                                     # e.g. list[str] -- not wired this pass

@@ -9,8 +9,10 @@ and the functions nobody else calls (main...) create it. The program therefore s
 function exactly as CPython's single module-level cache does. The key is the int / str argument itself,
 or a string built from the arguments (`str(a) + "," + str(b)`, a str argument as `len:text`) -- never an
 approximation that could join two different calls. The size bound of lru_cache(maxsize=N) is ignored: the
-result of a pure function does not depend on what was evicted. cache_info() / cache_clear() and a cached
-function used as a value (passed, stored) are refused by name.
+result of a pure function does not depend on what was evicted. cache_info() is built for the unbounded forms
+(cache, lru_cache(maxsize=None)) where there is no eviction to reproduce: hits / misses are counted and
+currsize is len(cache). cache_clear() / cache_parameters() and a cached function used as a value (passed,
+stored) are refused by name.
 
 cmp_to_key: `sorted(xs, key=cmp_to_key(f))` / `xs.sort(key=cmp_to_key(f))` (reverse= too) as a statement-
 level stable merge sort over indices, calling f(a, b) < 0 as the only comparison, as list.sort does with the
@@ -65,6 +67,7 @@ class Memo:
         tree = self.tree
         functions = {n.name: n for n in tree.body if isinstance(n, ast.FunctionDef)}
         cached = {}
+        unbounded = {}
         for name, fn in functions.items():
             kinds = [self.cache_kind(d) for d in fn.decorator_list]
             if not any(kinds):
@@ -72,6 +75,8 @@ class Memo:
             if len(fn.decorator_list) != 1:
                 refuse(fn, 'functools.%s together with another decorator is not built' % kinds[0])
             decorator = fn.decorator_list[0]
+            kind = next(k for k in kinds if k)
+            unbounded[name] = kind == 'cache'
             maxsize_zero = False
             if isinstance(decorator, ast.Call):
                 if any(isinstance(a, ast.Starred) for a in decorator.args) or any(k.arg is None for k in decorator.keywords):
@@ -84,6 +89,8 @@ class Memo:
                     maxsize_zero = True
                 elif values and not (isinstance(values[0], ast.Constant) and (values[0].value is None or type(values[0].value) is int)):
                     refuse(decorator, 'functools.lru_cache(maxsize=...) needs an int literal or None')
+                if values and isinstance(values[0], ast.Constant) and values[0].value is None:
+                    unbounded[name] = True
             fn.decorator_list = []
             if not maxsize_zero:
                 cached[name] = fn
@@ -107,6 +114,11 @@ class Memo:
                     if not need[callee] <= need[name]:
                         need[name] |= need[callee]
                         changed = True
+        own = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+        if '_AilCacheInfo' not in own:
+            self.cacheinfo_used = self.rewrite_cache_info(tree, cached, unbounded)
+        else:
+            self.cacheinfo_used = False
         self.check_uses(functions, need)
         callers = {name: set() for name in functions}
         for name, callees in calls.items():
@@ -119,6 +131,8 @@ class Memo:
         for name, fn in cached.items():
             info[name] = self.describe(fn)
             classes.append(self.memo_class(name, info[name]))
+        if self.cacheinfo_used:
+            classes.append(self.cache_info_class())
         for name in cached:
             fn = cached[name]
             wrappers.append(self.split(fn, info[name], need))
@@ -220,7 +234,48 @@ class Memo:
         for node in ast.walk(fn):
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in functions:
                 out.add(node.func.id)
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                  and node.func.attr == 'cache_info' and isinstance(node.func.value, ast.Name)
+                  and node.func.value.id in functions and not node.args and not node.keywords):
+                out.add(node.func.value.id)
         return out
+
+    def rewrite_cache_info(self, tree, cached, unbounded):
+        """`f.cache_info()` of an unbounded cache, inside a function that gets the cache, is the CacheInfo
+        object built from the memo: hits / misses / maxsize=None / currsize=len(d)."""
+        used = [False]
+
+        def field(memo, attr):
+            return ast.Attribute(value=ast.Name(id=memo, ctx=ast.Load()), attr=attr, ctx=ast.Load())
+
+        class Rewrite(ast.NodeTransformer):
+            depth = 0
+
+            def visit_FunctionDef(self, node):
+                self.depth += 1
+                self.generic_visit(node)
+                self.depth -= 1
+                return node
+
+            visit_AsyncFunctionDef = visit_FunctionDef
+
+            def visit_Call(self, node):
+                f = node.func
+                if (self.depth and isinstance(f, ast.Attribute) and f.attr == 'cache_info'
+                        and isinstance(f.value, ast.Name) and f.value.id in cached
+                        and unbounded.get(f.value.id) and not node.args and not node.keywords):
+                    memo = '_m_' + f.value.id
+                    new = ast.Call(func=ast.Name(id='_AilCacheInfo', ctx=ast.Load()),
+                                   args=[field(memo, 'hits'), field(memo, 'misses'), ast.Constant(value=None),
+                                         ast.Call(func=ast.Name(id='len', ctx=ast.Load()),
+                                                  args=[field(memo, 'd')], keywords=[])],
+                                   keywords=[])
+                    used[0] = True
+                    return ast.copy_location(new, node)
+                return self.generic_visit(node)
+
+        Rewrite().visit(tree)
+        return used[0]
 
     def check_uses(self, functions, need):
         """A threaded function may only be called by name (a call passes the caches on)."""
@@ -254,7 +309,29 @@ class Memo:
             class _AilMemo_%s:
                 def __init__(self, d: dict[%s, %s]):
                     self.d = d
+                    self.hits: int = 0
+                    self.misses: int = 0
         ''' % (name, self.key_type(keys), self.value_type(result)))
+        node = ast.parse(text).body[0]
+        _mark(node)
+        return node
+
+    def cache_info_class(self):
+        text = textwrap.dedent('''
+            class _AilCacheInfo:
+                def __init__(self, hits: int, misses: int, maxsize: int | None, currsize: int):
+                    self.hits = hits
+                    self.misses = misses
+                    self.maxsize = maxsize
+                    self.currsize = currsize
+
+                def __repr__(self) -> str:
+                    return ("CacheInfo(hits=" + str(self.hits) + ", misses=" + str(self.misses)
+                            + ", maxsize=" + str(self.maxsize) + ", currsize=" + str(self.currsize) + ")")
+
+                def __str__(self) -> str:
+                    return self.__repr__()
+        ''')
         node = ast.parse(text).body[0]
         _mark(node)
         return node
@@ -295,6 +372,11 @@ class Memo:
         stored = _call(ast.Name(id='int', ctx=ast.Load()), ast.Name(id='_ail_r', ctx=ast.Load())) \
             if result == 'bool' else ast.Name(id='_ail_r', ctx=ast.Load())
         got = ast.Compare(left=read, ops=[ast.NotEq()], comparators=[ast.Constant(value=0)]) if result == 'bool' else read
+        def bump(field):
+            return ast.Assign(
+                targets=[ast.Attribute(value=ast.Name(id=self_memo, ctx=ast.Load()), attr=field, ctx=ast.Store())],
+                value=ast.BinOp(left=ast.Attribute(value=ast.Name(id=self_memo, ctx=ast.Load()), attr=field,
+                                                   ctx=ast.Load()), op=ast.Add(), right=ast.Constant(value=1)))
         wrapper = ast.FunctionDef(
             name=name,
             args=ast.arguments(posonlyargs=[], args=[copy.deepcopy(a) for a in fn.args.args] + extra, vararg=None,
@@ -303,7 +385,8 @@ class Memo:
                 ast.Assign(targets=[ast.Name(id='_ail_k', ctx=ast.Store())], value=key),
                 ast.If(test=ast.Compare(left=ast.Name(id='_ail_k', ctx=ast.Load()), ops=[ast.In()],
                                         comparators=[ast.parse('%s.d' % self_memo, mode='eval').body]),
-                       body=[ast.Return(value=got)], orelse=[]),
+                       body=[bump('hits'), ast.Return(value=got)], orelse=[]),
+                bump('misses'),
                 ast.Assign(targets=[ast.Name(id='_ail_r', ctx=ast.Store())],
                            value=ast.Call(func=ast.Name(id=body_name, ctx=ast.Load()), args=forward, keywords=[])),
                 ast.Assign(targets=[ast.Subscript(value=ast.parse('%s.d' % self_memo, mode='eval').body,
