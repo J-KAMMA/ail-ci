@@ -22989,20 +22989,21 @@ import biggate as _biggate
 OBJ2_COND = OBJ2                              # both worlds, with the /*B<*/ blocks (biggate.py); pyboxed2 picks one per program
 OBJ2 = _biggate.resolve(OBJ2_COND, True)      # what every other reader of the runtime sees: the one with big ints
 
-# str.maketrans / str.translate for dict tables (general path). Appended by pyboxed2 only when a
-# program reaches one of them, so every other program's C is byte-identical.
+# str.maketrans / str.translate for dict, sequence and custom-mapping tables (general path).
+# Appended by pyboxed2 only when a program reaches one of them, so every other program's C is
+# byte-identical.
 STRTRANSLATE = r'''
 /* ---------------------------------------------------------------------------------------
-   str.maketrans / str.translate (general path). The table is the dict CPython's maketrans
-   returns: code point -> one-character str, or None to delete. A table built any other way
-   (one-argument maketrans(dict), a list, a custom mapping) is refused by name by the emitter.
+   str.maketrans / str.translate (general path). The table is whatever CPython's maketrans
+   returns (a code point -> one-character str / None dict), a mapping object with __getitem__,
+   or a sequence indexed by code point. A table lookup that raises LookupError (IndexError and
+   KeyError here) means "keep the character", exactly as CPython's translate does.
    --------------------------------------------------------------------------------------- */
 static inline ail_st ail_meth_str_maketrans(ail_ctx *cx, ail_obj *out, ail_obj frmobj, ail_obj toobj,
                                             int has_del, ail_obj delobj) {
     if (frmobj.tag != AIL_T_STR) {
-        char buf[128];
-        snprintf(buf, sizeof buf, "maketrans() argument 1 must be str, not %s", ail__tname_c(frmobj));
-        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        return ail_raise_c(cx, AIL_B_TYPEERROR,
+                           "first maketrans argument must be a string if there is a second argument");
     }
     if (toobj.tag != AIL_T_STR) {
         char buf[128];
@@ -23034,32 +23035,65 @@ static inline ail_st ail_meth_str_maketrans(ail_ctx *cx, ail_obj *out, ail_obj f
     return AIL_OK;
 }
 
-static inline ail_st ail_meth_str_translate(ail_ctx *cx, ail_obj *out, ail_obj sobj, ail_obj table) {
-    if (table.tag != AIL_T_DICT) {
-        char buf[160];
-        snprintf(buf, sizeof buf, "'%s' object is not subscriptable", ail__tname_c(table));
-        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+static inline ail_st ail__str_translate_char(ail_ctx *cx, ail_obj *out, int64_t cp) {
+    if (cp < 0 || cp > 0x10FFFF)
+        return ail_raise_c(cx, AIL_B_VALUEERROR, "character mapping must be in range(0x110000)");
+    if (cp >= 0xD800 && cp <= 0xDFFF)
+        return ail_raise_c(cx, AIL_B_VALUEERROR,
+                           "surrogate character mapping is not supported in the v2 runtime");
+    if (cp > 0xFFFF && sizeof(((ail_strback *)0)->data[0]) < 4)
+        return ail_raise_c(cx, AIL_B_VALUEERROR,
+                           "non-BMP character mapping is not supported in the 16-bit v2 runtime");
+    ail_strback *b = ail_strback_alloc(cx, 1);
+    b->data[0] = cp;
+    *out = ail_str_view((ail_gcobj *)b, 0, 1);
+    return AIL_OK;
+}
+
+static inline ail_st ail__str_translate_lookup(ail_ctx *cx, ail_obj *out, int *found,
+                                               ail_obj table, int64_t cp) {
+    ail_obj key = ail_box_int(cp);
+    if (table.tag == AIL_T_DICT) {
+        int has = 0;
+        ail_st st = ail_dict_contains(cx, &has, table, key);
+        if (st != AIL_OK) return st;
+        *found = has;
+        if (!has) { *out = ail_box_none(); return AIL_OK; }
+        return ail_dict_get(cx, out, table, key, ail_box_none());
     }
+    /* Any other table is indexed with the code point: a list/tuple/str sequence, or an
+       instance whose class defines __getitem__ (dunderrt.py). LookupError means no mapping. */
+    ail_st st = ail_op_getitem(cx, out, table, key);
+    if (st != AIL_OK) {
+        if (ail_exc_matches_b(cx, AIL_B_INDEXERROR) || ail_exc_matches_b(cx, AIL_B_KEYERROR)) {
+            ail_exc_clear(cx);
+            *out = ail_box_none();
+            *found = 0;
+            return AIL_OK;
+        }
+        return st;
+    }
+    *found = 1;
+    return AIL_OK;
+}
+
+static inline ail_st ail_meth_str_translate(ail_ctx *cx, ail_obj *out, ail_obj sobj, ail_obj table) {
     ail_str s = ail_view_to_str(sobj);
     ail_obj pieces = ail_list_new(cx);
-    ail_obj none = ail_box_none();
     for (int64_t i = 0; i < s.n; i++) {
-        ail_obj key = ail_box_int((int64_t)ail_chr(s, i));
+        ail_obj v;
         int found = 0;
-        ail_st st = ail_dict_contains(cx, &found, table, key);
+        ail_st st = ail__str_translate_lookup(cx, &v, &found, table, (int64_t)ail_chr(s, i));
         if (st != AIL_OK) return st;
         if (!found) {
             ail_list_append(cx, pieces, ail_str_view(sobj.sv.backing, sobj.sv.off + i, 1));
             continue;
         }
-        ail_obj v;
-        st = ail_dict_get(cx, &v, table, key, none);
-        if (st != AIL_OK) return st;
         if (v.tag == AIL_T_NONE) continue;
         if (v.tag == AIL_T_STR) { ail_list_append(cx, pieces, v); continue; }
         if (ail__is_intlike(v.tag)) {
             ail_obj ch;
-            st = ail_bi_chr(cx, &ch, v);
+            st = ail__str_translate_char(cx, &ch, v.i);
             if (st != AIL_OK) return st;
             ail_list_append(cx, pieces, ch);
             continue;

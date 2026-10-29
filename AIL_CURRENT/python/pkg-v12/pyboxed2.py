@@ -2513,6 +2513,30 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _compile_cond(self, source):
         tree = ast.parse(source)
+        # The 16-bit string runtime cannot represent a non-BMP code point, and its UTF-8 output
+        # replaces a lone surrogate rather than raising as CPython does. A translate table built
+        # as a dict literal with such an integer value cannot match CPython, so refuse it by name
+        # at compile time (the run-time conversion has no way to produce the character).
+        if not WIDE_STRINGS and any(isinstance(n, ast.Attribute) and n.attr == 'translate'
+                                    for n in ast.walk(tree)):
+            for node in ast.walk(tree):
+                if not isinstance(node, ast.Dict):
+                    continue
+                for value in node.values:
+                    cp = _const_int(value)
+                    if cp is None:
+                        continue
+                    if 0x10000 <= cp <= 0x10FFFF:
+                        what = 'non-BMP'
+                    elif 0xD800 <= cp <= 0xDFFF:
+                        what = 'surrogate'
+                    else:
+                        continue
+                    refusal = Unsupported(
+                        'str.translate() with the %s mapping value U+%04X in the 16-bit v2 runtime'
+                        % (what, cp))
+                    refusal.source_line = getattr(value, 'lineno', None)
+                    raise refusal
         self.source_has_class = any(isinstance(n, ast.ClassDef) for n in ast.walk(tree))
         import exctext
         exctext.refuse_args_item_store(tree, Unsupported)
@@ -9663,11 +9687,6 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _call_attribute(self, f, args, kwargs, ctx):
         recv = f.value
-        _tk = self.infer_kind(recv, ctx) if f.attr == 'translate' else None
-        if f.attr == 'translate' and (
-                _tk == 'str' or (isinstance(recv, ast.Constant) and isinstance(recv.value, str)) or
-                (_tk is None and not any('translate' in self.classes[c]['methods'] for c in self.classes))):
-            return self._str_translate_call(recv, args, kwargs, ctx)
         # sys.stdin.read() / .readline(): the only sys.stdin surface this emitter models
         # (B046/B047 -- glue in the preamble, see the module docstring's stdin note).
         if isinstance(recv, ast.Attribute) and isinstance(recv.value, ast.Name) and \
@@ -11080,20 +11099,24 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
-    def _str_translate_call(self, recv, args, kwargs, ctx):
-        """`s.translate(table)` for the dict `str.maketrans` returns (and a dict literal)."""
-        if kwargs:
-            raise Unsupported('.translate() with keyword arguments')
-        if len(args) != 1:
-            raise Unsupported('.translate() takes exactly one argument (%d given)' % len(args))
-        table = args[0]
-        if isinstance(table, (ast.List, ast.Set, ast.Tuple, ast.Constant)):
-            raise Unsupported('.translate() with a table literal that is not a dict is not built')
+    def _m_translate(self, recv, kind, args, kwargs, ctx):
+        """`s.translate(table)` for a dict table, a sequence table or a custom mapping."""
         self.uses_str_translate = True
-        recvc = self.expr(recv, ctx)
-        tab = self.expr(table, ctx)
+        if kwargs or len(args) != 1:
+            # This is the str handler: a bytes/bytearray receiver takes its own class method on
+            # the runtime dispatch, so the wrong arity must be a run-time TypeError, not a
+            # compile-time refusal (which would also reject the bytes form `translate(None, del)`).
+            t = ctx.tmp()
+            if kwargs:
+                ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "str.translate() takes no keyword arguments");')
+            else:
+                ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "str.translate() takes exactly one '
+                         'argument (%d given)");' % len(args))
+            ctx.check()
+            return t
+        tab = self.expr(args[0], ctx)
         t = ctx.tmp()
-        ctx.emit('st = ail_meth_str_translate(cx, &%s, %s, %s);' % (t, recvc, tab))
+        ctx.emit('st = ail_meth_str_translate(cx, &%s, %s, %s);' % (t, recv, tab))
         ctx.check()
         return t
 

@@ -1,3 +1,31 @@
+## 2026-10-29 -- cov49 review: non-dict tables, dynamic dispatch, range errors (job-cov49-10291923)
+
+The review's five defects are fixed. `str.translate` is now the ordinary built-in method
+handler and no longer sniffed before method dispatch, so an unrelated class defining
+`translate` no longer disables the str handler for a str receiver (a runtime instance still
+takes its own class's method). A non-dict table is indexed by code point through the runtime's
+item lookup: a list/tuple/str table and a custom `__getitem__` mapping match CPython, and a
+lookup that raises `IndexError`/`KeyError` keeps the character. An integer mapping value out of
+range now raises CPython's `ValueError: character mapping must be in range(0x110000)`, and a
+non-str first `maketrans` argument uses CPython's `first maketrans argument must be a string if
+there is a second argument`. A non-BMP integer value in a dict literal cannot be represented by
+the 16-bit string runtime (and its UTF-8 output replaces a lone surrogate instead of raising),
+so such non-BMP/surrogate mapping values are refused by name at compile time (no internal
+`chr()` error or silent replacement). A literal non-dict table is now supported rather than
+refused.
+
+Re-ran the corpus profile on both trees: 24 refused programs before this feature (e538775),
+23 after (the translate program deepseek-v4.1-flash-free/t484 builds; this fix keeps it at 23).
+
+Probes in `/tmp/probes/cov49fix`, each run with `bash ~/tools/cmp.sh ... $PWD`:
+`p_dict_routes` (dict via argument, attribute, list item, dict value, alias, mutation),
+`p_nondict` (list/tuple/str/int/None/set tables, small code points, NUL, 0xFFFF),
+`p_custom` (partial/complete custom mappings, bad value type), `p_values` (int 0/255/0xFFFF,
+bool, None, multi-character str, float, bytes, 300/-1 out of range), `p_maketrans_err`
+(arg 1/2/3 and length mismatch), `p_shadow` (a class defining translate), `p_bytes_translate`
+(bytes tables beside the str handler) all match CPython on both builds; `p_nonbmp_refuse`,
+`p_nonbmp_boundary` and `p_surrogate` are refused by name.
+
 ## 2026-10-29 -- cov49: str.translate / str.maketrans on the general path (job-cov49-10291923)
 
 A fresh build of every program in `lab/corpus/programs` (219 programs, default build, the

@@ -1,10 +1,10 @@
-"""Branch cov49: str.maketrans / str.translate with dict tables on the general path.
+"""Branch cov49: str.maketrans / str.translate on the general path.
 
 The corpus driver refused `text.translate(TABLE)` (job cov49's fresh profile: 24 refusals,
 8 of them stdlib imports; this was the most frequent exactly supportable construct left).
 Every program below is compared with CPython 3.12 on both builds: AIL_UNIFIED_FORCE=1 (the
-general path) and the default build (which falls back to it). The table shapes that cannot
-match stay named compile-time refusals.
+general path) and the default build (which falls back to it). Dict, sequence and custom-mapping
+tables are supported; only the shapes that cannot match stay named compile-time refusals.
 """
 import os
 import subprocess
@@ -46,7 +46,10 @@ print("cab".translate(tables[0]), "axbxc".translate(tables[1]))
 by_name = {"punct": str.maketrans("", "", "!?")}
 print("Wow!?!".translate(by_name["punct"]))
 print("abc".translate({97: 98, 98: None, 99: "ZZ"}))
-print("abc".translate({97: 300, 98: -1}))
+try:
+    print("abc".translate({97: 300, 98: -1}))
+except ValueError as e:
+    print("ValueError", e)
 print("abc".translate({97: "XY"}))
 '''
 
@@ -54,6 +57,10 @@ PROGRAMS['errors'] = r'''try:
     str.maketrans("ab", "x")
 except ValueError as e:
     print("ValueError", e)
+try:
+    str.maketrans(1, "b")
+except TypeError as e:
+    print("TypeError", e)
 try:
     str.maketrans("a", 1)
 except TypeError as e:
@@ -66,6 +73,55 @@ try:
     print("abc".translate({97: 1.5}))
 except TypeError as e:
     print("TypeError", e)
+'''
+
+PROGRAMS['tables'] = r'''def show(t, d):
+    try:
+        print(repr(t.translate(d)))
+    except Exception as e:
+        print(type(e).__name__, e)
+
+
+show("abc", {97: "z"})
+show("abc", [0, 1, 2])
+show("abc", (0, 1, 2))
+show("abc", "xyz")
+show("\x00\x01\x02", "xyz")
+show("\x00\x01\x02", [65, None, 67])
+show("abc", 123)
+show("abc", None)
+
+
+class Map:
+    def __getitem__(self, k):
+        if k == 97:
+            return "Z"
+        raise KeyError(k)
+
+
+show("abc", Map())
+
+
+class Every:
+    def __getitem__(self, k):
+        return "Z"
+
+
+show("abc", Every())
+
+
+class Foo:
+    def translate(self, x):
+        return ("foo", x)
+
+
+def f(s, d):
+    return s.translate(d)
+
+
+print(f("abc", {97: "z"}))
+print(Foo().translate(7))
+print("abc".translate(str.maketrans("a", "z")))
 '''
 
 PROGRAMS['unicode'] = r'''TABLE = str.maketrans("éü", "eu")
@@ -121,8 +177,13 @@ class Refused(unittest.TestCase):
         self.refused("t = str.maketrans({97: 'x'})\nprint('abc'.translate(t))\n",
                      "one argument")
 
-    def test_translate_with_a_list_table(self):
-        self.refused("print('abc'.translate([1, 2, 3]))\n", "table literal that is not a dict")
+    def test_non_bmp_mapping_value(self):
+        self.refused("def show(t, d):\n    print(t.translate(d))\n"
+                     "show('abc', {97: 0, 98: 255, 99: 0x10FFFF})\n",
+                     "non-BMP mapping value")
+
+    def test_surrogate_mapping_value(self):
+        self.refused("print('abc'.translate({97: 0xD800}))\n", "surrogate mapping value")
 
 
 if __name__ == "__main__":
