@@ -258,6 +258,7 @@ LISTED_MODULES = (
     'test_ail_pre395',
     'test_ail_pre364',
     'test_ail_ffi_parallel',
+    'test_ail_ffi_objfold',
     'test_ail_pre370',
     'test_ail_pre375',
     'test_ail_pre380',
