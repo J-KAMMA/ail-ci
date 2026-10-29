@@ -2842,6 +2842,11 @@ class _Surface:
         if not repr_off and any(each[3] for each in merged):
             # which fields repr leaves out, for the general path's marker lookup
             extra += ' hide=' + ','.join(name for name, _, _, shown, _ in merged if shown)
+        # every merged field's type for pyboxed2's @export check: a field(init=False) is not a
+        # parameter of __init__, but CPython still walks it through dataclasses.fields
+        extra += ' ftypes=' + ','.join(
+            '%s:%d' % (name, annotation in ('int', 'float', 'bool'))
+            for name, annotation, *_ in merged)
         if extra:
             for index, (start, end, text, flag) in enumerate(self.edits):
                 if text == marker and start == at:

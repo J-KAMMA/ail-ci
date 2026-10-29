@@ -3845,14 +3845,20 @@ class Compiler(boxclosure.ClosureMixin):
         return False
 
     def _export_dataclass_ok(self, name):
-        if self.classes.get(name, {}).get('dc_future'):
+        cls = self.classes.get(name, {})
+        if cls.get('dc_future'):
             return False       # field types stay strings under `from __future__ import annotations`
-        init = self.classes.get(name, {}).get('methods', {}).get('__init__')
+        init = cls.get('methods', {}).get('__init__')
         if not init:
             return False
         for arg in init['node'].args.args[1:]:
             ann = arg.annotation
             if not isinstance(ann, ast.Name) or ann.id not in ('int', 'float', 'bool'):
+                return False
+        # CPython checks `dataclasses.fields`, so a field left out of __init__ (init=False) is
+        # still part of the C struct. ail_syntax records every merged field's type in the marker.
+        for ok in cls.get('dc_field_types', {}).values():
+            if not ok:
                 return False
         return True
 
@@ -3875,6 +3881,24 @@ class Compiler(boxclosure.ClosureMixin):
             if name in _store_linenos([stmt]):
                 return True
         return False
+
+    def _check_export_applied_to(self, node, dec, inner):
+        """`export` must receive the function itself: `@export(...)` and an inner @lru_cache/@cache do not."""
+        if isinstance(dec, ast.Call) and (dec.args or dec.keywords):
+            raise Unsupported('@export %s: @export takes no arguments (CPython calls export(...) '
+                              'and raises TypeError: @export applies to a top-level function)' % node.name)
+        for other in inner:
+            bare = other.func if isinstance(other, ast.Call) else other
+            if isinstance(bare, ast.Name):
+                name = bare.id
+            elif isinstance(bare, ast.Attribute):
+                name = bare.attr
+            else:
+                name = None
+            if name in ('lru_cache', 'cache'):
+                raise Unsupported('@export %s: @lru_cache/@cache is applied inside @export and '
+                                  'yields a non-function (CPython raises TypeError: @export applies '
+                                  'to a top-level function)' % node.name)
 
     def _check_export_decorator(self, node, name, module):
         if self._export_rebound_before(node, name, module):
@@ -3918,7 +3942,8 @@ class Compiler(boxclosure.ClosureMixin):
         lru = False
         is_static = False
         is_property = is_setter = is_classmethod = False
-        for dec in node.decorator_list:
+        decorators = node.decorator_list
+        for index, dec in enumerate(decorators):
             dec_bare = dec.func if isinstance(dec, ast.Call) else dec
             nm = None
             if isinstance(dec_bare, ast.Name):
@@ -3930,11 +3955,13 @@ class Compiler(boxclosure.ClosureMixin):
             elif (not is_method
                   and isinstance(dec_bare, ast.Name)
                   and self.from_imports.get(dec_bare.id) == ('ail_ffi', 'export')):
+                self._check_export_applied_to(node, dec, decorators[index + 1:])
                 self._check_export_decorator(node, dec_bare.id, False)
             elif (not is_method
                   and isinstance(dec_bare, ast.Attribute) and dec_bare.attr == 'export'
                   and isinstance(dec_bare.value, ast.Name)
                   and self.module_aliases.get(dec_bare.value.id) == 'ail_ffi'):
+                self._check_export_applied_to(node, dec, decorators[index + 1:])
                 self._check_export_decorator(node, dec_bare.value.id, True)
                 # ail_ffi.export is the identity on CPython; it only marks
                 # a function for `ail build --lib`
@@ -4022,6 +4049,14 @@ class Compiler(boxclosure.ClosureMixin):
         hide = 0
         dc_future = bool(marker and 2 <= node.lineno <= len(marker) + 1
                          and ' future' in marker[node.lineno - 2])
+        dc_field_types = {}
+        if marker and 2 <= node.lineno <= len(marker) + 1:
+            found = re.search(r'\bftypes=(\S*)', marker[node.lineno - 2])
+            if found:
+                for entry in found.group(1).split(','):
+                    field_name, _, flag = entry.partition(':')
+                    if field_name:
+                        dc_field_types[field_name] = flag == '1'
         if (marker and 2 <= node.lineno <= len(marker) + 1
                 and marker[node.lineno - 2].strip().startswith('# ail:dataclass')
                 and '__repr__' not in methods and ' norepr' not in marker[node.lineno - 2]
@@ -4053,7 +4088,7 @@ class Compiler(boxclosure.ClosureMixin):
             class_body.append((kind,) + (class_attrs[what] if kind == 'a' else (what,)))
         self.classes[node.name] = {'base': base, 'methods': methods, 'class_attrs': class_attrs,
                                    'class_body': class_body, 'dc': dc, 'dc_hide': hide,
-                                   'dc_future': dc_future}
+                                   'dc_future': dc_future, 'dc_field_types': dc_field_types}
         self.class_order.append(node.name)
 
     def _class_definition(self, cname, attr):

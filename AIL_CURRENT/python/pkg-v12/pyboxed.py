@@ -1053,6 +1053,24 @@ class Compiler:
             dec = dec.func
         return self._is_mod_attr(dec, modname, attr)
 
+    def _check_export_applied_to(self, node, dec, inner):
+        """`export` must receive the function itself: `@export(...)` and an inner @lru_cache/@cache do not."""
+        if isinstance(dec, ast.Call) and (dec.args or dec.keywords):
+            raise Unsupported('@export %s: @export takes no arguments (CPython calls export(...) '
+                              'and raises TypeError: @export applies to a top-level function)' % node.name)
+        for other in inner:
+            bare = other.func if isinstance(other, ast.Call) else other
+            if isinstance(bare, ast.Name):
+                name = bare.id
+            elif isinstance(bare, ast.Attribute):
+                name = bare.attr
+            else:
+                name = None
+            if name in ('lru_cache', 'cache'):
+                raise Unsupported('@export %s: @lru_cache/@cache is applied inside @export and '
+                                  'yields a non-function (CPython raises TypeError: @export applies '
+                                  'to a top-level function)' % node.name)
+
     def _register_function(self, node, cname=None, is_method=False, owner_class=None):
         params = [a.arg for a in node.args.args]
         if node.args.vararg or node.args.kwonlyargs or node.args.kwarg or node.args.posonlyargs:
@@ -1060,7 +1078,8 @@ class Compiler:
                               'in def %s' % node.name)
         lru = False
         is_static = False
-        for dec in node.decorator_list:
+        decorators = node.decorator_list
+        for index, dec in enumerate(decorators):
             dec_bare = dec.func if isinstance(dec, ast.Call) else dec
             if (self._decorator_is(dec, 'functools', 'lru_cache')
                     or (isinstance(dec_bare, ast.Name)
@@ -1070,6 +1089,7 @@ class Compiler:
                   and ((isinstance(dec_bare, ast.Name)
                         and self.from_imports.get(dec_bare.id) == ('ail_ffi', 'export'))
                        or self._is_mod_attr(dec_bare, 'ail_ffi', 'export'))):
+                self._check_export_applied_to(node, dec, decorators[index + 1:])
                 pass                     # ail_ffi.export is the identity on CPython; it only marks
                                          # a function for `ail build --lib`
             elif is_method and isinstance(dec, ast.Name) and dec.id == 'staticmethod':

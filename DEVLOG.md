@@ -1,3 +1,22 @@
+## 2026-10-29 -- ex36 review: `@export` argument/inner-decorator checks and every dataclass field
+
+The ex36 review found three silent differences left by `fb13b9e`.  `@export` placed above an inner
+`@lru_cache`/`@cache` now refuses by name: CPython passes the C wrapper to `export`, which raises
+`TypeError: @export applies to a top-level function`, while AIL used to run the wrapper.  A called
+decorator with arguments or keywords (`@export(123)`, `@export(name="f")`) now refuses the same
+way; `@export()` with no arguments is still the identity.  The dataclass parameter check now
+covers every field CPython's `dataclasses.fields` returns, including `field(init=False)`: ail_syntax
+writes each merged field's type in the `# ail:dataclass` marker and pyboxed2 rejects a disallowed
+`init=False` field type even though it is not an `__init__` parameter.  A field of an allowed type
+and `@export` below `@lru_cache` still match CPython.
+
+Probes in `/tmp/probes/`: `r1_export_outer_lru.py`, `r4_export_outer_cache.py`, `q2_export_arg.py`,
+`q1_initfalse_str.py`, `q5_initfalse_bad_type.py`, `p1_initfalse_ok.py`,
+`p2_initfalse_inherited_bad.py`, `p3_initfalse_inherited_ok.py`, `p4_export_inside_cache.py`,
+`p5_export_empty_call.py`, `p6_export_kw_arg.py`, `p7_alias_outer_lru.py`, `p8_alias_arg.py`,
+`p9_initfalse_listint_bad.py`: the positive probes match CPython on both builds, the negative ones
+are refused by name on both (CPython raises `TypeError`).
+
 ## 2026-10-29 -- ex36: `@export` from ail_ffi compiles as the CPython identity decorator (job-ex36-10291446)
 
 The survey of the 14 Python-syntax examples under `language_examples` found two building on both

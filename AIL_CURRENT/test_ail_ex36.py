@@ -102,6 +102,32 @@ def f(x: int) -> int:
 print(f(2))
 '''
 
+INIT_FALSE_OK = '''from dataclasses import dataclass, field
+from ail_ffi import export
+
+@dataclass
+class P:
+    x: int
+    flag: bool = field(init=False, default=True)
+
+@export
+def f(p: P) -> int:
+    return p.x if p.flag else -p.x
+
+print(f(P(3)))
+'''
+
+EXPORT_INSIDE_CACHE = '''from functools import lru_cache
+from ail_ffi import export
+
+@lru_cache(maxsize=None)
+@export
+def f(x: int) -> int:
+    return x * x
+
+print(f(3))
+'''
+
 UNUSED_IMPORTS = (
     'from ail_ffi import export\n\ndef main() -> None:\n    xs = [3, 1, 2]\n    xs.sort()\n    print(xs[0] + xs[-1])\n\nmain()\n',
     'import ail_ffi\n\ndef main() -> None:\n    xs = [3, 1, 2]\n    xs.sort()\n    print(xs[0] + xs[-1])\n\nmain()\n',
@@ -117,6 +143,12 @@ INVALID = (
     'from ail_ffi import export\n\nfor export in [5]:\n    pass\n\n@export\ndef f(x: int) -> int:\n    return x\n\nprint(f(2))\n',
     'import ail_ffi as ffi\n\nffi = 5\n\n@ffi.export\ndef f(x: int) -> int:\n    return x\n\nprint(f(2))\n',
     'from ail_ffi import export\n\n(export := 5)\n\n@export\ndef f(x: int) -> int:\n    return x\n\nprint(f(2))\n',
+    'from functools import lru_cache\nfrom ail_ffi import export\n\n@export\n@lru_cache(maxsize=None)\ndef f(x: int) -> int:\n    return x * x\n\nprint(f(3))\n',
+    'from functools import cache\nfrom ail_ffi import export\n\n@export\n@cache\ndef f(x: int) -> int:\n    return x * x\n\nprint(f(2))\n',
+    'from ail_ffi import export\n\n@export(123)\ndef f(x: int) -> int:\n    return x\n\nprint(f(2))\n',
+    'from ail_ffi import export\n\n@export(name="f")\ndef f(x: int) -> int:\n    return x\n\nprint(f(2))\n',
+    'from dataclasses import dataclass, field\nfrom ail_ffi import export\n\n@dataclass\nclass P:\n    x: int\n    label: str = field(init=False, default="z")\n\n@export\ndef f(p: P) -> int:\n    return p.x\n\nprint(f(P(1)))\n',
+    'from dataclasses import dataclass, field\nfrom ail_ffi import export\n\n@dataclass\nclass P:\n    x: int\n    label: list[str] = field(init=False, default_factory=list)\n\n@export\ndef f(p: P) -> int:\n    return p.x\n\nprint(f(P(1)))\n',
 )
 
 
@@ -175,6 +207,12 @@ class ExportDecorator(unittest.TestCase):
 
     def test_export_annotation_boundaries_match_cpython(self):
         self.run_both(BOUNDARIES)
+
+    def test_init_false_dataclass_field_of_allowed_type_matches_cpython(self):
+        self.run_both(INIT_FALSE_OK)
+
+    def test_export_below_lru_cache_matches_cpython(self):
+        self.run_both(EXPORT_INSIDE_CACHE)
 
     def test_future_annotations_matches_cpython(self):
         self.run_both(FUTURE)
