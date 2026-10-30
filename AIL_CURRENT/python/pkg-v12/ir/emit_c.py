@@ -713,6 +713,8 @@ class Emitter(TextEmitter):
                          'if (__builtin_isinf(%(x)s)) ail_die("cannot convert float infinity to integer"); ')
             else:
                 inner = 'if (%(x)s != %(x)s) ail_raise_named(AIL_EXC_VALUE); '
+                if os.environ.get('AIL_SURFACE') == 'python':     # an infinity stays CPython's OverflowError, apart from "integer overflow"
+                    inner += 'if (__builtin_isinf(%(x)s)) ail_die("cannot convert float infinity to integer"); '
             self.line(depth, ('if (!(%(x)s >= -9223372036854775808.0 && %(x)s < 9223372036854775808.0)) { '
                               + inner + 'ail_die("integer overflow"); }') % {'x': o[0]})
             return self.assign_new(depth, ins.result, '(int64_t)%s' % o[0])
