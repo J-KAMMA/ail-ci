@@ -329,6 +329,7 @@ MODULES = (
     'test_ail_ffi_f3a',
     'test_ail_covtop1', 'test_ail_classnames', 'test_ail_stdtop1', 'test_ail_stdtop2', 'test_ail_stdtop3', 'test_ail_stdtop4', 'test_ail_gpu_g1',
     'test_ail_ex32',
+    'test_ail_pre430',
 )
 
 
