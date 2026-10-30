@@ -14,7 +14,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from ail_syntax import SyntaxErrorAIL, detect, fold_constants, python_surface, python_wording, translate
+from ail_syntax import SyntaxErrorAIL, ail_array_surface, detect, fold_constants, python_surface, python_wording, translate
 import ail_sexpr
 import ail_modules
 
@@ -4261,6 +4261,16 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             if path.suffix.lower() == '.py':
                 syntax = 'python'
             merged = None
+            if entry and syntax == 'python' and 'ail_array' in text:
+                # typed arrays (TYPED_ARRAY.md T2): lowered before the module merge, which would otherwise pull in the
+                # pure-Python reference file `ail_array.py` that sits beside the program
+                refused = []
+                locations = {}
+                text = ail_array_surface(text, refused)
+                if refused:
+                    error = ValueError(refused[0][1])
+                    error.source_line, error.source_column = refused[0][0], 0
+                    raise error
             if ffi is not None and syntax == 'python':
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
                 # a file that does not mention ail_ffi is returned untouched

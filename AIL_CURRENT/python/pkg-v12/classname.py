@@ -9,6 +9,7 @@ the generated C of such a program does not change.
 """
 import json
 import os
+import re
 
 ENV = 'AIL_CLASS_NAMES'
 _cache = [None, {}]
@@ -118,3 +119,64 @@ def patch_runtime(text):
         if old in text:
             text = text.replace(old, new)
     return text
+
+
+_TN_CALL = re.compile(r'ail_type_name\((\w+)\.tag\)')
+_TN_DEF = '\nstatic inline const char *ail_type_name(uint8_t t) {\n'
+_TN_CAP = re.compile(r'\bchar (\w+)\[(\d+)\]')
+
+
+def patch_error_names(text):
+    """The run-time error texts that print a type name ("'<' not supported between instances of 'P' and 'P'",
+    "'P' object is not iterable", "unsupported operand type(s) ...", int()/float()/ord() arguments, ...) name
+    the user's class, as CPython does, in a program that has a class.  The base runtime names only the tag
+    ("instance"); this pass asks the value itself (`ail__tname_c`), after the other runtime patches ran, so
+    it also covers their fallback texts.  A program with no class keeps the runtime text it always had."""
+    if text.find('static inline const char *ail__tname_c(ail_obj x) {') < 0 or text.find(_TN_DEF) < 0:
+        return text
+    lines = text.split('\n')
+    for i, line in enumerate(lines):
+        if ('ail_type_name(' in line and 'ail_str_from_cstr' not in line and 'return ail_type_name(x.tag);' not in line
+                and 'snprintf(buf, n, "%s", ail_type_name(x.tag));' not in line):
+            lines[i] = _TN_CALL.sub(r'ail__tname_c(\1)', line)
+        if 'ail__dun_tname_s(' in line and 'static const char *ail__dun_tname_s' not in line:
+            lines[i] = lines[i].replace('ail__dun_tname_s(', 'ail__tname_c(')
+    out = []
+    for i, line in enumerate(lines):
+        if 'ail__tname_c(' in line or (i + 1 < len(lines) and 'ail__tname_c(' in lines[i + 1] and 'char ' in line):
+            # a class name has no fixed bound: the message buffers that hold one are big enough for a few
+            line = _TN_CAP.sub(lambda m: m.group(0) if int(m.group(2)) >= 512 or m.group(1) in ('tnbuf', 'nb')
+                               else 'char %s[512]' % m.group(1), line)   # tnbuf: CPython's own %.200s cap
+        out.append(line)
+    text = '\n'.join(out)
+    for old, new in _TN_WORDING:
+        text = text.replace(old, new)
+    text = text.replace('char b2[200], tn[80]; ail__dun_tname(tn, sizeof tn, inst);',
+                        'char b2[512], tn[400]; ail__dun_tname(tn, sizeof tn, inst);')
+    # the first users (the dunder helpers) sit above the definition of ail__tname_c
+    if '\n} ail_obj;\n' not in text:
+        return text
+    text = text.replace('\n} ail_obj;\n', '\n} ail_obj;\nstatic inline const char *ail__tname_c(ail_obj x);\n', 1)
+    return text
+
+
+# wording the generic runtime texts get wrong for any operand, and the format texts that name the operand's class
+_FMT_INST = ('{ if (x.tag == AIL_T_INST) { char fb[512]; snprintf(fb, sizeof fb, "unsupported format string passed to %s.__format__", '
+             'ail__tname_c(x)); return ail_raise_c(cx, AIL_B_TYPEERROR, fb); } '
+             'return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to ')
+_TN_WORDING = (
+    ("int() argument must be a string or a number, not '%s'",
+     "int() argument must be a string, a bytes-like object or a real number, not '%s'"),
+    ("float() argument must be a string or a number, not '%s'",
+     "float() argument must be a string or a real number, not '%s'"),
+    # pow: CPython names the operator `** or pow()`
+    ("\"unsupported operand type(s) for %s: '%s' and '%s'\", op,",
+     "\"unsupported operand type(s) for %s: '%s' and '%s'\", (op[0] == '*' && op[1] == '*' && !op[2]) ? \"** or pow()\" : op,"),
+    ('return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to non-int");',
+     _FMT_INST + 'non-int"); }'),
+    ('return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported format string passed to non-float");',
+     _FMT_INST + 'non-float"); }'),
+    ('if (specobj.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "format() argument 2 must be str");',
+     'if (specobj.tag != AIL_T_STR) { char fb[512]; snprintf(fb, sizeof fb, "format() argument 2 must be str, not %s", '
+     'ail__tname_c(specobj)); return ail_raise_c(cx, AIL_B_TYPEERROR, fb); }'),
+)
