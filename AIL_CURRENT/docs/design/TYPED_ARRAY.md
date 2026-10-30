@@ -313,6 +313,72 @@ and the `v3` build may use `vcvtph2ps` / `vcvtps2ph` with round-to-nearest-even.
 tests. GCC's `_Float16` arithmetic is not used (its excess-precision rules vary by flag and version **[unverified]**);
 only explicit conversions are.
 
+### 5.2a Fusing a chain (built, branch array-fuse, 2026-10-30)
+
+Code: `Fuser` in `python/pkg-v12/ailarray.py`, `_ail_ta_bsum` and the unrolled `_ail_taf_fsum_s/_d` in `prelude_ailarray.py`;
+tests `test_ail_array_fuse.py`, cases `array_fuse_cases/`.
+
+T2 lowered `a * b + a` to one call per operation: a pass over memory and a new array for each. Now a tree of f64 operations is one
+generated function with one loop:
+
+| form | generated | notes |
+| --- | --- | --- |
+| `+ - * /`, unary minus, `abs`, `minimum`, `maximum`, `clip`, with arrays or scalars, 1 to 256 operations | `_ail_taf_fu<N>` (loop in `_ail_taf_fk<N>`) | a single operation too |
+| `a += tree`, `a -= tree`, `a *= tree`, `a /= tree` | `_ail_taf_fi<N>` | the loop reads and writes `a`; element k only reads element k, so aliasing is safe |
+| `ta.sum(tree)` | `_ail_taf_fs<N>` | the tree is computed one block of 1024 into a scratch array that `_ail_ta_bsum` adds in the order of 3.5 |
+| `ta.dot(x, y)`, a tree on either side | `_ail_taf_fd<N>` | the scratch array holds the products, which are rounded before the adds |
+
+Why the bits are T2's: the same binary64 operations in the same order (`-ffp-contract=off`); T2 makes a NaN canonical after every
+operation, and every fused operation returns a NaN for a NaN operand, so one canonicalisation at the end gives the same bits (a tree
+that ends in `minimum`/`maximum`/`clip` needs none: it returns a NaN only through its explicit canonical NaN); `x / y` is IEEE,
+y == 0 goes through the same `_ail_ta_fdiv0` and never raises (TA2); sums and dots do not canonicalise per element for the same
+reason, only the result; the shape checks come first, in T2's order and text. A tree with an operand that is a call, a subscript or
+anything but a name, constant or attribute chain is not fused as a whole (the operands would be evaluated before a check that used
+to come first); only its top operation is. A `ta.dot` whose second operand is such an expression is left to T2. int32 is untouched.
+The NaN equivalence is tested exhaustively on `array_fuse_cases/grid.py` (14 special values in all triples, 48 patterns of two
+operations, scalar patterns, sums, dots, in-place), with specials planted at lane and block boundaries in `reduce.py`.
+
+Lane indexing: the sixteen lanes are sixteen locals and the loop takes sixteen elements per pass, so there is no `% 16`; the short
+tail adds element j of the last group to lane j, which is the lane `(k - s) % 16` gave.
+
+What the IR needs (found by measuring): a function that returns an array is not compiled by the IR (the legacy emitter is 2 to 3
+times the instructions), so the loop is a kernel that returns a `list[float]` or nothing; an int parameter of a function that is
+not inlined becomes a tagged int and slows every index, so kernels take their length from `len()`; `list` parameters are read-only.
+
+Measured with `tools/icount.c` (instructions per repetition, user space, WSL, `-O2 -ffp-contract=off`), RSS from `/usr/bin/time`.
+"C" is hand-written `-O2` with the same order of operations (and, for sums, the lane order of 3.5).
+
+| op | n | T2 before | after | C |
+| --- | --- | --- | --- | --- |
+| `a*b+a` | 64K | 2.25M | 0.744M | 0.721M |
+| | 1M | 35.7M | 11.9M | 11.5M |
+| | 10M | 340M | 119M | 110M |
+| Horner 4 (8 ops) | 64K | 8.9M | 1.14M | 1.11M |
+| Horner 16 (32 ops) | 64K | 35.7M | 2.71M | 2.69M |
+| | 10M | 5,440M | 419M | 410M |
+| Horner 32 (64 ops) | 1M | 1,141M | 77.0M | 76.5M |
+| Horner 64 (128 ops) | 1M | 2,282M | 144M | 144M |
+| `a + b` (one op) | 64K | 1.14M | 0.611M | 0.590M |
+| `a / b + a` | 64K | 3.45M | 1.09M | 0.721M |
+| clip chain | 64K | 7.5M | 1.95M | 0.94M (C ignores -0.0) |
+| `abs(a - b) * a` | 64K | 4.15M | 1.07M | 0.786M |
+| `w += b * 1e-9` | 64K | 1.66M | 0.673M | 0.655M |
+| `ta.sum(a)` | 64K | 640k | 117k | 269k (lane array) / 91k (16 locals) |
+| | 1M | 9.9M | 1.50M | 4.3M / - |
+| `ta.dot(a, b)` | 64K | 706k | 187k | 302k / 161k |
+| `ta.sum(a * b)` | 64K | 1.76M | 0.660M | 0.662M |
+| `ta.dot(a, b * a)` | 64K | 1.82M | 0.922M | 0.695M |
+
+Peak RSS: Horner 16 at 1M 297 MB before, 57 MB after; Horner 64 at 1M 1,065 MB before, 57 MB after; at 10M Horner 16 2.8 GB before,
+535 MB after (four input arrays and a result are 460 MB of that); Horner 32 at 10M took 5.1 GB before (Horner 64 at 10M would need
+about 10 GB and was not run: it does not fit this machine, and that is the finding). C is lower in the RSS column only because
+its bench holds fewer arrays.
+
+Binary size of one-function programs (bytes, T2 before / after): `a*b+a` 31,584 / 31,688; `a+b` 31,584 / 31,688; Horner 16 52,200 /
+31,568; `ta.sum(a) + ta.dot(a, b)` 40,400 / 68,784 (the unrolled lanes cost about 28 KB: three 16-lane bodies, plain sum, plain
+dot and `_ail_ta_bsum`, each compiled twice by the IR for the guarded and the checked loop); a mix of chain, division, abs, in-place,
+clip, sum and dot 49,392 / 57,800. A program that only fuses chains gets smaller as the chain grows; one that sums gets bigger.
+
 ### 5.3 SIMD is an optimisation that cannot change a bit
 
 SIMD is allowed exactly where the scalar definition is order-free: element-wise ops, min/max, int reductions. For

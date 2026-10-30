@@ -1,3 +1,11 @@
+## 2026-10-30 -- ail_array: f64 expressions are fused in every build
+
+`a * b + a`, `a / b`, `abs`, `minimum`/`maximum`/`clip` chains (1 to 256 operations), `a += tree` and `ta.sum(tree)` / `ta.dot(x, tree)` are one
+generated loop, not a pass and an array per operation (TYPED_ARRAY.md 5.2a). Bits are T2's: same binary64 operations, one NaN canonicalisation at the
+end, IEEE division as T2, the shape checks first in T2's order. The sum lanes are 16 locals (no `% 16`). Instructions per repetition against T2 at 64K:
+`a*b+a` 3.0x fewer (0.744M vs 2.25M, hand C 0.721M), Horner 64 15.9x fewer (9.0M vs 142.7M, C 8.98M), `ta.sum` 5.5x fewer, `ta.dot` 3.8x fewer; Horner 16 at 1M
+needs 57 MB instead of 297 MB. Cost: a program that sums gets about 28 KB bigger. Tests: `test_ail_array_fuse.py`, `array_fuse_cases/`.
+
 ## 2026-10-30 -- GPU stage G1: `# ail: gpu`, the eligibility proof, kernel IR and its CPU emulation
 
 `compile --gpu` (or `AIL_GPU_BUILD=1`) reads `# ail: gpu` on the line before a loop (or at the end of a list-comprehension

@@ -1324,6 +1324,407 @@ class Lower(ast.NodeTransformer):
 
 
 # ---------------------------------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------------------------------------------------
+# Fusion of f64 element-wise code (docs/design/TYPED_ARRAY.md 5.2a).
+#
+# The lowering above turns `a * b + a` into `_ail_taf_bin(_ail_taf_bin(a, b, 2), a, 0)`: one pass over memory per operation, each with
+# an array allocated and filled for its result.  This pass (every build) rewrites such a tree into ONE call of a generated function
+# whose loop computes the whole expression for one element at a time:
+#
+#   map        `_ail_taf_fu<N>`  a tree of f64 `+ - * /`, unary minus, `abs`, `minimum`, `maximum`, `clip` (any scalar operand)
+#   in place   `_ail_taf_fi<N>`  `a += <tree>`, `a -= ...`, `a *= ...`, `a /= ...`: the loop reads and writes `a`
+#   sum        `_ail_taf_fs<N>`  `ta.sum(<tree>)`: the tree is evaluated one block of 1024 elements at a time into a scratch array of
+#                                the block, which `_ail_ta_bsum` adds in the fixed order of design 3.5 (16 lanes, then 8-4-2-1);
+#                                no array of n elements is made
+#   dot        `_ail_taf_fd<N>`  `ta.dot(x, y)` with a tree on either side: the same, the scratch array holds the products
+#
+# Why the bits are the same as T2's one pass per operation (every claim has a test in test_ail_array_fuse.py):
+# * every operation is the same binary64 operation on the same operands in the same order; the build says -ffp-contract=off, so a
+#   multiply and an add are never fused;
+# * T2 makes a NaN canonical after every operation.  Every operation here (+ - * /, neg, abs, minimum, maximum) gives a NaN when an
+#   operand is a NaN, so a NaN that appears stays a NaN down to the end of the tree and is made canonical there, once: the same
+#   bits.  A tree whose last operation is minimum/maximum/clip needs no canonicalisation at all: it only returns a NaN through the
+#   explicit canonical NaN of its NaN branch;
+# * `x / y` is IEEE and never raises (T2's rule, decision TA2): y == 0 goes through `_ail_ta_fdiv0` exactly as T2 does it;
+# * `ta.sum` / `ta.dot` skip the per-element canonicalisation too: a NaN element makes the sum a NaN, and the result is made canonical
+#   at the end as before; the products of `ta.dot` are rounded to binary64 before they are added (they are stored in the scratch array);
+# * the shape checks are made first, in the order the unfused code made them, with the same text; a tree with an operand that is
+#   a call, a subscript or anything but a name, a constant or an attribute chain is not fused as a whole (evaluating all operands
+#   first could change which error comes first, or which side effect happens first): only its top operation is, when that is
+#   worth it, with its operands evaluated where they stood.
+#
+# -----------------------------------------------------------------------------------------------------
+MAX_FUSED = 256
+FSYM = {0: '+', 1: '-', 2: '*', 3: '/'}
+MAPFN = ('_ail_taf_bin', '_ail_taf_bin_s', '_ail_taf_neg', '_ail_taf_abs', '_ail_taf_pick_aa', '_ail_taf_pick_as')
+BINARY = ('op', 'pk')       # ('op', code, L, R)   ('pk', smaller, L, R)
+SCALAR_NODES = ('sc', 'ps')       # ('sc', code, A, scalar, refl)   ('ps', smaller, A, scalar)
+UNARY = ('neg', 'abs')      # ('neg', A)   ('abs', A)
+
+
+def _is_call(node, name, nargs):
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == name and not node.keywords
+            and len(node.args) == nargs)
+
+
+def _small_int(node, allowed):
+    return isinstance(node, ast.Constant) and type(node.value) is int and node.value in allowed
+
+
+def _small_bool(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, bool)
+
+
+def _kids(t):
+    k = t[0]
+    if k in BINARY:
+        return [t[2], t[3]]
+    if k in SCALAR_NODES:
+        return [t[2]]
+    if k in UNARY:
+        return [t[1]]
+    return []
+
+
+class Fuser(ast.NodeTransformer):
+    def __init__(self):
+        self.defs = []          # Python source of the generated functions
+        self.made = {}          # shape key -> function name
+        self.counter = 0
+
+    # -- what may be a leaf -------------------------------------------------------------------------------------------------
+    def pure(self, node):
+        if isinstance(node, (ast.Name, ast.Constant)):
+            return True
+        if isinstance(node, ast.Attribute):
+            return self.pure(node.value)
+        return False
+
+    def pure_scalar(self, node):
+        if self.pure(node):
+            return True
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+            return self.pure_scalar(node.operand)
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)):
+            return self.pure_scalar(node.left) and self.pure_scalar(node.right)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('float', '_ail_ta_b2f') \
+                and len(node.args) == 1 and not node.keywords:
+            return self.pure_scalar(node.args[0])
+        return False
+
+    def leafkey(self, node):
+        """Two occurrences of the same name (a Store and a Load of `a` in `a += ...`) are the same leaf."""
+        if isinstance(node, ast.Name):
+            return ('n', node.id)
+        if isinstance(node, ast.Attribute):
+            return ('a', self.leafkey(node.value), node.attr)
+        return ('d', ast.dump(node))
+
+    # -- the tree of one f64 expression --------------------------------------------------------------------------------------
+    def tree(self, node, deep):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and not node.keywords):
+            return None
+        f, a = node.func.id, node.args
+        if f == '_ail_taf_bin' and len(a) == 3 and _small_int(a[2], FSYM):
+            return ('op', a[2].value, self.sub(a[0], deep), self.sub(a[1], deep))
+        if f == '_ail_taf_bin_s' and len(a) == 4 and _small_int(a[2], FSYM) and _small_bool(a[3]):
+            return ('sc', a[2].value, self.sub(a[0], deep), a[1], a[3].value)
+        if f == '_ail_taf_neg' and len(a) == 1:
+            return ('neg', self.sub(a[0], deep))
+        if f == '_ail_taf_abs' and len(a) == 1:
+            return ('abs', self.sub(a[0], deep))
+        if f == '_ail_taf_pick_aa' and len(a) == 3 and _small_bool(a[2]):
+            return ('pk', a[2].value, self.sub(a[0], deep), self.sub(a[1], deep))
+        if f == '_ail_taf_pick_as' and len(a) == 3 and _small_bool(a[2]):
+            return ('ps', a[2].value, self.sub(a[0], deep), a[1])
+        return None
+
+    def sub(self, node, deep):
+        """A child: part of the tree when `deep`, else an opaque leaf (the expression as it stands)."""
+        t = self.tree(node, True) if deep else None
+        return t if t is not None else ('leaf', node)
+
+    def ok(self, t, deep):
+        """Every leaf of a deep tree must be plain; a scalar operand must be a plain number expression."""
+        k = t[0]
+        if k == 'leaf':
+            return not deep or self.pure(t[1])
+        if k in SCALAR_NODES:
+            return self.ok(t[2], deep) and (not deep or self.pure_scalar(t[3]))
+        return all(self.ok(x, deep) for x in _kids(t))
+
+    def count(self, t):
+        return 0 if t[0] == 'leaf' else 1 + sum(self.count(x) for x in _kids(t))
+
+    # -- the shape of a tree with its leaves and scalars numbered ------------------------------------------------------------
+    def number(self, t, arrays, scalars):
+        """The shape of `t` (a hashable tuple); `arrays` and `scalars` collect the expressions in order of first use."""
+        k = t[0]
+        if k == 'leaf':
+            key = self.leafkey(t[1]) if self.pure(t[1]) else None        # an opaque operand is evaluated where it stood, once
+            for i, (kk, _) in enumerate(arrays):
+                if kk is not None and kk == key:
+                    return ('leaf', i)
+            arrays.append((key, t[1]))
+            return ('leaf', len(arrays) - 1)
+        if k in BINARY:
+            left = self.number(t[2], arrays, scalars)
+            return (k, t[1], left, self.number(t[3], arrays, scalars))
+        if k in SCALAR_NODES:
+            left = self.number(t[2], arrays, scalars)
+            key = ast.dump(t[3]) if self.pure_scalar(t[3]) else None
+            for i, (kk, _) in enumerate(scalars):
+                if kk is not None and kk == key:
+                    return (k, t[1], left, i) + tuple(t[4:])
+            scalars.append((key, t[3]))
+            return (k, t[1], left, len(scalars) - 1) + tuple(t[4:])
+        return (k, self.number(t[1], arrays, scalars))
+
+    def first(self, s):
+        while s[0] != 'leaf':
+            s = _kids(s)[0]
+        return s[1]
+
+    def checks(self, s, out):
+        """The shape checks of the unfused code, in its order: the operands of an operation, then its own check."""
+        if s[0] == 'leaf':
+            return
+        for x in _kids(s):
+            self.checks(x, out)
+        if s[0] in BINARY:
+            out.append((self.first(s[2]), self.first(s[3])))
+
+    def check_lines(self, pairs):
+        lines, seen = [], set()
+        for l, r in pairs:
+            if l == r or (l, r) in seen:                    # the same array against itself cannot differ
+                continue
+            seen.add((l, r))
+            lines.append('    if len(a%d.d) != len(a%d.d):' % (r, l))
+            lines.append('        _ail_ta_shapes(len(a%d.d), len(a%d.d))' % (l, r))
+        return lines
+
+    # -- the CPU loops: one element at a time, straight-line statements -------------------------------------------------------------
+    def emit(self, s, out, cnt):
+        """Appends to `out` the statements that compute the shape `s` for one element; returns the name of the value."""
+        k = s[0]
+        if k == 'leaf':
+            return 'p%d' % s[1]
+        if k in UNARY:
+            a = self.emit(s[1], out, cnt)
+            cnt[0] += 1
+            t = 't%d' % cnt[0]
+            out.append('%s = %s' % (t, ('-' + a) if k == 'neg' else 'math.fabs(%s)' % a))
+            return t
+        if k in ('op', 'sc'):
+            if k == 'op':
+                l = self.emit(s[2], out, cnt)
+                r = self.emit(s[3], out, cnt)
+            else:
+                a = self.emit(s[2], out, cnt)
+                x = 's%d' % s[3]
+                l, r = (x, a) if s[4] else (a, x)
+            cnt[0] += 1
+            t = 't%d' % cnt[0]
+            if s[1] < 3:
+                out.append('%s = %s %s %s' % (t, l, FSYM[s[1]], r))
+            else:                                   # T2's rule: no ZeroDivisionError, IEEE (decision TA2)
+                out += ['if %s == 0.0:' % r, '    %s = _ail_ta_fdiv0(%s, %s)' % (t, l, r), 'else:', '    %s = %s / %s' % (t, l, r)]
+            return t
+        l = self.emit(s[2], out, cnt)               # minimum / maximum: T2's _ail_taf_pick_aa / _ail_taf_pick_as, line by line
+        r = self.emit(s[3], out, cnt) if k == 'pk' else 's%d' % s[3]
+        cnt[0] += 1
+        t = 't%d' % cnt[0]
+        out += ['if %s != %s or %s != %s:' % (l, l, r, r), '    %s = nan' % t,
+                'elif %s_ail_ta_fless(%s, %s):' % ('' if s[1] else 'not ', r, l), '    %s = %s' % (t, r),
+                'else:', '    %s = %s' % (t, l)]
+        return t
+
+    @staticmethod
+    def canon_free(s):
+        """minimum / maximum return a NaN only through their explicit canonical NaN."""
+        return s[0] in ('pk', 'ps')
+
+    @staticmethod
+    def indent(lines, n):
+        return [(' ' * n + l) if l else l for l in lines]
+
+    def loads(self, na, form):
+        return ['p%d = %s' % (i, form % i) for i in range(na)]
+
+    def head(self, name, na, ns, ret):
+        params = ['a%d: _AilTAF' % i for i in range(na)] + ['s%d: float' % i for i in range(ns)]
+        return 'def %s(%s) -> %s:' % (name, ', '.join(params), ret)
+
+    def make_map(self, shape, na, ns):
+        key = ('f', False, shape)
+        if key in self.made:
+            return self.made[key]
+        n = self.counter
+        self.counter += 1
+        name, kname = '_ail_taf_fu%d' % n, '_ail_taf_fk%d' % n
+        body, cnt = [], [0]
+        res = self.emit(shape, body, cnt)
+        if not self.canon_free(shape):
+            body += ['if %s != %s:' % (res, res), '    %s = nan' % res]
+        kparams = ['x%d: list[float]' % i for i in range(na)] + ['s%d: float' % i for i in range(ns)]
+        lines = ['def %s(%s) -> list[float]:' % (kname, ', '.join(kparams)),
+                 '    n = len(x0)', '    nan = math.nan', '    o = [0.0] * n', '    for k in range(n):']
+        lines += self.indent(self.loads(na, 'x%d[k]') + body + ['o[k] = %s' % res], 8)
+        lines += ['    return o', '', '']
+        lines.append(self.head(name, na, ns, '_AilTAF'))
+        lines.append('    n = len(a0.d)')
+        checks = []
+        self.checks(shape, checks)
+        lines += self.check_lines(checks)
+        lines += ['    out = _AilTAF(0)',
+                  '    out.d = %s(%s)' % (kname, ', '.join(['a%d.d' % i for i in range(na)] + ['s%d' % i for i in range(ns)])),
+                  '    return out']
+        self.defs.append('\n'.join(lines) + '\n')
+        self.made[key] = name
+        return name
+
+    def make_inplace(self, shape, na, ns):
+        key = ('i', shape)
+        if key in self.made:
+            return self.made[key]
+        n = self.counter
+        self.counter += 1
+        name, kname = '_ail_taf_fi%d' % n, '_ail_taf_fk%d' % n
+        body, cnt = [], [0]
+        res = self.emit(shape, body, cnt)
+        if not self.canon_free(shape):
+            body += ['if %s != %s:' % (res, res), '    %s = nan' % res]
+        # the loop is a function of its own that returns nothing: a function that returns an array is not compiled by the IR
+        lines = [self.head(kname, na, ns, 'None'), '    n = len(a0.d)', '    nan = math.nan', '    for k in range(n):']
+        lines += self.indent(self.loads(na, 'a%d.d[k]') + body + ['a0.d[k] = %s' % res], 8)
+        lines += ['', '']
+        lines.append(self.head(name, na, ns, '_AilTAF'))
+        lines.append('    n = len(a0.d)')
+        checks = []
+        self.checks(shape, checks)
+        lines += self.check_lines(checks)
+        lines += ['    %s(%s)' % (kname, ', '.join(['a%d' % i for i in range(na)] + ['s%d' % i for i in range(ns)])), '    return a0']
+        self.defs.append(chr(10).join(lines) + chr(10))
+        self.made[key] = name
+        return name
+
+    def make_reduce(self, shapes, na, ns, dot):
+        """sum of `shapes[0]`, or the dot of `shapes[0]` and `shapes[1]`, one block of 1024 elements at a time."""
+        key = ('d' if dot else 's',) + tuple(shapes)
+        if key in self.made:
+            return self.made[key]
+        name = '_ail_taf_f%s%d' % ('d' if dot else 's', self.counter)
+        self.counter += 1
+        body, cnt = [], [0]
+        res = [self.emit(s, body, cnt) for s in shapes]
+        value = '%s * %s' % (res[0], res[1]) if dot else res[0]
+        lines = [self.head(name, na, ns, 'float'), '    n = len(a0.d)']
+        checks = []
+        for s in shapes:
+            self.checks(s, checks)
+        if dot:
+            checks.append((self.first(shapes[0]), self.first(shapes[1])))
+        lines += self.check_lines(checks)
+        lines += ['    if n == 0:', '        return 0.0',
+                  '    nb = (n + 1023) // 1024', '    blocks = [0.0] * nb', '    m = 1024', '    if n < 1024:', '        m = n',
+                  '    buf = _AilTAF(m)'] + (['    nan = math.nan'] if any(l.endswith('= nan') for l in body) else []) + [
+                  '    for b in range(nb):', '        s = b * 1024', '        t = s + 1024', '        if t > n:', '            t = n',
+                  '        if t - s != len(buf.d):', '            buf = _AilTAF(t - s)',
+                  '        for k in range(s, t):']
+        lines += self.indent(self.loads(na, 'a%d.d[k]') + body + ['buf.d[k - s] = %s' % value], 12)
+        lines += ['        blocks[b] = _ail_ta_bsum(buf)',
+                  '    r = _ail_ta_tree(blocks, 0, nb)', '    if r != r:', '        return math.nan', '    return r']
+        self.defs.append('\n'.join(lines) + '\n')
+        self.made[key] = name
+        return name
+
+    # -- the rewrite ------------------------------------------------------------------------------------------------------------
+    def call_of(self, name, arrays, scalars, node):
+        new = ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=[self.load(e) for _, e in arrays] + [e for _, e in scalars],
+                       keywords=[])
+        return ast.copy_location(new, node)
+
+    @staticmethod
+    def load(e):
+        return ast.Name(id=e.id, ctx=ast.Load()) if isinstance(e, ast.Name) else e
+
+    def visit_Call(self, node):
+        if isinstance(node.func, ast.Name):
+            fn = node.func.id
+            fused = None
+            if fn in MAPFN:
+                fused = self.fuse(node)
+            elif fn == '_ail_taf_ibin' and len(node.args) == 3 and not node.keywords:
+                fused = self.fuse_inplace(node)
+            elif fn == '_ail_taf_sum' and len(node.args) == 1 and not node.keywords:
+                fused = self.fuse_reduce(node, [node.args[0]], False)
+            elif fn == '_ail_taf_dot' and len(node.args) == 2 and not node.keywords:
+                fused = self.fuse_reduce(node, node.args, True)
+            if fused is not None:
+                return fused
+        return self.generic_visit(node)
+
+    def fuse(self, node):
+        for deep in (True, False):
+            t = self.tree(node, deep)
+            if t is None or not self.ok(t, deep):
+                continue
+            c = self.count(t)
+            if c > MAX_FUSED or c < 1:
+                continue
+            arrays, scalars = [], []
+            shape = self.number(t, arrays, scalars)
+            name = self.make_map(shape, len(arrays), len(scalars))
+            new = self.call_of(name, arrays, scalars, node)
+            return new if deep else self.generic_visit(new)      # opaque operands may hold more of the same
+        return None
+
+    def fuse_inplace(self, node):
+        """`a = _ail_taf_ibin(a, <tree>, code)`: the loop reads and writes `a`."""
+        target, rhs, code = node.args
+        if not (isinstance(target, ast.Name) and _small_int(code, FSYM)):
+            return None
+        t = self.tree(rhs, True)
+        if t is None or not self.ok(t, True) or self.count(t) + 1 > MAX_FUSED:
+            return None
+        whole = ('op', code.value, ('leaf', target), t)
+        arrays, scalars = [], []
+        shape = self.number(whole, arrays, scalars)
+        return self.call_of(self.make_inplace(shape, len(arrays), len(scalars)), arrays, scalars, node)
+
+    def fuse_reduce(self, node, args, dot):
+        """`ta.sum(<tree>)`, `ta.dot(x, y)` with a tree among x, y."""
+        for deep in (True, False):
+            trees = []
+            for i, a in enumerate(args):
+                t = self.tree(a, deep)
+                if t is None or not self.ok(t, deep):
+                    if deep and self.pure(a):
+                        t = ('leaf', a)
+                    elif dot and deep and i == 0 and len(args) == 2:
+                        t = ('leaf', a)         # an opaque first operand is evaluated first, as it was
+                    else:
+                        trees = None
+                        break
+                trees.append(t)
+            if trees is None:
+                continue
+            if not dot and not deep and trees[0][0] == 'leaf':
+                continue
+            if dot and not deep:
+                continue                        # the second operand would be evaluated before the first one's checks
+            c = sum(self.count(t) for t in trees)
+            if c < 1 or c > MAX_FUSED:
+                continue
+            arrays, scalars = [], []
+            shapes = [self.number(t, arrays, scalars) for t in trees]
+            name = self.make_reduce(shapes, len(arrays), len(scalars), dot)
+            new = self.call_of(name, arrays, scalars, node)
+            return new if deep else self.generic_visit(new)
+        return None
+
+
 def rewrite_text(source, notes=None):
     """The program text with `ail_array` lowered; the source as written (and `notes` filled) when a use is not built."""
     if MODULE not in source:
@@ -1342,6 +1743,9 @@ def rewrite_text(source, notes=None):
         typer.analyze()
         lower = Lower(typer)
         tree.body = [s for st in tree.body for s in _flat(lower.visit(st))]
+        fuser = Fuser()                                    # element-wise fusion (docs/design/TYPED_ARRAY.md 5.2a)
+        tree.body = [fuser.visit(st) for st in tree.body]
+        ast.fix_missing_locations(tree)
         used = set()
         for each in ast.walk(tree):
             if isinstance(each, ast.Name) and (each.id.startswith('_ail_ta') or each.id.startswith('_AilTA')):
@@ -1350,7 +1754,7 @@ def rewrite_text(source, notes=None):
         for each in ast.walk(tree):
             if isinstance(each, ast.Name) and each.id in binder.aliases:
                 refuse(each, 'ail_array used as a value is not built')
-        body = stdlib5.shake(prelude_source(), used)
+        body = stdlib5.shake(prelude_source() + ('\n\n' + '\n\n'.join(fuser.defs) if fuser is not None else ''), used)
         math_imported = any(isinstance(s, ast.Import) and any(a.name == 'math' and not a.asname for a in s.names)
                             for s in tree.body)
         extra = [] if math_imported else [ast.Import(names=[ast.alias(name='math', asname=None)])]

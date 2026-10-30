@@ -464,6 +464,7 @@ def _ail_ta_fdiv0(x: float, y: float) -> float:
 
 def _ail_taf_aa(dst: _AilTAF, a: _AilTAF, b: _AilTAF, op: int):
     """dst = a op b (op 0 + 1 - 2 * 3 /); dst may be a or b."""
+    nan = math.nan
     n = len(a.d)
     if len(b.d) != n:
         _ail_ta_shapes(n, len(b.d))
@@ -471,19 +472,19 @@ def _ail_taf_aa(dst: _AilTAF, a: _AilTAF, b: _AilTAF, op: int):
         for k in range(n):
             v = a.d[k] + b.d[k]
             if v != v:
-                v = math.nan
+                v = nan
             dst.d[k] = v
     elif op == 1:
         for k in range(n):
             v = a.d[k] - b.d[k]
             if v != v:
-                v = math.nan
+                v = nan
             dst.d[k] = v
     elif op == 2:
         for k in range(n):
             v = a.d[k] * b.d[k]
             if v != v:
-                v = math.nan
+                v = nan
             dst.d[k] = v
     else:
         for k in range(n):
@@ -494,37 +495,38 @@ def _ail_taf_aa(dst: _AilTAF, a: _AilTAF, b: _AilTAF, op: int):
             else:
                 v = a.d[k] / y
             if v != v:
-                v = math.nan
+                v = nan
             dst.d[k] = v
 
 
 def _ail_taf_as(dst: _AilTAF, a: _AilTAF, x: float, op: int, refl: bool):
     """dst = a op x, or x op a when refl; x is the scalar already stored to f64 (NaN canonical)."""
+    nan = math.nan
     n = len(a.d)
     if op == 0:
         for k in range(n):
             v = a.d[k] + x
             if v != v:
-                v = math.nan
+                v = nan
             dst.d[k] = v
     elif op == 1:
         if refl:
             for k in range(n):
                 v = x - a.d[k]
                 if v != v:
-                    v = math.nan
+                    v = nan
                 dst.d[k] = v
         else:
             for k in range(n):
                 v = a.d[k] - x
                 if v != v:
-                    v = math.nan
+                    v = nan
                 dst.d[k] = v
     elif op == 2:
         for k in range(n):
             v = a.d[k] * x
             if v != v:
-                v = math.nan
+                v = nan
             dst.d[k] = v
     else:
         for k in range(n):
@@ -539,7 +541,7 @@ def _ail_taf_as(dst: _AilTAF, a: _AilTAF, x: float, op: int, refl: bool):
             else:
                 v = p / q
             if v != v:
-                v = math.nan
+                v = nan
             dst.d[k] = v
 
 
@@ -566,21 +568,24 @@ def _ail_taf_ibin_s(a: _AilTAF, x: float, op: int) -> _AilTAF:
 
 
 def _ail_taf_neg(a: _AilTAF) -> _AilTAF:
+    nan = math.nan
     out = _AilTAF(len(a.d))
     for k in range(len(a.d)):
         v = -a.d[k]
         if v != v:
-            v = math.nan
+            v = nan
         out.d[k] = v
     return out
 
 
 def _ail_taf_abs(a: _AilTAF) -> _AilTAF:
     out = _AilTAF(len(a.d))
+    nan = math.nan
     for k in range(len(a.d)):
-        out.d[k] = math.fabs(a.d[k])
-        if out.d[k] != out.d[k]:
-            out.d[k] = math.nan
+        v = math.fabs(a.d[k])
+        if v != v:
+            v = nan
+        out.d[k] = v
     return out
 
 
@@ -630,11 +635,12 @@ def _ail_taf_pick_aa(a: _AilTAF, b: _AilTAF, smaller: bool) -> _AilTAF:
     if len(b.d) != n:
         _ail_ta_shapes(n, len(b.d))
     out = _AilTAF(n)
+    nan = math.nan
     for k in range(n):
         x = a.d[k]
         y = b.d[k]
         if x != x or y != y:
-            out.d[k] = math.nan
+            out.d[k] = nan
         elif _ail_ta_fless(y, x) == smaller:
             out.d[k] = y
         else:
@@ -646,10 +652,11 @@ def _ail_taf_pick_as(a: _AilTAF, s: float, smaller: bool) -> _AilTAF:
     n = len(a.d)
     y = _ail_ta_canon(s)
     out = _AilTAF(n)
+    nan = math.nan
     for k in range(n):
         x = a.d[k]
         if x != x or y != y:
-            out.d[k] = math.nan
+            out.d[k] = nan
         elif _ail_ta_fless(y, x) == smaller:
             out.d[k] = y
         else:
@@ -667,7 +674,7 @@ def _ail_ta_tree(blocks: list[float], lo: int, hi: int) -> float:
     return _ail_ta_tree(blocks, lo, lo + p) + _ail_ta_tree(blocks, lo + p, hi)
 
 
-def _ail_taf_fsum(d: list[float], e: list[float], dot: bool) -> float:
+def _ail_taf_fsum_s(d: list[float]) -> float:
     n = len(d)
     if n == 0:
         return 0.0
@@ -678,36 +685,298 @@ def _ail_taf_fsum(d: list[float], e: list[float], dot: bool) -> float:
         t = s + 1024
         if t > n:
             t = n
-        lanes = [-0.0] * 16
+        l0 = -0.0
+        l1 = -0.0
+        l2 = -0.0
+        l3 = -0.0
+        l4 = -0.0
+        l5 = -0.0
+        l6 = -0.0
+        l7 = -0.0
+        l8 = -0.0
+        l9 = -0.0
+        l10 = -0.0
+        l11 = -0.0
+        l12 = -0.0
+        l13 = -0.0
+        l14 = -0.0
+        l15 = -0.0
+        full = s + ((t - s) // 16) * 16
         k = s
-        if dot:
-            while k < t:
-                lanes[(k - s) % 16] = lanes[(k - s) % 16] + d[k] * e[k]
-                k = k + 1
-        else:
-            while k < t:
-                lanes[(k - s) % 16] = lanes[(k - s) % 16] + d[k]
-                k = k + 1
-        w = 8
-        while w > 0:
-            for i in range(w):
-                lanes[i] = lanes[i] + lanes[i + w]
-            w = w // 2
-        blocks[b] = lanes[0]
+        while k < full:
+            l0 = l0 + d[k + 0]
+            l1 = l1 + d[k + 1]
+            l2 = l2 + d[k + 2]
+            l3 = l3 + d[k + 3]
+            l4 = l4 + d[k + 4]
+            l5 = l5 + d[k + 5]
+            l6 = l6 + d[k + 6]
+            l7 = l7 + d[k + 7]
+            l8 = l8 + d[k + 8]
+            l9 = l9 + d[k + 9]
+            l10 = l10 + d[k + 10]
+            l11 = l11 + d[k + 11]
+            l12 = l12 + d[k + 12]
+            l13 = l13 + d[k + 13]
+            l14 = l14 + d[k + 14]
+            l15 = l15 + d[k + 15]
+            k = k + 16
+        rem = t - full
+        if rem > 0:
+            l0 = l0 + d[full + 0]
+        if rem > 1:
+            l1 = l1 + d[full + 1]
+        if rem > 2:
+            l2 = l2 + d[full + 2]
+        if rem > 3:
+            l3 = l3 + d[full + 3]
+        if rem > 4:
+            l4 = l4 + d[full + 4]
+        if rem > 5:
+            l5 = l5 + d[full + 5]
+        if rem > 6:
+            l6 = l6 + d[full + 6]
+        if rem > 7:
+            l7 = l7 + d[full + 7]
+        if rem > 8:
+            l8 = l8 + d[full + 8]
+        if rem > 9:
+            l9 = l9 + d[full + 9]
+        if rem > 10:
+            l10 = l10 + d[full + 10]
+        if rem > 11:
+            l11 = l11 + d[full + 11]
+        if rem > 12:
+            l12 = l12 + d[full + 12]
+        if rem > 13:
+            l13 = l13 + d[full + 13]
+        if rem > 14:
+            l14 = l14 + d[full + 14]
+        if rem > 15:
+            l15 = l15 + d[full + 15]
+        l0 = l0 + l8
+        l1 = l1 + l9
+        l2 = l2 + l10
+        l3 = l3 + l11
+        l4 = l4 + l12
+        l5 = l5 + l13
+        l6 = l6 + l14
+        l7 = l7 + l15
+        l0 = l0 + l4
+        l1 = l1 + l5
+        l2 = l2 + l6
+        l3 = l3 + l7
+        l0 = l0 + l2
+        l1 = l1 + l3
+        l0 = l0 + l1
+        blocks[b] = l0
     r = _ail_ta_tree(blocks, 0, nb)
     if r != r:
         return math.nan
     return r
 
 
+def _ail_taf_fsum_d(d: list[float], e: list[float]) -> float:
+    n = len(d)
+    if n == 0:
+        return 0.0
+    nb = (n + 1023) // 1024
+    blocks = [0.0] * nb
+    for b in range(nb):
+        s = b * 1024
+        t = s + 1024
+        if t > n:
+            t = n
+        l0 = -0.0
+        l1 = -0.0
+        l2 = -0.0
+        l3 = -0.0
+        l4 = -0.0
+        l5 = -0.0
+        l6 = -0.0
+        l7 = -0.0
+        l8 = -0.0
+        l9 = -0.0
+        l10 = -0.0
+        l11 = -0.0
+        l12 = -0.0
+        l13 = -0.0
+        l14 = -0.0
+        l15 = -0.0
+        full = s + ((t - s) // 16) * 16
+        k = s
+        while k < full:
+            l0 = l0 + d[k + 0] * e[k + 0]
+            l1 = l1 + d[k + 1] * e[k + 1]
+            l2 = l2 + d[k + 2] * e[k + 2]
+            l3 = l3 + d[k + 3] * e[k + 3]
+            l4 = l4 + d[k + 4] * e[k + 4]
+            l5 = l5 + d[k + 5] * e[k + 5]
+            l6 = l6 + d[k + 6] * e[k + 6]
+            l7 = l7 + d[k + 7] * e[k + 7]
+            l8 = l8 + d[k + 8] * e[k + 8]
+            l9 = l9 + d[k + 9] * e[k + 9]
+            l10 = l10 + d[k + 10] * e[k + 10]
+            l11 = l11 + d[k + 11] * e[k + 11]
+            l12 = l12 + d[k + 12] * e[k + 12]
+            l13 = l13 + d[k + 13] * e[k + 13]
+            l14 = l14 + d[k + 14] * e[k + 14]
+            l15 = l15 + d[k + 15] * e[k + 15]
+            k = k + 16
+        rem = t - full
+        if rem > 0:
+            l0 = l0 + d[full + 0] * e[full + 0]
+        if rem > 1:
+            l1 = l1 + d[full + 1] * e[full + 1]
+        if rem > 2:
+            l2 = l2 + d[full + 2] * e[full + 2]
+        if rem > 3:
+            l3 = l3 + d[full + 3] * e[full + 3]
+        if rem > 4:
+            l4 = l4 + d[full + 4] * e[full + 4]
+        if rem > 5:
+            l5 = l5 + d[full + 5] * e[full + 5]
+        if rem > 6:
+            l6 = l6 + d[full + 6] * e[full + 6]
+        if rem > 7:
+            l7 = l7 + d[full + 7] * e[full + 7]
+        if rem > 8:
+            l8 = l8 + d[full + 8] * e[full + 8]
+        if rem > 9:
+            l9 = l9 + d[full + 9] * e[full + 9]
+        if rem > 10:
+            l10 = l10 + d[full + 10] * e[full + 10]
+        if rem > 11:
+            l11 = l11 + d[full + 11] * e[full + 11]
+        if rem > 12:
+            l12 = l12 + d[full + 12] * e[full + 12]
+        if rem > 13:
+            l13 = l13 + d[full + 13] * e[full + 13]
+        if rem > 14:
+            l14 = l14 + d[full + 14] * e[full + 14]
+        if rem > 15:
+            l15 = l15 + d[full + 15] * e[full + 15]
+        l0 = l0 + l8
+        l1 = l1 + l9
+        l2 = l2 + l10
+        l3 = l3 + l11
+        l4 = l4 + l12
+        l5 = l5 + l13
+        l6 = l6 + l14
+        l7 = l7 + l15
+        l0 = l0 + l4
+        l1 = l1 + l5
+        l2 = l2 + l6
+        l3 = l3 + l7
+        l0 = l0 + l2
+        l1 = l1 + l3
+        l0 = l0 + l1
+        blocks[b] = l0
+    r = _ail_ta_tree(blocks, 0, nb)
+    if r != r:
+        return math.nan
+    return r
+
+
+def _ail_ta_bsum(d: _AilTAF) -> float:
+    """The value of one block (at most 1024 elements, the whole of `d`): 16 lanes, then the 8-4-2-1 tree of design 3.5.  The
+    sixteen lane sums are sixteen locals and the lane of element k is the position in the unrolled group, so there is no modulo."""
+    m = len(d.d)
+    l0 = -0.0
+    l1 = -0.0
+    l2 = -0.0
+    l3 = -0.0
+    l4 = -0.0
+    l5 = -0.0
+    l6 = -0.0
+    l7 = -0.0
+    l8 = -0.0
+    l9 = -0.0
+    l10 = -0.0
+    l11 = -0.0
+    l12 = -0.0
+    l13 = -0.0
+    l14 = -0.0
+    l15 = -0.0
+    full = 0 + ((m - 0) // 16) * 16
+    k = 0
+    while k < full:
+        l0 = l0 + d.d[k + 0]
+        l1 = l1 + d.d[k + 1]
+        l2 = l2 + d.d[k + 2]
+        l3 = l3 + d.d[k + 3]
+        l4 = l4 + d.d[k + 4]
+        l5 = l5 + d.d[k + 5]
+        l6 = l6 + d.d[k + 6]
+        l7 = l7 + d.d[k + 7]
+        l8 = l8 + d.d[k + 8]
+        l9 = l9 + d.d[k + 9]
+        l10 = l10 + d.d[k + 10]
+        l11 = l11 + d.d[k + 11]
+        l12 = l12 + d.d[k + 12]
+        l13 = l13 + d.d[k + 13]
+        l14 = l14 + d.d[k + 14]
+        l15 = l15 + d.d[k + 15]
+        k = k + 16
+    rem = m - full
+    if rem > 0:
+        l0 = l0 + d.d[full + 0]
+    if rem > 1:
+        l1 = l1 + d.d[full + 1]
+    if rem > 2:
+        l2 = l2 + d.d[full + 2]
+    if rem > 3:
+        l3 = l3 + d.d[full + 3]
+    if rem > 4:
+        l4 = l4 + d.d[full + 4]
+    if rem > 5:
+        l5 = l5 + d.d[full + 5]
+    if rem > 6:
+        l6 = l6 + d.d[full + 6]
+    if rem > 7:
+        l7 = l7 + d.d[full + 7]
+    if rem > 8:
+        l8 = l8 + d.d[full + 8]
+    if rem > 9:
+        l9 = l9 + d.d[full + 9]
+    if rem > 10:
+        l10 = l10 + d.d[full + 10]
+    if rem > 11:
+        l11 = l11 + d.d[full + 11]
+    if rem > 12:
+        l12 = l12 + d.d[full + 12]
+    if rem > 13:
+        l13 = l13 + d.d[full + 13]
+    if rem > 14:
+        l14 = l14 + d.d[full + 14]
+    if rem > 15:
+        l15 = l15 + d.d[full + 15]
+    l0 = l0 + l8
+    l1 = l1 + l9
+    l2 = l2 + l10
+    l3 = l3 + l11
+    l4 = l4 + l12
+    l5 = l5 + l13
+    l6 = l6 + l14
+    l7 = l7 + l15
+    l0 = l0 + l4
+    l1 = l1 + l5
+    l2 = l2 + l6
+    l3 = l3 + l7
+    l0 = l0 + l2
+    l1 = l1 + l3
+    l0 = l0 + l1
+    return l0
+
+
 def _ail_taf_sum(a: _AilTAF) -> float:
-    return _ail_taf_fsum(a.d, a.d, False)
+    return _ail_taf_fsum_s(a.d)
 
 
 def _ail_taf_dot(a: _AilTAF, b: _AilTAF) -> float:
     if len(b.d) != len(a.d):
         _ail_ta_shapes(len(a.d), len(b.d))
-    return _ail_taf_fsum(a.d, b.d, True)
+    return _ail_taf_fsum_d(a.d, b.d)
 
 
 def _ail_taf_extreme(a: _AilTAF, smaller: bool, name: str) -> list[int]:
