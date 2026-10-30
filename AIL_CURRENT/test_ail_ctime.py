@@ -57,6 +57,45 @@ class UnprintableTable(unittest.TestCase):
         self.assertEqual(text, ''.join('    {%d, %d},\n' % row for row in scan_rows()))
 
 
+class SourcesMemoBesideBytecode(unittest.TestCase):
+    def setUp(self):
+        import buildcache
+        self.buildcache = buildcache
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.package = Path(self.tmp.name) / 'pkg'
+        self.package.mkdir()
+        (self.package / 'a.py').write_text('x = 1\n')
+        (self.package / 'b.h').write_text('int y;\n')
+
+    def hash_with(self, cache_name, forbid_reads=False):
+        env = {'AIL_CACHE': str(Path(self.tmp.name) / cache_name)}
+        with mock.patch.dict(os.environ, env), mock.patch.dict(self.buildcache._sources, clear=True):
+            os.environ.pop('PYTHONDONTWRITEBYTECODE', None)
+            if forbid_reads:
+                with mock.patch.object(Path, 'read_bytes', side_effect=AssertionError('sources were read again')):
+                    return self.buildcache.sources_hash(self.package)
+            return self.buildcache.sources_hash(self.package)
+
+    def test_clean_cache_reuses_the_memo_beside_the_bytecode(self):
+        first = self.hash_with('cache-one')
+        self.assertEqual(len(list((self.package / '__pycache__').glob('ail-srcsig-*'))), 1)
+        self.assertEqual(self.hash_with('cache-two', forbid_reads=True), first)
+
+    def test_a_changed_source_changes_the_hash_and_replaces_the_memo(self):
+        first = self.hash_with('cache-one')
+        (self.package / 'a.py').write_text('x = 22\n')
+        second = self.hash_with('cache-two')
+        self.assertNotEqual(first, second)
+        self.assertEqual(len(list((self.package / '__pycache__').glob('ail-srcsig-*'))), 1)
+
+    def test_no_memo_is_written_when_bytecode_is_switched_off(self):
+        env = {'AIL_CACHE': str(Path(self.tmp.name) / 'cache-off'), 'PYTHONDONTWRITEBYTECODE': '1'}
+        with mock.patch.dict(os.environ, env), mock.patch.dict(self.buildcache._sources, clear=True):
+            self.buildcache.sources_hash(self.package)
+        self.assertFalse((self.package / '__pycache__').exists())
+
+
 class BytecodeSwitch(unittest.TestCase):
     def test_child_python_command(self):
         with mock.patch.dict(os.environ):
