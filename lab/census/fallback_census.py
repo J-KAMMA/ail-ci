@@ -50,6 +50,10 @@ def _setup():
     sys.path.insert(0, str(ROOT / 'python' / 'pkg-v12'))
     sys.setrecursionlimit(20000)
     signal.signal(signal.SIGALRM, _alarm)
+    # `ail_chatgpt.py compile --syntax python` builds with the Python surface; the tagged-int gate of the IR driver
+    # (ir/driver.py `_apply`) only exists there. Without it the census called a program "typed" that the real compile
+    # sends to the general path (the stdin `int(data[0])` idiom, a list used as a value, a method ...).
+    os.environ['AIL_SURFACE'] = 'python'
 
 
 def _prepare(path):
@@ -181,6 +185,10 @@ def census_one(args):
         src = _prepare(path)
         rec['lines'] = src.count('\n') + 1
         try:
+            # the same steps as pyc._build_unshadowed_inner, up to the typed attempt (no C compiler is run)
+            if pyc._is_whole_program(src):
+                pyc._refuse_big_capable(src, local=False)
+            pyc._refuse_typed_big_store(src, False)
             pyc.to_c(src, strict=True, info={'_checked_arrays': True})
             rec['typed'] = True
             return rec
