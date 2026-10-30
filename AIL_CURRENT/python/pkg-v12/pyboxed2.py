@@ -785,24 +785,29 @@ static inline int ail2_print_scalar(ail_obj x) {
 }
 
 /* print(sep=, end=): None means the default, anything but a str is CPython's TypeError (before any output) */
-static inline ail_st ail2_print_sepend(ail_ctx *cx, ail_obj *sep, ail_obj *end) {
+static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_obj sep, ail_obj end);
+static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsigned char *sepb4,
+                                         int64_t n, ail_obj sep, ail_obj end);
+/* The None / non-str cases run out of line (cold, never inlined) and call print again with plain strs, so sep and end
+   are never address-taken in the inlined print: taking their address there kept every print() call from being folded. */
+__attribute__((noinline, cold)) static ail_st ail2_print_sepend_do(ail_ctx *cx, ail_obj *vals, const unsigned char *sepb4,
+                                                                    int64_t n, ail_obj sep, ail_obj end) {
     char b[400];
-    if (sep->tag == AIL_T_NONE) *sep = ail_str_from_cstr(cx, " ");
-    else if (sep->tag != AIL_T_STR) {
-        snprintf(b, sizeof b, "sep must be None or a string, not %s", ail__tname_c(*sep));
+    if (sep.tag == AIL_T_NONE) sep = ail_str_from_cstr(cx, " ");
+    else if (sep.tag != AIL_T_STR) {
+        snprintf(b, sizeof b, "sep must be None or a string, not %s", ail__tname_c(sep));
         return ail_raise_c(cx, AIL_B_TYPEERROR, b);
     }
-    if (end->tag == AIL_T_NONE) *end = ail_str_from_cstr(cx, "\n");
-    else if (end->tag != AIL_T_STR) {
-        snprintf(b, sizeof b, "end must be None or a string, not %s", ail__tname_c(*end));
+    if (end.tag == AIL_T_NONE) end = ail_str_from_cstr(cx, "\n");
+    else if (end.tag != AIL_T_STR) {
+        snprintf(b, sizeof b, "end must be None or a string, not %s", ail__tname_c(end));
         return ail_raise_c(cx, AIL_B_TYPEERROR, b);
     }
-    return AIL_OK;
+    return sepb4 ? ail2_do_print_parts(cx, vals, sepb4, n, sep, end) : ail2_do_print(cx, vals, n, sep, end);
 }
 static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_obj sep, ail_obj end) {
-    if (__builtin_expect(sep.tag != AIL_T_STR || end.tag != AIL_T_STR, 0)) {
-        ail_st pst = ail2_print_sepend(cx, &sep, &end); if (pst != AIL_OK) return pst;
-    }
+    if (__builtin_expect(sep.tag != AIL_T_STR || end.tag != AIL_T_STR, 0))
+        return ail2_print_sepend_do(cx, vals, NULL, n, sep, end);
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -836,9 +841,8 @@ static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_ob
    strictly between real print() arguments and nowhere else. */
 static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsigned char *sepb4,
                                          int64_t n, ail_obj sep, ail_obj end) {
-    if (__builtin_expect(sep.tag != AIL_T_STR || end.tag != AIL_T_STR, 0)) {
-        ail_st pst = ail2_print_sepend(cx, &sep, &end); if (pst != AIL_OK) return pst;
-    }
+    if (__builtin_expect(sep.tag != AIL_T_STR || end.tag != AIL_T_STR, 0))
+        return ail2_print_sepend_do(cx, vals, sepb4, n, sep, end);
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -11854,7 +11858,10 @@ class Compiler(boxclosure.ClosureMixin):
         """`st = fn(cx, &new, cur, rhs);` for an augmented assignment, and the failure's text made CPython's:
         `unsupported operand type(s) for +=:` where the binary operator's helper says `for +:`."""
         plain = self.AUG_TEXT.get(type(node.op))
-        if plain is not None and not re.match(r'^[A-Za-z_][A-Za-z_0-9]*$', rhs):
+        # a literal operand (`x += 1`) stays a literal in both uses: parking it in a slot first hides the constant from the
+        # C compiler, and ail_op_iadd / ail_op_add then stop being folded down to their int fast path (about 3 KB per program)
+        if plain is not None and not re.match(r'^[A-Za-z_][A-Za-z_0-9]*$', rhs) \
+                and not re.match(r'^ail_box_(?:int|float|bool)\(-?[0-9.]+(?:LL|ULL|e[-+]?[0-9]+)?\)$', rhs):
             t = ctx.tmp()
             ctx.emit('%s = %s;' % (t, rhs))
             rhs = t

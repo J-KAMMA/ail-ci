@@ -2016,12 +2016,24 @@ static inline ail_st ail2m_idx(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (__builtin_expect(x.tag == AIL_T_INT || x.tag == AIL_T_BOOL, 1)) { *out = x; return AIL_OK; }
 /*B>*/
     char buf[600];
+#ifdef AIL_HAVE_DUNDER   /* only a program with a class that defines a hook method can have an instance with __index__ */
     if (x.tag == AIL_T_INST) {
-        ail_st st = ail_bi_int(cx, out, x, 0, 0);
-        if (st == AIL_OK) return st;
-        if (cx->exc.cls.o != cx->builtin_cls[AIL_B_TYPEERROR].o || cx->exc.value.tag != AIL_T_NONE) return st;
-        ail_exc_clear(cx);
+        /* __index__ only, as CPython's PyNumber_Index does (int() would also take __int__ and __trunc__, and drags in the
+           whole int()-from-text parser: about 3 KB in every program that calls math.comb / perm / gcd) */
+        ail_d1_fn f = ail_dun1(x, AIL_D1_INDEX);
+        if (f) {
+            ail_obj r; ail_st st = f(cx, &r, x);
+            if (st != AIL_OK) return st;
+/*B<*/
+            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL || r.tag == AIL_T_BIG) { *out = r; return AIL_OK; }
+/*B|*/
+            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = r; return AIL_OK; }
+/*B>*/
+            snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__tname_c(r));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
     }
+#endif
     snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(x));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
