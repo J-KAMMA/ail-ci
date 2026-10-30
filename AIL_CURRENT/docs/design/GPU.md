@@ -1,6 +1,6 @@
-# GPU offload (design only, 2026-10-29)
+# GPU offload (design 2026-10-29; G1 and G2 built, see 6.1 and 6.2)
 
-Design note for running parts of an AIL program on a GPU. Nothing here is built yet. The roadmap keeps the
+Design note for running parts of an AIL program on a GPU. Stages G1 and G2 are built (sections 6.1, 6.2); the rest is design. The roadmap keeps the
 implementation last (IR core -> correctness -> coverage -> FFI/modules -> tooling -> release -> GPU); this note fixes the
 design now so the earlier stages do not close doors. Oracle: CPython 3.12, as everywhere else.
 
@@ -397,6 +397,65 @@ and means the same as unset); no `AIL_GPU_FAULT` (G4); no `--gpu=auto` (G7); flo
 read); strided writes (`out[i * K + j]`) and conditional stores are not built; a comprehension over `zip()` is proven but the
 typed path does not compile it, so such a program runs on the general path with the note; `float()` of a bool list and
 bool-valued results are stored as 0/1 ints.
+
+### 6.2 G2 as built (2026-10-30)
+
+Code: `python/pkg-v12/gpu_spirv.py` (SPIR-V writer + kernel lowering), `python/pkg-v12/gpu_vk.py` (the C runtime and the
+per-kernel wrapper), a few lines in `gpu.py` (`_glue` calls `ail_gk<k>_run` instead of `ail_gk<k>`, `PATHS`, `path_note`),
+`pyc.py` / `ail_chatgpt.py` (the compile note), tests in `test_ail_gpu_g2.py`, a `gpu` job in `tests.yml`. G2 took the
+runtime of G3 along (the task that built it asked for both): what G3 still has is the Windows laptop script, the +40 KB size
+budget measurement, the cost model constants (G7) and a table of tested drivers.
+
+- **What runs on the device.** Every kernel G1 builds: map kernels over `list[float]` / `list[int]` with locals, `if`, inner
+  `for`, conditional expressions, short-circuit `and`/`or`, `+ - *` and unary minus/`abs` on binary64, `+ - * // %` on int64,
+  comparisons (including int against float), `min`/`max`, `float()`, `int()`, `floor`/`ceil`/`trunc`, reads at computed
+  indices, inlined functions. One invocation per element, 64 per workgroup, a 2-D grid when the count needs more than 65535
+  groups. SPIR-V 1.4 for Vulkan 1.2; capabilities `Shader`, `Int64` and, for kernels that touch binary64, `Float64`,
+  `RoundingModeRTE`, `SignedZeroInfNanPreserve`. Nothing else in G1's scope is left to the emulation: a kernel whose IR the
+  writer does not know raises `Unsupported` and keeps the emulation only (the note says so).
+- **No int32 yet.** The typed array module (`ail_array`, #225/#235) is not in this base, and the G1 kernels are int64 with the
+  overflow flag. int64 overflow at any element is detected on the device (xor sign tests for `+ -`, division check for `*`,
+  `-INT64_MIN`, `INT64_MIN // -1`), flagged, and replayed on the CPU, which then does what the CPU build does (the loud
+  `integer overflow` stop, or exact big integers on the general path).
+- **Floating point.** Every `FAdd`/`FSub`/`FMul` carries `NoContraction`; no `FPFastMathMode` decoration exists in any module;
+  there is no `Fma`, `FDiv`, `FMin`, `FMax` (the tests parse every module and fail on any of them). The entry point has the
+  execution modes `RoundingModeRTE 64` (which also rounds `OpConvertSToF`; the `FPRoundingMode` decoration is only legal on
+  16-bit conversions) and `SignedZeroInfNanPreserve 64`. `DenormPreserve` is not requested: the guards of 3.2 (operand or
+  result in 0 < |x| < 2**-1000, a product whose exponents sum below -1000, a sum that is 0 although the operands do not cancel)
+  set the flag, so a device that flushes subnormals can never show a different bit. NaN: a NaN operand or a NaN made from
+  numbers sets the flag, so the payload and sign of a NaN are never visible (the CPU replay makes the CPU's NaN).
+  A device that does not report `shaderFloat64`, `shaderRoundingModeRTEFloat64` and `shaderSignedZeroInfNanPreserveFloat64`
+  gets int64 kernels only; the binary64 kernels run as the emulation. **Finding:** lavapipe's compiler rewrote `0.0 - x` to
+  `-x` although the subtraction carried `NoContraction` (wrong for x = +0.0), caught by the bit test. The emitter now builds the
+  sign of an exact zero (add, sub, mul), `-x` and `abs(x)` from integer bit operations, and breaks `min`/`max` ties
+  explicitly. The same class of bug can exist in another driver for a pattern the bit test does not contain; that is the
+  risk of section 9 and the reason a device list is still a G3 item.
+- **Fallbacks, in order**, each one printed by `AIL_GPU_TRACE=1` as `gpu: k0 device unavailable (<why>)`: `AIL_GPU=emu` or
+  `AIL_GPU=0`; a launch below `AIL_GPU_MIN_N` (4096) unless `AIL_GPU=force`; no loader (`dlopen` fails); no Vulkan 1.2 device
+  with a compute queue (`AIL_GPU_DEVICE=<name>` picks by name, otherwise discrete, integrated, virtual, CPU in that order);
+  a missing feature (test hook `AIL_GPU_DISABLE=f64,i64,rte,szinp`); buffers larger than `maxStorageBufferRange`; any failed
+  Vulkan call; a static build (`AIL_STATIC=1`: a static glibc segfaults in `dlopen`, so such a build always takes the CPU
+  path); output that overlaps an input (G1's pointer check, before any launch). The result is committed only when the flag
+  word is 0.
+- **Compile note.** `note: prog.py:12: kernel k0: SPIR-V for binary64 + int64 (909 words, needs ...). At run time it runs on a
+  Vulkan device that has those features ...; with no device ... the CPU emulation of the same kernel runs, with identical
+  output. AIL_GPU=emu forces the CPU emulation, AIL_GPU=0 the original CPU loop.` A kernel without SPIR-V gets
+  `kernel k0: no SPIR-V (<why>); the kernel runs as the CPU emulation only`.
+- **Tests (lavapipe 1.4, Mesa/LLVM 20.1.2 on this laptop's WSL).** Bit tests (5.1): 51 kernels (every op, comparison,
+  conversion, fused-multiply-add-shaped expression, min/max/ternary tie case) over 65,536 operand sets each (random bit
+  patterns, +-0, +-inf, NaN, subnormals, the 2**-1000 boundary, neighbours for cancellation, int64 limits): 2,779,992 clean
+  elements compared bit for bit between the emulation (one element per call) and the device (one launch), 0 differences; for
+  the 562,344 elements the emulation flags, 17,200 single-element launches (the first 400 per kernel), all flagged on the
+  device; in-place output over input equal. Whole programs: lengths 0, 1, 2, 63, 64, 65, 127..129, 255..257, 4095..4097,
+  100003; a 4.3 million element launch (2-D grid); special floats; 21 error kinds at positions 0, 63, 64, 4999 (add/sub/mul
+  overflow, `-INT64_MIN`, `abs`, floor division and modulo by zero, `INT64_MIN // -1`, index == len, -len, -len-1,
+  `int(1e30)`, `int(inf)`, subnormal and NaN operands, inf + -inf, underflowing product, subnormal difference, floor of inf,
+  inf * 0): the same binary under `AIL_GPU=0`, `emu`, `force` (device), no loader, a device without features, and CPython print
+  the same stdout and exit code, and the device and the emulation make the same ran/replay decision for every launch. All
+  modules pass `spirv-val --target-env vulkan1.2`; the declared Vulkan structs and constants are checked against `vulkan_core.h`
+  (sizes, alignments, offsets). Aliasing of the output and an input cannot be written in the typed path (a `list`
+  parameter is read-only, and `ys = xs` is refused by name), so it is tested at the C level (output over input, same index) and by
+  G1's `gk_disjoint` unit tests. **Speed: unmeasured.** Nothing in G2 measures time; lavapipe is a CPU.
 
 ## 7. Colab validation (owner-started, manual)
 

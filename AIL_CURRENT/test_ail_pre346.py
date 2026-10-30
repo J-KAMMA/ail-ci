@@ -52,7 +52,8 @@ class CiShardsAssignment(unittest.TestCase):
         counts = collections.Counter(planned)
         self.assertEqual([name for name, count in counts.items() if count > 1], [],
                          'a module runs in two shards')
-        self.assertEqual(set(counts), set(ail_check.MODULES))
+        # modules in GPU_JOB run in the workflow's own `gpu` job, not in a shard
+        self.assertEqual(set(counts), set(ail_check.MODULES) - set(getattr(ci, 'GPU_JOB', ())))
 
     def test_duplicate_placement_runs_once(self):
         ci = load_ci_shards()
