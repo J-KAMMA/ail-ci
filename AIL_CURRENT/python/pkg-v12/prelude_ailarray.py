@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-# prelude_ailarray.py -- `ail_array` (docs/design/TYPED_ARRAY.md, stage T2) for the dtypes f64 and int32, as Python source
+# prelude_ailarray.py -- `ail_array` (docs/design/TYPED_ARRAY.md, stages T2 and T3b) for the dtypes f64, int32, int64 and bool_, as Python source
 # that the AIL compiler builds to native loops (ailarray.py rewrites the program onto these names and injects what it
 # uses). It is plain Python 3.12 as well: test_ail_array_t2.py runs it under CPython against ail_array.py (the reference),
 # so the two are compared op by op before any C is involved.
 #
-# An f64 array is a _AilTAF holding a list[float]; an int32 array is a _AilTAI holding a list[int]. The functions follow the
+# An f64 array is a _AilTAF holding a list[float]; an int32 array is a _AilTAI and an int64 array a _AilTAL, each holding a list[int];
+# a bool_ array is a _AilTAO holding a list[bool]. The functions follow the
 # reference line by line (same checks in the same order, same error texts); where the reference works on the bytes of a
 # bytearray, the bits of a double are made with exact float arithmetic (no struct, no frexp) because the typed path has
 # neither.
@@ -1461,4 +1462,1934 @@ def _ail_tai_to_f64(a: _AilTAI) -> _AilTAF:
     out = _AilTAF(n)
     for k in range(n):
         out.d[k] = float(a.d[k])
+    return out
+
+
+# ============================== stage T3b: int64 and bool_ ==========================================================
+class _AilTAL:
+    def __init__(self, n: int):
+        self.d = [0] * n
+
+
+class _AilTAO:
+    def __init__(self, n: int):
+        self.d: list[bool] = [False] * n
+
+
+def _ail_ta_te_al(msg: str) -> _AilTAL:
+    if len(msg) >= 0:
+        raise TypeError(msg)
+    return _AilTAL(0)
+
+
+def _ail_ta_te_ao(msg: str) -> _AilTAO:
+    if len(msg) >= 0:
+        raise TypeError(msg)
+    return _AilTAO(0)
+
+
+def _ail_ta_ve_al(msg: str) -> _AilTAL:
+    if len(msg) >= 0:
+        raise ValueError(msg)
+    return _AilTAL(0)
+
+
+def _ail_ta_ve_ao(msg: str) -> _AilTAO:
+    if len(msg) >= 0:
+        raise ValueError(msg)
+    return _AilTAO(0)
+
+
+# ---- helpers shared by the dtypes ---------------------------------------------------------------------------------------
+def _ail_ta_poserr(i: int, n: int):
+    raise IndexError("index " + str(i) + " is out of bounds for dimension 0 with size " + str(n))
+
+
+def _ail_ta_pos(i: int, n: int) -> int:
+    """Index i (negative counts from the end) of n elements, or the IndexError PyTorch's x[idx] gives."""
+    k = i
+    if k < 0:
+        k = k + n
+    if k < 0 or k >= n:
+        raise IndexError("index " + str(i) + " is out of bounds for dimension 0 with size " + str(n))
+    return k
+
+
+def _ail_ta_positions(n: int, offset: int, shape: list[int], strides: list[int], name: str, verb: str) -> list[int]:
+    """The array positions of a strided view in C order of its logical index (design TYPED_ARRAY 3.9)."""
+    if len(shape) != len(strides):
+        raise ValueError("ail_array." + name + "(): shape and strides differ in length (" + str(len(shape)) + " and " + str(len(strides)) + ")")
+    total = 1
+    for d in range(len(shape)):
+        if shape[d] < 0:
+            raise ValueError("ail_array." + name + "(): negative size " + str(shape[d]) + " in shape")
+        total = total * shape[d]
+    out = [0] * total
+    if total == 0:
+        return out
+    idx = [0] * len(shape)
+    p = offset
+    for e in range(total):
+        if p < 0 or p >= n:
+            raise IndexError("ail_array." + name + "(): element " + str(e) + " " + verb + " index " + str(p) + ", outside the array of " + str(n) + " elements")
+        out[e] = p
+        d = len(shape) - 1
+        while d >= 0:
+            idx[d] = idx[d] + 1
+            p = p + strides[d]
+            if idx[d] < shape[d]:
+                break
+            p = p - shape[d] * strides[d]
+            idx[d] = 0
+            d = d - 1
+    return out
+
+
+def _ail_ta_segments(n: int, offs: _AilTAL, name: str) -> int:
+    """Check segment offsets; the number of segments."""
+    if len(offs.d) == 0:
+        raise ValueError("ail_array." + name + "(): offsets needs at least one element")
+    for k in range(len(offs.d)):
+        o = offs.d[k]
+        if o < 0 or o > n or (k > 0 and o < offs.d[k - 1]):
+            raise ValueError("ail_array." + name + "(): offsets[" + str(k) + "] = " + str(o) + " is out of order or outside 0.." + str(n))
+    return len(offs.d) - 1
+
+
+def _ail_ta_mul32(a: int, b: int) -> int:
+    """(a * b) mod 2^32 for 0 <= a, b < 2^32 without leaving int64."""
+    return (a * (b & 65535) + (((a * (b >> 16)) & 65535) << 16)) & 4294967295
+
+
+def _ail_tal_wmul(x: int, y: int) -> int:
+    """x * y modulo 2^64 as a signed int64, with no intermediate beyond int64."""
+    if x >= -2147483648 and x <= 2147483647 and y >= -2147483648 and y <= 2147483647:
+        return x * y
+    a0 = x & 4294967295
+    a1 = (x >> 32) & 4294967295
+    b0 = y & 4294967295
+    b1 = (y >> 32) & 4294967295
+    p1 = a0 >> 16
+    p0 = a0 & 65535
+    t = p1 * b0
+    u = p0 * b0
+    s = (t & 65535) * 65536 + u
+    lo32 = s & 4294967295
+    hi32 = ((t >> 16) + (s >> 32) + _ail_ta_mul32(a1, b0) + _ail_ta_mul32(a0, b1)) & 4294967295
+    if hi32 >= 2147483648:
+        hi32 = hi32 - 4294967296
+    return hi32 * 4294967296 + lo32
+
+
+def _ail_tal_wadd(x: int, y: int) -> int:
+    if y > 0 and x > 9223372036854775807 - y:
+        return (x - 9223372036854775807 - 1) + (y - 9223372036854775807 - 1)
+    if y < 0 and x < -9223372036854775807 - 1 - y:
+        return (x + 9223372036854775807 + 1) + (y + 9223372036854775807 + 1)
+    return x + y
+
+
+def _ail_tal_wsub(x: int, y: int) -> int:
+    if y < 0 and x > 9223372036854775807 + y:
+        return (x - 9223372036854775807 - 1) - (y + 9223372036854775807 + 1)
+    if y > 0 and x < -9223372036854775807 - 1 + y:
+        return (x + 9223372036854775807 + 1) - (y - 9223372036854775807 - 1)
+    return x - y
+
+
+def _ail_tal_over(op: int, k: int):
+    name = "mod"
+    if op == 0:
+        name = "add"
+    elif op == 1:
+        name = "sub"
+    elif op == 2:
+        name = "mul"
+    elif op == 3:
+        name = "floordiv"
+    raise OverflowError("int64 " + name + " overflow at index " + str(k))
+
+
+def _ail_tal_one(x: int, y: int, op: int, k: int) -> int:
+    """x op y for op 0 + 1 - 2 * 3 // 4 %, raising OverflowError / ZeroDivisionError as the reference does."""
+    if op == 0:
+        if (y > 0 and x > 9223372036854775807 - y) or (y < 0 and x < -9223372036854775807 - 1 - y):
+            _ail_tal_over(op, k)
+        return x + y
+    if op == 1:
+        if (y < 0 and x > 9223372036854775807 + y) or (y > 0 and x < -9223372036854775807 - 1 + y):
+            _ail_tal_over(op, k)
+        return x - y
+    if op == 2:
+        if x >= -2147483648 and x <= 2147483647 and y >= -2147483648 and y <= 2147483647:
+            return x * y
+        if x == 0 or y == 0:
+            return 0
+        if y == -1:
+            if x == -9223372036854775807 - 1:
+                _ail_tal_over(op, k)
+            return 0 - x
+        if x == -1:
+            if y == -9223372036854775807 - 1:
+                _ail_tal_over(op, k)
+            return 0 - y
+        r = _ail_tal_wmul(x, y)
+        if r // y != x:
+            _ail_tal_over(op, k)
+        return r
+    if y == 0:
+        raise ZeroDivisionError("integer division or modulo by zero")
+    if op == 3:
+        if y == -1:
+            if x == -9223372036854775807 - 1:
+                _ail_tal_over(op, k)
+            return 0 - x
+        return x // y
+    if y == -1:
+        return 0
+    return x % y
+
+
+# ---- int64: construction and access ---------------------------------------------------------------------------------------
+def _ail_tal_zeros(n: int) -> _AilTAL:
+    return _AilTAL(_ail_ta_length(n))
+
+
+def _ail_tal_store(x: int) -> int:
+    if x < -9223372036854775807 - 1 or x > 9223372036854775807:
+        raise OverflowError("int64 value out of range: " + str(x))
+    return x
+
+
+def _ail_tal_from(xs: list[int]) -> _AilTAL:
+    a = _AilTAL(len(xs))
+    for k in range(len(xs)):
+        a.d[k] = _ail_tal_store(xs[k])
+    return a
+
+
+def _ail_tal_full(n: int, x: int) -> _AilTAL:
+    m = _ail_ta_length(n)
+    v = _ail_tal_store(x)
+    a = _AilTAL(m)
+    for k in range(m):
+        a.d[k] = v
+    return a
+
+
+def _ail_tal_arange(n: int) -> _AilTAL:
+    m = _ail_ta_length(n)
+    a = _AilTAL(m)
+    for k in range(m):
+        a.d[k] = k
+    return a
+
+
+def _ail_tal_copy(a: _AilTAL) -> _AilTAL:
+    n = len(a.d)
+    b = _AilTAL(n)
+    for k in range(n):
+        b.d[k] = a.d[k]
+    return b
+
+
+def _ail_tal_frombytes(data: bytes) -> _AilTAL:
+    if len(data) % 8 != 0:
+        raise ValueError("ail_array: byte length " + str(len(data)) + " is not a multiple of 8 (int64)")
+    n = len(data) // 8
+    a = _AilTAL(n)
+    for k in range(n):
+        j = k * 8
+        lo = data[j] + data[j + 1] * 256 + data[j + 2] * 65536 + data[j + 3] * 16777216
+        hi = data[j + 4] + data[j + 5] * 256 + data[j + 6] * 65536 + data[j + 7] * 16777216
+        if hi >= 2147483648:
+            hi = hi - 4294967296
+        a.d[k] = hi * 4294967296 + lo
+    return a
+
+
+def _ail_tal_tobytes(a: _AilTAL) -> bytes:
+    n = len(a.d)
+    out = bytearray(n * 8)
+    for k in range(n):
+        x = a.d[k]
+        lo = x & 4294967295
+        hi = (x >> 32) & 4294967295
+        j = k * 8
+        out[j] = lo % 256
+        out[j + 1] = (lo // 256) % 256
+        out[j + 2] = (lo // 65536) % 256
+        out[j + 3] = lo // 16777216
+        out[j + 4] = hi % 256
+        out[j + 5] = (hi // 256) % 256
+        out[j + 6] = (hi // 65536) % 256
+        out[j + 7] = hi // 16777216
+    return bytes(out)
+
+
+def _ail_tal_tolist(a: _AilTAL) -> list[int]:
+    return list(a.d)
+
+
+def _ail_tal_repr(a: _AilTAL) -> str:
+    s = "array(["
+    for k in range(len(a.d)):
+        if k > 0:
+            s = s + ", "
+        s = s + repr(a.d[k])
+    return s + "], int64)"
+
+
+def _ail_tal_get(a: _AilTAL, i: int) -> int:
+    return a.d[_ail_ta_oob(len(a.d), i)]
+
+
+def _ail_tal_set(a: _AilTAL, i: int, x: int):
+    k = _ail_ta_oob(len(a.d), i)
+    a.d[k] = _ail_tal_store(x)
+
+
+def _ail_tal_set_bad(a: _AilTAL, i: int, tname: str):
+    _ail_ta_oob(len(a.d), i)
+    raise TypeError("'" + tname + "' object cannot be interpreted as an integer")
+
+
+def _ail_tal_full_bad(n: int, tname: str) -> _AilTAL:
+    _ail_ta_length(n)
+    raise TypeError("'" + tname + "' object cannot be interpreted as an integer")
+    return _AilTAL(0)
+
+
+def _ail_tal_slice(a: _AilTAL, lo: int, hi: int, st: int, flags: int) -> _AilTAL:
+    r = _ail_ta_slice(len(a.d), lo, hi, st, flags)
+    out = _AilTAL(r[1])
+    for j in range(r[1]):
+        out.d[j] = a.d[r[0] + j * r[2]]
+    return out
+
+
+def _ail_tal_setslice(a: _AilTAL, lo: int, hi: int, st: int, flags: int, b: _AilTAL):
+    r = _ail_ta_slice(len(a.d), lo, hi, st, flags)
+    if r[1] != len(b.d):
+        raise ValueError("ail_array: slice assignment needs " + str(r[1]) + " elements, not " + str(len(b.d)))
+    src = list(b.d)
+    for j in range(r[1]):
+        a.d[r[0] + j * r[2]] = src[j]
+
+
+def _ail_tal_eq(a: _AilTAL, b: _AilTAL) -> bool:
+    if len(a.d) != len(b.d):
+        return False
+    for k in range(len(a.d)):
+        if a.d[k] != b.d[k]:
+            return False
+    return True
+
+
+# ---- int64: element-wise arithmetic (raises on overflow, as TA1) -------------------------------------------------------------
+def _ail_tal_aa(dst: _AilTAL, a: _AilTAL, b: _AilTAL, op: int):
+    """dst = a op b; the elements before a failing index are written."""
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    if op == 0:
+        for k in range(n):
+            x = a.d[k]
+            y = b.d[k]
+            if (y > 0 and x > 9223372036854775807 - y) or (y < 0 and x < -9223372036854775807 - 1 - y):
+                _ail_tal_over(0, k)
+            dst.d[k] = x + y
+    elif op == 1:
+        for k in range(n):
+            x = a.d[k]
+            y = b.d[k]
+            if (y < 0 and x > 9223372036854775807 + y) or (y > 0 and x < -9223372036854775807 - 1 + y):
+                _ail_tal_over(1, k)
+            dst.d[k] = x - y
+    else:
+        for k in range(n):
+            dst.d[k] = _ail_tal_one(a.d[k], b.d[k], op, k)
+
+
+def _ail_tal_as(dst: _AilTAL, a: _AilTAL, s: int, op: int, refl: bool):
+    n = len(a.d)
+    if op == 0:
+        for k in range(n):
+            x = a.d[k]
+            if (s > 0 and x > 9223372036854775807 - s) or (s < 0 and x < -9223372036854775807 - 1 - s):
+                _ail_tal_over(0, k)
+            dst.d[k] = x + s
+    elif op == 1 and not refl:
+        for k in range(n):
+            x = a.d[k]
+            if (s < 0 and x > 9223372036854775807 + s) or (s > 0 and x < -9223372036854775807 - 1 + s):
+                _ail_tal_over(1, k)
+            dst.d[k] = x - s
+    else:
+        for k in range(n):
+            if refl:
+                dst.d[k] = _ail_tal_one(s, a.d[k], op, k)
+            else:
+                dst.d[k] = _ail_tal_one(a.d[k], s, op, k)
+
+
+def _ail_tal_bin(a: _AilTAL, b: _AilTAL, op: int) -> _AilTAL:
+    out = _AilTAL(len(a.d))
+    _ail_tal_aa(out, a, b, op)
+    return out
+
+
+def _ail_tal_bin_s(a: _AilTAL, x: int, op: int, refl: bool) -> _AilTAL:
+    s = _ail_tal_store(x)
+    out = _AilTAL(len(a.d))
+    _ail_tal_as(out, a, s, op, refl)
+    return out
+
+
+def _ail_tal_ibin(a: _AilTAL, b: _AilTAL, op: int) -> _AilTAL:
+    _ail_tal_aa(a, a, b, op)
+    return a
+
+
+def _ail_tal_ibin_s(a: _AilTAL, x: int, op: int) -> _AilTAL:
+    s = _ail_tal_store(x)
+    _ail_tal_as(a, a, s, op, False)
+    return a
+
+
+def _ail_tal_unary(a: _AilTAL, absolute: bool) -> _AilTAL:
+    out = _AilTAL(len(a.d))
+    for k in range(len(a.d)):
+        v = a.d[k]
+        name = "neg"
+        if absolute:
+            name = "abs"
+        if v == -9223372036854775807 - 1:
+            raise OverflowError("int64 " + name + " overflow at index " + str(k))
+        if absolute:
+            if v < 0:
+                v = 0 - v
+        else:
+            v = 0 - v
+        out.d[k] = v
+    return out
+
+
+def _ail_tal_sat1(x: int, y: int, op: int) -> int:
+    if op == 0:
+        if y > 0 and x > 9223372036854775807 - y:
+            return 9223372036854775807
+        if y < 0 and x < -9223372036854775807 - 1 - y:
+            return -9223372036854775807 - 1
+        return x + y
+    if y < 0 and x > 9223372036854775807 + y:
+        return 9223372036854775807
+    if y > 0 and x < -9223372036854775807 - 1 + y:
+        return -9223372036854775807 - 1
+    return x - y
+
+
+def _ail_tal_explicit(a: _AilTAL, b: _AilTAL, op: int, wrap: bool) -> _AilTAL:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTAL(n)
+    for k in range(n):
+        x = a.d[k]
+        y = b.d[k]
+        if wrap:
+            if op == 0:
+                out.d[k] = _ail_tal_wadd(x, y)
+            elif op == 1:
+                out.d[k] = _ail_tal_wsub(x, y)
+            else:
+                out.d[k] = _ail_tal_wmul(x, y)
+        else:
+            out.d[k] = _ail_tal_sat1(x, y, op)
+    return out
+
+
+def _ail_tal_explicit_s(a: _AilTAL, x: int, op: int, wrap: bool) -> _AilTAL:
+    y = _ail_tal_store(x)
+    n = len(a.d)
+    out = _AilTAL(n)
+    for k in range(n):
+        x = a.d[k]
+        if wrap:
+            if op == 0:
+                out.d[k] = _ail_tal_wadd(x, y)
+            elif op == 1:
+                out.d[k] = _ail_tal_wsub(x, y)
+            else:
+                out.d[k] = _ail_tal_wmul(x, y)
+        else:
+            out.d[k] = _ail_tal_sat1(x, y, op)
+    return out
+
+
+def _ail_tal_wneg(a: _AilTAL, absolute: bool) -> _AilTAL:
+    out = _AilTAL(len(a.d))
+    for k in range(len(a.d)):
+        v = a.d[k]
+        if v == -9223372036854775807 - 1:
+            out.d[k] = v
+        elif absolute:
+            if v < 0:
+                out.d[k] = 0 - v
+            else:
+                out.d[k] = v
+        else:
+            out.d[k] = 0 - v
+    return out
+
+
+def _ail_tal_wfloordiv(a: _AilTAL, b: _AilTAL) -> _AilTAL:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTAL(n)
+    for k in range(n):
+        x = a.d[k]
+        y = b.d[k]
+        if y == 0:
+            raise ZeroDivisionError("integer division or modulo by zero")
+        if y == -1:
+            out.d[k] = _ail_tal_wmul(x, -1)
+        else:
+            out.d[k] = x // y
+    return out
+
+
+def _ail_tal_wfloordiv_s(a: _AilTAL, x: int) -> _AilTAL:
+    y = _ail_tal_store(x)
+    n = len(a.d)
+    out = _AilTAL(n)
+    for k in range(n):
+        x = a.d[k]
+        if y == 0:
+            raise ZeroDivisionError("integer division or modulo by zero")
+        if y == -1:
+            out.d[k] = _ail_tal_wmul(x, -1)
+        else:
+            out.d[k] = x // y
+    return out
+
+
+def _ail_tal_pick_aa(a: _AilTAL, b: _AilTAL, smaller: bool) -> _AilTAL:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTAL(n)
+    for k in range(n):
+        x = a.d[k]
+        y = b.d[k]
+        if smaller:
+            if y < x:
+                out.d[k] = y
+            else:
+                out.d[k] = x
+        else:
+            if y > x:
+                out.d[k] = y
+            else:
+                out.d[k] = x
+    return out
+
+
+def _ail_tal_pick_as(a: _AilTAL, x: int, smaller: bool) -> _AilTAL:
+    y = _ail_tal_store(x)
+    n = len(a.d)
+    out = _AilTAL(n)
+    for k in range(n):
+        x = a.d[k]
+        if smaller:
+            if y < x:
+                out.d[k] = y
+            else:
+                out.d[k] = x
+        else:
+            if y > x:
+                out.d[k] = y
+            else:
+                out.d[k] = x
+    return out
+
+
+# ---- int64: reductions ----------------------------------------------------------------------------------------------------
+def _ail_ta_hlfold(hs: int, ls: int, wrap: bool, what: str) -> int:
+    """The total of a sum kept as hs * 2^32 + ls (hs the sum of x >> 32, ls the sum of x & 0xffffffff): modulo 2^64 when wrap, else exact or OverflowError(what)."""
+    if wrap:
+        h32 = ((hs + 2147483648) & 4294967295) - 2147483648
+        return _ail_tal_wadd(h32 * 4294967296, ls)
+    q = hs + (ls >> 32)
+    if q < -2147483648 or q > 2147483647:
+        raise OverflowError(what)
+    return q * 4294967296 + (ls & 4294967295)
+
+
+def _ail_ta_isum(d: list[int], lo: int, hi: int, wrap: bool, what: str) -> int:
+    hs = 0
+    ls = 0
+    for k in range(lo, hi):
+        x = d[k]
+        hs = hs + (x >> 32)
+        ls = ls + (x & 4294967295)
+    return _ail_ta_hlfold(hs, ls, wrap, what)
+
+
+def _ail_tal_sum(a: _AilTAL) -> int:
+    hs = 0
+    ls = 0
+    for k in range(len(a.d)):
+        x = a.d[k]
+        hs = hs + (x >> 32)
+        ls = ls + (x & 4294967295)
+    return _ail_ta_hlfold(hs, ls, False, "int64 sum overflow")
+
+
+def _ail_tal_wsum(a: _AilTAL) -> int:
+    hs = 0
+    ls = 0
+    for k in range(len(a.d)):
+        x = a.d[k]
+        hs = hs + (x >> 32)
+        ls = ls + (x & 4294967295)
+    return _ail_ta_hlfold(hs, ls, True, "")
+
+
+def _ail_tal_wdot(a: _AilTAL, b: _AilTAL) -> int:
+    if len(b.d) != len(a.d):
+        _ail_ta_shapes(len(a.d), len(b.d))
+    total = 0
+    for k in range(len(a.d)):
+        total = _ail_tal_wadd(total, _ail_tal_wmul(a.d[k], b.d[k]))
+    return total
+
+
+def _ail_tal_extreme(a: _AilTAL, smaller: bool, name: str) -> int:
+    n = len(a.d)
+    if n == 0:
+        raise ValueError(name + "() iterable argument is empty")
+    best = 0
+    for k in range(1, n):
+        if smaller:
+            if a.d[k] < a.d[best]:
+                best = k
+        else:
+            if a.d[best] < a.d[k]:
+                best = k
+    return best
+
+
+def _ail_tal_min(a: _AilTAL) -> int:
+    return a.d[_ail_tal_extreme(a, True, "min")]
+
+
+def _ail_tal_max(a: _AilTAL) -> int:
+    return a.d[_ail_tal_extreme(a, False, "max")]
+
+
+def _ail_tal_argmin(a: _AilTAL) -> int:
+    return _ail_tal_extreme(a, True, "argmin")
+
+
+def _ail_tal_argmax(a: _AilTAL) -> int:
+    return _ail_tal_extreme(a, False, "argmax")
+
+
+# ---- int64 / int32 / bool_ / f64 casts ----------------------------------------------------------------------------------------
+def _ail_tal_to_f64(a: _AilTAL) -> _AilTAF:
+    n = len(a.d)
+    out = _AilTAF(n)
+    for k in range(n):
+        out.d[k] = float(a.d[k])
+    return out
+
+
+def _ail_tai_to_i64(a: _AilTAI) -> _AilTAL:
+    n = len(a.d)
+    out = _AilTAL(n)
+    for k in range(n):
+        out.d[k] = a.d[k]
+    return out
+
+
+def _ail_tal_to_i32(a: _AilTAL, mode: int) -> _AilTAI:
+    """astype(ta.int32): mode 0 raise, 1 saturate, 2 wrap."""
+    n = len(a.d)
+    out = _AilTAI(n)
+    for k in range(n):
+        x = a.d[k]
+        if x < -2147483648 or x > 2147483647:
+            if mode == 1:
+                if x < 0:
+                    x = -2147483648
+                else:
+                    x = 2147483647
+            elif mode == 2:
+                x = x & 4294967295
+                if x >= 2147483648:
+                    x = x - 4294967296
+            else:
+                raise OverflowError("int32 cast overflow at index " + str(k))
+        out.d[k] = x
+    return out
+
+
+def _ail_taf_to_i64(a: _AilTAF, nearest: bool, mode: int) -> _AilTAL:
+    """astype(ta.int64) of an f64 array: mode 0 raise, 1 saturate (wrap is a ValueError for float sources)."""
+    n = len(a.d)
+    out = _AilTAL(n)
+    for k in range(n):
+        x = a.d[k]
+        if x != x:
+            if mode == 1:
+                out.d[k] = 0
+                continue
+            raise ValueError("cannot convert float NaN to integer")
+        if x == math.inf or x == -math.inf:
+            if mode == 1:
+                if x > 0.0:
+                    out.d[k] = 9223372036854775807
+                else:
+                    out.d[k] = -9223372036854775807 - 1
+                continue
+            raise OverflowError("cannot convert float infinity to integer")
+        if x >= 9223372036854775808.0 or x < -9223372036854775808.0:
+            if mode == 1:
+                if x > 0.0:
+                    out.d[k] = 9223372036854775807
+                else:
+                    out.d[k] = -9223372036854775807 - 1
+                continue
+            raise OverflowError("int64 cast overflow at index " + str(k))
+        v = 0
+        if nearest and x > -4503599627370496.0 and x < 4503599627370496.0:
+            f = int(x)
+            if float(f) > x:
+                f = f - 1
+            r = x - float(f)
+            if r > 0.5:
+                v = f + 1
+            elif r < 0.5:
+                v = f
+            elif f % 2 == 0:
+                v = f
+            else:
+                v = f + 1
+        else:
+            v = int(x)
+        out.d[k] = v
+    return out
+
+
+def _ail_taf_to_bool(a: _AilTAF) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(n)
+    for k in range(n):
+        out.d[k] = a.d[k] != 0.0
+    return out
+
+
+def _ail_tai_to_bool(a: _AilTAI) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(n)
+    for k in range(n):
+        out.d[k] = a.d[k] != 0
+    return out
+
+
+def _ail_tal_to_bool(a: _AilTAL) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(n)
+    for k in range(n):
+        out.d[k] = a.d[k] != 0
+    return out
+
+
+def _ail_tao_to_f64(a: _AilTAO) -> _AilTAF:
+    n = len(a.d)
+    out = _AilTAF(n)
+    for k in range(n):
+        if a.d[k]:
+            out.d[k] = 1.0
+    return out
+
+
+def _ail_tao_to_i32(a: _AilTAO) -> _AilTAI:
+    n = len(a.d)
+    out = _AilTAI(n)
+    for k in range(n):
+        if a.d[k]:
+            out.d[k] = 1
+    return out
+
+
+def _ail_tao_to_i64(a: _AilTAO) -> _AilTAL:
+    n = len(a.d)
+    out = _AilTAL(n)
+    for k in range(n):
+        if a.d[k]:
+            out.d[k] = 1
+    return out
+
+
+# ---- bool_ ----------------------------------------------------------------------------------------------------------------
+def _ail_tao_zeros(n: int) -> _AilTAO:
+    return _AilTAO(_ail_ta_length(n))
+
+
+def _ail_tao_from(xs: list[bool]) -> _AilTAO:
+    a = _AilTAO(len(xs))
+    for k in range(len(xs)):
+        a.d[k] = xs[k]
+    return a
+
+
+def _ail_tao_full(n: int, x: bool) -> _AilTAO:
+    m = _ail_ta_length(n)
+    a = _AilTAO(m)
+    for k in range(m):
+        a.d[k] = x
+    return a
+
+
+def _ail_tao_copy(a: _AilTAO) -> _AilTAO:
+    n = len(a.d)
+    b = _AilTAO(n)
+    for k in range(n):
+        b.d[k] = a.d[k]
+    return b
+
+
+def _ail_tao_frombytes(data: bytes) -> _AilTAO:
+    n = len(data)
+    a = _AilTAO(n)
+    for k in range(n):
+        a.d[k] = data[k] != 0
+    return a
+
+
+def _ail_tao_tobytes(a: _AilTAO) -> bytes:
+    n = len(a.d)
+    out = bytearray(n)
+    for k in range(n):
+        if a.d[k]:
+            out[k] = 1
+    return bytes(out)
+
+
+def _ail_tao_tolist(a: _AilTAO) -> list[bool]:
+    return list(a.d)
+
+
+def _ail_tao_repr(a: _AilTAO) -> str:
+    s = "array(["
+    for k in range(len(a.d)):
+        if k > 0:
+            s = s + ", "
+        if a.d[k]:
+            s = s + "True"
+        else:
+            s = s + "False"
+    return s + "], bool_)"
+
+
+def _ail_tao_get(a: _AilTAO, i: int) -> bool:
+    return a.d[_ail_ta_oob(len(a.d), i)] != 0
+
+
+def _ail_tao_set(a: _AilTAO, i: int, x: bool):
+    k = _ail_ta_oob(len(a.d), i)
+    a.d[k] = x
+
+
+def _ail_tao_set_bad(a: _AilTAO, i: int, tname: str):
+    _ail_ta_oob(len(a.d), i)
+    raise TypeError("'" + tname + "' object cannot be interpreted as an integer")
+
+
+def _ail_tao_full_bad(n: int, tname: str) -> _AilTAO:
+    _ail_ta_length(n)
+    raise TypeError("'" + tname + "' object cannot be interpreted as an integer")
+    return _AilTAO(0)
+
+
+def _ail_tao_slice(a: _AilTAO, lo: int, hi: int, st: int, flags: int) -> _AilTAO:
+    r = _ail_ta_slice(len(a.d), lo, hi, st, flags)
+    out = _AilTAO(r[1])
+    for j in range(r[1]):
+        out.d[j] = a.d[r[0] + j * r[2]]
+    return out
+
+
+def _ail_tao_setslice(a: _AilTAO, lo: int, hi: int, st: int, flags: int, b: _AilTAO):
+    r = _ail_ta_slice(len(a.d), lo, hi, st, flags)
+    if r[1] != len(b.d):
+        raise ValueError("ail_array: slice assignment needs " + str(r[1]) + " elements, not " + str(len(b.d)))
+    src = list(b.d)
+    for j in range(r[1]):
+        a.d[r[0] + j * r[2]] = src[j]
+
+
+def _ail_tao_eq(a: _AilTAO, b: _AilTAO) -> bool:
+    if len(a.d) != len(b.d):
+        return False
+    for k in range(len(a.d)):
+        if a.d[k] != b.d[k]:
+            return False
+    return True
+
+
+def _ail_tao_logic(a: _AilTAO, b: _AilTAO, op: int) -> _AilTAO:
+    """op 0 and, 1 or, 2 xor."""
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        y = b.d[k]
+        if op == 0:
+            out.d[k] = x == True and y == True
+        elif op == 1:
+            out.d[k] = x == True or y == True
+        else:
+            out.d[k] = x != y
+    return out
+
+
+def _ail_tao_logic_s(a: _AilTAO, y: bool, op: int) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        if op == 0:
+            out.d[k] = x == True and y == True
+        elif op == 1:
+            out.d[k] = x == True or y == True
+        else:
+            out.d[k] = x != y
+    return out
+
+
+def _ail_tao_not(a: _AilTAO) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(n)
+    for k in range(n):
+        out.d[k] = not a.d[k]
+    return out
+
+
+def _ail_tao_sum(a: _AilTAO) -> int:
+    total = 0
+    for k in range(len(a.d)):
+        if a.d[k]:
+            total = total + 1
+    return total
+
+
+def _ail_tao_extreme(a: _AilTAO, smaller: bool, name: str) -> int:
+    n = len(a.d)
+    if n == 0:
+        raise ValueError(name + "() iterable argument is empty")
+    best = 0
+    for k in range(1, n):
+        if smaller:
+            if (not a.d[k]) and a.d[best]:
+                best = k
+        else:
+            if a.d[k] and (not a.d[best]):
+                best = k
+    return best
+
+
+def _ail_tao_min(a: _AilTAO) -> bool:
+    return a.d[_ail_tao_extreme(a, True, "min")] != 0
+
+
+def _ail_tao_max(a: _AilTAO) -> bool:
+    return a.d[_ail_tao_extreme(a, False, "max")] != 0
+
+
+def _ail_tao_argmin(a: _AilTAO) -> int:
+    return _ail_tao_extreme(a, True, "argmin")
+
+
+def _ail_tao_argmax(a: _AilTAO) -> int:
+    return _ail_tao_extreme(a, False, "argmax")
+
+
+def _ail_tao_pick_aa(a: _AilTAO, b: _AilTAO, smaller: bool) -> _AilTAO:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        y = b.d[k]
+        if smaller:
+            out.d[k] = x == True and y == True
+        else:
+            out.d[k] = x == True or y == True
+    return out
+
+
+def _ail_tao_pick_as(a: _AilTAO, y: bool, smaller: bool) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        if smaller:
+            out.d[k] = x == True and y == True
+        else:
+            out.d[k] = x == True or y == True
+    return out
+
+
+# ---- int32 additions of stage T3b ---------------------------------------------------------------------------------------
+def _ail_tai_wneg(a: _AilTAI, absolute: bool) -> _AilTAI:
+    out = _AilTAI(len(a.d))
+    for k in range(len(a.d)):
+        v = 0 - a.d[k]
+        if absolute and a.d[k] >= 0:
+            v = a.d[k]
+        out.d[k] = _ail_tai_wrap(v)
+    return out
+
+
+def _ail_tai_wfloordiv(a: _AilTAI, b: _AilTAI) -> _AilTAI:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTAI(n)
+    for k in range(n):
+        if b.d[k] == 0:
+            raise ZeroDivisionError("integer division or modulo by zero")
+        out.d[k] = _ail_tai_wrap(a.d[k] // b.d[k])
+    return out
+
+
+def _ail_tai_wfloordiv_s(a: _AilTAI, y: int) -> _AilTAI:
+    n = len(a.d)
+    out = _AilTAI(n)
+    for k in range(n):
+        if y == 0:
+            raise ZeroDivisionError("integer division or modulo by zero")
+        out.d[k] = _ail_tai_wrap(a.d[k] // y)
+    return out
+
+
+def _ail_taf_cmp(a: _AilTAF, b: _AilTAF, op: int) -> _AilTAO:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        y = b.d[k]
+        if op == 0:
+            out.d[k] = x == y
+        elif op == 1:
+            out.d[k] = x != y
+        elif op == 2:
+            out.d[k] = x < y
+        elif op == 3:
+            out.d[k] = x <= y
+        elif op == 4:
+            out.d[k] = x > y
+        else:
+            out.d[k] = x >= y
+    return out
+
+
+def _ail_taf_cmp_s(a: _AilTAF, y: float, op: int) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        if op == 0:
+            out.d[k] = x == y
+        elif op == 1:
+            out.d[k] = x != y
+        elif op == 2:
+            out.d[k] = x < y
+        elif op == 3:
+            out.d[k] = x <= y
+        elif op == 4:
+            out.d[k] = x > y
+        else:
+            out.d[k] = x >= y
+    return out
+
+
+def _ail_taf_where_aa(m: _AilTAO, a: _AilTAF, b: _AilTAF) -> _AilTAF:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAF(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = a.d[k]
+        else:
+            out.d[k] = b.d[k]
+    return out
+
+
+def _ail_taf_where_as(m: _AilTAO, a: _AilTAF, y: float) -> _AilTAF:
+    n = len(a.d)
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAF(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = a.d[k]
+        else:
+            out.d[k] = y
+    return out
+
+
+def _ail_taf_where_sa(m: _AilTAO, x: float, b: _AilTAF) -> _AilTAF:
+    n = len(b.d)
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAF(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = x
+        else:
+            out.d[k] = b.d[k]
+    return out
+
+
+def _ail_taf_any(a: _AilTAF) -> bool:
+    for k in range(len(a.d)):
+        if a.d[k] != 0.0:
+            return True
+    return False
+
+
+def _ail_taf_all(a: _AilTAF) -> bool:
+    for k in range(len(a.d)):
+        if not (a.d[k] != 0.0):
+            return False
+    return True
+
+
+def _ail_taf_take(a: _AilTAF, idx: _AilTAL) -> _AilTAF:
+    n = len(a.d)
+    out = _AilTAF(len(idx.d))
+    for j in range(len(idx.d)):
+        i = idx.d[j]
+        k = i
+        if k < 0:
+            k = k + n
+        if k < 0 or k >= n:
+            _ail_ta_poserr(i, n)
+        out.d[j] = a.d[k]
+    return out
+
+
+def _ail_taf_put(a: _AilTAF, idx: _AilTAL, src: _AilTAF):
+    if len(src.d) != len(idx.d):
+        raise ValueError("ail_array.put(): src has " + str(len(src.d)) + " elements but there are " + str(len(idx.d)) + " indices")
+    s = list(src.d)
+    for j in range(len(idx.d)):
+        a.d[_ail_ta_pos(idx.d[j], len(a.d))] = s[j]
+
+
+def _ail_taf_put_s(a: _AilTAF, idx: _AilTAL, x: float):
+    for j in range(len(idx.d)):
+        a.d[_ail_ta_pos(idx.d[j], len(a.d))] = x
+
+
+def _ail_taf_gstride(a: _AilTAF, offset: int, shape: list[int], strides: list[int]) -> _AilTAF:
+    ps = _ail_ta_positions(len(a.d), offset, shape, strides, "gather_strided", "reads")
+    out = _AilTAF(len(ps))
+    for j in range(len(ps)):
+        out.d[j] = a.d[ps[j]]
+    return out
+
+
+def _ail_taf_sstride(dst: _AilTAF, offset: int, shape: list[int], strides: list[int], src: _AilTAF):
+    ps = _ail_ta_positions(len(dst.d), offset, shape, strides, "scatter_strided", "writes")
+    if len(src.d) != len(ps):
+        raise ValueError("ail_array.scatter_strided(): src has " + str(len(src.d)) + " elements but the shape has " + str(len(ps)))
+    s = list(src.d)
+    for j in range(len(ps)):
+        dst.d[ps[j]] = s[j]
+
+
+def _ail_taf_sstride_s(dst: _AilTAF, offset: int, shape: list[int], strides: list[int], x: float):
+    ps = _ail_ta_positions(len(dst.d), offset, shape, strides, "scatter_strided", "writes")
+    for j in range(len(ps)):
+        dst.d[ps[j]] = x
+
+
+def _ail_taf_segbest(a: _AilTAF, offs: _AilTAL, smaller: bool, name: str) -> list[int]:
+    ns = _ail_ta_segments(len(a.d), offs, name)
+    res = [0] * ns
+    for s in range(ns):
+        lo = offs.d[s]
+        hi = offs.d[s + 1]
+        if lo == hi:
+            raise ValueError("ail_array." + name + "(): segment " + str(s) + " is empty")
+        best = lo
+        for j in range(lo, hi):
+            x = a.d[j]
+            if x != x:
+                best = j
+                break
+            if j > lo:
+                if smaller:
+                    if _ail_ta_fless(x, a.d[best]):
+                        best = j
+                else:
+                    if _ail_ta_fless(a.d[best], x):
+                        best = j
+        res[s] = best
+    return res
+
+
+def _ail_taf_segmin(a: _AilTAF, offs: _AilTAL) -> _AilTAF:
+    r = _ail_taf_segbest(a, offs, True, "segment_min")
+    out = _AilTAF(len(r))
+    for s in range(len(r)):
+        out.d[s] = _ail_ta_canon(a.d[r[s]])
+    return out
+
+
+def _ail_taf_segmax(a: _AilTAF, offs: _AilTAL) -> _AilTAF:
+    r = _ail_taf_segbest(a, offs, False, "segment_max")
+    out = _AilTAF(len(r))
+    for s in range(len(r)):
+        out.d[s] = _ail_ta_canon(a.d[r[s]])
+    return out
+
+
+def _ail_taf_segargmin(a: _AilTAF, offs: _AilTAL) -> _AilTAL:
+    r = _ail_taf_segbest(a, offs, True, "segment_argmin")
+    out = _AilTAL(len(r))
+    for s in range(len(r)):
+        out.d[s] = r[s] - offs.d[s]
+    return out
+
+
+def _ail_taf_segargmax(a: _AilTAF, offs: _AilTAL) -> _AilTAL:
+    r = _ail_taf_segbest(a, offs, False, "segment_argmax")
+    out = _AilTAL(len(r))
+    for s in range(len(r)):
+        out.d[s] = r[s] - offs.d[s]
+    return out
+
+
+def _ail_taf_put_add(a: _AilTAF, idx: _AilTAL, src: _AilTAF, wrap: bool):
+    if len(src.d) != len(idx.d):
+        raise ValueError("ail_array.put(): src has " + str(len(src.d)) + " elements but there are " + str(len(idx.d)) + " indices")
+    s = list(src.d)
+    for j in range(len(idx.d)):
+        k = _ail_ta_pos(idx.d[j], len(a.d))
+        a.d[k] = _ail_ta_canon(a.d[k] + s[j])
+
+
+def _ail_taf_put_add_s(a: _AilTAF, idx: _AilTAL, x: float, wrap: bool):
+    s = [x] * len(idx.d)
+    for j in range(len(idx.d)):
+        k = _ail_ta_pos(idx.d[j], len(a.d))
+        a.d[k] = _ail_ta_canon(a.d[k] + s[j])
+
+
+def _ail_tai_cmp(a: _AilTAI, b: _AilTAI, op: int) -> _AilTAO:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        y = b.d[k]
+        if op == 0:
+            out.d[k] = x == y
+        elif op == 1:
+            out.d[k] = x != y
+        elif op == 2:
+            out.d[k] = x < y
+        elif op == 3:
+            out.d[k] = x <= y
+        elif op == 4:
+            out.d[k] = x > y
+        else:
+            out.d[k] = x >= y
+    return out
+
+
+def _ail_tai_cmp_s(a: _AilTAI, y: int, op: int) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        if op == 0:
+            out.d[k] = x == y
+        elif op == 1:
+            out.d[k] = x != y
+        elif op == 2:
+            out.d[k] = x < y
+        elif op == 3:
+            out.d[k] = x <= y
+        elif op == 4:
+            out.d[k] = x > y
+        else:
+            out.d[k] = x >= y
+    return out
+
+
+def _ail_tai_where_aa(m: _AilTAO, a: _AilTAI, b: _AilTAI) -> _AilTAI:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAI(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = a.d[k]
+        else:
+            out.d[k] = b.d[k]
+    return out
+
+
+def _ail_tai_where_as(m: _AilTAO, a: _AilTAI, y: int) -> _AilTAI:
+    n = len(a.d)
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAI(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = a.d[k]
+        else:
+            out.d[k] = y
+    return out
+
+
+def _ail_tai_where_sa(m: _AilTAO, x: int, b: _AilTAI) -> _AilTAI:
+    n = len(b.d)
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAI(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = x
+        else:
+            out.d[k] = b.d[k]
+    return out
+
+
+def _ail_tai_any(a: _AilTAI) -> bool:
+    for k in range(len(a.d)):
+        if a.d[k] != 0:
+            return True
+    return False
+
+
+def _ail_tai_all(a: _AilTAI) -> bool:
+    for k in range(len(a.d)):
+        if not (a.d[k] != 0):
+            return False
+    return True
+
+
+def _ail_tai_take(a: _AilTAI, idx: _AilTAL) -> _AilTAI:
+    n = len(a.d)
+    out = _AilTAI(len(idx.d))
+    for j in range(len(idx.d)):
+        i = idx.d[j]
+        k = i
+        if k < 0:
+            k = k + n
+        if k < 0 or k >= n:
+            _ail_ta_poserr(i, n)
+        out.d[j] = a.d[k]
+    return out
+
+
+def _ail_tai_put(a: _AilTAI, idx: _AilTAL, src: _AilTAI):
+    if len(src.d) != len(idx.d):
+        raise ValueError("ail_array.put(): src has " + str(len(src.d)) + " elements but there are " + str(len(idx.d)) + " indices")
+    s = list(src.d)
+    for j in range(len(idx.d)):
+        a.d[_ail_ta_pos(idx.d[j], len(a.d))] = s[j]
+
+
+def _ail_tai_put_s(a: _AilTAI, idx: _AilTAL, x: int):
+    for j in range(len(idx.d)):
+        a.d[_ail_ta_pos(idx.d[j], len(a.d))] = x
+
+
+def _ail_tai_gstride(a: _AilTAI, offset: int, shape: list[int], strides: list[int]) -> _AilTAI:
+    ps = _ail_ta_positions(len(a.d), offset, shape, strides, "gather_strided", "reads")
+    out = _AilTAI(len(ps))
+    for j in range(len(ps)):
+        out.d[j] = a.d[ps[j]]
+    return out
+
+
+def _ail_tai_sstride(dst: _AilTAI, offset: int, shape: list[int], strides: list[int], src: _AilTAI):
+    ps = _ail_ta_positions(len(dst.d), offset, shape, strides, "scatter_strided", "writes")
+    if len(src.d) != len(ps):
+        raise ValueError("ail_array.scatter_strided(): src has " + str(len(src.d)) + " elements but the shape has " + str(len(ps)))
+    s = list(src.d)
+    for j in range(len(ps)):
+        dst.d[ps[j]] = s[j]
+
+
+def _ail_tai_sstride_s(dst: _AilTAI, offset: int, shape: list[int], strides: list[int], x: int):
+    ps = _ail_ta_positions(len(dst.d), offset, shape, strides, "scatter_strided", "writes")
+    for j in range(len(ps)):
+        dst.d[ps[j]] = x
+
+
+def _ail_tai_segbest(a: _AilTAI, offs: _AilTAL, smaller: bool, name: str) -> list[int]:
+    ns = _ail_ta_segments(len(a.d), offs, name)
+    res = [0] * ns
+    for s in range(ns):
+        lo = offs.d[s]
+        hi = offs.d[s + 1]
+        if lo == hi:
+            raise ValueError("ail_array." + name + "(): segment " + str(s) + " is empty")
+        best = lo
+        for j in range(lo, hi):
+            x = a.d[j]
+            if j > lo:
+                if smaller:
+                    if x < a.d[best]:
+                        best = j
+                else:
+                    if a.d[best] < x:
+                        best = j
+        res[s] = best
+    return res
+
+
+def _ail_tai_segmin(a: _AilTAI, offs: _AilTAL) -> _AilTAI:
+    r = _ail_tai_segbest(a, offs, True, "segment_min")
+    out = _AilTAI(len(r))
+    for s in range(len(r)):
+        out.d[s] = a.d[r[s]]
+    return out
+
+
+def _ail_tai_segmax(a: _AilTAI, offs: _AilTAL) -> _AilTAI:
+    r = _ail_tai_segbest(a, offs, False, "segment_max")
+    out = _AilTAI(len(r))
+    for s in range(len(r)):
+        out.d[s] = a.d[r[s]]
+    return out
+
+
+def _ail_tai_segargmin(a: _AilTAI, offs: _AilTAL) -> _AilTAL:
+    r = _ail_tai_segbest(a, offs, True, "segment_argmin")
+    out = _AilTAL(len(r))
+    for s in range(len(r)):
+        out.d[s] = r[s] - offs.d[s]
+    return out
+
+
+def _ail_tai_segargmax(a: _AilTAI, offs: _AilTAL) -> _AilTAL:
+    r = _ail_tai_segbest(a, offs, False, "segment_argmax")
+    out = _AilTAL(len(r))
+    for s in range(len(r)):
+        out.d[s] = r[s] - offs.d[s]
+    return out
+
+
+def _ail_tai_put_add(a: _AilTAI, idx: _AilTAL, src: _AilTAI, wrap: bool):
+    if len(src.d) != len(idx.d):
+        raise ValueError("ail_array.put(): src has " + str(len(src.d)) + " elements but there are " + str(len(idx.d)) + " indices")
+    s = list(src.d)
+    for j in range(len(idx.d)):
+        k = _ail_ta_pos(idx.d[j], len(a.d))
+        a.d[k] = _ail_tai_addchk(a.d[k], s[j], j, wrap)
+
+
+def _ail_tai_put_add_s(a: _AilTAI, idx: _AilTAL, x: int, wrap: bool):
+    s = [x] * len(idx.d)
+    for j in range(len(idx.d)):
+        k = _ail_ta_pos(idx.d[j], len(a.d))
+        a.d[k] = _ail_tai_addchk(a.d[k], s[j], j, wrap)
+
+
+def _ail_tal_cmp(a: _AilTAL, b: _AilTAL, op: int) -> _AilTAO:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        y = b.d[k]
+        if op == 0:
+            out.d[k] = x == y
+        elif op == 1:
+            out.d[k] = x != y
+        elif op == 2:
+            out.d[k] = x < y
+        elif op == 3:
+            out.d[k] = x <= y
+        elif op == 4:
+            out.d[k] = x > y
+        else:
+            out.d[k] = x >= y
+    return out
+
+
+def _ail_tal_cmp_s(a: _AilTAL, y: int, op: int) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        if op == 0:
+            out.d[k] = x == y
+        elif op == 1:
+            out.d[k] = x != y
+        elif op == 2:
+            out.d[k] = x < y
+        elif op == 3:
+            out.d[k] = x <= y
+        elif op == 4:
+            out.d[k] = x > y
+        else:
+            out.d[k] = x >= y
+    return out
+
+
+def _ail_tal_where_aa(m: _AilTAO, a: _AilTAL, b: _AilTAL) -> _AilTAL:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAL(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = a.d[k]
+        else:
+            out.d[k] = b.d[k]
+    return out
+
+
+def _ail_tal_where_as(m: _AilTAO, a: _AilTAL, y: int) -> _AilTAL:
+    n = len(a.d)
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAL(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = a.d[k]
+        else:
+            out.d[k] = y
+    return out
+
+
+def _ail_tal_where_sa(m: _AilTAO, x: int, b: _AilTAL) -> _AilTAL:
+    n = len(b.d)
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAL(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = x
+        else:
+            out.d[k] = b.d[k]
+    return out
+
+
+def _ail_tal_any(a: _AilTAL) -> bool:
+    for k in range(len(a.d)):
+        if a.d[k] != 0:
+            return True
+    return False
+
+
+def _ail_tal_all(a: _AilTAL) -> bool:
+    for k in range(len(a.d)):
+        if not (a.d[k] != 0):
+            return False
+    return True
+
+
+def _ail_tal_take(a: _AilTAL, idx: _AilTAL) -> _AilTAL:
+    n = len(a.d)
+    out = _AilTAL(len(idx.d))
+    for j in range(len(idx.d)):
+        i = idx.d[j]
+        k = i
+        if k < 0:
+            k = k + n
+        if k < 0 or k >= n:
+            _ail_ta_poserr(i, n)
+        out.d[j] = a.d[k]
+    return out
+
+
+def _ail_tal_put(a: _AilTAL, idx: _AilTAL, src: _AilTAL):
+    if len(src.d) != len(idx.d):
+        raise ValueError("ail_array.put(): src has " + str(len(src.d)) + " elements but there are " + str(len(idx.d)) + " indices")
+    s = list(src.d)
+    for j in range(len(idx.d)):
+        a.d[_ail_ta_pos(idx.d[j], len(a.d))] = s[j]
+
+
+def _ail_tal_put_s(a: _AilTAL, idx: _AilTAL, x: int):
+    for j in range(len(idx.d)):
+        a.d[_ail_ta_pos(idx.d[j], len(a.d))] = x
+
+
+def _ail_tal_gstride(a: _AilTAL, offset: int, shape: list[int], strides: list[int]) -> _AilTAL:
+    ps = _ail_ta_positions(len(a.d), offset, shape, strides, "gather_strided", "reads")
+    out = _AilTAL(len(ps))
+    for j in range(len(ps)):
+        out.d[j] = a.d[ps[j]]
+    return out
+
+
+def _ail_tal_sstride(dst: _AilTAL, offset: int, shape: list[int], strides: list[int], src: _AilTAL):
+    ps = _ail_ta_positions(len(dst.d), offset, shape, strides, "scatter_strided", "writes")
+    if len(src.d) != len(ps):
+        raise ValueError("ail_array.scatter_strided(): src has " + str(len(src.d)) + " elements but the shape has " + str(len(ps)))
+    s = list(src.d)
+    for j in range(len(ps)):
+        dst.d[ps[j]] = s[j]
+
+
+def _ail_tal_sstride_s(dst: _AilTAL, offset: int, shape: list[int], strides: list[int], x: int):
+    ps = _ail_ta_positions(len(dst.d), offset, shape, strides, "scatter_strided", "writes")
+    for j in range(len(ps)):
+        dst.d[ps[j]] = x
+
+
+def _ail_tal_segbest(a: _AilTAL, offs: _AilTAL, smaller: bool, name: str) -> list[int]:
+    ns = _ail_ta_segments(len(a.d), offs, name)
+    res = [0] * ns
+    for s in range(ns):
+        lo = offs.d[s]
+        hi = offs.d[s + 1]
+        if lo == hi:
+            raise ValueError("ail_array." + name + "(): segment " + str(s) + " is empty")
+        best = lo
+        for j in range(lo, hi):
+            x = a.d[j]
+            if j > lo:
+                if smaller:
+                    if x < a.d[best]:
+                        best = j
+                else:
+                    if a.d[best] < x:
+                        best = j
+        res[s] = best
+    return res
+
+
+def _ail_tal_segmin(a: _AilTAL, offs: _AilTAL) -> _AilTAL:
+    r = _ail_tal_segbest(a, offs, True, "segment_min")
+    out = _AilTAL(len(r))
+    for s in range(len(r)):
+        out.d[s] = a.d[r[s]]
+    return out
+
+
+def _ail_tal_segmax(a: _AilTAL, offs: _AilTAL) -> _AilTAL:
+    r = _ail_tal_segbest(a, offs, False, "segment_max")
+    out = _AilTAL(len(r))
+    for s in range(len(r)):
+        out.d[s] = a.d[r[s]]
+    return out
+
+
+def _ail_tal_segargmin(a: _AilTAL, offs: _AilTAL) -> _AilTAL:
+    r = _ail_tal_segbest(a, offs, True, "segment_argmin")
+    out = _AilTAL(len(r))
+    for s in range(len(r)):
+        out.d[s] = r[s] - offs.d[s]
+    return out
+
+
+def _ail_tal_segargmax(a: _AilTAL, offs: _AilTAL) -> _AilTAL:
+    r = _ail_tal_segbest(a, offs, False, "segment_argmax")
+    out = _AilTAL(len(r))
+    for s in range(len(r)):
+        out.d[s] = r[s] - offs.d[s]
+    return out
+
+
+def _ail_tal_put_add(a: _AilTAL, idx: _AilTAL, src: _AilTAL, wrap: bool):
+    if len(src.d) != len(idx.d):
+        raise ValueError("ail_array.put(): src has " + str(len(src.d)) + " elements but there are " + str(len(idx.d)) + " indices")
+    s = list(src.d)
+    for j in range(len(idx.d)):
+        k = _ail_ta_pos(idx.d[j], len(a.d))
+        a.d[k] = _ail_tal_addchk(a.d[k], s[j], j, wrap)
+
+
+def _ail_tal_put_add_s(a: _AilTAL, idx: _AilTAL, x: int, wrap: bool):
+    s = [x] * len(idx.d)
+    for j in range(len(idx.d)):
+        k = _ail_ta_pos(idx.d[j], len(a.d))
+        a.d[k] = _ail_tal_addchk(a.d[k], s[j], j, wrap)
+
+
+def _ail_tao_cmp(a: _AilTAO, b: _AilTAO, op: int) -> _AilTAO:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        y = b.d[k]
+        if op == 0:
+            out.d[k] = x == y
+        elif op == 1:
+            out.d[k] = x != y
+        elif op == 2:
+            out.d[k] = x < y
+        elif op == 3:
+            out.d[k] = x <= y
+        elif op == 4:
+            out.d[k] = x > y
+        else:
+            out.d[k] = x >= y
+    return out
+
+
+def _ail_tao_cmp_s(a: _AilTAO, y: bool, op: int) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(n)
+    for k in range(n):
+        x = a.d[k]
+        if op == 0:
+            out.d[k] = x == y
+        elif op == 1:
+            out.d[k] = x != y
+        elif op == 2:
+            out.d[k] = x < y
+        elif op == 3:
+            out.d[k] = x <= y
+        elif op == 4:
+            out.d[k] = x > y
+        else:
+            out.d[k] = x >= y
+    return out
+
+
+def _ail_tao_where_aa(m: _AilTAO, a: _AilTAO, b: _AilTAO) -> _AilTAO:
+    n = len(a.d)
+    if len(b.d) != n:
+        _ail_ta_shapes(n, len(b.d))
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAO(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = a.d[k]
+        else:
+            out.d[k] = b.d[k]
+    return out
+
+
+def _ail_tao_where_as(m: _AilTAO, a: _AilTAO, y: bool) -> _AilTAO:
+    n = len(a.d)
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAO(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = a.d[k]
+        else:
+            out.d[k] = y
+    return out
+
+
+def _ail_tao_where_sa(m: _AilTAO, x: bool, b: _AilTAO) -> _AilTAO:
+    n = len(b.d)
+    if len(m.d) != n:
+        _ail_ta_shapes(len(m.d), n)
+    out = _AilTAO(n)
+    for k in range(n):
+        if m.d[k]:
+            out.d[k] = x
+        else:
+            out.d[k] = b.d[k]
+    return out
+
+
+def _ail_tao_any(a: _AilTAO) -> bool:
+    for k in range(len(a.d)):
+        if a.d[k]:
+            return True
+    return False
+
+
+def _ail_tao_all(a: _AilTAO) -> bool:
+    for k in range(len(a.d)):
+        if not (a.d[k]):
+            return False
+    return True
+
+
+def _ail_tao_take(a: _AilTAO, idx: _AilTAL) -> _AilTAO:
+    n = len(a.d)
+    out = _AilTAO(len(idx.d))
+    for j in range(len(idx.d)):
+        i = idx.d[j]
+        k = i
+        if k < 0:
+            k = k + n
+        if k < 0 or k >= n:
+            _ail_ta_poserr(i, n)
+        out.d[j] = a.d[k]
+    return out
+
+
+def _ail_tao_put(a: _AilTAO, idx: _AilTAL, src: _AilTAO):
+    if len(src.d) != len(idx.d):
+        raise ValueError("ail_array.put(): src has " + str(len(src.d)) + " elements but there are " + str(len(idx.d)) + " indices")
+    s = list(src.d)
+    for j in range(len(idx.d)):
+        a.d[_ail_ta_pos(idx.d[j], len(a.d))] = s[j]
+
+
+def _ail_tao_put_s(a: _AilTAO, idx: _AilTAL, x: bool):
+    for j in range(len(idx.d)):
+        a.d[_ail_ta_pos(idx.d[j], len(a.d))] = x
+
+
+def _ail_tao_gstride(a: _AilTAO, offset: int, shape: list[int], strides: list[int]) -> _AilTAO:
+    ps = _ail_ta_positions(len(a.d), offset, shape, strides, "gather_strided", "reads")
+    out = _AilTAO(len(ps))
+    for j in range(len(ps)):
+        out.d[j] = a.d[ps[j]]
+    return out
+
+
+def _ail_tao_sstride(dst: _AilTAO, offset: int, shape: list[int], strides: list[int], src: _AilTAO):
+    ps = _ail_ta_positions(len(dst.d), offset, shape, strides, "scatter_strided", "writes")
+    if len(src.d) != len(ps):
+        raise ValueError("ail_array.scatter_strided(): src has " + str(len(src.d)) + " elements but the shape has " + str(len(ps)))
+    s = list(src.d)
+    for j in range(len(ps)):
+        dst.d[ps[j]] = s[j]
+
+
+def _ail_tao_sstride_s(dst: _AilTAO, offset: int, shape: list[int], strides: list[int], x: bool):
+    ps = _ail_ta_positions(len(dst.d), offset, shape, strides, "scatter_strided", "writes")
+    for j in range(len(ps)):
+        dst.d[ps[j]] = x
+
+
+def _ail_tao_segbest(a: _AilTAO, offs: _AilTAL, smaller: bool, name: str) -> list[int]:
+    ns = _ail_ta_segments(len(a.d), offs, name)
+    res = [0] * ns
+    for s in range(ns):
+        lo = offs.d[s]
+        hi = offs.d[s + 1]
+        if lo == hi:
+            raise ValueError("ail_array." + name + "(): segment " + str(s) + " is empty")
+        best = lo
+        for j in range(lo, hi):
+            x = a.d[j]
+            if j > lo:
+                if smaller:
+                    if (not x) and a.d[best]:
+                        best = j
+                else:
+                    if (not a.d[best]) and x:
+                        best = j
+        res[s] = best
+    return res
+
+
+def _ail_tao_segmin(a: _AilTAO, offs: _AilTAL) -> _AilTAO:
+    r = _ail_tao_segbest(a, offs, True, "segment_min")
+    out = _AilTAO(len(r))
+    for s in range(len(r)):
+        out.d[s] = a.d[r[s]]
+    return out
+
+
+def _ail_tao_segmax(a: _AilTAO, offs: _AilTAL) -> _AilTAO:
+    r = _ail_tao_segbest(a, offs, False, "segment_max")
+    out = _AilTAO(len(r))
+    for s in range(len(r)):
+        out.d[s] = a.d[r[s]]
+    return out
+
+
+def _ail_tao_segargmin(a: _AilTAO, offs: _AilTAL) -> _AilTAL:
+    r = _ail_tao_segbest(a, offs, True, "segment_argmin")
+    out = _AilTAL(len(r))
+    for s in range(len(r)):
+        out.d[s] = r[s] - offs.d[s]
+    return out
+
+
+def _ail_tao_segargmax(a: _AilTAO, offs: _AilTAL) -> _AilTAL:
+    r = _ail_tao_segbest(a, offs, False, "segment_argmax")
+    out = _AilTAL(len(r))
+    for s in range(len(r)):
+        out.d[s] = r[s] - offs.d[s]
+    return out
+
+
+def _ail_tai_addchk(x: int, y: int, j: int, wrap: bool) -> int:
+    v = x + y
+    if v < -2147483648 or v > 2147483647:
+        if wrap:
+            return _ail_tai_wrap(v)
+        raise OverflowError("int32 add overflow at index " + str(j))
+    return v
+
+
+def _ail_tal_addchk(x: int, y: int, j: int, wrap: bool) -> int:
+    if wrap:
+        return _ail_tal_wadd(x, y)
+    return _ail_tal_one(x, y, 0, j)
+
+
+def _ail_taf_segsum(a: _AilTAF, offs: _AilTAL) -> _AilTAF:
+    ns = _ail_ta_segments(len(a.d), offs, "segment_sum")
+    out = _AilTAF(ns)
+    for s in range(ns):
+        lo = offs.d[s]
+        m = offs.d[s + 1] - lo
+        seg = [0.0] * m
+        for j in range(m):
+            seg[j] = a.d[lo + j]
+        out.d[s] = _ail_ta_canon(_ail_taf_fsum_s(seg))
+    return out
+
+
+def _ail_ta_isegsum(d: list[int], offs: _AilTAL, wrap: bool, name: str) -> _AilTAL:
+    ns = _ail_ta_segments(len(d), offs, name)
+    out = _AilTAL(ns)
+    for s in range(ns):
+        out.d[s] = _ail_ta_isum(d, offs.d[s], offs.d[s + 1], wrap, "int64 " + name + " overflow at segment " + str(s))
+    return out
+
+
+def _ail_tai_segsum(a: _AilTAI, offs: _AilTAL, wrap: bool, name: str) -> _AilTAL:
+    return _ail_ta_isegsum(a.d, offs, wrap, name)
+
+
+def _ail_tal_segsum(a: _AilTAL, offs: _AilTAL, wrap: bool, name: str) -> _AilTAL:
+    return _ail_ta_isegsum(a.d, offs, wrap, name)
+
+
+def _ail_tao_segsum(a: _AilTAO, offs: _AilTAL, wrap: bool, name: str) -> _AilTAL:
+    ns = _ail_ta_segments(len(a.d), offs, name)
+    out = _AilTAL(ns)
+    for s in range(ns):
+        c = 0
+        for j in range(offs.d[s], offs.d[s + 1]):
+            if a.d[j]:
+                c = c + 1
+        out.d[s] = c
     return out

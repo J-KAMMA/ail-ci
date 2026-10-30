@@ -1,11 +1,12 @@
-"""`import ail_array` (docs/design/TYPED_ARRAY.md, stage T2): f64 and int32 arrays lowered onto native loops.
+"""`import ail_array` (docs/design/TYPED_ARRAY.md, stages T2 and T3b): f64, int32, int64 and bool_ arrays lowered onto native loops.
 
 Called from ail_syntax.python_surface (as stdlib5 is) on the program text. A program that does not import `ail_array`
 is returned as it was written (the same string), so its C does not change. Otherwise:
 
 * every array has a static dtype: the `ta.f64` / `ta.int32` literal of its construction, a `ta.Array[ta.f64]` annotation,
   or what flows from those through assignments, calls (parameters take what every call site passes) and returns. An f64
-  array becomes a `_AilTAF` (a list[float]), an int32 array a `_AilTAI` (a list[int]); prelude_ailarray.py holds the
+  array becomes a `_AilTAF` (a list[float]), an int32 array a `_AilTAI` (a list[int]), an int64 array a `_AilTAL` (a
+  list[int]) and a bool_ array a `_AilTAO` (a list[bool]); prelude_ailarray.py holds the
   functions and is plain Python as well, so CPython runs the lowered text and the tests compare it with the reference
   `ail_array.py` before any C is involved;
 * operators, indexing, slices, `len`, iteration and printing on a value of known array kind become direct calls of those
@@ -27,17 +28,29 @@ import stdlib5
 from stdlib4 import Refused, refuse
 
 MODULE = 'ail_array'
-API = {'DType', 'Array', 'f64', 'f32', 'f16', 'int8', 'int32', 'array', 'zeros', 'full', 'arange', 'frombytes', 'sqrt',
-       'exp', 'log', 'tanh', 'minimum', 'maximum', 'clip', 'wrapping_add', 'wrapping_sub', 'wrapping_mul',
-       'saturating_add', 'saturating_sub', 'sum', 'dot', 'min', 'max', 'argmin', 'argmax'}
-DTYPES = {'f64': 'F', 'int32': 'I'}
+API = {'DType', 'Array', 'f64', 'f32', 'f16', 'int8', 'int32', 'int64', 'bool_', 'array', 'zeros', 'full', 'arange',
+       'frombytes', 'sqrt', 'exp', 'log', 'tanh', 'minimum', 'maximum', 'clip', 'wrapping_add', 'wrapping_sub',
+       'wrapping_mul', 'saturating_add', 'saturating_sub', 'sum', 'dot', 'min', 'max', 'argmin', 'argmax',
+       'wrapping_neg', 'wrapping_abs', 'wrapping_floordiv', 'wrapping_sum', 'wrapping_dot', 'eq', 'ne', 'lt', 'le', 'gt',
+       'ge', 'logical_and', 'logical_or', 'logical_xor', 'logical_not', 'where', 'any', 'all', 'take', 'put',
+       'gather_strided', 'scatter_strided', 'segment_sum', 'segment_min', 'segment_max', 'segment_argmin',
+       'segment_argmax', 'wrapping_segment_sum', 'mm', 'promote_types', 'promote_scalar'}
+DTYPES = {'f64': 'F', 'int32': 'I', 'int64': 'L', 'bool_': 'O'}
 LATER = {'f32', 'f16', 'int8'}          # stage T3
-OUTSIDE = {'bf16', 'uint8', 'int16', 'int64', 'bool_', 'uint16', 'uint32', 'uint64', 'float32', 'float16'}
-ARR = ('AF', 'AI')
+OUTSIDE = {'bf16', 'uint8', 'int16', 'uint16', 'uint32', 'uint64', 'float32', 'float16'}
+ARR = ('AF', 'AI', 'AL', 'AO')
 SCALAR = ('F', 'I', 'B')
-CLASS = {'F': '_AilTAF', 'I': '_AilTAI'}
-P = {'F': '_ail_taf_', 'I': '_ail_tai_'}
-AKIND = {'F': 'AF', 'I': 'AI'}
+CLASS = {'F': '_AilTAF', 'I': '_AilTAI', 'L': '_AilTAL', 'O': '_AilTAO'}
+P = {'F': '_ail_taf_', 'I': '_ail_tai_', 'L': '_ail_tal_', 'O': '_ail_tao_'}
+AKIND = {'F': 'AF', 'I': 'AI', 'L': 'AL', 'O': 'AO'}
+DN = {'F': 'f64', 'I': 'int32', 'L': 'int64', 'O': 'bool_'}         # dtype letter -> name in messages
+ELEM = {'AF': 'F', 'AI': 'I', 'AL': 'I', 'AO': 'B'}                  # array kind -> kind of an element
+LISTK = {'AF': 'LF', 'AI': 'LI', 'AL': 'LI', 'AO': 'LB'}             # array kind -> kind of its tolist()
+CMPS = {'eq': 0, 'ne': 1, 'lt': 2, 'le': 3, 'gt': 4, 'ge': 5}
+T3B_CALLS = {'wrapping_neg', 'wrapping_abs', 'wrapping_floordiv', 'wrapping_sum', 'wrapping_dot', 'eq', 'ne', 'lt', 'le',
+             'gt', 'ge', 'logical_and', 'logical_or', 'logical_xor', 'logical_not', 'where', 'any', 'all', 'take', 'put',
+             'gather_strided', 'scatter_strided', 'segment_sum', 'segment_min', 'segment_max', 'segment_argmin',
+             'segment_argmax', 'wrapping_segment_sum', 'mm', 'promote_types', 'promote_scalar'}
 MATH_FLOAT = {'sqrt', 'exp', 'log', 'log2', 'log10', 'sin', 'cos', 'tan', 'fabs', 'pow', 'tanh', 'atan', 'atan2', 'hypot',
               'fmod', 'copysign', 'cbrt', 'exp2', 'expm1', 'log1p', 'asin', 'acos', 'sinh', 'cosh', 'degrees', 'radians'}
 MATH_INT = {'floor', 'ceil', 'trunc', 'isqrt', 'gcd', 'lcm', 'factorial', 'comb', 'perm'}
@@ -50,6 +63,16 @@ SIG = {
     'saturating_add': ('a', 'b'), 'saturating_sub': ('a', 'b'),
     'sum': ('a', 'acc', 'order'), 'dot': ('a', 'b', 'acc', 'order'), 'min': ('a', 'order'), 'max': ('a', 'order'),
     'argmin': ('a',), 'argmax': ('a',),
+    'wrapping_neg': ('a',), 'wrapping_abs': ('a',), 'wrapping_floordiv': ('a', 'b'), 'wrapping_sum': ('a',),
+    'wrapping_dot': ('a', 'b'),
+    'eq': ('a', 'b'), 'ne': ('a', 'b'), 'lt': ('a', 'b'), 'le': ('a', 'b'), 'gt': ('a', 'b'), 'ge': ('a', 'b'),
+    'logical_and': ('a', 'b'), 'logical_or': ('a', 'b'), 'logical_xor': ('a', 'b'), 'logical_not': ('a',),
+    'where': ('mask', 'a', 'b'), 'any': ('a',), 'all': ('a',), 'take': ('a', 'idx'),
+    'put': ('a', 'idx', 'src', 'accumulate', 'overflow'),
+    'gather_strided': ('a', 'offset', 'shape', 'strides'), 'scatter_strided': ('dst', 'offset', 'shape', 'strides', 'src'),
+    'segment_sum': ('a', 'offsets'), 'segment_min': ('a', 'offsets'), 'segment_max': ('a', 'offsets'),
+    'segment_argmin': ('a', 'offsets'), 'segment_argmax': ('a', 'offsets'), 'wrapping_segment_sum': ('a', 'offsets'),
+    'mm': ('a', 'b', 'm', 'k', 'n'), 'promote_types': ('a', 'b'), 'promote_scalar': ('dtype', 'scalar', 'default_float'),
 }
 OPS = {ast.Add: (0, '+'), ast.Sub: (1, '-'), ast.Mult: (2, '*'), ast.Div: (3, '/'), ast.FloorDiv: (3, '//'),
        ast.Mod: (4, '%')}
@@ -57,6 +80,7 @@ BUILTIN_ITER = {'list', 'sorted', 'sum', 'min', 'max', 'enumerate', 'zip', 'reve
 BUILTIN_SHOW = {'print', 'str', 'repr'}
 UNSUPPORTED_METHODS = {'append': 'ail_array arrays have a fixed length; write instead: ta.zeros(n, ...) and index, or a list',
                        'extend': None, 'insert': None, 'pop': None, 'remove': None, 'resize': None}
+NOBOOL = 'ail_array: %s on bool_ arrays is not defined; write a.astype(ta.int64) (or ta.logical_and/or/xor/not)'
 PRELUDE_SOURCE = []
 
 
@@ -122,18 +146,18 @@ class Typer:
 
     # -- annotations -------------------------------------------------------------------------------------------------
     def dtype_kind(self, node):
-        """'F' or 'I' for a `ta.f64` / `ta.int32` expression; a refusal for the other dtypes."""
+        """'F', 'I', 'L' or 'O' for a `ta.f64` / `ta.int32` / `ta.int64` / `ta.bool_` expression; a refusal for the other dtypes."""
         found = self.b.attr(node)
         if found in DTYPES:
             return DTYPES[found]
         if found in LATER:
             no(node, '%s arrays are stage T3 of the typed arrays and not built here' % found,
-               'ta.f64 or ta.int32 (the program runs unchanged under CPython)')
+               'ta.f64, ta.int32, ta.int64 or ta.bool_ (the program runs unchanged under CPython)')
         if found in OUTSIDE or found == 'DType':
-            no(node, 'ail_array has f64, f32, f16, int8, int32', 'ta.int32 (or a list)')
+            no(node, 'ail_array has f64, f32, f16, int8, int32, int64, bool_', 'ta.int32 (or a list)')
         if found is not None:
-            no(node, 'ta.%s is not a dtype' % found, 'ta.f64 or ta.int32')
-        no(node, 'the dtype is not known at compile time', 'a literal ta.f64 or ta.int32 here')
+            no(node, 'ta.%s is not a dtype' % found, 'ta.f64, ta.int32, ta.int64 or ta.bool_')
+        no(node, 'the dtype is not known at compile time', 'a literal ta.f64, ta.int32, ta.int64 or ta.bool_ here')
 
     def annot_kind(self, node):
         if node is None:
@@ -146,7 +170,7 @@ class Typer:
             return {'float': 'F', 'int': 'I', 'bool': 'B', 'str': 'S', 'bytes': 'BY', 'bytearray': 'BA'}.get(node.id)
         if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name) and node.value.id == 'list' \
                 and isinstance(node.slice, ast.Name):
-            return {'float': 'LF', 'int': 'LI'}.get(node.slice.id)
+            return {'float': 'LF', 'int': 'LI', 'bool': 'LB'}.get(node.slice.id)
         return None
 
     # -- expression kinds --------------------------------------------------------------------------------------------
@@ -198,10 +222,10 @@ class Typer:
         if isinstance(node, ast.Subscript):
             v = k(node.value, env)
             if v in ARR:
-                return v if isinstance(node.slice, ast.Slice) else ('F' if v == 'AF' else 'I') \
+                return v if isinstance(node.slice, ast.Slice) else ELEM[v] \
                     if not isinstance(node.slice, ast.Tuple) else None
-            if v in ('LF', 'LI'):
-                return v if isinstance(node.slice, ast.Slice) else ('F' if v == 'LF' else 'I')
+            if v in ('LF', 'LI', 'LB'):
+                return v if isinstance(node.slice, ast.Slice) else {'LF': 'F', 'LI': 'I', 'LB': 'B'}[v]
             return None
         if isinstance(node, ast.List):
             ks = {k(e, env) for e in node.elts}
@@ -209,11 +233,13 @@ class Typer:
                 return 'LF'
             if ks == {'I'}:
                 return 'LI'
+            if ks == {'B'}:
+                return 'LB'
             return None
         if isinstance(node, ast.ListComp) and len(node.generators) == 1:
             sub = self.comp_env(node.generators, env)
             e = k(node.elt, sub)
-            return {'F': 'LF', 'I': 'LI'}.get(e)
+            return {'F': 'LF', 'I': 'LI', 'B': 'LB'}.get(e)
         if isinstance(node, ast.Call):
             return self.call_kind(node, env)
         return None
@@ -236,8 +262,10 @@ class Typer:
         v = self.kind(it, env)
         if v in ('AF', 'LF'):
             return 'F'
-        if v in ('AI', 'LI', 'R'):
+        if v in ('AI', 'AL', 'LI', 'R'):
             return 'I'
+        if v in ('AO', 'LB'):
+            return 'B'
         if isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == 'range':
             return 'I'
         return None
@@ -290,11 +318,14 @@ class Typer:
             if f.id == 'abs':
                 return first if first in ARR + ('F', 'I') else ('I' if first == 'B' else None)
             if f.id in ('sum', 'min', 'max') and len(args) == 1 and not node.keywords:
-                return {'AF': 'F', 'AI': 'I', 'LF': 'F', 'LI': 'I'}.get(first)
+                got = {'AF': 'F', 'AI': 'I', 'AL': 'I', 'LF': 'F', 'LI': 'I'}.get(first)
+                if got is None and first in ('AO', 'LB'):
+                    got = 'I' if f.id == 'sum' else 'B'
+                return got
             if f.id == 'sorted' and len(args) == 1:
-                return {'AF': 'LF', 'AI': 'LI', 'LF': 'LF', 'LI': 'LI'}.get(first)
+                return {'AF': 'LF', 'AI': 'LI', 'AL': 'LI', 'AO': 'LB', 'LF': 'LF', 'LI': 'LI', 'LB': 'LB'}.get(first)
             if f.id == 'list' and len(args) == 1:
-                return {'AF': 'LF', 'AI': 'LI', 'LF': 'LF', 'LI': 'LI'}.get(first)
+                return {'AF': 'LF', 'AI': 'LI', 'AL': 'LI', 'AO': 'LB', 'LF': 'LF', 'LI': 'LI', 'LB': 'LB'}.get(first)
             if f.id == 'range':
                 return 'R'
             if f.id == 'bytearray':
@@ -314,7 +345,7 @@ class Typer:
                 if f.attr == 'copy':
                     return v
                 if f.attr == 'tolist':
-                    return 'LF' if v == 'AF' else 'LI'
+                    return LISTK[v]
                 if f.attr == 'tobytes':
                     return 'BY'
                 if f.attr == 'astype' and node.args:
@@ -340,15 +371,39 @@ class Typer:
             except Refused:
                 return None
         a = self.kind(args['a'], env) if 'a' in args else None
+        if found in T3B_CALLS:
+            return self.t3b_kind(found, args, a, env)
         if found in ('sqrt', 'exp', 'log', 'tanh'):
             return 'AF'
         if found in ('minimum', 'maximum', 'clip'):
             return a if a in ARR else None
         if found.startswith('wrapping') or found.startswith('saturating'):
-            return 'AI'
+            return a if a in ARR else 'AI'
         if found in ('sum', 'dot', 'min', 'max'):
-            return {'AF': 'F', 'AI': 'I'}.get(a)
+            if a == 'AO':
+                return 'I' if found == 'sum' else 'B' if found != 'dot' else None
+            return {'AF': 'F', 'AI': 'I', 'AL': 'I'}.get(a)
         if found in ('argmin', 'argmax'):
+            return 'I'
+        return None
+
+    def t3b_kind(self, found, args, a, env):
+        """The kind of a call of a function that stage T3b added."""
+        if found in CMPS or found in ('logical_and', 'logical_or', 'logical_xor', 'logical_not'):
+            return 'AO'
+        if found == 'where':
+            b = self.kind(args['b'], env) if 'b' in args else None
+            return a if a in ARR else b if b in ARR else None
+        if found in ('any', 'all'):
+            return 'B'
+        if found in ('take', 'gather_strided', 'segment_min', 'segment_max', 'wrapping_neg', 'wrapping_abs',
+                     'wrapping_floordiv'):
+            return a if a in ARR else None
+        if found in ('segment_sum', 'wrapping_segment_sum'):
+            return 'AF' if a == 'AF' and found == 'segment_sum' else 'AL' if a in ARR else None
+        if found in ('segment_argmin', 'segment_argmax'):
+            return 'AL'
+        if found in ('wrapping_sum', 'wrapping_dot'):
             return 'I'
         return None
 
@@ -419,7 +474,8 @@ class Typer:
                 arrays = {k for k in got if k in ARR}
                 if arrays and arg.annotation is None and (len(arrays) > 1 or got != arrays):
                     no(fn, "parameter '%s' of %s() receives %s from the calls in this program" % (
-                        arg.arg, name, 'both f64 and int32 arrays' if len(arrays) > 1 else
+                        arg.arg, name, ('both f64 and int32 arrays' if arrays == {'AF', 'AI'} else
+                                        'arrays of different dtypes') if len(arrays) > 1 else
                         'an array from one call and something else (or something unknown) from another'),
                        "one function per dtype, or annotate it (%s: ta.Array[ta.f64])" % arg.arg)
 
@@ -565,6 +621,8 @@ class Lower(ast.NodeTransformer):
         if kd in ('I', 'B'):
             if dt == 'F':
                 return call('float', new) if kd == 'I' else call('_ail_ta_b2f', new)
+            if dt == 'O':
+                return new if kd == 'B' else ast.Compare(left=new, ops=[ast.NotEq()], comparators=[const(0)])
             return new if kd == 'I' else call('_ail_ta_b2i', new)
         no(node, 'cannot tell whether this operand is a number or an array', 'annotate it (x: float, x: int or x: ta.Array[ta.f64])')
 
@@ -812,19 +870,19 @@ class Lower(ast.NodeTransformer):
             if vkind not in ARR:
                 if vkind is None:
                     no(node, 'cannot tell the type of the value assigned to a slice', 'annotate it (b: ta.Array[ta.f64])')
-                return ast.Expr(value=call('_ail_ta_te_' + ('af' if dt == 'F' else 'ai'),
+                return ast.Expr(value=call('_ail_ta_te_a' + dt.lower(),
                                            const('ail_array: can only assign an ail_array.Array to a slice, not %s' %
                                                  {'F': 'float', 'I': 'int', 'B': 'bool', 'S': 'str', 'LF': 'list',
-                                                  'LI': 'list', 'BY': 'bytes', 'BA': 'bytearray'}.get(vkind, 'object'))))
+                                                  'LI': 'list', 'LB': 'list', 'BY': 'bytes', 'BA': 'bytearray'}.get(vkind, 'object'))))
             if vkind != kd:
-                return ast.Expr(value=call('_ail_ta_te_' + ('af' if dt == 'F' else 'ai'),
+                return ast.Expr(value=call('_ail_ta_te_a' + dt.lower(),
                                            const('ail_array: slice assignment: dtypes differ (%s and %s)' %
-                                                 ('f64' if dt == 'F' else 'int32', 'f64' if vkind == 'AF' else 'int32'))))
+                                                 (DN[dt], DN[vkind[1]]))))
             lo, hi, st, flags = self.slice_args(idx)
             return ast.Expr(value=call(P[dt] + 'setslice', arr, lo, hi, st, flags, self.visit(value)))
         ik = self.k(idx)
         if ik in ARR or ik in ('LF', 'LI'):
-            no(node, 'fancy indexing or a mask', 'a loop, or ta.minimum/ta.maximum/ta.clip')
+            no(node, 'fancy indexing or a mask', 'ta.take(a, idx) / ta.put(a, idx, src), ta.where(mask, a, b), a loop, or ta.minimum/ta.maximum/ta.clip')
         if ik in ('F', 'S'):
             no(node, 'an index that is not an int', 'an int index')
         index = self.visit(idx)
@@ -833,11 +891,19 @@ class Lower(ast.NodeTransformer):
                 no(node, 'cannot tell whether the stored value is a number', 'annotate it (x: float)')
             val = self.visit(value) if vkind == 'F' else call('float' if vkind == 'I' else '_ail_ta_b2f', self.visit(value))
             return ast.Expr(value=call('_ail_taf_set', arr, index, val))
+        if dt == 'O':
+            if vkind == 'F':
+                return ast.Expr(value=call('_ail_tao_set_bad', arr, index, const('float')))
+            if vkind not in ('I', 'B'):
+                no(node, 'cannot tell whether the stored value is an int or a bool', 'annotate it (x: bool)')
+            val = self.visit(value) if vkind == 'B' else ast.Compare(left=self.visit(value), ops=[ast.NotEq()],
+                                                                     comparators=[const(0)])
+            return ast.Expr(value=call('_ail_tao_set', arr, index, val))
         if vkind in ('I', 'B'):
             val = self.visit(value) if vkind == 'I' else call('_ail_ta_b2i', self.visit(value))
-            return ast.Expr(value=call('_ail_tai_set', arr, index, val))
+            return ast.Expr(value=call(P[dt] + 'set', arr, index, val))
         if vkind == 'F':
-            return ast.Expr(value=call('_ail_tai_set_bad', arr, index, const('float')))
+            return ast.Expr(value=call(P[dt] + 'set_bad', arr, index, const('float')))
         no(node, 'cannot tell whether the stored value is an int', 'annotate it (x: int)')
 
     def slice_args(self, sl):
@@ -892,7 +958,10 @@ class Lower(ast.NodeTransformer):
             if isinstance(node.op, ast.USub):
                 if kd == 'AF':
                     return call('_ail_taf_neg', self.visit(node.operand))
-                return call('_ail_tai_unary', self.visit(node.operand), const(False))
+                if kd == 'AO':
+                    self.need_pure(node.operand, 'neg of a bool_ array')
+                    return call('_ail_ta_te_ao', const(NOBOOL % 'neg'))
+                return call(P[kd[1]] + 'unary', self.visit(node.operand), const(False))
             if isinstance(node.op, ast.Not):
                 no(node, 'the truth value of an array', 'len(a) > 0')
             no(node, 'unary operator on an array', 'a loop over the elements')
@@ -915,24 +984,28 @@ class Lower(ast.NodeTransformer):
         code, sym = OPS[type(op)]
         if lk in ARR:
             dt = lk[1]
+            if dt == 'O':
+                self.need_pure(left, 'an operator on a bool_ array')
+                self.need_pure(right, 'an operator on a bool_ array')
+                return call('_ail_ta_te_ao', const(NOBOOL % sym))
             if dt == 'F' and sym in ('//', '%'):
                 no(where, '%s on f64 arrays' % sym, 'a loop over a.tolist()')
-            if dt == 'I' and sym == '/':
-                no(where, '/ on int32 arrays', 'a.astype(ta.f64) / b.astype(ta.f64)')
+            if dt != 'F' and sym == '/':
+                no(where, '/ on %s arrays' % DN[dt], 'a.astype(ta.f64) / b.astype(ta.f64)')
             if rk in ARR:
                 if rk != lk:
                     self.need_pure(left, 'a dtype mismatch')
                     self.need_pure(right, 'a dtype mismatch')
                     return call('_ail_ta_te_a' + dt.lower(), const(
                         'ail_array: %s %s %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)' %
-                        ('f64' if dt == 'F' else 'int32', sym, 'f64' if rk == 'AF' else 'int32',
-                         'f64' if rk == 'AF' else 'int32', 'f64' if dt == 'F' else 'int32')))
+                        (DN[dt], sym, DN[rk[1]], DN[rk[1]], DN[dt])))
                 a, b = self.visit(left), self.visit(right)
                 return call(P[dt] + ('ibin' if inplace else 'bin'), a, b, const(code))
-            if dt == 'I' and rk == 'F':
-                self.need_pure(left, 'an int32 array and a float')
-                self.need_pure(right, 'an int32 array and a float')
-                return call('_ail_ta_te_ai', const('ail_array: int32 %s float: write a.astype(ta.f64) (no implicit int-to-float)' % sym))
+            if dt in 'IL' and rk == 'F':
+                self.need_pure(left, 'an int array and a float')
+                self.need_pure(right, 'an int array and a float')
+                return call('_ail_ta_te_a' + dt.lower(), const(
+                    'ail_array: %s %s float: write a.astype(ta.f64) (no implicit int-to-float)' % (DN[dt], sym)))
             a = self.visit(left)
             x = self.scalar(right, rk, dt, 'operand')
             if inplace:
@@ -942,12 +1015,16 @@ class Lower(ast.NodeTransformer):
         dt = rk[1]
         if inplace:
             no(where, 'an in-place operator with an array on the right', 'a = a op b')
+        if dt == 'O':
+            self.need_pure(left, 'an operator on a bool_ array')
+            self.need_pure(right, 'an operator on a bool_ array')
+            return call('_ail_ta_te_ao', const(NOBOOL % sym))
         if dt == 'F' and sym in ('//', '%'):
             no(where, '%s on f64 arrays' % sym, 'a loop over a.tolist()')
-        if dt == 'I' and sym == '/':
-            no(where, '/ on int32 arrays', 'a.astype(ta.f64) / b.astype(ta.f64)')
-        if dt == 'I' and lk == 'F':
-            no(where, 'a float and an int32 array', 'a.astype(ta.f64)')
+        if dt != 'F' and sym == '/':
+            no(where, '/ on %s arrays' % DN[dt], 'a.astype(ta.f64) / b.astype(ta.f64)')
+        if dt in 'IL' and lk == 'F':
+            no(where, 'a float and an %s array' % DN[dt], 'a.astype(ta.f64)')
         x = self.scalar(left, lk, dt, 'operand')
         a = self.visit(right)
         return call(P[dt] + 'bin_s', a, x, const(code), const(True))
@@ -966,16 +1043,22 @@ class Lower(ast.NodeTransformer):
         if isinstance(op, (ast.In, ast.NotIn)):
             no(node, 'membership in an array', 'a loop over the elements')
         if not isinstance(op, (ast.Eq, ast.NotEq)):
-            no(node, 'element-wise comparison or ordering of arrays', 'a loop, or ta.minimum/ta.maximum/ta.clip')
+            no(node, 'element-wise comparison or ordering of arrays',
+               'ta.eq/ta.ne/ta.lt/ta.le/ta.gt/ta.ge(a, b) (a bool_ array), a loop, or ta.minimum/ta.maximum/ta.clip')
         lk, rk = kinds
         if lk not in ARR or rk not in ARR:
             no(node, 'comparing an array with something that is not an array of known dtype',
                'len(a) == len(b) and a loop, or annotate the other operand')
         if lk == rk:
             res = call(P[lk[1]] + 'eq', self.visit(node.left), self.visit(node.comparators[0]))
-        else:
+        elif (lk, rk) in (('AF', 'AI'), ('AI', 'AF')):
             first, second = (node.left, node.comparators[0])
             res = call('_ail_ta_ne_dtype' if lk == 'AF' else '_ail_ta_ne_dtype2', self.visit(first), self.visit(second))
+        else:       # arrays of different dtypes are never equal: len(a.d) + len(b.d) < 0 is False, and evaluates both
+            both = ast.BinOp(left=call('len', ast.Attribute(value=self.visit(node.left), attr='d', ctx=ast.Load())),
+                             op=ast.Add(),
+                             right=call('len', ast.Attribute(value=self.visit(node.comparators[0]), attr='d', ctx=ast.Load())))
+            res = ast.Compare(left=both, ops=[ast.Lt()], comparators=[const(0)])
         if isinstance(op, ast.NotEq):
             return ast.UnaryOp(op=ast.Not(), operand=res)
         return res
@@ -995,10 +1078,10 @@ class Lower(ast.NodeTransformer):
             return call(P[dt] + 'slice', arr, lo, hi, st, flags)
         ik = self.k(idx)
         if ik in ARR or ik in ('LF', 'LI'):
-            no(node, 'fancy indexing or a mask', 'a loop, or ta.minimum/ta.maximum/ta.clip')
+            no(node, 'fancy indexing or a mask', 'ta.take(a, idx), a loop, or ta.minimum/ta.maximum/ta.clip')
         if ik in ('F', 'S'):
             self.need_pure(node.value, 'an index that is not an int')
-            return call('_ail_ta_te_f' if dt == 'F' else '_ail_ta_te_i', const('array indices must be integers'))
+            return call({'F': '_ail_ta_te_f', 'O': '_ail_ta_te_b'}.get(dt, '_ail_ta_te_i'), const('array indices must be integers'))
         return call(P[dt] + 'get', arr, self.visit(idx))
 
     def visit_JoinedStr(self, node):
@@ -1038,7 +1121,10 @@ class Lower(ast.NodeTransformer):
                 kd = self.k(node.args[0])
                 if kd == 'AF':
                     return call('_ail_taf_abs', self.visit(node.args[0]))
-                return call('_ail_tai_unary', self.visit(node.args[0]), const(True))
+                if kd == 'AO':
+                    self.need_pure(node.args[0], 'abs of a bool_ array')
+                    return call('_ail_ta_te_ao', const(NOBOOL % 'abs'))
+                return call(P[kd[1]] + 'unary', self.visit(node.args[0]), const(True))
             if f.id == 'list' and len(node.args) == 1 and not node.keywords:
                 return call(P[self.k(node.args[0])[1]] + 'tolist', self.visit(node.args[0]))
             if f.id in BUILTIN_ITER:
@@ -1089,19 +1175,32 @@ class Lower(ast.NodeTransformer):
             else:
                 no(v, 'astype(%s=...) that is not a string literal' % name, "a literal such as 'trunc'")
         src = kd[1]
-        mk = 'af' if dst == 'F' else 'ai'
+        mk = 'a' + dst.lower()
         if opts['rounding'] not in ('trunc', 'nearest'):
             return call('_ail_ta_ve_' + mk, const("ail_array: rounding must be 'trunc' or 'nearest', not %r" % opts['rounding']))
         if opts['overflow'] not in ('raise', 'saturate', 'wrap'):
             return call('_ail_ta_ve_' + mk, const("ail_array: overflow must be 'raise', 'saturate' or 'wrap', not %r" % opts['overflow']))
+        mode = {'raise': 0, 'saturate': 1, 'wrap': 2}[opts['overflow']]
+        if dst == 'O':
+            return call({'F': '_ail_taf_to_bool', 'I': '_ail_tai_to_bool', 'L': '_ail_tal_to_bool', 'O': '_ail_tao_copy'}[src], recv)
         if dst == 'F':
-            return call('_ail_taf_to_f64' if src == 'F' else '_ail_tai_to_f64', recv)
+            return call({'F': '_ail_taf_to_f64', 'I': '_ail_tai_to_f64', 'L': '_ail_tal_to_f64', 'O': '_ail_tao_to_f64'}[src], recv)
         if src == 'F':
             if opts['overflow'] == 'wrap':
-                return call('_ail_ta_ve_ai', const("ail_array: overflow='wrap' is for int-to-int casts; use 'raise' or 'saturate'"))
-            return call('_ail_taf_to_i32', recv, const(opts['rounding'] == 'nearest'),
+                return call('_ail_ta_ve_' + mk, const("ail_array: overflow='wrap' is for int-to-int casts; use 'raise' or 'saturate'"))
+            return call('_ail_taf_to_i32' if dst == 'I' else '_ail_taf_to_i64', recv, const(opts['rounding'] == 'nearest'),
                         const(1 if opts['overflow'] == 'saturate' else 0))
-        return call('_ail_tai_copy', recv)
+        if dst == 'I':
+            if src == 'L':
+                return call('_ail_tal_to_i32', recv, const(mode))
+            if src == 'O':
+                return call('_ail_tao_to_i32', recv)
+            return call('_ail_tai_copy', recv)
+        if src == 'I':
+            return call('_ail_tai_to_i64', recv)
+        if src == 'O':
+            return call('_ail_tao_to_i64', recv)
+        return call('_ail_tal_copy', recv)
 
     def dtype_arg(self, node, args, found):
         if 'dtype' not in args:
@@ -1128,13 +1227,18 @@ class Lower(ast.NodeTransformer):
                 return call('float', self.visit(node))
             if kd == 'B':
                 return call('_ail_ta_b2f', self.visit(node))
+        elif dt == 'O':
+            if kd == 'B':
+                return self.visit(node)
+            if kd == 'I':
+                return ast.Compare(left=self.visit(node), ops=[ast.NotEq()], comparators=[const(0)])
         else:
             if kd == 'I':
                 return self.visit(node)
             if kd == 'B':
                 return call('_ail_ta_b2i', self.visit(node))
-        no(node, 'cannot tell that this list element is %s' % ('a number' if dt == 'F' else 'an int'),
-           'annotate it, or build the array from a list of %s' % ('floats' if dt == 'F' else 'ints'))
+        no(node, 'cannot tell that this list element is %s' % ('a number' if dt == 'F' else 'a bool' if dt == 'O' else 'an int'),
+           'annotate it, or build the array from a list of %s' % ('floats' if dt == 'F' else 'bools' if dt == 'O' else 'ints'))
 
     def values_of(self, node, dt):
         """A list expression of the elements of dtype `dt` made from the `values` argument of ta.array."""
@@ -1148,11 +1252,11 @@ class Lower(ast.NodeTransformer):
             self.env = saved
             return ast.ListComp(elt=elt, generators=gens)
         kd = self.k(node)
-        want = 'LF' if dt == 'F' else 'LI'
+        want = {'F': 'LF', 'I': 'LI', 'L': 'LI', 'O': 'LB'}[dt]
         if kd == want:
             return self.visit(node)
         if kd in ARR:
-            if kd[1] == dt:
+            if kd[1] == dt or (dt == 'L' and kd == 'AI'):
                 return ast.Attribute(value=self.visit(node), attr='d', ctx=ast.Load())
             if dt == 'F':
                 return ast.ListComp(elt=call('float', n('_ail_v')), generators=[ast.comprehension(
@@ -1161,15 +1265,23 @@ class Lower(ast.NodeTransformer):
         if kd in ('LI', 'R') and dt == 'F':
             return ast.ListComp(elt=call('float', n('_ail_v')), generators=[ast.comprehension(
                 target=ast.Name(id='_ail_v', ctx=ast.Store()), iter=self.visit(node), ifs=[], is_async=0)])
-        if kd == 'R' and dt == 'I':
+        if kd in ('LI', 'R') and dt == 'O':
+            return ast.ListComp(elt=ast.Compare(left=n('_ail_v'), ops=[ast.NotEq()], comparators=[const(0)]),
+                                generators=[ast.comprehension(target=ast.Name(id='_ail_v', ctx=ast.Store()),
+                                                              iter=self.visit(node), ifs=[], is_async=0)])
+        if kd == 'R' and dt in ('I', 'L'):
             return call('list', self.visit(node))
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'range':
             if dt == 'F':
                 return ast.ListComp(elt=call('float', n('_ail_v')), generators=[ast.comprehension(
                     target=ast.Name(id='_ail_v', ctx=ast.Store()), iter=self.visit(node), ifs=[], is_async=0)])
+            if dt == 'O':
+                return ast.ListComp(elt=ast.Compare(left=n('_ail_v'), ops=[ast.NotEq()], comparators=[const(0)]),
+                                    generators=[ast.comprehension(target=ast.Name(id='_ail_v', ctx=ast.Store()),
+                                                                  iter=self.visit(node), ifs=[], is_async=0)])
             return call('list', self.visit(node))
-        no(node, 'cannot tell the element type of these values for a%s array' % ('n f64' if dt == 'F' else 'n int32'),
-           'a list literal, a comprehension, or a list annotated as list[%s]' % ('float' if dt == 'F' else 'int'))
+        no(node, 'cannot tell the element type of these values for an array of dtype %s' % DN[dt],
+           'a list literal, a comprehension, or a list annotated as list[%s]' % ('float' if dt == 'F' else 'bool' if dt == 'O' else 'int'))
 
     def module_call(self, node, found):
         if found not in SIG:
@@ -1177,9 +1289,11 @@ class Lower(ast.NodeTransformer):
                 self.t.dtype_kind(node.func)
             no(node, 'ta.%s is not a function' % found, 'a call of one of its functions')
         args = self.t.bind(node, found)
+        if found in T3B_CALLS:
+            return self.t3b_call(node, found, args)
         if found in ('array', 'zeros', 'full', 'arange', 'frombytes'):
             dt = self.dtype_arg(node, args, found)
-            mk = 'af' if dt == 'F' else 'ai'
+            mk = 'a' + dt.lower()
             if found == 'array':
                 if 'values' not in args:
                     no(node, 'ta.array without values', 'ta.array(xs, ta.f64)')
@@ -1204,20 +1318,27 @@ class Lower(ast.NodeTransformer):
                     val = self.visit(args['value']) if vk == 'F' else call('float' if vk == 'I' else '_ail_ta_b2f', self.visit(args['value']))
                 else:
                     if vk == 'F':
-                        return call('_ail_tai_full_bad', m, const('float'))
+                        return call(P[dt] + 'full_bad', m, const('float'))
                     if vk not in ('I', 'B'):
                         no(args['value'], 'cannot tell whether the fill value is an int', 'annotate it (x: int)')
-                    val = self.visit(args['value']) if vk == 'I' else call('_ail_ta_b2i', self.visit(args['value']))
+                    if dt == 'O':
+                        val = self.visit(args['value']) if vk == 'B' else ast.Compare(
+                            left=self.visit(args['value']), ops=[ast.NotEq()], comparators=[const(0)])
+                    else:
+                        val = self.visit(args['value']) if vk == 'I' else call('_ail_ta_b2i', self.visit(args['value']))
                 return call(P[dt] + 'full', m, val)
             if found == 'arange':
                 if 'n' not in args:
                     no(node, 'ta.arange without a length', 'ta.arange(n, ta.int32)')
                 if dt == 'F':
                     return call('_ail_ta_te_af', const('ail_array: arange() makes int arrays; write arange(n, ta.int32).astype(ta.f64)'))
+                if dt == 'O':
+                    return call('_ail_ta_te_ao', const('ail_array: arange() makes int arrays, not bool_; '
+                                                       'write ta.arange(n, ta.int64).astype(ta.bool_)'))
                 m = self.length(args['n'])
                 if m is None:
-                    return call('_ail_ta_te_ai', const('ail_array: a length must be an int, not bool'))
-                return call('_ail_tai_arange', m)
+                    return call('_ail_ta_te_a' + dt.lower(), const('ail_array: a length must be an int, not bool'))
+                return call(P[dt] + 'arange', m)
             if 'data' not in args:
                 no(node, 'ta.frombytes without data', 'ta.frombytes(b, ta.f64)')
             dk = self.k(args['data'])
@@ -1231,9 +1352,9 @@ class Lower(ast.NodeTransformer):
         kd = self.array_arg(a, 'ta.%s' % found)
         dt = kd[1]
         if found in ('sqrt', 'exp', 'log', 'tanh'):
-            if dt == 'I':
-                self.need_pure(a, 'ta.%s of an int32 array' % found)
-                return call('_ail_ta_te_af', const('ail_array.%s() is defined for float arrays, not int32' % found))
+            if dt != 'F':
+                self.need_pure(a, 'ta.%s of an %s array' % (found, DN[dt]))
+                return call('_ail_ta_te_af', const('ail_array.%s() is defined for float arrays, not %s' % (found, DN[dt])))
             return call('_ail_taf_fn', self.visit(a), const(('sqrt', 'exp', 'log', 'tanh').index(found)))
         if found in ('minimum', 'maximum', 'clip'):
             return self.pick(node, found, args, kd)
@@ -1250,9 +1371,10 @@ class Lower(ast.NodeTransformer):
                         no(v, "order= other than 'any'", "order='any' or nothing")
                 else:
                     accd = self.t.dtype_kind(args['acc'])
-                    if dt == 'I' or accd == 'I':
-                        self.need_pure(a, 'acc= on an int32 array')
-                        return call('_ail_ta_ve_f', const('ail_array.%s(): acc= is for float arrays; int32 sums are exact' % found))
+                    if dt != 'F' or accd != 'F':
+                        self.need_pure(a, 'acc= on an int array')
+                        return call('_ail_ta_ve_f', const('ail_array.%s(): acc= is for float arrays; %s sums are exact' % (
+                            found, DN[dt] if dt != 'F' else 'int32')))
         if found == 'sum':
             return call(P[dt] + 'sum', self.visit(a))
         if found == 'dot':
@@ -1261,13 +1383,19 @@ class Lower(ast.NodeTransformer):
             bk = self.k(args['b'])
             if bk not in ARR:
                 no(args['b'], 'ta.dot of something that is not an array of known dtype', 'annotate it')
+            if dt == 'O':
+                self.need_pure(a, 'ta.dot of bool_ arrays')
+                self.need_pure(args['b'], 'ta.dot of bool_ arrays')
+                return call('_ail_ta_te_i', const('ail_array.dot() is defined for numeric arrays, not bool_'))
+            if dt == 'L':
+                no(node, 'ta.dot of int64 arrays (an exact int64 dot needs 128-bit sums)',
+                   'ta.wrapping_dot(a, b) (modulo 2^64), or a loop')
             if bk != kd:
                 self.need_pure(a, 'a dtype mismatch')
                 self.need_pure(args['b'], 'a dtype mismatch')
                 return call('_ail_ta_te_f' if dt == 'F' else '_ail_ta_te_i', const(
                     'ail_array: %s dot %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)' %
-                    ('f64' if dt == 'F' else 'int32', 'f64' if bk == 'AF' else 'int32', 'f64' if bk == 'AF' else 'int32',
-                     'f64' if dt == 'F' else 'int32')))
+                    (DN[dt], DN[bk[1]], DN[bk[1]], DN[dt])))
             return call(P[dt] + 'dot', self.visit(a), self.visit(args['b']))
         return call(P[dt] + found, self.visit(a))
 
@@ -1293,18 +1421,19 @@ class Lower(ast.NodeTransformer):
             if bk != kd:
                 return call('_ail_ta_te_a' + dt.lower(), const(
                     'ail_array: %s %s %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)' %
-                    ('f64' if dt == 'F' else 'int32', name, 'f64' if bk == 'AF' else 'int32',
-                     'f64' if bk == 'AF' else 'int32', 'f64' if dt == 'F' else 'int32')))
+                    (DN[dt], name, DN[bk[1]], DN[bk[1]], DN[dt])))
             return call(P[dt] + 'pick_aa', left, self.visit(b), const(smaller))
-        if dt == 'I' and bk == 'F':
-            return call('_ail_ta_te_ai', const('ail_array: int32 %s float: write a.astype(ta.f64) (no implicit int-to-float)' % name))
+        if dt != 'F' and bk == 'F':
+            return call('_ail_ta_te_a' + dt.lower(), const(
+                'ail_array: %s %s float: write a.astype(ta.f64) (no implicit int-to-float)' % (DN[dt], name)))
         x = self.scalar(b, bk, dt, 'operand')
         return call(P[dt] + 'pick_as', left, x, const(smaller))
 
     def explicit(self, node, found, args, kd):
         dt = kd[1]
-        if dt == 'F':
-            return call('_ail_ta_te_af', const('ail_array.%s() is defined for int arrays, not f64' % found))
+        if dt in ('F', 'O'):
+            self.need_pure(args['a'], 'ta.%s of a %s array' % (found, DN[dt]))
+            return call('_ail_ta_te_a' + dt.lower(), const('ail_array.%s() is defined for int arrays, not %s' % (found, DN[dt])))
         if 'b' not in args:
             no(node, 'ta.%s needs two operands' % found, 'ta.%s(a, b)' % found)
         op = {'add': 0, 'sub': 1, 'mul': 2}[found.split('_')[1]]
@@ -1314,13 +1443,341 @@ class Lower(ast.NodeTransformer):
         left = self.visit(args['a'])
         if bk in ARR:
             if bk != kd:
-                return call('_ail_ta_te_ai', const(
-                    'ail_array: int32 %s f64: dtypes differ; write a.astype(ta.f64) or b.astype(ta.int32)' % found))
-            return call('_ail_tai_explicit', left, self.visit(b), const(op), const(wrap))
+                return call('_ail_ta_te_a' + dt.lower(), const(
+                    'ail_array: %s %s %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)' %
+                    (DN[dt], found, DN[bk[1]], DN[bk[1]], DN[dt])))
+            return call(P[dt] + 'explicit', left, self.visit(b), const(op), const(wrap))
         if bk == 'F':
-            return call('_ail_ta_te_ai', const('ail_array: int32 %s float: write a.astype(ta.f64) (no implicit int-to-float)' % found))
-        x = self.scalar(b, bk, 'I', 'operand')
-        return call('_ail_tai_explicit_s', left, x, const(op), const(wrap))
+            return call('_ail_ta_te_a' + dt.lower(), const(
+                'ail_array: %s %s float: write a.astype(ta.f64) (no implicit int-to-float)' % (DN[dt], found)))
+        x = self.scalar(b, bk, dt, 'operand')
+        return call(P[dt] + 'explicit_s', left, x, const(op), const(wrap))
+
+    # -- stage T3b: comparisons, bool_ logic, where, gather and scatter, segments --------------------------------------------------
+    def te(self, dt):
+        return '_ail_ta_te_a' + dt.lower()
+
+    def stored(self, node, kd, dt):
+        """A scalar `node` stored into an array of dtype `dt` (the store rule), or None for a float into an int array."""
+        x = self.scalar(node, kd, dt, 'operand')
+        if x is None:
+            return None
+        if dt == 'I':
+            return call('_ail_tai_store', x)
+        if dt == 'L':
+            return call('_ail_tal_store', x)
+        if dt == 'F':
+            return call('_ail_ta_canon', x)
+        return x
+
+    def idx_list(self, arg, what):
+        """An int64 array for an int32/int64 index array (int32 is converted), or None for another dtype."""
+        kd = self.k(arg)
+        if kd == 'AL':
+            return self.visit(arg)
+        if kd == 'AI':
+            return call('_ail_tai_to_i64', self.visit(arg))
+        if kd in ARR:
+            return None
+        no(arg, '%s with indices that are not an array of known dtype' % what,
+           'ta.array(idx, ta.int64) bound to a name with its dtype visible')
+
+    def int_list(self, arg, what):
+        if isinstance(arg, (ast.List, ast.Tuple)):
+            for e in arg.elts:
+                if self.k(e) != 'I':
+                    no(e, '%s with an element that is not known to be an int' % what, 'ints, or a list[int] name')
+            return ast.List(elts=[self.visit(e) for e in arg.elts], ctx=ast.Load())
+        if self.k(arg) == 'LI':
+            return self.visit(arg)
+        no(arg, '%s that is not a list or tuple of ints' % what, 'a tuple literal such as (2, 3) or a list[int]')
+
+    def int_arg(self, arg, what):
+        if self.k(arg) != 'I':
+            no(arg, '%s that is not known to be an int' % what, 'an int expression')
+        return self.visit(arg)
+
+    def literal(self, arg, kind, default, what):
+        if arg is None:
+            return default
+        if isinstance(arg, ast.Constant) and type(arg.value) is kind:
+            return arg.value
+        no(arg, '%s that is not a literal' % what, 'a literal such as %r' % (default,))
+
+    def t3b_call(self, node, found, args):
+        if found == 'mm':
+            no(node, 'ta.mm (reference only: f32 arrays are stage T3 and the 2-D kernel is stage T6)',
+               'ta.dot on a row and a column, or the 2-D ta.matmul of stage T6')
+        if found in ('promote_types', 'promote_scalar'):
+            no(node, 'ta.%s (dtypes are not values on the typed path)' % found, 'choose the dtype where you write the code')
+        if found in CMPS:
+            return self.t3b_compare(node, found, args)
+        if found in ('logical_and', 'logical_or', 'logical_xor', 'logical_not'):
+            return self.t3b_logic(node, found, args)
+        if found == 'where':
+            return self.t3b_where(node, args)
+        if found in ('take', 'put', 'gather_strided', 'scatter_strided'):
+            return self.t3b_move(node, found, args)
+        if found.startswith('segment') or found == 'wrapping_segment_sum':
+            return self.t3b_segment(node, found, args)
+        a = args.get('a')
+        if a is None:
+            no(node, 'ta.%s needs an array' % found, 'ta.%s(a)' % found)
+        kd = self.array_arg(a, 'ta.%s' % found)
+        dt = kd[1]
+        if found in ('any', 'all'):
+            return call(P[dt] + found, self.visit(a))
+        if found in ('wrapping_neg', 'wrapping_abs'):
+            if dt in ('F', 'O'):
+                self.need_pure(a, 'ta.%s of a %s array' % (found, DN[dt]))
+                return call(self.te(dt), const('ail_array.%s() is defined for int arrays, not %s' % (found, DN[dt])))
+            return call(P[dt] + 'wneg', self.visit(a), const(found == 'wrapping_abs'))
+        if found == 'wrapping_sum':
+            if dt != 'L':
+                self.need_pure(a, 'ta.wrapping_sum of a %s array' % DN[dt])
+                return call('_ail_ta_te_i', const('ail_array.wrapping_sum() is for int64 arrays, not %s (int8/int32 sums are '
+                                                  'exact and cannot leave int64)' % DN[dt]))
+            return call('_ail_tal_wsum', self.visit(a))
+        if 'b' not in args:
+            no(node, 'ta.%s needs two operands' % found, 'ta.%s(a, b)' % found)
+        b = args['b']
+        bk = self.k(b)
+        if found == 'wrapping_dot':
+            if dt != 'L':
+                self.need_pure(a, 'ta.wrapping_dot of a %s array' % DN[dt])
+                return call('_ail_ta_te_i', const('ail_array.wrapping_dot() is for int64 arrays, not %s (int8/int32 sums are '
+                                                  'exact and cannot leave int64)' % DN[dt]))
+            if bk not in ARR:
+                no(b, 'ta.wrapping_dot of something that is not an array of known dtype', 'annotate it')
+            if bk != kd:
+                self.need_pure(a, 'a dtype mismatch')
+                self.need_pure(b, 'a dtype mismatch')
+                return call('_ail_ta_te_i', const(
+                    'ail_array: int64 wrapping_dot %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.int64)' %
+                    (DN[bk[1]], DN[bk[1]])))
+            return call('_ail_tal_wdot', self.visit(a), self.visit(b))
+        # wrapping_floordiv
+        if dt in ('F', 'O'):
+            self.need_pure(a, 'ta.wrapping_floordiv of a %s array' % DN[dt])
+            return call(self.te(dt), const('ail_array.wrapping_floordiv() is defined for int arrays, not %s' % DN[dt]))
+        left = self.visit(a)
+        if bk in ARR:
+            if bk != kd:
+                return call(self.te(dt), const(
+                    'ail_array: %s wrapping_floordiv %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)' %
+                    (DN[dt], DN[bk[1]], DN[bk[1]], DN[dt])))
+            return call(P[dt] + 'wfloordiv', left, self.visit(b))
+        if bk == 'F':
+            return call(self.te(dt), const('ail_array: %s wrapping_floordiv float: write a.astype(ta.f64) '
+                                           '(no implicit int-to-float)' % DN[dt]))
+        return call(P[dt] + 'wfloordiv_s', left, self.stored(b, bk, dt))
+
+    def t3b_compare(self, node, found, args):
+        a, b = args.get('a'), args.get('b')
+        if a is None or b is None:
+            no(node, 'ta.%s needs two operands' % found, 'ta.%s(a, b)' % found)
+        kd = self.array_arg(a, 'ta.%s' % found)
+        dt = kd[1]
+        bk = self.k(b)
+        code = const(CMPS[found])
+        if bk in ARR:
+            if bk != kd:
+                self.need_pure(a, 'a dtype mismatch')
+                self.need_pure(b, 'a dtype mismatch')
+                return call('_ail_ta_te_ao', const(
+                    'ail_array: %s %s %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)' %
+                    (DN[dt], found, DN[bk[1]], DN[bk[1]], DN[dt])))
+            return call(P[dt] + 'cmp', self.visit(a), self.visit(b), code)
+        if dt != 'F' and bk == 'F':
+            self.need_pure(a, 'an int array and a float')
+            self.need_pure(b, 'an int array and a float')
+            return call('_ail_ta_te_ao', const('ail_array: %s %s float: write a.astype(ta.f64) (no implicit int-to-float)'
+                                               % (DN[dt], found)))
+        left = self.visit(a)
+        x = self.stored(b, bk, dt)
+        return call(P[dt] + 'cmp_s', left, x, code)
+
+    def t3b_logic(self, node, found, args):
+        a = args.get('a')
+        if a is None:
+            no(node, 'ta.%s needs an array' % found, 'ta.%s(a)' % found)
+        kd = self.array_arg(a, 'ta.%s' % found)
+        two = found != 'logical_not'
+        if kd != 'AO':
+            if two:
+                self.need_pure(a, 'ta.%s of a non-bool array' % found)
+                return call('_ail_ta_te_ao', const('ail_array.%s() needs bool_ arrays; write ta.ne(a, 0) or a.astype(ta.bool_)'
+                                                   % found))
+            self.need_pure(a, 'ta.logical_not of a non-bool array')
+            return call('_ail_ta_te_ao', const('ail_array.logical_not() needs a bool_ array; write ta.eq(a, 0) or '
+                                               'a.astype(ta.bool_)'))
+        if not two:
+            return call('_ail_tao_not', self.visit(a))
+        if 'b' not in args:
+            no(node, 'ta.%s needs two operands' % found, 'ta.%s(a, b)' % found)
+        b = args['b']
+        bk = self.k(b)
+        op = {'logical_and': 0, 'logical_or': 1, 'logical_xor': 2}[found]
+        if bk in ARR:
+            if bk != 'AO':
+                self.need_pure(a, 'a dtype mismatch')
+                self.need_pure(b, 'a dtype mismatch')
+                return call('_ail_ta_te_ao', const(
+                    'ail_array: bool_ %s %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.bool_)' %
+                    (found, DN[bk[1]], DN[bk[1]])))
+            return call('_ail_tao_logic', self.visit(a), self.visit(b), const(op))
+        if bk == 'F':
+            self.need_pure(a, 'a bool_ array and a float')
+            self.need_pure(b, 'a bool_ array and a float')
+            return call('_ail_ta_te_ao', const('ail_array: bool_ %s float: write a.astype(ta.f64) (no implicit int-to-float)'
+                                               % found))
+        left = self.visit(a)
+        return call('_ail_tao_logic_s', left, self.stored(b, bk, 'O'), const(op))
+
+    def t3b_where(self, node, args):
+        m, a, b = args.get('mask'), args.get('a'), args.get('b')
+        if m is None or a is None or b is None:
+            no(node, 'ta.where needs a mask and two operands', 'ta.where(mask, a, b)')
+        mk = self.k(m)
+        if mk not in ARR:
+            no(m, 'ta.where with a mask whose dtype is not known at compile time', 'annotate it (m: ta.Array[ta.bool_])')
+        ak, bk = self.k(a), self.k(b)
+        if ak not in ARR and bk not in ARR:
+            no(node, 'ta.where with neither operand an array of known dtype', 'annotate one of them')
+        if mk != 'AO':
+            self.need_pure(m, 'a non-bool mask')
+            self.need_pure(a, 'a non-bool mask')
+            self.need_pure(b, 'a non-bool mask')
+            return call(self.te((ak if ak in ARR else bk)[1]), const('ail_array.where() needs a bool_ array as the mask, not %s'
+                                                                      % DN[mk[1]]))
+        if ak in ARR:
+            dt = ak[1]
+            if bk in ARR:
+                if bk != ak:
+                    self.need_pure(m, 'a dtype mismatch')
+                    self.need_pure(a, 'a dtype mismatch')
+                    self.need_pure(b, 'a dtype mismatch')
+                    return call(self.te(dt), const(
+                        'ail_array: %s where %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)' %
+                        (DN[dt], DN[bk[1]], DN[bk[1]], DN[dt])))
+                return call(P[dt] + 'where_aa', self.visit(m), self.visit(a), self.visit(b))
+            if dt != 'F' and bk == 'F':
+                self.need_pure(m, 'an int array and a float')
+                self.need_pure(a, 'an int array and a float')
+                self.need_pure(b, 'an int array and a float')
+                return call(self.te(dt), const('ail_array: %s where float: write a.astype(ta.f64) (no implicit int-to-float)'
+                                               % DN[dt]))
+            return call(P[dt] + 'where_as', self.visit(m), self.visit(a), self.stored(b, bk, dt))
+        dt = bk[1]
+        if dt != 'F' and ak == 'F':
+            self.need_pure(m, 'an int array and a float')
+            self.need_pure(a, 'an int array and a float')
+            self.need_pure(b, 'an int array and a float')
+            return call(self.te(dt), const('ail_array: %s where float: write a.astype(ta.f64) (no implicit int-to-float)'
+                                           % DN[dt]))
+        return call(P[dt] + 'where_sa', self.visit(m), self.stored(a, ak, dt), self.visit(b))
+
+    def t3b_move(self, node, found, args):
+        first = 'dst' if found == 'scatter_strided' else 'a'
+        a = args.get(first)
+        if a is None:
+            no(node, 'ta.%s needs an array' % found, 'ta.%s(...)' % found)
+        kd = self.array_arg(a, 'ta.%s' % found)
+        dt = kd[1]
+        if found == 'take':
+            if 'idx' not in args:
+                no(node, 'ta.take needs indices', 'ta.take(a, idx)')
+            idx = self.idx_list(args['idx'], 'ta.take')
+            if idx is None:
+                self.need_pure(a, 'indices that are not an int array')
+                self.need_pure(args['idx'], 'indices that are not an int array')
+                return call(self.te(dt), const('ail_array.take(): indices must be an int array, not %s'
+                                               % DN[self.k(args['idx'])[1]]))
+            return call(P[dt] + 'take', self.visit(a), idx)
+        if found == 'put':
+            if 'idx' not in args or 'src' not in args:
+                no(node, 'ta.put needs a, idx and src', 'ta.put(a, idx, src)')
+            acc = self.literal(args.get('accumulate'), bool, False, 'accumulate=')
+            ov = self.literal(args.get('overflow'), str, 'raise', 'overflow=')
+            if ov not in ('raise', 'wrap'):
+                no(args['overflow'], "ta.put(overflow=%r)" % ov, "overflow='raise' or overflow='wrap'")
+            if acc and dt == 'O':
+                no(node, 'ta.put(accumulate=True) on a bool_ array', 'accumulate on an int array and compare with ta.ne(a, 0)')
+            if acc and dt == 'F' and ov == 'wrap':
+                no(node, "ta.put(overflow='wrap') on a float array", "drop overflow= (floats never raise)")
+            idx = self.idx_list(args['idx'], 'ta.put')
+            sk = self.k(args['src'])
+            if idx is None:
+                self.need_pure(a, 'indices that are not an int array')
+                self.need_pure(args['idx'], 'indices that are not an int array')
+                self.need_pure(args['src'], 'indices that are not an int array')
+                return call(self.te(dt), const('ail_array.put(): indices must be an int array, not %s'
+                                               % DN[self.k(args['idx'])[1]]))
+            if sk in ARR:
+                if sk != kd:
+                    self.need_pure(a, 'a dtype mismatch')
+                    self.need_pure(args['idx'], 'a dtype mismatch')
+                    self.need_pure(args['src'], 'a dtype mismatch')
+                    return call(self.te(dt), const('ail_array: %s put %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)'
+                                                   % (DN[dt], DN[sk[1]], DN[sk[1]], DN[dt])))
+                if acc:
+                    return call(P[dt] + 'put_add', self.visit(a), idx, self.visit(args['src']), const(ov == 'wrap'))
+                return call(P[dt] + 'put', self.visit(a), idx, self.visit(args['src']))
+            if dt != 'F' and sk == 'F':
+                self.need_pure(a, 'a float stored into an int array')
+                self.need_pure(args['idx'], 'a float stored into an int array')
+                self.need_pure(args['src'], 'a float stored into an int array')
+                return call(self.te(dt), const("'float' object cannot be interpreted as an integer"))
+            left = self.visit(a)
+            x = self.stored(args['src'], sk, dt)
+            if acc:
+                return call(P[dt] + 'put_add_s', left, idx, x, const(ov == 'wrap'))
+            return call(P[dt] + 'put_s', left, idx, x)
+        # gather_strided / scatter_strided
+        for need in ('offset', 'shape', 'strides') + (('src',) if found == 'scatter_strided' else ()):
+            if need not in args:
+                no(node, 'ta.%s without %s' % (found, need), 'ta.%s(...) with all its arguments' % found)
+        off = self.int_arg(args['offset'], 'ta.%s with an offset' % found)
+        shape = self.int_list(args['shape'], 'ta.%s with a shape' % found)
+        strides = self.int_list(args['strides'], 'ta.%s with strides' % found)
+        if found == 'gather_strided':
+            return call(P[dt] + 'gstride', self.visit(a), off, shape, strides)
+        sk = self.k(args['src'])
+        if sk in ARR:
+            if sk != kd:
+                self.need_pure(a, 'a dtype mismatch')
+                self.need_pure(args['src'], 'a dtype mismatch')
+                return call(self.te(dt), const('ail_array: %s scatter %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)'
+                                               % (DN[dt], DN[sk[1]], DN[sk[1]], DN[dt])))
+            return call(P[dt] + 'sstride', self.visit(a), off, shape, strides, self.visit(args['src']))
+        if dt != 'F' and sk == 'F':
+            self.need_pure(a, 'a float stored into an int array')
+            return call(self.te(dt), const("'float' object cannot be interpreted as an integer"))
+        left = self.visit(a)
+        return call(P[dt] + 'sstride_s', left, off, shape, strides, self.stored(args['src'], sk, dt))
+
+    def t3b_segment(self, node, found, args):
+        a = args.get('a')
+        if a is None or 'offsets' not in args:
+            no(node, 'ta.%s needs an array and offsets' % found, 'ta.%s(a, offsets)' % found)
+        kd = self.array_arg(a, 'ta.%s' % found)
+        dt = kd[1]
+        offs = self.idx_list(args['offsets'], 'ta.%s' % found)
+        if offs is None:
+            self.need_pure(a, 'offsets that are not an int array')
+            self.need_pure(args['offsets'], 'offsets that are not an int array')
+            return call(self.te(dt), const('ail_array.%s(): indices must be an int array, not %s'
+                                           % (found, DN[self.k(args['offsets'])[1]])))
+        if found in ('segment_sum', 'wrapping_segment_sum'):
+            if dt == 'F':
+                if found == 'wrapping_segment_sum':
+                    self.need_pure(a, 'wrapping_segment_sum of a float array')
+                    self.need_pure(args['offsets'], 'wrapping_segment_sum of a float array')
+                    return call('_ail_ta_te_al', const('ail_array.wrapping_segment_sum() is defined for int arrays, not f64'))
+                return call('_ail_taf_segsum', self.visit(a), offs)
+            return call(P[dt] + 'segsum', self.visit(a), offs, const(found == 'wrapping_segment_sum'), const(found))
+        short = found.split('_', 1)[1]          # min max argmin argmax
+        return call(P[dt] + 'seg' + short, self.visit(a), offs)
 
 
 # ---------------------------------------------------------------------------------------------------------------------

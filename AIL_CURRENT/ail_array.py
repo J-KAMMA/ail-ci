@@ -9,7 +9,8 @@ a program that imports `ail_array` prints, under CPython with this file beside i
     y = (a * 2.0 + a) / 3.0          # every op rounded to f32, nothing fused
     print(ta.sum(y), y.tobytes().hex())
 
-Dtypes: f64, f32, f16 (IEEE binary64/32/16) and int8, int32. Stage T1 is 1-D only; 2-D arrays and matmul are T6.
+Dtypes: f64, f32, f16 (IEEE binary64/32/16), int8, int32, int64 and bool_ (stage T3b). Arrays are 1-D; 2-D arrays and
+matmul are T6 (`mm` is the flat form that stage T3b adds for the torch layer).
 
 How the bits are made (design sections 3 and 4):
 * Float ops compute in binary64 (Python floats, correctly rounded) and round once to the dtype with `struct`. For
@@ -17,8 +18,9 @@ How the bits are made (design sections 3 and 4):
 * Overflow goes to +-inf (`struct` raises instead, so the overflow is caught); division by zero is IEEE; subnormals
   are kept; every NaN an operation produces is the canonical positive quiet NaN. Bits that come in through
   `frombytes` are stored unchanged until an operation touches them.
-* int8/int32 `+ - * // %`, unary `-` and `abs` are exact and raise OverflowError at the first index whose result does
-  not fit; `wrapping_*` and `saturating_*` are the explicit alternatives.
+* int8/int32/int64 `+ - * // %`, unary `-` and `abs` are exact and raise OverflowError at the first index whose result does
+  not fit; `wrapping_*` and `saturating_*` are the explicit alternatives. bool_ has no arithmetic: comparisons give bool_
+  arrays, `logical_*` and `where` combine them, `astype` converts.
 * `sum` and `dot` of floats use one fixed order: blocks of 1024 elements, 16 lanes per block starting at -0.0, an
   8-4-2-1 tree over the lanes, and a power-of-two tree over the blocks.
 """
@@ -26,22 +28,27 @@ import builtins
 import math
 import struct
 
-__all__ = ['DType', 'Array', 'f64', 'f32', 'f16', 'int8', 'int32', 'array', 'zeros', 'full', 'arange', 'frombytes',
-           'sqrt', 'exp', 'log', 'tanh', 'minimum', 'maximum', 'clip', 'wrapping_add', 'wrapping_sub',
-           'wrapping_mul', 'saturating_add', 'saturating_sub', 'sum', 'dot', 'min', 'max', 'argmin', 'argmax']
+__all__ = ['DType', 'Array', 'f64', 'f32', 'f16', 'int8', 'int32', 'int64', 'bool_', 'array', 'zeros', 'full', 'arange',
+           'frombytes', 'sqrt', 'exp', 'log', 'tanh', 'minimum', 'maximum', 'clip', 'wrapping_add', 'wrapping_sub',
+           'wrapping_mul', 'wrapping_neg', 'wrapping_abs', 'wrapping_floordiv', 'wrapping_sum', 'wrapping_dot',
+           'saturating_add', 'saturating_sub', 'sum', 'dot', 'min', 'max', 'argmin', 'argmax',
+           'eq', 'ne', 'lt', 'le', 'gt', 'ge', 'logical_and', 'logical_or', 'logical_xor', 'logical_not', 'where', 'any',
+           'all', 'take', 'put', 'gather_strided', 'scatter_strided', 'segment_sum', 'segment_min', 'segment_max',
+           'segment_argmin', 'segment_argmax', 'wrapping_segment_sum', 'mm', 'promote_types', 'promote_scalar']
 
 BLOCK = 1024
 LANES = 16
 
 
 class DType:
-    """One of the five element types. Compare with `is`; `repr` is the name."""
-    __slots__ = ('name', 'itemsize', 'code', 'is_float', 'lo', 'hi', 'bits')
+    """One of the seven element types. Compare with `is`; `repr` is the name."""
+    __slots__ = ('name', 'itemsize', 'code', 'is_float', 'lo', 'hi', 'bits', 'is_bool')
 
-    def __init__(self, name, itemsize, code, is_float, bits):
+    def __init__(self, name, itemsize, code, is_float, bits, is_bool=False):
         self.name, self.itemsize, self.code, self.is_float, self.bits = name, itemsize, code, is_float, bits
-        self.lo = None if is_float else -(1 << (bits - 1))
-        self.hi = None if is_float else (1 << (bits - 1)) - 1
+        self.is_bool = is_bool
+        self.lo = None if is_float else (0 if is_bool else -(1 << (bits - 1)))
+        self.hi = None if is_float else (1 if is_bool else (1 << (bits - 1)) - 1)
 
     def __repr__(self):
         return self.name
@@ -55,7 +62,9 @@ f32 = DType('f32', 4, 'f', True, 32)
 f16 = DType('f16', 2, 'e', True, 16)
 int8 = DType('int8', 1, 'b', False, 8)
 int32 = DType('int32', 4, 'i', False, 32)
-_DTYPES = (f64, f32, f16, int8, int32)
+int64 = DType('int64', 8, 'q', False, 64)
+bool_ = DType('bool_', 1, '?', False, 8, True)
+_DTYPES = (f64, f32, f16, int8, int32, int64, bool_)
 _WIDTH = {f16: 1, f32: 2, f64: 3}
 
 # The canonical quiet NaN, sign bit clear (binary64 7ff8000000000000; packs to f32 7fc00000 and f16 7e00).
@@ -66,7 +75,8 @@ _ONE = {code: struct.Struct('<' + code) for code in 'dfe'}
 
 def _dtype(dt):
     if not isinstance(dt, DType):
-        raise TypeError('ail_array: dtype must be one of f64, f32, f16, int8, int32, not %s' % type(dt).__name__)
+        raise TypeError('ail_array: dtype must be one of f64, f32, f16, int8, int32, int64, bool_, not %s'
+                        % type(dt).__name__)
     return dt
 
 
@@ -106,6 +116,8 @@ def _store(dt, x):
         raise TypeError('must be real number, not %s' % _type_name(x))
     if isinstance(x, int):
         v = int(x)
+        if dt.is_bool:
+            return v != 0
         if v < dt.lo or v > dt.hi:
             raise OverflowError('%s value out of range: %d' % (dt.name, v))
         return v
@@ -204,7 +216,7 @@ class Array:
             yield self[k]
 
     def __contains__(self, x):
-        return any(v == x for v in self._values())
+        return builtins.any(v == x for v in self._values())
 
     # ---- conversion -----------------------------------------------------------------------------------------------
     def tolist(self):
@@ -273,7 +285,7 @@ def _length(shape):
             raise ValueError('ail_array: 2-D arrays are not in this version (stage T6); shape %r' % (shape,))
         else:
             raise ValueError('ail_array has 1-D and 2-D arrays; shape %r' % (shape,))
-    if isinstance(shape, bool) or not isinstance(shape, int):
+    if isinstance(shape, builtins.bool) or not isinstance(shape, int):
         raise TypeError('ail_array: a length must be an int, not %s' % _type_name(shape))
     if shape < 0:
         raise ValueError('ail_array: negative length %d' % shape)
@@ -303,6 +315,8 @@ def arange(n, dtype):
     dt = _dtype(dtype)
     if dt.is_float:
         raise TypeError('ail_array: arange() makes int arrays; write arange(n, ta.int32).astype(ta.%s)' % dt)
+    if dt.is_bool:
+        raise TypeError('ail_array: arange() makes int arrays, not bool_; write ta.arange(n, ta.int64).astype(ta.bool_)')
     return Array._of(dt, [_store(dt, k) for k in range(_length(n))])
 
 
@@ -313,6 +327,8 @@ def frombytes(data, dtype):
         raise TypeError('ail_array: frombytes() needs bytes, not %s' % _type_name(data))
     if len(data) % dt.itemsize:
         raise ValueError('ail_array: byte length %d is not a multiple of %d (%s)' % (len(data), dt.itemsize, dt))
+    if dt.is_bool:
+        return Array._make(dt, bytearray(1 if b else 0 for b in data))     # a bool_ byte is 0 or 1
     return Array._make(dt, bytearray(data))
 
 
@@ -386,8 +402,15 @@ def _run(a, xs, step, name, into):
     return Array._of(dt, out)
 
 
+def _no_bool(dt, what):
+    if dt.is_bool:
+        raise TypeError('ail_array: %s on bool_ arrays is not defined; write a.astype(ta.int64) (or ta.logical_and/or/xor/not)'
+                        % what)
+
+
 def _binary(a, o, sym, reflected, into=None):
     dt = a._dt
+    _no_bool(dt, sym)
     if dt.is_float and sym in ('//', '%'):
         raise TypeError('ail_array: %s is not defined for %s arrays; write a loop over a.tolist()' % (sym, dt))
     if not dt.is_float and sym == '/':
@@ -403,6 +426,7 @@ def _binary(a, o, sym, reflected, into=None):
 
 
 def _unary(a, what):
+    _no_bool(a._dt, what)
     xs = a._values()
     if what == 'neg':
         return _run(a, xs, lambda k: -xs[k], 'neg', None)
@@ -502,7 +526,7 @@ def clip(a, lo, hi):
 def _int_pair(a, b, name):
     if not isinstance(a, Array):
         raise TypeError('ail_array.%s() needs an ail_array.Array first, not %s' % (name, _type_name(a)))
-    if a._dt.is_float:
+    if a._dt.is_float or a._dt.is_bool:
         raise TypeError('ail_array.%s() is defined for int arrays, not %s' % (name, a._dt))
     ys = _operand(a, b, name)
     if ys is NotImplemented:
@@ -535,6 +559,25 @@ saturating_sub = _intfn('saturating_sub', lambda x, y: x - y, _sat)
 
 
 # ---- casts --------------------------------------------------------------------------------------------------------
+def _int_to_float(dt, v):
+    """The float of the exact int `v` rounded once to `dt` (nearest-even; overflow is left to `_round`). `float(v)` first
+    would round twice for |v| > 2^53 (int64 to f32 or f16)."""
+    if dt is f64:
+        return float(v)
+    p = 24 if dt is f32 else 11
+    m = builtins.abs(v)
+    n = m.bit_length()
+    if n > p:
+        shift = n - p
+        q, r = divmod(m, 1 << shift)
+        half = 1 << (shift - 1)
+        if r > half or (r == half and q & 1):
+            q += 1
+        m = q << shift
+    x = float(m)
+    return -x if v < 0 else x
+
+
 def _astype(a, dt, rounding, overflow):
     if rounding not in ('trunc', 'nearest'):
         raise ValueError("ail_array: rounding must be 'trunc' or 'nearest', not %r" % (rounding,))
@@ -542,8 +585,12 @@ def _astype(a, dt, rounding, overflow):
         raise ValueError("ail_array: overflow must be 'raise', 'saturate' or 'wrap', not %r" % (overflow,))
     src = a._dt
     xs = a._values()
+    if dt.is_bool:
+        return Array._of(dt, [x != 0 for x in xs])                 # nonzero, so NaN is True and -0.0 is False
     if dt.is_float:
-        return Array._of(dt, [_round(dt, float(x)) for x in xs])
+        if src.is_float:
+            return Array._of(dt, [_round(dt, float(x)) for x in xs])
+        return Array._of(dt, [_round(dt, _int_to_float(dt, int(x))) for x in xs])     # one rounding, also for int64
     if src.is_float and overflow == 'wrap':
         raise ValueError("ail_array: overflow='wrap' is for int-to-int casts; use 'raise' or 'saturate'")
     out = []
@@ -561,7 +608,7 @@ def _astype(a, dt, rounding, overflow):
                 raise OverflowError('cannot convert float infinity to integer')
             v = int(x) if rounding == 'trunc' else round(x)
         else:
-            v = x
+            v = int(x)
         if v < dt.lo or v > dt.hi:
             if overflow == 'saturate':
                 v = _sat(dt, v)
@@ -634,6 +681,8 @@ def sum(a, acc=None, order=None):
         total = 0
         for x in xs:
             total += x
+        if a._dt is int64 and not -(1 << 63) <= total < (1 << 63):
+            raise OverflowError('int64 sum overflow')
         return total
     return _fixed_sum(A, xs)
 
@@ -642,6 +691,8 @@ def dot(a, b, acc=None, order=None):
     """sum(a * b) bit for bit: products rounded to the accumulator dtype, then the fixed order; ints are exact."""
     if not isinstance(a, Array) or not isinstance(b, Array):
         raise TypeError('ail_array.dot() needs two ail_array.Array values')
+    if a._dt.is_bool:
+        raise TypeError('ail_array.dot() is defined for numeric arrays, not bool_')
     ys = _operand(a, b, 'dot')
     A = _acc(a, acc, 'dot')
     _order(order, 'dot')
@@ -650,6 +701,8 @@ def dot(a, b, acc=None, order=None):
         total = 0
         for x, y in zip(xs, ys):
             total += x * y
+        if a._dt is int64 and not -(1 << 63) <= total < (1 << 63):
+            raise OverflowError('int64 dot overflow')
         return total
     return _fixed_sum(A, [_round(A, x * y) for x, y in zip(xs, ys)])
 
@@ -691,3 +744,453 @@ def argmin(a):
 def argmax(a):
     """Lowest index of the largest element (the first NaN if there is one)."""
     return _extreme(a, 'argmax', False)[0]
+
+
+# ---- stage T3b: wrapping forms the torch layer calls --------------------------------------------------------------
+def _int_array(a, name):
+    if not isinstance(a, Array):
+        raise TypeError('ail_array.%s() needs an ail_array.Array, not %s' % (name, _type_name(a)))
+    if a._dt.is_float or a._dt.is_bool:
+        raise TypeError('ail_array.%s() is defined for int arrays, not %s' % (name, a._dt))
+    return a._values()
+
+
+def wrapping_neg(a):
+    """Two's-complement negation: the minimum value stays the minimum."""
+    return Array._of(a._dt, [_wrap(a._dt, -x) for x in _int_array(a, 'wrapping_neg')])
+
+
+def wrapping_abs(a):
+    """abs with the minimum value staying the minimum."""
+    return Array._of(a._dt, [_wrap(a._dt, builtins.abs(x)) for x in _int_array(a, 'wrapping_abs')])
+
+
+def wrapping_floordiv(a, b):
+    """Python's floor division; only `min // -1` differs from `//` (it wraps to min instead of raising). A zero divisor
+    raises ZeroDivisionError as `//` does."""
+    xs, ys = _int_pair(a, b, 'wrapping_floordiv')
+    return Array._of(a._dt, [_wrap(a._dt, _ifloordiv(x, y)) for x, y in zip(xs, ys)])
+
+
+def _int64_only(a, name):
+    if not isinstance(a, Array):
+        raise TypeError('ail_array.%s() needs an ail_array.Array, not %s' % (name, _type_name(a)))
+    if a._dt is not int64:
+        raise TypeError('ail_array.%s() is for int64 arrays, not %s (int8/int32 sums are exact and cannot leave int64)'
+                        % (name, a._dt))
+
+
+def wrapping_sum(a):
+    """The sum of an int64 array modulo 2^64, as a Python int in the int64 range (the order does not matter)."""
+    _int64_only(a, 'wrapping_sum')
+    return _wrap(int64, builtins.sum(a._values()))
+
+
+def wrapping_dot(a, b):
+    """sum(a * b) modulo 2^64 for int64 arrays."""
+    _int64_only(a, 'wrapping_dot')
+    ys = _operand(a, b, 'wrapping_dot')
+    return _wrap(int64, builtins.sum(x * y for x, y in zip(a._values(), ys)))
+
+
+# ---- comparisons, logic, where, any/all ---------------------------------------------------------------------------
+def _compare(a, b, name, op):
+    if not isinstance(a, Array):
+        raise TypeError('ail_array.%s() needs an ail_array.Array first, not %s' % (name, _type_name(a)))
+    ys = _operand(a, b, name)
+    if ys is NotImplemented:
+        raise TypeError('ail_array.%s(): unsupported operand %s' % (name, _type_name(b)))
+    return Array._of(bool_, [op(x, y) for x, y in zip(a._values(), ys)])
+
+
+def eq(a, b):
+    """Element-wise a == b as a bool_ array (IEEE: NaN is unequal to everything, -0.0 == 0.0)."""
+    return _compare(a, b, 'eq', lambda x, y: x == y)
+
+
+def ne(a, b):
+    return _compare(a, b, 'ne', lambda x, y: x != y)
+
+
+def lt(a, b):
+    return _compare(a, b, 'lt', lambda x, y: x < y)
+
+
+def le(a, b):
+    return _compare(a, b, 'le', lambda x, y: x <= y)
+
+
+def gt(a, b):
+    return _compare(a, b, 'gt', lambda x, y: x > y)
+
+
+def ge(a, b):
+    return _compare(a, b, 'ge', lambda x, y: x >= y)
+
+
+def _logic(a, b, name, op):
+    if not isinstance(a, Array) or not a._dt.is_bool:
+        raise TypeError('ail_array.%s() needs bool_ arrays; write ta.ne(a, 0) or a.astype(ta.bool_)' % name)
+    ys = _operand(a, b, name)
+    if ys is NotImplemented:
+        raise TypeError('ail_array.%s(): unsupported operand %s' % (name, _type_name(b)))
+    return Array._of(bool_, [op(x, y) for x, y in zip(a._values(), ys)])
+
+
+def logical_and(a, b):
+    return _logic(a, b, 'logical_and', lambda x, y: x and y)
+
+
+def logical_or(a, b):
+    return _logic(a, b, 'logical_or', lambda x, y: x or y)
+
+
+def logical_xor(a, b):
+    return _logic(a, b, 'logical_xor', lambda x, y: x != y)
+
+
+def logical_not(a):
+    if not isinstance(a, Array) or not a._dt.is_bool:
+        raise TypeError('ail_array.logical_not() needs a bool_ array; write ta.eq(a, 0) or a.astype(ta.bool_)')
+    return Array._of(bool_, [not x for x in a._values()])
+
+
+def where(mask, a, b):
+    """mask ? a : b element by element. `a` and `b` are arrays of one dtype, or one is a Python number (stored to the
+    other's dtype); the result has that dtype and mask's length."""
+    if not isinstance(mask, Array) or not mask._dt.is_bool:
+        raise TypeError('ail_array.where() needs a bool_ array as the mask, not %s' % (
+            mask._dt if isinstance(mask, Array) else _type_name(mask)))
+    if isinstance(a, Array):
+        ys = _operand(a, b, 'where')
+        if ys is NotImplemented:
+            raise TypeError('ail_array.where(): unsupported operand %s' % _type_name(b))
+        dt, xs = a._dt, a._values()
+    elif isinstance(b, Array):
+        dt, ys = b._dt, b._values()
+        xs = _operand(b, a, 'where')
+        if xs is NotImplemented:
+            raise TypeError('ail_array.where(): unsupported operand %s' % _type_name(a))
+    else:
+        raise TypeError('ail_array.where() needs an ail_array.Array for a or b')
+    if len(xs) != mask._n:
+        raise ValueError('ail_array: shapes differ: (%d,) and (%d,)' % (mask._n, len(xs)))
+    return Array._of(dt, [x if m else y for m, x, y in zip(mask._values(), xs, ys)])
+
+
+def any(a):
+    """True when some element is nonzero (NaN counts as nonzero); False for the empty array."""
+    if not isinstance(a, Array):
+        raise TypeError('ail_array.any() needs an ail_array.Array, not %s' % _type_name(a))
+    return builtins.any(x != 0 for x in a._values())
+
+
+def all(a):
+    """True when every element is nonzero (NaN counts as nonzero); True for the empty array."""
+    if not isinstance(a, Array):
+        raise TypeError('ail_array.all() needs an ail_array.Array, not %s' % _type_name(a))
+    return builtins.all(x != 0 for x in a._values())
+
+
+# ---- gather and scatter: moves only, so exact ------------------------------------------------------------------------
+def _indices(idx, name):
+    if not isinstance(idx, Array):
+        raise TypeError('ail_array.%s(): indices must be an ail_array.Array, not %s' % (name, _type_name(idx)))
+    if idx._dt.is_float or idx._dt.is_bool:
+        raise TypeError('ail_array.%s(): indices must be an int array, not %s' % (name, idx._dt))
+    return idx._values()
+
+
+def _need_array(a, name):
+    if not isinstance(a, Array):
+        raise TypeError('ail_array.%s() needs an ail_array.Array, not %s' % (name, _type_name(a)))
+
+
+def _position(i, n):
+    """Index `i` (negative counts from the end) of an array of n elements, or the IndexError of PyTorch's x[idx]."""
+    k = i + n if i < 0 else i
+    if k < 0 or k >= n:
+        raise IndexError('index %d is out of bounds for dimension 0 with size %d' % (i, n))
+    return k
+
+
+def take(a, idx):
+    """The elements at the positions in the int array `idx` (negative counts from the end), as a new array of a's dtype.
+    The bytes are copied, so every bit (NaN payloads too) is kept."""
+    _need_array(a, 'take')
+    ks = [_position(i, a._n) for i in _indices(idx, 'take')]
+    size = a._dt.itemsize
+    out = bytearray()
+    for k in ks:
+        out += a._buf[k * size:(k + 1) * size]
+    return Array._make(a._dt, out)
+
+
+def put(a, idx, src, accumulate=False, overflow='raise'):
+    """a[idx[j]] = src[j] for j in order (the last write to a position wins), in place. `src` is an array of a's dtype
+    and idx's length, or one Python number for every position. The dtype and the length are checked first; then the
+    writes happen in order and an index outside the array raises at its position with the elements before it already
+    written (PyTorch's index_put_ does the same). With accumulate=True the element becomes a[idx[j]] + src[j]: floats
+    round per add, ints raise OverflowError ('int64 add overflow at index j') or, with overflow='wrap', wrap. Returns
+    None."""
+    _need_array(a, 'put')
+    ints = _indices(idx, 'put')
+    dt = a._dt
+    if overflow not in ('raise', 'wrap'):
+        raise ValueError("ail_array.put(): overflow must be 'raise' or 'wrap', not %r" % (overflow,))
+    if isinstance(src, Array):
+        if src._dt is not dt:
+            raise TypeError('ail_array: %s put %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)'
+                            % (dt, src._dt, src._dt, dt))
+        if src._n != len(ints):
+            raise ValueError('ail_array.put(): src has %d elements but there are %d indices' % (src._n, len(ints)))
+        vs = src._values()
+    else:
+        vs = [_store(dt, src)] * len(ints)
+    if accumulate:
+        _no_bool(dt, 'put(accumulate=True)')
+        if dt.is_float and overflow == 'wrap':
+            raise ValueError("ail_array.put(): overflow='wrap' is for int arrays")
+    size = dt.itemsize
+    for j, (i, v) in enumerate(zip(ints, vs)):
+        k = _position(i, a._n)
+        if accumulate:
+            cur = _ONE_READ[dt].unpack_from(a._buf, k * size)[0]
+            if dt.is_float:
+                v = _round(dt, cur + v)
+            else:
+                v = cur + v
+                if v < dt.lo or v > dt.hi:
+                    if overflow == 'wrap':
+                        v = _wrap(dt, v)
+                    else:
+                        raise OverflowError('%s add overflow at index %d' % (dt.name, j))
+        a._buf[k * size:(k + 1) * size] = _pack(dt, [v])
+
+
+def _shape_args(offset, shape, strides, name):
+    if isinstance(offset, builtins.bool) or not isinstance(offset, int):
+        raise TypeError('ail_array.%s(): offset must be an int, not %s' % (name, _type_name(offset)))
+    for what, seq in (('shape', shape), ('strides', strides)):
+        if not isinstance(seq, (list, tuple)):
+            raise TypeError('ail_array.%s(): %s must be a list or tuple of ints, not %s' % (name, what, _type_name(seq)))
+        for d in seq:
+            if isinstance(d, builtins.bool) or not isinstance(d, int):
+                raise TypeError('ail_array.%s(): %s must hold ints, not %s' % (name, what, _type_name(d)))
+    if len(shape) != len(strides):
+        raise ValueError('ail_array.%s(): shape and strides differ in length (%d and %d)' % (name, len(shape), len(strides)))
+    for d in shape:
+        if d < 0:
+            raise ValueError('ail_array.%s(): negative size %d in shape' % (name, d))
+    total = 1
+    for d in shape:
+        total *= d
+    return total
+
+
+def _positions(n, offset, shape, strides, name, verb):
+    """The array positions of the elements of a strided view, in C order of the logical index; IndexError at the
+    first one outside 0..n-1 (strides may be zero or negative)."""
+    total = _shape_args(offset, shape, strides, name)
+    out = []
+    if total == 0:
+        return out
+    idx = [0] * len(shape)
+    p = offset
+    for e in range(total):
+        if p < 0 or p >= n:
+            raise IndexError('ail_array.%s(): element %d %s index %d, outside the array of %d elements'
+                             % (name, e, verb, p, n))
+        out.append(p)
+        d = len(shape) - 1
+        while d >= 0:
+            idx[d] += 1
+            p += strides[d]
+            if idx[d] < shape[d]:
+                break
+            p -= shape[d] * strides[d]
+            idx[d] = 0
+            d -= 1
+    return out
+
+
+def gather_strided(a, offset, shape, strides):
+    """A new 1-D array of prod(shape) elements: element (i0, i1, ...) in C order is a[offset + i0*strides[0] + ...].
+    Strides count elements; zero strides repeat (broadcast). Bytes are copied, so every bit is kept."""
+    _need_array(a, 'gather_strided')
+    ps = _positions(a._n, offset, shape, strides, 'gather_strided', 'reads')
+    size = a._dt.itemsize
+    out = bytearray()
+    for p in ps:
+        out += a._buf[p * size:(p + 1) * size]
+    return Array._make(a._dt, out)
+
+
+def scatter_strided(dst, offset, shape, strides, src):
+    """dst[offset + i0*strides[0] + ...] = src[e] for the elements e in C order, in place (a position written twice
+    keeps the later element). `src` is an array of dst's dtype with prod(shape) elements, or one Python number.
+    Every position is checked before anything is written. Returns None."""
+    _need_array(dst, 'scatter_strided')
+    ps = _positions(dst._n, offset, shape, strides, 'scatter_strided', 'writes')
+    dt = dst._dt
+    size = dt.itemsize
+    if isinstance(src, Array):
+        if src._dt is not dt:
+            raise TypeError('ail_array: %s scatter %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)'
+                            % (dt, src._dt, src._dt, dt))
+        if src._n != len(ps):
+            raise ValueError('ail_array.scatter_strided(): src has %d elements but the shape has %d' % (src._n, len(ps)))
+        data = bytes(src._buf)
+        for e, p in enumerate(ps):
+            dst._buf[p * size:(p + 1) * size] = data[e * size:(e + 1) * size]
+        return
+    one = _pack(dt, [_store(dt, src)])
+    for p in ps:
+        dst._buf[p * size:(p + 1) * size] = one
+
+
+# ---- segmented reductions --------------------------------------------------------------------------------------------
+def _segments(a, offsets, name):
+    """[(start, stop)] of the segments a[offsets[k]:offsets[k+1]]; offsets rise from >= 0 to <= len(a)."""
+    _need_array(a, name)
+    os_ = _indices(offsets, name)
+    if not os_:
+        raise ValueError('ail_array.%s(): offsets needs at least one element' % name)
+    for k, o in enumerate(os_):
+        if o < 0 or o > a._n or (k and o < os_[k - 1]):
+            raise ValueError('ail_array.%s(): offsets[%d] = %d is out of order or outside 0..%d' % (name, k, o, a._n))
+    return list(zip(os_[:-1], os_[1:]))
+
+
+def _exact_segment_sums(a, offsets, name, wrap):
+    segs = _segments(a, offsets, name)
+    xs = a._values()
+    out = []
+    for k, (lo, hi) in enumerate(segs):
+        total = 0
+        for x in xs[lo:hi]:
+            total += x
+        if not -(1 << 63) <= total < (1 << 63):
+            if wrap:
+                total = _wrap(int64, total)
+            else:
+                raise OverflowError('int64 segment_sum overflow at segment %d' % k)
+        out.append(total)
+    return Array._of(int64, out)
+
+
+def segment_sum(a, offsets):
+    """One sum per segment a[offsets[k]:offsets[k+1]]. Floats: design 3.5's order inside each segment, rounded to a's
+    dtype (an empty segment gives +0.0). Ints and bool_: exact, as an int64 array, OverflowError if one leaves int64."""
+    if isinstance(a, Array) and not a._dt.is_float:
+        return _exact_segment_sums(a, offsets, 'segment_sum', False)
+    segs = _segments(a, offsets, 'segment_sum')
+    xs, dt = a._values(), a._dt
+    A = f32 if dt is f16 else dt
+    return Array._of(dt, [_round(dt, _fixed_sum(A, xs[lo:hi])) for lo, hi in segs])
+
+
+def wrapping_segment_sum(a, offsets):
+    """segment_sum of int arrays with each sum taken modulo 2^64 (the int64 result wraps instead of raising)."""
+    if isinstance(a, Array) and a._dt.is_float:
+        raise TypeError('ail_array.wrapping_segment_sum() is defined for int arrays, not %s' % a._dt)
+    return _exact_segment_sums(a, offsets, 'wrapping_segment_sum', True)
+
+
+def _segment_extreme(a, offsets, name, smaller, want_index):
+    segs = _segments(a, offsets, name)
+    xs = a._values()
+    out = []
+    for k, (lo, hi) in enumerate(segs):
+        if lo == hi:
+            raise ValueError('ail_array.%s(): segment %d is empty' % (name, k))
+        best = lo
+        found = None
+        for j in range(lo, hi):
+            x = xs[j]
+            if x != x:
+                found = j
+                break
+            if j > lo and (_less(x, xs[best]) if smaller else _less(xs[best], x)):
+                best = j
+        j = best if found is None else found
+        out.append(j - lo if want_index else (_NAN if found is not None else xs[j]))
+    return Array._of(int64 if want_index else a._dt, out)
+
+
+def segment_min(a, offsets):
+    """The smallest element of each segment (NaN if the segment has one; -0.0 < 0.0); ValueError on an empty segment."""
+    return _segment_extreme(a, offsets, 'segment_min', True, False)
+
+
+def segment_max(a, offsets):
+    return _segment_extreme(a, offsets, 'segment_max', False, False)
+
+
+def segment_argmin(a, offsets):
+    """Per segment, the lowest index inside the segment of its smallest element (the first NaN), as an int64 array."""
+    return _segment_extreme(a, offsets, 'segment_argmin', True, True)
+
+
+def segment_argmax(a, offsets):
+    return _segment_extreme(a, offsets, 'segment_argmax', False, True)
+
+
+# ---- flat matrix product ---------------------------------------------------------------------------------------------
+def mm(a, b, m, k, n):
+    """The (m x k) by (k x n) product of two flat row-major float arrays (f32 or f64) as a flat m*n array. Element
+    (i, j) is dot(a[i*k:(i+1)*k], b[j::n]) bit for bit: the products rounded to the dtype, then design 3.5's order along
+    k (K = 0 gives +0.0). It is the order the 2-D matmul of TYPED_ARRAY 3.7 defines, for f32 as for f64."""
+    if not isinstance(a, Array) or not isinstance(b, Array):
+        raise TypeError('ail_array.mm() needs two ail_array.Array values')
+    dt = a._dt
+    if b._dt is not dt:
+        raise TypeError('ail_array: %s mm %s: dtypes differ; write a.astype(ta.%s) or b.astype(ta.%s)'
+                        % (dt, b._dt, b._dt, dt))
+    if dt is not f32 and dt is not f64:
+        raise TypeError('ail_array.mm(): only f32 and f64 arrays are built, not %s' % dt)
+    for what, v in (('m', m), ('k', k), ('n', n)):
+        if isinstance(v, builtins.bool) or not isinstance(v, int):
+            raise TypeError('ail_array.mm(): %s must be an int, not %s' % (what, _type_name(v)))
+        if v < 0:
+            raise ValueError('ail_array.mm(): negative size %s = %d' % (what, v))
+    if a._n != m * k:
+        raise ValueError('ail_array.mm(): a has %d elements, expected %d (%d x %d)' % (a._n, m * k, m, k))
+    if b._n != k * n:
+        raise ValueError('ail_array.mm(): b has %d elements, expected %d (%d x %d)' % (b._n, k * n, k, n))
+    xs, ys = a._values(), b._values()
+    out = []
+    for i in range(m):
+        row = xs[i * k:(i + 1) * k]
+        for j in range(n):
+            out.append(_fixed_sum(dt, [_round(dt, row[t] * ys[t * n + j]) for t in range(k)]))
+    return Array._of(dt, out)
+
+
+# ---- dtype promotion (PyTorch's rules, for the torch layer) ----------------------------------------------------------
+def promote_types(a, b):
+    """The dtype PyTorch gives an operation on two tensors of dtypes a and b: bool < int < float; the wider one
+    inside a category; any float wins over any int (int64 with f16 is f16)."""
+    _dtype(a), _dtype(b)
+    if a.is_float or b.is_float:
+        fl = [d for d in (a, b) if d.is_float]
+        return fl[0] if len(fl) == 1 or _WIDTH[fl[0]] >= _WIDTH[fl[1]] else fl[1]
+    if a.is_bool:
+        return b
+    if b.is_bool:
+        return a
+    return a if a.bits >= b.bits else b
+
+
+def promote_scalar(dtype, scalar, default_float=None):
+    """The dtype of `tensor(dtype) op scalar` for a Python scalar (PyTorch: a scalar only raises the category):
+    a bool scalar keeps dtype; an int scalar turns bool into int64; a float scalar turns bool and ints into the
+    default float (f32 unless `default_float` says otherwise)."""
+    dt = _dtype(dtype)
+    if isinstance(scalar, builtins.bool):
+        return dt
+    if isinstance(scalar, int):
+        return int64 if dt.is_bool else dt
+    if isinstance(scalar, float):
+        return dt if dt.is_float else (f32 if default_float is None else _dtype(default_float))
+    raise TypeError('ail_array.promote_scalar(): scalar must be a bool, int or float, not %s' % _type_name(scalar))
