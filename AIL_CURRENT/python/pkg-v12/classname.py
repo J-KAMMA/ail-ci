@@ -52,6 +52,11 @@ def qualified(ident):
 # keeps its module, and the places that print a class with its module use it. The old text is exact; a
 # pair whose old text is absent from a given fragment is skipped (the same pairs serve several fragments).
 _PATCHES = (
+    ("""            fputs("<__main__.", f); ail_str_write(ail_view_to_str(c->name), f); fprintf(f, " object at %p>", (void *)ii);
+""",
+     """            fputs("<", f); fputs(c->module ? c->module : "__main__", f); fputc('.', f); ail_str_write(ail_view_to_str(c->name), f);
+            fprintf(f, " object at %p>", (void *)ii);
+"""),
     (" } ail_classobj;",
      " const char *module; /* F2: the module of a class of an imported module, else 0 */ } ail_classobj;"),
     ("""            fputs(c->builtin_id >= 0 ? "<class '" : "<class '__main__.", f);

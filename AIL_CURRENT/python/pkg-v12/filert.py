@@ -601,7 +601,10 @@ static ail_st ailo_fail(ail_ctx *cx) {
     return AIL_EXC;
 }
 static ail_st ailo_utf8_arg(ail_ctx *cx, ail_obj s, ailf_buf *b) {
-    if (s.tag != AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "expected str");
+    if (s.tag != AIL_T_STR) {   /* CPython's path conversion (open(), os.*): it names the argument's class */
+        char tb[512]; snprintf(tb, sizeof tb, "expected str, bytes or os.PathLike object, not %s", ail__tname_c(s));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, tb);
+    }
     ail_str v = ail_view_to_str(s);
     for (int64_t i = 0; i < v.n; i++) {
         uint32_t c = ail_chr(v, i);

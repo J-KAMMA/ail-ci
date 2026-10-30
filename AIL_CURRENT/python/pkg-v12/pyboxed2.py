@@ -784,7 +784,30 @@ static inline int ail2_print_scalar(ail_obj x) {
         || x.tag == AIL_T_NONE || x.tag == AIL_T_FLOAT;
 }
 
+/* print(sep=, end=): None means the default, anything but a str is CPython's TypeError (before any output) */
+static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_obj sep, ail_obj end);
+static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsigned char *sepb4,
+                                         int64_t n, ail_obj sep, ail_obj end);
+/* The None / non-str cases run out of line (cold, never inlined) and call print again with plain strs, so sep and end
+   are never address-taken in the inlined print: taking their address there kept every print() call from being folded. */
+__attribute__((noinline, cold)) static ail_st ail2_print_sepend_do(ail_ctx *cx, ail_obj *vals, const unsigned char *sepb4,
+                                                                    int64_t n, ail_obj sep, ail_obj end) {
+    char b[400];
+    if (sep.tag == AIL_T_NONE) sep = ail_str_from_cstr(cx, " ");
+    else if (sep.tag != AIL_T_STR) {
+        snprintf(b, sizeof b, "sep must be None or a string, not %s", ail__tname_c(sep));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, b);
+    }
+    if (end.tag == AIL_T_NONE) end = ail_str_from_cstr(cx, "\n");
+    else if (end.tag != AIL_T_STR) {
+        snprintf(b, sizeof b, "end must be None or a string, not %s", ail__tname_c(end));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, b);
+    }
+    return sepb4 ? ail2_do_print_parts(cx, vals, sepb4, n, sep, end) : ail2_do_print(cx, vals, n, sep, end);
+}
 static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_obj sep, ail_obj end) {
+    if (__builtin_expect(sep.tag != AIL_T_STR || end.tag != AIL_T_STR, 0))
+        return ail2_print_sepend_do(cx, vals, NULL, n, sep, end);
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -818,6 +841,8 @@ static inline ail_st ail2_do_print(ail_ctx *cx, ail_obj *vals, int64_t n, ail_ob
    strictly between real print() arguments and nowhere else. */
 static inline ail_st ail2_do_print_parts(ail_ctx *cx, ail_obj *vals, const unsigned char *sepb4,
                                          int64_t n, ail_obj sep, ail_obj end) {
+    if (__builtin_expect(sep.tag != AIL_T_STR || end.tag != AIL_T_STR, 0))
+        return ail2_print_sepend_do(cx, vals, sepb4, n, sep, end);
     if (sep.tag == AIL_T_STR && end.tag == AIL_T_STR) {
         int scalar = 1;
         for (int64_t i = 0; i < n; i++) if (!ail2_print_scalar(vals[i])) { scalar = 0; break; }
@@ -1199,6 +1224,33 @@ __attribute__((noinline, cold)) static ail_st ail2_unpack_iter(ail_ctx *cx, ail_
             return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
         }
     }
+    return st;
+}
+/* sum(iterable, start): CPython refuses a start that is a str, bytes or bytearray, and says what to use instead */
+static inline ail_st ail2_sum_chk(ail_ctx *cx, ail_obj start) {
+    if (start.tag == AIL_T_STR) return ail_raise_c(cx, AIL_B_TYPEERROR, "sum() can't sum strings [use ''.join(seq) instead]");
+    if (start.tag == AIL_T_INST) {
+        const char *n = ail__tname_c(start);
+        if (!strcmp(n, "bytes")) return ail_raise_c(cx, AIL_B_TYPEERROR, "sum() can't sum bytes [use b''.join(seq) instead]");
+        if (!strcmp(n, "bytearray")) return ail_raise_c(cx, AIL_B_TYPEERROR, "sum() can't sum bytearray [use b''.join(seq) instead]");
+    }
+    return AIL_OK;
+}
+/* ail_iter(), but the TypeError of a non-iterable is worded for the construct that asked: kind 1 `[*x]` / `(*x,)`
+   ("Value after * must be an iterable, not P"), 2 `sep.join(x)` ("can only join an iterable"), 3 `print(*x)`.  Only the
+   runtime's own "'P' object is not iterable" is reworded; a TypeError a user __iter__ raises goes by untouched. */
+static inline ail_st ail2_iter_w(ail_ctx *cx, ail_obj *out, ail_obj v, int kind) {
+    ail_st st = ail_iter(cx, out, v);
+    if (__builtin_expect(st != AIL_EXC, 1)) return st;
+    if (cx->exc.cls.tag != AIL_T_CLASS || cx->exc.cls.o != cx->builtin_cls[AIL_B_TYPEERROR].o
+        || cx->exc.value.tag != AIL_T_NONE || cx->exc.msg.tag != AIL_T_STR) return st;
+    char want[600], buf[600];
+    snprintf(want, sizeof want, "'%s' object is not iterable", ail__tname_c(v));
+    if (ail_str_cmp(ail_view_to_str(cx->exc.msg), ail_view_to_str(ail_str_from_cstr(cx, want))) != 0) return st;
+    if (kind == 2) snprintf(buf, sizeof buf, "can only join an iterable");
+    else if (kind == 3) snprintf(buf, sizeof buf, "print() argument after * must be an iterable, not %s", ail__tname_c(v));
+    else snprintf(buf, sizeof buf, "Value after * must be an iterable, not %s", ail__tname_c(v));
+    cx->exc.msg = ail_str_from_cstr(cx, buf);
     return st;
 }
 /* ============================================================================================= */
@@ -2610,6 +2662,8 @@ class Compiler(boxclosure.ClosureMixin):
             raise refusal
         self._module_tree = tree          # the element-kind records (_elem_record_exact) are judged on the whole module
         for fn in tree.body:
+            if isinstance(fn, ast.FunctionDef) and fn.name.startswith('_ail_math_'):
+                self._math_arg_checks(fn)
             # math.sqrt is the correctly rounded C sqrt; the helper's `x ** 0.5` is pow(), which can differ in the last bit
             if isinstance(fn, ast.FunctionDef) and fn.name == '_ail_math_sqrt':
                 for stmt in ast.walk(fn):
@@ -3543,6 +3597,8 @@ class Compiler(boxclosure.ClosureMixin):
             for m in ast.walk(n):
                 if isinstance(m, ast.FunctionDef):
                     self.prelude_names.add(m.name)
+            if isinstance(n, ast.FunctionDef) and n.name.startswith('_ail_math_'):
+                self._math_arg_checks(n)
             if isinstance(n, ast.FunctionDef) and n.name == '_ail_math_sqrt':
                 for stmt in ast.walk(n):      # as in compile(): the correctly rounded C sqrt, not pow()
                     if isinstance(stmt, ast.Return) and isinstance(stmt.value, ast.BinOp) and isinstance(stmt.value.op, ast.Pow):
@@ -6153,7 +6209,7 @@ class Compiler(boxclosure.ClosureMixin):
         for e in elts:
             if isinstance(e, ast.Starred):
                 src = self.expr(e.value, ctx)
-                self._extend_from_iter(t, src, ctx)
+                self._extend_from_iter(t, src, ctx, wording=1)
             else:
                 v = self.expr(e, ctx)
                 ctx.emit('ail_list_append(cx, %s, %s);' % (t, v))
@@ -6854,7 +6910,7 @@ class Compiler(boxclosure.ClosureMixin):
             # walk the value once into a fresh list, which is what `*x` does in CPython
             lst = ctx.tmp()
             ctx.emit('%s = ail_list_new(cx);' % lst)
-            self._extend_from_iter(lst, self._resolve_iter_src(star_val, ctx), ctx)
+            self._extend_from_iter(lst, self._resolve_iter_src(star_val, ctx), ctx, wording=3 if what == 'print' else 0)
             return lst
         return self.expr(star_val, ctx)
 
@@ -7815,6 +7871,24 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('  %s = ail_box_float(cx, %s(%s)); }' % (t, fn, ', '.join('%s[%d]' % (md, i) for i in range(len(vals)))))
         return t
 
+    @staticmethod
+    def _math_arg_checks(fn):
+        """math.f(x): the helper of ail_syntax.py (written for the typed path, where `x: float` is a fact) gets, in the
+        general path, a run-time check of each float / int parameter: CPython's TypeError for an argument that is no
+        number ("must be real number, not str"), a conversion for a class with __float__ / __index__.  Idempotent."""
+        if getattr(fn, '_ail_math_checked', False):
+            return
+        fn._ail_math_checked = True
+        checks = []
+        for a in fn.args.args:
+            ann = a.annotation
+            if isinstance(ann, ast.Name) and ann.id in ('float', 'int'):
+                call = ast.Call(func=ast.Name(id='_ail_m_real' if ann.id == 'float' else '_ail_m_idx', ctx=ast.Load()),
+                                args=[ast.Name(id=a.arg, ctx=ast.Load())], keywords=[])
+                checks.append(ast.Assign(targets=[ast.Name(id=a.arg, ctx=ast.Store())], value=call, lineno=fn.lineno))
+        if checks:
+            fn.body[0:0] = [ast.fix_missing_locations(ast.copy_location(c, fn)) for c in checks]
+
     def _is_typed_intrinsic(self, name):
         if name in self.functions or name in self.classes:
             return False
@@ -8048,7 +8122,11 @@ class Compiler(boxclosure.ClosureMixin):
                 v = kwargs.get(key)
                 if v is None or (isinstance(v, ast.Constant) and v.value is None):
                     return ast.Constant(value=text)
-                return v
+                if isinstance(v, ast.Constant) and isinstance(v.value, str):
+                    return v
+                # a value known only at run time: None is the default, a non-str is CPython's TypeError
+                return ast.Call(func=ast.Name(id='_ail_print_arg', ctx=ast.Load()),
+                                args=[v, ast.Constant(value=1 if key == 'end' else 0)], keywords=[])
             parts = ast.List(elts=[ast.Call(func=ast.Name(id='str', ctx=ast.Load()), args=[a], keywords=[])
                                    for a in args], ctx=ast.Load())
             text = ast.BinOp(left=ast.Call(func=ast.Attribute(value=or_default('sep', ' '), attr='join', ctx=ast.Load()),
@@ -8374,13 +8452,16 @@ class Compiler(boxclosure.ClosureMixin):
         # same scope as the other unambiguous-name methods).
         return self._dict_fromkeys(args, kwargs, ctx)
 
-    def _extend_from_iter(self, listexpr, src, ctx, ordered=True, unpack=False):
+    def _extend_from_iter(self, listexpr, src, ctx, ordered=True, unpack=False, wording=0):
         it = ctx.tmp(); val = ctx.tmp()
         # ordered=False: the order the elements arrive in cannot show (sorted() with no key), so a set whose
         # CPython order cannot be reproduced (str ...) may still be read
         # unpack=True: this materialises a starred unpack target, so a missing iteration protocol
         # gets CPython's "cannot unpack non-iterable ... object" wording.
-        ctx.emit('st = %s(cx, &%s, %s);' % ('ail2_unpack_iter' if unpack else 'ail_iter', it, src))
+        if wording:
+            ctx.emit('st = ail2_iter_w(cx, &%s, %s, %d);' % (it, src, wording))
+        else:
+            ctx.emit('st = %s(cx, &%s, %s);' % ('ail2_unpack_iter' if unpack else 'ail_iter', it, src))
         ctx.check()
         ctx.emit('for (;;) {')
         ctx.indent += 1
@@ -9517,6 +9598,9 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('ail_sumst %s; ail_sum_begin(&%s, %s);' % (sst, sst, acc))
         ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, src))
         ctx.check()
+        if start_node is not None and not (isinstance(start_node, ast.Constant) and isinstance(start_node.value, (int, float))):
+            ctx.emit('st = ail2_sum_chk(cx, %s);' % acc)      # CPython refuses a str / bytes / bytearray start
+            ctx.check()
         ctx.emit('for (;;) {')
         ctx.indent += 1
         ctx.emit('st = ail_it_next(cx, &%s, %s);' % (val, it))
@@ -11090,7 +11174,7 @@ class Compiler(boxclosure.ClosureMixin):
         else:
             lst = ctx.tmp()
             ctx.emit('%s = ail_list_new(cx);' % lst)
-            self._extend_from_iter(lst, src, ctx)
+            self._extend_from_iter(lst, src, ctx, wording=2)
         t = ctx.tmp()
         ctx.emit('st = ail_meth_str_join(cx, &%s, %s, %s);' % (t, recv, lst))
         ctx.check()
@@ -11766,6 +11850,27 @@ class Compiler(boxclosure.ClosureMixin):
              ast.BitXor: 'ail_op_bitxor', ast.LShift: 'ail_op_lshift',
              ast.RShift: 'ail_op_rshift'}
 
+    AUG_TEXT = {ast.Add: '+', ast.Sub: '-', ast.Mult: '*', ast.Div: '/', ast.FloorDiv: '//', ast.Mod: '%',
+                ast.Pow: '** or pow()', ast.BitAnd: '&', ast.BitOr: '|', ast.BitXor: '^', ast.LShift: '<<',
+                ast.RShift: '>>'}
+
+    def _emit_aug_call(self, node, fn, new, cur, rhs, ctx):
+        """`st = fn(cx, &new, cur, rhs);` for an augmented assignment, and the failure's text made CPython's:
+        `unsupported operand type(s) for +=:` where the binary operator's helper says `for +:`."""
+        plain = self.AUG_TEXT.get(type(node.op))
+        # a literal operand (`x += 1`) stays a literal in both uses: parking it in a slot first hides the constant from the
+        # C compiler, and ail_op_iadd / ail_op_add then stop being folded down to their int fast path (about 3 KB per program)
+        if plain is not None and not re.match(r'^[A-Za-z_][A-Za-z_0-9]*$', rhs) \
+                and not re.match(r'^ail_box_(?:int|float|bool)\(-?[0-9.]+(?:LL|ULL|e[-+]?[0-9]+)?\)$', rhs):
+            t = ctx.tmp()
+            ctx.emit('%s = %s;' % (t, rhs))
+            rhs = t
+        ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
+        if plain is not None:
+            ctx.emit('if (st == AIL_EXC) st = ail__aug_fix(cx, st, %s, %s, "%s", "%s=");'
+                     % (cur, rhs, plain, '**' if plain.startswith('**') else plain))
+        return rhs
+
     def stmt_AugAssign(self, node, ctx):
         fn = self.AUG_FN.get(type(node.op))
         setfn = self._SET_OP_FN.get(type(node.op))
@@ -11808,7 +11913,7 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.check()
             rhs = self.expr(node.value, ctx)
             new = ctx.tmp()
-            ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
+            rhs = self._emit_aug_call(node, fn, new, cur, rhs, ctx)
             ctx.check()
             ctx.emit('%s = %s;' % (self.name_ref(t.id, ctx), new))
             self._mark_rebound(t.id, ctx)
@@ -11829,7 +11934,7 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.check()
                 rhs = self.expr(node.value, ctx)
                 new = ctx.tmp()
-                ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
+                rhs = self._emit_aug_call(node, fn, new, cur, rhs, ctx)
                 ctx.check()
                 ctx.emit('ail_class_setattr(cx, %s, g_attr_%s, %s);' % (obj, t.attr, new))
                 return
@@ -11841,7 +11946,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.check()
             rhs = self.expr(node.value, ctx)
             new = ctx.tmp()
-            ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
+            rhs = self._emit_aug_call(node, fn, new, cur, rhs, ctx)
             ctx.check()
             ctx.emit('st = ail_inst_setattr_chk(cx, %s, g_attr_%s, %s);' % (obj, t.attr, new))
             ctx.check()
@@ -11861,7 +11966,7 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.check()
                 rhs = self.expr(node.value, ctx)
                 new = ctx.tmp()
-                ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
+                rhs = self._emit_aug_call(node, fn, new, cur, rhs, ctx)
                 ctx.check()
                 ctx.emit('if (%s) *%s = %s; else st = ail_op_setitem(cx, %s, %s, %s);'
                          % (aug, aug, new, c, key, new))
@@ -11878,7 +11983,7 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.check()
             rhs = self.expr(node.value, ctx)
             new = ctx.tmp()
-            ctx.emit('st = %s(cx, &%s, %s, %s);' % (fn, new, cur, rhs))
+            rhs = self._emit_aug_call(node, fn, new, cur, rhs, ctx)
             ctx.check()
             ctx.emit('st = ail_op_setitem(cx, %s, %s, %s);' % (c, key, new))
             ctx.check()
@@ -12177,7 +12282,8 @@ class Compiler(boxclosure.ClosureMixin):
             return
         exc = node.exc
         if (isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name) and exc.func.id in self.classes
-                and self._is_exc_class(exc.func.id)) or (
+                and exc.func.id not in ctx.slot_of) or (isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name)
+                and exc.func.id in self.classes and self._is_exc_class(exc.func.id)) or (
                 not (isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name)) and
                 not (isinstance(exc, ast.Name) and exc.id in EXC_IDS)):
             # an exception object of the program's own class, or any value: built, completed and raised as itself

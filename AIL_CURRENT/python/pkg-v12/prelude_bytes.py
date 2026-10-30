@@ -137,7 +137,11 @@ def _ail_bcontains(x):
     raise TypeError("a bytes-like object is required, not '" + type(x).__name__ + "'")
 
 
-def _ail_b_source(source, encoding, errors):
+def _ail_b_source(source, encoding, errors, what="bytes"):
+    if encoding is not None and not isinstance(encoding, str):
+        raise TypeError(what + "() argument 'encoding' must be str, not " + type(encoding).__name__)
+    if errors is not None and not isinstance(errors, str):
+        raise TypeError(what + "() argument 'errors' must be str, not " + type(errors).__name__)
     if source is None:
         if encoding is not None or errors is not None:
             raise TypeError("encoding or errors without sequence argument")
@@ -156,7 +160,7 @@ def _ail_b_source(source, encoding, errors):
         return source._s
     if isinstance(source, bytearray):
         return _ail_b_from_ints(source._a)
-    return _ail_b_from_ints(source)
+    return _ail_b_from_ints_w(source, 1 if what == "bytearray" else 0)
 
 
 def _ail_b_bound(x):
@@ -318,7 +322,11 @@ def _ail_bm_replace(s, old, new, count):
 def _ail_bm_join(s, iterable):
     parts = []
     i = 0
-    for x in iterable:
+    try:
+        it = iter(iterable)
+    except TypeError:
+        raise TypeError("can only join an iterable")
+    for x in it:
         if isinstance(x, bytes):
             parts.append(x._s)
         elif isinstance(x, bytearray):
@@ -513,7 +521,7 @@ def _ail_b_idx(n, i, what):
 
 class bytes:
     def __init__(self, source=None, encoding=None, errors=None):
-        self._s = _ail_b_source(source, encoding, errors)
+        self._s = _ail_b_source(source, encoding, errors, "bytes")
 
     def __len__(self):
         return len(self._s)
@@ -617,7 +625,7 @@ class bytearray:
                 raise ValueError("negative count")
             self._a = [0] * source
         else:
-            self._a = _ail_b_ints(_ail_b_source(source, encoding, errors))
+            self._a = _ail_b_ints(_ail_b_source(source, encoding, errors, "bytearray"))
 
     def __len__(self):
         return len(self._a)
@@ -833,6 +841,14 @@ def _ail_str_encode(s, encoding="utf-8", errors="strict"):
 
 
 def _ail_str_decode(x, encoding="utf-8", errors="strict"):
+    if not isinstance(encoding, str):
+        raise TypeError("str() argument 'encoding' must be str, not " + type(encoding).__name__)
+    if not isinstance(errors, str):
+        raise TypeError("str() argument 'errors' must be str, not " + type(errors).__name__)
+    if isinstance(x, str):
+        raise TypeError("decoding str is not supported")
+    if not (isinstance(x, bytes) or isinstance(x, bytearray)):
+        raise TypeError("decoding to str: need a bytes-like object, " + type(x).__name__ + " found")
     return _ail_b_dec(_ail_bs(x), encoding, errors)
 
 

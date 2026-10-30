@@ -15131,6 +15131,7 @@ static inline ail_st ail__raise_class_subscript(ail_ctx *cx, ail_obj c) {
 static inline ail_st ail_deque_concat(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);
 static inline ail_st ail_counter_binop(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, int op);
 static inline ail_st ail_counter_unary(ail_ctx *cx, ail_obj *out, ail_obj a, int neg);
+static inline ail_st ail__bit_type_error(ail_ctx *cx, const char *op, ail_obj a, ail_obj b);
 /*B<*/
 #define AIL_SLOW_PL(a) ((a).tag == AIL_T_BIG ? (a).sv.off : (a).i)
 static inline ail_obj ail__slow_obj(uint8_t t, int64_t p) {
@@ -15368,25 +15369,25 @@ static AIL_BIGFN ail_st ail__truediv_slow(ail_ctx *cx, ail_obj *out, uint8_t ta,
 /*P:div<*/static AIL_BIGFN ail_st ail__floordiv_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb) {
     AIL_SLOW_OBJS(a, b);
     if (__builtin_expect(a.tag == AIL_T_BIG || b.tag == AIL_T_BIG, 0)) { ail_st bst; if (ail__big_floordiv(cx, out, a, b, &bst)) return bst; }
-    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for //");
+    return ail__bit_type_error(cx, "//", a, b);
 }
 /*P|*/
 /*P>*//*P:div<*/static AIL_BIGFN ail_st ail__mod_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb) {
     AIL_SLOW_OBJS(a, b);
     if (__builtin_expect(a.tag == AIL_T_BIG || b.tag == AIL_T_BIG, 0)) { ail_st bst; if (ail__big_mod(cx, out, a, b, &bst)) return bst; }
-    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %");
+    return ail__bit_type_error(cx, "%", a, b);
 }
 /*P|*/
 /*P>*//*P:div<*/static AIL_BIGFN ail_st ail__truediv_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb) {
     AIL_SLOW_OBJS(a, b);
     if (__builtin_expect(a.tag == AIL_T_BIG || b.tag == AIL_T_BIG, 0)) { ail_st bst; if (ail__big_truediv(cx, out, a, b, &bst)) return bst; }
-    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for /");
+    return ail__bit_type_error(cx, "/", a, b);
 }
 /*P|*/
 /*P>*//*P:pow<*/static AIL_BIGFN ail_st ail__pow_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb) {
     AIL_SLOW_OBJS(a, b);
     if (__builtin_expect(a.tag == AIL_T_BIG || b.tag == AIL_T_BIG, 0)) { ail_st bst; if (ail__big_pow(cx, out, a, b, &bst)) return bst; }
-    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for **");
+    return ail__bit_type_error(cx, "** or pow()", a, b);
 }
 /*P|*/
 /*P>*/static AIL_BIGFN ail_st ail__neg_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa) {
@@ -15418,7 +15419,7 @@ static inline ail_st ail_op_floordiv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_o
 /*B<*/
     return ail__floordiv_slow(cx, out, a.tag, AIL_SLOW_PL(a), b.tag, AIL_SLOW_PL(b));
 /*B|*/
-    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for //");
+    return ail__bit_type_error(cx, "//", a, b);
 /*B>*/
 }
 static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
@@ -15438,7 +15439,7 @@ static inline ail_st ail_op_mod(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
 /*B<*/
     return ail__mod_slow(cx, out, a.tag, AIL_SLOW_PL(a), b.tag, AIL_SLOW_PL(b));
 /*B|*/
-    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for %");
+    return ail__bit_type_error(cx, "%", a, b);
 /*B>*/
 }
 static inline ail_st ail_op_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
@@ -15461,7 +15462,7 @@ static inline ail_st ail_op_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_ob
 /*B<*/
     return ail__truediv_slow(cx, out, a.tag, AIL_SLOW_PL(a), b.tag, AIL_SLOW_PL(b));
 /*B|*/
-    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for /");
+    return ail__bit_type_error(cx, "/", a, b);
 /*B>*/
 }
 /*B<*/
@@ -15512,12 +15513,26 @@ static inline ail_st ail_op_pow(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)
 /*B<*/
     return ail__pow_slow(cx, out, a.tag, AIL_SLOW_PL(a), b.tag, AIL_SLOW_PL(b));
 /*B|*/
-    return ail_raise_c(cx, AIL_B_TYPEERROR, "unsupported operand type(s) for **");
+    return ail__bit_type_error(cx, "** or pow()", a, b);
 /*B>*/
 }
 static inline ail_st ail__bit_type_error(ail_ctx *cx, const char *op, ail_obj a, ail_obj b) {
     char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for %s: '%s' and '%s'", op, ail__tname_c(a), ail__tname_c(b));
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+/* `x += y` that found no operator: CPython's text names the augmented operator (`for +=:`), the binary operator's own
+   helpers say `for +:`.  The generated code of an augmented assignment passes the failure through here; only the
+   exact text the operator helpers make for these two operands is changed, so a TypeError raised inside a user's
+   __add__ (or any other text) goes by untouched. */
+static inline ail_st ail__aug_fix(ail_ctx *cx, ail_st st, ail_obj a, ail_obj b, const char *plain, const char *aug) {
+    if (st != AIL_EXC || cx->exc.cls.tag != AIL_T_CLASS || cx->exc.cls.o != cx->builtin_cls[AIL_B_TYPEERROR].o
+        || cx->exc.value.tag != AIL_T_NONE || cx->exc.msg.tag != AIL_T_STR) return st;
+    char want[1500], fix[1500];
+    snprintf(want, sizeof want, "unsupported operand type(s) for %s: '%s' and '%s'", plain, ail__tname_c(a), ail__tname_c(b));
+    if (ail_str_cmp(ail_view_to_str(cx->exc.msg), ail_view_to_str(ail_str_from_cstr(cx, want))) != 0) return st;
+    snprintf(fix, sizeof fix, "unsupported operand type(s) for %s: '%s' and '%s'", aug, ail__tname_c(a), ail__tname_c(b));
+    cx->exc.msg = ail_str_from_cstr(cx, fix);
+    return st;
 }
 /* & | ^ : bool op bool stays bool (CPython), any int involvement gives int. */
 static inline ail_st ail__bit_logic(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b, char op) {
@@ -15538,7 +15553,19 @@ static inline ail_st ail__bit_logic(ail_ctx *cx, ail_obj *out, ail_obj a, ail_ob
     return AIL_OK;
 }
 static inline ail_st ail_op_bitand(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { return ail__bit_logic(cx, out, a, b, '&'); }
-static inline ail_st ail_op_bitor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)  { return ail__bit_logic(cx, out, a, b, '|'); }
+static inline ail_st ail_meth_dict_copy(ail_ctx *cx, ail_obj *out, ail_obj d);
+static inline ail_st ail_meth_dict_update(ail_ctx *cx, ail_obj d, ail_obj other);
+static inline ail_st ail_op_bitor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b)  {
+    if (a.tag == AIL_T_DICT && b.tag == AIL_T_DICT && !ail__is_counter(a) && !ail__is_counter(b)) {   /* d1 | d2: a copy of d1, updated with d2 */
+        AIL_FRAME_ENTER(cx, fr, 1);
+        ail_st st = ail_meth_dict_copy(cx, &fr.slots[0], a);
+        if (st == AIL_OK) st = ail_meth_dict_update(cx, fr.slots[0], b);
+        if (st == AIL_OK) *out = fr.slots[0];
+        AIL_FRAME_LEAVE(cx, fr);
+        return st;
+    }
+    return ail__bit_logic(cx, out, a, b, '|');
+}
 static inline ail_st ail_op_bitxor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) { return ail__bit_logic(cx, out, a, b, '^'); }
 static inline ail_st ail_op_lshift(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
 /*B<*/
@@ -15731,22 +15758,98 @@ static inline ail_st ail_list_delitem(ail_ctx *cx, ail_obj lst, int64_t i) {
     for (int64_t k = i; k + 1 < v->n; k++) v->p[k] = v->p[k + 1];
     v->n--; return AIL_OK;
 }
-/* stable merge sort, used both for the plain (keyless) form and as the engine for
-   ail_list_sort's decorate-sort-undecorate below. */
-static inline ail_st ail__vec_merge_sort(ail_ctx *cx, ail_obj *p, ail_obj *keys, ail_obj *tmp, ail_obj *ktmp, int64_t lo, int64_t hi) {
-    if (hi - lo <= 1) return AIL_OK;
-    int64_t mid = (lo + hi) / 2;
-    ail_st st = ail__vec_merge_sort(cx, p, keys, tmp, ktmp, lo, mid); if (st != AIL_OK) return st;
-    st = ail__vec_merge_sort(cx, p, keys, tmp, ktmp, mid, hi); if (st != AIL_OK) return st;
-    int64_t i = lo, j = mid, k = lo;
-    while (i < mid && j < hi) {
-        int64_t c; st = ail_obj_cmp(cx, &c, keys[i], keys[j]); if (st != AIL_OK) return st;
-        if (c <= 0) { tmp[k] = p[i]; ktmp[k] = keys[i]; k++; i++; }
-        else { tmp[k] = p[j]; ktmp[k] = keys[j]; k++; j++; }
+/* stable sort, used both for the plain (keyless) form and as the engine for ail_list_sort's decorate-sort-undecorate
+   below.  It asks the questions CPython's list.sort asks, in the order it asks them, and always as `later < earlier`
+   (ISLT(x, y) is `x < y`): runs are found by count_run, a short run is extended to minrun by a binary insertion, the
+   runs are merged by merge_collapse's rule.  The result is the same stable order; what differs from the old top-down
+   merge is which pair of operands meets first when the list holds values that cannot be ordered, and so the type names
+   in `TypeError: '<' not supported between instances of 'str' and 'int'` (CPython names the later element first).
+   The merge does not gallop: galloping only skips comparisons, it never changes the first one that fails.  The element
+   array is only written after a merge finished, so a user __lt__ that collects still finds every element rooted. */
+static inline ail_st ail__sort_lt(ail_ctx *cx, int *out, ail_obj a, ail_obj b) {
+    int64_t c; ail_st st = ail_obj_cmp(cx, &c, a, b); if (st != AIL_OK) return st;
+    *out = c < 0; return AIL_OK;
+}
+static inline ail_st ail__ts_count_run(ail_ctx *cx, ail_obj *k, int64_t lo, int64_t hi, int64_t *nrun, int *desc) {
+    *desc = 0;
+    int64_t i = lo + 1;
+    if (i == hi) { *nrun = 1; return AIL_OK; }
+    int lt; ail_st st = ail__sort_lt(cx, &lt, k[i], k[i - 1]); if (st != AIL_OK) return st;
+    int64_t n = 2;
+    if (lt) {
+        *desc = 1;
+        for (i = i + 1; i < hi; ++i, ++n) { st = ail__sort_lt(cx, &lt, k[i], k[i - 1]); if (st != AIL_OK) return st; if (!lt) break; }
+    } else {
+        for (i = i + 1; i < hi; ++i, ++n) { st = ail__sort_lt(cx, &lt, k[i], k[i - 1]); if (st != AIL_OK) return st; if (lt) break; }
     }
-    while (i < mid) { tmp[k] = p[i]; ktmp[k] = keys[i]; k++; i++; }
-    while (j < hi) { tmp[k] = p[j]; ktmp[k] = keys[j]; k++; j++; }
-    for (int64_t x = lo; x < hi; x++) { p[x] = tmp[x]; keys[x] = ktmp[x]; }
+    *nrun = n; return AIL_OK;
+}
+static inline ail_st ail__ts_binarysort(ail_ctx *cx, ail_obj *p, ail_obj *k, int64_t lo, int64_t hi, int64_t start) {
+    if (lo == start) ++start;
+    for (; start < hi; ++start) {
+        int64_t l = lo, r = start;
+        ail_obj pk = k[start], pp = p[start];
+        do {
+            int64_t m = l + ((r - l) >> 1);
+            int lt; ail_st st = ail__sort_lt(cx, &lt, pk, k[m]); if (st != AIL_OK) return st;
+            if (lt) r = m; else l = m + 1;
+        } while (l < r);
+        for (int64_t q = start; q > l; --q) { p[q] = p[q - 1]; k[q] = k[q - 1]; }
+        p[l] = pp; k[l] = pk;
+    }
+    return AIL_OK;
+}
+/* merge the adjacent runs [a, b) and [b, e) through tmp, then copy back (the arrays are untouched when a comparison fails) */
+static inline ail_st ail__ts_merge(ail_ctx *cx, ail_obj *p, ail_obj *k, ail_obj *tmp, ail_obj *ktmp, int64_t a, int64_t b, int64_t e) {
+    int64_t i = a, j = b, o = a;
+    while (i < b && j < e) {
+        int lt; ail_st st = ail__sort_lt(cx, &lt, k[j], k[i]); if (st != AIL_OK) return st;
+        if (lt) { tmp[o] = p[j]; ktmp[o] = k[j]; o++; j++; }
+        else { tmp[o] = p[i]; ktmp[o] = k[i]; o++; i++; }
+    }
+    while (i < b) { tmp[o] = p[i]; ktmp[o] = k[i]; o++; i++; }
+    while (j < e) { tmp[o] = p[j]; ktmp[o] = k[j]; o++; j++; }
+    for (int64_t x = a; x < e; x++) { p[x] = tmp[x]; k[x] = ktmp[x]; }
+    return AIL_OK;
+}
+static inline ail_st ail__vec_merge_sort(ail_ctx *cx, ail_obj *p, ail_obj *keys, ail_obj *tmp, ail_obj *ktmp, int64_t lo, int64_t hi) {
+    int64_t nrem = hi - lo;
+    if (nrem < 2) return AIL_OK;
+    int64_t minrun; { int64_t n = nrem, r = 0; while (n >= 64) { r |= n & 1; n >>= 1; } minrun = n + r; }
+    int64_t base[96], len[96]; int nrun = 0;
+    int64_t cur = lo;
+    do {
+        int64_t n; int desc;
+        ail_st st = ail__ts_count_run(cx, keys, cur, cur + nrem, &n, &desc); if (st != AIL_OK) return st;
+        if (desc) for (int64_t x = cur, y = cur + n - 1; x < y; x++, y--) {
+            ail_obj t = p[x]; p[x] = p[y]; p[y] = t; t = keys[x]; keys[x] = keys[y]; keys[y] = t;
+        }
+        if (n < minrun) {
+            int64_t force = nrem <= minrun ? nrem : minrun;
+            st = ail__ts_binarysort(cx, p, keys, cur, cur + force, cur + n); if (st != AIL_OK) return st;
+            n = force;
+        }
+        base[nrun] = cur; len[nrun] = n; nrun++;
+        while (nrun > 1) {                      /* merge_collapse */
+            int64_t m = nrun - 2;
+            if ((m > 0 && len[m - 1] <= len[m] + len[m + 1]) || (m > 1 && len[m - 2] <= len[m - 1] + len[m])) {
+                if (len[m - 1] < len[m + 1]) --m;
+            } else if (len[m] > len[m + 1]) break;
+            st = ail__ts_merge(cx, p, keys, tmp, ktmp, base[m], base[m] + len[m], base[m + 1] + len[m + 1]); if (st != AIL_OK) return st;
+            len[m] += len[m + 1];
+            if (m == nrun - 3) { base[m + 1] = base[m + 2]; len[m + 1] = len[m + 2]; }
+            nrun--;
+        }
+        cur += n; nrem -= n;
+    } while (nrem);
+    while (nrun > 1) {                          /* merge_force_collapse */
+        int64_t m = nrun - 2;
+        if (m > 0 && len[m - 1] < len[m + 1]) --m;
+        ail_st st = ail__ts_merge(cx, p, keys, tmp, ktmp, base[m], base[m] + len[m], base[m + 1] + len[m + 1]); if (st != AIL_OK) return st;
+        len[m] += len[m + 1];
+        if (m == nrun - 3) { base[m + 1] = base[m + 2]; len[m + 1] = len[m + 2]; }
+        nrun--;
+    }
     return AIL_OK;
 }
 /* ail_list_sort -- the key function (if not AIL_T_NONE) is called EXACTLY ONCE per
@@ -16454,8 +16557,8 @@ static inline ail_st ail_set_sorted_list(ail_ctx *cx, ail_obj *out, ail_obj s) {
         ail_obj key = v->p[i]; int64_t j = i - 1;
         for (;;) {
             if (j < 0) break;
-            int64_t c; ail_st st = ail_obj_cmp(cx, &c, v->p[j], key); if (st != AIL_OK) { v->p[j + 1] = key; AIL_FRAME_LEAVE(cx, fr); return st; }
-            if (c <= 0) break;
+            int64_t c; ail_st st = ail_obj_cmp(cx, &c, key, v->p[j]); if (st != AIL_OK) { v->p[j + 1] = key; AIL_FRAME_LEAVE(cx, fr); return st; }
+            if (c >= 0) break;
             v->p[j + 1] = v->p[j]; j--;
         }
         v->p[j + 1] = key;
@@ -17164,7 +17267,9 @@ static inline void ail__write_repr_body(ail_ctx *cx, ail_obj x, FILE *f) {
                 fputc(')', f);
                 break;
             }
-            fputs("<", f); ail_str_write(ail_view_to_str(c->name), f); fputs(" object>", f);
+            /* CPython: `<__main__.P object at 0x7f...>`; the address differs from run to run, so nothing can match it byte for byte,
+               but the rest of the text (module, name, `object at 0x`) is CPython's */
+            fputs("<__main__.", f); ail_str_write(ail_view_to_str(c->name), f); fprintf(f, " object at %p>", (void *)ii);
             break;
         }
         case AIL_T_EXC: {
@@ -18740,14 +18845,25 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
 /*P>*/
 /*B|*/
 /*B>*/
+/* pow(a, b, c) with an operand that is no number: CPython's ternary_op names all three types */
+static inline ail_st ail__pow3_type_error(ail_ctx *cx, ail_obj a, ail_obj b, ail_obj c) {
+    char buf[1600];
+    snprintf(buf, sizeof buf, "unsupported operand type(s) for ** or pow(): '%s', '%s', '%s'", ail__tname_c(a), ail__tname_c(b), ail__tname_c(c));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
 static inline ail_st ail_bi_pow(ail_ctx *cx, ail_obj *out, ail_obj base, ail_obj exp, int has_mod, ail_obj modv) {
-    if (!has_mod) return ail_op_pow(cx, out, base, exp);
+    if (!has_mod || modv.tag == AIL_T_NONE) return ail_op_pow(cx, out, base, exp);   /* pow(a, b, None) is a ** b */
 /*B<*/
-    if (!ail__isint(base.tag) || !ail__isint(exp.tag) || !ail__isint(modv.tag))
-/*B|*/
-    if (!ail__is_intlike(base.tag) || !ail__is_intlike(exp.tag) || !ail__is_intlike(modv.tag))
-/*B>*/
+    if (!ail__isint(base.tag) || !ail__isint(exp.tag) || !ail__isint(modv.tag)) {
+        if (!ail__is_numb(base.tag) || !ail__is_numb(exp.tag) || !ail__is_numb(modv.tag)) return ail__pow3_type_error(cx, base, exp, modv);
         return ail_raise_c(cx, AIL_B_TYPEERROR, "pow() 3rd argument not allowed unless all arguments are integers");
+    }
+/*B|*/
+    if (!ail__is_intlike(base.tag) || !ail__is_intlike(exp.tag) || !ail__is_intlike(modv.tag)) {
+        if (!ail__is_num(base.tag) || !ail__is_num(exp.tag) || !ail__is_num(modv.tag)) return ail__pow3_type_error(cx, base, exp, modv);
+        return ail_raise_c(cx, AIL_B_TYPEERROR, "pow() 3rd argument not allowed unless all arguments are integers");
+    }
+/*B>*/
 /*B<*/
     if (base.tag == AIL_T_BIG || exp.tag == AIL_T_BIG || modv.tag == AIL_T_BIG) return ail__pow3_big(cx, out, base, exp, modv);
 /*B|*/
@@ -20179,8 +20295,22 @@ static inline ail_st ail_dict_update_pairs(ail_ctx *cx, ail_obj d, ail_obj other
         if (st == AIL_STOP) { st = AIL_OK; break; }
         if (st != AIL_OK) break;
         ail_obj e = fr.slots[1];
+        if (e.tag == AIL_T_STR) {   /* a str element is a sequence of characters */
+            int64_t en = ail_view_to_str(e).n;
+            if (en != 2) {
+                char buf[80]; snprintf(buf, sizeof buf, "dictionary update sequence element #%lld has length %lld; 2 is required", (long long)i, (long long)en);
+                st = ail_raise_c(cx, AIL_B_VALUEERROR, buf); break;
+            }
+            ail_obj k0, k1;
+            st = ail_op_getitem(cx, &k0, e, ail_box_int(0)); if (st != AIL_OK) break;
+            st = ail_op_getitem(cx, &k1, e, ail_box_int(1)); if (st != AIL_OK) break;
+            st = ail_dict_set(cx, d, k0, k1);
+            i++;
+            continue;
+        }
         if (e.tag != AIL_T_LIST && e.tag != AIL_T_TUPLE) {
-            st = ail_raise_c(cx, AIL_B_TYPEERROR, "cannot convert dictionary update sequence element to a sequence"); break;
+            char buf[96]; snprintf(buf, sizeof buf, "cannot convert dictionary update sequence element #%lld to a sequence", (long long)i);
+            st = ail_raise_c(cx, AIL_B_TYPEERROR, buf); break;
         }
         ail_vecobj *v = (ail_vecobj *)e.o;
         if (v->n != 2) {
@@ -20565,6 +20695,11 @@ static inline ail_st ail_set_ixor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj 
 static inline ail_st ail_op_ibitor(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b) {
     if (ail__is_counter(a)) return ail_counter_inplace_other(cx, out, a, b, 3);
     if (AIL_IS_ANYSET(a.tag)) return ail_set_ior(cx, out, a, b);
+    if (a.tag == AIL_T_DICT) {   /* d |= other: dict.update(other) in place (a mapping, or an iterable of pairs) */
+        ail_st st = b.tag == AIL_T_DICT ? ail_meth_dict_update(cx, a, b) : ail_dict_update_pairs(cx, a, b);
+        if (st != AIL_OK) return st;
+        *out = a; return AIL_OK;
+    }
     return ail_op_bitor(cx, out, a, b);
 }
 static inline ail_st ail_counter_iand_other(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj b);

@@ -377,15 +377,16 @@ static inline ail_st ail2b_decode(ail_ctx *cx, ail_obj *out, ail_obj so, ail_obj
     *out = ail_str_buf_done(bu, o);
     return AIL_OK;
 }
-/* bytes(iterable of int) */
-static inline ail_st ail2b_from_ints(ail_ctx *cx, ail_obj *out, ail_obj src) {
+/* bytes(iterable of int); which: 0 bytes, 1 bytearray (the name CPython's "cannot convert" text ends with) */
+static inline ail_st ail2b_from_ints_w(ail_ctx *cx, ail_obj *out, ail_obj src, ail_obj which_o) {
+    int64_t which = which_o.i;
     AIL_FRAME_ENTER(cx, fr, 2);
     ail_st st = AIL_OK;
     if (src.tag == AIL_T_LIST || src.tag == AIL_T_TUPLE) fr.slots[0] = src;
     else if ((st = ail_bi_list_from_iter(cx, &fr.slots[0], src)) != AIL_OK) {
         if (st == AIL_EXC && ail_exc_matches_b(cx, AIL_B_TYPEERROR)) {
             ail_exc_clear(cx);
-            char buf[96]; snprintf(buf, sizeof buf, "cannot convert '%s' object to bytes", ail_type_name(src.tag));
+            char buf[96]; snprintf(buf, sizeof buf, "cannot convert '%s' object to %s", ail_type_name(src.tag), which ? "bytearray" : "bytes");
             st = ail_raise_c(cx, AIL_B_TYPEERROR, buf);
         }
         AIL_FRAME_LEAVE(cx, fr); return st;
@@ -406,6 +407,7 @@ static inline ail_st ail2b_from_ints(ail_ctx *cx, ail_obj *out, ail_obj src) {
     AIL_FRAME_LEAVE(cx, fr);
     return AIL_OK;
 }
+static inline ail_st ail2b_from_ints(ail_ctx *cx, ail_obj *out, ail_obj src) { return ail2b_from_ints_w(cx, out, src, ail_box_int(0)); }
 /* the bytes of a str as a list of int */
 static inline ail_st ail2b_ints(ail_ctx *cx, ail_obj *out, ail_obj so) {
     ail_st st = ail2b_need(cx, so); if (st != AIL_OK) return st;
@@ -1882,8 +1884,16 @@ static inline ail_st ail2x_setargs(ail_ctx *cx, ail_obj inst, ail_obj args) {
     ail_inst_setattr(cx, inst, ail2x_args_id, args);
     return AIL_OK;
 }
+/* the class derives from a builtin exception class (a plain user class is rooted in no builtin) */
+static inline int ail2x_is_exc_class(ail_ctx *cx, ail_obj cls) {
+    for (ail_obj k = cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base)
+        for (int i = 0; i < AIL_B_COUNT; i++) if (cx->builtin_cls[i].tag == AIL_T_CLASS && cx->builtin_cls[i].o == k.o) return 1;
+    return 0;
+}
 /* raise v: an exception instance (complete or not) */
 static inline ail_st ail2x_raise(ail_ctx *cx, ail_obj v) {
+    if (v.tag == AIL_T_INST && !ail2x_is_exc_class(cx, ((ail_instobj *)v.o)->cls))
+        return ail_raise_c(cx, AIL_B_TYPEERROR, "exceptions must derive from BaseException");
     if (v.tag == AIL_T_INST) { ail_st st = ail2x_finish(cx, &v); if (st != AIL_OK) return st; }
     if (v.tag != AIL_T_EXC) return ail_raise_c(cx, AIL_B_TYPEERROR, "exceptions must derive from BaseException");
     ail_instobj *ii = (ail_instobj *)v.o;
@@ -1979,6 +1989,61 @@ static inline ail_st ail2e_exc_name(ail_ctx *cx, ail_obj *out, ail_obj a) {
     if (c.tag != AIL_T_CLASS) return ail_raise_c(cx, AIL_B_TYPEERROR, "_ail_exc_name: no class");
     *out = ((ail_classobj *)c.o)->name;
     return AIL_OK;
+}
+/* math.f(x): the argument must be a real number (int, bool, float, or a class with __float__ / __index__); CPython's text otherwise */
+static inline ail_st ail2m_real(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (__builtin_expect(x.tag == AIL_T_FLOAT || x.tag == AIL_T_INT || x.tag == AIL_T_BOOL, 1)) { *out = x; return AIL_OK; }
+/*B<*/
+    if (x.tag == AIL_T_BIG) { *out = x; return AIL_OK; }
+/*B|*/
+/*B>*/
+    char buf[600];
+    if (x.tag == AIL_T_INST) {
+        ail_st st = ail_bi_float(cx, out, x);
+        if (st != AIL_EXC || cx->exc.cls.o != cx->builtin_cls[AIL_B_TYPEERROR].o || cx->exc.value.tag != AIL_T_NONE
+            || cx->exc.msg.tag != AIL_T_STR) return st;
+        snprintf(buf, sizeof buf, "float() argument must be a string or a real number, not '%s'", ail__tname_c(x));
+        if (ail_str_cmp(ail_view_to_str(cx->exc.msg), ail_view_to_str(ail_str_from_cstr(cx, buf))) != 0) return st;
+    }
+    snprintf(buf, sizeof buf, "must be real number, not %s", ail__tname_c(x));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+/* math.gcd(n) / isqrt / factorial / comb ...: the argument must be an integer (or a class with __index__) */
+static inline ail_st ail2m_idx(ail_ctx *cx, ail_obj *out, ail_obj x) {
+/*B<*/
+    if (__builtin_expect(x.tag == AIL_T_INT || x.tag == AIL_T_BOOL || x.tag == AIL_T_BIG, 1)) { *out = x; return AIL_OK; }
+/*B|*/
+    if (__builtin_expect(x.tag == AIL_T_INT || x.tag == AIL_T_BOOL, 1)) { *out = x; return AIL_OK; }
+/*B>*/
+    char buf[600];
+#ifdef AIL_HAVE_DUNDER   /* only a program with a class that defines a hook method can have an instance with __index__ */
+    if (x.tag == AIL_T_INST) {
+        /* __index__ only, as CPython's PyNumber_Index does (int() would also take __int__ and __trunc__, and drags in the
+           whole int()-from-text parser: about 3 KB in every program that calls math.comb / perm / gcd) */
+        ail_d1_fn f = ail_dun1(x, AIL_D1_INDEX);
+        if (f) {
+            ail_obj r; ail_st st = f(cx, &r, x);
+            if (st != AIL_OK) return st;
+/*B<*/
+            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL || r.tag == AIL_T_BIG) { *out = r; return AIL_OK; }
+/*B|*/
+            if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) { *out = r; return AIL_OK; }
+/*B>*/
+            snprintf(buf, sizeof buf, "__index__ returned non-int (type %s)", ail__tname_c(r));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
+    }
+#endif
+    snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__tname_c(x));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+/* print(sep=x / end=x, file=sys.stderr): None is the default, a str itself, anything else CPython's TypeError */
+static inline ail_st ail2e_print_arg(ail_ctx *cx, ail_obj *out, ail_obj v, ail_obj which) {
+    if (v.tag == AIL_T_STR) { *out = v; return AIL_OK; }
+    if (v.tag == AIL_T_NONE) { *out = ail_str_from_cstr(cx, which.i ? "\n" : " "); return AIL_OK; }
+    char b[400];
+    snprintf(b, sizeof b, "%s must be None or a string, not %s", which.i ? "end" : "sep", ail__tname_c(v));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, b);
 }
 /* print(..., file=sys.stderr): the text, UTF-8, straight to stderr */
 static inline ail_st ail2e_write(ail_ctx *cx, ail_obj *out, ail_obj s) {
@@ -2577,6 +2642,7 @@ PRIMS = {
     '_ail_b_encode': ('ail2b_encode(cx, &{t}, {a0}, {a1}, {a2})', 3, 'bytes'),
     '_ail_b_decode': ('ail2b_decode(cx, &{t}, {a0}, {a1}, {a2})', 3, 'bytes'),
     '_ail_b_from_ints': ('ail2b_from_ints(cx, &{t}, {a0})', 1, 'bytes'),
+    '_ail_b_from_ints_w': ('ail2b_from_ints_w(cx, &{t}, {a0}, {a1})', 2, 'bytes'),
     '_ail_b_ints': ('ail2b_ints(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_index': ('ail2b_index(cx, &{t}, {a0})', 1, 'bytes'),
     '_ail_b_repr': ('ail2b_repr(cx, &{t}, {a0})', 1, 'bytes'),
@@ -2610,6 +2676,9 @@ PRIMS = {
     '_ail_gen_close': ('ail2g_close(cx, &{t}, {a0})', 1, 'gen'),
     '_ail_gen_name': ('ail2g_name(cx, &{t}, {a0})', 1, 'gen'),
     '_ail_stderr_write': ('ail2e_write(cx, &{t}, {a0})', 1, 'misc'),
+    '_ail_print_arg': ('ail2e_print_arg(cx, &{t}, {a0}, {a1})', 2, 'misc'),
+    '_ail_m_real': ('ail2m_real(cx, &{t}, {a0})', 1, 'misc'),
+    '_ail_m_idx': ('ail2m_idx(cx, &{t}, {a0})', 1, 'misc'),
     '_ail_same_class': ('ail2e_same_class(cx, &{t}, {a0}, {a1})', 2, 'misc'),
     '_ail_exc_name': ('ail2e_exc_name(cx, &{t}, {a0})', 1, 'misc'),
     '_ail_exc_cause_is': ('ail2e_cause_is(cx, &{t}, {a0}, {a1})', 2, 'misc'),
