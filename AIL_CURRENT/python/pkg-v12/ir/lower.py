@@ -41,14 +41,32 @@ BYTEARRAY = I.T('obj', I.T('bytearray'))
 LIST_I64 = I.T('obj', I.T('list', I.I64))
 LIST_F64 = I.T('obj', I.T('list', I.F64))
 LIST_STR = I.T('obj', I.T('list', I.STRV))
+LIST_TINT = I.T('obj', I.T('list', TINT))      # a list of exact ints: each element an ail_tint slot (BIGINT.md section 13)
+TLIST = 'tlist'                                # the lowering's pseudo-kind of such a list (the legacy kind is P.LIST)
 PLIST = I.PLIST
 # list-valued methods the S3a lowering recognises as changing a list's length or contents
 _LIST_MUTATORS = ('append', 'pop', 'clear', 'extend', 'insert', 'remove', 'sort', 'reverse')
 
 
 def is_list(t):
-    """An owned-list type: obj<list<i64>> or obj<list<f64>>."""
-    return t in (LIST_I64, LIST_F64)
+    """An owned-list type: obj<list<i64>>, obj<list<f64>> or obj<list<tint>>."""
+    return t in (LIST_I64, LIST_F64, LIST_TINT)
+
+
+class NeedTaint(NotS0):
+    """A value that comes from text or from a list of exact ints is stored into the scalar local(s) `names`: lower() runs the
+    lowering again knowing they hold such values (so a later store of one into an int list makes it a list of exact ints)."""
+    def __init__(self, names):
+        NotS0.__init__(self, 'the scalar(s) %s hold exact ints from text' % ', '.join(names))
+        self.names = list(names)
+
+
+class NeedTlist(NotS0):
+    """The function stores an exact int that may exceed int64 into the int list(s) `names`, or joins them to a list of such:
+    lower() runs the lowering again with those locals as lists of exact ints."""
+    def __init__(self, names, why=''):
+        NotS0.__init__(self, 'the int list(s) %s must hold exact ints%s' % (', '.join(names), why))
+        self.names = list(names)
 
 
 def is_slist(t):
@@ -98,7 +116,7 @@ def _linkage(sig):
 
 
 class Lowering(TextLowering):
-    def __init__(self, P, fn, ctx, sig, recursive, cname, pending=(), link_units=False, summaries=None):
+    def __init__(self, P, fn, ctx, sig, recursive, cname, pending=(), link_units=False, summaries=None, tlists=(), taint=()):
         """`P` is the legacy compiler module (pyfunc), `ctx` its finished Ctx for this function,
         `sig` the legacy C signature text (linkage and inlining decisions are kept as they are).
         `pending` lists the C symbols of already compiled IR functions that can return with an
@@ -107,6 +125,16 @@ class Lowering(TextLowering):
         self.P = P
         self.fn = fn
         self.ctx = ctx
+        self.tlists = set(tlists)     # int list locals that hold exact ints (obj<list<tint>>)
+        self.taint = set(taint)       # scalar locals that hold an exact int parsed from text or read from a list of them
+        self.taint_hidden = set()     # the accumulators of this attempt's sum/min/max loops that do
+        # lists of exact ints across functions, as pyfunc.TLIST_ACTIVE asks for them: ('p', function, index), ('r', function)
+        self.tl_active = getattr(P, 'TLIST_ACTIVE', None) or frozenset()
+        # a program with a list of exact ints (('exact',) is requested by the first one): it was on the exact general path before,
+        # so no exact int may be narrowed to int64 anywhere in it (a loud stop where CPython has an answer)
+        self.exact_prog = ('exact',) in self.tl_active
+        # the lists of exact ints switched off (pyfunc.TLIST_OFF: the program did not build with them): the lowering of batch 2
+        self.tl_off = bool(getattr(P, 'TLIST_OFF', False))
         self.recursive = recursive
         self.cname = cname
         self.pending = frozenset(pending)
@@ -189,6 +217,8 @@ class Lowering(TextLowering):
             want = None
         have = I.I64 if value.type == I.I1 else value.type
         if have == TINT and kind == self.P.INT:
+            return
+        if have == I.T('span', TINT) and want == I.T('span', I.I64):
             return
         if want != have:
             raise NotS0('type disagreement at line %s: legacy %r, IR %s'
@@ -392,6 +422,7 @@ class Lowering(TextLowering):
                     return False
                 return False
             return True
+        self.may_tint = _may_tint
         _tint_targets, _int_targets = set(), set()
         for _n in ast.walk(fn):
             if isinstance(_n, ast.For) and isinstance(_n.target, ast.Name) \
@@ -414,10 +445,14 @@ class Lowering(TextLowering):
             results = []
         elif ret_kind == P.INT and self.tint_result:
             results = [TINT]
+        elif ret_kind == P.LIST and ('r', fn.name) in self.tl_active:
+            results = [LIST_TINT]
         else:
             results = [self.kind_type(ret_kind, 'the result', owned=True)]
-        param_types = [TINT if n in self.tint_params else self.kind_type(k, 'parameter %r' % n, views=True)
-                       for n, k in ctx.params]
+        param_types = [TINT if n in self.tint_params else
+                       I.T('span', TINT) if k == 'array' and ('p', fn.name, i) in self.tl_active
+                       else self.kind_type(k, 'parameter %r' % n, views=True)
+                       for i, (n, k) in enumerate(ctx.params)]
         param_names = [n for n, _ in ctx.params]
         if param_names != [p.arg for p in a.args]:
             raise NotS0('parameter list differs from the source')
@@ -438,7 +473,7 @@ class Lowering(TextLowering):
                 for special in ('tstride', 'rowparam', 'gridparam', 'byterow', 'nlist', 'blist', 'trowsf'):
                     if n in (getattr(ctx, special, None) or ()):
                         raise NotS0('parameter %r is a %s array' % (n, special))
-                abi.append('array')
+                abi.append('tarray' if t == I.T('span', TINT) else 'array')
             elif k == P.FLIST:
                 abi.append('flist')
             elif k == P.SLIST:
@@ -511,6 +546,8 @@ class Lowering(TextLowering):
                     self.check_slist_local(name)
                 if kind == P.INT and name in self.tint_names:
                     t = value_type = TINT
+                elif kind == P.LIST and name in self.tlists:
+                    t = value_type = LIST_TINT
                 else:
                     t = value_type = self.kind_type(kind, 'local %r' % name, owned=True, local=True)
             if name in getattr(ctx, 'optional', ()) or (name in getattr(ctx, 'stdin_unbound', ())
@@ -557,7 +594,7 @@ class Lowering(TextLowering):
         if owned:
             f.attrs['owned'] = owned
         if results and is_list(results[0]):
-            f.attrs['ret_list'] = 'flist' if results[0] == LIST_F64 else 'list'
+            f.attrs['ret_list'] = 'flist' if results[0] == LIST_F64 else 'tlist' if results[0] == LIST_TINT else 'list'
         # a function that raises, or calls one that can return with an exception pending, has the
         # exception entry point `<sym>__ir` and a wrapper under its own name (emit_c)
         if any(i.op in ('raise', 'reraise', 'try') or (i.op == 'call' and i.attrs.get('callee') in self.pending)
@@ -755,7 +792,92 @@ class Lowering(TextLowering):
         self.b.emit('ba.new', [self.places[name], n])
 
     def list_kind_of(self, t):
-        return self.P.FLIST if t == LIST_F64 else self.P.LIST
+        return self.P.FLIST if t == LIST_F64 else TLIST if t == LIST_TINT else self.P.LIST
+
+    def elem_of_kind(self, kind):
+        return I.F64 if kind == self.P.FLIST else TINT if kind == TLIST else I.STRV if kind == self.P.SLIST else I.I64
+
+    def local_i64_list(self, name):
+        """Whether `name` is an int64 list local this function owns (a candidate for a list of exact ints)."""
+        pl = self.places.get(name) if isinstance(name, str) else None
+        return pl is not None and name not in self.params and pl.type.pointee == LIST_I64
+
+    def need_tlist(self, *names):
+        todo = [n for n in names if self.local_i64_list(n)]
+        if not todo:
+            raise NotS0('an int list that is not a local of this function must hold exact ints')
+        raise NeedTlist(todo)
+
+    def request_tlist(self, key, why):
+        """Ask `_to_c_once` for another round with `key` switched on, and stop this attempt."""
+        requests = getattr(self.P, 'TLIST_REQUESTS', None)
+        if requests is None:
+            raise NotS0(why)
+        requests.add(key)
+        requests.add(('exact',))
+        raise NotS0(why + ' (asking for a list of exact ints across the call)')
+
+    def own_param_index(self, name):
+        names = [n for n, _ in self.ctx.params]
+        return names.index(name) if name in names else None
+
+    def place_name(self, place):
+        d = self.b.defs.get(place)
+        return d.attrs.get('name') if d is not None and d.op == 'local.alloc' else None
+
+    def tainted(self, v):
+        """Whether the exact int `v` comes from text (`int(token)`) or from a list of exact ints, through tagged arithmetic and
+        the scalar locals that hold such values. The int lists such a value is stored into are lists of exact ints; a value
+        that is merely an unbounded accumulator keeps the int64 list it always had (and its loud stop)."""
+        if v.type != TINT:
+            return False
+        ins = self.b.defs.get(v)
+        if ins is None:
+            return False
+        op = ins.op
+        if op == 'rt':
+            return ins.attrs.get('callee') in ('tint_from_str', 'tint_from_bytes')
+        if op in ('list.get', 'span.get', 'spec.get'):
+            return True
+        if op == 'load':
+            pl = ins.operands[0]
+            return pl in self.taint_hidden or self.place_name(pl) in self.taint
+        if op == 'if':
+            return any(self.tainted(y.operands[0]) for r in ins.regions for y in r.instrs
+                       if y.op == 'yield' and y.operands)
+        if op.startswith('tint.') or op in ('select', 'zext'):
+            return any(self.tainted(o) for o in ins.operands)
+        return False
+
+    def no_narrowing(self, v, t, what):
+        """In a program with a list of exact ints (it was on the exact general path before) no exact int may be narrowed to int64
+        where CPython has an answer for the value: the function keeps the exact general path instead of stopping at "integer
+        overflow". Programs without such a list keep the loud stop they always had at these places."""
+        if v.type == TINT and t == I.I64 and not self.small_tint(v) and self.exact_prog:
+            raise NotS0('an exact int from text %s (the narrowing would stop the program)' % what)
+
+    def small_tint(self, v):
+        """Whether the exact int `v` is known to fit int64 (it was an int64 widened, or a remainder by an int64)."""
+        ins = self.b.defs.get(v)
+        return ins is not None and ins.op in ('tint.from', 'tint.mod_i64', 'tint.mod_pos_i64')
+
+    def elem_value(self, v, elem, node, dst, strict=False, exact=False):
+        """`v` as an element of a list with element type `elem`. An exact int that may exceed int64 cannot go into an int64
+        list: when the list is a local of this function it becomes a list of exact ints, otherwise (`strict`: the caller
+        cannot narrow either) the function keeps the exact general path."""
+        if self.tl_off:
+            if strict and elem == I.I64 and v.type == TINT and not self.small_tint(v):
+                raise NotS0('an exact int that may exceed int64 stored in an int64 list')
+            return self.field_value(v, elem, node)
+        if elem == I.I64 and v.type == TINT and not self.small_tint(v):
+            if self.tainted(v) or exact:
+                if self.local_i64_list(dst):
+                    raise NeedTlist([dst])
+                if dst == '<return>' and self.function.results and self.function.results[0] == LIST_I64:
+                    self.request_tlist(('r', self.fn.name), 'an exact int that may exceed int64 in the list returned')
+            if strict:
+                raise NotS0('an exact int that may exceed int64 stored in an int64 list')
+        return self.field_value(v, elem, node)
 
     def same_kind(self, node, kind):
         try:
@@ -767,7 +889,8 @@ class Lowering(TextLowering):
                         % (getattr(node, 'lineno', '?'), got, kind))
 
     def new_list_place(self, kind, tag):
-        return self.new_place(tag, LIST_STR if kind == self.P.SLIST else LIST_F64 if kind == self.P.FLIST else LIST_I64)
+        return self.new_place(tag, LIST_STR if kind == self.P.SLIST else LIST_F64 if kind == self.P.FLIST
+                              else LIST_TINT if kind == TLIST else LIST_I64)
 
     # ------------------------------------------------------------------ the stdin line loop (S3c-3)
     def stdin_loop_only(self, name):
@@ -1227,21 +1350,25 @@ class Lowering(TextLowering):
         place = self.places[name]
         self.assign_list(lambda: self.list_ref(place), node, self.list_kind_of(place.type.pointee), dst=name)
 
-    def list_source(self, node, kind):
+    def list_source(self, node, kind, dst=None):
         """(reference, name) when `node` names an existing list of element kind `kind`: an owned list
         local or a struct field's list; None for any other expression."""
         P = self.P
-        t = LIST_F64 if kind == P.FLIST else LIST_I64
+        t = LIST_F64 if kind == P.FLIST else LIST_TINT if kind == TLIST else LIST_I64
         if isinstance(node, ast.Name):
             if node.id in self.params and self.params[node.id].type.head == 'span':
                 raise NotS0('a read-only list parameter %r is shared with its caller (stage S3e)' % node.id)
             if self.is_list_name(node.id):
                 place = self.places[node.id]
                 if place.type.pointee != t:
+                    if {place.type.pointee, t} == {LIST_I64, LIST_TINT}:
+                        self.need_tlist(node.id, dst)
                     raise NotS0('a list assigned to a list of the other element type')
                 return self.list_ref(place), node.id
             return None
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name):
+            if kind == TLIST:
+                raise NotS0('a list of exact ints assigned from a field')
             obj, cls, fkind = self.field_of(node)
             if fkind not in (P.LIST, P.FLIST):
                 return None
@@ -1251,7 +1378,7 @@ class Lowering(TextLowering):
                     '%s.%s' % (node.value.id, node.attr))
         return None
 
-    def copy_source(self, node, kind):
+    def copy_source(self, node, kind, dst=None):
         """The list value an explicit copy `xs[:]`, `list(xs)` or `xs.copy()` reads, else None."""
         P = self.P
         inner = None
@@ -1267,23 +1394,26 @@ class Lowering(TextLowering):
         if inner is None or not isinstance(inner, (ast.Name, ast.Attribute)):
             return None
         v = self.container(inner)
-        elem = I.F64 if kind == P.FLIST else I.I64
-        if not (v.type == (LIST_F64 if kind == P.FLIST else LIST_I64) or v.type == I.T('span', elem)):
+        elem = self.elem_of_kind(kind)
+        if not (v.type == (LIST_F64 if kind == P.FLIST else LIST_TINT if kind == TLIST else LIST_I64)
+                or v.type == I.T('span', elem)):
+            if kind in (P.LIST, TLIST) and v.type in (LIST_I64, LIST_TINT):
+                self.need_tlist(getattr(inner, 'id', None), dst)
             raise NotS0('a copy of something that is not a list of the target kind')
         return v
 
     def assign_list(self, ref_fn, node, kind, dst='?'):
         """Replace the content of the list `ref_fn()` names with the list `node` builds or names."""
         P = self.P
-        elem = I.F64 if kind == P.FLIST else I.I64
-        src = self.list_source(node, kind)
+        elem = self.elem_of_kind(kind)
+        src = self.list_source(node, kind, dst)
         if src is not None:
             # Python's `dst = src`: one list, two names. The ownership analysis (ownership.py)
             # decides move, rename or box
             self.b.emit('list.share', [ref_fn(), src[0]], [], {'dst': dst, 'src': src[1],
                                                                'line': getattr(node, 'lineno', 0)})
             return
-        copy = self.copy_source(node, kind)
+        copy = self.copy_source(node, kind, dst)
         if copy is not None:
             self.b.emit('list.copy', [ref_fn(), copy], [], {'dst': dst, 'line': getattr(node, 'lineno', 0)})
             return
@@ -1293,35 +1423,45 @@ class Lowering(TextLowering):
             if not node.elts:
                 self.b.emit('list.reset', [ref_fn()])
                 return
-            vals = [self.field_value(self.expr(e), elem, e) for e in node.elts]
+            vals = [self.elem_value(self.expr(e), elem, e, dst) for e in node.elts]
             self.b.emit('list.lit', [ref_fn()] + vals)
             return
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
             for lst, cnt, first in ((node.left, node.right, True), (node.right, node.left, False)):
                 if isinstance(lst, ast.List) and len(lst.elts) == 1 and not isinstance(lst.elts[0], ast.Starred):
                     if first:
-                        v = self.field_value(self.expr(lst.elts[0]), elem, lst.elts[0])
+                        v = self.elem_value(self.expr(lst.elts[0]), elem, lst.elts[0], dst)
                         n = self.as_int(self.expr(cnt))
                     else:
                         n = self.as_int(self.expr(cnt))
-                        v = self.field_value(self.expr(lst.elts[0]), elem, lst.elts[0])
+                        v = self.elem_value(self.expr(lst.elts[0]), elem, lst.elts[0], dst)
                     self.b.emit('list.repeat', [ref_fn(), v, n])
                     return
             raise NotS0('a list product that is not [v] * n')
         if isinstance(node, ast.ListComp):
-            tmp = self.comprehension(node, kind)
+            tmp = self.comprehension(node, kind, dst)
+            self.b.emit('list.move', [ref_fn(), self.list_ref(tmp)])
+            return
+        if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice) and node.slice.step is None \
+                and isinstance(node.value, ast.Name) and self.is_list_name(node.value.id) and kind in (P.LIST, TLIST):
+            # `ys = xs[a:b]`: the elements a..b (clamped as Python does) copied, as `[v for v in xs[a:b]]` does
+            var = '_ail_sv'
+            comp = ast.copy_location(ast.ListComp(
+                elt=ast.copy_location(ast.Name(var, ast.Load()), node),
+                generators=[ast.comprehension(ast.copy_location(ast.Name(var, ast.Store()), node), node, [], 0)]), node)
+            tmp = self.comprehension(comp, kind, dst)
             self.b.emit('list.move', [ref_fn(), self.list_ref(tmp)])
             return
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in self.ctx.funcs \
                 and node.func.id not in self.places and node.func.id not in self.params:
-            self.user_call(node.func.id, node, False, list_dst=ref_fn, list_kind=kind)
+            self.user_call(node.func.id, node, False, list_dst=ref_fn, list_kind=kind, list_name=dst)
             return
-        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'sorted'                 and self.is_builtin('sorted') and kind == P.LIST:
-            self.sorted_list(ref_fn, node, dst)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'sorted'                 and self.is_builtin('sorted') and kind in (P.LIST, TLIST):
+            self.sorted_list(ref_fn, node, dst, kind)
             return
         raise NotS0('a list built from %s' % type(node).__name__)
 
-    def sorted_list(self, ref_fn, node, dst):
+    def sorted_list(self, ref_fn, node, dst, kind=None):
         """`sorted(xs)`, `sorted(xs, reverse=True)` and the same of `set(xs)` for an owned list of int: the elements are
         copied into a hidden list, sorted, and written to the target (each value once for a set, in the order asked)."""
         rev = False
@@ -1335,9 +1475,15 @@ class Lowering(TextLowering):
         arg, unique = node.args[0], False
         if isinstance(arg, ast.Call) and isinstance(arg.func, ast.Name) and arg.func.id == 'set'                 and len(arg.args) == 1 and not arg.keywords and self.is_builtin('set'):
             arg, unique = arg.args[0], True
-        if not (isinstance(arg, ast.Name) and self.is_list_name(arg.id) and self.places[arg.id].type.pointee == LIST_I64):
+        if not (isinstance(arg, ast.Name) and self.is_list_name(arg.id)
+                and self.places[arg.id].type.pointee in (LIST_I64, LIST_TINT)):
             raise NotS0('sorted() of something other than an owned list of int')
-        tmp = self.new_list_place(self.P.LIST, 'srt')
+        src_t = self.places[arg.id].type.pointee
+        elem = TINT if src_t == LIST_TINT else I.I64
+        out_elem = self.elem_of_kind(kind) if kind is not None else I.I64
+        if elem == TINT and out_elem == I.I64:
+            self.need_tlist(dst)
+        tmp = self.new_list_place(TLIST if src_t == LIST_TINT else self.P.LIST, 'srt')
         self.b.emit('list.copy', [self.list_ref(tmp), self.container(arg)], [],
                     {'dst': '<sorted>', 'line': getattr(node, 'lineno', 0)})
         self.b.emit('list.sort', [self.list_ref(tmp)])
@@ -1350,7 +1496,8 @@ class Lowering(TextLowering):
         body = I.Region([index])
 
         def fill():
-            v = self.b.value('list.get', [src, index], I.I64, {'mode': 'ck'})
+            v0 = self.b.value('list.get', [src, index], elem, {'mode': 'ck'})
+            v = self.coerce(v0, out_elem)
             if not unique:
                 self.b.emit('list.push', [out, v])
             else:
@@ -1360,8 +1507,8 @@ class Lowering(TextLowering):
                 then, other = I.Region(), I.Region()
 
                 def check():
-                    w = self.b.value('list.get', [src, nb], I.I64, {'mode': 'ck'})
-                    same = self.b.value('cmp.eq', [v, w], I.I1)
+                    w = self.b.value('list.get', [src, nb], elem, {'mode': 'ck'})
+                    same = self.b.value('tint.eq' if elem == TINT else 'cmp.eq', [v0, w], I.I1)
                     t2, o2 = I.Region(), I.Region()
                     self.in_region(t2, fill=lambda: self.b.emit('yield'))
                     self.in_region(o2, fill=lambda: (self.b.emit('list.push', [out, v]), self.b.emit('yield')))
@@ -1391,12 +1538,12 @@ class Lowering(TextLowering):
                 inside.update(id(n) for n in ast.walk(c))
         return any(isinstance(n, ast.Name) and n.id == name and id(n) not in inside for n in ast.walk(self.fn))
 
-    def comprehension(self, node, kind):
+    def comprehension(self, node, kind, dst='?'):
         """`[elt for v in range(..) if c ...]` or `[elt for v in xs if c ...]` (xs an owned list of any element
         type), built in a hidden list place that the caller moves into its target (the old target stays readable
         while the new list is built). `kind` is the legacy kind of the result list (int, float or str elements)."""
         P = self.P
-        elem = I.F64 if kind == P.FLIST else I.STRV if kind == P.SLIST else I.I64
+        elem = self.elem_of_kind(kind)
         tmp = self.new_list_place(kind, 'comp')
         self.b.emit('list.reset', [self.list_ref(tmp)])
         ref = self.list_ref(tmp)
@@ -1406,14 +1553,10 @@ class Lowering(TextLowering):
                                     or self.is_slist_expr(g0.iter))
 
         def push(e):
-            v = self.expr(e)
-            if exact and v.type == TINT and elem == I.I64:
-                ins = self.b.defs.get(v)
-                if ins is None or ins.op not in ('tint.from', 'tint.mod_i64', 'tint.mod_pos_i64'):
-                    # an exact int that may be beyond int64 (int() of text, a tagged sum) cannot go into an int64 list:
-                    # the narrowing would stop the program where CPython has an answer; the general path keeps it exact
-                    raise NotS0('an exact int that may exceed int64 stored in an int64 list')
-            v = self.field_value(v, elem, e)
+            # an exact int that may be beyond int64 (int() of text, a tagged sum) cannot go into an int64 list: the
+            # narrowing would stop the program where CPython has an answer. The list becomes a list of exact ints
+            # (NeedTlist); a list that is not a local keeps the exact general path
+            v = self.elem_value(self.expr(e), elem, e, dst, strict=exact, exact=exact)
             self.b.emit('list.push', [ref, v])
         self.comp_loop(node, node.elt, push, reserve=(None if elem == I.STRV else ref), tagged=(elem == I.STRV))
         return tmp
@@ -1439,7 +1582,7 @@ class Lowering(TextLowering):
         over_text = (not over_range and not over_list and self.is_slist_expr(it))
         # a read-only numeric list parameter (a span) is read the same way, element by element
         over_span = isinstance(it, ast.Name) and it.id in self.params and self.params[it.id].type.head == 'span' \
-            and self.params[it.id].type.args[0] in (I.I64, I.F64) and it.id not in self.places
+            and self.params[it.id].type.args[0] in (I.I64, I.F64, TINT) and it.id not in self.places
         if g.is_async or not isinstance(g.target, ast.Name) or not (over_range or over_list or over_span
                                                                   or over_text):
             raise NotS0('a comprehension that is not over range() or an owned list')
@@ -1567,6 +1710,8 @@ class Lowering(TextLowering):
                 st['acc'] = self.new_place('acc', v.type)
                 st['seen'] = self.new_place('seen', I.I64)
             acc, seen = st['acc'], st['seen']
+            if self.tainted(v):
+                self.taint_hidden.add(acc)
             if acc.type.pointee != v.type:
                 raise NotS0('%s() of mixed element types' % f)
             cur = self.b.value('load', [acc], v.type)
@@ -1635,6 +1780,11 @@ class Lowering(TextLowering):
         if isinstance(node, ast.Name) and self.is_list_name(node.id) and self.places[node.id].type.pointee == t:
             ref = self.container(node)
         else:
+            if isinstance(node, ast.Name) and self.is_list_name(node.id) \
+                    and {self.places[node.id].type.pointee, t} == {LIST_I64, LIST_TINT}:
+                if t == LIST_I64:
+                    self.request_tlist(('r', self.fn.name), 'the list of exact ints %r is returned' % node.id)
+                self.need_tlist(node.id)
             if isinstance(node, (ast.Name, ast.Attribute)):
                 raise NotS0('a list that something else names is returned (shared with its owner)')
             tmp = self.new_list_place(kind, 'ret')
@@ -1697,6 +1847,8 @@ class Lowering(TextLowering):
         return I.I64 if kind == self.P.INT else I.F64
 
     def store(self, name, v):
+        if v.type == TINT and not self.tl_off and name not in self.taint and self.tainted(v):
+            raise NeedTaint([name])
         if name in getattr(self.ctx, 'gdecl', ()):
             self.b.emit('global.store', [self.coerce(v, self.global_type(name))], [], {'name': name})
             return
@@ -1712,6 +1864,7 @@ class Lowering(TextLowering):
             raise NotS0('store to %r' % name)
         if place.type.pointee == BYTEARRAY:
             raise NotS0('a bytearray %r rebound to something other than bytearray()' % name)
+        self.no_narrowing(v, place.type.pointee, 'stored into the int64 local %r' % name)
         self.b.emit('store', [place, self.coerce(v, place.type.pointee)])
 
     def if_add(self, s):
@@ -1851,7 +2004,9 @@ class Lowering(TextLowering):
                 self.leave()
                 self.b.emit('return', [v])
                 return
-            v = self.coerce(self.expr(s.value), self.function.results[0])
+            v = self.expr(s.value)
+            self.no_narrowing(v, self.function.results[0], 'returned as an int64')
+            v = self.coerce(v, self.function.results[0])
             self.leave()
             self.b.emit('return', [v])
         elif isinstance(s, ast.Break):
@@ -2055,6 +2210,12 @@ class Lowering(TextLowering):
         A stop such as `INT64_MAX + 1` must reach the loop as the exact 2**63, not as an overflow
         and not saturated back to INT64_MAX: the loop then runs tagged and still yields INT64_MAX.
         Arithmetic the range pass proves safe keeps its int64 form (and the fast i64 loop)."""
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub)) and not self.proven(node) \
+                and not self.may_tint(node):
+            # `range(n - 1, -1, -1)`, `range(i + 1, n)`: counters, len() and small constants -- the sum stays within the
+            # physical limit of a counter (the pre-pass has made the loop variable an int64 for the same reason); the
+            # addition is still overflow-checked
+            return self.expr(node)
         if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)) \
                 and not self.proven(node):
             left = self.range_bound(node.left)
@@ -2187,6 +2348,8 @@ class Lowering(TextLowering):
         else:
             n = self.b.value('span.len', [base], I.I64)
             elem = base.type.args[0]
+        if elem == TINT and self.places[s.target.id].type.pointee != TINT:
+            raise NotS0('the loop variable %r is an int64 place but the list holds exact ints' % s.target.id)
         lo, step = self.const(I.I64, 0), self.const(I.I64, 1)
         index = I.Value(I.I64, hint='k')
         body = I.Region([index])
@@ -2552,7 +2715,8 @@ class Lowering(TextLowering):
             raise NotS0('element store into %s' % base.type)
         index = self.as_int(self.expr(target.slice))
         elem = base.type.args[0].args[0]
-        self.b.emit('list.set', [base, index, self.field_value(v, elem, value_node)], [], {'mode': self.index_mode(target)})
+        self.b.emit('list.set', [base, index, self.elem_value(v, elem, value_node, getattr(target.value, 'id', None))],
+                    [], {'mode': self.index_mode(target)})
 
     def module_int_value(self, node):
         """Whether this expression can carry a module int (a direct read or a call that returns
@@ -2608,7 +2772,8 @@ class Lowering(TextLowering):
         mode = self.index_mode(target)
         old = self.b.value('list.get', [base, index], elem, {'mode': mode})
         new = self.apply_binop(s, old, self.expr(s.value))
-        self.b.emit('list.set', [base, index, self.field_value(new, elem, s.value)], [], {'mode': 'nck'})
+        self.b.emit('list.set', [base, index, self.elem_value(new, elem, s.value, getattr(target.value, 'id', None))],
+                    [], {'mode': 'nck'})
 
     def apply_binop(self, s, left, right):
         """`left <op> right` for an augmented assignment, typed as the legacy path types the
@@ -2723,13 +2888,13 @@ class Lowering(TextLowering):
         name = func.attr
         if elem == I.STRV:
             return self.slist_method(base, name, node, statement)
-        if name == 'sort' and not node.args and statement and elem in (I.I64, I.F64):
+        if name == 'sort' and not node.args and statement and elem in (I.I64, I.F64, TINT):
             self.b.emit('list.sort', [base])
             return None
         if name == 'append' and len(node.args) == 1:
             if not statement:
                 raise NotS0('append() used as a value')
-            v = self.field_value(self.expr(node.args[0]), elem, node.args[0])
+            v = self.elem_value(self.expr(node.args[0]), elem, node.args[0], getattr(func.value, 'id', None))
             self.b.emit('list.push', [base, v])
             return None
         if name == 'pop' and not node.args:
@@ -2798,6 +2963,8 @@ class Lowering(TextLowering):
                 _d = self.P._int_const(node.right)
             except Exception:
                 _d = None
+            if _d is None:
+                _d = self._const_int_value(right)          # (a module constant read: `x % MOD`)
             if isinstance(_d, int) and not isinstance(_d, bool) and _d > 0 \
                     and _d & (_d - 1) == 0 and _d.bit_length() <= 63:
                 _k = _d.bit_length() - 1
@@ -2956,6 +3123,16 @@ class Lowering(TextLowering):
                 and isinstance(node.comparators[0], ast.Name) and self.is_slist_name(node.comparators[0].id):
             return self.slist_in(node)
         if len(node.ops) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)) \
+                and isinstance(node.comparators[0], ast.Name) and self.is_list_name(node.comparators[0].id) \
+                and self.places[node.comparators[0].id].type.pointee == LIST_TINT:
+            item = self.expr(node.left)
+            if item.type == I.F64:
+                raise NotS0('membership of a float in a list of exact ints')
+            found = self.b.value('list.has', [self.container(node.comparators[0]), self.coerce(item, TINT)], I.I1)
+            if isinstance(node.ops[0], ast.NotIn):
+                return self.b.value('cmp.eq', [found, self.const(I.I1, False)], I.I1)
+            return found
+        if len(node.ops) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)) \
                 and self.plist_field(node.comparators[0]) is not None:
             return self.plist_in(node)
         return self._chain(self.expr(node.left), node.ops, node.comparators)
@@ -3039,6 +3216,8 @@ class Lowering(TextLowering):
         if not self.is_builtin(f):
             raise NotS0('call of %r' % f)
         args = node.args
+        if f == 'print' and statement and self.print_list(node):
+            return None
         if f == 'print' and statement:
             self.print_stmt(node)
             return None
@@ -3150,6 +3329,152 @@ class Lowering(TextLowering):
             return None
         raise NotS0('builtin %s()' % f)
 
+    def print_list(self, node):
+        """`print(...)` with a list of ints among the arguments (an int64 list or a list of exact ints, `*xs` or whole): every
+        argument is evaluated first, in order (a list-valued expression is built in a hidden list), then the items are written
+        as `print` writes them -- a list as `[a, b, c]`, a starred list item by item -- one separator between any two items and
+        the end last. False when `node` has no such argument (the ordinary print lowering takes it)."""
+        P = self.P
+
+        def list_place(n):
+            return self.places[n.id] if isinstance(n, ast.Name) and self.is_list_name(n.id) \
+                and self.places[n.id].type.pointee in (LIST_I64, LIST_TINT) else None
+
+        def list_expr(n):
+            if not isinstance(n, (ast.Call, ast.Subscript, ast.ListComp, ast.List)):
+                return False
+            try:
+                return P._etype(n, self.ctx) == P.LIST
+            except Exception:
+                return False
+        plan = []
+        for a0 in node.args:
+            star = isinstance(a0, ast.Starred)
+            inner = a0.value if star else a0
+            if list_place(inner) is not None:
+                plan.append(('named', star, inner))
+            elif list_expr(inner):
+                plan.append(('built', star, inner))
+            elif star:
+                return False
+            else:
+                plan.append(('scalar', False, inner))
+        if all(c[0] == 'scalar' for c in plan):
+            return False
+        sep_node = end_node = None
+        for kw in node.keywords:
+            if kw.arg == 'sep':
+                sep_node = kw.value
+            elif kw.arg == 'end':
+                end_node = kw.value
+            else:
+                raise NotS0('print(%s=...) of a list' % kw.arg)
+        for n_ in (sep_node, end_node):
+            if n_ is not None and self.text_kind(n_) != 'str':
+                raise NotS0('print sep/end that is not a str')
+        # everything the call evaluates, before anything is written (the arguments left to right, then sep and end)
+        items = []
+        temps = []
+        for kind, star, inner in plan:
+            if kind == 'scalar':
+                items.append(('scalar',) + self.print_piece(inner))
+            elif kind == 'named':
+                items.append(('list', star, list_place(inner)))
+            else:
+                tmp = self.new_list_place(TLIST, 'pl')
+                self.assign_list(lambda tmp=tmp: self.list_ref(tmp), inner, TLIST, dst='<print>')
+                temps.append(tmp)
+                items.append(('list', star, tmp))
+        sep = self.expr(sep_node) if sep_node is not None else self.str_lit(' ')
+        end = self.expr(end_node) if end_node is not None else self.str_lit('\n')
+        empty = self.str_lit('')
+        comma = self.str_lit(', ')
+        flag = self.new_place('pf', I.I64)
+        self.b.emit('store', [flag, self.const(I.I64, 0)])
+
+        def out(v, kind='str'):
+            self.b.emit('print', [v, empty], [], {'kinds': [kind], 'stream': 'stdout', 'end': True})
+
+        def when(cond, fill):
+            then, other = I.Region(), I.Region()
+            self.in_region(then, fill=lambda: (fill(), self.b.emit('yield')))
+            self.in_region(other, fill=lambda: self.b.emit('yield'))
+            self.b.emit('if', [cond], [], None, [then, other])
+
+        def separator():
+            seen = self.b.value('cmp.ne', [self.b.value('load', [flag], I.I64), self.const(I.I64, 0)], I.I1)
+            when(seen, lambda: out(sep))
+
+        def element_loop(place, per):
+            base = self.list_ref(place)
+            n = self.b.value('list.len', [base], I.I64)
+            elem = base.type.args[0].args[0]
+            index = I.Value(I.I64, hint='k')
+            body = I.Region([index])
+
+            def fill():
+                v = self.b.value('list.get', [self.list_ref(place), index, ], elem, {'mode': 'nck', 'iter': True})
+                per(v, index)
+                self.b.emit('continue')
+            self.loop_depth += 1
+            try:
+                self.in_region(body, fill=fill)
+            finally:
+                self.loop_depth -= 1
+            loop = self.b.emit('for.range', [self.const(I.I64, 0), n, self.const(I.I64, 1)], [], {'args': 1}, [body])
+            self.iter_loops.append((loop, base))
+
+        def elem_out(v):
+            if v.type == TINT:
+                out(v, 'tint')
+            else:
+                out(v, 'int')
+        for it in items:
+            if it[0] == 'scalar':
+                separator()
+                out(it[2], it[1])
+                self.b.emit('store', [flag, self.const(I.I64, 1)])
+            elif it[1]:                                    # *xs
+                def star_item(v, index):
+                    separator()
+                    elem_out(v)
+                    self.b.emit('store', [flag, self.const(I.I64, 1)])
+                element_loop(it[2], star_item)
+            else:                                          # xs
+                separator()
+                out(self.str_lit('['))
+
+                def list_item(v, index):
+                    when(self.b.value('cmp.gt', [index, self.const(I.I64, 0)], I.I1), lambda: out(comma))
+                    elem_out(v)
+                element_loop(it[2], list_item)
+                out(self.str_lit(']'))
+                self.b.emit('store', [flag, self.const(I.I64, 1)])
+        out(end)
+        for tmp in temps:
+            self.b.emit('list.reset', [self.list_ref(tmp)], [], {'drop': True})
+        return True
+
+    def print_piece(self, a0):
+        """(print kind, value) of one scalar argument of print(), as lower_text.print_stmt writes it."""
+        P = self.P
+        if P._is_bool_expr(a0, self.ctx):
+            v = self.expr(a0)
+            return 'bool', (self.coerce(v, I.I64) if v.type == TINT else v)
+        if self.text_kind(a0) == 'bytes':
+            raise NotS0('print of bytes')
+        t = P._etype(a0, self.ctx)
+        if t == P.STR:
+            return 'str', self.expr(a0)
+        if t == P.FLT:
+            return 'flt', self.expr(a0)
+        if t == P.INT:
+            v = self.expr(a0)
+            if v.type == TINT:
+                return 'tint', v
+            return 'int', self.as_int(v)
+        raise NotS0('print of kind %r among lists' % (t,))
+
     def int_text(self, text, base):
         """`int(text)` / `int(text, base)` with a str or bytes first argument, on the Python
         surface: a value beyond int64 is a big int, so this is the tagged-int parse."""
@@ -3169,6 +3494,8 @@ class Lowering(TextLowering):
                 raise NotS0('%s is not an owned local list' % what)
             if arg.id in self.ctx.kind:
                 raise NotS0('%s is a parameter' % what)
+            if self.places[arg.id].type.pointee == LIST_TINT:
+                raise NotS0('%s holds exact ints' % what)
             return arg
         if node.keywords:
             raise NotS0('keywords to %s()' % f)
@@ -3192,7 +3519,7 @@ class Lowering(TextLowering):
         self.b.emit('list.permute', [self.container(xs), self.container(perm)])
         return None
 
-    def user_call(self, f, node, statement, list_dst=None, list_kind=None, ba_dst=None, obj_dst=None):
+    def user_call(self, f, node, statement, list_dst=None, list_kind=None, ba_dst=None, obj_dst=None, list_name=None):
         P, ctx = self.P, self.ctx
         try:
             arg_nodes = P._bind_call_args(f, node, ctx)
@@ -3211,7 +3538,13 @@ class Lowering(TextLowering):
         if len(arg_nodes) != len(params):
             raise NotS0('%s() arity' % f)
         _tsig = getattr(P, 'TINT_ACTIVE', {}).get(f) or getattr(P, 'TINT_ACTIVE', {}).get(symbol) or ((), 0)
-        param_types = [(TINT if (_tsig[0] and i < len(_tsig[0]) and _tsig[0][i]) else self.kind_type(k, '%s() parameter %r' % (f, n), views=True))
+        tl_params = {i for i, (n, k) in enumerate(params) if k == 'array' and ('p', f, i) in self.tl_active}
+        tl_ret = ('r', f) in self.tl_active
+        if (tl_params or tl_ret) and (symbol != ctx.csym.get(f, f) or f in getattr(ctx, 'clones', {})):
+            raise NotS0('a list of exact ints passed to a function that has clones')
+        param_types = [(TINT if (_tsig[0] and i < len(_tsig[0]) and _tsig[0][i])
+                        else I.T('span', TINT) if i in tl_params
+                        else self.kind_type(k, '%s() parameter %r' % (f, n), views=True))
                        for i, (n, k) in enumerate(params)]
         if ret == P.NORET:
             if not statement:
@@ -3227,14 +3560,25 @@ class Lowering(TextLowering):
             results = [self.kind_type(ret, '%s() result' % f, owned=True, local=True)]
             if results[0] != obj_dst.type.pointee:
                 raise NotS0('%s() does not return an object of the target\'s class' % f)
+        elif tl_ret and ret == P.LIST:
+            results = [LIST_TINT]
         else:
             results = [self.kind_type(ret, '%s() result' % f, owned=True)]
         if ba_dst is not None and results != [BYTEARRAY]:
             raise NotS0('%s() does not return a bytearray' % f)
         if results and is_list(results[0]) and list_dst is None:
             raise NotS0('the list %s() returns is used as a value (stage S3b)' % f)
+        if list_dst is not None and results and is_list(results[0]):
+            want = LIST_F64 if list_kind == P.FLIST else LIST_TINT if list_kind == TLIST else LIST_I64
+            if results[0] != want and {results[0], want} == {LIST_I64, LIST_TINT}:
+                if want == LIST_I64:
+                    if list_name == '<return>' and self.function.results and self.function.results[0] == LIST_I64:
+                        self.request_tlist(('r', self.fn.name), '%s() returns a list of exact ints' % f)
+                    self.need_tlist(list_name)          # the target list holds what the callee returns: exact ints
+                self.request_tlist(('r', f), '%s() would return the list of exact ints its caller needs' % f)
         if list_dst is not None and not (results and is_list(results[0])
-                                         and results[0] == (LIST_F64 if list_kind == P.FLIST else LIST_I64)):
+                                         and results[0] == (LIST_F64 if list_kind == P.FLIST else LIST_TINT
+                                                            if list_kind == TLIST else LIST_I64)):
             raise NotS0("%s() does not return a list of the target's kind" % f)
         order = sorted(range(len(arg_nodes)), key=lambda i: (getattr(arg_nodes[i], 'lineno', 0),
                                                               getattr(arg_nodes[i], 'col_offset', 0)))
@@ -3247,6 +3591,12 @@ class Lowering(TextLowering):
                 # for the duration of the call and cannot resize it (it has no way to name it)
                 if params[i][1] not in ('array', P.FLIST):
                     raise NotS0('list argument to a parameter of kind %r' % (params[i][1],))
+                if params[i][1] == 'array':
+                    at = self.places[a.id].type.pointee
+                    if i in tl_params and at == LIST_I64:
+                        self.need_tlist(a.id)                # the callee reads exact ints: so does this list
+                    if i not in tl_params and at == LIST_TINT:
+                        self.request_tlist(('p', f, i), 'the list of exact ints %r is passed to %s()' % (a.id, f))
                 values[i] = self.container(a)
             elif params[i][1] == P.SLIST and isinstance(a, ast.Name) and self.is_slist_name(a.id):
                 values[i] = self.container(a)        # (read only on both sides: check_slist_params)
@@ -3270,7 +3620,7 @@ class Lowering(TextLowering):
             elif isinstance(a, ast.List) and params[i][1] in ('array', P.FLIST) and not self.list_display_names(a):
                 # a list display handed to a read-only list parameter: a temporary this call owns, lent to the
                 # callee and dropped once the call is over
-                tkind = P.LIST if params[i][1] == 'array' else P.FLIST
+                tkind = (TLIST if i in tl_params else P.LIST) if params[i][1] == 'array' else P.FLIST
                 tmp = self.new_list_place(tkind, 'arg')
                 self.assign_list(lambda tmp=tmp: self.list_ref(tmp), a, tkind, dst='<arg>')
                 temps.append(tmp)
@@ -3278,7 +3628,7 @@ class Lowering(TextLowering):
             elif isinstance(a, ast.Call) and isinstance(a.func, ast.Name) and a.func.id in ctx.funcs                     and a.func.id not in self.places and a.func.id not in self.params                     and ctx.funcs[a.func.id][1] in (P.LIST, P.FLIST):
                 # the list a call returns, passed straight on: a temporary this call owns, lent to the
                 # callee and dropped once the call is over
-                if params[i][1] not in ('array', P.FLIST):
+                if params[i][1] not in ('array', P.FLIST) or ('r', a.func.id) in self.tl_active or i in tl_params:
                     raise NotS0('list argument to a parameter of kind %r' % (params[i][1],))
                 tkind = ctx.funcs[a.func.id][1]
                 tmp = self.new_list_place(tkind, 'arg')
@@ -3295,15 +3645,22 @@ class Lowering(TextLowering):
         args = []
         arg_abi = []
         own_abi = dict(zip(self.function.params, self.function.attrs.get('abi') or []))
-        for v, t, (pname, pkind) in zip(values, param_types, params):
+        for k_, (v, t, (pname, pkind)) in enumerate(zip(values, param_types, params)):
             if v.type == I.F64 and t != I.F64:
                 raise NotS0('float argument to an int parameter of %s()' % f)
             if t.head == 'span':
-                want = 'array' if pkind == 'array' else 'flist'
+                want = 'tarray' if t.args[0] == TINT else 'array' if pkind == 'array' else 'flist'
                 if is_list(v.type) and v.type.args[0].args[0] == t.args[0]:
                     arg_abi.append(want)
                     args.append(v)
                     continue
+                if v.type.head == 'span' and v.type != t and pkind == 'array' and v.type.args[0] in (I.I64, TINT)                         and t.args[0] in (I.I64, TINT):
+                    # a read-only parameter of this function handed to a parameter of the other element type
+                    if v.type.args[0] == I.I64 and v in self.function.params:
+                        self.request_tlist(('p', self.fn.name, self.function.params.index(v)),
+                                           'an int64 list parameter is passed on to a parameter of exact ints')
+                    if v.type.args[0] == TINT:
+                        self.request_tlist(('p', f, k_), 'a list parameter of exact ints is passed on to %s()' % f)
                 if v.type != t or own_abi.get(v) != want:
                     raise NotS0('list argument to %s() is not a parameter passed through' % f)
                 arg_abi.append(want)
@@ -3318,6 +3675,7 @@ class Lowering(TextLowering):
                 args.append(v)
                 continue
             arg_abi.append('value')
+            self.no_narrowing(v, t, 'passed to an int64 parameter of %s()' % f)
             args.append(self.coerce(v, t))
         sig = I.fn_type(param_types, results)
         known = self.program.callee_type(symbol)
@@ -3369,22 +3727,41 @@ class Lowering(TextLowering):
 
 def lower(P, fn, ctx, sig, recursive, cname, pending=(), link_units=False, summaries=None):
     """(IR function, its one-function program) for the S0 subset; NotS0 otherwise."""
-    lowering = Lowering(P, fn, ctx, sig, recursive, cname, pending, link_units, summaries)
     # the legacy front end has already checked where each handler's name is bound; the type queries of the
     # lowering (`e.__ail_text__` inside the handler) must not trip that check, and the legacy emitter that
     # takes the function over when this one refuses needs it as it was
     scope_check = getattr(ctx, 'check_exception_scope', None)
-    if scope_check is not None:
-        ctx.check_exception_scope = False
-    try:
-        f = lowering.run()
-    finally:
+    tlists, taint = set(), set()
+    for _attempt in range(40):
+        lowering = Lowering(P, fn, ctx, sig, recursive, cname, pending, link_units, summaries, tlists, taint)
         if scope_check is not None:
-            ctx.check_exception_scope = scope_check
-        # the kinds the flow analysis put in the legacy context are the IR's own business
-        for n, t in lowering.__dict__.get('saved_types', {}).items():
-            if t is None:
-                ctx.types.pop(n, None)
-            else:
-                ctx.types[n] = t
+            ctx.check_exception_scope = False
+        try:
+            f = lowering.run()
+            break
+        except NeedTlist as need:
+            # an int list local that must hold exact ints (and the lists it is joined to): lower again with it so
+            requests = getattr(P, 'TLIST_REQUESTS', None)
+            if requests is not None:
+                requests.add(('exact',))
+            fresh = set(need.names) - tlists
+            if not fresh:
+                raise NotS0(str(need))
+            tlists |= fresh
+        except NeedTaint as need:
+            fresh = set(need.names) - taint
+            if not fresh:
+                raise NotS0(str(need))
+            taint |= fresh
+        finally:
+            if scope_check is not None:
+                ctx.check_exception_scope = scope_check
+            # the kinds the flow analysis put in the legacy context are the IR's own business
+            for n, t in lowering.__dict__.get('saved_types', {}).items():
+                if t is None:
+                    ctx.types.pop(n, None)
+                else:
+                    ctx.types[n] = t
+    else:
+        raise NotS0('the lists of exact ints did not settle')
     return f, lowering.program

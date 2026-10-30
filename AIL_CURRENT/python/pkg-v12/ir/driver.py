@@ -367,6 +367,18 @@ def _drop_tint(P, *names):
                 _map.pop(_name, None)
 
 
+def _tlist_affected(P, fn):
+    """Whether `fn` takes or returns a list of exact ints (its C signature is the IR's own), or calls a function that does: the
+    legacy int64 emitter cannot compile it, so the program takes the exact general path when the IR cannot lower it."""
+    active = getattr(P, 'TLIST_ACTIVE', None)
+    if not active:
+        return False
+    names = {k[1] for k in active if len(k) > 1}
+    if fn.name in names:
+        return True
+    return any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in names for n in ast.walk(fn))
+
+
 def _apply(P, args, kwargs, result, current):
     sig, generated, ctx = result
     bound = inspect.signature(P._one_function_numeric_impl).bind(*args, **kwargs).arguments
@@ -444,10 +456,31 @@ def _apply(P, args, kwargs, result, current):
     except Exception:
         _needs_tint = False
         _no_tint_locals = False
+    # the variable of a comprehension over a list of str (`[int(t) for t in s.split()]`, `[int(x) for x in data[1:]]`): the legacy
+    # types do not know it outside the comprehension, but `int(t)` of it is an int() of text all the same
+    _comp_str = set()
+    for _c in (() if (os.environ.get('AIL_NO_GENERAL') or getattr(P, 'TLIST_OFF', False)) else ast.walk(fn)):
+        if isinstance(_c, (ast.ListComp, ast.GeneratorExp, ast.SetComp)):
+            for _g in _c.generators:
+                if isinstance(_g.target, ast.Name):
+                    _it = _g.iter
+                    if isinstance(_it, ast.Subscript) and isinstance(_it.slice, ast.Slice):
+                        _it = _it.value
+                    _split = isinstance(_it, ast.Call) and isinstance(_it.func, ast.Attribute) \
+                        and _it.func.attr in ('split', 'splitlines')
+                    try:
+                        _slist = P._etype(_it, ctx) == P.SLIST
+                    except Exception:
+                        _slist = False
+                    if _split or _slist:
+                        _comp_str.add(_g.target.id)
+
     def _text_int(n):
         if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                 and n.func.id in ('int', '_ail_int2') and n.args):
             return False
+        if isinstance(n.args[0], ast.Name) and n.args[0].id in _comp_str:
+            return True
         try:
             return P._etype(n.args[0], ctx) in (P.STR, P.BYTES)
         except Exception:
@@ -482,9 +515,14 @@ def _apply(P, args, kwargs, result, current):
     # as it does with AIL_IR=0; refusing it here would lose a supported typed-path shape.
     _map_param = any(k in getattr(P, 'MAPS', ()) or k == getattr(P, 'SLIST', None)
                      for _, k in getattr(ctx, 'params', ()))
+    # (a function that returns a list built from text -- `return [int(t) for t in s.split()]` -- is lowered with a list of exact
+    # ints as its result: the lowering asks for it, and refuses if it cannot)
+    _list_result = getattr(ctx, 'ret', None) in (P.LIST,) and any(
+        isinstance(n, (ast.ListComp, ast.Call)) for r in ast.walk(fn) if isinstance(r, ast.Return) and r.value is not None
+        for n in ast.walk(r.value))
     _proof_without_local = (_py and _tagged and _needs_tint and _no_tint_locals and not _has_tint_call
                             and not (_call_result_proof and _typed_only)
-                            and not _map_param
+                            and not _map_param and not _list_result
                             and not (_proof or '').startswith(('it calls ', 'it contains ')))
     if _proof_without_local:
         if os.environ.get('AIL_NO_GENERAL'):
@@ -570,12 +608,18 @@ def _apply(P, args, kwargs, result, current):
             new_sig = 'static' + chr(10) + new_sig
         # (a function with a try has its parameters `volatile` in the legacy signature, for the
         # setjmp rule; a qualifier on a parameter does not change the type of the function)
+        _tl_ret = ('r', fn.name) in (getattr(P, 'TLIST_ACTIVE', None) or ())
         if new_sig != sig and ''.join(new_sig.split()) != ''.join(re.sub(r'\bvolatile\b', '', sig).split()) \
-                and not _needs_tint:
+                and not _needs_tint and not _tl_ret:
             raise I.IRError('IR signature %r differs from the legacy %r' % (new_sig, sig))
         if needs['need'] and ctx.need is None:
             raise lower.NotS0('checked helpers in a non-strict build')
     except lower.NotS0 as reason:
+        if _tlist_affected(P, fn):
+            from pyfront import Unsupported
+            _record(fn.name, cname, 'legacy', str(reason), ctx)
+            raise Unsupported('%s() passes or returns a list of exact ints, which the IR lowering does not cover here: %s'
+                              % (fn.name, reason))
         if os.environ.get('AIL_IR_TRACE'):
             import traceback
             with open(os.environ['AIL_IR_TRACE'], 'a') as _t:
@@ -616,6 +660,10 @@ def _apply(P, args, kwargs, result, current):
         if current == 'verify':
             raise
         _record(fn.name, cname, 'legacy', 'IR failure: %s: %s' % (type(error).__name__, error), ctx)
+        if _tlist_affected(P, fn):
+            from pyfront import Unsupported
+            raise Unsupported('%s() passes or returns a list of exact ints, which the IR lowering does not cover here: '
+                              'IR failure: %s: %s' % (fn.name, type(error).__name__, error))
         if _unsafe_text_int and _tagged and not _io_like and not fn.name.startswith(('_Ail', '_ail'))                 and not getattr(P, 'TINT_DISABLED', False) and not os.environ.get('AIL_NO_GENERAL'):
             # the legacy emitter parses int(<text>) into an int64 and stops at "integer overflow" on a value CPython keeps
             # exactly: a function the IR cannot lower must not keep that parse, the whole program takes the exact path
@@ -650,4 +698,4 @@ def _apply(P, args, kwargs, result, current):
         PENDING.add(cname)
     if needs.get('byval'):
         LISTVAL.add(cname)
-    return (new_sig if _needs_tint else sig), body, ctx
+    return (new_sig if (_needs_tint or _tl_ret) else sig), body, ctx
