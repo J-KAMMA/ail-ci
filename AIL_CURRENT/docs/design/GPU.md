@@ -1,6 +1,6 @@
-# GPU offload (design 2026-10-29; G1, G2 and the device-trust part of G3 built, see 6.1 to 6.3)
+# GPU offload (design 2026-10-29; G1 to G4 built (6.1 to 6.4), G5 (typed arrays on the device) in 6.5)
 
-Design note for running parts of an AIL program on a GPU. Stages G1 and G2 and the device-trust part of G3 are built (sections 6.1 to 6.3); the rest is design. The roadmap keeps the
+Design note for running parts of an AIL program on a GPU. Stages G1 to G4 and the typed-array part of G5 are built (sections 6.1 to 6.5); the rest is design. The roadmap keeps the
 implementation last (IR core -> correctness -> coverage -> FFI/modules -> tooling -> release -> GPU); this note fixes the
 design now so the earlier stages do not close doors. Oracle: CPython 3.12, as everywhere else.
 
@@ -680,6 +680,120 @@ launch) with the same stdout, exit code and stderr as `AIL_GPU=0` and CPython, n
 and `original loop` for every declined launch; a lavapipe is never used by auto (software device); a pool program with growing,
 shrinking and repeated sizes in six modes. The 780M bit tests (51 kernels x 65,536 operand sets) were repeated on the final code:
 2,779,992 clean elements, 562,344 flagged, 17,200 single launches, 0 differences, 0 missed flags.
+
+### 6.5 G5 as built: typed arrays (`ail_array`) on the device (2026-10-30)
+
+Code: `python/pkg-v12/ailarray.py` (class `Fuser`: the rewrite of a `--gpu` build), `prelude_ailarray.py` (the block kernels of `ta.sum` /
+`ta.dot`, `_ail_ta_c32`, `_ail_ta_cn`), `gpu.py` (internal markers, the IR node `c32`), `gpu_spirv.py` (`x_c32`), `gpu_vk.py` (self-test
+and first-launch shape of the block kernels), `test_ail_gpu_g5.py`, `array_g5_cases/`. Base: G4 plus T1/T2 (#225/#235). Without `--gpu`
+the lowering of `ailarray.py` is T2's, text for text (tested); with it the loops below carry a marker that is a NAME, not a comment,
+because the surface passes unparse the program several times and a comment does not survive that.
+
+**What goes to the device** (everything else in `ail_array` runs T2's code):
+
+| op | kernel | notes |
+| --- | --- | --- |
+| f64 `+ - *` and unary minus, between arrays and with a scalar | one generated function per expression SHAPE, one loop | fused, see the rule below |
+| `ta.sum(a)` of f64 | `_ail_taf_gk_sum`: one invocation per whole block of 1024 elements | 16 lanes x 64 adds in index order, then the 8-4-2-1 tree; the short last block and the tree over the blocks run on the CPU: the order of TYPED_ARRAY.md 3.5 on every device |
+| `ta.dot(a, b)` of f64 | `_ail_taf_gk_dot`, the same with `d[q] * e[q]`; **opt-in** (`AIL_GPU_ARRAY_SLOW=1`) | same bits as the CPU for f64 (the products are rounded, then added) |
+| int32 `+ - *`, array with array or scalar | `_ail_tai_k*`: one kernel per operation, **opt-in** (`AIL_GPU_ARRAY_SLOW=1` at build time, like the `ta.dot` kernel) | the int32 range is checked in the kernel (new IR node `c32`: the overflow flag when the value is outside int32); the flagged launch is replayed by the CPU loop, which raises T2's `OverflowError` with the operation and the lowest index |
+| f64 `/`, `abs`, `sqrt`, `exp`, `minimum`, ..., int32 `// %`, `astype`, in-place `+=`, slices, min/max | not on the device | no correctly rounded device division (G5 of the plan), or the output overlaps an input (G1's pointer check declines it) |
+
+**The fusion rule.** After T2's lowering has turned `a * b + a` into nested `_ail_taf_bin` calls, a tree of f64 `+ - *` / unary minus whose
+leaves are plain names, constants or attribute chains (scalar operands: also `float(x)`, `-x`, `x * y`, `x + y`, `x - y` of those), at most 256
+operations, becomes ONE call of `_ail_taf_fu<N>`: the shape checks in the order the unfused code made them (same text), then a loop
+`o = [_ail_ta_cn(<expr>, inf) for _ailg_map in range(n)]`. Arithmetic is unchanged: the same binary64 operations in the same order, no
+fused multiply-add (`-ffp-contract=off`, `NoContraction` in the module), and a NaN is made canonical once, at the end, which is the same bits as after every
+operation (an operation with a NaN operand gives a NaN). A tree with an operand that is a call, a subscript or a division is not fused as a
+whole (evaluating all operands first could change which error comes first): each single operation is still rewritten (its two operands are
+evaluated where they stood), so `g(a) * b + g(b) * a` is three single-operation kernels, two of which share a function. Trees of the same shape
+(leaves and scalars numbered by first use) share one function and one kernel. int32 chains are not fused: the `OverflowError` of `a + b * a`
+names the multiplication over the whole array first, and a per-element chain would name the first failing element of either operation.
+
+**Decision and cost.** `ops_expr` counts the new kernels like the old ones (a load, an operation, a comparison: 1 each; the inner loop of a block
+kernel: 64 x its body, about 3.2 per element for `ta.sum`). The constants of 6.4 are unchanged. Consequences, from the model and then measured below:
+a chain pays for its copy only when it is long (about 40 operations with one input array, about 60 with two); `ta.sum`, `ta.dot` and int32 never do.
+Two things were found on the way and are in the code: (1) the function that holds a marked loop is emitted by the legacy emitter, which fills
+`[0] * n` one element at a time and checks every element access, so the kernel loops are written as comprehensions (no fill, one reserve) and the
+whole-block loops of `ta.sum` / `ta.dot` use eight accumulators per pass, two passes (16 accumulators and the loaded values spill out of registers);
+(2) even so the int32 loop is 1.6 to 1.8x and the `ta.dot` loop 10 to 29 percent slower on the CPU than T2's, which is why those two are opt-in (`AIL_GPU_ARRAY_SLOW=1` at build time):
+`--gpu` must not make programs slower, and the model never uses them on this device.
+
+**Bit tests.** `array_g5_cases/sumdot.py`, `fused.py`, `int32.py` (each built with `compile --gpu`, typed path only, run in every mode, stdout and
+exit code compared with CPython running the T1 reference `ail_array.py` on the same text):
+- `sumdot.py`: 9 data kinds (ramp of 0.1, 1e16 / 1 / -1e16, random, 1/k, all -0.0, +-1e308, 1e-300 scale, 1 + eps, wide) x lengths
+  0, 1, 2, 15, 16, 17, 31, 32, 33, 1023, 1024, 1025, 1536, 2047, 2048, 2049, 3071, 3072, 3073, 4097, 5000, 20000, 100003; inf, NaN, -inf (cancelling
+  across blocks), -0.0, 1e308 x2, 1e-310 and +-1e308 planted at positions 0, 1, 15, 16, 17, 1023, 1024, 1025, 2047, 2048, 2049 of a 2100-element array
+  (two whole blocks and a short third); all -0.0 / all 0.0 / mixes at 1, 16, 1024, 1040, 2048, 2049; a 70000-element array with a NaN at the end and one
+  whose infinities meet in the tree. Printed: the bits of `ta.sum` and `ta.dot` (hex) and their reprs.
+- `fused.py`: 11 chains (`a*b + a`, `(a+b)*(a-b) - c*0.5`, `2.0 - a*b`, `-(a*b) + c`, `a*3 + 1`, `s*a - b*s + c`, each single operation, `-a`, and a
+  depth-5 chain) on 5 data kinds (including 1e290 and 1e-150 scales, where products overflow and underflow) at lengths 0, 1, 2, 63, 64, 65, 127..129,
+  255..257, 4095..4097, 100003; 12 special values (inf, -inf, NaN, -0.0, 0.0, 1e308, -1e308, 1e-310, 5e-324, 2**-1000, 1.5 * 2**-1000, 2**53 + 1) planted
+  in the three operands and the scalar at 5 positions of 65- and 4097-element arrays; shape errors; NaN / inf / int scalars. Printed: a hash of every bit
+  of every result (n <= 4100) or the bits of ends, middle, `ta.sum` and `ta.dot` of the result.
+- `int32.py`: add / sub / mul, with a scalar on either side and a scalar outside int32, at the same lengths for ranges that fit, near +-2**31 and with
+  overflow at positions 0, 1, 63, 64 and n - 1 (the message names the operation and the lowest failing index), shape error, chains where the multiplication fails first.
+
+**Real hardware: AMD Radeon 780M, Windows driver 0x00800156, WinLibs gcc 16.1, `-O2 -ffp-contract=off`, the `program.c` of a `compile --gpu --debug-dir` build in WSL
+compiled natively on Windows (the whole program, not a harness).** The three case programs print byte for byte what CPython with the T1 reference prints
+in `AIL_GPU=0`, `emu`, `force` (229 / 1,448 / 335 device launches for `int32` / `fused` / `sumdot`), auto with a model that says yes (the same counts),
+auto as shipped (0 launches: declined), no loader, and an untrusted device (`flip:selftest`). Every new kernel passed its self-test on the 780M
+(`selftest ok device=AMD Radeon 780M Graphics`; e.g. the sum kernel: 43 clean blocks compared bit for bit, 21 flagged, 2 single launches). On lavapipe (LLVM 20.1.2): the same programs in `0`, `emu`, `force` and auto, the same stdout and exit code (1,431 / 220 / 333 emulation launches and 1,448 / 229 / 335 device launches).
+
+**Measurements on the 780M** (Windows 11, mains power, the machine shared with other work: run-to-run spread 5 to 60 percent, so each cell is the median of 3 process
+runs of the median of 6 to 14 repeats, min..max of those three medians in brackets; the repeats of one process allocate a new result each time, as a program does).
+"T2 CPU" = the same program built WITHOUT `--gpu` (T2's code, one pass per operation); "off" = `--gpu` build, `AIL_GPU=0` (the fused loop); "auto" = the shipped default;
+"force" = `AIL_GPU=force`. Times in ms. Chains are Horner's rule in one array `x` with scalar coefficients, so `cN` has N multiplications and N additions
+(`c1` is `a * b + a` with two arrays). The cold start of the first device launch (instance, device, shader, self-test) is 150 to 630 ms per process on this laptop and is in the `first` repeat only.
+
+| op | n | T2 CPU | off (fused CPU) | auto | force (device) | what auto did |
+| --- | --- | --- | --- | --- | --- | --- |
+| `a*b + a` (3 ops) | 1M | 12.2 [11.1..12.6] | 8.8 [7.5..9.3] | 8.8 | 5.8 [5.6..7.6] | declined |
+| | 10M | 104 [94..123] | 94 [74..171] | 87 | 59 [57..70] | declined |
+| Horner 4 (8 ops) | 1M | 47.8 [46..51] | 5.4 [5.0..6.3] | 5.3 | 5.1 [4.9..5.2] | declined |
+| | 10M | 486 [452..584] | 45.5 [44.5..48.9] | 46.1 | 37.6 [35.9..66] | declined |
+| Horner 16 (32 ops) | 1M | 128 [122..135] | 15.3 [15.0..30] | 13.6 | 6.8 [6.3..7.2] | declined |
+| | 4M | 613 [573..644] | 44.6 [44.6..48.8] | 45.5 | 23.6 [23.0..31] | declined |
+| | 10M | 1,509 [1,290..1,699] | 96.9 [95..99] | 113 | 55.8 [53.8..58.1] | declined |
+| Horner 32 (64 ops) | 1M | 256 [229..271] | 34.7 [30..57] | 29.1 | 11.7 [11.4..11.8] | declined |
+| | 4M | 1,250 [1,136..1,471] | 128 [127..130] | 118 | 45.2 [43.7..55.7] | declined |
+| | 10M | 3,695 [3,385..4,042] | 298 [284..303] | 108 | 109 [104..109] | device |
+| Horner 64 (128 ops) | 1M | 721 [557..781] | 88.2 [82..89] | 81.8 | 34.4 [29..37] | declined |
+| | 4M | 2,903 [2,579..3,547] | 326 [323..341] | 130 | 135 [131..141] | device |
+| | 10M | 16,036 [15,685..16,237] | 770 [761..782] | 276 | 263 [262..283] | device |
+| `ta.sum` | 1M | 0.47 | 0.79 [0.41..0.87] | 0.44 | 1.20 | declined |
+| | 10M | 6.7 [5.5..7.2] | 5.4 [5.4..5.7] | 5.1 | 8.4 [8.3..8.9] | declined |
+| `ta.dot` (opt-in kernel) | 1M | 0.76 [0.59..0.93] | 0.98 [0.95..2.7] | 0.79 | 2.3 | declined |
+| | 10M | 7.4 [6.3..7.6] | 8.2 [7.7..9.7] | 9.2 | 23.7 [22.9..24.4] | declined |
+| int32 `a + b` (opt-in kernel) | 1M | 2.6 | 4.4 [4.2..4.6] | 4.5 | 4.4 | declined |
+| | 10M | 28.6 [28.0..30.0] | 52.7 [43.6..66.6] | 42.4 | 44.1 | declined |
+
+An earlier sweep of the same programs on a quieter machine (older loop shape, 3 runs): `a*b + a` at 1M: T2 6.0, off 5.0, auto 5.4, force 5.5; at 10M: 59.5 / 50.4 / 54.8 / 50.6, a tie
+within the spread. Horner 64 at 10M: T2 11,790, off 889, auto 312, force 329. The ordering of the table is the same in both sweeps.
+
+What the numbers say, and no more than that:
+- **Fusion is the big win and it needs no device.** The fused loop (`off`) is 1.1x (3 ops) to 21x (128 ops) faster than T2's one-pass-per-operation code, because T2 allocates and
+  fills an array per operation. It is what runs when the device is declined, so a `--gpu` build is faster than a plain build for every chain.
+- **The device wins for long chains and only for them.** Against the fused CPU loop: 3 ops a tie (1.0 to 1.5x faster, inside the spread of this machine); 8 ops about 1.0 to 1.2x; 32 ops 1.7 to 2.2x
+  (1M to 10M); 64 ops 2.7 to 3.0x; 128 ops 2.6 to 2.9x. The copy of the inputs and the result (16 bytes per element for one input array) is what a short chain cannot pay for.
+- **auto is conservative.** It picked the device where the device was at least as good (Horner 32 at 10M, Horner 64 at 4M and 10M: 2.7x, 2.5x and 2.8x faster than `off`) and never ran slower than `off` beyond the spread,
+  but it left a 1.7x to 3x on the table for the 32- to 128-op chains at 1M to 4M and for Horner 16 (the model needs about 40 operations per input array and the ski-rental cold start): the constants of 6.4 were not re-fitted here.
+- **`ta.sum` and `ta.dot` never win on this device.** They are bound by memory on the CPU (0.4 to 0.7 ns per element) and the device has to copy 8 to 16 bytes per element first: 1.5x to 3x slower forced.
+  The block kernel's CPU loop is as fast as T2's or faster for `ta.sum` (equal within the spread on Windows, 1.7x faster in WSL) and 10 to 29 percent SLOWER for `ta.dot`, which is why the `ta.dot` kernel is opt-in.
+- **int32 never wins** (1.6x to 1.7x slower forced than the CPU) and its CPU loop is 1.6 to 1.8x slower than T2's (the function that holds a marked loop is emitted by the legacy emitter), so its kernels are opt-in too.
+- The 3 to 5 percent differences between modes where auto declined are noise (the same machine code runs).
+
+**Tests.** `test_ail_gpu_g5.py` (16 tests, `gpu` CI job and `GPU_JOB` of `tools/ci_shards.py`): the text of the lowering (nothing added without the switch; one function and one loop for a chain; same
+shape shares a function; division not fused; calls among the operands not reordered; int32 and dot opt-in), the lowered text run by CPython equals the reference on the three case programs, the IR node
+`c32` in SPIR-V and C, the sum kernel as a range kernel, the three case programs built with `compile --gpu` on the typed path (kernels present) and run in `AIL_GPU=0`, default, a model that says no, `emu`, `force`, auto on a
+device, no loader, auto without loader, a device without features, an untrusted device found by the self-test, one found by the first launch; the self-test of every new kernel passes on the device;
+a corrupted device (`flip`, `negzero`, `noflag` in the self-test) is found for every kernel of every program; a Horner chain of 40 steps in all modes and sent to the device by a model that says yes.
+G1 (42), G3 (16), T2 (23) re-run on the merged tree.
+
+**Not done / open.** The cost model constants are G4's; a re-fit with the chains of this stage (the model is conservative for 16 to 64 operations) would move the break-even for chains from about 40 to about 15 operations per input array.
+Reductions run one invocation per block of 1024 elements (uncoalesced; a lane-parallel kernel with a workgroup tree would read 16 consecutive elements per step) because the kernel IR has no workgroup-local memory yet;
+it does not matter for the decision on this device (the copy dominates) but it would on a discrete GPU. `ta.min`/`ta.max`/`argmin`, `astype`, f32/f16 and f64 division/`sqrt` (correctly rounded device division, stage G5 of the plan) are not on the device.
+
 
 ## 7. Colab validation (owner-started, manual)
 
