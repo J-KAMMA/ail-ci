@@ -779,6 +779,7 @@ def _tname(t):
 _NEXT = [0]
 _FUNCS = {}
 APPLIED = set()          # lines of the sites whose kernel was built
+PATHS = {}               # line -> ('spirv'|'emulation', text): which path the kernel of that loop can take (G2)
 MARKED = {}              # line -> text of the site, for the end-of-build notes
 
 
@@ -960,6 +961,7 @@ def check_source(source):
     depend on which path would have built the program.  Also remembers the marked lines for the end-of-build note."""
     MARKED.clear()
     APPLIED.clear()
+    PATHS.clear()
     if not enabled() or 'ail' not in source:
         return
     text = source.strip()
@@ -988,6 +990,21 @@ def sites_of(text):
     return sorted(line_of(site['node']) for site in analyze(ast.parse(text), text))
 
 
+def paths_lines():
+    """pyc's report to ail_chatgpt (stderr, one per kernel): `ail-gpu-path: <line> <kind> <text>`."""
+    return ['ail-gpu-path: %d %s %s' % (line, kind, text) for line, (kind, text) in sorted(PATHS.items())]
+
+
+def path_note(kind, text):
+    """The compile note for one kernel (GPU.md G2): which path it can take at run time."""
+    if kind == 'spirv':
+        return ('%s. At run time it runs on a Vulkan device that has those features (libvulkan is opened then, never '
+                'linked); with no device, no loader or a device without them, the CPU emulation of the same kernel '
+                'runs, with identical output. AIL_GPU=emu forces the CPU emulation, AIL_GPU=0 the original CPU loop.' % text)
+    return ('%s; the kernel runs as the CPU emulation only (identical output). AIL_GPU=0 runs the original CPU loop.'
+            % text)
+
+
 def applied_line():
     """pyc's report to ail_chatgpt: the lines of the loops a kernel was built for."""
     return 'ail-gpu-applied: ' + ' '.join(str(line) for line in sorted(APPLIED))
@@ -998,6 +1015,7 @@ def prepare(tree, text):
     global _FUNCS
     _NEXT[0] = 0
     APPLIED.clear()
+    PATHS.clear()
     if not enabled():
         return 0
     tagged = [n for n in ast.walk(tree) if isinstance(n, ast.stmt) and getattr(n, '_ail_gpu', False)]
@@ -1234,8 +1252,23 @@ def _glue(k, kernel, facts, text, decl, kernels, where):
             raise refuse(where, 'cannot find the C declaration of %r' % py)
         return c, ctype
 
-    # the kernel function
+    # the kernel function (the C emulation) and its device twin: SPIR-V plus the wrapper that tries Vulkan first (G2)
     kernels.append(emit_c(kernel, name))
+    call = name + '_run'
+    try:
+        import gpu_vk
+        dev_c, info, words = gpu_vk.device_text(kernel, name, k)
+        kernels.append(gpu_vk.runtime_text() + dev_c)
+        PATHS[line_of(where)] = ('spirv', 'kernel k%d: SPIR-V %s (%d words, %s)' % (
+            k, 'for binary64 + int64' if info['need_f64'] else 'for int64', len(words),
+            'needs shaderFloat64, shaderInt64, round-to-nearest-even and signed-zero/inf/NaN preservation for binary64'
+            if info['need_f64'] else 'needs shaderInt64'))
+    except Exception as exc:                     # gpu_spirv.Unsupported, or anything else: the emulation alone is exact
+        if type(exc).__name__ not in ('Unsupported', 'ImportError'):
+            raise
+        kernels.append('static unsigned %s_run(%s) { gk_dev = "emulation"; return %s(%s); }\n' % (
+            name, ', '.join(emu_signature(kernel)[0]), name, ', '.join(emu_signature(kernel)[1])))
+        PATHS[line_of(where)] = ('emulation', 'kernel k%d: no SPIR-V (%s)' % (k, exc))
     args, setup = [], []
     for lst in kernel.lists:
         c, ct = cdecl(lst)
@@ -1276,7 +1309,7 @@ def _glue(k, kernel, facts, text, decl, kernels, where):
         lines.append('        if (%s) _gk_res = (%s *)malloc((size_t)_gk_n * sizeof(%s));' % (' && '.join(cond), ctype, ctype))
         lines.append('        else gk_trace_cpu(%d, "the range does not fit the output list, or it overlaps an input");' % k)
         lines += ['        if (_gk_res) {',
-                  '            unsigned _gk_f = %s(%s%s_gk_lo, _gk_n, _gk_res);' % (name, ', '.join(args) + (', ' if args else ''), ''),
+                  '            unsigned _gk_f = %s(%s%s_gk_lo, _gk_n, _gk_res);' % (call, ', '.join(args) + (', ' if args else ''), ''),
                   '            if (_gk_f == 0) {',
                   '                memcpy(%s + _gk_lo, _gk_res, (size_t)_gk_n * sizeof(%s));' % (out_p, ctype),
                   '                _gk_ok = 1; gk_trace_run(%d, _gk_n);' % k,
@@ -1317,7 +1350,7 @@ def _glue(k, kernel, facts, text, decl, kernels, where):
               '    if (_gk_n > 0 && _gk_n < (INT64_MAX / 16) && gk_on()) {',
               '        %s_reserve(&%s, _gk_n);' % ('ail_flist' if res_t == 'f' else 'ail_list', dest),
               '        if (%s.p) {' % dest,
-              '            unsigned _gk_f = %s(%s%s_gk_n, %s.p);' % (name, (', '.join(args) + ', ') if args else '',
+              '            unsigned _gk_f = %s(%s%s_gk_n, %s.p);' % (call, (', '.join(args) + ', ') if args else '',
                                                                  call_lo if kernel.loop_var else '', dest),
               '            if (_gk_f == 0) { %s.n = _gk_n; _gk_ok = 1; gk_trace_run(%d, _gk_n); }' % (dest, k),
               '            else gk_trace_replay(%d, _gk_f);' % k,
@@ -1383,9 +1416,10 @@ static inline int64_t gk_ldi(const int64_t *p, int64_t n, int64_t i, unsigned *f
 static inline int gk_disjoint(const void *a, int64_t an, const void *b, int64_t bn, int w) {
     uintptr_t x = (uintptr_t)a, y = (uintptr_t)b;
     return an <= 0 || bn <= 0 || x + (uintptr_t)an * (uintptr_t)w <= y || y + (uintptr_t)bn * (uintptr_t)w <= x; }
+static const char *gk_dev = "emulation";    /* what ran the last launch: "emulation" or the Vulkan device's name (gpu_vk.py) */
 static inline int gk_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("AIL_GPU"); v = !(e && e[0] == '0' && e[1] == 0); } return v; }
 static inline int gk_tracing(void) { static int v = -1; if (v < 0) { const char *e = getenv("AIL_GPU_TRACE"); v = e && e[0] && !(e[0] == '0' && e[1] == 0); } return v; }
-static inline void gk_trace_run(int k, int64_t n) { if (gk_tracing()) fprintf(stderr, "gpu: k%d n=%lld device=emulation\n", k, (long long)n); }
+static inline void gk_trace_run(int k, int64_t n) { if (gk_tracing()) fprintf(stderr, "gpu: k%d n=%lld device=%s\n", k, (long long)n, gk_dev); }
 static inline void gk_trace_cpu(int k, const char *why) { if (gk_tracing()) fprintf(stderr, "gpu: k%d cpu (%s)\n", k, why); }
 static inline void gk_trace_replay(int k, unsigned f) {
     if (!gk_tracing()) return;
@@ -1512,6 +1546,27 @@ class _Emit:
 
     def cond(self, e):
         return '(%s) && !_f' % self.ex(e) if False else self.ex(e)
+
+
+def emu_signature(kernel):
+    """([C parameter declarations], [argument names]) of the emulation function of `kernel` (and of its `_run` wrapper)."""
+    ct = lambda t: 'double' if t == 'f' else 'int64_t'
+    params, names = [], []
+    for lst, t in kernel.lists.items():
+        params += ['const %s *p_%s' % (ct(t), lst), 'int64_t n_%s' % lst]
+        names += ['p_' + lst, 'n_' + lst]
+    for sc, t in kernel.scalars.items():
+        params.append('%s s_%s' % (ct(t), sc))
+        names.append('s_' + sc)
+    for sc, (t, value) in kernel.consts.items():
+        params.append('%s s_%s' % (ct(t), sc))
+        names.append('s_' + sc)
+    if kernel.loop_var:
+        params.append('int64_t _lo')
+        names.append('_lo')
+    params += ['int64_t _cnt', '%s *_res' % ct(kernel.res_type)]
+    names += ['_cnt', '_res']
+    return params, names
 
 
 def emit_c(kernel, name):
