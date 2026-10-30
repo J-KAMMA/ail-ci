@@ -17,7 +17,12 @@ interpreter over the structured regions:
   in int64 the checked op becomes `nsw` (the emitter prints the plain C operator); after a checked
   op the result is clipped to int64 (otherwise it raised);
 * `//` and `%` by a positive constant of a non-negative value get mode `nonneg` (plain C / and %,
-  which equal Python's floor division there).
+  which equal Python's floor division there);
+* a tagged int (`tint`, the exact Python int of the Python surface) has a fact over the mathematical
+  integers: nothing is clipped (its operations never raise), an unknown one is [-BIG, BIG], and the
+  facts of `tint.from`, `tint.add/sub/mul` (and the `_i64` forms), `tint.neg`, selects, block arguments
+  and `if` results follow the same rules as for i64. `Analysis.vfacts` records the final fact of every
+  value; tintnarrow.py turns a tint whose fact lies in int64 into a plain i64.
 
 Only the final (stable) visit of each instruction decides its mode, so every decision holds for
 every execution that reaches it.
@@ -27,6 +32,8 @@ from .. import ir as I
 MIN, MAX = -(1 << 63), (1 << 63) - 1
 LEN_MAX = 1 << 48
 WIDEN_AFTER = 3
+NARROW_ROUNDS = 3
+BIG = 1 << 200                      # "unbounded" for a tint fact
 
 
 class Fact(object):
@@ -52,6 +59,7 @@ class Fact(object):
 
 
 TOP = Fact()
+TOPT = Fact(-BIG, BIG)              # an unknown tint
 
 
 def join(a, b):
@@ -64,9 +72,9 @@ def join(a, b):
     return Fact(min(a.lo, b.lo), max(a.hi, b.hi), ub, lb)
 
 
-def widen(old, new):
-    lo = new.lo if new.lo >= old.lo else MIN
-    hi = new.hi if new.hi <= old.hi else MAX
+def widen(old, new, lim=(MIN, MAX)):
+    lo = new.lo if new.lo >= old.lo else lim[0]
+    hi = new.hi if new.hi <= old.hi else lim[1]
     ub = {w: c for w, c in new.ub.items() if w in old.ub and c <= old.ub[w]}
     lb = {w: c for w, c in new.lb.items() if w in old.lb and c >= old.lb[w]}
     return Fact(lo, hi, ub, lb)
@@ -78,6 +86,10 @@ def _clip(lo, hi):
 
 def _negate(pred):
     return {'eq': 'ne', 'ne': 'eq', 'lt': 'ge', 'ge': 'lt', 'le': 'gt', 'gt': 'le'}[pred]
+
+
+_TINT_CMP = {'tint.eq': 'eq', 'tint.ne': 'ne', 'tint.lt': 'lt', 'tint.le': 'le',
+             'tint.eq_i64': 'eq', 'tint.ne_i64': 'ne', 'tint.lt_i64': 'lt', 'tint.le_i64': 'le'}
 
 
 def _swap(pred):
@@ -99,6 +111,7 @@ class Analysis(object):
         self.decision = {}          # instr -> new mode (final visit wins)
         self.cmps = {}              # cmp instr -> True/False/None (final visit wins)
         self.index_facts = {}       # checked index instr -> (lo, hi) of its index (final visit)
+        self.vfacts = {}            # i64/tint value -> its Fact at its last visit (the stable one)
         self.lens = {}
 
     # ------------------------------------------------------------------ facts
@@ -106,6 +119,9 @@ class Analysis(object):
         ins = self.defs.get(v)
         if ins is not None and ins.op == 'const':
             return ins.attrs.get('value')
+        if ins is not None and ins.op == 'tint.from':
+            c = self.const(ins.operands[0])
+            return c if isinstance(c, int) and not isinstance(c, bool) else None
         return None
 
     def get(self, env, v):
@@ -116,8 +132,11 @@ class Analysis(object):
                 return Fact(int(c), int(c))
             if isinstance(c, int):
                 return Fact(c, c)
-            return TOP
+            return TOPT if v.type == I.TINT else TOP
         return f
+
+    def top_for(self, v):
+        return TOPT if v.type == I.TINT else TOP
 
     def bounds(self, env, v):
         """[lo, hi] including what the symbolic bounds imply (one step)."""
@@ -132,8 +151,9 @@ class Analysis(object):
         return lo, hi
 
     def set(self, env, v, f):
-        if v.type in (I.I64, I.I1):
+        if v.type in (I.I64, I.I1, I.TINT):
             env[v] = f
+            self.vfacts[v] = f
 
     # ------------------------------------------------------------------ refinement
     def atoms(self, v, truth, depth=0):
@@ -151,6 +171,10 @@ class Analysis(object):
             if a.type != I.I64 or b.type != I.I64:
                 return []
             pred = op[4:]
+            return [(pred if truth else _negate(pred), a, b)]
+        if op in _TINT_CMP:
+            a, b = ins.operands
+            pred = _TINT_CMP[op]
             return [(pred if truth else _negate(pred), a, b)]
         if op == 'if' and len(ins.results) == 1 and ins.result.type == I.I1:
             then, other = ins.regions
@@ -258,6 +282,73 @@ class Analysis(object):
             return TOP          # wrapping arithmetic
         return f
 
+    def tint_eval(self, ins, env):
+        """The fact of a tagged-int result, over the mathematical integers (no clipping: a tint operation
+        never raises). Only the operations tintnarrow.py can turn into plain i64 arithmetic get a fact; any
+        other result stays unknown (+-BIG)."""
+        op = ins.op
+        r = ins.results[0]
+        o = ins.operands
+        if op == 'tint.from':
+            f = self.get(env, o[0])
+            if self.const(o[0]) is None:
+                env[r] = Fact(f.lo, f.hi, {w: c for w, c in f.ub.items()}, {w: c for w, c in f.lb.items()})
+                env[r].ub[o[0]] = 0
+                env[r].lb[o[0]] = 0
+            else:
+                env[r] = Fact(f.lo, f.hi)
+            return
+        if op == 'tint.neg':
+            lo, hi = self.bounds(env, o[0])
+            env[r] = Fact(-hi, -lo)
+            return
+        if op in ('tint.add', 'tint.sub', 'tint.mul', 'tint.add_i64', 'tint.sub_i64', 'tint.mul_i64'):
+            k = op[5:].split('_')[0]
+            a, b = o
+            alo, ahi = self.bounds(env, a)
+            blo, bhi = self.bounds(env, b)
+            if k == 'add':
+                lo, hi = alo + blo, ahi + bhi
+            elif k == 'sub':
+                lo, hi = alo - bhi, ahi - blo
+            else:
+                ps = (alo * blo, alo * bhi, ahi * blo, ahi * bhi)
+                lo, hi = min(ps), max(ps)
+            f = Fact(max(lo, -BIG), min(hi, BIG))
+            bc = self.const(b)
+            if k in ('add', 'sub') and isinstance(bc, int) and not isinstance(bc, bool) and self.const(a) is None:
+                kk = bc if k == 'add' else -bc
+                fa = self.get(env, a)
+                f.ub = {w: c + kk for w, c in fa.ub.items()}
+                f.lb = {w: c + kk for w, c in fa.lb.items()}
+                f.ub[a] = kk
+                f.lb[a] = kk
+            env[r] = f
+            return
+        if op in ('tint.floordiv_i64', 'tint.mod_i64', 'tint.mod_pos_i64'):
+            # by a constant other than 0 and -1: no ZeroDivisionError and no INT64_MIN // -1 (a divisor that is
+            # not a constant keeps no fact, so tintnarrow.py leaves the operation tagged)
+            c = self.const(o[1])
+            if not isinstance(c, int) or isinstance(c, bool) or c in (0, -1):
+                return
+            alo, ahi = self.bounds(env, o[0])
+            if op == 'tint.floordiv_i64':
+                lo, hi = (alo // c, ahi // c) if c > 0 else (ahi // c, alo // c)
+            elif op == 'tint.mod_i64':
+                if c > 0:
+                    lo, hi = (alo, ahi) if 0 <= alo and ahi < c else (0, c - 1)
+                else:
+                    lo, hi = (alo, ahi) if c < alo and ahi <= 0 else (c + 1, 0)
+            else:
+                # `mod_pos` is C's `%` on a non-negative small value: Python's `%` only where the dividend is >= 0
+                if c < 0 or alo < 0:
+                    return
+                lo, hi = (alo, ahi) if ahi < c else (0, c - 1)
+            env[r] = Fact(lo, hi)
+            return
+        if op == 'select':
+            env[r] = join(self.get(env, o[1]), self.get(env, o[2]))
+
     def lengths_of(self, base):
         """Every `bytes.len` value of `base` (all equal: bytes are immutable)."""
         out = self.lens.get(base)
@@ -358,10 +449,18 @@ class Analysis(object):
         if r.type == I.I1:
             env[r] = Fact(0, 1)
             return
+        if r.type == I.TINT:
+            self.tint_eval(ins, env)
+            return
         if r.type != I.I64:
             return
         o = ins.operands
         if op == 'const':
+            return
+        if op == 'tint.i64':
+            # the conversion raises when the value does not fit: afterwards it lies in int64
+            lo, hi = self.bounds(env, o[0])
+            env[r] = Fact(max(lo, MIN), min(hi, MAX))
             return
         if op in ('add', 'sub', 'mul', 'neg'):
             env[r] = self.arith(ins, env)
@@ -472,6 +571,9 @@ class Analysis(object):
             if op in ('return', 'unreachable', 'raise', 'reraise'):
                 return None
             self.evaluate(ins, env)
+            for r in ins.results:
+                f = env.get(r)
+                self.vfacts[r] = f if f is not None else self.top_for(r)
         return None
 
     def do_if(self, ins, env, loops):
@@ -489,7 +591,7 @@ class Analysis(object):
             # nothing falls through: the rest of the region is dead; keep analysing it under the
             # pre-if state (its decisions only matter if it is reachable, which it is not)
             for r in ins.results:
-                self.set(env, r, TOP)
+                self.set(env, r, self.top_for(r))
             return
         merged = outs[0]
         if len(outs) == 2:
@@ -511,34 +613,57 @@ class Analysis(object):
             idx, args = body.args[0], body.args[1:]
         else:
             init, idx, args = ins.operands, None, body.args
-        carried = [self.get(env, v) for v in init]
+        init_facts = [self.get(env, v) for v in init]
+        carried = list(init_facts)
+
+        def visit(heads):
+            state = _Loop(ins)
+            sub = dict(env)
+            for a, f in zip(args, heads):
+                self.set(sub, a, f)
+            if idx is not None and idx.type == I.TINT:
+                self.set(sub, idx, self.index_fact(env, lo, hi, step, TOPT))
+            elif idx is not None:
+                self.set(sub, idx, self.index_fact(env, lo, hi, step))
+            self.region(body, sub, loops + [state])
+            return state
+
         rounds = 0
         while True:
             rounds += 1
-            state = _Loop(ins)
-            sub = dict(env)
-            for a, f in zip(args, carried):
-                self.set(sub, a, f)
-            if idx is not None:
-                self.set(sub, idx, self.index_fact(env, lo, hi, step))
-            self.region(body, sub, loops + [state])
+            state = visit(carried)
             new = list(carried)
             for vals in state.continues:
                 new = [join(n, v) for n, v in zip(new, vals)]
             if new == carried:
                 break
             if rounds >= WIDEN_AFTER:
-                new = [widen(o, n) for o, n in zip(carried, new)]
+                new = [widen(o, n, (-BIG, BIG) if a.type == I.TINT else (MIN, MAX))
+                       for o, n, a in zip(carried, new, args)]
             if rounds > 40:          # cannot happen after widening; a guard against a bug
-                new = [TOP for _ in new]
+                new = [self.top_for(a) for a in args]
             carried = new
+        # Narrowing: `carried` is an invariant of the loop head (every reachable state lies in it), possibly a
+        # coarse one after widening. The head state of the next iteration is then contained in
+        # join(initial, continues-of-the-body-analysed-under-carried): that is also an invariant, and a tighter
+        # one when the guard of the loop caps what the body adds (`while k < n: k += 16`). The last visit
+        # must be the one made under the invariant that is kept, because the decisions come from it.
+        if args:
+            for _ in range(NARROW_ROUNDS):
+                cand = list(init_facts)
+                for vals in state.continues:
+                    cand = [join(n, v) for n, v in zip(cand, vals)]
+                if cand == carried or not all(c.lo >= o.lo and c.hi <= o.hi for c, o in zip(cand, carried)):
+                    break
+                carried = cand
+                state = visit(carried)
         for j, r in enumerate(ins.results):
             f = carried[j] if ins.op == 'for.range' else None
             for vals in state.breaks:
                 f = join(f, vals[j])
-            self.set(env, r, f if f is not None else TOP)
+            self.set(env, r, f if f is not None else self.top_for(r))
 
-    def index_fact(self, env, lo, hi, step):
+    def index_fact(self, env, lo, hi, step, top=TOP):
         k = self.const(step)
         llo, lhi = self.bounds(env, lo)
         hlo, hhi = self.bounds(env, hi)
@@ -553,7 +678,7 @@ class Analysis(object):
             return Fact(llo, hhi - 1)
         if isinstance(k, int) and k < 0:
             return Fact(hlo + 1, lhi)
-        return TOP
+        return top
 
 
 def run(fn, facts=None):

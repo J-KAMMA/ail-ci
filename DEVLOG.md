@@ -1,3 +1,18 @@
+## 2026-10-30 -- Check elimination in the IR: tagged ints that fit int64, loop narrowing, a loop-versioning fix
+
+Three changes in `ir/passes/`. (1) `mem2reg` now promotes tagged-int (`tint`) places, and the new `tintnarrow.py` runs the
+range analysis over the tagged values (facts over the mathematical integers, nothing clipped) and rewrites every tagged value
+whose fact lies in int64 (and everything it is computed from, loop-carried values included) to plain i64 with `nsw`
+arithmetic; a tagged `+ - * neg` whose only reader is `tint.i64` becomes the checked i64 op (same "integer overflow" stop at
+the same point). `while k < full: ... k += 16` over a list thereby gets an i64 `k`, and the existing range pass and loop
+versioning can then prove the element reads. (2) `ranges.py` narrows a loop's widened invariant once (`while k < n: k += 16`
+no longer ends at +-inf). (3) `licm.py` loop versioning left a later `yield` of the loop's results pointing at the
+fast copy's values (the "tail skipped" shape of the matmul kernel), the verifier rejected the function and it silently went
+to the legacy emitter (measured: `_ail_tam_mmk` was not on the IR path on array-matmul). New `dupreads.py` removes a second
+identical element read when nothing that can write a list runs between. Test: `test_ail_ir_bce.py` (cases in `bce_cases/`).
+Measured (`tools/icount.c`, fill subtracted): ta.matmul 15.8 -> 4.9 instructions per multiply-add, ta.dot 22.2 -> 0.6 per
+element. The compare-lab `.ail` tasks do not change (their ints are already int64; their gaps are not bounds/overflow checks).
+
 ## 2026-10-30 -- FFI F3a: integer arguments of an @extern stub behave like the shim's
 
 CPython runs `@extern` stubs through `ail_ffi.py`, which checks every int argument against the range of its C type and

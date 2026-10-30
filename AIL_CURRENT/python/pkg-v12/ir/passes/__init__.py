@@ -1,6 +1,6 @@
 """IR passes of stage S1 (design §3 pass order, restricted to what S1 lowers):
 
-    mem2reg -> simplify (fold, CSE, DCE) -> ranges (overflow and index checks)
+    mem2reg -> simplify (fold, CSE, DCE) -> tintnarrow (tagged ints that fit int64 become i64) -> ranges (overflow and index checks)
             -> licm (pure LICM, span hoisting, loop versioning) -> ranges -> simplify
             -> specsel (speculative selects; simplify again when it changed anything) -> window
 
@@ -12,9 +12,9 @@ import os
 
 from .. import effects as E
 from .. import ir as I
-from . import mem2reg, simplify, ranges, licm, window, specsel
+from . import mem2reg, simplify, ranges, licm, window, specsel, tintnarrow, dupreads
 
-ALL = ('mem2reg', 'simplify', 'ranges', 'licm', 'specsel', 'window')
+ALL = ('mem2reg', 'simplify', 'tintnarrow', 'ranges', 'licm', 'dupreads', 'specsel', 'window')
 
 
 def enabled():
@@ -59,6 +59,14 @@ def optimize(fn, program, facts=None, check=None):
             open(dump, 'a').write('--- before the first simplify\n' + text.print_function(fn))
         simplify.run(fn)
         after()
+    if 'tintnarrow' in on and 'mem2reg' in on:
+        narrowed = tintnarrow.run(fn, facts)
+        if narrowed:
+            stats.update(narrowed)
+            after()
+            if 'simplify' in on:
+                simplify.run(fn)
+                after()
     if 'ranges' in on:
         stats.update(ranges.run(fn, facts))
         after()
@@ -69,6 +77,11 @@ def optimize(fn, program, facts=None, check=None):
             second = ranges.run(fn, facts)
             stats['ck_ssa_proven'] = stats.get('ck_ssa_proven', 0) + second['ck_ssa_proven']
             stats['idx_ssa_proven'] = stats.get('idx_ssa_proven', 0) + second['idx_ssa_proven']
+            after()
+    if 'dupreads' in on:
+        dropped = dupreads.run(fn)
+        if dropped:
+            stats['dup_reads'] = dropped
             after()
     if 'simplify' in on:
         simplify.run(fn)

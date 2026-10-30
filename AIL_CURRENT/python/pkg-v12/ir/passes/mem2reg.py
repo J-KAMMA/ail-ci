@@ -100,7 +100,9 @@ def run(fn):
         for k, v in enumerate(ins.operands):
             if v in places and not (ins.op in ('load', 'store') and k == 0):
                 bad.add(v)
-    promotable = set(p for p in places if p not in bad and p.type.pointee.is_scalar)
+    # a tint place is promoted too (its zero is `tint.from 0`, as `ail_tint v = {0}` is): tintnarrow.py then
+    # decides which tagged values are provably int64 and turns them into plain integers
+    promotable = set(p for p in places if p not in bad and (p.type.pointee.is_scalar or p.type.pointee == I.TINT))
     if not promotable:
         return 0
     order = {p: k for k, p in enumerate(places)}
@@ -110,7 +112,12 @@ def run(fn):
         p = ins.result
         if p in promotable:
             t = p.type.pointee
-            z = I.Instr('const', [], [I.Value(t)], {'value': 0.0 if t.is_float else (False if t == I.I1 else 0)})
+            if t == I.TINT:
+                c0 = I.Instr('const', [], [I.Value(I.I64)], {'value': 0})
+                z = I.Instr('tint.from', [c0.result], [I.Value(t)])
+                zeros.append(c0)
+            else:
+                z = I.Instr('const', [], [I.Value(t)], {'value': 0.0 if t.is_float else (False if t == I.I1 else 0)})
             zeros.append(z)
             env[p] = z.result
     promoter = _Promoter(fn, promotable, order)
