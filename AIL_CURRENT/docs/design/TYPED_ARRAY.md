@@ -467,6 +467,35 @@ here (`ta.dot` of two 65,536-element arrays, 20 repetitions). Vectorising over `
 next element's) is the way to the C locals' number and is not built; it is an optimisation that cannot change a bit (5.3), and
 `speed-claims` applies before anyone says it is faster. No speed claim is made here beyond the table.
 
+### 5.7 The GPU kernel for `matmul`: the contract (not built; GPU.md 6.2 to 6.5 and M5/M6)
+
+The device side has to produce the bits of 3.7, so what it may and may not do is fixed here, before the code:
+
+- **One invocation per output element** (or per tile of elements): the invocation for `(i, j)` runs the order of 3.7 along `k` in
+  one thread of control: blocks of 1024, sixteen lane accumulators `l0 .. l15` started at `-0.0`, element `u` of a block into lane
+  `u % 16`, the 8-4-2-1 tree, the tree over blocks, `+0.0` for `K = 0`, canonical NaN at the store. Tiling over `i` and `j` (shared
+  memory, several elements per invocation) is free; splitting `k` over invocations or sub-group lanes is not (it would add a
+  reduction in another order). 16 lanes per element are 16 registers of one invocation, not 16 invocations.
+- **No fused multiply-add**: every product is a `NoContraction` `OpFMul` whose result is added by a separate `OpFAdd` (also
+  `NoContraction`); the emitter of GPU.md G2 must decorate it, and G3's self-test has to show that the
+  device honours it (a device that fuses `a * b + c` fails the matmul-specific operand set below and is kept on the CPU).
+- **The short tail** of a block adds nothing to the lanes it does not reach (equivalently `-0.0`, 3.7); the kernel must not add
+  `+0.0`.
+- **64-bit integer index arithmetic** avoids `OpSRem`/`OpSMod` on NVIDIA driver 580 (`a - (a / d) * d` instead); the matmul kernel
+  needs only `i * K + k` style products and one division by the constant 16 (a shift), so it should not need either.
+- **G3 self-test operand sets for matmul** (run once per device, before the first launch; a mismatch with the CPU emulation keeps the
+  device off): (1) `K = 17`, `1025` with `a_k * b_k` chosen so that only the lane order gives the CPU's bits (alternating `1e16`,
+  `1`, `-1e16`); (2) products that overflow to `inf` and cancel to NaN (`inf - inf` in one lane); (3) `-0.0` products only (the
+  identity lanes); (4) subnormal products (flush-to-zero devices fail); (5) a product pair that differs in the last bit when
+  fused. Every set is compared with `_ail_tam_mmk` on the CPU by the 3.7 order.
+- **Cost model entry (G4/G7)**: operations `2 * K` per output element (one multiply, one add), `M * N` elements; transfer bytes
+  `8 * (M * K + K * N)` in and `8 * M * N` out, counted whether or not the data is already resident. `auto` launches when
+  `2 * M * N * K` flops divided by the measured device rate plus the transfer time beats the measured CPU time of the kernel above;
+  `--gpu` must never make a program slower, so a shape under the break-even stays on the CPU and a device that fails the
+  self-test is never used. Constants come from measurements on the laptop iGPU, lavapipe and Colab (G7), not from this note.
+- **Fallback**: no loader, no device, `AIL_GPU=0`, a failed self-test or a failed launch all run the CPU kernel; the result is the
+  same bits by construction.
+
 ## 6. Aliasing, layout and the FFI boundary
 
 ### 6.1 Sharing semantics
