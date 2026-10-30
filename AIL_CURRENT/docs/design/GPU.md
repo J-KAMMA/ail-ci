@@ -783,7 +783,7 @@ What the numbers say, and no more than that:
 - **int32 never wins** (1.6x to 1.7x slower forced than the CPU) and its CPU loop is 1.6 to 1.8x slower than T2's (the function that holds a marked loop is emitted by the legacy emitter), so its kernels are opt-in too.
 - The 3 to 5 percent differences between modes where auto declined are noise (the same machine code runs).
 
-**Tests.** `test_ail_gpu_g5.py` (16 tests, `gpu` CI job and `GPU_JOB` of `tools/ci_shards.py`): the text of the lowering (nothing added without the switch; one function and one loop for a chain; same
+**Tests.** `test_ail_gpu_g5.py` (19 tests, `gpu` CI job and `GPU_JOB` of `tools/ci_shards.py`): the text of the lowering (nothing added without the switch; one function and one loop for a chain; same
 shape shares a function; division not fused; calls among the operands not reordered; int32 and dot opt-in), the lowered text run by CPython equals the reference on the three case programs, the IR node
 `c32` in SPIR-V and C, the sum kernel as a range kernel, the three case programs built with `compile --gpu` on the typed path (kernels present) and run in `AIL_GPU=0`, default, a model that says no, `emu`, `force`, auto on a
 device, no loader, auto without loader, a device without features, an untrusted device found by the self-test, one found by the first launch; the self-test of every new kernel passes on the device;
