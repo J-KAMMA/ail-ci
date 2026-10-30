@@ -649,6 +649,26 @@ def _has_main_entry(source):
     return any(isinstance(n, ast.FunctionDef) and n.name == 'main' for n in tree.body)
 
 
+def _module_body_without_entry(source):
+    """A def/class program whose other top-level statements are only module constants.
+
+    CPython executes those constants and stops: the definitions are not called, so there is no
+    entry point and no file/argv to read. The general path already takes this shape when a
+    module-level assignment exists; the typed path used to hand the last function to
+    `_main_for`, which refused a scalar-only parameter with "the first parameter must be the
+    sequence read from the file". A function-only file (no module constant) keeps the entry
+    convention, including the array-to-file one."""
+    if not is_function(source) or _has_main_entry(source):
+        return False
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    if not any(isinstance(n, (ast.Assign, ast.AnnAssign)) for n in tree.body):
+        return False
+    return _rewrite_script(source, force=False) is None
+
+
 def _general_failure(typed, use_typed, failure):
     """The exception to report when the general (boxed) path cannot build a program the typed
     path refused. For a program with a `main` entry that is the TYPED refusal: it names the
@@ -1315,8 +1335,13 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = (_NOTHING_MAIN if _python_runs_nothing(source, True) else
-            _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
+    try:
+        main = (_NOTHING_MAIN if _python_runs_nothing(source, True) else
+                _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
+    except Unsupported:
+        if not _module_body_without_entry(source):
+            raise
+        main = _NOTHING_MAIN
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]

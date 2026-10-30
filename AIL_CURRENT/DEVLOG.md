@@ -1,3 +1,33 @@
+## 2026-10-30 -- ex15 re-apply: definitions plus module constants run only the constants (job-rbex15-10301051)
+
+Re-applied accepted job `job-ex15-10290445` on this tree. `language_examples/math.ail` is a Python-syntax
+example with `LIMIT = 6` and one function definition and no call; the default (typed) path handed the last
+function to `_main_for`, which refused its scalar parameter with `the first parameter must be the sequence
+read from the file`. A definition-only source with at least one module-level constant (and no `main`) now
+emits a no-op entry, so CPython's "run the constants, call nothing" shape builds on both paths with the same
+empty stdout and exit 0. This tree already had the narrower `_python_runs_nothing`/`_NOTHING_MAIN` shape (gated
+on `AIL_SURFACE=python`, only literal-evaluable assignments); both are kept, the accepted `_module_body_without_entry`
+fallback catching the remaining shapes. A file with only functions keeps the single-function entry convention,
+and a top-level call or `__main__` guard still runs. Added `test_ail_ex15.py` (2 build-matching tests plus 1
+non-finite case, both builds) and registered it in `ail_check.MODULES`.
+
+## 2026-10-30 -- ex15 re-apply: refuse non-finite module constants by name (job-rbex15-10301051)
+
+The review fix from the accepted job: the no-op entry path bypassed the typed entry refusal for a module whose
+constants include a non-finite float: `X = 1e400` (also `-1e400`, and the list form `XS = [1e400, 2.0]`)
+emitted `static const double v_X = (inf);`, so the default build failed at the C compiler with `'inf' undeclared
+here` instead of refusing by name. `_emit_module_consts` now refuses a non-finite float scalar or float-list
+element with the general path's own message, `a nan/inf float literal`, before codegen, for every entry shape
+(scalar/array parameter, a `main` entry, a `global` rebind). Finite float lists still build and match CPython,
+and `language_examples/math.ail` still matches on both builds.
+
+## 2026-10-30 -- ex15 re-apply: detect a usable rustc (job-rbex15-10301051)
+
+`test_ail_c_export` and `test_ail_cratebridge` failed in the full suite because `shutil.which` found the rustup
+proxy while no default toolchain was visible (the session HOME is a fresh directory), so the Rust hosts were
+attempted and the proxy exited 1. `ail_testenv.rustc()` now probes `rustc --version` and both modules use it;
+the Rust cases skip when there is no usable toolchain and still run, unchanged, when one is installed.
+
 ## 2026-10-30 -- GPU stage G1: `# ail: gpu`, the eligibility proof, kernel IR and its CPU emulation
 
 `compile --gpu` (or `AIL_GPU_BUILD=1`) reads `# ail: gpu` on the line before a loop (or at the end of a list-comprehension

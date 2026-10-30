@@ -43,6 +43,20 @@ def objcopy_available():
     return shutil.which('objcopy') is not None
 
 
+def rustc():
+    """The path of a usable `rustc`, else None. `shutil.which` finds the rustup proxy even when no
+    default toolchain is installed (for example when HOME points at a fresh directory), and the
+    proxy then fails every invocation; running `--version` proves there is a compiler behind it."""
+    found = shutil.which('rustc')
+    if not found:
+        return None
+    try:
+        probe = subprocess.run([found, '--version'], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return found if probe.returncode == 0 else None
+
+
 def glibc_cookie_streams():
     """fopencookie() is a glibc extension (macOS has funopen, MinGW neither)."""
     return sys.platform.startswith('linux')
