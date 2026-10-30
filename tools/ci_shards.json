@@ -7,6 +7,8 @@
   "test_ail_arg_borrow": 8.5,
   "test_ail_argument_type_details": 1.4,
   "test_ail_argv_slices": 8.8,
+  "test_ail_array_ref": 23.1,
+  "test_ail_array_t2": 23.1,
   "test_ail_ascii_char_compare": 2.0,
   "test_ail_batch_edit": 0.8,
   "test_ail_bigint": 889.7,
@@ -73,6 +75,7 @@
   "test_ail_edit_dependencies": 0.9,
   "test_ail_element_views": 52.3,
   "test_ail_empty_blocks": 1.6,
+  "test_ail_exc_nobind": 23.1,
   "test_ail_exc_str": 199.8,
   "test_ail_exception_aggregate_objects": 20.0,
   "test_ail_exception_context": 8.8,
@@ -813,6 +816,7 @@
   ],
   [
    "test_ail_api_profiles",
+   "test_ail_array_ref",
    "test_ail_build_cache",
    "test_ail_builtin_maps",
    "test_ail_c_objects",
@@ -885,6 +889,7 @@
    "test_json_pointer_batch"
   ],
   [
+   "test_ail_array_t2",
    "test_ail_batch_edit",
    "test_ail_build_reports",
    "test_ail_builtin_syntax_forms",
@@ -920,6 +925,7 @@
   [
    "test_ail_argument_type_details",
    "test_ail_argv_slices",
+   "test_ail_exc_nobind",
    "test_ail_exception_values_app",
    "test_ail_frontend_speed",
    "test_ail_fuzz32",
