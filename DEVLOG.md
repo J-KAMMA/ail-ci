@@ -61,6 +61,35 @@ argument, a list item, an attribute and a dict value); `p_refuse_file`, `p_refus
 `test_ail_cov22.py`, registered in `ail_check.MODULES` and `tools/ci_shards.json`, with the same
 CPython comparison on both builds and one refusal case. `tools/update_manifest.py` was run and
 `--check` passes; `tools/ci_shards.py --update` adds the module and `--check` exits 0.
+## 2026-10-29 -- ctime1: one flat `ast.walk` for both front ends (job-ctime1-10300005)
+
+`ast.walk` was one of the most-called functions of a C generation run: every pass walks function
+bodies, and several walk the same body once per function per fixed-point round, paying two nested
+generators (`iter_child_nodes` -> `iter_fields` -> `getattr`/`isinstance` per field) per node.
+`python/pkg-v12/fastwalk.py` yields the identical breadth-first node sequence with one flat
+list-backed loop, and `install()` replaces `ast.walk` for the rest of the process, so
+`ail_chatgpt.py` and `pyc.py` reuse it from the 300+ existing `ast.walk` call sites in `pyfunc.py`
+and the other passes without touching any of them.  `AIL_FASTWALK=0` keeps the standard library's
+walk for A/B measurement.
+
+Measured with user+sys CPU time on this 4-core GitHub Actions runner (perf_event_paranoid is 4, so
+instruction counts are not available): whole-corpus `compile --syntax python` over 40 sampled
+programs with the on/off order balanced ABBA, default build 238.3 -> 233.9 s and
+`AIL_UNIFIED_FORCE=1` 348.3 -> 343.0 s, i.e. 1.8% / 1.5% end-to-end; the front end alone
+(`check`, all 219 programs, balanced) 287.0 -> 276.6 s, 3.6%.  `fastwalk.walk` itself is 1.49x
+faster than `ast.walk` on a 379-node corpus tree and 1.24-1.38x on whole compiler files, where it
+is memory-bound.
+
+Byte identity: all 219 programs in `lab/corpus/programs`, both builds (default and
+`AIL_UNIFIED_FORCE=1`), compiled with `--debug-dir` under `AIL_FASTWALK=1` and `=0`, gave the same
+exit status (195 built, 24 refused by name, identically) and byte-identical `program.c` (86,943,786
+bytes on the default build, 130,583,461 on the unified build): 438/438 comparisons match.  The
+three `FastWalk` tests in `test_ail_frontend_speed` assert the node sequence and the C identity.
+Ten probes in `/tmp/probes` (types, widths, empty, negative, aliasing, argument, list item,
+attribute, dict value, constructs) match CPython on both builds.
+
+`tools/update_manifest.py` refreshed the stale pins of `ail_chatgpt.py` and `pyfunc.py`;
+`--check` passes.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
