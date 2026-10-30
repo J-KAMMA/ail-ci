@@ -998,11 +998,13 @@ def paths_lines():
 def path_note(kind, text):
     """The compile note for one kernel (GPU.md G2): which path it can take at run time."""
     if kind == 'spirv':
-        return ('%s. At run time it runs on a Vulkan device that has those features (libvulkan is opened then, never '
-                'linked); with no device, no loader or a device without them, the CPU emulation of the same kernel '
-                'runs, with identical output. AIL_GPU=emu forces the CPU emulation, AIL_GPU=0 the original CPU loop.' % text)
-    return ('%s; the kernel runs as the CPU emulation only (identical output). AIL_GPU=0 runs the original CPU loop.'
-            % text)
+        return ('%s. At run time (AIL_GPU=auto, the default) the launch goes to a Vulkan device (libvulkan is opened then, never '
+                'linked) only when a cost model predicts a clear win; otherwise, and with no device, no loader or a device '
+                'without those features, the ORIGINAL CPU loop runs, with identical output (the CPU emulation of the kernel '
+                'runs only for AIL_GPU=emu and for the device checks). AIL_GPU=0 never launches, AIL_GPU=force always tries '
+                'the device, AIL_GPU_MIN_N=<n> uses it from n elements.' % text)
+    return ('%s; the kernel runs as the CPU emulation only with AIL_GPU=emu (identical output); otherwise the original CPU loop '
+            'runs. AIL_GPU=0 never launches.' % text)
 
 
 def applied_line():
@@ -1242,6 +1244,75 @@ def _acc(ctype, c):
     return c, '%s_len' % c
 
 
+def ops_expr(kernel):
+    """A C expression (a double, in the scope of the `ail_gk<k>_want` wrapper: the kernel's `s_*` scalars and `n_*` list
+    lengths) for the number of IR operations one element of the kernel costs: GPU.md 6.4.  Arithmetic, comparisons, loads,
+    conversions and min/max count 1 each; a branch counts its dearer side; an inner loop counts its trip count (a constant,
+    a captured scalar or a list length in the bounds) times its body, and 1 when the bound is anything else (which
+    under-counts: the cost model then declines more, never less)."""
+    def bound(e):
+        op = e[0]
+        if op == 'c' and e[1] == 'i':
+            return '%d.0' % int(e[2])
+        if op == 'v' and e[2].startswith('s_') and e[1] == 'i':
+            return '(double)%s' % e[2]
+        if op == 'len':
+            return '(double)n_%s' % e[2]
+        if op == 'bin' and e[2] in ('add', 'sub', 'mul'):
+            a, b = bound(e[3]), bound(e[4])
+            if a is not None and b is not None:
+                return '(%s %s %s)' % (a, {'add': '+', 'sub': '-', 'mul': '*'}[e[2]], b)
+        return None
+
+    def add(*xs):
+        xs = [x for x in xs if x != '0.0']
+        return '(%s)' % ' + '.join(xs) if xs else '0.0'
+
+    def ex(e):
+        op = e[0]
+        if op in ('c', 'v', 'len'):
+            return '0.0'
+        if op == 'ld':
+            return add('1.0', ex(e[3]))
+        if op in ('neg', 'abs'):
+            return add('1.0', ex(e[2]))
+        if op == 'pos':
+            return ex(e[2])
+        if op in ('bin', 'cmp'):
+            return add('1.0', ex(e[3]), ex(e[4]))
+        if op == 'truth':
+            return add('1.0', ex(e[3]))
+        if op == 'not':
+            return add('1.0', ex(e[2]))
+        if op in ('and', 'or', 'vand', 'vor'):
+            return add('1.0', ex(e[2]), ex(e[3]))
+        if op == 'sel':
+            return add('1.0', ex(e[2]), 'gkv_max(%s, %s)' % (ex(e[3]), ex(e[4])))
+        if op == 'cvt':
+            return add('0.0' if e[2] == 'b2i' else '1.0', ex(e[3]))
+        if op == 'mm':
+            return add('%d.0' % max(len(e[3]) - 1, 1), *[ex(a) for a in e[3]])
+        if op == 'blk':
+            return add(sts(e[2]), ex(e[3]))
+        raise AssertionError(op)
+
+    def sts(stmts):
+        parts = []
+        for st in stmts:
+            if st[0] == 'set':
+                parts.append(ex(st[3]))
+            elif st[0] == 'if':
+                parts.append(add(ex(st[1]), 'gkv_max(%s, %s)' % (sts(st[2]), sts(st[3]))))
+            else:
+                _, _var, lo, hi, body = st
+                a, b = bound(lo), bound(hi)
+                trips = 'gkv_trip(%s, %s)' % (a, b) if a is not None and b is not None else '1.0'
+                parts.append('(%s * %s)' % (trips, sts(body)))
+        return add(*parts)
+
+    return add('1.0', sts(kernel.body), ex(kernel.result))
+
+
 def _glue(k, kernel, facts, text, decl, kernels, where):
     site = kernel.site
     name = 'ail_gk%d' % k
@@ -1257,7 +1328,7 @@ def _glue(k, kernel, facts, text, decl, kernels, where):
     call = name + '_run'
     try:
         import gpu_vk
-        dev_c, info, words = gpu_vk.device_text(kernel, name, k)
+        dev_c, info, words = gpu_vk.device_text(kernel, name, k, ops_expr(kernel))
         kernels.append(gpu_vk.runtime_text() + dev_c)
         PATHS[line_of(where)] = ('spirv', 'kernel k%d: SPIR-V %s (%d words, %s)' % (
             k, 'for binary64 + int64' if info['need_f64'] else 'for int64', len(words),
@@ -1266,8 +1337,10 @@ def _glue(k, kernel, facts, text, decl, kernels, where):
     except Exception as exc:                     # gpu_spirv.Unsupported, or anything else: the emulation alone is exact
         if type(exc).__name__ not in ('Unsupported', 'ImportError'):
             raise
-        kernels.append('static unsigned %s_run(%s) { gk_dev = "emulation"; return %s(%s); }\n' % (
-            name, ', '.join(emu_signature(kernel)[0]), name, ', '.join(emu_signature(kernel)[1])))
+        ps, ns = emu_signature(kernel)       # no SPIR-V: only AIL_GPU=emu / force run the emulation; otherwise the original loop
+        kernels.append('static int %s_want(%s) { (void)_cnt; return gk_emu_mode() ? 1 : 0; }\n'
+                       'static unsigned %s_run(%s) { if (!gk_emu_mode()) return GK_DECLINED; gk_dev = "emulation"; return %s(%s); }\n' % (
+            name, ', '.join(ps[:-1]), name, ', '.join(ps), name, ', '.join(ns)))
         PATHS[line_of(where)] = ('emulation', 'kernel k%d: no SPIR-V (%s)' % (k, exc))
     args, setup = [], []
     for lst in kernel.lists:
@@ -1300,25 +1373,26 @@ def _glue(k, kernel, facts, text, decl, kernels, where):
                  '    int64_t _gk_n = 0;',
                  '    if (_gk_hi > _gk_lo && __builtin_sub_overflow(_gk_hi, _gk_lo, &_gk_n)) _gk_n = 0;',
                  '    if (_gk_n > 0 && gk_on()) {',
-                 '        %s *_gk_res = 0;' % ctype]
+                 '        int _gk_go = 0;']
         inputs = [(_acc(cdecl(l)[1], cdecl(l)[0]), kernel.lists[l]) for l in kernel.lists]
         out_p, out_n = _acc(out_ct, out_c)
         cond = ['_gk_lo >= 0', '_gk_hi <= %s' % out_n, '_gk_n < (INT64_MAX / 16)']
         cond += ['gk_disjoint((const void *)%s, %s, (const void *)%s, %s, %d)'
                  % (p, n, out_p, out_n, 8) for (p, n), _ in inputs]
-        lines.append('        if (%s) _gk_res = (%s *)malloc((size_t)_gk_n * sizeof(%s));' % (' && '.join(cond), ctype, ctype))
+        lines.append('        if (%s) { if (%s_want(%s_gk_lo, _gk_n)) _gk_go = 1; else gk_trace_loop(%d); }'
+                     % (' && '.join(cond), name, (', '.join(args) + ', ') if args else '', k))
         lines.append('        else gk_trace_cpu(%d, "the range does not fit the output list, or it overlaps an input");' % k)
-        lines += ['        if (_gk_res) {',
-                  '            unsigned _gk_f = %s(%s%s_gk_lo, _gk_n, _gk_res);' % (call, ', '.join(args) + (', ' if args else ''), ''),
-                  '            if (_gk_f == 0) {',
-                  '                memcpy(%s + _gk_lo, _gk_res, (size_t)_gk_n * sizeof(%s));' % (out_p, ctype),
-                  '                _gk_ok = 1; gk_trace_run(%d, _gk_n);' % k,
-                  '            } else gk_trace_replay(%d, _gk_f);' % k,
-                  '            free(_gk_res);',
+        # the kernel writes the elements into the output list itself, and only when it ran without a flag
+        lines += ['        if (_gk_go) {',
+                  '            unsigned _gk_f = %s(%s_gk_lo, _gk_n, (%s *)(%s) + _gk_lo);' % (
+                      call, ', '.join(args) + (', ' if args else ''), ctype, out_p),
+                  '            if (_gk_f == 0) { _gk_ok = 1; gk_trace_run(%d, _gk_n); }' % k,
+                  '            else if (_gk_f != GK_DECLINED) gk_trace_replay(%d, _gk_f);' % k,
+                  '            else gk_trace_loop(%d);' % k,
                   '        }',
                   '    }',
                   '    if (!_gk_ok) {',
-                  text,
+                                    text,
                   '    }',
                   '}']
         return '\n'.join(lines)
@@ -1348,12 +1422,15 @@ def _glue(k, kernel, facts, text, decl, kernels, where):
     lines += ['    ' + c for c in count]
     lines += ['    (void)_gk_lo;',
               '    if (_gk_n > 0 && _gk_n < (INT64_MAX / 16) && gk_on()) {',
-              '        %s_reserve(&%s, _gk_n);' % ('ail_flist' if res_t == 'f' else 'ail_list', dest),
-              '        if (%s.p) {' % dest,
+              '        int _gk_w = %s_want(%s%s_gk_n);' % (name, (', '.join(args) + ', ') if args else '', call_lo if kernel.loop_var else ''),
+              '        if (_gk_w) %s_reserve(&%s, _gk_n); else gk_trace_loop(%d);' % (
+                  'ail_flist' if res_t == 'f' else 'ail_list', dest, k),
+              '        if (_gk_w && %s.p) {' % dest,
               '            unsigned _gk_f = %s(%s%s_gk_n, %s.p);' % (call, (', '.join(args) + ', ') if args else '',
                                                                  call_lo if kernel.loop_var else '', dest),
               '            if (_gk_f == 0) { %s.n = _gk_n; _gk_ok = 1; gk_trace_run(%d, _gk_n); }' % (dest, k),
-              '            else gk_trace_replay(%d, _gk_f);' % k,
+              '            else if (_gk_f != GK_DECLINED) gk_trace_replay(%d, _gk_f);' % k,
+              '            else gk_trace_loop(%d);' % k,
               '        }',
               '    }',
               '    if (!_gk_ok) %s' % text,
@@ -1377,6 +1454,7 @@ RUNTIME = r'''
 #define GK_DENORM   8u   /* a float operand or result below 2**-1000      */
 #define GK_NAN     16u   /* a NaN operand, or a NaN made from numbers     */
 #define GK_RANGE   32u   /* int(float) outside int64; int vs float compare beyond 2**53 */
+#define GK_DECLINED 0x80000000u   /* not a flag: the wrapper did not run the kernel; the caller runs the ORIGINAL loop (GPU.md 6.4) */
 static inline int64_t gk_add(int64_t a, int64_t b, unsigned *f) { int64_t r; if (__builtin_add_overflow(a, b, &r)) { *f |= GK_OVERFLOW; return 0; } return r; }
 static inline int64_t gk_sub(int64_t a, int64_t b, unsigned *f) { int64_t r; if (__builtin_sub_overflow(a, b, &r)) { *f |= GK_OVERFLOW; return 0; } return r; }
 static inline int64_t gk_mul(int64_t a, int64_t b, unsigned *f) { int64_t r; if (__builtin_mul_overflow(a, b, &r)) { *f |= GK_OVERFLOW; return 0; } return r; }
@@ -1418,8 +1496,10 @@ static inline int gk_disjoint(const void *a, int64_t an, const void *b, int64_t 
     return an <= 0 || bn <= 0 || x + (uintptr_t)an * (uintptr_t)w <= y || y + (uintptr_t)bn * (uintptr_t)w <= x; }
 static const char *gk_dev = "emulation";    /* what ran the last launch: "emulation" or the Vulkan device's name (gpu_vk.py) */
 static inline int gk_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("AIL_GPU"); v = !(e && e[0] == '0' && e[1] == 0); } return v; }
+static inline int gk_emu_mode(void) { static int v = -1; if (v < 0) { const char *e = getenv("AIL_GPU"); v = e && (!strcmp(e, "emu") || !strcmp(e, "force")); } return v; }
 static inline int gk_tracing(void) { static int v = -1; if (v < 0) { const char *e = getenv("AIL_GPU_TRACE"); v = e && e[0] && !(e[0] == '0' && e[1] == 0); } return v; }
 static inline void gk_trace_run(int k, int64_t n) { if (gk_tracing()) fprintf(stderr, "gpu: k%d n=%lld device=%s\n", k, (long long)n, gk_dev); }
+static inline void gk_trace_loop(int k) { if (gk_tracing()) fprintf(stderr, "gpu: k%d original loop\n", k); }
 static inline void gk_trace_cpu(int k, const char *why) { if (gk_tracing()) fprintf(stderr, "gpu: k%d cpu (%s)\n", k, why); }
 static inline void gk_trace_replay(int k, unsigned f) {
     if (!gk_tracing()) return;

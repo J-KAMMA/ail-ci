@@ -330,7 +330,8 @@ class Programs(unittest.TestCase):
             self.assertIn('untrusted for binary64 kernels', err, inject)
             # the hook corrupts every kernel's answers, so no kernel runs on the device at all
             self.assertEqual(self.device_launches(err), [], (inject, err))
-            self.assertIn('device=emulation', err)
+            self.assertIn('gpu: k0 original loop', err)          # GPU.md 6.4: the declined launch runs the plain loop, not the emulation
+            self.assertNotIn('device=emulation', err)
 
     def test_a_bad_device_found_by_the_first_launch(self):
         """The self-test passes (the injection aims at launches), the comparison of the first real launch finds it."""
@@ -341,12 +342,12 @@ class Programs(unittest.TestCase):
             self.assertIn('selftest ok', err, inject)
             self.assertIn('differs from the CPU emulation', err, inject)
             self.assertIn('untrusted for binary64 kernels', err, inject)
-            # sub(a, a) is the first launch: its device answer is thrown away and the emulation's is used
-            k0 = [l for l in g2.trace_of(err) if l.startswith('gpu: k0 n=')]
-            self.assertTrue(k0 and all('device=emulation' in l for l in k0), (inject, err))
+            # sub(a, a) is the first launch: its device answer is thrown away and the original loop runs (GPU.md 6.4)
+            self.assertIn('gpu: k0 original loop', err, (inject, err))
+            self.assertFalse([l for l in g2.trace_of(err) if l.startswith('gpu: k0 n=')], (inject, err))
             # the second float kernel never touches the device either
-            k1 = [l for l in g2.trace_of(err) if l.startswith('gpu: k1 n=')]
-            self.assertTrue(k1 and all('device=emulation' in l for l in k1), (inject, err))
+            self.assertIn('gpu: k1 original loop', err, (inject, err))
+            self.assertFalse([l for l in g2.trace_of(err) if l.startswith('gpu: k1 n=')], (inject, err))
 
     def test_a_hidden_flag_is_found_by_the_first_launch(self):
         self.need_device()

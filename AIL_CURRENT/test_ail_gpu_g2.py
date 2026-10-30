@@ -488,7 +488,8 @@ def _harness(entries, n):
 
 def _device_env():
     env = dict(os.environ)
-    for key in ('AIL_GPU', 'AIL_GPU_TRACE', 'AIL_GPU_DISABLE', 'AIL_VULKAN_LIB', 'AIL_GPU_DEVICE', 'AIL_GPU_MIN_N'):
+    for key in ('AIL_GPU', 'AIL_GPU_TRACE', 'AIL_GPU_DISABLE', 'AIL_VULKAN_LIB', 'AIL_GPU_DEVICE', 'AIL_GPU_MIN_N', 'AIL_GPU_MODEL',
+                'AIL_GPU_AUTO_ANY'):
         env.pop(key, None)
     return env
 
@@ -1047,8 +1048,10 @@ class Programs(unittest.TestCase):
         self.assertEqual(len([c for c in emu_classes if c.endswith('ran')]), 15 * 3, emu_classes)   # n = 0 launches nothing
         self.assertFalse([c for c in emu_classes if not c.endswith('ran')], emu_classes)
         for name in ('noloader',):
-            self.assertEqual(classes(results[name][2]), emu_classes)
+            # GPU.md 6.4: without a device the launch is declined and the ORIGINAL loop runs (not the emulation)
+            self.assertEqual(classes(results[name][2]), [])
             self.assertIn('device unavailable (no Vulkan loader', results[name][2])
+            self.assertIn('original loop', results[name][2])
         if 'device' in results:
             self.assertEqual(classes(results['device'][2]), emu_classes)
             self.assertEqual(len(device_runs(results['device'][2])), 15 * 3)
@@ -1105,16 +1108,17 @@ class Programs(unittest.TestCase):
         self.assertFalse(device_runs(err))
         self.assertEqual((out, rc), self.oracle('100\n'))
 
-    def test_the_default_keeps_small_launches_on_the_cpu(self):
+    def test_min_n_replaces_the_cost_model(self):
+        """AIL_GPU_MIN_N=n: the device for launches of at least n elements, the original loop below (GPU.md 6.4)."""
         self.need_device()
-        out, rc, err = self.b.run('100\n', AIL_GPU_TRACE='1')
+        out, rc, err = self.b.run('100\n', AIL_GPU_TRACE='1', AIL_GPU_MIN_N='4096')
         self.assertEqual((out, rc), self.oracle('100\n'))
-        sizes = {int(re.match(r'gpu: k\d+ n=(\d+) device=', l)[1]): ('emulation' not in l) for l in trace_of(err)
-                 if re.match(r'gpu: k\d+ n=(\d+) device=', l)}
-        self.assertFalse(sizes[4095])
-        self.assertTrue(sizes[4096] and sizes[100003])
+        ran = {int(re.match(r'gpu: k\d+ n=(\d+) device=', l)[1]) for l in device_runs(err)}
+        self.assertFalse([n for n in ran if n < 4096], sorted(ran))
+        self.assertTrue(4096 in ran and 100003 in ran, sorted(ran))
+        self.assertIn('n = 4095 is below AIL_GPU_MIN_N = 4096', err)
         out, rc, err = self.b.run('100\n', AIL_GPU_TRACE='1', AIL_GPU_MIN_N='64')
-        self.assertTrue(any(' n=64 ' in l and 'emulation' not in l for l in trace_of(err)), err[:800])
+        self.assertTrue(any(' n=64 ' in l for l in device_runs(err)), err[:800])
 
     def test_the_trace_names_the_device(self):
         self.need_device()
@@ -1193,7 +1197,8 @@ class Unavailable(unittest.TestCase):
             out, rc, err = b.run('', AIL_GPU='force', AIL_GPU_TRACE='1')
             self.assertEqual((out, rc), run_python(b.src))
             self.assertIn('static build never opens the Vulkan loader', err)
-            self.assertIn('device=emulation', err)
+            self.assertIn('gpu: k0 original loop', err)
+            self.assertNotIn('device=emulation', err)
 
 
 if __name__ == '__main__':
