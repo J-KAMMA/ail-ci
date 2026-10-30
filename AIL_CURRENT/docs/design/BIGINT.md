@@ -175,6 +175,6 @@ Now (`unified.exact_enabled()`, default on; `AIL_UNIFIED_EXACT=0` is the old rul
 Mixed-mode typed clones (`pyboxed2._setup_mix`) keep the transitive marks: a clone has an int64 ABI.
 
 Measured (`tools/icount.c`, default build, medium input of `lab/compare/tasks/<t>/gen.py`, every public and hidden case
-compared with CPython): berth_sim 78.80M -> 69.85M, echo_pack 814.1M -> 780.7M, ledger_bin 14.57M -> 13.91M,
-rail_transfer 1140.4M -> 1038.0M, chain_relax 1369.8M -> 1320.7M; term_rank and ticket_audit (no marks) unchanged.
+compared with CPython): berth_sim 78.80M -> 69.85M, echo_pack 814.1M -> 802.3M, ledger_bin 14.57M -> 13.91M,
+rail_transfer 1140.4M -> 1039.9M, chain_relax 1369.8M -> 1320.7M; term_rank and ticket_audit (no marks) unchanged.
 Tests: `test_ail_bigcap_split.py`.
