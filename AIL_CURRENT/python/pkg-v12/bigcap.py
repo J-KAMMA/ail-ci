@@ -10,9 +10,10 @@ when any of these holds:
   2. it contains `**` (or `**=`, or the two-argument `pow`) with a non-constant exponent, or with a constant exponent where the
      result can exceed int64: a literal base b with |b| ** e >= 2**63, any other base with e >= 4 (a base that is not a literal is
      unknown here, and e >= 4 is where a 16-bit base already overflows; squares and cubes of int64 values stay typed);
-  3. it contains `<<` (or `<<=`) by a non-constant amount;
+  3. it contains `<<` (or `<<=`) by a non-constant amount (a name bound once to a constant, or a module int constant, is
+     that constant);
   4. it calls math.factorial / comb / perm with arguments whose value is not a constant (or whose constant result is beyond
-     int64), `int(s)` on a constant string of more than 18 digits, or `int.from_bytes`;
+     int64), `int(s)` on a constant string of more than 18 digits, or `int.from_bytes` of more than 7 bytes (or of an unknown length);
   5. it calls a marked function (transitively; a method is matched by its name).
 
 `<module>` is the module-level code outside any def; when it is marked the whole program is.
@@ -116,8 +117,59 @@ def _const_float(node):
     return None
 
 
-def _own_reason(fn_nodes, defined, module_values=None, float_names=()):
-    """The first reason a function's own code (not its callees) can need a big int, or None."""
+def _fixed_ints(fn_nodes, params=(), module_ints=None):
+    """{name: value} of the names this unit binds exactly once, to a constant int expression (`SH = 22`), with no
+    parameter, `global` or `nonlocal` of that name; and of the module int constants it does not bind. A read of one
+    is that constant: `x << SH` is the same shift as `x << 22`."""
+    stores, values = {}, {}
+    for n in fn_nodes:
+        if isinstance(n, ast.Name) and not isinstance(n.ctx, ast.Load):
+            stores[n.id] = stores.get(n.id, 0) + 1
+        elif isinstance(n, (ast.Global, ast.Nonlocal)):
+            for g in n.names:
+                stores[g] = 2
+        elif isinstance(n, ast.arg):
+            stores[n.arg] = 2
+        elif isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name):
+            v = _const_int(n.value)
+            if v is not None:
+                values[n.targets[0].id] = v
+    for p in params:
+        stores[p] = 2
+    out = {k: v for k, v in values.items() if stores.get(k) == 1}
+    for k, v in (module_ints or {}).items():
+        if k not in stores and type(v) is int:
+            out.setdefault(k, v)
+    return out
+
+
+def _short_bytes(node):
+    """The most bytes `node` can hold when that is a constant: a bytes literal, `s[a:b]` of constant bounds of one sign,
+    or `s[p:p + k]`. None otherwise."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, bytes):
+        return len(node.value)
+    if not (isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice) and node.slice.step is None):
+        return None
+    lo, hi = node.slice.lower, node.slice.upper
+    if lo is None or hi is None:
+        return None
+    a, b = _const_int(lo), _const_int(hi)
+    if a is not None and b is not None and (a >= 0) == (b >= 0):
+        return max(b - a, 0)
+    if isinstance(hi, ast.BinOp) and isinstance(hi.op, ast.Add) and ast.dump(hi.left) == ast.dump(lo):
+        k = _const_int(hi.right)
+        if k is not None and k >= 0:
+            return k            # whatever p is, s[p:p + k] has at most k items
+    return None
+
+
+def _own_reason(fn_nodes, defined, module_values=None, float_names=(), fixed=None):
+    """The first reason a function's own code (not its callees) can need a big int, or None. `fixed` is _fixed_ints:
+    a shift by one of those names is a shift by a constant."""
+    fixed = fixed or {}
+
+    def const_count(e):
+        return _const_int(e) is not None or isinstance(e, ast.Constant)             or (isinstance(e, ast.Name) and e.id in fixed)
     if module_values:
         # The module literal is only the value at the power when nothing in this function stored the
         # variable before it. A store later in the function (the other `e |= ...` of an accumulator)
@@ -167,14 +219,14 @@ def _own_reason(fn_nodes, defined, module_values=None, float_names=()):
                 r = _pow_reason(n.left, n.right, module_values, float_names)
                 if r:
                     return '`**` with ' + r
-            elif isinstance(n.op, ast.LShift) and _const_int(n.right) is None and not isinstance(n.right, ast.Constant):
+            elif isinstance(n.op, ast.LShift) and not const_count(n.right):
                 return '`<<` by an amount that is not a constant'
         elif isinstance(n, ast.AugAssign):
             if isinstance(n.op, ast.Pow):
                 r = _pow_reason(n.target, n.value, module_values, float_names)
                 if r:
                     return '`**=` with ' + r
-            elif isinstance(n.op, ast.LShift) and _const_int(n.value) is None and not isinstance(n.value, ast.Constant):
+            elif isinstance(n.op, ast.LShift) and not const_count(n.value):
                 return '`<<=` by an amount that is not a constant'
         elif isinstance(n, ast.Call):
             f = n.func
@@ -187,6 +239,9 @@ def _own_reason(fn_nodes, defined, module_values=None, float_names=()):
                     continue                   # constant arguments whose result fits int64 (factorial(10))
                 return 'a call of math.%s' % base
             if isinstance(f, ast.Attribute) and f.attr == 'from_bytes' and isinstance(f.value, ast.Name) and f.value.id == 'int':
+                k = _short_bytes(n.args[0]) if n.args else None
+                if k is not None and k <= 7:
+                    continue                   # at most 7 bytes: below 2**56 signed or not
                 return 'a call of int.from_bytes'
             if isinstance(f, ast.Name) and f.id == 'pow' and 'pow' not in defined and len(n.args) == 2 and not n.keywords:
                 r = _pow_reason(n.args[0], n.args[1], module_values, float_names)
@@ -1250,7 +1305,8 @@ def marked(tree, local=True):
                 float_names = {n for n, v in local_int_bounds(defs[0], defined).items() if v is not None and v[0] == 'float'}
             except Exception:
                 float_names = set()
-        r = _own_reason(nodes, defined, values, float_names)
+        params = set() if defs is None else {a.arg for d in defs for a in ast.walk(d.args) if isinstance(a, ast.arg)}
+        r = _own_reason(nodes, defined, values, float_names, _fixed_ints(nodes, params, defined.module_ints))
         if r:
             reason[name] = r
         if local:

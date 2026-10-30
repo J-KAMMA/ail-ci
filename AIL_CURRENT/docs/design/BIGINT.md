@@ -61,9 +61,11 @@ about 1.5k start-up instructions in every general binary.
 ## 5. Marked functions (default build) and literals
 
 `bigcap.py` marks a function big-int capable (int literal beyond int64; `**` with a non-constant or too large exponent -- not a
-float constant base, which makes a float; `<<` by a variable; math.factorial/comb/perm unless every call has constant arguments
+float constant base, which makes a float; `<<` by a variable -- a name the function binds once to a constant, with no
+parameter, `global` or `nonlocal` of it, and a module int constant count as that constant, so `SH = 22; x << SH` is `x << 22`; math.factorial/comb/perm unless every call has constant arguments
 whose result fits int64 (`factorial(5)` does not mark, `factorial(21)` does); pow() with such an exponent; int() of a constant
-string over 18 digits, also `'1' * 5000`; int.from_bytes; a call of a marked function, transitively). A marked function gets no typed clone and unified.py keeps its ints boxed (`demote`
+string over 18 digits, also `'1' * 5000`; int.from_bytes, unless of at most 7 bytes (a bytes literal, `s[3:7]`,
+`s[p:p + 4]`), which is below 2**56; a call of a marked function, transitively). A marked function gets no typed clone and unified.py keeps its ints boxed (`demote`
 `(name, '*')`); a marked module takes the whole program off unified. Python-syntax programs only (`AIL_SURFACE=python`).
 Big literals are string constants parsed once at start-up (general path, marked functions).
 
