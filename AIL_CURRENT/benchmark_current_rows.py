@@ -410,7 +410,7 @@ def main(argv=None):
                   encode_measured=False, physical_roof_measured=False, assumed_physical_roof_fraction=None,
                   achieved_physical_roof_fraction=None, optimization_adopted=False, all_purpose_fastest_claim=False,
                   builds={}, qualification={}, controls_passed=False, workloads=[], pins_before={})
-    watched = [Path(__file__), ROOT / 'ail_chatgpt.py', ROOT / 'ail_syntax.py', ROOT / 'MANIFEST.json',
+    watched = [Path(__file__), ROOT / 'ail_chatgpt.py', ROOT / 'ail_syntax.py', ROOT / 'MANIFEST.json', *sorted((ROOT / 'manifest.d').glob('*.txt')),
                HERE / 'row_reduce_stream_main.ail', HERE / 'integer_row_stream.ail',
                *sorted((ROOT / 'python/pkg-v12').glob('*.py'))]
     try:

@@ -134,7 +134,7 @@ class PlatformTests(unittest.TestCase):
         self.assertEqual(link_flags_with(AIL_STATIC='1')[:1], ['-static'])
 
     def test_console_unit_is_shipped_and_guarded(self):
-        manifest = json.loads((support.ROOT / 'MANIFEST.json').read_text(encoding='utf8'))
+        manifest = __import__('ail_manifest').load(support.ROOT)
         self.assertIn('python/pkg-v12/ail_wincon.c', manifest['sdk_files'])
         text = (PKG / 'ail_wincon.c').read_text(encoding='utf8')
         self.assertIn('SetConsoleOutputCP(CP_UTF8)', text)
