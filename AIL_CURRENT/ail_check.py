@@ -323,6 +323,7 @@ LISTED_MODULES = (
     'test_ail_gpu_g1',
     'test_ail_ffi_f3a',
     'test_ail_exc_nobind', 'test_ail_cargo', 'test_ail_fz196', 'test_ail_pre409', 'test_ail_pre427', 'test_ail_pre432',
+    'test_ail_gpu_g2',
 )
 
 

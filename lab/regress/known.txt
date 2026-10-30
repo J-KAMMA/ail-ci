@@ -1,0 +1,2 @@
+# Programs whose silent differences already exist on integ (one program key per line, e.g. dev/t123).
+# They are reported but do not fail the check. Fix the difference and delete the line.

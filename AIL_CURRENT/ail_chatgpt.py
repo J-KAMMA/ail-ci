@@ -5885,6 +5885,9 @@ def main(argv=None):
                     for line in (result.stderr or '').splitlines():
                         if line.startswith('ail-gpu-applied:'):
                             applied = {int(n) for n in line.split(':', 1)[1].split()}
+                        elif line.startswith('ail-gpu-path: '):                  # G2: which path the kernel can take
+                            number, kind, text = line[len('ail-gpu-path: '):].split(' ', 2)
+                            print('note: %s:%s: %s' % (_relpath(source), number, gpu.path_note(kind, text)), file=sys.stderr)
                     for number in gpu_sites:
                         if number not in applied:
                             print('note: %s:%d: %s' % (_relpath(source), number, gpu.IGNORED), file=sys.stderr)
