@@ -13014,6 +13014,8 @@ def _build(source, report, allow_mix=True):
         import safetyrt
         body = safetyrt.patch_gcpool(body)
     body = classname.patch_runtime(body)     # F2: a class of an imported module prints with its module
+    if compiler.source_has_class:
+        body = classname.patch_error_names(body)    # error texts name the user's class
     report['big_enum'] = getattr(compiler, 'need_big_enum', False)
     report['boxed'] = [n for n in compiler.boxed_names if n not in compiler.prelude_names]
     if compiler.threads:
