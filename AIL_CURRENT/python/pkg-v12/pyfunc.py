@@ -38558,6 +38558,7 @@ if _QC_MODE != '0':
 
     _signatures = _walk_scope(_signatures, True)
     _to_c_once = _walk_scope(_to_c_once, False)
+    _to_c_once_inner = _walk_scope(_to_c_once_inner, False)     # (each round of `_to_c_once` starts with a clean walk cache)
 
     # Only this module's view of `ast` is replaced (a copy of the namespace); the real `ast` is untouched.
     _fast_ast = _types.ModuleType('ast')
