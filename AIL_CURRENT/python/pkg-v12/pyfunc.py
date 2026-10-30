@@ -89,6 +89,7 @@ TINT_ACTIVE = {}
 # of exact ints by value. The IR lowering asks for them (TLIST_REQUESTS) when a list of exact ints meets a parameter or a result
 # that is still an int64 list; `_to_c_once` then compiles the program again with those keys active (TLIST_ACTIVE).
 TLIST_ACTIVE = frozenset()
+_PROGRAM_TREE = None
 TLIST_REQUESTS = set()
 TLIST_OFF = False        # set by `_to_c_once` when the program did not build with lists of exact ints: batch 2's lowering
 # True when the program calls a typed-only runtime primitive (monotonic_ms, tcp_*, ...) that the
@@ -8082,8 +8083,10 @@ def _str_value(node, ctx, *, owned_join_return=False):
         if at == EXCEPTION:
             _exc_text_parts(ctx)
             return 'ail_exc_text(%s, &%s)' % (_exception_value(arg, ctx), ctx.sarena())
+        if _list_text_ok(arg, at, ctx):
+            return _list_text(arg, at, ctx)
         if at != INT:
-            raise Unsupported('str() of %s is not built; only str(<int>) and str(<float>) are. '
+            raise Unsupported('str() of %s is not built; only str(<int>), str(<float>) and str() of a flat list are. '
                               'For a list, join its elements: `",".join([str(v) for v in xs])`'
                               % _a(at))
         if _is_bool_expr(arg, ctx):
@@ -35089,6 +35092,8 @@ def _to_c_once_inner(source, name=None, strict=True, info=None, entry=None, sig=
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    global _PROGRAM_TREE
+    _PROGRAM_TREE = tree                       # (the IR lowering asks which fields of a record can only hold small ints)
     gpu.tag(tree, source.strip())              # `# ail: gpu`: before any pass rewrites the tree
     refuse_field_method_call(tree)
     debug_restore_lines(tree, source.strip())

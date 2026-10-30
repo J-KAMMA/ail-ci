@@ -65,7 +65,7 @@ class _Checker(object):
         base = t.pointee if t.is_place else t
         if self.stage == 'S0' and base not in S0_TYPES:
             self.err(where, 'type %s is not in the S0 subset (i1, i64, f64 and places of them)' % t)
-        elif self.stage == 'S1' and base not in S1_TYPES and I.rec_elem(base) is None and base != I.DICT_II and base != I.PLIST and not (
+        elif self.stage == 'S1' and base not in S1_TYPES and I.rec_elem(base) is None and base != I.DICT_II and base != I.PLIST and I.olist_elem(base) is None and not (
                 base.head == 'obj' and base.args[0].head == 'class'):
             self.err(where, 'type %s is not in the S1 subset' % t)
 
@@ -104,7 +104,7 @@ class _Checker(object):
         return self.errors
 
     # ------------------------------------------------------------------ ownership of lists (S3a)
-    _RESIZERS = ('list.push', 'list.pop', 'list.clear', 'list.reset', 'list.repeat', 'list.lit',
+    _RESIZERS = ('list.push', 'list.pop', 'list.clear', 'list.append_all', 'list.delat', 'list.reverse', 'list.reset', 'list.repeat', 'list.lit',
                  'list.reserve', 'list.move', 'list.call', 'list.copy', 'list.rt', 'list.sortperm',
                  'rec.push', 'rec.pop')
 
@@ -501,9 +501,24 @@ class _Checker(object):
         elem = self._list_elem(ins.operands[0])
         self.want(where, elem is not None and ins.operands[1].type == elem, 'list.push takes (list, element)')
 
+    def op_list_reverse(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, self._list_elem(ins.operands[0]) is not None, 'list.reverse of a non-list')
+
+    def op_list_append_all(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        a, b = ins.operands
+        self.want(where, self._list_elem(a) is not None and a.type == b.type, 'list.append_all takes two lists of one kind')
+
+    def op_list_delat(self, ins, scope, stack, where, top):
+        self.nresults(ins, where, 0)
+        self.want(where, self._list_elem(ins.operands[0]) is not None and ins.operands[1].type == I.I64,
+                  'list.delat takes (list, i64)')
+
     def op_list_pop(self, ins, scope, stack, where, top):
         elem = self._list_elem(ins.operands[0])
         self.want(where, elem is not None, 'list.pop of a non-list')
+        self.want(where, len(ins.operands) == 1 or ins.operands[1].type == I.I64, 'list.pop index is an i64')
         if self.nresults(ins, where, 1):
             self.want(where, ins.result.type == elem, 'list.pop yields the element type')
 
@@ -800,6 +815,18 @@ class _Checker(object):
         if self.nresults(ins, where, 1):
             self.want(where, ins.operands[0].type == I.PLIST and ins.operands[1].type == I.I64
                       and ins.result.type == I.STRV, 'plist.get takes (plist, i64) and yields a str')
+
+    def op_olist_len(self, ins, scope, stack, where, top):
+        if self.nresults(ins, where, 1):
+            self.want(where, I.olist_elem(ins.operands[0].type) is not None and ins.result.type == I.I64,
+                      'olist.len takes a list of objects and yields i64')
+
+    def op_olist_get(self, ins, scope, stack, where, top):
+        self._index_mode(ins, where)
+        if self.nresults(ins, where, 1):
+            elem = I.olist_elem(ins.operands[0].type)
+            self.want(where, elem is not None and ins.operands[1].type == I.I64 and ins.result.type == elem,
+                      'olist.get takes (list of objects, i64) and yields an object of the list class')
 
     def op_plist_has(self, ins, scope, stack, where, top):
         if self.nresults(ins, where, 1):

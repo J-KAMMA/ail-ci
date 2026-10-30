@@ -30,6 +30,7 @@ from . import effects as E
 _LISTS = (I.T('obj', I.T('list', I.I64)), I.T('obj', I.T('list', I.F64)))
 DST_OPS = ('list.reset', 'list.lit', 'list.repeat', 'list.move', 'list.call', 'list.copy', 'list.share', 'list.rt', 'list.sortperm')
 WRITE_OPS = ('list.set', 'list.push', 'list.pop', 'list.clear', 'list.reserve', 'list.sort', 'list.permute',
+             'list.reverse', 'list.append_all', 'list.delat',
              'rec.push', 'rec.up', 'rec.pop')
 CALLS = ('call', 'list.call', 'ba.call', 'obj.call')
 

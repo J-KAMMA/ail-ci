@@ -151,12 +151,11 @@ class FallbackNote(unittest.TestCase):
         ran = subprocess.run([str(default_exe)], capture_output=True, text=True, timeout=60)
         self.assertEqual(ran.stdout, expected_index_sort())
 
-    def test_refusal_after_index_sort_names_the_real_cause(self):
-        # the general path builds it since branch safetynet (str.encode); the note still names the typed path's reason
+    def test_str_of_a_list_after_index_sort_builds_typed(self):
+        # print(idx) was built on the typed path since branch typed2; str() of a flat list is built since branch rec-list
+        # (this program used to name `str() of a list is not built` as the reason for the general path)
         result, exe = self.compile(PRINT_SORTED)
-        self.assertEqual(result.returncode, 0, result.stderr)
-        # print(idx) is built on the typed path since branch typed2; str() of the list is the cause now
-        self.assertIn('str() of a list is not built', result.stderr)
+        self.assertEqual((result.returncode, result.stderr), (0, ''))
         self.assertNotIn('is an int', result.stderr)
         ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
         self.assertEqual(ran.stdout, '[1, 3, 0, 2, 4]\n15\n')

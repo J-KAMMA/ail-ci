@@ -368,7 +368,10 @@ class BorrowedOwnerTests(unittest.TestCase):
             self.assertNotIn("ail_obj_store_P(", kernel)
             self.assertNotIn("ail_obj_retain(ail_olist_get", kernel)
             for unsafe in ("int64_t swap_ends(", "int64_t pop_keeps(", "int64_t with_call("):
-                self.assertIn("ail_obj_retain(ail_olist_get", body(unsafe), unsafe)
+                # (the legacy emitter retains the element it reads; a function the IR lowers stores it with
+                # ail_obj_store_P, which takes its own reference: either way the local owns the element)
+                text = body(unsafe)
+                self.assertTrue("ail_obj_retain(ail_olist_get" in text or "ail_obj_store_P(" in text, unsafe)
 
     def test_numeric_field_lists_grow_and_bound_check_like_cpython(self):
         with tempfile.TemporaryDirectory() as directory:

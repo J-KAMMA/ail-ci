@@ -218,14 +218,22 @@ class TextLowering(object):
 
     def fstring_field(self, fv):
         P = self.P
-        if fv.conversion not in (-1, 115):
+        if fv.conversion not in (-1, 115) and not (fv.conversion == 114 and fv.format_spec is None
+                                                      and P._etype(fv.value, self.ctx) in (P.LIST, P.FLIST, P.SLIST,
+                                                                                           P.INT, P.FLT, P.STR)):
             raise self.NotS0('an f-string conversion')
         val = fv.value
         kind = P._etype(val, self.ctx)
+        if fv.format_spec is None and kind in (P.LIST, P.FLIST, P.SLIST):
+            text = self.list_text_value(val)
+            if text is not None:
+                return text
         if kind not in (P.INT, P.FLT, P.STR):
             raise self.NotS0('an f-string field of kind %r' % (kind,))
         if kind == P.INT and P._is_bool_expr(val, self.ctx):
             raise self.NotS0('a bool in an f-string')
+        if fv.format_spec is None and fv.conversion == 114 and kind == P.STR:
+            return self.rt('str_repr', [self.expr(val)])
         if fv.format_spec is None:
             return self.default_conv(val, kind)
         fs = fv.format_spec
@@ -428,6 +436,9 @@ class TextLowering(object):
                     return self.rt('str_from_float', [self.expr(arg)])
                 if at == P.INT and not P._is_bool_expr(arg, self.ctx):
                     return self.str_from_int(arg, buf=False)
+                text = self.list_text_value(arg)
+                if text is not None:
+                    return text
                 raise self.NotS0('str() of kind %r' % (at,))
             if self.is_builtin(name) and name in ('bin', 'oct', 'hex') and len(node.args) == 1:
                 v = self.coerce(self.expr(node.args[0]), I.TINT)
@@ -739,6 +750,10 @@ class TextLowering(object):
             elif t == P.FLT:
                 kinds.append('flt')
                 vals.append(self.expr(a0))
+            elif t in (P.LIST, P.FLIST, P.SLIST) and not isinstance(a0, ast.Starred) \
+                    and self.list_text_value(a0, probe=True):
+                kinds.append('str')
+                vals.append(self.list_text_value(a0))
             elif t == P.INT:
                 v = self.expr(a0)
                 if v.type == I.TINT and stream == 'stdout':

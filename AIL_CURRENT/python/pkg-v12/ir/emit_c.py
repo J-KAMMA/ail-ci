@@ -50,6 +50,8 @@ def ctype(t):
             return 'ail_slist *'
         if inner.head == 'plist':
             return 'ail_pslist *'
+        if inner.head == 'olist':
+            return 'ail_olist *'
         if I.rec_elem(t) is not None:
             return 'ail_rl_%s *' % I.rec_sig(t)
     raise I.IRError('no C type for %s' % t)
@@ -263,6 +265,9 @@ class Emitter(TextEmitter):
         self.tries = 0
         self.next_status = 3
         self.retained = [self.pre + 'v_' + n for n in fn.attrs.get('retain', ())]
+        # (a retained parameter is a bytearray, or a list of struct objects: `ail_obj_retain` / `ail_obj_release`)
+        self.retained_objs = {self.pre + 'v_' + n for n, p in zip(fn.param_names, fn.params)
+                              if n in fn.attrs.get('retain', ()) and I.olist_elem(p.type) is not None}
         # the lists this function owns (S3a): one place each, freed at every exit; a cleanup frame
         # links them so a longjmp over this function frees them too -- only when something in the
         # function can raise (or call something that can); otherwise there is no edge to clean
@@ -278,7 +283,7 @@ class Emitter(TextEmitter):
                       if i.op == 'local.alloc' and (i.result.type.pointee in _OWNED_LISTS or i.result.type.pointee == _BA)]
         for i in fn.body.instrs:
             if i.op == 'local.alloc' and i.result.type.pointee.head == 'obj' \
-                    and i.result.type.pointee.args[0].head == 'class':
+                    and i.result.type.pointee.args[0].head == 'class' and not i.attrs.get('borrowed'):
                 self.owned.append((self.pre + 'v_' + i.attrs['name'], 'obj'))
         if self.needs_sar:
             self.owned.append((self.sar, 'sarena'))
@@ -459,6 +464,9 @@ class Emitter(TextEmitter):
             self.parts.add('DIE')
             steps = []
             for k, name in enumerate(self.retained):
+                if name in self.retained_objs:
+                    steps.append('ail_obj_release(*(void **)p[%d]);' % k)
+                    continue
                 self.parts.add('BYTEARRAY')
                 steps.append('ail_bytearray_release(*(ail_bytearray **)p[%d]);' % k)
             for k, (name, kind) in enumerate(self.owned, len(self.retained)):
@@ -471,7 +479,7 @@ class Emitter(TextEmitter):
             unwind = self.unwind_name or 'ail_unwind_ir_%s' % sym
             self.aux.append('static void %s(void **p) { %s }\n' % (unwind, ' '.join(steps)))
             for name in self.retained:
-                self.line(1, 'ail_bytearray_retain(%s);' % name)
+                self.line(1, ('ail_obj_retain(%s);' if name in self.retained_objs else 'ail_bytearray_retain(%s);') % name)
             cargs = ['(void *)(&%s)' % n for n in self.retained] + ['(void *)(&%s)' % n for n, _ in self.owned]
             self.line(1, 'void *v__cargs[] = {%s};' % ', '.join(cargs))
             self.line(1, 'ail_cleanup_frame v__cf = {ail_cleanup_top, %s, v__cargs};' % unwind)
@@ -513,7 +521,7 @@ class Emitter(TextEmitter):
         if self.link:
             self.line(depth, 'ail_cleanup_top = v__cf.previous;')
         for name in self.retained:
-            self.line(depth, 'ail_bytearray_release(%s);' % name)
+            self.line(depth, ('ail_obj_release(%s);' if name in self.retained_objs else 'ail_bytearray_release(%s);') % name)
         for name, kind in self.owned:
             if kind == 'bytearray':
                 self.line(depth, 'ail_bytearray_release(%s);' % name)
@@ -780,6 +788,13 @@ class Emitter(TextEmitter):
         if op == 'field.plist':
             self.parts.update(('SLIST', 'PSLIST'))
             return self.assign_new(depth, ins.result, '(&(%s)->f_%s)' % (o[0], ins.attrs['name']))
+        if op == 'olist.len':
+            return self.assign_new(depth, ins.result, 'ail_olist_len(%s)' % o[0])
+        if op == 'olist.get':
+            cls = ins.result.type.args[0].name
+            if ins.attrs.get('mode') == 'nck':
+                return self.assign_new(depth, ins.result, '((ail_obj_%s *)(%s)->p[%s])' % (cls, o[0], o[1]))
+            return self.assign_new(depth, ins.result, '((ail_obj_%s *)ail_olist_get(%s, %s))' % (cls, o[0], o[1]))
         if op == 'plist.len':
             return self.assign_new(depth, ins.result, '((int64_t)(%s)->n)' % o[0])
         if op == 'plist.get':
@@ -861,7 +876,8 @@ class Emitter(TextEmitter):
             if ins.attrs.get('mode') == 'nck':
                 return self.line(depth, '%s[%s] = %s;' % (sp, o[1], o[2]))
             return self.line(depth, '%s_set(%s, %s, %s, %s);' % (view, sp, sn, o[1], o[2]))
-        if op in ('list.len', 'list.get', 'list.set', 'list.push', 'list.pop', 'list.clear'):
+        if op in ('list.len', 'list.get', 'list.set', 'list.push', 'list.pop', 'list.clear', 'list.reverse', 'list.append_all',
+                  'list.delat'):
             return self.list_op(ins, depth, o)
         if op == 'spec.get':
             return self.spec_get(ins, depth, o)
@@ -1364,11 +1380,26 @@ class Emitter(TextEmitter):
         if op == 'list.push':
             return self.line(depth, 'ail_%s_push(%s, %s);' % (f, L, o[1]))
         if op == 'list.pop':
+            at = o[1] if len(o) > 1 else '-1LL'
             if ins.results:
-                return self.assign_new(depth, ins.result, 'ail_%s_pop(%s, -1LL)' % (f, L))
-            return self.line(depth, '(void)ail_%s_pop(%s, -1LL);' % (f, L))
+                return self.assign_new(depth, ins.result, 'ail_%s_pop(%s, %s)' % (f, L, at))
+            return self.line(depth, '(void)ail_%s_pop(%s, %s);' % (f, L, at))
         if op == 'list.clear':
             return self.line(depth, 'ail_%s_clear(%s);' % (f, L))
+        if op == 'list.reverse':
+            return self.line(depth, '{ __typeof__((%(L)s)->p[0]) t_; for (int64_t a_ = 0, b_ = (%(L)s)->n - 1; a_ < b_; a_++, b_--) '
+                                    '{ t_ = (%(L)s)->p[a_]; (%(L)s)->p[a_] = (%(L)s)->p[b_]; (%(L)s)->p[b_] = t_; } }' % {'L': L})
+        if op == 'list.append_all':
+            self.parts.add('DIE')
+            return self.line(depth, '{ int64_t m_ = (%(S)s)->n; if (m_) { ail_%(f)s_reserve(%(L)s, m_); '
+                                    'memcpy((%(L)s)->p + (%(L)s)->n, (%(S)s)->p, (size_t)m_ * sizeof(*(%(L)s)->p)); '
+                                    '(%(L)s)->n += m_; } }' % {'L': L, 'S': o[1], 'f': f})
+        if op == 'list.delat':
+            self.parts.add('DIE')
+            return self.line(depth, '{ int64_t n_ = (%(L)s)->n, i_ = %(I)s; if (i_ < 0) i_ += n_; '
+                                    'if (i_ < 0 || i_ >= n_) ail_die("list assignment index out of range"); '
+                                    'memmove((%(L)s)->p + i_, (%(L)s)->p + i_ + 1, (size_t)(n_ - i_ - 1) * sizeof(*(%(L)s)->p)); '
+                                    '(%(L)s)->n = n_ - 1; }' % {'L': L, 'I': o[1]})
         raise I.IRError('no C for %s' % op)
 
     def owned_slist_op(self, ins, depth, o):

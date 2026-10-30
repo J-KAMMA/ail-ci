@@ -592,6 +592,20 @@ static inline void ail_write_tint(ail_tint x) {
 
 # A list of exact ints (docs/design/BIGINT.md section 13): each element is an `ail_tint` slot, the small ints inline and a big one
 # a pointer to its (immutable, never freed before exit) magnitude, so copying a slot shares the box and nothing is reference counted.
+TLISTTEXT = r'''
+static ail_str ail_list_text_t(ail_sarena *A, const ail_tint *p, int64_t n) {
+    ail_str *parts = ail__list_text_parts(n);
+    int64_t k = 0;
+    parts[k++] = ail__lt_open;
+    for (int64_t i = 0; i < n; i++) {
+        if (i) parts[k++] = ail__lt_sep;
+        parts[k++] = ail_tint_str(A, p[i]);
+    }
+    parts[k++] = ail__lt_close;
+    return ail__list_text_join(A, parts, k);
+}
+'''
+
 TLIST = r'''
 /* ---- lists of exact ints: ail_tlist (tint_typed.TLIST) ----------------------------------------------------- */
 typedef struct { ail_tint *p; int64_t n, cap; } ail_tlist;
@@ -618,6 +632,10 @@ static __attribute__((noreturn, noinline, cold)) void ail_ir_tlist_fail(void) {
     ail_die("list index out of range");
     __builtin_unreachable();
 }
+static __attribute__((noreturn, noinline, cold)) void ail_ir_tlist_setfail(void) {
+    ail_die("list assignment index out of range");
+    __builtin_unreachable();
+}
 static inline __attribute__((always_inline)) ail_tint ail_ir_tlist_get(const ail_tlist *L, int64_t i) {
     if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
         if (i < 0) i += L->n;
@@ -628,7 +646,7 @@ static inline __attribute__((always_inline)) ail_tint ail_ir_tlist_get(const ail
 static inline __attribute__((always_inline)) void ail_ir_tlist_set(ail_tlist *L, int64_t i, ail_tint v) {
     if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
         if (i < 0) i += L->n;
-        if (i < 0 || i >= L->n) ail_ir_tlist_fail();
+        if (i < 0 || i >= L->n) ail_ir_tlist_setfail();
     }
     L->p[i] = v;
 }
