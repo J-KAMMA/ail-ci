@@ -1,3 +1,30 @@
+## 2026-10-30 -- ex23: a module constant with only function definitions runs nothing (re-applied on job-rbex23)
+
+`math.ail` is a Python-syntax example with a module constant (`LIMIT = 6`) and a helper (`sum_to`)
+but no top-level call.  CPython runs the literal assignment, prints nothing and exits 0.  This tree
+already had a related no-op entry rule (`_python_runs_nothing` / `_NOTHING_MAIN`); the accepted
+ex23 change adds the typed-path `_declarations_only` flag, the purity checks (`_pure_definition_expr`,
+`_pure_function`, `_pure_class`) and `_has_module_constant`, and selects `DECLARATIONS_MAIN` for a
+source `_rewrite_script` leaves unchanged when it assigns module literals and only defines
+functions/classes.  Both rules are kept: the ex23 flag is only set for pure definitions (so a
+decorator, a non-literal default or a non-declaration class body does not take the new
+declarations-only main), a file-reading array entry keeps the existing entry convention, tool mode
+still asks for the library entry, and the earlier `_python_runs_nothing` route stays for defs-only
+and import shapes.
+
+Added `AIL_CURRENT/test_ail_ex23.py` (7 programs, both builds, CPython comparison) and registered
+it in `ail_check.MODULES`.  Probes in `/tmp/probes` (`ex23_math_const`, `ex23_const_call`,
+`ex23_const_ifmain`, `ex23_const_types`, `ex23_const_class`, `ex23_const_print_uncalled`,
+`ex23_const_computed`, `ex23_const_default`, `ex23_const_empty`, `ex23_no_const`,
+`ex23_array_entry`, `ex23_array_entry_noconst`, `ex23_impure_default`,
+`ex23_impure_class_assign`, `ex23_decorated`) match CPython on both builds; `ex23_decorated`
+keeps the pre-existing general-path build refusal of a decorator, and `ex23_impure_class` keeps the
+pre-existing no-output difference for a bare statement in a class body (the ex23 flag is not set
+for it).  Tests on the final tree: `test_ail_ex23`, `test_ail_python_syntax`, `test_ail_pre364`,
+`test_ail_fallback_note`, `test_ail_refusal_messages`, `test_ail_pre170`, `test_ail_safetynet`,
+`test_ail_modconst`, `test_ail_files` and `test_ail_corpus_findings3`;
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-30 -- GPU stage G1: `# ail: gpu`, the eligibility proof, kernel IR and its CPU emulation
 
 `compile --gpu` (or `AIL_GPU_BUILD=1`) reads `# ail: gpu` on the line before a loop (or at the end of a list-comprehension
