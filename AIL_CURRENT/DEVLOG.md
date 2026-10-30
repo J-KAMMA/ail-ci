@@ -1,3 +1,11 @@
+## 2026-10-30 -- ex15 re-apply: detect a usable cargo too (job-rbex15-10301051)
+
+`test_ail_cargo` failed the full suite for the same reason as the Rust host cases above:
+`shutil.which` finds the rustup proxy while no default toolchain is installed, so five cargo builds were
+attempted and the proxy exited 1. `ail_testenv.cargo()` shares the `rustc()` `--version` probe (both now call
+`_usable`), and `test_ail_cargo` takes its `CARGO` from it, so the module skips here with the reason "cargo
+with a toolchain and a C compiler are required" and still runs unchanged when a toolchain is installed.
+
 ## 2026-10-30 -- ex15 re-apply: definitions plus module constants run only the constants (job-rbex15-10301051)
 
 Re-applied accepted job `job-ex15-10290445` on this tree. `language_examples/math.ail` is a Python-syntax

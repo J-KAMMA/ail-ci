@@ -11,8 +11,8 @@ A dependency is vendored from a local git repository (`cargo vendor`) so the bui
 wrappers that read NAME_last_error); a Rust host that uses it is compared with CPython calling
 the same `@export` library.
 
-Skipped when cargo (and a C compiler) is missing.  cbindgen is optional: tests use --header,
-and a fake cbindgen checks the installed branch without it.
+Skipped when cargo (with its toolchain) or a C compiler is missing.  cbindgen is optional: tests
+use --header, and a fake cbindgen checks the installed branch without it.
 """
 import json
 import os
@@ -27,11 +27,13 @@ ROOT = Path(__file__).resolve().parent
 CARGO_TOOL = ROOT / "ail_cargo.py"
 RSGEN = ROOT / "ail_rsgen.py"
 CLI = ROOT / "ail_chatgpt.py"
-CARGO = shutil.which("cargo")
 GIT = shutil.which("git")
 CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc")
 sys.path.insert(0, str(ROOT))
 from test_ail_ffi import compile_cli, run_cpython  # noqa: E402
+from ail_testenv import cargo  # noqa: E402
+
+CARGO = cargo()
 
 CARGOTOML = """[package]
 name = "{name}"
@@ -286,7 +288,7 @@ def crate(directory, name, source, manifest=None):
     return directory
 
 
-@unittest.skipUnless(CARGO and CC, "cargo and a C compiler are required")
+@unittest.skipUnless(CARGO and CC, "cargo with a toolchain and a C compiler are required")
 class CargoTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
