@@ -649,6 +649,22 @@ def _has_main_entry(source):
     return any(isinstance(n, ast.FunctionDef) and n.name == 'main' for n in tree.body)
 
 
+def _module_constant_source(source):
+    """True for a source whose whole top level is definitions plus at least one module
+    constant, with no `main` and no executable statement. CPython runs such a file's module
+    body (the constants have no effect) and exits 0, so there is no array-entry tool to
+    synthesize; the general path already builds it as a no-op module body."""
+    if _has_main_entry(source):
+        return False
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    if not any(isinstance(n, (ast.Assign, ast.AnnAssign)) for n in tree.body):
+        return False
+    return _rewrite_script(source, force=False) is None
+
+
 def _general_failure(typed, use_typed, failure):
     """The exception to report when the general (boxed) path cannot build a program the typed
     path refused. For a program with a `main` entry that is the TYPED refusal: it names the
@@ -1315,7 +1331,12 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = (_NOTHING_MAIN if _python_runs_nothing(source, True) else
+    # A definitions-plus-constants source runs nothing under CPython, so it gets a no-op `main`.
+    # `_python_runs_nothing` covers the python surface; `_module_constant_source` names the same
+    # rule for a definitions-only source with a module constant, while AIL_TOOL_MODE still asks
+    # for the library tool entry instead.
+    main = (_NOTHING_MAIN if _python_runs_nothing(source, True)
+            or (not os.environ.get('AIL_TOOL_MODE') and _module_constant_source(source)) else
             _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
