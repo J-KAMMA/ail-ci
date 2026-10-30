@@ -53,7 +53,7 @@ sys.exit(main())
   No other globals you change (an int/float `global` works), nested `def`, own exception classes (MORE).
 - `int` is 64-bit (`OverflowError`, no big ints). Types: int, float, str, bool, bytes, `list`,
   `dict`, `set`, `tuple[int, str]` (`return a, b`; `a, b = f()`), dataclasses. `None` for a class
-  or int/float/str (`int | None`; `Optional["Node"]`); else a sentinel (-1, "").
+  or int/float/str (`int | None`, also `bytes | None`; `Optional["Node"]`); else a sentinel (-1, "").
 - List/dict/set params are read-only (typed): change a dataclass field
   (`acc.keys.append`) or return one.
 - `print` takes numbers, str, bool, tuples, lists, `*xs` (dict: general path):

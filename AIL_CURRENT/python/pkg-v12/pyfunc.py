@@ -21879,6 +21879,18 @@ def _stmt_inner(node, ctx, ind):
             v = _bytes_value(fake, ctx)
             return _flush(ctx, pad) + '%s%s = %s;\n' % (pad, ctx.cname(node.target.id), v)
         _at = ctx.type_of(node.target.id)
+        if (_at == BYTEARRAY and isinstance(node.op, ast.Add)
+                and _etype(node.value, ctx) in (BYTES, BYTEARRAY)
+                and not (isinstance(node.value, ast.Name) and node.value.id == node.target.id)):
+            # `ba += chunk` extends the bytearray in place (CPython's bytearray.__iadd__) for a bytes or bytearray
+            # chunk; a list, a str or an int is a TypeError there and is not rewritten.  `ba += ba` is a BufferError
+            # in CPython ("Existing exports of data"), so that one stays refused (a copy, `ba += ba[:]`, is fine)
+            extend = ast.Call(func=ast.Attribute(value=node.target, attr='extend', ctx=ast.Load()),
+                              args=[node.value], keywords=[])
+            ast.copy_location(extend, node)
+            ast.fix_missing_locations(extend)
+            call_c = _bytearray_method(extend, ctx, as_stmt=True)
+            return _flush(ctx, pad) + '%s(void)(%s);\n' % (pad, call_c)
         if _at not in NUM:
             raise Unsupported('augmented assignment to %s; a container is not rebound by += -- '
                               'grow a list with .append(), a set with .add(), and a dict with '
