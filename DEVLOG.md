@@ -1,3 +1,28 @@
+## 2026-10-30 -- ex16: a module with a top-level statement falls back when main cannot be synthesised (job-rbex16-10301052)
+
+`language_examples/math.ail` (a module constant `LIMIT` plus `def sum_to(n)`) built with
+`AIL_UNIFIED_FORCE=1`, but the default build refused it by name: the typed path built the
+function, then `_main_for` rejected its non-array first parameter, and that refusal was raised
+after the `try` whose `except Unsupported` tries the general path.  Main synthesis now happens
+inside that `try`, so the default build falls back; both builds match CPython (`python3
+math.ail` prints nothing, exit 0).  The fallback is gated on a top-level executable statement:
+a pure `def`/`class`/`import` source keeps the typed path's own main (here `_python_runs_nothing`
+already installs the nothing-main that CPython's run implies), because the general path's
+array-entry main would turn it into a usage error where CPython does nothing (a new silent
+difference).  `language_examples/integer_series.ail` still refuses (its typed C arity bug,
+after main synthesis succeeded) and is unchanged.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `module_const` and `module_used` (the
+`math.ail` shape with and without a top-level `print`) match CPython, as does
+`language_examples/math.ail`; `module_noio` (a top-level non-literal assignment, so the typed
+path still reaches `_main_for`) was the residual default-build failure and now matches, as do
+`module_call`, `module_attr`, `module_neg`, `pure_defs` and `pure_defs_const`.  Final-state
+tests: test_ail_ex16, test_ail_fallback_note, test_ail_refusal_messages,
+test_ail_python_syntax, test_ail_pre170, test_ail_strict, test_ail_build_reports,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --update` added
+the module (its unrelated pre-existing unassigned modules were left alone) and `--check` exits 0.
+
 ## 2026-10-30 -- FFI F3a: integer arguments of an @extern stub behave like the shim's
 
 CPython runs `@extern` stubs through `ail_ffi.py`, which checks every int argument against the range of its C type and
