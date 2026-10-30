@@ -28698,6 +28698,15 @@ def _host_unprintable_rows():
     import os
     import re
     import unicodedata
+    try:
+        # the table shipped for this Unicode database: a clean AIL_CACHE has no on-disk copy yet
+        import unprintable_data
+        flat = unprintable_data.ROWS.get(unicodedata.unidata_version)
+        if flat is not None and sys.implementation.name == 'cpython':
+            _HOST_ROWS = ''.join('    {%d, %d},\n' % (flat[i], flat[i + 1]) for i in range(0, len(flat), 2))
+            return _HOST_ROWS
+    except ImportError:
+        pass
     cache = None
     try:
         import buildcache
