@@ -321,6 +321,7 @@ MODULES = (
     'test_ail_gpu_g1',
     'test_ail_gpu_g2',
     'test_ail_gpu_g3',
+    'test_ail_piece_stubs', 'test_ail_ffi_f3a',
 )
 
 
