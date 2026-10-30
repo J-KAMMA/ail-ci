@@ -741,7 +741,10 @@ class TextLowering(object):
                 vals.append(self.expr(a0))
             elif t == P.INT:
                 v = self.expr(a0)
-                if v.type == I.TINT:
+                if v.type == I.TINT and stream == 'stdout':
+                    kinds.append('tint')
+                    vals.append(v)
+                elif v.type == I.TINT:
                     kinds.append('str')
                     vals.append(self.rt('tint_str', [v]))
                 else:

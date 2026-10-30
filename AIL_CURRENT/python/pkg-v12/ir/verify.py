@@ -25,13 +25,14 @@ from . import rtc
 _LIST_I64 = I.T('obj', I.T('list', I.I64))
 _LIST_F64 = I.T('obj', I.T('list', I.F64))
 _LIST_STR = I.T('obj', I.T('list', I.STRV))
+_LIST_TINT = I.T('obj', I.T('list', I.TINT))
 _BA = I.T('obj', I.T('bytearray'))
 
 
 class _Listy(object):
     """The owned-list types: lists of int, float, str, and lists of scalar records."""
     def __contains__(self, t):
-        return t in (_LIST_I64, _LIST_F64, _LIST_STR) or I.rec_elem(t) is not None
+        return t in (_LIST_I64, _LIST_F64, _LIST_STR, _LIST_TINT) or I.rec_elem(t) is not None
 
 
 _LISTY = _Listy()
@@ -40,7 +41,8 @@ S0_TYPES = frozenset([I.I1, I.I64, I.F64, I.TINT])
 S1_TYPES = S0_TYPES | frozenset([I.T('bytes'), I.T('obj', I.T('list', I.I64)),
                                  I.T('obj', I.T('list', I.F64)), I.T('span', I.I64), I.T('span', I.F64),
                                  I.T('span', I.T('u8')), I.T('obj', I.T('bytearray')), I.STRV,
-                                 I.T('obj', I.T('list', I.STRV))])
+                                 I.T('obj', I.T('list', I.STRV)), I.T('obj', I.T('list', I.TINT)),
+                                 I.T('span', I.TINT)])
 
 
 class _Checker(object):
@@ -431,7 +433,7 @@ class _Checker(object):
         ok = len(ins.operands) == len(params) == len(abi)
         for a, p, how in zip(ins.operands, params, abi):
             # an owned list lent to a read-only list parameter (a span in the callee's signature)
-            lent = how in ('array', 'flist') and p.head == 'span' and self._is_list_ref(a) \
+            lent = how in ('array', 'flist', 'tarray') and p.head == 'span' and self._is_list_ref(a) \
                 and a.type.args[0].args[0] == p.args[0]
             ok = ok and (a.type == p or lent)
         self.want(where, ok, 'arguments (%s) do not match %s' % (', '.join(map(str, self.types(ins.operands))), sig))
@@ -636,13 +638,14 @@ class _Checker(object):
     def op_list_has(self, ins, scope, stack, where, top):
         if self.nresults(ins, where, 1):
             L, v = ins.operands
-            self.want(where, L.type == _LIST_STR and v.type == I.STRV and ins.result.type == I.I1,
-                      'list.has takes (list of str, str) and yields i1')
+            self.want(where, ((L.type == _LIST_STR and v.type == I.STRV)
+                              or (L.type == _LIST_TINT and v.type == I.TINT)) and ins.result.type == I.I1,
+                      'list.has takes (list of str, str) or (list of tint, tint) and yields i1')
 
     def op_list_sort(self, ins, scope, stack, where, top):
         self.nresults(ins, where, 0)
-        self.want(where, ins.operands[0].type in (_LIST_STR, _LIST_I64, _LIST_F64),
-                  'list.sort takes a list of str, int or float')
+        self.want(where, ins.operands[0].type in (_LIST_STR, _LIST_I64, _LIST_F64, _LIST_TINT),
+                  'list.sort takes a list of str, int, float or tint')
 
     def op_list_join(self, ins, scope, stack, where, top):
         if self.nresults(ins, where, 1):
@@ -674,7 +677,7 @@ class _Checker(object):
         abi = ins.attrs.get('abi') or ['value'] * len(args)
         ok = len(args) == len(params) == len(abi)
         for a, p, how in zip(args, params, abi):
-            if how in ('array', 'flist'):
+            if how in ('array', 'flist', 'tarray'):
                 ok = ok and p.head == 'span' and (a.type == p or (self._is_list_ref(a) and a.type.args[0].args[0] == p.args[0]))
             else:
                 ok = ok and a.type == p
@@ -753,7 +756,7 @@ class _Checker(object):
         abi = ins.attrs.get('abi') or ['value'] * len(args)
         ok = len(args) == len(params) == len(abi)
         for a, p, how in zip(args, params, abi):
-            if how in ('array', 'flist'):
+            if how in ('array', 'flist', 'tarray'):
                 ok = ok and p.head == 'span' and (a.type == p or (self._is_list_ref(a) and a.type.args[0].args[0] == p.args[0]))
             else:
                 ok = ok and a.type == p
@@ -890,7 +893,7 @@ class _Checker(object):
                       and all(isinstance(x, int) and not isinstance(x, bool) and 0 <= x <= 255 for x in data),
                       'bytes.lit yields bytes and carries its byte values')
 
-    _PRINT_KINDS = {'int': I.I64, 'flt': I.F64, 'str': I.STRV, 'bool': I.I64}
+    _PRINT_KINDS = {'int': I.I64, 'flt': I.F64, 'str': I.STRV, 'bool': I.I64, 'tint': I.TINT}
 
     def op_print(self, ins, scope, stack, where, top):
         self.nresults(ins, where, 0)
