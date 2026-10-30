@@ -1520,11 +1520,11 @@ class Unified(unittest.TestCase):
                      'for (int64_t _uvk', '_uv->p['):
             self.assertNotIn(form, plain)
             self.assertNotIn(form, c)
-        # the unannotated tuple loops are boxed: no unboxed local; only the run-time changes every plan gets (section 15) differ
+        # the unannotated tuple loops are boxed: no unboxed local; only the run-time changes every plan gets (section 15) differ (and the gc pool)
         sys.path[:0] = [str(PKG)]
         try:
             import safetyrt
-            plain = safetyrt.patch_tuples(safetyrt.patch_sortprim(plain))
+            plain = safetyrt.patch_gcpool(safetyrt.patch_tuples(safetyrt.patch_sortprim(plain)))
         finally:
             sys.path.remove(str(PKG))
         self.assertEqual(plain, c)
