@@ -149,6 +149,33 @@ def main():
 main()
 '''
 
+# an exact function with a constant-table loop and a lifted closure (test_ail_nested_functions set_rows): the row reads
+# of the table stay native, which is what the table loop emits
+TABLE = '''
+def main() -> None:
+    adj: list[set[int]] = [set() for _ in range(5)]
+    for a, b in [(0, 1), (1, 2), (3, 4)]:
+        adj[a].add(b)
+        adj[b].add(a)
+    comp = [-1] * 5
+
+    def mark(u: int, c: int) -> None:
+        comp[u] = c
+        for v in sorted(adj[u]):
+            if comp[v] == -1:
+                mark(v, c)
+
+    c = 0
+    for u in range(5):
+        if comp[u] == -1:
+            mark(u, c)
+            c += 1
+    print(c, comp)
+
+
+main()
+'''
+
 
 def build(directory, text, name, extra=None):
     source, exe = Path(directory, name + '.py'), Path(directory, name)
@@ -184,6 +211,9 @@ class BigcapSplit(unittest.TestCase):
 
     def test_s1_boundary(self):
         self.check(CROSS, ['3 4\n', '70 9\n', '200 12\n'])
+
+    def test_s1_table_loop(self):
+        self.check(TABLE, [''], {'default': {}, 'force': MODES['force']})
 
     def test_s2_shifts(self):
         self.check(SHIFTS, ['5 0 1 63 64 200\n', '3 62 63\n', '7 -1 5\n', '1 -3\n'])

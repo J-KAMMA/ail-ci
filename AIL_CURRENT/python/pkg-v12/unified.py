@@ -2086,7 +2086,8 @@ def etype(plan, fp, n, env):
     """The lattice value of expression `n` in function `fp`, under the variable types `env`.
     A scalar answer means the emitter can produce the value unboxed (`Emit.nexpr`)."""
     t = _etype(plan, fp, n, env)
-    if t == INT and fp is not None and fp.exact and not isinstance(n, (ast.Name, ast.Constant))             and fn_bits(plan, fp)(n) > 62:
+    if t == INT and fp is not None and fp.exact and not isinstance(n, (ast.Name, ast.Constant))             and fn_bits(plan, fp)(n) > 62 and _row_read(plan, fp, n) is None:
+        # (a row read of a constant table is an int64 literal of the table, and the table loop reads it only natively)
         return OBJ            # an exact function: an unbounded int expression is the boxed, promoting int
     return OBJ if (t == FLOAT and plan.nofloat) else t
 
