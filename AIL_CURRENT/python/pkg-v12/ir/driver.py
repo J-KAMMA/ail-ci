@@ -38,6 +38,9 @@ _PROGRAM = [None]        # the program SUMMARIES belong to: its signature table 
                          # object per compiled program), held so its identity cannot be reused
 
 
+# IR ops that lower list operations the IR did not cover before (extend, reverse, del xs[i], pop(i))
+_NEW_LIST_OPS = frozenset(('list.append_all', 'list.reverse', 'list.delat'))
+
 def _summaries(ctx):
     funcs = getattr(ctx, 'funcs', None)
     if _PROGRAM[0] is not funcs:
@@ -583,6 +586,21 @@ def _apply(P, args, kwargs, result, current):
                 print("---- types:", dict(ctx.types), file=out)
         function, program = lower.lower(P, fn, ctx, sig, recursive, cname, PENDING,
                                         not bound.get('local_methods', True), _summaries(ctx))
+        if _needs_tint:
+            # A function whose ints need the tagged lowering keeps the route it had before these operations on a list of int64
+            # were lowered: the exact general path. Lowered here, its int64 arithmetic (`ck_sub` of a bound the proof cannot
+            # fit) stops with a catchable overflow where CPython keeps the exact value (`v += [9]` ... `x = MAX - len(v) * -1`
+            # under `except:` printed 1). Only a function with a `try` is held back (without a handler the overflow stops the program
+            # loudly, as it does for every function the IR lowers), and not one that has a list of exact ints (ail_tlist: the
+            # program already takes that route for its big ints); a list of records is not affected.
+            _body = list(I.walk(function.body))
+            if any(_i.op == 'try' for _i in _body) and not any(
+                    getattr(_r, 'type', None) == lower.LIST_TINT for _i in _body for _r in _i.results):
+                for _ins in _body:
+                    if _ins.op in _NEW_LIST_OPS or (_ins.op == 'list.pop' and len(_ins.operands) > 1):
+                        _lt = _ins.operands[0].type
+                        if _lt.head == 'obj' and _lt.args[0].head == 'list' and _lt.args[0].args[0] == I.I64:
+                            raise lower.NotS0('%s: the exact general path handles this function' % _ins.op)
         if not _only_cleanup_before(generated, sig):
             raise lower.NotS0('the legacy path emits helpers around this function')
         if '_stdin_broots' in generated:

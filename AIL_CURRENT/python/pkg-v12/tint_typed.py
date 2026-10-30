@@ -632,6 +632,10 @@ static __attribute__((noreturn, noinline, cold)) void ail_ir_tlist_fail(void) {
     ail_die("list index out of range");
     __builtin_unreachable();
 }
+static __attribute__((noreturn, noinline, cold)) void ail_ir_tlist_setfail(void) {
+    ail_die("list assignment index out of range");
+    __builtin_unreachable();
+}
 static inline __attribute__((always_inline)) ail_tint ail_ir_tlist_get(const ail_tlist *L, int64_t i) {
     if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
         if (i < 0) i += L->n;
@@ -642,7 +646,7 @@ static inline __attribute__((always_inline)) ail_tint ail_ir_tlist_get(const ail
 static inline __attribute__((always_inline)) void ail_ir_tlist_set(ail_tlist *L, int64_t i, ail_tint v) {
     if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
         if (i < 0) i += L->n;
-        if (i < 0 || i >= L->n) ail_ir_tlist_fail();
+        if (i < 0 || i >= L->n) ail_ir_tlist_setfail();
     }
     L->p[i] = v;
 }

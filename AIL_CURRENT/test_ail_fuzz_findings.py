@@ -206,7 +206,7 @@ main()
 # With AIL_IR=1 the IR takes a def-syntax function whose only sharing is a list (design section 15):
 # it shares like CPython, so these compile and print what CPython prints. The other kinds (dict, set,
 # bytearray, `+=` on a list) are not in the IR yet: the legacy emitter refuses them by name.
-IR_SHARES = ("list", "list_store", "list_loop")
+IR_SHARES = ("list", "list_store", "list_loop", "list_aug")   # (list_aug: `xs += [3]` is lowered by the IR since list[Rec])
 IR_SHARES_TYPED = ("field_read", "field_read_other_way")
 
 
