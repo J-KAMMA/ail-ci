@@ -115,12 +115,17 @@ int in_thread(int (*f)(int));
 void keep(int (*f)(int));
 int fire(void);
 unsigned long long u64_round(unsigned long long (*f)(unsigned long long), unsigned long long x);
+unsigned long long ucall(unsigned long long x, unsigned long long (*f)(unsigned long long));
+int uptr(int (*f)(const unsigned long long *));
+int ulist(int (*f)(int, unsigned long long *));
+long ibig(long x, long (*f)(long));
 """
 
 CB_C = r"""
 #include "cb.h"
 #include <pthread.h>
 #include <stddef.h>
+#include <stdlib.h>
 static int log_[16];
 int each(int n, int (*f)(int)) { int s = 0; for (int i = 1; i <= n; i++) { int r = f(i); if (i < 16) log_[i] = r; s += r; } return s; }
 int got(int i) { return log_[i]; }
@@ -140,6 +145,14 @@ int in_thread(int (*f)(int)) { pthread_t t; void *r; pthread_create(&t, NULL, th
 void keep(int (*f)(int)) { kept = f; }
 int fire(void) { return kept(6); }
 unsigned long long u64_round(unsigned long long (*f)(unsigned long long), unsigned long long x) { return f(x); }
+unsigned long long ucall(unsigned long long x, unsigned long long (*f)(unsigned long long)) { return f(x); }
+int uptr(int (*f)(const unsigned long long *)) { static unsigned long long v = 18446744073709551615ULL; return f(&v); }
+int ulist(int (*f)(int, unsigned long long *)) {
+    static unsigned long long u[3] = {1ULL, 9223372036854775807ULL, 18446744073709551615ULL};
+    static unsigned long long small[3] = {1ULL, 9223372036854775807ULL, 5ULL};
+    return f(3, getenv("CB_SMALL") ? small : u);
+}
+long ibig(long x, long (*f)(long)) { return f(x); }
 """
 
 CB_STUBS = r"""
@@ -302,6 +315,99 @@ main()
 """
 U64_OUT = "18446744073709551615 9223372036854775808\nu64: u64_round: the result of plus_one does not fit c_ulonglong\n"
 EXACT = (("default", {}), ("general", {"AIL_UNIFIED_FORCE": "1"}))
+
+# (F3a / F3b) the integer conversions of a stub are the same around a callback: an argument is checked against the range of its
+# C type (OverflowError "<stub>: <param> does not fit <type>"), a 64-bit unsigned argument or result is exact over 0 .. 2**64-1,
+# and a callback's result outside its type is an OverflowError raised after the C call returns.
+U64_MORE = r"""
+from ail_ffi import *
+
+link("./libcb.so")
+Up = callback(c_ulonglong, c_ulonglong, on_error=18446744073709551615)
+
+@extern(header="cb.h")
+def ucall(x: c_ulonglong, f: Up) -> c_ulonglong: ...
+@extern(header="cb.h")
+def uptr(f: callback(c_int, cptr(c_ulonglong), on_error=0)) -> c_int: ...
+@extern(header="cb.h")
+def ibig(x: c_long, f: callback(c_long, c_long, on_error=-1)) -> c_long: ...
+
+def same(x: int) -> int:
+    print("same", x, x + 1, x // 3)
+    return x
+
+def quiet(x: int) -> int:
+    return x
+
+def dbl(x: int) -> int:
+    return x * 2 + 1
+
+def neg(x: int) -> int:
+    return 0 - x - 1
+
+def look(v: int) -> int:
+    print("ptr", v, v + 1, v // 3)
+    return 1
+
+def twice(x: int) -> int:
+    return x * 2
+
+def main():
+    print(ucall(5, same))
+    print(ucall(9223372036854775807, same))
+    print(ucall(9223372036854775808, same))
+    print(ucall(18446744073709551615, same))
+    maxv = ucall(18446744073709551615, quiet)
+    x = maxv // 2
+    print(ucall(x, dbl))
+    print(ucall(0, dbl))
+    for k in range(3):
+        print(ucall(x + k, same))
+    try:
+        print(ucall(x + 1, dbl))
+    except OverflowError as e:
+        print("result:", e)
+    try:
+        print(ucall(0, neg))
+    except OverflowError as e:
+        print("result:", e)
+    try:
+        print(ucall(x * 2 + 2, same))
+    except OverflowError as e:
+        print("argument:", e)
+    try:
+        print(ucall(0 - 1, same))
+    except OverflowError as e:
+        print("argument:", e)
+    print(uptr(look))
+    print(ibig(5, twice))
+    try:
+        print(ibig(4611686018427387904, twice))
+    except OverflowError as e:
+        print("result:", e)
+
+main()
+"""
+
+# a list of 64-bit unsigned values is a list of exact ints, which the typed lowering of this base does not cover (the program then
+# builds on the legacy int64 emitter): the values below 2**63 are equal to CPython's, one above them stops loudly, never a negative int
+U64_LIST = r"""
+from ail_ffi import *
+
+link("./libcb.so")
+
+@extern(header="cb.h")
+def ulist(f: callback(c_int, c_int, array(c_ulonglong, 0), on_error=0)) -> c_int: ...
+
+def show(n: int, xs: list[int]) -> int:
+    print("list", n, xs)
+    return n
+
+def main():
+    print(ulist(show))
+
+main()
+"""
 
 UNCAUGHT = CB_STUBS + r"""
 def third(i: int) -> int:
@@ -585,6 +691,52 @@ class CallbackTests(unittest.TestCase):
 
     def test_exception_in_the_third_call_and_other_callbacks(self):
         self.compare("third", THIRD, THIRD_OUT)
+
+    def test_unsigned_64_bit_and_range_checks(self):
+        source = self.write("u64more.py", U64_MORE)
+        cpy = run_cpython(self.dir, source)
+        self.assertEqual(cpy.returncode, 0, cpy.stderr)
+        for needle in ("same 18446744073709551615 18446744073709551616 6148914691236517205", "result: ucall: the result of dbl does not fit c_ulonglong",
+                       "argument: ucall: x does not fit c_ulonglong", "ptr 18446744073709551615",
+                       "result: ibig: the result of twice does not fit c_long"):
+            self.assertIn(needle, cpy.stdout)
+        for mode, extra in (("default", {}), ("general", {"AIL_UNIFIED_FORCE": "1"})):
+            with self.subTest(mode):
+                out = self.dir / ("u64more_%s.out" % mode)
+                if out.exists():
+                    out.unlink()
+                env = dict(os.environ, PYTHONPATH=str(ROOT), AIL_NO_CACHE="1", **extra)
+                built = subprocess.run([sys.executable, "-B", CLI, "compile", source, "-o", str(out)], cwd=self.dir,
+                                       capture_output=True, text=True, timeout=900, env=env)
+                self.assertEqual(built.returncode, 0, built.stderr + built.stdout)
+                ran = subprocess.run([str(out)], cwd=self.dir, capture_output=True, text=True, timeout=60)
+                self.assertEqual(ran.stdout, cpy.stdout)
+                self.assertEqual(ran.returncode, 0, ran.stderr)
+
+    def test_unsigned_64_bit_list_argument(self):
+        source = self.write("u64list.py", U64_LIST)
+        for small in (True, False):
+            env = dict(os.environ, PYTHONPATH=str(ROOT), PYTHONDONTWRITEBYTECODE="1")
+            if small:
+                env["CB_SMALL"] = "1"
+            cpy = subprocess.run([sys.executable, "-B", source], cwd=self.dir, capture_output=True, text=True, timeout=120, env=env)
+            self.assertEqual(cpy.returncode, 0, cpy.stderr)
+            self.assertIn("[1, 9223372036854775807, 5]" if small else "[1, 9223372036854775807, 18446744073709551615]", cpy.stdout)
+            for mode, extra in (("default", {}), ("general", {"AIL_UNIFIED_FORCE": "1"})):
+                with self.subTest("%s small=%s" % (mode, small)):
+                    out = self.dir / ("u64list_%s.out" % mode)
+                    if out.exists():
+                        out.unlink()
+                    built = subprocess.run([sys.executable, "-B", CLI, "compile", source, "-o", str(out)], cwd=self.dir,
+                                           capture_output=True, text=True, timeout=900, env=dict(env, AIL_NO_CACHE="1", **extra))
+                    self.assertEqual(built.returncode, 0, built.stderr + built.stdout)
+                    ran = subprocess.run([str(out)], cwd=self.dir, capture_output=True, text=True, timeout=60, env=env)
+                    if (ran.stdout, ran.returncode) == (cpy.stdout, cpy.returncode):
+                        continue
+                    self.assertFalse(small, "equal to CPython expected: %r %r" % (ran.stdout, ran.stderr))
+                    self.assertNotIn("-", ran.stdout)                       # never a negative number for a value above int64
+                    self.assertEqual(ran.returncode, 1, ran.stderr)
+                    self.assertIn("integer overflow", ran.stderr)
 
     def test_unsigned_64_bit_callbacks(self):
         """Exact in the builds with tagged ints; the legacy int64 emitter (the "typed" mode here) stops loudly instead
