@@ -71,15 +71,14 @@ for a C prototype that names a struct), `lib` (library name for -l, or a path to
 declaring file; None is the C library), `header` (checked against the real prototype at compile time;
 without one the declaration is trusted and `ail check --ffi` says so), `symbol` (the C name when it differs
 from the stub name), `pkg_config` (link flags from pkg-config, compile side only), `check` (one of
-"negative", "nonzero", "null", "minus1": a result that means failure), `errno` (read errno right after the
+"negative", "nonzero", "null", "minus1", and "allones", the unsigned (T)-1 such as (size_t)-1: a result that
+means failure; "negative" and "minus1" on an unsigned result never fire, so a compiled program refuses them), `errno` (read errno right after the
 call and raise OSError(errno, strerror): `str(e)` is `[Errno 2] No such file or directory`, `e.errno` is 2),
 `exc` (OSError by default with errno, else RuntimeError; one of the built-in kinds AIL can raise: OSError ValueError RuntimeError KeyError
 IndexError OverflowError EOFError), `sources` (a list of .c files beside the declaring file: the compiled
 program links them into its adapter object, CPython builds them into a shared library on first use).
 
 What the compiled program does differently (the declared differences):
-  * `c_ulong`, `c_size_t` and `c_uint64` results above 2**63 - 1 come back as the negative int with the
-    same bits in the compiled program (AIL ints are 64 bit); CPython gives the positive value.
   * a bytearray argument is copied in and out around the call in the compiled program; two names for one
     bytearray in one call see C's writes only after it returns.
   * `e.errno`, `e.strerror` and `str(e)` of an OSError are built in the compiled program only on a name bound by
@@ -104,6 +103,7 @@ CHECKS = {
     'nonzero': lambda rc: rc != 0,
     'null': lambda rc: rc == 0,
     'minus1': lambda rc: rc == -1,
+    'allones': None,        # the unsigned (T)-1, 2**bits - 1: decided against the result type in the call below
 }
 
 
@@ -430,6 +430,8 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
                 if kind.name not in names or not isinstance(next(k for n, k, _ in params if n == kind.name), (CType, ptr)) \
                         or next(k for n, k, _ in params if n == kind.name).kind not in ('bytes', 'bytearray'):
                     raise TypeError('%s: length(%r) must name a bytes or bytearray parameter' % (function.__name__, kind.name))
+        if check == 'allones' and not (isinstance(result, CType) and result.kind == 'int' and not result.signed):
+            raise ValueError('%s: check="allones" needs an unsigned integer result (c_size_t, c_uint64, ...)' % function.__name__)
         c_name = symbol or function.__name__
         record = dict(name=function.__name__, symbol=c_name, lib=lib, header=header,
                       file=getattr(function.__code__, 'co_filename', None))
@@ -554,7 +556,7 @@ def extern(lib=None, header=None, *, symbol=None, check=None, errno=False, exc=N
             if result is None:
                 return None
             probe = (0 if rc is None else 1) if result.kind == 'str' else (rc or 0) if result.kind in ('handle', 'owned') else rc
-            if check is not None and CHECKS[check](probe):
+            if check is not None and (probe == (1 << result.bits) - 1 if check == 'allones' else CHECKS[check](probe)):
                 failure = exc if exc is not None else (OSError if errno else RuntimeError)
                 if errno:
                     if failure is OSError:

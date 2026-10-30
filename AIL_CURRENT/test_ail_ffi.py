@@ -607,12 +607,25 @@ class FFITests(unittest.TestCase):
     def test_handles(self):
         self.same("handles", HANDLES, "True 10 11 12\n100 13 True\n")
 
-    def test_uint64_above_int64_is_the_declared_difference(self):
-        text = STUBS + "\ndef main():\n    print(tiny_big())\n    print(tiny_ul(9223372036854775807))\n\nmain()\n"
-        cpy, ail = self.both("big", text)
+    def test_uint64_results_equal_cpython(self):
+        # F3b: a 64-bit unsigned result above 2**63 - 1 is the exact int, as under the CPython shim (it used to come back
+        # as the negative int with the same bits). The stubs here are only the two u64 ones: a program with an errno stub
+        # is built on the legacy int64 emitter, where such a value is the loud stop of the next test.
+        stubs = ('from ail_ffi import *\n\n@extern(lib="./libtiny.so", header="tiny.h")\ndef tiny_ul(x: c_ulong) -> c_ulong: ...\n'
+                 '@extern(lib="./libtiny.so", header="tiny.h")\ndef tiny_big() -> c_uint64: ...\n')
+        text = stubs + "\ndef main():\n    print(tiny_big())\n    print(tiny_ul(9223372036854775807))\n\nmain()\n"
+        cpy, ail = self.both("big", text, ir="1")
         self.assertEqual(cpy, "9223372036854775809\n9223372036854775808\n")
-        # the compiled program has 64 bit ints: the same bits, signed
-        self.assertEqual(ail, "-9223372036854775807\n-9223372036854775808\n")
+        self.assertEqual(ail, cpy)
+
+    def test_uint64_result_above_int64_is_a_loud_stop_on_the_legacy_emitter(self):
+        text = STUBS + "\ndef main():\n    print(1)\n    print(tiny_big())\n    print(2)\n\nmain()\n"
+        self.write("big_legacy.py", text)
+        built, exe = compile_cli(self.dir, "big_legacy.py", ir="0", name="big_legacy.out")
+        self.assertEqual(built.returncode, 0, built.stderr)
+        ran = subprocess.run([str(exe)], cwd=self.dir, capture_output=True, text=True, timeout=60)
+        self.assertEqual((ran.stdout, ran.returncode), ("1\n", 1))        # never the negative number it used to print
+        self.assertIn("integer overflow", ran.stderr)
 
     def test_stubs_in_an_imported_module(self):
         self.write("tinymod.py", MODULE_STUBS)
