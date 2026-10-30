@@ -8,7 +8,8 @@ when the C call returns, in both. Each program below runs under CPython (ail_ffi
 typed path and general path; stdout and the exit code must be equal.
 
 * qsort and bsearch from the C library with AIL comparators (ints, doubles; a header-checked `const void *` form);
-* a small C library (built here): an exception in the 3rd callback call, a result that does not fit, an uncaught
+* a small C library (built here): an exception in the 3rd callback call, exact 64-bit unsigned arguments and results
+  (F3b), an int argument outside its C type, a result that does not fit, an uncaught
   exception, nested callback calls, float / bool / str / void / c_void_p / array callbacks, a callback on a stub
   that also takes a bytearray;
 * the SQLite `sqlite3_exec` row callback; skipped with a reason when libsqlite3-dev is missing;
@@ -113,6 +114,7 @@ int scale(unsigned char *buf, int n, int (*f)(int));
 int in_thread(int (*f)(int));
 void keep(int (*f)(int));
 int fire(void);
+unsigned long long u64_round(unsigned long long (*f)(unsigned long long), unsigned long long x);
 """
 
 CB_C = r"""
@@ -137,6 +139,7 @@ static void *thread_main(void *f) { kept = (int (*)(int))f; static int r; r = ke
 int in_thread(int (*f)(int)) { pthread_t t; void *r; pthread_create(&t, NULL, thread_main, (void *)f); pthread_join(t, &r); return *(int *)r; }
 void keep(int (*f)(int)) { kept = f; }
 int fire(void) { return kept(6); }
+unsigned long long u64_round(unsigned long long (*f)(unsigned long long), unsigned long long x) { return f(x); }
 """
 
 CB_STUBS = r"""
@@ -169,6 +172,8 @@ def in_thread(f: Each) -> c_int: ...
 def keep(f: Each) -> None: ...
 @extern(header="cb.h")
 def fire() -> c_int: ...
+@extern(header="cb.h")
+def u64_round(f: callback(c_ulonglong, c_ulonglong, on_error=0), x: c_ulonglong) -> c_ulonglong: ...
 """
 
 THIRD = CB_STUBS + r"""
@@ -266,6 +271,10 @@ def main():
         scale(buf, double_or_raise)
     except ValueError as e:
         print("scale:", e, buf[0], buf[1], buf[2])
+    try:
+        each(2147483648, third)
+    except OverflowError as e:
+        print("range:", e)
 
 main()
 """
@@ -274,7 +283,25 @@ THIRD_OUT = (
     "overflow: each: the result of big does not fit c_int\n-1 -1\n10\nouter 1\nouter 2\nnested: 'inner'\n1 -1 -1\n"
     "6.0\nfold: fold\n3\nname 1 alpha 5\nname 2 \u03b2eta 4\nname 3  0\n"
     "items 3 [4, -5, 6] ['x', '', 'zz'] [0.5, 1.5, -2.0]\nitems 0 [] [] []\n8\n4296\ntick 0\ntick 1\ntick 2\ntick: tick\n"
-    "20 2 8\nscale: too big 10 255 255\n")
+    "20 2 8\nscale: too big 10 255 255\nrange: each: n does not fit c_int\n")
+
+# 64-bit unsigned callback arguments and results are exact (F3b): 2**64 - 2 reaches the def as itself, and its result 2**64 - 1
+# goes back to C. The constant argument is rebuilt from C bits on the same line as the callback rewrite.
+U64 = CB_STUBS + r"""
+def plus_one(x: int) -> int:
+    return x + 1
+
+def main():
+    print(u64_round(plus_one, 18446744073709551614), u64_round(plus_one, 9223372036854775807))
+    try:
+        u64_round(plus_one, 18446744073709551615)
+    except OverflowError as e:
+        print("u64:", e)
+
+main()
+"""
+U64_OUT = "18446744073709551615 9223372036854775808\nu64: u64_round: the result of plus_one does not fit c_ulonglong\n"
+EXACT = (("default", {}), ("general", {"AIL_UNIFIED_FORCE": "1"}))
 
 UNCAUGHT = CB_STUBS + r"""
 def third(i: int) -> int:
@@ -399,7 +426,7 @@ Each = callback(c_int, c_int, on_error=0,
                 threads=True)
 """
 
-# programs without callbacks: the lowered text and the adapter C, sha256, as integ writes them without F7 (F3a changed the lowered text) (lowered at the fixed path
+# programs without callbacks: the lowered text and the adapter C, sha256, as integ writes them without F7 (F3a and F3b changed the lowered text) (lowered at the fixed path
 # below; the adapter's compile step is not run)
 GOLDEN_PATH = "/ail-f7-golden/prog.py"
 GOLDEN = {
@@ -463,9 +490,9 @@ main()
 """,
 }
 GOLDEN_SHA = {
-    "libc": ("2293496a6257a3bc32a83905e25ae2048046d4fa5c1fbc6bea79fa059767c307",
+    "libc": ("d086ee611aa04d96960707f639d99e60fb909ff9666d70a04e88e699276dbf2a",
                "40f67875f01ca2240012b086ad547b333e793ac80af29f018ffc0858779e1390"),
-    "bytes": ("c9e99d5c82f035882eb806465f263c61ad75c34596dafcededfd8938dad5f592",
+    "bytes": ("46be2c90fffa2aa292af5ba3b806e7fc0c1c8f016c772671fe49b33207761920",
                "0dfe30459b62074b12879f100c4279492160a692ec4cb08ac158d36922f1909f"),
     "handle": ("4671aa3d2fe69e63683510cd10862f68ba17c929954cff4bce79114efef23ccb",
                "a30529176b3286e6065ac5fee9061e17df8c87f65f065c94e4d6698ac2c7d3ef"),
@@ -503,7 +530,7 @@ def compile_cli(directory, source, mode, name):
     if out.exists():
         out.unlink()
     env = dict(os.environ, PYTHONPATH=str(ROOT), AIL_NO_CACHE="1")
-    env.update(dict(MODES)[mode])
+    env.update(dict(MODES + EXACT)[mode])
     done = subprocess.run([sys.executable, "-B", CLI, "compile", source, "-o", str(out)], cwd=directory,
                           capture_output=True, text=True, timeout=900, env=env)
     return done, out
@@ -558,6 +585,23 @@ class CallbackTests(unittest.TestCase):
 
     def test_exception_in_the_third_call_and_other_callbacks(self):
         self.compare("third", THIRD, THIRD_OUT)
+
+    def test_unsigned_64_bit_callbacks(self):
+        """Exact in the builds with tagged ints; the legacy int64 emitter (the "typed" mode here) stops loudly instead
+        (`integer overflow`, exit 1), as F3b's own test expects of it."""
+        source = self.write("u64.py", U64)
+        cpy = run_cpython(self.dir, source)
+        self.assertEqual((cpy.stdout, cpy.returncode), (U64_OUT, 0), cpy.stderr)
+        for mode, _ in EXACT + MODES[:1]:
+            with self.subTest(mode):
+                built, exe = compile_cli(self.dir, source, mode, "u64_%s.out" % mode)
+                self.assertEqual(built.returncode, 0, built.stderr + built.stdout)
+                ran = subprocess.run([str(exe)], cwd=self.dir, capture_output=True, text=True, timeout=60)
+                if mode == "typed":
+                    self.assertEqual((ran.stdout, ran.returncode), ("", 1), ran.stderr)
+                    self.assertIn("integer overflow", ran.stderr)
+                else:
+                    self.assertEqual((ran.stdout, ran.returncode), (U64_OUT, 0), ran.stderr)
 
     def test_uncaught_exception_from_a_callback(self):
         self.compare("uncaught", UNCAUGHT, UNCAUGHT_OUT, 1)

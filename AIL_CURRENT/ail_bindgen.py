@@ -258,7 +258,7 @@ def main(argv=None):
     ap.add_argument('--lib', help='library for every stub: a name (-lNAME) or a path')
     ap.add_argument('--link', action='append', help='emit link("NAME") instead of lib= (repeatable)')
     ap.add_argument('--header-name', help='name used in header= (default: the file name)')
-    ap.add_argument('--check', action='append', default=[], help='FUNC=KIND[:EXC] (negative nonzero null minus1)')
+    ap.add_argument('--check', action='append', default=[], help='FUNC=KIND[:EXC] (negative nonzero null minus1 allones)')
     ap.add_argument('--errno', action='append', default=[], help='FUNC: read errno on failure (needs --check)')
     ap.add_argument('--typedef', action='append', default=[], help='NAME=c_type for an unknown typedef')
     ap.add_argument('-o', '--output')
