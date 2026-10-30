@@ -408,13 +408,17 @@ static void run_%(name)s(void) {
     int clean = 0, flagged = 0, checked = 0, missed = 0, spurious = 0, bad = 0;
     %(pk_decl)s
     %(rt)s *dres = malloc((size_t)N * sizeof(%(rt)s));
+    /* every kernel gets its own trust verdict: one that fails its self-test must not make the kernels after it report
+       "spurious" (a distrusted class declines every later launch with GK_DECLINED, which is not a flag word) */
+    gkv_G.untrusted = 0; %(emu)s_state = 0; %(emu)s_first = 0; gkv_G.distrust[0] = 0;
     for (int i = 0; i < N; i++) {
         ef[i] = %(emu)s(%(one_args)s);
         if (ef[i] == 0) { %(pack)s clean++; } else flagged++;
     }
     if (clean > 0) {
         unsigned f = %(run)s(%(pk_args)s);
-        if (strcmp(gk_dev, "emulation") == 0) { printf("NODEVICE %(name)s\n"); exit(77); }
+        if (f == GK_DECLINED && gkv_G.state != 1) { printf("NODEVICE %(name)s\n"); exit(77); }
+        if (f == GK_DECLINED) printf("  %(name)s: the device declined the launch: %%s\n", gkv_G.distrust[0] ? gkv_G.distrust : (gkv_G.why ? gkv_G.why : "?"));
         if (f != 0) spurious++;
         else {
             int j = 0;
@@ -511,13 +515,15 @@ class BitTests(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
-    def harness(self, group, entries):
+    def harness(self, group, entries, extra_env=None):
         src = self.dir / (group + '.c')
         src.write_text(_harness(entries, self.N), encoding='utf-8')
         exe = self.dir / group
         r = subprocess.run([CC, '-O1', '-std=gnu11', '-w', str(src), '-o', str(exe), '-lm', '-ldl'], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr[:3000])
-        r = subprocess.run([str(exe)], capture_output=True, text=True, env=_device_env(), timeout=900)
+        env = _device_env()
+        env.update(extra_env or {})
+        r = subprocess.run([str(exe)], capture_output=True, text=True, env=env, timeout=900)
         if r.returncode == 77:
             if REQUIRE_DEVICE:
                 self.fail('no Vulkan device, but AIL_GPU_REQUIRE_DEVICE is set:\n' + r.stdout)
@@ -549,6 +555,19 @@ class BitTests(unittest.TestCase):
         entries = [e for e in CATALOGUE if e[0].startswith('i_')]
         out = self.harness('bits_int', entries)
         self.check(out, entries)
+
+    def test_a_distrusted_kernel_is_reported_and_does_not_poison_the_next(self):
+        """Colab Tesla T4, 2026-10-30: the first int64 kernel whose self-test failed made the device untrusted for the class,
+        every later launch of the process returned GK_DECLINED, and the harness counted each of them as a "spurious flag"
+        (min/max/lt/eq cannot flag at all).  A declined launch is now named as such with the distrust message, and each
+        kernel starts with a fresh trust state, so the second kernel fails (or passes) on its own self-test (k1), not on
+        the first one's (k0).  AIL_GPU_INJECT=flip:selftest makes every self-test fail."""
+        entries = [e for e in CATALOGUE if e[0] in ('i_add', 'i_min')]
+        out = self.harness('bits_declined', entries, {'AIL_GPU_INJECT': 'flip:selftest'})
+        self.assertRegex(out, r'i_add: the device declined the launch: device untrusted for int64 kernels: k0 result bits differ')
+        self.assertRegex(out, r'i_min: the device declined the launch: device untrusted for int64 kernels: k1 result bits differ')
+        self.assertRegex(out, r'K i_add .* spurious=1')
+        self.assertRegex(out, r'K i_min .* spurious=1')
 
 
 # ---------------------------------------------------------------------------------------------------------------------
