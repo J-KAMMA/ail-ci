@@ -133,6 +133,8 @@ class Lowering(TextLowering):
         # a program with a list of exact ints (('exact',) is requested by the first one): it was on the exact general path before,
         # so no exact int may be narrowed to int64 anywhere in it (a loud stop where CPython has an answer)
         self.exact_prog = ('exact',) in self.tl_active
+        # the lists of exact ints switched off (pyfunc.TLIST_OFF: the program did not build with them): the lowering of batch 2
+        self.tl_off = bool(getattr(P, 'TLIST_OFF', False))
         self.recursive = recursive
         self.cname = cname
         self.pending = frozenset(pending)
@@ -317,6 +319,8 @@ class Lowering(TextLowering):
         have = I.I64 if value.type == I.I1 else value.type
         if have == TINT and kind == self.P.INT:
             return
+        if have == I.T('span', TINT) and want == I.T('span', I.I64):
+            return
         if want != have:
             raise NotS0('type disagreement at line %s: legacy %r, IR %s'
                         % (getattr(node, 'lineno', '?'), kind, value.type))
@@ -499,7 +503,7 @@ class Lowering(TextLowering):
             if isinstance(_e, ast.BinOp):
                 return _may_tint(_e.left) or _may_tint(_e.right)
             if isinstance(_e, ast.Name):
-                if _e.id in self.tint_names:
+                if _e.id in self.tint_names or _e.id in _tint_targets:
                     return True
                 if getattr(self.P, 'GLOBAL_INT_TINT', False):
                     _mods = getattr(getattr(self.ctx, 'modconsts', None), 'vars', {})
@@ -969,6 +973,10 @@ class Lowering(TextLowering):
         """`v` as an element of a list with element type `elem`. An exact int that may exceed int64 cannot go into an int64
         list: when the list is a local of this function it becomes a list of exact ints, otherwise (`strict`: the caller
         cannot narrow either) the function keeps the exact general path."""
+        if self.tl_off:
+            if strict and elem == I.I64 and v.type == TINT and not self.small_tint(v):
+                raise NotS0('an exact int that may exceed int64 stored in an int64 list')
+            return self.field_value(v, elem, node)
         if elem == I.I64 and v.type == TINT and not self.small_tint(v):
             if self.tainted(v) or exact:
                 if self.local_i64_list(dst):
@@ -1843,7 +1851,7 @@ class Lowering(TextLowering):
             c = self.b.value('cmp.ne', [self.b.value('load', [seen], I.I64), self.const(I.I64, 0)], I.I1)
             self.in_region(ok, fill=lambda: self.b.emit('yield'))
             self.in_region(fail, fill=lambda: self.b.emit('raise', [], [], {
-                'code': code, 'name': 'ValueError', 'form': 'msg', 'msg': '%s() arg is an empty sequence' % f}))
+                'code': code, 'name': 'ValueError', 'form': 'msg', 'msg': '%s() iterable argument is empty' % f}))
             self.b.emit('if', [c], [], None, [ok, fail])
         return self.b.value('load', [acc], acc.type.pointee)
 
@@ -1947,7 +1955,7 @@ class Lowering(TextLowering):
         return I.I64 if kind == self.P.INT else I.F64
 
     def store(self, name, v):
-        if v.type == TINT and name not in self.taint and self.tainted(v):
+        if v.type == TINT and not self.tl_off and name not in self.taint and self.tainted(v):
             raise NeedTaint([name])
         if name in getattr(self.ctx, 'gdecl', ()):
             self.b.emit('global.store', [self.coerce(v, self.global_type(name))], [], {'name': name})

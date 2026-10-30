@@ -459,7 +459,7 @@ def _apply(P, args, kwargs, result, current):
     # the variable of a comprehension over a list of str (`[int(t) for t in s.split()]`, `[int(x) for x in data[1:]]`): the legacy
     # types do not know it outside the comprehension, but `int(t)` of it is an int() of text all the same
     _comp_str = set()
-    for _c in ast.walk(fn):
+    for _c in (() if (os.environ.get('AIL_NO_GENERAL') or getattr(P, 'TLIST_OFF', False)) else ast.walk(fn)):
         if isinstance(_c, (ast.ListComp, ast.GeneratorExp, ast.SetComp)):
             for _g in _c.generators:
                 if isinstance(_g.target, ast.Name):
