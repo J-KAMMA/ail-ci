@@ -2714,12 +2714,15 @@ class Compiler(boxclosure.ClosureMixin):
         # call site is compiled (`_emit_function` below is where `_call_user_function` runs).
         self._setup_mix(source, mix_tree)
         # The size gate uses only local proofs (BIGINT.md rules 2-4): no call-site, field or container scan.
-        _marks = bigcap.marked(mix_tree, local=False)
+        # In exact mode (unified.exact_enabled) only module code that can itself make a big int keeps every int boxed:
+        # a marked function called from it returns its big ints boxed.
+        _mark_fn = bigcap.own_marked if unified.exact_enabled() else bigcap.marked
+        _marks = _mark_fn(mix_tree, local=False)
         _prelude = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
         if '<module>' in _marks and _prelude:
             _own = copy.copy(mix_tree)
             _own.body = [n for n in mix_tree.body if getattr(n, 'name', None) not in _prelude]
-            _marks = bigcap.marked(_own, local=False)
+            _marks = _mark_fn(_own, local=False)
         if unified.enabled() and ('<program>', '*') not in self.u_demote and not unified.nan_capable(mix_tree) \
                 and '<module>' not in _marks:     # the module code can need a big int: every int stays boxed
             self.uplan = unified.analyze(self, tree, self.u_demote)

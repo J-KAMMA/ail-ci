@@ -63,8 +63,9 @@ about 1.5k start-up instructions in every general binary.
 `bigcap.py` marks a function big-int capable (int literal beyond int64; `**` with a non-constant or too large exponent -- not a
 float constant base, which makes a float; `<<` by a variable; math.factorial/comb/perm unless every call has constant arguments
 whose result fits int64 (`factorial(5)` does not mark, `factorial(21)` does); pow() with such an exponent; int() of a constant
-string over 18 digits, also `'1' * 5000`; int.from_bytes; a call of a marked function, transitively). A marked function gets no typed clone and unified.py keeps its ints boxed (`demote`
-`(name, '*')`); a marked module takes the whole program off unified. Python-syntax programs only (`AIL_SURFACE=python`).
+string over 18 digits, also `'1' * 5000`; int.from_bytes; a call of a marked function, transitively). A marked function gets no typed clone; unified.py keeps its unbounded ints boxed and,
+when its own module code is marked, takes the whole program off unified (section 14; before it boxed the function
+whole, `demote (name, '*')`, and every caller of it). Python-syntax programs only (`AIL_SURFACE=python`).
 Big literals are string constants parsed once at start-up (general path, marked functions).
 
 ## 6. Unified unboxing: the option measured
@@ -152,3 +153,28 @@ result, tuple classes in expression position, lists of objects and nested record
 collections/group_indices, stdlib3/json_dumps and tuples/bfs; `AIL_NO_GENERAL=1` builds them on the legacy emitter.
 Debug switches: `AIL_IR_TRACE=<file>` appends the traceback (and the tagged-int facts) of every function the IR refuses;
 `AIL_NO_TINT_LEGACY=1` turns the legacy retry of item 2 off.
+
+## 14. Per-function exact mode on the general path (2026-10-30)
+
+The general path's unboxing pass (`unified.py`) used to box a function bigcap marks as a whole (`demote (name, '*')`:
+its floats too), and bigcap marks every caller of a marked function, transitively, up to `<module>`; a marked
+`<module>` turned the pass off for the whole program. One `x << n` in `main()` therefore boxed every value of every
+function. Seven of the ten lab/compare programs (berth_sim, chain_relax, echo_pack, ledger_bin, rail_transfer,
+scar_life, tally_lang) had unboxing off for that reason alone.
+
+Now (`unified.exact_enabled()`, default on; `AIL_UNIFIED_EXACT=0` is the old rule):
+- Only units whose OWN code is marked count (`bigcap.own_marked`): a caller of a marked function is not marked, and
+  `<module>` turns the pass off only when the module code itself can make a big int.
+- A marked function is *exact* (`FnPlan.exact`), not boxed whole: an int expression in it is unboxed only when its bit
+  bound (`fn_bits`, the bound B2b already uses for locals) is below 63; anything else (an unbounded sum, a shift by a
+  variable, `int()` of text, a list element, a call result) is the boxed, promoting int. Its unproven int locals are
+  boxed as in B2b (an annotated exact function included); its floats, bools and bounded ints stay unboxed.
+- The boundary is exact by construction: a value crossing a call, a list or a field is the general path's boxed value;
+  an exact function's int result is unboxed only when bounded, a boxed argument fails a specialised body's entry
+  guard, and an unmarked function's own ints are proven by the local proof, so it never receives an unbounded one.
+Mixed-mode typed clones (`pyboxed2._setup_mix`) keep the transitive marks: a clone has an int64 ABI.
+
+Measured (`tools/icount.c`, default build, medium input of `lab/compare/tasks/<t>/gen.py`, every public and hidden case
+compared with CPython): berth_sim 78.80M -> 69.85M, echo_pack 814.1M -> 780.7M, ledger_bin 14.57M -> 13.91M,
+rail_transfer 1140.4M -> 1038.0M, chain_relax 1369.8M -> 1320.7M; term_rank and ticket_audit (no marks) unchanged.
+Tests: `test_ail_bigcap_split.py`.
