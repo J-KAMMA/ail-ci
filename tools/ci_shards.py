@@ -24,7 +24,7 @@ REPO = Path(__file__).resolve().parents[1]
 MAP = Path(__file__).with_name('ci_shards.json')
 CACHE = Path.home() / '.cache' / 'ail_par_check.json'
 SHARDS = 20
-GPU_JOB = {'test_ail_gpu_g2'}
+GPU_JOB = {'test_ail_gpu_g2', 'test_ail_gpu_g3'}
 JOBS = 4
 
 

@@ -1,6 +1,6 @@
-# GPU offload (design 2026-10-29; G1 and G2 built, see 6.1 and 6.2)
+# GPU offload (design 2026-10-29; G1, G2 and the device-trust part of G3 built, see 6.1 to 6.3)
 
-Design note for running parts of an AIL program on a GPU. Stages G1 and G2 are built (sections 6.1, 6.2); the rest is design. The roadmap keeps the
+Design note for running parts of an AIL program on a GPU. Stages G1 and G2 and the device-trust part of G3 are built (sections 6.1 to 6.3); the rest is design. The roadmap keeps the
 implementation last (IR core -> correctness -> coverage -> FFI/modules -> tooling -> release -> GPU); this note fixes the
 design now so the earlier stages do not close doors. Oracle: CPython 3.12, as everywhere else.
 
@@ -457,6 +457,123 @@ budget measurement, the cost model constants (G7) and a table of tested drivers.
   parameter is read-only, and `ys = xs` is refused by name), so it is tested at the C level (output over input, same index) and by
   G1's `gk_disjoint` unit tests. **Speed: unmeasured.** Nothing in G2 measures time; lavapipe is a CPU.
 
+### 6.3 G3 (first part) as built: device trust, the 780M, and the first measurements (2026-10-30)
+
+Code: `python/pkg-v12/gpu_vk.py` (self-test, first-launch comparison, test hook, host-cached result memory),
+`test_ail_gpu_g3.py`; no change to `gpu.py`, `gpu_spirv.py` or the C of programs built without `--gpu`. G2 left the question
+what to do about a driver whose shader compiler rewrites a pattern that the module forbids (lavapipe: `0.0 - x` to `-x`).
+A list of known-good drivers would not cover the next driver; a check on the device itself does.
+
+**The self-test (per kernel, at first use).** Before a process first trusts a device for a kernel `k`, `ail_gk<k>_selftest`
+runs THAT kernel's own SPIR-V over 4096 operand sets and compares it with the C emulation of the same kernel:
+- Operands: for the first 33 x 33 (28 x 28 for ints) elements the pair table of the edge values of the bit tests of 5.1
+  (+-0, +-inf, NaN-free edge floats, 2**-1000 neighbours, subnormals, 2**53, 2**63, int64 limits, 3037000499/500), a
+  different permutation per list so three-operand kernels see many triples; the rest are neighbours of the previous list's
+  value (equal, negated, +-4 ulp, halved) and random bit patterns with tiny and 2**-1000 exponents. Fixed seeds: the same
+  sets every run. The kernel's captured scalars are the real ones.
+- Clean elements (the emulation does not flag them) must come back bit for bit. The device is launched once over all 4096 with
+  `all` set (the results of a flagged launch are read too; the shader stores every element's result before it ORs the
+  flag). A launch the emulation flags must flag on the device, and a launch the emulation accepts must not be flagged. One
+  single-element launch per new flag bit the emulation raised (at most 6) must flag on the device, which checks the guards
+  one element at a time (a missed denormal/NaN/overflow flag is the dangerous failure: a wrong value with flag 0).
+- Kernels that also read an iterated list by computed index cannot be cut into single elements; they are compared on the
+  whole launch (no kernel in the G1/G2 catalogue is of that kind).
+- Trust classes: `binary64` kernels and `int64` kernels. A difference in a binary64 kernel marks binary64 untrusted for the
+  process (every later binary64 kernel takes the CPU path), a difference in an int64 kernel marks int64 untrusted; a binary64
+  kernel needs both classes. The per-device, per-process cache is the state in the runtime (one device per process,
+  chosen by `AIL_GPU_DEVICE` or the rank rule); the trace names the device, `driverVersion` and `vendorID` it was judged on.
+  **No disk cache**: the check is per kernel (the shader under test is the program's own), so a cache keyed by device,
+  driver and AIL version would have to be keyed by kernel too; with 7 to 25 ms per kernel on the 780M it does not pay.
+- **First launch.** The first real launch of each kernel is compared with the emulation on its first 4096 elements
+  (elements run one at a time; a flagged emulation element requires a flagged device launch). `AIL_GPU_CHECK=all` repeats this
+  for every launch; `AIL_GPU_CHECK=0` skips self-test and comparison and exists to measure their cost.
+- **What happens on a difference.** One trace line (`gpu: k0 device <name> (driver 0x..., vendor 0x...) differs from the CPU
+  emulation: result bits differ (element 1); untrusted for binary64 kernels, the CPU path runs`), the device answer is thrown
+  away and the emulation's is used, and all later launches of the class run the CPU path (`gpu: k1 device unavailable (device
+  untrusted ...)`). The program's stdout and exit code are the ones of `AIL_GPU=0` (tested).
+- **Limits, stated plainly.** 4096 operand sets are a sample, not a proof: a driver that rewrites a pattern only for operand
+  combinations that the sets miss, or only above some size, is not found. The first-launch comparison covers the program's
+  own first 4096 elements, not the rest. What the check does remove is the class of failure found in G2 (a rewrite of a
+  pattern for a few special operands, here +0.0) for every kernel on every device without a list. The test hook
+  `AIL_GPU_INJECT=<flip|negzero|noflag>[:selftest|:launch]` simulates a bad driver; `RealBug` in `test_ail_gpu_g3.py` also
+  removes the G2 workaround (`Gen.zero_sign`) from the emitter and shows that the self-test then finds the real lavapipe
+  rewrite (skipped on a driver that does not have it).
+
+**Cost of the check (measured, noisy).** One launch costs 3 to 5 ms fixed on the 780M with the Windows driver, so a
+self-test with one 4096-element launch and 1 to 3 single launches takes 7 ms (warm, many kernels in one process) to 12 to 21
+ms (the first kernel of a process), plus 0.1 to 0.2 ms to build the pipeline, which the first launch needs anyway; the
+first-launch comparison adds up to about 5 ms (emulation of 4096 elements of the 320-op kernel below; 0.05 ms for a 5-op kernel).
+Per-process cold start of the first device launch (instance, device, pipeline, self-test, comparison) was 100 to 300 ms with
+or without the check; the medians of 6 runs per kernel were 161/156/198 ms with the check and 140/145/136 ms with `AIL_GPU_CHECK=0` (a difference of 11 to 62 ms, inside a spread of 100 to 300 ms). On lavapipe a warm self-test takes about 4 ms.
+
+**Real hardware: AMD Radeon 780M (driver 0x00800156, vendor 0x1002) through `vulkan-1.dll` (Vulkan loader 1.4.304.0), built
+natively on Windows with WinLibs gcc 16.1 (UCRT) found on the PATH; nothing was installed.** The runtime's `LoadLibraryA`
+path worked unchanged (only `setenv` needed a one-line shim in the test harness; the generated program code does not use
+it). The three bit-test harnesses of 5.1 (51 kernels x 65,536 operand sets, 2.78 million clean elements compared) ran on the device:
+
+| group | kernels | clean elements compared bit for bit | flagged elements | single flagged launches checked | differences |
+| --- | --- | --- | --- | --- | --- |
+| float arithmetic | 18 | 931,789 | 247,859 | 7,200 | 0 |
+| comparisons and conversions | 18 | 952,820 | 226,828 | 6,400 | 0 |
+| int64 | 15 | 895,383 | 87,657 | 3,600 | 0 |
+
+The self-test passed for every kernel on the 780M. **So no pattern was found where the 780M differs from the CPU emulation;**
+that is a statement about these 51 kernels and these operand sets, and the Windows driver is one driver. The 780M reports
+`shaderFloat64`, `shaderInt64`, round-to-nearest-even and signed-zero/inf/NaN preservation for binary64 (otherwise the float
+kernels would not have run).
+
+**Measurements (this laptop with the Radeon 780M, Windows 11, "balanced" power plan, on mains power; noise: run
+to run spread of 10 to 70 percent, 3 runs per cell; nothing else was stopped).** Host buffers, one device launch includes
+creating the buffers, copying the inputs in, the dispatch, the fence wait and copying the result out. CPU loop = the
+plain C loop gcc -O2 -ffp-contract=off makes of the Python loop (single thread), `emu` = the G1 emulation (what runs today
+when the device is not used), device = the median of 7 launches after the first. Times in ms; median of the three process
+runs for the device column, `cpu` and `emu` are medians of 5 and 3 in-process repeats of the middle run.
+
+| kernel | n | CPU loop | emulation | device (steady) | device vs CPU loop |
+| --- | --- | --- | --- | --- | --- |
+| light f64: `(x+y)*(x-y)+x*0.1` (5 ops) | 4,096 | 0.002 | 0.05 | 4.6 | ~2000x slower |
+| | 65,536 | 0.05 | 0.97 | 5.3 | 100x slower |
+| | 1,000,000 | 1.0 | 16 | 16 (10 to 17) | 10 to 16x slower |
+| | 10,000,000 | 10.8 | 176 | 58 (56 to 63) | 5x slower |
+| heavy f64: 64-step recurrence (~320 ops) | 4,096 | 0.3 | 2.3 to 4.6 | 3.6 (3.0 to 4.0) | 12x slower |
+| | 65,536 | 5.2 | 49.6 | 4.9 (4.7 to 5.2) | 1.06x faster (tie) |
+| | 1,000,000 | 74.5 | 758 | 27.9 (25 to 28) | 2.7x faster |
+| | 10,000,000 | 961 (733 to 1010) | 12,756 | 152 (143 to 188) | 6x faster |
+| int64: `(x+y)//3 + x*y - z` (3 lists, ~8 ops) | 4,096 | 0.008 | 0.01 | 5.1 | 600x slower |
+| | 65,536 | 0.12 | 0.12 | 6.2 | 50x slower |
+| | 1,000,000 | 2.3 | 3.0 | 19 (16 to 21) | 8x slower |
+| | 10,000,000 | 22.5 | 27.2 | 92 (76 to 97) | 4x slower |
+
+Cold start of the first device launch of a process (instance + device + pipeline + self-test + comparison): 125 to 270 ms
+in these runs.
+
+What the numbers say, and no more than that:
+- A fixed cost of about 4 to 5 ms per launch on this driver puts the break-even beyond 4,096 elements for every kernel
+  measured; the placeholder `AIL_GPU_MIN_N = 4096` sends launches to a device that is 12x to 2000x slower for them.
+- The device wins only where the arithmetic per element is large (here the 64-step loop): about a tie at 65,536 elements and
+  2.7x to 6x faster at 1M to 10M. For the light and the int64 kernels it loses at every size up to 10M, 4x to 16x at
+  1M and 10M. They are bound by moving 16 to 24 bytes per element through new buffers (about 5 ns per element in these runs).
+- These are binary64 and int64 kernels on an integrated GPU; the speed of other kernels, other drivers and discrete GPUs is
+  not measured here.
+- **Memory type matters more than the shader.** The first measurement used write-combined memory for the result buffer
+  (the first host-visible, coherent type): reading the result back was the dominant cost (light kernel 10M: 446 ms, heavy
+  1M: 74 ms, heavy 10M: 587 ms). The result buffer now asks for host-visible, coherent, cached memory first (falling back
+  to the old type), which gave the table above (58, 28 and 152 ms). The results are unchanged (the same bits, the bit tests
+  repeated on the final code).
+- **The CPU path today is the emulation, not the plain loop.** When the device is not used (below `AIL_GPU_MIN_N`, no
+  device, untrusted device), `ail_gk<k>_run` runs the G1 emulation, which carries a check per operation: 1.2x (the int64 kernel) to 16x (the light f64 kernel) slower than the plain loop in the table above (light 176 vs 10.8 ms, heavy 12,756 vs 961 ms, int64 27 vs 22.5 ms at 10M). It is exact, and it is what makes
+  the fallback bit-identical without a replay, but a program that falls back pays for it. (`AIL_GPU=0` runs the plain loop.)
+
+**Where this leaves the cost model (the G7 placeholder).** Not changed in this stage; the numbers above support a model but
+only from three kernels on one device, and applying one needs the fallback to be the plain loop. A fit from this table:
+`t_device = 4.5 ms + n * (5 ns + ops * 0.07 ns)` and `t_cpu = n * ops * 0.25 ns`, with `ops` the number of IR operations of the
+kernel body (loops multiplied by their trip count when it is a constant), gives "never for ops below about 28; for 320 ops
+from about 100,000 elements", which matches all twelve cells. Next steps, in order: (1) let the wrapper return "declined" so the
+glue runs the original loop instead of the emulation when the device is not wanted; (2) count `ops` in the emitter and add
+`AIL_GPU=auto` with the model above and a safety factor, constants in one table; (3) reuse buffers between launches and map
+host memory instead of copying on a unified-memory device (the 5 ns per element is mostly copying and page-faulting fresh
+80 to 240 MB allocations: G8); (4) re-fit on the Colab NVIDIA GPU and a second AMD/Intel device before the model is the default.
+
 ## 7. Colab validation (owner-started, manual)
 
 The owner has a paid Google Colab subscription with NVIDIA GPUs (T4/L4/A100 class, CUDA). It is useful as a second real
@@ -588,7 +705,8 @@ cooperative-matrix path itself is tested only on the laptop and Colab, by hand (
   element. G7 may find that only int and comparison-heavy kernels pay off. The design stops cleanly there.
 - **Driver bugs.** A driver that ignores `NoContraction` or RTE would give wrong bits with no flag. Mitigation: the bit
   tests run on every device before it is trusted, and a device whose start-up feature list is not on a tested list can be
-  kept on the CPU (decided in G3; this costs a small table of known-good driver versions).
+  kept on the CPU (decided in G3; this costs a small table of known-good driver versions). **Built in G3 (6.3) as a run-time
+  self-test instead of a list**: every kernel is checked on the device it will run on, so an unlisted driver is covered too.
 - **lavapipe is not a GPU.** It runs SPIR-V through LLVM on the CPU, so it cannot find bugs that depend on real GPU
   scheduling or memory. The laptop and Colab runs cover that, by hand only.
 - **Proof scope creep.** The eligible body is deliberately the `parallel for` body; widening it (structs, nested lists)
