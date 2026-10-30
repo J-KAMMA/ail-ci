@@ -185,12 +185,17 @@ Now lowered:
 - a `list[str]` parameter, lent read-only: the legacy passes the `{p, n, cap}` struct by value (abi `slist`). Every mention of the
   parameter in the function must be a read (an element, len(), a loop, comprehension, `in`, join, truth test, `max(p, key=len)`, or an
   argument to a function that takes a list of str); a store, a method call or a kept slice leaves the function off the lowering;
-- a `range` loop whose bounds are tagged ints but whose counter is an int64 place (the bounds are narrowed with `tint.i64`).
 
 Still refused (the program stays on the general path): a function returning an object (`Optional[int]` is one), a method, a
 list of objects with a str field, `list[list[int]]` values, `str`-keyed dicts, `groupby`, `iter()`/`next()`, bytes
 conversions (`encode`, `bytes(...).hex()`), the `calendar`/`datetime` modules.
-A value beyond int64 that is stored into an int64 list stops loudly (`integer overflow`, exit 1), as before; the same program on the
-general path prints the exact answer. `v * 2` for a comprehension variable `v` is a checked int64 operation (a loud stop), while the same
-expression on a `for` variable is a tagged one and exact.
+The rule for what is lowered: nothing here may turn a program that printed CPython's answer on the general path into a program
+that stops. So an exact int that may exceed int64 (`int()` of text, a tagged sum) is never stored into an int64 list by the new
+comprehension sources (a slice, `s.split()`): the function keeps the exact general path (`[int(t) for t in
+sys.stdin.read().split()]` and the whole stdin idiom stay general until the IR has a list of tagged ints; corpus t001, t010, t012,
+t314, t459 are back on the general path for that reason). The element of a comprehension over a slice, and the variable of
+`sum`/`min`/`max`/`join` generators, is a tagged int in the body, so `v * 2` is exact. A `range` loop with a tagged bound and
+an int64 counter is refused (narrowing the bound would stop on `range(10**20, 5)`, which is empty in CPython). Programs that
+take the typed path with these forms: t069, t081, and any program whose int lists hold values that are int64 by construction
+(`len()`, a literal), with a slice bound that is an exact tagged int (saturated, so exact).
 Tests: `test_ail_typedreach2.py`.

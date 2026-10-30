@@ -203,6 +203,56 @@ if __name__ == "__main__":
     main()
 '''
 
+# the lowered forms with no int64 store of a possibly big int: lengths of words (int64 by construction), a slice bound that is an
+# exact tagged int (n = int(token), possibly beyond int64), sum/min/max/sorted/set of the lengths, a range loop with int64 bounds
+LENS = '''import sys
+
+
+def main() -> None:
+    data = sys.stdin.read().split()
+    if not data:
+        print("none")
+        return
+    n = int(data[0])
+    lens = [len(w) for w in data[1:1 + n]]
+    print(len(lens), sum(lens), sum(len(w) * 3 for w in data[1:1 + n]))
+    if lens:
+        print(max(lens), min(len(w) for w in data[1:1 + n]))
+    uniq = sorted(set(lens), reverse=True)
+    print(len(uniq), uniq[0] if uniq else -1)
+    srt = sorted(lens)
+    print(" ".join(str(x) for x in srt))
+    total = 0
+    for i in range(len(lens)):
+        total += lens[i] * i
+    print(total)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+# int64 elements whose arithmetic leaves int64 inside a sum/min/max/join/slice: the answer is CPython's exact one, in the default build
+EDGE = '''import sys
+
+
+def main() -> None:
+    data = sys.stdin.read().split()
+    k = int(data[0])
+    xs = [9223372036854775807, -9223372036854775807, 4611686018427387904, 3, 3]
+    print(sum(v * 2 for v in xs), sum(v * k for v in xs[1:1 + k]), sum(xs))
+    print(max(v + 1 for v in xs), min(v * 3 for v in xs), max(xs), min(xs))
+    print(" ".join(str(v * v) for v in xs))
+    ys = sorted(set(xs), reverse=True)
+    print(ys[0], ys[-1], len(ys))
+    print(sum(v - 1 for v in xs[k:]), sum(1 for v in xs[:k] if v * 2 > 0))
+    for i in range(k, 3 + k):
+        print(i)
+
+
+main()
+'''
+
 INT_INPUTS = ['', '\n', '   \n', '3\n1 2 3\n', '5\n3 1 2 3 1\n', '3\n5 5 5\n', '-2\n1 2 3\n', '0\n', ' 7 \n1 2 3 4 5 6 7\n',
               '+3\n4 -0 1_0\n', '1_000\n5\n', '٣\n1 2 3 4\n',
               '99999999999999999999\n1 2 3\n',
@@ -270,10 +320,11 @@ class TypedReach2(unittest.TestCase):
 
     # T1 + T2 + T3
     def test_stdin_idiom_typed_and_equal(self):
-        self.check(STDIN_IDIOM, 'idiom', INT_INPUTS, loud=BIG_VALUES)
+        self.check(STDIN_IDIOM, 'idiom', INT_INPUTS + BIG_VALUES, expect_typed=None)
 
     def test_max_of_empty_generator_raises_like_cpython(self):
-        self.check(MINMAX, 'minmax', ['', '1 2 3\n', '-5\n', '  \n'], loud=BIG_VALUES)
+        self.check(MINMAX, 'minmax', ['', '1 2 3\n', '-5\n', '  \n', '1 99999999999999999999 -3\n'] + BIG_VALUES,
+                   expect_typed=None)
 
     def test_list_str_parameters_read_only_typed(self):
         self.check(WORDS, 'words', WORD_INPUTS)
@@ -282,7 +333,19 @@ class TypedReach2(unittest.TestCase):
         self.check(TEXT, 'text', TEXT_INPUTS)
 
     def test_range_bounds_tagged_counter_int64(self):
-        self.check(BITONIC, 'bitonic', ['', '1 2 3 2 1\n', '5\n', '1 3 2 4 3 5\n', '3 3 3\n'], loud=BIG_VALUES)
+        self.check(BITONIC, 'bitonic', ['', '1 2 3 2 1\n', '5\n', '1 3 2 4 3 5\n', '3 3 3\n'] + BIG_VALUES, expect_typed=None)
+
+    def test_slice_with_a_tagged_bound_stays_typed_and_exact(self):
+        words = 'a bb ccc dd e ffff ggg'
+        inputs = ['', '3 ' + words + '\n', '0 ' + words + '\n', '-2 ' + words + '\n', '99999999999999999999 ' + words + '\n',
+                  '-99999999999999999999 ' + words + '\n', '9223372036854775807 ' + words + '\n',
+                  '-9223372036854775808 ' + words + '\n', ' +2 ' + words + '\n', '1_0 ' + words + '\n', '\u0663 ' + words + '\n',
+                  'x ' + words + '\n', '2\n']
+        self.check(LENS, 'lens', inputs)
+
+    def test_int64_elements_whose_arithmetic_leaves_int64(self):
+        inputs = ['2', '0', '-1', '4', '99999999999999999999', '-99999999999999999999', '9223372036854775807', '1', '']
+        self.check(EDGE, 'edge', [i + chr(10) if i else i for i in inputs], expect_typed=None)
 
     # T4
     def test_mutated_list_parameter_keeps_python_semantics(self):

@@ -1399,13 +1399,24 @@ class Lowering(TextLowering):
         self.b.emit('list.reset', [self.list_ref(tmp)])
         ref = self.list_ref(tmp)
 
+        g0 = node.generators[0] if node.generators else None
+        exact = g0 is not None and (isinstance(g0.iter, ast.Subscript) and isinstance(g0.iter.slice, ast.Slice)
+                                    or self.is_slist_expr(g0.iter))
+
         def push(e):
-            v = self.field_value(self.expr(e), elem, e)
+            v = self.expr(e)
+            if exact and v.type == TINT and elem == I.I64:
+                ins = self.b.defs.get(v)
+                if ins is None or ins.op not in ('tint.from', 'tint.mod_i64', 'tint.mod_pos_i64'):
+                    # an exact int that may be beyond int64 (int() of text, a tagged sum) cannot go into an int64 list:
+                    # the narrowing would stop the program where CPython has an answer; the general path keeps it exact
+                    raise NotS0('an exact int that may exceed int64 stored in an int64 list')
+            v = self.field_value(v, elem, e)
             self.b.emit('list.push', [ref, v])
-        self.comp_loop(node, node.elt, push, reserve=(None if elem == I.STRV else ref))
+        self.comp_loop(node, node.elt, push, reserve=(None if elem == I.STRV else ref), tagged=(elem == I.STRV))
         return tmp
 
-    def comp_loop(self, node, elt, per_elt, reserve=None):
+    def comp_loop(self, node, elt, per_elt, reserve=None, tagged=False):
         """The loop of a comprehension or generator expression `node`: `per_elt(elt)` is lowered once for every element
         that passes the conditions. Over range(), an owned list of any element type, a slice of one, a read-only numeric
         list parameter, or a str.split()/splitlines() result (built first in a hidden list)."""
@@ -1497,8 +1508,11 @@ class Lowering(TextLowering):
             if over_range:
                 self.scope_vars[name] = index
             else:
-                self.scope_vars[name] = self.b.value('span.get' if over_span else 'list.get', [src, index], var_type,
-                                                     {'mode': 'nck', 'iter': True})
+                got = self.b.value('span.get' if over_span else 'list.get', [src, index], var_type,
+                                   {'mode': 'nck', 'iter': True})
+                # (an int element is a tagged int in the body: `v * 2` is exact, not a checked int64 operation)
+                self.scope_vars[name] = (self.b.value('tint.from', [got], TINT)
+                                         if var_type == I.I64 and (slice_of is not None or tagged) else got)
             had = self.ctx.types.get(name)
             self.ctx.types[name] = var_kind
             try:
@@ -1564,7 +1578,7 @@ class Lowering(TextLowering):
             self.b.emit('store', [acc, self.b.value('select', [first, v, pick], v.type)])
             self.b.emit('store', [seen, self.const(I.I64, 1)])
         region = self.b.region
-        self.comp_loop(gen, gen.elt, per)
+        self.comp_loop(gen, gen.elt, per, tagged=True)
         loop = region.instrs.pop()
         acc, seen = st['acc'], st['seen']
         if f == 'sum':
@@ -2107,9 +2121,7 @@ class Lowering(TextLowering):
         vals = [self.coerce(v, TINT) if v.type == TINT else v for v in vals]
         _tplace = self.places.get(s.target.id)
         if any(v.type == TINT for v in vals) and _tplace is not None and _tplace.type.pointee == I.I64:
-            # the counter is an int64 place (the proof bounds it): a bound that is an exact tagged int must fit int64
-            # (`tint.i64` stops loudly otherwise, as every narrowing does), and the loop runs on int64
-            vals = [self.coerce(v, I.I64) for v in vals]
+            raise NotS0('a range loop with a tagged bound but an int64 counter (the narrowing would stop the program)')
         if any(v.type == TINT for v in vals):
             if len(vals) == 1:
                 lo, hi, step = self.const(I.I64, 0), vals[0], self.const(I.I64, 1)
