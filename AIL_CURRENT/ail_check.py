@@ -321,6 +321,7 @@ MODULES = (
     'test_ail_exc_nobind', 'test_ail_cargo', 'test_ail_fz196', 'test_ail_pre409', 'test_ail_pre427', 'test_ail_pre432', 'test_ail_array_ref', 'test_ail_array_t2',
     'test_ail_cmp_classname',
     'test_ail_bound_builtin',
+    'test_ail_gpu_g2',
 )
 
 
