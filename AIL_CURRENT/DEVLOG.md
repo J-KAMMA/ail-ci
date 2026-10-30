@@ -1,3 +1,12 @@
+## 2026-10-30 -- Rust test modules probe the toolchain instead of the rustup shim
+
+`test_ail_cargo` and `test_ail_cratebridge` decided whether to run from `shutil.which("cargo")` /
+`shutil.which("rustc")`.  A rustup proxy is on `PATH` even when no toolchain is installed, so both
+modules ran and failed with `rustup could not choose a version of cargo to run`.  They now run
+`--version` once: a working toolchain keeps every test enabled, while a broken proxy (or a missing
+tool) skips the Rust tests as their docstrings always intended.  With a real stable toolchain both
+modules pass unchanged (6/6 and 11/11); without one they report OK with skips instead of failures.
+
 ## 2026-10-30 -- ex23: a module constant with only function definitions runs nothing (re-applied on job-rbex23)
 
 `math.ail` is a Python-syntax example with a module constant (`LIMIT = 6`) and a helper (`sum_to`)

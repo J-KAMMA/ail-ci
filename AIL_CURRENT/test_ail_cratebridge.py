@@ -27,6 +27,20 @@ BINDGEN = ROOT / "ail_bindgen.py"
 RUSTC = shutil.which("rustc")
 
 
+def runs(command):
+    """Whether COMMAND really works: a rustup proxy without a toolchain fails on `--version`."""
+    if not command:
+        return False
+    try:
+        done = subprocess.run([command, "--version"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+HAVE_RUSTC = runs(RUSTC)
+
+
 def have_header(name):
     if not CC:
         return False
@@ -556,7 +570,7 @@ class CratebridgeTests(unittest.TestCase):
 
     # ------------------------------------------------------------------ Rust crates
 
-    @unittest.skipUnless(RUSTC, "rustc required")
+    @unittest.skipUnless(HAVE_RUSTC, "rustc required")
     def test_rust_crate_cdylib_and_staticlib(self):
         rdir = self.dir / "rust"
         rdir.mkdir()

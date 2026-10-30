@@ -33,6 +33,20 @@ CC = os.environ.get("PIPE_CC") or shutil.which("cc") or shutil.which("gcc")
 sys.path.insert(0, str(ROOT))
 from test_ail_ffi import compile_cli, run_cpython  # noqa: E402
 
+
+def runs(command):
+    """Whether COMMAND really works: a rustup proxy without a toolchain fails on `--version`."""
+    if not command:
+        return False
+    try:
+        done = subprocess.run([command, "--version"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0
+
+
+HAVE_CARGO = runs(CARGO)
+
 CARGOTOML = """[package]
 name = "{name}"
 version = "0.1.0"
@@ -286,7 +300,7 @@ def crate(directory, name, source, manifest=None):
     return directory
 
 
-@unittest.skipUnless(CARGO and CC, "cargo and a C compiler are required")
+@unittest.skipUnless(HAVE_CARGO and CC, "cargo and a C compiler are required")
 class CargoTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
