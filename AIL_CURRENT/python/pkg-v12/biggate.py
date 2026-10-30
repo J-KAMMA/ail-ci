@@ -100,6 +100,36 @@ def pieces_for(text):
     return found
 
 
+_TRIGGER_NAMES = frozenset(n for names in PIECES.values() for n in names) | {'ail__pow_slow', 'ail__floordiv_slow', 'ail__mod_slow', 'ail__truediv_slow'}
+_PROTO = re.compile(r'^(static [^\n(;{}]*?\b(ail\w+)\([^\n;{}]*\));[ \t]*$', re.M)
+
+
+def absent_stubs(text):
+    """A body for every prototype of a piece that was left out, so the finished C has no function that is declared and never defined.
+
+    The prototypes stay for the unused inline operators that name the cold helpers of a piece (ail_op_floordiv -> ail__floordiv_slow).
+    A reachable runtime function that still calls one (ail__round_int_big -> ail__int_pow, ail_int_divmod -> ail_big_divmod) is a
+    live reference at -O0, and any compile that does not fold it, or a runtime built as its own unit, fails to link on it. The
+    stub is `static`, so gcc drops it with its callers wherever the call was folded away before, and the program cannot reach
+    it (the token graph of pieces_for would have kept the piece)."""
+    stubs = []
+    seen = set()
+    for m in _PROTO.finditer(text):
+        name = m.group(2)
+        if name not in _TRIGGER_NAMES or name in seen:
+            continue
+        seen.add(name)
+        if re.search(r'\b' + name + r'\([^;{}]*\)\s*\{', text):
+            continue
+        stubs.append(m.group(1) + ' { __builtin_trap(); }')
+    if not stubs:
+        return text
+    head, mark, user = text.partition(USER_MARK)
+    if not mark:
+        return text + '\n'.join(stubs) + '\n'
+    return head + '/* left out of this program (biggate.absent_stubs): declared above, so defined here */\n' + '\n'.join(stubs) + '\n' + mark + user
+
+
 def cond(new, old=''):
     """An inline conditional: `new` in a program with big ints, `old` in one without."""
     assert OPEN not in new + old and CLOSE not in new + old
@@ -116,6 +146,8 @@ def resolve(text, big, keep=False, pieces=None):
         pass
     elif pieces is not None:
         text = _PBLOCK.sub(lambda m: m.group(2) if (big and m.group(1) in pieces) else m.group(3), text)
+        if big:
+            text = absent_stubs(text)
     else:
         text = _PBLOCK.sub(lambda m: m.group(2) if big else m.group(3), text)
     return text if keep else text.replace(UMARK, '')
