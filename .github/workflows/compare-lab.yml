@@ -1,0 +1,115 @@
+name: compare-lab
+
+# Language comparison: the same ten programs (lab/compare/src/<task>/) built in C (gcc -O2), Rust (rustc, opt-level 3),
+# Go, Nim (-d:release) and run by CPython 3.12, against AIL built from this checkout (the .ail source, and the CPython
+# source compiled by AIL). One job per task; each reports instructions, peak RSS, binary size, compile time, build disk
+# and the AIL typed/general path, and every stdout and exit code is checked against the task's CPython reference.
+# The report job merges the tasks into tables (AIL first, ratio vs the best other language) and a JSON artifact.
+# Manual: run it from the Actions tab or `gh workflow run compare-lab`; `tasks` limits the run to some tasks.
+on:
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: 'Space separated task names (default: all ten)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compare-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - id: m
+        env:
+          WANT: ${{ inputs.tasks }}
+        run: |
+          all=$(ls lab/compare/src)
+          want=${WANT:-$all}
+          for t in $want; do test -d "lab/compare/src/$t" || { echo "unknown task: $t"; exit 1; }; done
+          echo "matrix=$(printf '%s\n' $want | jq -R . | jq -sc '{task: .}')" >> "$GITHUB_OUTPUT"
+
+  measure:
+    name: ${{ matrix.task }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install toolchains
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq valgrind time
+          # Nim 2.2.12 prebuilt tarball, checksum from nim-lang.org/download
+          curl -fsSL -o nim.tar.xz https://nim-lang.org/download/nim-2.2.12-linux_x64.tar.xz
+          echo "7df1611449a6842af69322aa2c1206942982650a5f6bc0d37bc8ec109932f638  nim.tar.xz" | sha256sum -c -
+          tar xf nim.tar.xz -C "$HOME"
+          echo "$HOME/nim-2.2.12/bin" >> "$GITHUB_PATH"
+          # Go and Rust ship on the runner image; install only if one is missing
+          if ! command -v go >/dev/null; then
+            curl -fsSL -o go.tar.gz https://go.dev/dl/go1.27.2.linux-amd64.tar.gz
+            echo "ecbadb99091a3f46e31f5f934b068b1864eafa7995211b39eaddf76996045fe5  go.tar.gz" | sha256sum -c -
+            sudo tar xf go.tar.gz -C /usr/local
+            echo "/usr/local/go/bin" >> "$GITHUB_PATH"
+          fi
+          command -v rustc >/dev/null || sudo apt-get install -y -qq rustc
+          # a hardware instruction counter is rarely exposed on a hosted VM; try, fall back to callgrind
+          sudo sysctl -w kernel.perf_event_paranoid=-1 || true
+      - name: Versions
+        run: |
+          export PATH="$HOME/nim-2.2.12/bin:$PATH"
+          gcc --version | head -1; rustc --version; go version; nim --version | head -1; python3 --version; valgrind --version
+          nproc; free -g | head -2; df -h . | tail -1
+      - name: Measure ${{ matrix.task }}
+        run: |
+          export PATH="$HOME/nim-2.2.12/bin:$PATH"
+          python3 lab/compare/run_task.py --task "${{ matrix.task }}" --out "result-${{ matrix.task }}.json"
+      - name: Keep results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: result-${{ matrix.task }}
+          path: result-${{ matrix.task }}.json
+          if-no-files-found: ignore
+
+  report:
+    name: report
+    needs: [plan, measure]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: result-*
+          path: results
+      - name: Merge
+        run: |
+          python3 lab/compare/merge.py results --json compare-report.json > compare-report.md
+          cat compare-report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: compare-report
+          path: |
+            compare-report.md
+            compare-report.json
