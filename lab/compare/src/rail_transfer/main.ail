@@ -1,0 +1,144 @@
+struct Item { d: int; b: int; n: int; }
+struct G {
+    nn: int;
+    ns: int;
+    x: list[int];
+    sstart: list[int];
+    nstation: list[int];
+    estart: list[int];
+    etarget: list[int];
+    ecost: list[int];
+    dist: list[int];
+    bd: list[int];
+}
+
+fn solve(g: G, s: int, t: int) -> str {
+    if s == t { return "0 0"; }
+    let inf = 1 << 62;
+    let touched: list[int] = [];
+    let h: list[Item] = [];
+    for n in range(g.sstart[s], g.sstart[s + 1]) {
+        let id = g.ns + n;
+        g.dist[id] = 0;
+        g.bd[id] = 1;
+        touched.append(id);
+        heappush(h, Item(0, 1, id), key=lambda it: (it.d, it.b, it.n));
+    }
+    let rd = -1;
+    let rb = 0;
+    while len(h) > 0 {
+        let it = heappop(h, key=lambda it: (it.d, it.b, it.n));
+        let u = it.n;
+        if it.d > g.dist[u] or (it.d == g.dist[u] and it.b > g.bd[u]) { continue; }
+        if u == t { rd = it.d; rb = it.b; break; }
+        if u < g.ns {
+            let nd = it.d + g.x[u];
+            let nb = it.b + 1;
+            for n in range(g.sstart[u], g.sstart[u + 1]) {
+                let v = g.ns + n;
+                if nd < g.dist[v] or (nd == g.dist[v] and nb < g.bd[v]) {
+                    if g.dist[v] == inf { touched.append(v); }
+                    g.dist[v] = nd;
+                    g.bd[v] = nb;
+                    heappush(h, Item(nd, nb, v), key=lambda it: (it.d, it.b, it.n));
+                }
+            }
+        } else {
+            let k = u - g.ns;
+            let hub = g.nstation[k];
+            if it.d < g.dist[hub] or (it.d == g.dist[hub] and it.b < g.bd[hub]) {
+                if g.dist[hub] == inf { touched.append(hub); }
+                g.dist[hub] = it.d;
+                g.bd[hub] = it.b;
+                heappush(h, Item(it.d, it.b, hub), key=lambda it: (it.d, it.b, it.n));
+            }
+            for e in range(g.estart[k], g.estart[k + 1]) {
+                let v = g.etarget[e];
+                let nd = it.d + g.ecost[e];
+                if nd < g.dist[v] or (nd == g.dist[v] and it.b < g.bd[v]) {
+                    if g.dist[v] == inf { touched.append(v); }
+                    g.dist[v] = nd;
+                    g.bd[v] = it.b;
+                    heappush(h, Item(nd, it.b, v), key=lambda it: (it.d, it.b, it.n));
+                }
+            }
+        }
+    }
+    for id in touched { g.dist[id] = inf; g.bd[id] = 0; }
+    if rd < 0 { return "none"; }
+    return f"{rd} {rb}";
+}
+
+fn main() {
+    let first = input().split();
+    let n = int(first[0]);
+    let m = int(first[1]);
+    let q = int(first[2]);
+    let x: list[int] = [];
+    for w in input().split() { x.append(int(w)); }
+    let eu = [0] * m;
+    let ev = [0] * m;
+    let el = [0] * m;
+    let et = [0] * m;
+    let cnt = [0] * (n + 1);
+    for i in range(m) {
+        let f = input().split();
+        eu[i] = int(f[0]);
+        ev[i] = int(f[1]);
+        el[i] = int(f[2]);
+        et[i] = int(f[3]);
+        cnt[eu[i] + 1] += 1;
+        cnt[ev[i] + 1] += 1;
+    }
+    # half-edge h: 2i = u->v, 2i+1 = v->u ; source station of h
+    for i in range(n) { cnt[i + 1] += cnt[i]; }
+    let pos = [0] * n;
+    for i in range(n) { pos[i] = cnt[i]; }
+    let hs = [0] * (2 * m);
+    for i in range(m) {
+        hs[pos[eu[i]]] = 2 * i;
+        pos[eu[i]] += 1;
+        hs[pos[ev[i]]] = 2 * i + 1;
+        pos[ev[i]] += 1;
+    }
+    let stamp = [-1] * 100000;
+    let lastid = [0] * 100000;
+    let nodeof = [0] * (2 * m);
+    let sstart = [0] * (n + 1);
+    let nstation: list[int] = [];
+    let k = 0;
+    for v in range(n) {
+        sstart[v] = k;
+        for j in range(cnt[v], cnt[v + 1]) {
+            let hh = hs[j];
+            let l = el[hh // 2];
+            if stamp[l] != v {
+                stamp[l] = v;
+                lastid[l] = k;
+                nstation.append(v);
+                k += 1;
+            }
+            nodeof[hh] = lastid[l];
+        }
+    }
+    sstart[n] = k;
+    let estart = [0] * (k + 1);
+    for hh in range(2 * m) { estart[nodeof[hh] + 1] += 1; }
+    for i in range(k) { estart[i + 1] += estart[i]; }
+    let epos = [0] * k;
+    for i in range(k) { epos[i] = estart[i]; }
+    let etarget = [0] * (2 * m);
+    let ecost = [0] * (2 * m);
+    for hh in range(2 * m) {
+        let a = nodeof[hh];
+        etarget[epos[a]] = n + nodeof[hh ^ 1];
+        ecost[epos[a]] = et[hh // 2];
+        epos[a] += 1;
+    }
+    let inf = 1 << 62;
+    let g = G(k, n, x, sstart, nstation, estart, etarget, ecost, [inf] * (n + k), [0] * (n + k));
+    for _ in range(q) {
+        let f = input().split();
+        print(solve(g, int(f[0]), int(f[1])));
+    }
+}
