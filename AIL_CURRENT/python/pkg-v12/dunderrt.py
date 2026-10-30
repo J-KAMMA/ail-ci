@@ -166,6 +166,17 @@ static inline ail_st ail_dun_pos(ail_ctx *cx, ail_obj *out, ail_obj x) {
 static inline ail_st ail_dun_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj item) {
     ail_d2_fn f = ail_dun2(c, AIL_D2_CONTAINS);
     if (f) { ail_obj r; ail_st st = f(cx, &r, c, item); if (st != AIL_OK) return st; *out = ail_obj_truthy(r); return AIL_OK; }
+    if (c.tag == AIL_T_INST && !ail_dun2(c, AIL_D2_GETITEM)) {   /* CPython: `x in obj` names the operand when nothing can iterate it */
+        int has_iter = 0;
+        for (ail_obj k = ((ail_instobj *)c.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+            ail_classobj *kc = (ail_classobj *)k.o;
+            if (kc->iter_iter || kc->iter_next) { has_iter = 1; break; }
+        }
+        if (!has_iter) {
+            char cb[200]; snprintf(cb, sizeof cb, "argument of type '%s' is not iterable", ail__dun_tname_s(c));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, cb);
+        }
+    }
     AIL_FRAME_ENTER(cx, fr, 2);
     ail_st st = ail_iter(cx, &fr.slots[0], c);
     if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
