@@ -1,3 +1,19 @@
+## 2026-10-30 -- ail_array: 2-D f64 arrays and an exact `ta.matmul` (T6, CPU)
+
+`ta.zeros((r, c), ta.f64)`, `ta.array([[...], [...]], ta.f64)`, `M[i, j]`, `M[i]` (a row copy), `M[a:b]` (a rows copy), `M[i, j] = x`,
+`M[i] = row`, `M.shape` (`r, c = m.shape`), `len(M)`, `M.T`, `.copy()`, `.tobytes()`, `==`, `print`, the element-wise operators on equal
+shapes (the 1-D rules on the flat data), `ta.sqrt/exp/log/tanh`, `minimum/maximum/clip`, and `ta.matmul(A, B)` (TYPED_ARRAY.md 3.7, 3.8,
+5.6). `matmul` uses ONE order for every output element, the 16-lane, 1024-block order of `ta.dot` along `k`, so `matmul` of a row and a
+column is `ta.dot` bit for bit and any device can reproduce it (owner decision TA4, 2026-10-30; the first draft said sequential `k`).
+The reference is `ail_array.py` (every dtype in 2-D; matmul for f64); the lowering builds f64 2-D only and refuses the rest by name
+(int32 2-D, iteration, `tolist`, 2-D with 1-D broadcast, `sum/dot/min/max` of a 2-D array, `@`). One-dimensional programs get the same
+text and C as before. Instructions per multiply-add with `tools/icount.c`: AIL 15.1 at 256^3 (naive C with the same order 10.9, best C
+2.8, CPython reference 2,528); the gap to C is the IR's per-read checks, the same that make `ta.dot` 23.5 per element. Tests:
+`test_ail_array_t6.py` (reference against an independent implementation of the order at 17 shapes and planted specials at every lane
+and block boundary, exact error texts, lowering equal to the reference under CPython, native builds in the default, forced and
+typed-only modes), cases `array_t6_cases/`. Not built: the GPU kernel (waits for GPU.md G3 to merge), the row broadcast, f32/f16/int
+matmul, vectorising over `j`, the opt-in fast matmul (D2).
+
 ## 2026-10-30 -- ail_array: f64 expressions are fused in every build
 
 `a * b + a`, `a / b`, `abs`, `minimum`/`maximum`/`clip` chains (1 to 256 operations), `a += tree` and `ta.sum(tree)` / `ta.dot(x, tree)` are one
