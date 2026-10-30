@@ -31,6 +31,31 @@ Probes in `/tmp/probes/pre440` on both builds via `cmp.sh`: `p_add_120`, `p_sub_
 `p_routes` (argument, alias, list item, attribute, dict value, instance + instance), `p_subclass`,
 `p_other_ops` (list/tuple/str concatenation, sequence repeat, divmod, bitwise, shifts) and
 `p_caps250` (250-character names) all match CPython on both builds.  Added `test_ail_pre440.py`.
+## 2026-10-29 -- pre442: an IntEnum member value int() rejects is refused at compile time (job-pre442-10300212)
+
+The pre411 review's first still-differing case (`p9`) is reproduced on this tree: `class
+E(IntEnum): A = "0x10"` is accepted by both builds and prints `class ok`, where CPython raises
+`ValueError: invalid literal for int() with base 10: '0x10'` while the class statement runs
+(enum.py `__set_name__` creates each member with `int(value)`).  The root divergence is the
+accepted class, not the later index error.  `enumlib.lower_class` now applies CPython's
+conversion to every literal `IntEnum` member value and refuses by name (`enum class E: IntEnum
+member A has the value '0x10', which int() rejects at class creation in CPython ...`) when it
+fails.  A tuple value is unpacked as CPython does (`("5", 10)` is `int("5", 10)`); non-literal
+values are left to the run time, and the pre-existing `.value` normalisation difference is
+unchanged.  Both builds refuse the same programs.
+
+Probes in `/tmp/probes/pre442` on both builds via `cmp.sh`: the p9 program and the class-only
+form, `bad_hex_prefix`, `bad_empty`, `bad_spaces`, `bad_decimal_str`, `bad_none`, `bad_tuple`,
+`bad_tuple3`, `bad_complex`, `bad_leading`, `bad_alias`, `bad_second_member` are refused by name;
+`ok_decimal_str`, `ok_float`, `ok_bool_bytes`, `ok_auto`, `ok_routes` (an alias, an argument, a
+list item, an attribute and a dict value) match CPython.  Remaining pre-existing and unchanged:
+`p10` (`A = 2.0 ** 63`) reaches the index and says `cannot fit 'E'` where CPython says `cannot
+fit 'int'`; `p12` (`xs[E.ONE] = 9` with a float member) still says `not E`; `p13` (`class B:
+Y = A.X`) still stops with `type object 'A' has no attribute 'X'`.  `p14` was not identified in
+the review text and is not reproduced.  Final-state tests: test_ail_pre442, test_ail_pre412,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (5 modules, 0 failed, 1
+skipped).  `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py
+--update` added the module and `--check` exits 0.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
