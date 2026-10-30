@@ -1,0 +1,78 @@
+name: regress-check
+
+# Compares the compiler of a pull request with its merge base against CPython 3.12 (lab/regress/run.py): a program that
+# matched CPython on the base and is now refused, stops or differs fails the check, and so does any silent difference.
+# Branches job-* and cand-* have their own gate. Two runners, each takes half of the programs.
+on:
+  pull_request:
+    branches: [integ]
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "base ref (branch, tag or sha)"
+        required: true
+        default: integ
+      head:
+        description: "head ref (branch, tag or sha)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regress-check-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: true
+
+jobs:
+  regress:
+    name: regress ${{ matrix.shard }}/2
+    if: ${{ github.event_name != 'pull_request' || !(startsWith(github.head_ref, 'job-') || startsWith(github.head_ref, 'cand-')) }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Pick base and head
+        id: refs
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          IN_BASE: ${{ github.event.inputs.base }}
+          IN_HEAD: ${{ github.event.inputs.head }}
+        run: |
+          resolve() { git rev-parse --verify --quiet "origin/$1^{commit}" || git rev-parse --verify "$1^{commit}"; }
+          if [ "$EVENT" = pull_request ]; then
+            head="$PR_HEAD"
+            base=$(git merge-base "$PR_HEAD" "$PR_BASE")
+          else
+            head=$(resolve "$IN_HEAD")
+            base=$(git merge-base "$head" "$(resolve "$IN_BASE")")
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "base $base, head $head"
+      - name: Compare with CPython
+        env:
+          BASE: ${{ steps.refs.outputs.base }}
+          HEAD: ${{ steps.refs.outputs.head }}
+          SHARD: ${{ matrix.shard }}
+        run: |
+          gcc --version | head -1
+          python3 lab/regress/run.py --base "$BASE" --head "$HEAD" --jobs 4 --shard "$SHARD/2" \
+            --budget-min 14 --out regress-out
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: regress-${{ matrix.shard }}
+          path: regress-out
+          if-no-files-found: ignore
