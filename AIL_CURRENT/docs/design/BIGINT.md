@@ -152,3 +152,14 @@ result, tuple classes in expression position, lists of objects and nested record
 collections/group_indices, stdlib3/json_dumps and tuples/bfs; `AIL_NO_GENERAL=1` builds them on the legacy emitter.
 Debug switches: `AIL_IR_TRACE=<file>` appends the traceback (and the tagged-int facts) of every function the IR refuses;
 `AIL_NO_TINT_LEGACY=1` turns the legacy retry of item 2 off.
+
+## 11. What the local proof knows about counters and floats (2026-10-30)
+
+Two gaps kept float programs on the general path (20 to 200 times the instructions; measure-float-refcount.md):
+- An attribute, a list item or a call result had no kind in the proof, so `dx = b1.x - b2.x` (dataclass `x: float`) and
+  `round(acc.x, 6)` looked like unprovable int operations. `ir/driver.py` now gives the proof the typed emitter's own type
+  (`bigcap._Defined.float_oracle`): what the emitter types float is float. Without the oracle (the source-level marking) nothing changes.
+- The counter of `for i in range(...)` was unbounded unless every argument was. With a bounded start (0 for `range(n)`) and a
+  constant step up to 256 it is within 2**48 steps of its start (`_lp_range_value`), the same physical limit as `len()` and the IR's
+  int counters. `i + 1` is proven; `i * i` and `i << 20` are still not. The stop is not looked at, whatever its kind.
+Tests: `test_ail_typedreach1.py`.
