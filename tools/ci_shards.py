@@ -24,13 +24,15 @@ REPO = Path(__file__).resolve().parents[1]
 MAP = Path(__file__).with_name('ci_shards.json')
 CACHE = Path.home() / '.cache' / 'ail_par_check.json'
 SHARDS = 20
+GPU_JOB = {'test_ail_gpu_g2'}
 JOBS = 4
 
 
 def all_modules():
     sys.path.insert(0, str(REPO / 'AIL_CURRENT'))
     import ail_check
-    return sorted(ail_check.MODULES)
+    # modules that need a Vulkan device (lavapipe) run in their own `gpu` job of tests.yml, not in the shards
+    return sorted(m for m in ail_check.MODULES if m not in GPU_JOB)
 
 
 def load():
