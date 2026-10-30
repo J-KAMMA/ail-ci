@@ -5596,7 +5596,7 @@ class Compiler(boxclosure.ClosureMixin):
                 lam._ail_builtin_fn = True
                 lam._ail_builtin_type = node.id in self._BUILTIN_TYPE_NAMES
                 return self.expr(lam, ctx)
-            raise Unsupported("name '%s' is not defined" % node.id)
+            raise _builtin_name_refusal(Unsupported("name '%s' is not defined" % node.id), node, 'used as a value')
         if (not is_global and node.id in ctx.slot_of and node.id not in ctx.ptr_names and node.id not in ctx.clo_index
                 and node.id not in ctx.free_names and node.id not in ctx.cell_slots
                 and (node.id in getattr(ctx, 'fixed_params', ()) or id(node) in getattr(ctx, 'bound_reads', ()))):
@@ -6831,7 +6831,10 @@ class Compiler(boxclosure.ClosureMixin):
         args = node.args
         kwargs = {kw.arg: kw.value for kw in node.keywords}
         if isinstance(f, ast.Name):
-            return self._call_name(f.id, args, kwargs, ctx)
+            try:
+                return self._call_name(f.id, args, kwargs, ctx)
+            except Unsupported as exc:
+                raise _builtin_name_refusal(exc, f, 'called')
         if isinstance(f, ast.Attribute):
             return self._call_attribute(f, args, kwargs, ctx)
         # a lambda literal is never a class; inside a class-attribute value the class branch would
@@ -12878,6 +12881,35 @@ def _lazy_raising_genexp(tree):
                 and _genexp_can_raise(node, user_functions, safe_classes, real_next):
             return node
     return None
+
+
+def _builtin_name_refusal(exc, node, how):
+    """The refusal for a builtin of CPython that this general path does not build (`object`, `int` kept in a variable,
+    `complex`, `globals`...), with the line of the use and a `write instead:` line; any other refusal is returned as it is."""
+    text = str(exc)
+    name = node.id
+    if (getattr(exc, 'source_line', None) is not None or name not in _BUILTIN_NAMES
+            or not (text.startswith("name '%s' is not defined" % name) or text.startswith("the name '%s' is not a known" % name))):
+        return exc
+    if name == 'object':
+        hint = '`class Marker: pass` and `marker = Marker()` for a sentinel'
+    elif how == 'used as a value' and name in ('int', 'float', 'str', 'bool', 'list', 'dict', 'set', 'tuple',
+                                               'frozenset', 'bytes', 'bytearray', 'type', 'complex', 'range', 'slice'):
+        hint = 'call it (`%s(x)`) or test with `isinstance(x, %s)`; the type itself is not a value here' % (name, name)
+    elif how == 'used as a value':
+        hint = 'call it, or use the function directly where it is defined'
+    else:
+        hint = 'write the few lines it does with plain numbers, strings, lists and dicts'
+    if how == 'called':
+        text = "the name '%s' is not a known function/class/builtin (the builtin %s is not built)" % (name, name)
+    else:
+        text = 'the builtin %s is %s here, which this compiler does not build (CPython has it)' % (name, how)
+    refusal = Unsupported('%s.\n  write instead: %s' % (text, hint))
+    refusal.source_line = getattr(node, 'lineno', None)
+    return refusal
+
+
+_BUILTIN_NAMES = frozenset(dir(builtins))
 
 
 def build(source, report, allow_mix=True):

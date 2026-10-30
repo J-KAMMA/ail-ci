@@ -53,6 +53,13 @@ BUILTINS = frozenset(dir(builtins))
 MODULE_DUNDERS = frozenset(('__file__', '__package__', '__path__', '__spec__', '__loader__', '__cached__',
                             '__builtins__'))
 NEVER = 10 ** 9
+# C accelerators that CPython's own pure-Python modules import inside `try: ... except ImportError:` and that
+# have a pure-Python fallback written to behave the same (bisect/_bisect, heapq/_heapq, json/_json,
+# functools/_functools, stat/_stat, pickle/_pickle). The compiler has none of them, so the fallback is what runs.
+ACCELERATORS = frozenset(('_bisect', '_heapq', '_json', '_functools', '_stat', '_pickle'))
+IMPORT_ERRORS = frozenset(('ImportError', 'ModuleNotFoundError'))
+# statements an accelerator fallback may consist of: it defines names, it does not do anything
+FALLBACK_STATEMENTS = (ast.Pass, ast.Assign, ast.AnnAssign, ast.Import, ast.ImportFrom, ast.FunctionDef, ast.ClassDef)
 _UNKNOWN = object()                     # a module-level name bound to something the compiler cannot evaluate
 
 
@@ -219,6 +226,11 @@ def _function_locals(node):
     return (stores | params | nonlocals) - globals_, globals_
 
 
+def _mangled(name):
+    """A name CPython rewrites inside a class body (`__x`, not `__x__`)."""
+    return name.startswith('__') and not name.endswith('__')
+
+
 def _static_main_test(test):
     """'main' for `__name__ == "__main__"`, 'not-main' for `!=`, else None."""
     if (isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.left, ast.Name)
@@ -259,6 +271,7 @@ class Program:
         self.kept = {}
         self.ext = {}                   # (Mod, attr) -> (writer Mod, node): `m.attr = v` somewhere
         self.top_cache = {}
+        self.guards = []                # (Mod, try node, its local import statements): see fold_guards
 
     def refuse(self, mod, node, text):
         raise ModuleRefusal(mod.path, getattr(node, 'lineno', 1), getattr(node, 'col_offset', 0) + 1, text)
@@ -369,6 +382,7 @@ class Program:
         mod = Mod(fullname, path if path is not None else mdirs[0], tree, False, kind, mdirs if kind != 'module' else [])
         self.mods[fullname] = mod
         self.drop_main_guards(mod)
+        self.fold_guards(mod)
         self.take_all(mod)
         self.discover(mod)
         return mod
@@ -442,6 +456,176 @@ class Program:
                     out.append(node)
             return out
         entry.tree.body = flat(entry.tree.body)
+        self.fold_guards(entry)
+
+    # -- imports under `try:` / `if` at the top level of a module
+
+    def fold_guards(self, mod):
+        """Resolve, at build time, what a top-level `try: import ... except ImportError:` and a top-level `if`
+        around a local import would decide when the module runs:
+
+        * `try:` whose body only imports C accelerators the compiler lacks (ACCELERATORS) becomes the handler's
+          body: CPython without the accelerator runs exactly that. Only a handler that defines names is
+          taken (see FALLBACK_STATEMENTS), and an `else:` (which runs only WITH the accelerator) is refused;
+        * `try:` whose body only imports local modules (and binds constants) becomes the body, the `else:` and
+          the `finally:` (the import succeeds, so the handler never runs); whether the imported modules could
+          raise ImportError themselves is checked once everything is loaded (check_guards);
+        * `if` with a test the compiler can decide (a constant, `sys.version_info` against a (major, minor)
+          pair) and a local import in a branch becomes the branch that runs.
+
+        Anything else is left as written, and refused later by name."""
+        mod.tree.body = self.fold_body(mod, mod.tree.body)
+
+    def fold_body(self, mod, body):
+        out = []
+        for node in body:
+            if isinstance(node, ast.Try):
+                out.extend(self.fold_try(mod, node))
+            elif isinstance(node, ast.If) and self.holds_local_import(node):
+                taken = self.static_test(mod, node.test)
+                if taken is None:
+                    out.append(node)
+                else:
+                    out.extend(self.fold_body(mod, node.body if taken else node.orelse))
+            else:
+                out.append(node)
+        return out
+
+    def holds_local_import(self, node):
+        return any(isinstance(n, (ast.Import, ast.ImportFrom)) and self.is_local_import(n) for n in ast.walk(node))
+
+    def fold_try(self, mod, node):
+        caught = self.import_error_handler(node)
+        imports = [n for n in node.body if isinstance(n, (ast.Import, ast.ImportFrom))]
+        if caught is None or not imports:
+            return [node]
+        others = [n for n in node.body if not isinstance(n, (ast.Import, ast.ImportFrom))]
+        accel = [self.accelerator(n) for n in imports]
+        if all(accel):
+            if others:
+                return [node]
+            if node.orelse:
+                self.refuse(mod, node.orelse[0], "the `else:` of `try: import %s ... except ImportError:` runs only "
+                            "when the C accelerator exists, and the compiler has none, so CPython and this program "
+                            "would differ.\n  write instead: put the `else:` statements after the `try`, or drop "
+                            "the guard" % ', '.join(sorted(set(accel))))
+            for handler in node.handlers:
+                bad = next((s for s in handler.body if not isinstance(s, FALLBACK_STATEMENTS)
+                            and not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))), None)
+                if bad is not None:
+                    self.refuse(mod, bad, "the handler of `try: import %s ... except ImportError:` does more than "
+                                "define a fallback (`%s`); the compiler takes this handler because CPython without "
+                                "the C accelerator runs it, but CPython here has the accelerator and would not.\n"
+                                "  write instead: keep only definitions and assignments in the handler"
+                                % (', '.join(sorted(set(accel))), ast.unparse(bad).split('\n')[0][:50]))
+            return self.fold_body(mod, list(caught.body) + list(node.finalbody))
+        if any(accel) or not all(self.is_local_import(n) for n in imports):
+            return [node]
+        if any(not (isinstance(n, ast.Pass) or isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
+                    and all(isinstance(t, ast.Name) for t in n.targets)) for n in others):
+            return [node]
+        self.guards.append((mod, node, imports))
+        return self.fold_body(mod, list(node.body) + list(node.orelse) + list(node.finalbody))
+
+    def import_error_handler(self, node):
+        """The first handler of a `try` that catches only ImportError / ModuleNotFoundError (bound to no name,
+        no bare except), else None."""
+        if not node.handlers or any(h.name or h.type is None for h in node.handlers):
+            return None
+        for h in node.handlers:
+            kinds = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
+            if not all(isinstance(k, ast.Name) and k.id in IMPORT_ERRORS for k in kinds):
+                return None
+        return node.handlers[0]
+
+    def accelerator(self, node):
+        """The accelerator module an `import _x` / `from _x import ...` statement names, else None."""
+        if isinstance(node, ast.ImportFrom):
+            names = [node.module or ''] if not node.level else ['.']
+        else:
+            names = [a.name for a in node.names]
+        if all(n in ACCELERATORS and not self.local_top(n) for n in names):
+            return names[0]
+        return None
+
+    def static_test(self, mod, test):
+        """True / False when the test of an `if` has one value for every run of the program, else None."""
+        if isinstance(test, ast.Constant):
+            return bool(test.value)
+        if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+            inner = self.static_test(mod, test.operand)
+            return None if inner is None else not inner
+        if isinstance(test, ast.BoolOp):
+            values = [self.static_test(mod, v) for v in test.values]
+            if None in values:
+                return None
+            return all(values) if isinstance(test.op, ast.And) else any(values)
+        if isinstance(test, ast.Compare) and len(test.ops) == 1 and isinstance(test.comparators[0], ast.Tuple):
+            want = test.comparators[0].elts
+            if not (1 <= len(want) <= 2 and all(isinstance(e, ast.Constant) and type(e.value) is int for e in want)):
+                return None
+            want = tuple(e.value for e in want)
+            op = test.ops[0]
+            sliced = (isinstance(test.left, ast.Subscript) and isinstance(test.left.slice, ast.Slice)
+                      and test.left.slice.lower is None and test.left.slice.step is None
+                      and isinstance(test.left.slice.upper, ast.Constant) and test.left.slice.upper.value == 2
+                      and self.sys_version(mod, test.left.value))
+            if sliced:
+                allowed = (ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Eq, ast.NotEq)
+            elif self.sys_version(mod, test.left):
+                allowed = (ast.Lt, ast.GtE)     # the micro version of the running Python decides the others
+            else:
+                return None
+            table = {ast.Lt: operator.lt, ast.LtE: operator.le, ast.Gt: operator.gt, ast.GtE: operator.ge,
+                     ast.Eq: operator.eq, ast.NotEq: operator.ne}
+            if not isinstance(op, allowed):
+                return None
+            return table[type(op)]((3, 12), want)
+        return None
+
+    def sys_version(self, mod, node):
+        return (isinstance(node, ast.Attribute) and node.attr == 'version_info' and isinstance(node.value, ast.Name)
+                and node.value.id == 'sys' and self.binds_only(mod, 'sys', ('sys', None)))
+
+    def binds_only(self, mod, name, via):
+        """`name` is bound in the module only by `import <via[0]>` (via[1] None) or by
+        `from <via[0]> import <via[1]>`, and nowhere else (not a parameter, assignment or definition)."""
+        found = 0
+        for n in ast.walk(mod.tree):
+            if isinstance(n, ast.Import) and via[1] is None:
+                found += sum(1 for a in n.names if a.name == via[0] and (a.asname or a.name) == name)
+            elif isinstance(n, ast.ImportFrom) and via[1] is not None and n.module == via[0] and not n.level:
+                found += sum(1 for a in n.names if a.name == via[1] and (a.asname or a.name) == name)
+            elif isinstance(n, ast.arg) and n.arg == name:
+                return False
+        sites = _scan_scope(mod.tree.body)[3]
+        return found >= 1 and all(isinstance(site, (ast.Import, ast.ImportFrom)) for (bound, site) in sites
+                                  if bound == name)
+
+    def check_guards(self):
+        """A `try: import <local> except ImportError:` was resolved as if the import succeeds. It does, unless a
+        module that import runs raises ImportError itself: refused when ImportError / ModuleNotFoundError
+        appears in any of those modules (after the accelerator fallbacks were resolved)."""
+        for mod, node, imports in self.guards:
+            seen, todo = set(), []
+            for n in imports:
+                imp = mod.imps.get(id(n))
+                if imp is not None:
+                    todo.extend(imp.chain)
+            while todo:
+                target = todo.pop()
+                if target in seen:
+                    continue
+                seen.add(target)
+                for x in ast.walk(target.tree):
+                    if isinstance(x, ast.Name) and (x.id in IMPORT_ERRORS or x.id == '__import__'):
+                        self.refuse(mod, imports[0], "`try: import ... except ImportError:` around a local import: %s (%s:%d) "
+                                    "mentions %s, so the import may raise ImportError itself, and the compiler "
+                                    "decides this `try` when it builds, taking the import as successful.\n"
+                                    "  write instead: import it without `try`, or keep ImportError out of the "
+                                    "imported modules" % (target.name, target.path, getattr(x, 'lineno', 1), x.id))
+                for imp in target.imps.values():
+                    todo.extend(imp.chain)
 
     def is_local_import(self, node):
         if isinstance(node, ast.ImportFrom):
@@ -1218,10 +1402,10 @@ class Program:
             if a.name == '*':
                 self.d_star(mod, imp, target, node)
                 continue
-            if a.name.startswith('_') and not (a.name.startswith('__') and a.name.endswith('__')):
-                self.refuse(mod, node, "`from %s import %s` imports a private name (a leading underscore); "
-                            "this compiler refuses it even though CPython allows it.\n"
-                            "  write instead: rename it without the underscore in %s"
+            if _mangled(a.name):
+                self.refuse(mod, node, "`from %s import %s` imports a name with two leading underscores; CPython "
+                            "mangles such a name inside a class body, and this compiler does not.\n"
+                            "  write instead: rename it with one underscore (or none) in %s"
                             % (absname, a.name, target.path.name))
             bound = self.bound_except(mod, node) if target is mod else self.bound_names(target)
             if bound is not None and a.name in bound:
@@ -1275,10 +1459,11 @@ class Program:
         imp.stars.append(target)
         bound = self.bound_names(target)
         for name in self.star_list(target, mod, node):
-            if name.startswith('_'):
-                self.refuse(mod, node, "`from %s import *` would bind the private name %s (it is listed in "
-                            "__all__); this compiler refuses private names even though CPython allows them.\n"
-                            "  write instead: rename it without the underscore in %s"
+            if _mangled(name):
+                self.refuse(mod, node, "`from %s import *` would bind the name %s (it is listed in "
+                            "__all__), which has two leading underscores; CPython mangles such a name inside a "
+                            "class body, and this compiler does not.\n"
+                            "  write instead: rename it with one underscore (or none) in %s"
                             % (target.name, name, target.path.name))
             imp.star_keys.add(name)
             if bound is not None and name in bound:
@@ -1781,10 +1966,11 @@ class Rewriter(ast.NodeTransformer):
         if attr in MODULE_DUNDERS and not stored:
             self.program.refuse(self.mod, node, "%s.%s is not available: the program is built into one executable.\n"
                                 "  write instead: pass the value in as a constant or an argument" % (target.name, attr))
-        if attr.startswith('_') and not (attr.startswith('__') and attr.endswith('__')):
-            self.program.refuse(self.mod, node, "`%s.%s` reads or writes a private name (a leading underscore); this "
-                                "compiler refuses it even though CPython allows it.\n  write instead: rename it "
-                                "without the underscore in %s" % (target.name, attr, target.path.name))
+        if _mangled(attr):
+            self.program.refuse(self.mod, node, "`%s.%s` reads or writes a name with two leading underscores; CPython "
+                                "mangles such a name inside a class body, and this compiler does not.\n"
+                                "  write instead: rename it with one underscore (or none) in %s"
+                                % (target.name, attr, target.path.name))
         if self.module_value(target, attr, node) is not None:
             self.program.refuse(self.mod, node, "%s.%s is a module, used as a value; this compiler needs a module "
                                 "to be named in the source.\n  write instead: use `%s.%s.name` directly"
@@ -1941,6 +2127,7 @@ def merge_program(entry_path, entry_text, read=None):
     program.mods['__main__'] = entry
     program.prepare_entry(entry)
     program.discover(entry)
+    program.check_guards()
     program.check_star_packages()
     order = program.analyse_all(entry)
     reachable = [m for m in order if m is not entry]

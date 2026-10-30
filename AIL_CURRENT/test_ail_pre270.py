@@ -71,18 +71,24 @@ class Pre270Refusals(unittest.TestCase):
                     for phrase in phrases:
                         self.assertIn(phrase, message)
 
-    def test_import_in_a_module_level_try_is_named(self):
+    def test_import_in_a_module_level_try_is_built(self):
+        # a local import under a module-level `try ... except ImportError` is the import succeeding (stdlib rules,
+        # batch 1): the handler never runs, as in CPython, unless the imported module can raise ImportError itself
         text, where, phrases = LOCAL_TRY
         for general in (True, False):
             with self.subTest(general=general), tempfile.TemporaryDirectory() as directory:
                 built = compile_files(directory, {'main.py': text, 'lib.py': 'K = 1\n'},
                                       entry='main.py', general=general)
-                message = built.stdout + built.stderr
-                self.assertIn(built.returncode, (2, 3), message)
-                self.assertFalse(Path(directory, 'prog').exists(), message)
-                self.assertTrue(message.startswith(where), message)
-                for phrase in phrases:
-                    self.assertIn(phrase, message)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                ran = subprocess.run([str(Path(directory, 'prog'))], capture_output=True, text=True, timeout=60)
+                self.assertEqual(ran.stdout, 'done\n')
+        with tempfile.TemporaryDirectory() as directory:
+            built = compile_files(directory, {'main.py': text, 'lib.py': 'K = 1\nraise ImportError("x")\n'},
+                                  entry='main.py')
+            message = built.stdout + built.stderr
+            self.assertIn(built.returncode, (2, 3), message)
+            self.assertTrue(message.startswith('main.py:2:5:'), message)
+            self.assertIn('mentions ImportError', message)
 
     def test_user_import_error_class_keeps_its_named_refusal(self):
         text, where, phrases = SHADOW
