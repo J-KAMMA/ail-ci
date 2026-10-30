@@ -1,3 +1,21 @@
+## 2026-10-30 -- GPU stage G2: SPIR-V for the G1 kernels, and the Vulkan runtime that is opened at run time
+
+The kernel IR of G1 now has a device twin. `python/pkg-v12/gpu_spirv.py` (a SPIR-V writer of about 800 lines, no shaderc or
+spirv-tools at user build time) lowers a kernel to a compute shader; `python/pkg-v12/gpu_vk.py` is the C runtime that goes
+into a `--gpu` program: it opens `libvulkan.so.1` with dlopen at run time (never linked), declares the Vulkan structs it
+needs itself, picks a device, and runs one pipeline per kernel. The wrapper `ail_gk<k>_run` has the signature of the G1
+emulation, tries the device and falls back to the emulation on any missing piece (no loader, no device, no compute queue, a
+device without shaderInt64 / shaderFloat64 / round-to-nearest-even / signed-zero-inf-NaN preservation for binary64, a failed
+allocation or submit, a static build), so the program prints the same bytes either way. The device sets the same flag bits
+as the emulation (a superset is allowed, a subset is not); flag != 0 discards the result and the original loop replays.
+Switches: `AIL_GPU=0` (original CPU loop), `AIL_GPU=emu` (the CPU emulation, no Vulkan), `AIL_GPU=force` (device for every
+launch), unset (device from `AIL_GPU_MIN_N`=4096 elements; placeholder until the G7 cost model), `AIL_GPU_TRACE=1`,
+`AIL_GPU_DEVICE=<name>`; test hooks `AIL_VULKAN_LIB`, `AIL_GPU_DISABLE`. The build prints one note per kernel naming the path it
+can take. A bit test on lavapipe found that the device compiler folds `0.0 - x` into `-x` (wrong sign of zero for +0.0), so
+the emitter now computes the sign of an exact zero, `-x` and `abs(x)` with integer bit operations. There is no int32 kernel
+yet: the typed array module is not in this base, and the G1 kernels are int64 with the overflow flag. Programs without
+`--gpu` are byte-identical. `test_ail_gpu_g2.py` runs in its own CI job on lavapipe (`gpu` in tests.yml), not in the shards.
+
 ## 2026-10-30 -- GPU stage G1: `# ail: gpu`, the eligibility proof, kernel IR and its CPU emulation
 
 `compile --gpu` (or `AIL_GPU_BUILD=1`) reads `# ail: gpu` on the line before a loop (or at the end of a list-comprehension
