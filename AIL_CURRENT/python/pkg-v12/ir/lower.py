@@ -372,7 +372,7 @@ class Lowering(TextLowering):
             if isinstance(_e, ast.BinOp):
                 return _may_tint(_e.left) or _may_tint(_e.right)
             if isinstance(_e, ast.Name):
-                if _e.id in self.tint_names:
+                if _e.id in self.tint_names or _e.id in _tint_targets:
                     return True
                 if getattr(self.P, 'GLOBAL_INT_TINT', False):
                     _mods = getattr(getattr(self.ctx, 'modconsts', None), 'vars', {})
@@ -1598,7 +1598,7 @@ class Lowering(TextLowering):
             c = self.b.value('cmp.ne', [self.b.value('load', [seen], I.I64), self.const(I.I64, 0)], I.I1)
             self.in_region(ok, fill=lambda: self.b.emit('yield'))
             self.in_region(fail, fill=lambda: self.b.emit('raise', [], [], {
-                'code': code, 'name': 'ValueError', 'form': 'msg', 'msg': '%s() arg is an empty sequence' % f}))
+                'code': code, 'name': 'ValueError', 'form': 'msg', 'msg': '%s() iterable argument is empty' % f}))
             self.b.emit('if', [c], [], None, [ok, fail])
         return self.b.value('load', [acc], acc.type.pointee)
 
