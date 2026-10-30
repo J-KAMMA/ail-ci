@@ -555,9 +555,142 @@ static AIL_BIGFN ail_str ail_tint_chr(ail_sarena *A, ail_tint x) {
     return (ail_str){q, n, n == 1};
 }
 static inline ail_tint ail_tint_from_str(ail_sarena *A, int64_t base, ail_str s) {
+    /* the common token, `[+-]?[0-9]{1,18}`: parsed in place (fewer than 19 digits cannot overflow); anything else (spaces,
+       underscores, a prefix, non-ASCII digits, a longer number, an error) goes through the full parser */
+    if (__builtin_expect(base == 10 && s.n >= 1 && s.n <= 18, 1)) {
+        const uint8_t *p = s.p;
+        int64_t n = s.n, i = 0;
+        int neg = 0;
+        if (p[0] == '-') { neg = 1; i = 1; } else if (p[0] == '+') i = 1;
+        if (i < n) {
+            int64_t v = 0;
+            for (; i < n; i++) {
+                unsigned d = (unsigned)p[i] - '0';
+                if (d > 9) goto slow;
+                v = v * 10 + (int64_t)d;
+            }
+            return ail_tint_from_int64(neg ? -v : v);
+        }
+    }
+slow:
     return ail_tint__parse_text(A, s, base);
 }
 static inline ail_tint ail_tint_from_bytes(ail_sarena *A, int64_t base, const uint8_t *p, int64_t n) {
     return ail_tint__parse_bytes(A, p, n, base);
+}
+/* print(x) of an exact int: a small one is written as an int64, a big one through a scratch arena */
+static void ail_write_tint_big(ail_tint x) {
+    ail_sarena A = {0};
+    ail_str s = ail_tint_str(&A, x);
+    ail_str_write(s, stdout);
+    ail_sarena_free(&A);
+}
+static inline void ail_write_tint(ail_tint x) {
+    if (__builtin_expect(!x.b, 1)) ail_write_int(x.i); else ail_write_tint_big(x);
+}
+'''
+
+# A list of exact ints (docs/design/BIGINT.md section 13): each element is an `ail_tint` slot, the small ints inline and a big one
+# a pointer to its (immutable, never freed before exit) magnitude, so copying a slot shares the box and nothing is reference counted.
+TLIST = r'''
+/* ---- lists of exact ints: ail_tlist (tint_typed.TLIST) ----------------------------------------------------- */
+typedef struct { ail_tint *p; int64_t n, cap; } ail_tlist;
+static __attribute__((noinline)) void ail_tlist__grow(ail_tlist *L, int64_t want) {
+    int64_t c = L->cap ? L->cap * 2 : 8;
+    if (c < want) c = want;
+    if (c > (int64_t)(SIZE_MAX / sizeof(ail_tint))) ail_die("list too long");
+    ail_tint *q = (ail_tint *)realloc(L->p, (size_t)c * sizeof *q);
+    if (!q) ail_die("out of memory");
+    ail__huge_hint(q, (size_t)c * sizeof *q);
+    L->p = q; L->cap = c;
+}
+static inline __attribute__((always_inline)) void ail_tlist_push(ail_tlist *L, ail_tint v) {
+    if (__builtin_expect(L->n == L->cap, 0)) ail_tlist__grow(L, L->n + 1);
+    L->p[L->n++] = v;
+}
+static void ail_tlist_reserve(ail_tlist *L, int64_t extra) {
+    if (extra <= 0 || L->cap - L->n >= extra) return;
+    if (extra > (int64_t)(SIZE_MAX / sizeof(ail_tint)) - L->n) ail_die("list too long");
+    ail_tlist__grow(L, L->n + extra);
+    /* (grow doubles; a comprehension of known length wants exactly its size) */
+}
+static __attribute__((noreturn, noinline, cold)) void ail_ir_tlist_fail(void) {
+    ail_die("list index out of range");
+    __builtin_unreachable();
+}
+static inline __attribute__((always_inline)) ail_tint ail_ir_tlist_get(const ail_tlist *L, int64_t i) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
+        if (i < 0) i += L->n;
+        if (i < 0 || i >= L->n) ail_ir_tlist_fail();
+    }
+    return L->p[i];
+}
+static inline __attribute__((always_inline)) void ail_ir_tlist_set(ail_tlist *L, int64_t i, ail_tint v) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)L->n, 0)) {
+        if (i < 0) i += L->n;
+        if (i < 0 || i >= L->n) ail_ir_tlist_fail();
+    }
+    L->p[i] = v;
+}
+static ail_tint ail_tlist_pop(ail_tlist *L, int64_t i) {
+    if (L->n == 0) ail_die("pop from empty list");
+    if (i < 0) i += L->n;
+    if (i < 0 || i >= L->n) ail_die("pop index out of range");
+    ail_tint v = L->p[i];
+    for (int64_t j = i; j < L->n - 1; j++) L->p[j] = L->p[j + 1];
+    L->n--;
+    return v;
+}
+static void ail_tlist_clear(ail_tlist *L) { L->n = 0; }
+static void ail_tlist_free(ail_tlist *L) { free(L->p); L->p = 0; L->n = L->cap = 0; }
+static int ail_tlist__cmp(const void *a, const void *b) {
+    return ail_tint_cmp(*(const ail_tint *)a, *(const ail_tint *)b);
+}
+/* sort: every element small (the usual case) sorts as plain int64 values; a list with a big element sorts by the exact comparison.
+   Equal elements are the same value, so stability cannot show. */
+static void ail_tlist_sort(ail_tlist *L) {
+    int64_t n = L->n, i;
+    if (n < 2) return;
+    for (i = 0; i < n; i++) if (L->p[i].b) break;
+    if (i == n) {
+        int64_t *t = (int64_t *)malloc((size_t)n * sizeof *t);
+        if (!t) ail_die("out of memory");
+        for (i = 0; i < n; i++) t[i] = L->p[i].i;
+        ail__sort_i64(t, n);
+        for (i = 0; i < n; i++) { L->p[i].i = t[i]; L->p[i].b = NULL; }
+        free(t);
+        return;
+    }
+    qsort(L->p, (size_t)n, sizeof *L->p, ail_tlist__cmp);
+}
+static int ail_tlist_has(const ail_tlist *L, ail_tint v) {
+    int64_t n = L->n;
+    if (!v.b) {
+        for (int64_t i = 0; i < n; i++) if (!L->p[i].b && L->p[i].i == v.i) return 1;
+        return 0;
+    }
+    for (int64_t i = 0; i < n; i++) if (L->p[i].b && ail_tint_cmp(L->p[i], v) == 0) return 1;
+    return 0;
+}
+static inline __attribute__((always_inline)) ail_tint ail_ir_tview_get(const ail_tint *p, int64_t n, int64_t i) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)n, 0)) {
+        if (i < 0) i += n;
+        if (i < 0 || i >= n) ail_ir_tlist_fail();
+    }
+    return p[i];
+}
+static inline __attribute__((always_inline)) void ail_ir_tview_set(ail_tint *p, int64_t n, int64_t i, ail_tint v) {
+    if (__builtin_expect((uint64_t)i >= (uint64_t)n, 0)) {
+        if (i < 0) i += n;
+        if (i < 0 || i >= n) ail_ir_tlist_fail();
+    }
+    p[i] = v;
+}
+/* a copy of n slots from p into L (L's old content is dropped; L may not alias p) */
+static void ail_tlist_assign(ail_tlist *L, const ail_tint *p, int64_t n) {
+    L->n = 0;
+    ail_tlist_reserve(L, n);
+    if (n > 0) memcpy(L->p, p, (size_t)n * sizeof *p);
+    L->n = n;
 }
 '''

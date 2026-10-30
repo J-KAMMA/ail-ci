@@ -199,3 +199,89 @@ an int64 counter is refused (narrowing the bound would stop on `range(10**20, 5)
 take the typed path with these forms: t069, t081, and any program whose int lists hold values that are int64 by construction
 (`len()`, a literal), with a slice bound that is an exact tagged int (saturated, so exact).
 Tests: `test_ail_typedreach2.py`.
+
+## 13. Lists of exact ints on the typed path (2026-10-30, batch 3)
+
+Section 12 left `values = [int(t) for t in sys.stdin.read().split()]` (and every program that builds an int list from text or from
+an unbounded accumulator) on the general path, because the IR's int lists hold int64 and a value beyond int64 cannot be stored in
+one. The IR now has a second int list kind whose element is a tagged slot.
+
+**Representation.** `obj<list<tint>>` is the C struct `ail_tlist { ail_tint *p; int64_t n, cap; }` (`tint_typed.TLIST`), the same
+inline `{p, n, cap}` shape as `ail_list`; an element is an `ail_tint`: `{int64 i; ail_tbig *b}`. A small int is inline (`b == NULL`,
+nothing allocated); a big one is a pointer to its limbs. A box is immutable and, as everywhere on the typed runtime (no GC), freed
+only at exit, so copying a slot (a slice, a copy, a sort, a move) shares the box and nothing is reference counted: there is no
+count to keep right when two lists, or a list and a scalar, name one big value. Reading an element is a 16-byte load, and the tag
+check is the one every tagged operation already does (`!a.b && !b.b`), so `sum`, a loop, a compare cost what they cost on a tagged
+scalar. The alternative, an 8-byte slot with a tag bit (a 62-bit small int, everything else boxed), was priced and not built: it
+halves the list but adds a shift and a check to every read and write, boxes the int64 values from 2**62 up, and the measured RSS
+cost of the 16-byte slot is +0-25% (section 13 table), the instruction cost +-5%.
+
+**Which lists.** Locals only (a list in a struct field, a dict value or a record stays an int64 list). Exact `int64` lists remain
+where every value stored is provably int64 (`len()`, a counter, a literal, `tint.from` of an int64, a remainder by an int64).
+The lowering decides by taint: an exact int is *tainted* when it comes from `int(<text>)`, from an element of a list of exact ints
+(or a read-only parameter of them), or through tagged arithmetic and scalar locals from such a value (`acc += x`;
+`out.append(acc)`). Storing a tainted value into an int64 list local makes that list a list of exact ints
+(`lower.NeedTlist`); storing it into a scalar local marks the scalar (`lower.NeedTaint`); `lower.lower()` lowers the function
+again with those sets until nothing changes (at most 40 times; every attempt is a fresh `Lowering`, the context is restored in between).
+`ys = xs`, `ys = xs[:]` and `sorted(xs)` between the two kinds make both sides lists of exact ints. An unbounded accumulator that is
+not tainted keeps the int64 list and its loud stop, exactly as before, so existing programs do not change. A comprehension over a
+slice or `s.split()` always counts (batch 2's rule: it refused the function; now it builds a list of exact ints).
+
+A program in which any function builds a list of exact ints is an *exact program* (`('exact',)` in `pyfunc.TLIST_ACTIVE`; the
+first such list requests it, which costs one more compilation round): it was on the exact general path before, so nothing in it
+may be narrowed to int64 where CPython has an answer for the value. In an exact program a non-small exact int that would be
+passed to an int64 parameter, stored into an int64 local or returned as an int64 (`lower.no_narrowing`) refuses the function, and
+the whole program stays on the general path, instead of stopping at "integer overflow" (corpus t028 `math.isqrt` of a parsed
+token, t470 `m.bit_length()`). A program without such a list keeps the loud stops it always had at those places.
+
+**Operations** (all on the `ail_tlist` place, ownership/sharing analysis unchanged): `[..]` displays, `[v] * n`, comprehensions
+over `range`, a list, a slice or `s.split()`; `append`, `pop`, `clear`, `sort`, `xs[i]` read and write (checked or proven),
+`xs[i] op= v`, `ys = xs[a:b]` (clamped as Python does), `copy`, `len`, truth, `for x in xs`, `x in xs` (`list.has`), `sum` / `min`
+/ `max` (exact, empty min/max raise `ValueError`), `sorted(xs)` / `sorted(set(xs), reverse=...)`, `" ".join(str(x) for x in xs)`,
+`print(xs)` (`[a, b, c]`), `print(*xs, sep=..., end=...)` and a `print` mixing lists and scalars (every argument is evaluated before
+anything is written). `sort`: when every element is small the values are sorted as plain int64 (`ail__sort_i64`); a list with a
+big element is sorted by the exact comparison (`qsort` over `ail_tint_cmp`); equal values are one value, so stability cannot show.
+Printing an element uses `ail_write_tint` (a small one is the int64 writer, a big one decimalised in a scratch arena).
+`int(<str>)` has an in-place fast path for `[+-]?[0-9]{1,18}` (the common token) and the full CPython parser for the rest.
+Not covered (the program stays on the exact general path, with the same answers): `insert`, `remove`, `extend`, `reverse`,
+`del`, slice assignment, `str(xs)` and f-strings of a list, a list of exact ints in a struct field, in a dict or as an argument to
+`sorted(key=...)`, a list parameter that the callee modifies.
+
+**Across functions.** A `list[int]` parameter that a caller fills with exact ints is a read-only array of `ail_tint` slots: abi
+`tarray`, `span<tint>`, the same C signature as an int64 array (`const int64_t *p, int64_t n`; the definition reinterprets the
+pointer, the callers pass `(const int64_t *)xs->p`), so the forward declarations of the legacy front end stay right. A function
+that returns a list of exact ints has the C result `ail_tlist` by value (`ret_list = 'tlist'`; no buffer, no `__irl` twin).
+Which parameters and results those are is a whole-program fact: the lowering asks for it (`pyfunc.TLIST_REQUESTS`: `('p', f, i)`,
+`('r', f)`), refuses that attempt, and `pyfunc._to_c_once` compiles the program again with the keys switched on
+(`pyfunc.TLIST_ACTIVE`), at most 8 rounds; a program with no list of exact ints makes no request and compiles once. A function that
+takes or returns such a list, or calls one that does, and that the IR cannot lower, is not given to the legacy int64 emitter (its
+signature differs): `ir/driver.py` raises, and the whole program takes the exact general path.
+
+**Measured** (`tools/icount.c` instructions, `/usr/bin/time` peak RSS, bytes of the binary; corpus programs of
+`lab/corpus/programs/deepseek-v4.1-flash-free`; general = batch 2 (#237), i64 = commit 25ba1b28 before exact ints, new = this
+change; synthetic inputs 200,000 ints, t314 3,000 because it is quadratic; "big" = 20% of the values between 1e19 and 1e25 and 5%
+at the int64 edges; `*` the int64 build stops loudly there):
+
+| program, input | general | i64 build | new |
+|---|---:|---:|---:|
+| t001 corpus 0/1/2 | 214k / 223k / 285k | 129k / 132k / 156k | 128k / 130k / 150k |
+| t001 200k small | 317.5M | 162.6M | 110.0M |
+| t001 200k big | 848.0M | stops* | 450.9M |
+| t010 200k small | 424.9M | 215.8M | 210.1M |
+| t010 200k big | 676.0M | stops* | 423.4M |
+| t012 200k small | 210.9M | 79.8M | 75.2M |
+| t012 200k big | 532.5M | stops* | 383.0M |
+| t314 3k small | 5,299.7M | 143.7M | 146.2M |
+| t314 3k big | 5,564.5M | stops* | 256.2M |
+| t459 200k small | 593.0M | 497.6M | 520.8M |
+| t459 200k big | 1,084.9M | stops* | 874.5M |
+
+Peak RSS at 200k small values: general 29-61 MB, i64 9-24 MB, new 10.6-27.3 MB (t001 14.6 MB against 19.0). Binary: general 85-147 KB,
+i64 26-31 KB, new 35-40 KB (the tagged runtime, +5-9 KB). On the small corpus inputs the new build is within +-4% of the int64
+build. The cost on big values is the bigint arithmetic itself (and the decimal conversion on output), not the list.
+Programs that left the general path: t001, t010 (3 copies), t012, t314 and t459 of the corpus. Census of `lab/census/programs/dev`
+(178 programs, compile only): built on the typed path 29 before, 37 now (t002, t010, t012, t014, t024, t054, t062, t308), none
+the other way; the eight programs that moved (and t028, t470, which the exact-program rule keeps general) print what CPython prints
+on their corpus inputs and on empty, int64-edge and beyond-int64 inputs. `recs_t` is not one of them:
+its blocker is a parameter that is a list of records (`parameter 'recs' has kind ('olist', 'Rec')`), not an int list.
+Tests: `test_ail_tintlist.py`.

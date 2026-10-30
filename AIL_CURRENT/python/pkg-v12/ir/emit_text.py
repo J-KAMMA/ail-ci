@@ -138,6 +138,8 @@ class TextEmitter(object):
             self.parts.add('STR')
         if 'flt' in kinds:
             self.parts.add('FREPR')
+        if 'tint' in kinds:
+            self.parts.add('TINTT')
         if stream == 'stdout':
             self.line(depth, 'ail_stdout_text();')
         if ins.attrs.get('parts'):
@@ -154,6 +156,8 @@ class TextEmitter(object):
             elif kind == 'flt':
                 self.line(depth, ('ail_write_float((double)(%s));' % v) if stream == 'stdout'
                           else 'ail_write_float_to((double)(%s), stderr);' % v)
+            elif kind == 'tint':
+                self.line(depth, 'ail_write_tint(%s);' % v)
             elif kind == 'bool':
                 self.line(depth, ('ail_fputs_stdout((%s) ? "True" : "False");' % v) if stream == 'stdout'
                           else 'fputs((%s) ? "True" : "False", stderr);' % v)

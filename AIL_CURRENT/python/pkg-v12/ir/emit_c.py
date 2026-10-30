@@ -42,6 +42,8 @@ def ctype(t):
             return 'ail_list *'
         if inner.head == 'list' and inner.args[0] == I.F64:
             return 'ail_flist *'
+        if inner.head == 'list' and inner.args[0] == I.TINT:
+            return 'ail_tlist *'
         if inner.head == 'dict':
             return 'ail_idict *'
         if inner.head == 'list' and inner.args[0] == I.STRV:
@@ -96,7 +98,7 @@ def signature(fn, sym=None, linkage=None, byval=False):
     abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
     decls = []
     for p, n, a in zip(fn.params, fn.param_names, abi):
-        if a == 'array':
+        if a in ('array', 'tarray'):
             decls.append('const int64_t *v_%s, int64_t v_%s_len' % (n, n))
         elif a == 'flist':
             decls.append('ail_flist v_%s' % n)
@@ -104,7 +106,10 @@ def signature(fn, sym=None, linkage=None, byval=False):
             decls.append('ail_slist v_%s' % n)
         else:
             decls.append(_decl(ctype(p.type), 'v_' + n))
-    if fn.attrs.get('ret_list') and byval:
+    if fn.attrs.get('ret_list') == 'tlist':
+        # a list of exact ints always leaves as the {p, n, cap} struct itself (the callers are IR functions)
+        ret = 'ail_tlist'
+    elif fn.attrs.get('ret_list') and byval:
         # IR to IR (S3b): the list leaves as the {p, n, cap} struct itself, no copy through the spill slot
         ret = 'ail_flist' if fn.attrs['ret_list'] == 'flist' else 'ail_list'
     elif fn.attrs.get('ret_list'):
@@ -125,7 +130,7 @@ def _args_of(fn, want_out=True):
     abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
     out = []
     for n, a in zip(fn.param_names, abi):
-        out.append('v_%s, v_%s_len' % (n, n) if a == 'array' else 'v_%s' % n)
+        out.append('v_%s, v_%s_len' % (n, n) if a in ('array', 'tarray') else 'v_%s' % n)
     if fn.attrs.get('ret_list') and want_out:
         out.append('_out, _cap')
     return ', '.join(out)
@@ -142,6 +147,8 @@ def storage(t):
         return 'ail_flist'
     if t == _SLIST:
         return 'ail_slist'
+    if t == _LIST_TINT:
+        return 'ail_tlist'
     if t == I.DICT_II:
         return 'ail_idict'
     if I.rec_elem(t) is not None:
@@ -186,7 +193,18 @@ class _Cx(object):
 
 
 _LISTS = (I.T('obj', I.T('list', I.I64)), I.T('obj', I.T('list', I.F64)))
-_OWNED_LISTS = _LISTS + (_SLIST,)
+_LIST_TINT = I.T('obj', I.T('list', I.TINT))
+_OWNED_LISTS = _LISTS + (_SLIST, _LIST_TINT)
+
+
+def _lfam(elem):
+    """The runtime family of a list with this element type: ail_list, ail_flist or ail_tlist (lists of str and the
+    record lists are handled apart)."""
+    return 'flist' if elem == I.F64 else 'tlist' if elem == I.TINT else 'list'
+
+
+def _lparts(f):
+    return {'list': ('LIST', 'IRLIST'), 'flist': ('FLIST', 'IRFLIST'), 'tlist': ('TINTT', 'TLIST')}[f]
 
 
 class _OwnedLists(object):
@@ -226,7 +244,11 @@ class Emitter(TextEmitter):
                                           or (i.op == 'call' and i.attrs.get('callee') in self.pending)
                                           for i in ops)
         self.frame = any(i.op == 'try' for i in ops)
-        self.byval = bool(fn.attrs.get('ret_list')) and not self.is_pending and not self.frame and self.allow_byval
+        self.tl_ret = fn.attrs.get('ret_list') == 'tlist'
+        self.byval = bool(fn.attrs.get('ret_list')) and not self.is_pending and not self.frame and self.allow_byval \
+            and not self.tl_ret
+        if self.tl_ret and (self.is_pending or self.frame):
+            raise I.IRError('a list of exact ints returned by a function that can raise or has a try')
         self.pre = 'fr->' if self.frame else ''
         self.text_init(fn)
         self.cx = _Cx('top', 0, 0)
@@ -247,6 +269,7 @@ class Emitter(TextEmitter):
         self.owned = [(self.pre + 'v_' + i.attrs['name'],
                        'bytearray' if i.result.type.pointee == _BA else
                        'flist' if i.result.type.pointee == _LISTS[1] else
+                       'tlist' if i.result.type.pointee == _LIST_TINT else
                        'idict' if i.result.type.pointee == I.DICT_II else
                        'slist' if i.result.type.pointee == _SLIST else
                        'rl_' + I.rec_sig(i.result.type.pointee) if I.rec_elem(i.result.type.pointee) is not None
@@ -275,6 +298,8 @@ class Emitter(TextEmitter):
             self.names[p] = self.pre + 'v_' + n
             if a == 'array':
                 self.span_names[p] = ('((int64_t *)%sv_%s)' % (self.pre, n), '%sv_%s_len' % (self.pre, n))
+            elif a == 'tarray':
+                self.span_names[p] = ('((ail_tint *)%sv_%s)' % (self.pre, n), '%sv_%s_len' % (self.pre, n))
             elif a == 'flist':
                 self.span_names[p] = ('%sv_%s.p' % (self.pre, n), '%sv_%s.n' % (self.pre, n))
             elif a == 'slist':
@@ -354,7 +379,7 @@ class Emitter(TextEmitter):
         fields = []
         abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
         for p, n, a in zip(fn.params, fn.param_names, abi):
-            if a == 'array':
+            if a in ('array', 'tarray'):
                 fields.append('const int64_t *v_%s; int64_t v_%s_len;' % (n, n))
             elif a == 'flist':
                 fields.append('ail_flist v_%s;' % n)
@@ -386,12 +411,14 @@ class Emitter(TextEmitter):
                        for i in I.walk(fn.body)):
             self.parts.add('TINTT')
         abi = fn.attrs.get('abi') or ['value'] * len(fn.params)
+        if 'tarray' in abi or fn.attrs.get('ret_list') == 'tlist':
+            self.parts.update(_lparts('tlist'))
         if self.frame:
             self.aux.append(self.frame_struct())
             self.line(1, 'struct %s__fr fr_ = {0};' % sym)
             self.line(1, 'struct %s__fr *fr = &fr_;' % sym)
             for n, a in zip(fn.param_names, abi):
-                if a == 'array':
+                if a in ('array', 'tarray'):
                     self.line(1, 'fr->v_%s = v_%s; fr->v_%s_len = v_%s_len;' % (n, n, n, n))
                 else:
                     self.line(1, 'fr->v_%s = v_%s;' % (n, n))
@@ -417,6 +444,8 @@ class Emitter(TextEmitter):
             self.parts.add('TINTT')
         if any(kind == 'slist' for _, kind in self.owned):
             self.parts.update(('STR', 'SLIST'))
+        if any(kind == 'tlist' for _, kind in self.owned):
+            self.parts.update(('LIST', 'IRLIST', 'TINTT', 'TLIST'))
         if any(kind in ('list', 'flist') for _, kind in self.owned):
             self.parts.update(('LIST', 'IRLIST'))
             if any(kind == 'flist' for _, kind in self.owned):
@@ -496,7 +525,10 @@ class Emitter(TextEmitter):
     def exit_return(self, depth, value, in_frame=False):
         self.leaves(depth, lambda sc: True)
         if self.cx.kind == 'top':
-            if self.byval and value is not None:
+            if self.tl_ret and value is not None:
+                self.line(depth, 'ail_tlist ir_ret = *(%s); *(%s) = (ail_tlist){0};' % (value, value))
+                value = 'ir_ret'
+            elif self.byval and value is not None:
                 # the list leaves by value: the result takes the storage, the place is left empty
                 kind = 'flist' if self.fn.attrs['ret_list'] == 'flist' else 'list'
                 self.line(depth, 'ail_%s ir_ret = *(%s); *(%s) = (ail_%s){0};' % (kind, value, value, kind))
@@ -810,9 +842,12 @@ class Emitter(TextEmitter):
             return self.assign_new(depth, ins.result, self.span_names[ins.operands[0]][1])
         if op in ('span.get', 'span.set'):
             elem = ins.operands[0].type.args[0]
-            f = 'flist' if elem == I.F64 else 'list'
+            f = _lfam(elem)
             sp, sn = self.span_names[ins.operands[0]][:2]
-            if ins.operands[0] in self.span_own:
+            if f == 'tlist':
+                self.parts.update(_lparts(f))
+                view = 'ail_ir_tview'
+            elif ins.operands[0] in self.span_own:
                 # a span over a list this function owns fails as the legacy owned list does
                 self.parts.update(('LIST', 'IRLIST') if f == 'list' else ('FLIST', 'IRFLIST'))
                 view = 'ail_ir_view' if f == 'list' else 'ail_ir_fview'
@@ -830,6 +865,11 @@ class Emitter(TextEmitter):
             return self.list_op(ins, depth, o)
         if op == 'spec.get':
             return self.spec_get(ins, depth, o)
+        if op in ('list.has', 'list.sort') and ins.operands[0].type == _LIST_TINT:
+            self.parts.update(_lparts('tlist'))
+            if op == 'list.sort':
+                return self.line(depth, 'ail_tlist_sort(%s);' % o[0])
+            return self.assign_new(depth, ins.result, '(ail_tlist_has(%s, %s) != 0)' % (o[0], o[1]))
         if op in ('list.rt', 'list.has', 'list.sort', 'list.join'):
             return self.slist_op(ins, depth, o)
         if op in ('rec.push', 'rec.up', 'rec.pop'):
@@ -893,6 +933,11 @@ class Emitter(TextEmitter):
                     continue
                 if a == 'slist':
                     parts.append('*(%s)' % text)      # the {p, n, cap} struct, by value
+                elif a == 'tarray':
+                    if v in self.defs and self.defs[v].op in ('list.ref', 'field.list'):
+                        parts.append('(const int64_t *)(%s)->p, (%s)->n' % (text, text))
+                    else:
+                        parts.append('(const int64_t *)%s, %s' % tuple(self.span_names[v][:2]))
                 elif a in ('array', 'flist') and v in self.defs and self.defs[v].op in ('list.ref', 'field.list'):
                     # an owned (or field) list handed to a read-only list parameter: the callee gets
                     # the data pointer and length (an int list) or the {p, n, cap} struct (a float list)
@@ -921,6 +966,16 @@ class Emitter(TextEmitter):
                     self.pending_check(depth)
                     text = t
                 return self.line(depth, 'ail_obj_store_%s(&%s, %s, 1);' % (cls, o[0], text))
+            if op == 'list.call' and ins.operands[0].type == _LIST_TINT:
+                # a callee that returns a list of exact ints hands the {p, n, cap} struct back by value
+                if checked:
+                    raise I.IRError('a list of exact ints returned by a function that can raise')
+                self.parts.update(_lparts('tlist'))
+                self.count += 1
+                n = 'ir%d' % self.count
+                self.line(depth, 'ail_tlist %s = %s(%s);' % (n, callee, ', '.join(parts)))
+                self.line(depth, '{ ail_tlist_free(%s); *(%s) = %s; }' % (o[0], o[0], n))
+                return
             if op == 'list.call':
                 # a list-returning callee hands its list back through a buffer (LISTRET); with none
                 # given, the whole list waits in the runtime's spill slot and is adopted right after
@@ -1247,12 +1302,15 @@ class Emitter(TextEmitter):
         helpers (same checks, same messages): ail_list_span_* reads, ail_numfield_* writes."""
         op = ins.op
         elem = ins.operands[0].type.args[0].args[0]
-        f = 'flist' if elem == I.F64 else 'slist' if elem == I.STRV else 'rlist' if elem.head == 'tup' else 'list'
+        f = 'flist' if elem == I.F64 else 'slist' if elem == I.STRV else 'rlist' if elem.head == 'tup' \
+            else 'tlist' if elem == I.TINT else 'list'
         d = self.defs.get(ins.operands[0])
         if (d is not None and d.op == 'list.ref') or ins.operands[0] in self.slist_params:
             return self.owned_list_op(ins, depth, o, f)
         if f == 'slist':
             raise I.IRError('a list of str that is not an owned place')
+        if f == 'tlist':
+            raise I.IRError('a list of exact ints that is not an owned place')
         self.parts.update(('NUMFIELD', 'NUMFIELDMUT', 'LIST'))
         if elem == I.F64:
             self.parts.add('FLIST')
@@ -1290,7 +1348,7 @@ class Emitter(TextEmitter):
             if op == 'list.clear':
                 return self.line(depth, '(%s)->n = 0;' % L)
             raise I.IRError('no C for %s on a list of records' % op)
-        self.parts.update(('LIST', 'IRLIST') if f == 'list' else ('FLIST', 'IRFLIST'))
+        self.parts.update(_lparts(f))
         L = o[0]
         ir = 'ail_ir_%s' % f
         if op == 'list.len':
@@ -1515,8 +1573,8 @@ class Emitter(TextEmitter):
                 return self.line(depth, '{ ail_slist %s = *(%s); *(%s) = (ail_slist){0}; ail_slist_free(%s); *(%s) = %s; }'
                                  % (t, o[1], o[1], L, L, t))
             raise I.IRError('no C for %s on a list of str' % op)
-        f = 'flist' if ins.operands[0].type == _LISTS[1] else 'list'
-        self.parts.update(('LIST', 'IRLIST') if f == 'list' else ('FLIST', 'IRFLIST'))
+        f = _lfam(ins.operands[0].type.args[0].args[0])
+        self.parts.update(_lparts(f))
         L = o[0]
         if op == 'list.reset':
             return self.line(depth, 'ail_%s_free(%s);' % (f, L))
@@ -1548,7 +1606,7 @@ class Emitter(TextEmitter):
             self.count += 1
             d, n, i = 'ir%d' % self.count, 'ir%d' % (self.count + 1), 'ir%d' % (self.count + 2)
             self.count += 2
-            ct = 'double' if f == 'flist' else 'int64_t'
+            ct = 'double' if f == 'flist' else 'ail_tint' if f == 'tlist' else 'int64_t'
             self.line(depth, '{ ail_%s *%s = %s; const %s *%s_s = %s; int64_t %s = %s; if (%s_s != %s->p) { %s->n = 0; '
                              'ail_%s_reserve(%s, %s); for (int64_t %s = 0; %s < %s; %s++) %s->p[%s] = %s_s[%s]; '
                              '%s->n = %s; } }'

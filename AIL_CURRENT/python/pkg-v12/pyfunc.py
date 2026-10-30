@@ -84,6 +84,12 @@ FLOAT_FLOOR_MOD = True
 # B2b: {function name / C symbol: (per-parameter tint flags, tint result)} for this compile.
 TINT_SIGS = {}
 TINT_ACTIVE = {}
+# Lists of exact ints that cross a function boundary (docs/design/BIGINT.md section 13). A key is ('p', function, index): that
+# parameter (a `list[int]`) is a read-only array of exact ints, `ail_tint` slots; or ('r', function): the function returns a list
+# of exact ints by value. The IR lowering asks for them (TLIST_REQUESTS) when a list of exact ints meets a parameter or a result
+# that is still an int64 list; `_to_c_once` then compiles the program again with those keys active (TLIST_ACTIVE).
+TLIST_ACTIVE = frozenset()
+TLIST_REQUESTS = set()
 # True when the program calls a typed-only runtime primitive (monotonic_ms, tcp_*, ...) that the
 # general path cannot build. Such a program must stay on the typed path even if that means keeping
 # an unproven call result on the legacy emitter; trying the general path would fail outright.
@@ -34986,6 +34992,38 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
 
 
 def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0, _tint_exclude=(), _tint_retry=0):
+    """`_to_c_once_inner`, again with the lists of exact ints the IR lowering asked for (TLIST_REQUESTS) switched on, until
+    the requests stop.  A program that never builds a list from `int(text)` makes no request: one round, unchanged."""
+    global TLIST_ACTIVE
+    saved = TLIST_ACTIVE
+    active = frozenset()
+    snapshot = dict(info) if info is not None else None
+    try:
+        for _round in range(8):
+            TLIST_REQUESTS.clear()
+            TLIST_ACTIVE = active
+            failure = None
+            try:
+                out = _to_c_once_inner(source, name, strict, info, entry, sig, library, external, _sort_stage,
+                                       _tint_exclude, _tint_retry, active)
+            except Unsupported as error:
+                failure = error
+            fresh = frozenset(TLIST_REQUESTS) - active
+            if not fresh:
+                if failure is not None:
+                    raise failure
+                return out
+            active = active | fresh
+            if info is not None:
+                info.clear()
+                info.update(snapshot)
+        raise Unsupported('the lists of exact ints that cross functions did not settle')
+    finally:
+        TLIST_ACTIVE = saved
+        TLIST_REQUESTS.clear()
+
+
+def _to_c_once_inner(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0, _tint_exclude=(), _tint_retry=0, _tlist=()):
     """C for every `def` in the source, with the last one as the entry point.
 
     Functions may call each other, including themselves, directly or in a cycle. Recursion shares
@@ -35887,9 +35925,9 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     _tint_fell = set(TINT_SIGS) - set(TINT_ACTIVE)
     if _tint_fell and _tint_retry < 4:
         retry_info = dict(info) if info is not None else None
-        return _to_c_once(source, name, strict, retry_info, entry, sig, library, external,
-                          _sort_stage=_sort_stage, _tint_exclude=_tint_exclude | _tint_fell,
-                          _tint_retry=_tint_retry + 1)
+        return _to_c_once_inner(source, name, strict, retry_info, entry, sig, library, external,
+                                _sort_stage=_sort_stage, _tint_exclude=_tint_exclude | _tint_fell,
+                                _tint_retry=_tint_retry + 1, _tlist=_tlist)
     return declarations + '\n'.join(bodies)
 
 
