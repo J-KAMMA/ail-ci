@@ -46,3 +46,34 @@ jobs:
           modules=$(python3 tools/ci_shards.py --shard "$SHARD")
           echo "modules: $modules"
           python3 tools/par_check.py -j 4 $modules
+
+  gpu:
+    name: gpu (lavapipe)
+    # GPU.md section 5.1: the SPIR-V kernels run on lavapipe (Mesa's software Vulkan) and must print what the CPU path and
+    # CPython print.  One job, kept out of the 20 shards.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install lavapipe, the Vulkan loader, the Vulkan headers and spirv-tools
+        # dev and CI only: spirv-val checks every emitted module, the headers check the structs the runtime declares itself.
+        # A built program needs none of these (libvulkan is opened at run time, and optionally).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 libvulkan-dev spirv-tools
+      - name: Byte-compile the compiler
+        run: python3 -m compileall -q -j 0 AIL_CURRENT tools
+      - name: GPU tests (G1 emulation, G2 SPIR-V on lavapipe)
+        env:
+          AIL_GPU_REQUIRE_DEVICE: '1'
+          LP_NUM_THREADS: '2'
+        run: |
+          gcc --version | head -1
+          spirv-val --version | head -1
+          python3 AIL_CURRENT/test_ail_gpu_g1.py
+          python3 AIL_CURRENT/test_ail_gpu_g2.py -v

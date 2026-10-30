@@ -86,17 +86,43 @@ def ffi_type_name(ann):
     return {'c_byte': 'c_int8', 'c_ubyte': 'c_uint8'}.get(ann, ann)
 
 
+TWO62 = 4611686018427387904          # 2**62: every constant a wrapper writes fits int64, so no wide literal is needed
+
+
+def _shifted(expr, sign):
+    """`expr +/- 2**64` as four int64-sized terms. The tagged lowering adds them exactly (ail_tint); the legacy int64 emitter
+    stops with `integer overflow` when the result leaves int64, so nothing wraps in any build."""
+    return expr + (' %s %d' % (sign, TWO62)) * 4
+
+
+def u64_name(name):
+    return 'ffi_u_' + name
+
+
+def is_u64(ann):
+    return ann in INTS and INTS[ann][2] == 64 and not INTS[ann][3]
+
+
 def range_check(ann, expr, message, lengths):
     """AIL lines raising the shim's OverflowError when the int `expr` is outside the range of the C type `ann`.
 
-    An int of a program with @extern stubs is an int64 (such a program is built on the typed path only; a value beyond
-    int64 stops loudly before the call, BIGINT.md A1). So a signed 64-bit type has nothing to check, and a 64-bit
-    unsigned type can only be too small (negative): 2**63 .. 2**64-1 cannot be held, hence cannot be passed (F3b)."""
+    A 64-bit unsigned parameter takes the exact value 0 .. 2**64-1 (F3b): the lines below also leave its int64 bits in
+    `ffi_u_<name>`, which is what the adapter receives (`(uint64_t)` of the bits is the value). A 64-bit signed parameter is
+    checked against int64 because a tagged int can be beyond it."""
     bits, signed = INTS[ann][2], INTS[ann][3]
     if bits == 64:
-        if signed or lengths:
+        if lengths:
             return []
-        test = '%s < 0' % expr
+        if signed:
+            return ['    if %s > 9223372036854775807 or %s < -9223372036854775807 - 1:' % (expr, expr),
+                    '        raise OverflowError("%s")' % message]
+        bits_name = u64_name(expr)
+        return ['    if %s < 0:' % expr, '        raise OverflowError("%s")' % message,
+                '    %s = %s' % (bits_name, expr),
+                '    if not (%s <= 9223372036854775807):' % expr,       # `x <= c` is the cheap tagged compare; `c < x` is not
+                '        %s = %s' % (bits_name, _shifted(expr, '-')),
+                '        if %s >= 0:' % bits_name,
+                '            raise OverflowError("%s")' % message]
     elif signed:
         high = (1 << (bits - 1)) - 1
         test = '%s > %d' % (expr, high) if lengths else '%s < %d or %s > %d' % (expr, -(1 << (bits - 1)), expr, high)
@@ -105,10 +131,30 @@ def range_check(ann, expr, message, lengths):
     return ['    if %s:' % test, '        raise OverflowError("%s")' % message]
 
 
+def u64_const_helper(name):
+    return 'ffi_kv' + name[3:]
+
+
+def u64_result(var, target, indent='    '):
+    """AIL lines that leave the exact int of the int64 bits `var` in `target`, which is the tagged one: `var` itself stays an
+    int64, so the common case (top bit clear) is one compare and no tagged arithmetic."""
+    return [indent + 'if %s < 0:' % var, indent + '    %s = %s' % (target, _shifted(var, '+'))]
+
+
 NATIVE = {'int8': 'int8_t', 'int16': 'int16_t', 'int32': 'int32_t', 'uint8': 'uint8_t', 'uint16': 'uint16_t',
           'uint32': 'uint32_t', 'int': 'int64_t', 'uint64_bits': 'uint64_t'}
 EXCEPTIONS = ('OSError', 'ValueError', 'RuntimeError', 'KeyError', 'IndexError', 'OverflowError', 'EOFError')
-CHECKS = {'negative': '< 0', 'nonzero': '!= 0', 'null': '== 0', 'minus1': '== -1'}
+CHECKS = {'negative': '< 0', 'nonzero': '!= 0', 'null': '== 0', 'minus1': '== -1', 'allones': None}
+
+
+def check_test(d):
+    """The failure test on the raw result of a stub with `check=`. `allones` is the unsigned (T)-1: for a 64-bit type the bits
+    are -1 (no 64-bit literal is needed), for a narrower one the exact value 2**bits - 1."""
+    if d.check == 'allones':
+        bits = INTS[d.result][2]
+        return '== -1' if bits == 64 else '== %d' % ((1 << bits) - 1)
+    return CHECKS[d.check]
+
 OPTIONS = ('lib', 'header', 'symbol', 'check', 'errno', 'exc', 'pkg_config', 'sources', 'trust')
 
 
@@ -212,6 +258,7 @@ class Session:
         self.workdir = None if workdir is None else Path(workdir)
         self.forbid = forbid
         self.decls = []
+        self.wide = {}                  # (tag, value) -> C function that returns a 64-bit unsigned constant's bits (F3b)
         self.links = {}                 # declaring file -> [(library, pkg_config, directory)] from link()
         self.lowered = {}               # resolved path -> lowered text
         self.link_args = []
@@ -322,8 +369,11 @@ class Session:
         handles_here = [ht for key, ht in self.handles.items() if key not in before]
         if self.handles:
             self._refuse_handle_use(path, tree)
-        if decls:
-            self._refuse_wide_constants(path, tree, decls)
+        wide = self._wide_constants(path, tree, decls) if decls else []
+        for lineno, col, end, value in sorted(wide, reverse=True):         # right to left, so earlier columns stay valid
+            raw = lines[lineno - 1].encode('utf-8')
+            name = self.wide.setdefault((tag, value), 'ffi_%s_k%d' % (tag, len(self.wide)))
+            lines[lineno - 1] = (raw[:col] + (u64_const_helper(name) + '()').encode('utf-8') + raw[end:]).decode('utf-8')
         # a file that imports ail_ffi but declares nothing is left with its import blanked
         block = []
         for ht in handles_here:
@@ -336,17 +386,32 @@ class Session:
                 block.append('    dst.clear()')
                 block.append('    dst.extend(src[at:at + n])')
                 block.append('    return at + n')
+            if any(is_u64(d.result) for d in decls if d.result is not None) or self.wide:
+                # a 64-bit unsigned result with the top bit set: the int64 bits plus 2**64, in four terms that each fit int64
+                block.extend(['', 'def ffi_widen_%s(r: int) -> int:' % tag, '    return %s' % _shifted('r', '+')])
+            if any(d.result is not None and is_u64(d.result) and d.check is not None and not d.errno for d in decls):
+                # the failure text of a checked result shows the unsigned value
+                block.extend(['', 'def ffi_u64_text_%s(b: int) -> str:' % tag, '    if b >= 0:', '        return str(b)',
+                              '    h = (b >> 1) & 9223372036854775807',
+                              '    return str(h // 5) + str(2 * (h % 5) + (b & 1))'])
             for decl in decls:
                 block.extend(self._wrapper(decl))
+            for (ctag, value), name in self.wide.items():
+                if ctag == tag:
+                    block.extend(['', 'def %s() -> int:' % u64_const_helper(name), '    ffi_rc = %s()' % name,
+                                  '    if ffi_rc < 0:', '        return ffi_widen_%s(ffi_rc)' % tag, '    return ffi_rc'])
         return '\n'.join(lines).rstrip('\n') + '\n' + '\n'.join(block) + ('\n' if block else '')
 
-    def _refuse_wide_constants(self, path, tree, decls):
+    def _wide_constants(self, path, tree, decls):
         """A constant argument beyond int64 to an integer parameter of a stub declared in this file.
 
-        The compiled program holds ints as int64 (a program with stubs is built on the typed path only). CPython passes
-        `2**63 .. 2**64-1` to a 64-bit unsigned parameter and raises the shim's OverflowError for anything else out of
-        range; the compiled program would stop with `integer overflow` first, so no text or value can match."""
+        A 64-bit unsigned parameter takes `2**63 .. 2**64-1` exactly (F3b): the argument is replaced by a call of a generated
+        helper that builds the value from the bits a C function returns (no wide literal reaches the compiler, whose
+        typed path refuses one). Returns [(line, first byte, end byte, value)]. Every other constant beyond int64 is a
+        value CPython raises OverflowError for (or one an int64 slot cannot hold); the compiled program refuses it here, by
+        name, instead of stopping at run time."""
         by_name = {d.name: d for d in decls}
+        edits = []
         for node in ast.walk(tree):
             if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in by_name):
                 continue
@@ -362,13 +427,17 @@ class Session:
                     continue
                 bits, signed = INTS[param.ann][2], INTS[param.ann][3]
                 valid = 0 <= value < (1 << bits) if not signed else -(1 << (bits - 1)) <= value < (1 << (bits - 1))
+                if valid and is_u64(param.ann) and getattr(arg, 'end_lineno', None) == arg.lineno:
+                    edits.append((arg.lineno, arg.col_offset, arg.end_col_offset, value))
+                    continue
                 text = str(value) if abs(value) < 10 ** 30 else '%d digits' % len(str(abs(value)))
-                self._refuse(path, arg, '%s: argument %s is the constant %s, beyond int64; the compiled program holds ints as int64, so it '
-                             'cannot pass this to %s as CPython does (%s)\n  write instead: %s'
+                self._refuse(path, arg, '%s: argument %s is the constant %s, beyond int64; the compiled program cannot pass this to %s '
+                             'as CPython does (%s)\n  write instead: %s'
                              % (d.name, param.name, text, ffi_type_name(param.ann),
                                 'a valid argument' if valid else 'OverflowError: %s does not fit %s' % (param.name, ffi_type_name(param.ann)),
-                                'an argument in -2**63 .. 2**63-1 (values from 2**63 to 2**64-1 need exact ints in compiled programs, FFI step F3b)'
+                                'the argument on one line, or a value computed at run time'
                                 if valid else 'a value inside the range of %s' % ffi_type_name(param.ann)))
+        return edits
 
     def _refuse_export(self, path, tree, imported, module_names):
         """`compile --lib`: only the entry file declares the C API."""
@@ -585,6 +654,15 @@ class Session:
                 decl.result = 'c_char_p'
         if decl.check is not None and (decl.result is None or decl.result in ('c_double', 'c_float', 'c_bool', 'c_char_p', 'c_mut_char_p')):
             self._refuse(path, node, '%s: check= needs an integer or handle result' % node.name)
+        if decl.check is not None:
+            unsigned = decl.result in INTS and not INTS[decl.result][3]
+            if decl.check in ('negative', 'minus1') and unsigned:
+                self._refuse(path, options['check'], '%s: check="%s" on a %s result never fires: the result is unsigned\n'
+                             '  write instead: check="allones" (the C value (%s)-1, which CPython shows as %d)'
+                             % (node.name, decl.check, ffi_type_name(decl.result), INTS[decl.result][0], (1 << INTS[decl.result][2]) - 1))
+            if decl.check == 'allones' and not unsigned:
+                self._refuse(path, options['check'], '%s: check="allones" needs an unsigned integer result (c_size_t, c_uint64, ...)\n'
+                             '  write instead: check="minus1" for a signed result, or declare the result unsigned' % node.name)
         if decl.has_bytearray and decl.result in ('c_char_p', 'c_mut_char_p'):
             self._refuse(path, node, '%s: a str result together with a bytearray parameter is not supported' % node.name)
         body = [n for n in node.body if not (isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
@@ -821,6 +899,8 @@ class Session:
                 args.append('bytes(%s)' % p.name)
             elif p.handle is not None:
                 args.append('%s._p' % p.name)
+            elif is_u64(p.ann):
+                args.append(u64_name(p.name))      # the int64 bits of the exact value (range_check leaves them there)
             else:
                 args.append(p.name)
         call = '%s(%s)' % (d.export, ', '.join(args))
@@ -855,9 +935,27 @@ class Session:
             return out
         else:
             out.append('    ffi_rc = ' + call)
+        exact = d.result is not None and is_u64(d.result)      # the adapter returns the int64 bits of a 64-bit unsigned result
+        helper = []
         if d.check is not None:
-            out.append('    if ffi_rc %s:' % CHECKS[d.check])
-            if d.errno:
+            out.append('    if ffi_rc %s:' % check_test(d))
+            if exact:
+                # The raise sits in its own function: a `raise` with a computed message keeps the function it is in off the
+                # tagged lowering, and a wrapper on the legacy int64 emitter cannot return a value above int64.
+                fail = 'ffi_fail_%s_%s' % (d.tag, d.name)
+                if d.errno:
+                    out.append('        %s()' % fail)
+                    # no int local: the helper stays a plain legacy function and the program keeps the tagged lowering
+                    helper = ['', 'def %s() -> None:' % fail]
+                    if d.exc == 'OSError':
+                        helper.append('    raise OSError(ffi_%s__errno(), ffi_%s__strerror(ffi_%s__errno()))' % (d.tag, d.tag, d.tag))
+                    else:
+                        helper.append('    raise %s("[Errno %%d] %%s" %% (ffi_%s__errno(), ffi_%s__strerror(ffi_%s__errno())))'
+                                      % (d.exc, d.tag, d.tag, d.tag))
+                else:
+                    out.append('        %s(ffi_u64_text_%s(ffi_rc))' % (fail, d.tag))
+                    helper = ['', 'def %s(shown: str) -> None:' % fail, '    raise %s("%s failed with " + shown)' % (d.exc, d.name)]
+            elif d.errno:
                 out.append('        ffi_e = ffi_%s__errno()' % d.tag)
                 if d.exc == 'OSError':
                     # CPython's shim raises OSError(err, os.strerror(err)): `.errno`, `.strerror`, the
@@ -867,11 +965,14 @@ class Session:
                     out.append('        raise %s("[Errno %%d] %%s" %% (ffi_e, ffi_%s__strerror(ffi_e)))' % (d.exc, d.tag))
             else:
                 out.append('        raise %s("%s failed with %%d" %% ffi_rc)' % (d.exc, d.name))
+        if exact:
+            out.append('    if ffi_rc < 0:')
+            out.append('        return ffi_widen_%s(ffi_rc)' % d.tag)
         if d.result_handle is not None:
             out.append('    return %s(ffi_rc)' % d.result_handle.make)
         else:
             out.append('    return ffi_rc != 0' if d.result == 'c_bool' else '    return ffi_rc')
-        return out
+        return out + helper
 
     # ------------------------------------------------------------------ the C object
 
@@ -958,6 +1059,10 @@ class Session:
             if any(t == 'c_size_t' or t == 'c_ssize_t' for t in [p.ann for p in d.params] + [d.result]):
                 asserts.append('_Static_assert(sizeof(size_t) == 8, "ail_ffi: c_size_t needs a 64 bit size_t");')
             self._emit(d, functions, bodies)
+        for (ctag, value), name in self.wide.items():
+            if ctag in tags:
+                functions[name] = dict(symbol=name, params=[], result='int')
+                bodies.append('int64_t %s(void) { return (int64_t)%dull; }' % (name, value))
         for tag in tags:
             name = 'ffi_%s__errno' % tag
             functions[name] = dict(symbol=name, params=[], result='int')
