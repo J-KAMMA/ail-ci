@@ -137,6 +137,24 @@ Probes in `/tmp/probes` via `cmp.sh`: `fz201`, `minD`, `fz201_local`, `fz201_fun
 `fz201_argument_dict`, `fz201_call_result`, `fz201_negative`, `fz201_neg_exp_odd`,
 `fz201_float_exp`, `fz201_exp_neg`, `fz201_in_range`, `fz201_safe_base` match CPython on both
 builds.  Added `test_ail_fz201.py`.
+## 2026-10-29 -- pre428 review: operand class names in operator TypeErrors (job-pre440-10300211)
+
+The pre428 review recorded as pre-existing that an ordinary-instance class name longer than 79
+characters was cut at 79 in `unsupported operand type(s) for ...` (`u_longinst`: 202 where CPython
+prints 244), on both builds.  The general runtime's `ail_dun_binop` kept each operand name in an
+80-byte buffer.  It now keeps 201 bytes per name and applies CPython's own caps in its messages:
+`unsupported operand type(s) for %s: '%.100s' and '%.100s'` (CPython's `binary_op_error`), while
+`can only concatenate ...` and `can't multiply sequence ...` keep the full name up to CPython's 200
+bytes.  Only a program with a class gets this runtime text, so a no-class program's C is unchanged.
+The other two items in the review's list are separate pre-existing causes and untouched: an
+exception operand still prints `'exception'`, and `**` still omits CPython's `or pow()` suffix
+(ordering also says `'exception'`; `//`, `%` and `/` already name their operands on this tree).
+
+Probes in `/tmp/probes/pre440` on both builds via `cmp.sh`: `p_add_120`, `p_sub_120`, `p_mul_120`,
+`p_add_99`, `p_add_100`, `p_add_101`, `p_add_79`, `p_add_80`, `p_add_long_int`, `p_add_int_long`,
+`p_routes` (argument, alias, list item, attribute, dict value, instance + instance), `p_subclass`,
+`p_other_ops` (list/tuple/str concatenation, sequence repeat, divmod, bitwise, shifts) and
+`p_caps250` (250-character names) all match CPython on both builds.  Added `test_ail_pre440.py`.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
