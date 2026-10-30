@@ -1107,6 +1107,11 @@ print(m, get_i32(e, 0))                              # 0.75 6
   ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; `c_mut_void_p` / `c_const_void_p` for a struct; fields are read and written at the C
   offsets with `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`.
 - `trust=True` for a prototype that names a struct (`struct tm *`, `sqlite3 *`): the header is included, its prototype is not compared.
+- Unsigned 64-bit values (`c_uint64 c_ulong c_ulonglong c_size_t`) are exact ints in `0 .. 2**64 - 1`, as under CPython: a result with the top bit set (a
+  hash, `SIZE_MAX`) is the big positive int, and an argument takes `2**63 .. 2**64 - 1` too (also as a literal at the call). Anything else is the shim's
+  `OverflowError("NAME: PARAM does not fit TYPE")`. In the legacy int64 build (`AIL_NO_GENERAL=1 AIL_IR=0`) a result above `2**63 - 1` is the loud stop `integer
+  overflow` (exit 1), never a negative number. `check="allones"` fails on the unsigned `(T)-1` (`(size_t)-1` is `18446744073709551615`); `check="minus1"`
+  and `"negative"` on an unsigned result can never fire and are refused at compile time (`write instead: check="allones"`).
 - Callbacks (AIL functions called from C) are not supported.
 - Rust: export `#[no_mangle] pub extern "C"` functions from a `cdylib` / `staticlib` crate (`panic = "abort"`), generate a header with
   cbindgen, and `python3 AIL_CURRENT/ail_bindgen.py crate.h --lib ./libcrate.so --check fn=nonzero:ValueError` writes the stubs.

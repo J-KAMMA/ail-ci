@@ -18,7 +18,8 @@ for the common forms; a call with a different argument count is a TypeError from
 Not rewritten (left to the existing paths): a name some class of the program defines or assigns
 (a user method or a field), a read through an imported module, a read in call position, and
 `str.lower` / `len` style references handed to a call as an argument (map / sorted key= already
-handle those).  A bound method of a literal or constructor receiver whose name is a builtin method
+handle those), and `d.get` / `obj.attr` handed to sorted / min / max / map / filter / reduce / .sort
+(the same existing path turns them into the lambda that calls them).  A bound method of a literal or constructor receiver whose name is a builtin method
 but is not in TABLE is refused at compile time with a hint.
 """
 import ast
@@ -92,6 +93,7 @@ _OTHER = frozenset({'pop', 'popitem', 'fromkeys', 'format', 'format_map', 'encod
                     'from_bytes', 'bit_length', 'is_integer', 'as_integer_ratio', 'conjugate'})
 
 _TYPES = frozenset({'str', 'list', 'dict', 'set', 'frozenset', 'tuple'})
+_CONSUMERS = frozenset({'sorted', 'min', 'max', 'map', 'filter', 'reduce'})
 _CONSTRUCTORS = frozenset({'list', 'dict', 'set', 'frozenset', 'str', 'tuple', 'sorted'})
 
 
@@ -144,11 +146,20 @@ class _Rewrite(ast.NodeTransformer):
         self.refuse = refuse
         self.called = set()
         self.args_of_call = set()
+        self.consumer_args = set()
 
     def prepare(self, tree):
         for n in ast.walk(tree):
             if isinstance(n, ast.Call):
                 self.called.add(id(n.func))
+                f = n.func
+                if (isinstance(f, ast.Name) and f.id in _CONSUMERS and f.id not in self.bound) or \
+                        (isinstance(f, ast.Attribute) and f.attr in ('sort', 'reduce')):
+                    # key=d.get / map(d.get, ks): the compiler turns these into the lambda that calls them
+                    for a in n.args:
+                        self.consumer_args.add(id(a))
+                    for k in n.keywords:
+                        self.consumer_args.add(id(k.value))
                 for a in n.args:
                     self.args_of_call.add(id(a))
                 for k in n.keywords:
@@ -179,6 +190,8 @@ class _Rewrite(ast.NodeTransformer):
             text = 'lambda _bmr%s: %s' % (', ' + params if params else '', body)
             new = ast.parse(text, mode='eval').body
         else:
+            if id(node) in self.consumer_args and isinstance(recv, (ast.Name, ast.Attribute)):
+                return self.generic_visit(node)     # key=d.get, map(d.get, ks): handled already, kept as before
             recv = self.visit(recv)
             new = ast.parse('(lambda _bmr: (lambda %s: %s))(None)' % (params, body), mode='eval').body
         for n in ast.walk(new):
