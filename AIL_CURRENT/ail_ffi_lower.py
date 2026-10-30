@@ -40,6 +40,71 @@ INTS = {
     'c_uint64': ('uint64_t', 'uint64_bits', 64, False), 'c_ulong': ('unsigned long', 'uint64_bits', 64, False),
     'c_ulonglong': ('unsigned long long', 'uint64_bits', 64, False), 'c_size_t': ('size_t', 'uint64_bits', 64, False),
 }
+def _constant_int(node):
+    """The int value of a constant integer expression (literals, + - * // % ** << >> & | ^ ~), else None. Bounded work."""
+    if isinstance(node, ast.Constant):
+        return node.value if type(node.value) is int else None
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd, ast.Invert)):
+        v = _constant_int(node.operand)
+        if v is None:
+            return None
+        return -v if isinstance(node.op, ast.USub) else v if isinstance(node.op, ast.UAdd) else ~v
+    if isinstance(node, ast.BinOp):
+        a, b = _constant_int(node.left), _constant_int(node.right)
+        if a is None or b is None:
+            return None
+        try:
+            if isinstance(node.op, ast.Add):
+                return a + b
+            if isinstance(node.op, ast.Sub):
+                return a - b
+            if isinstance(node.op, ast.Mult):
+                return a * b if a.bit_length() + b.bit_length() <= 1 << 14 else None
+            if isinstance(node.op, ast.FloorDiv):
+                return a // b
+            if isinstance(node.op, ast.Mod):
+                return a % b
+            if isinstance(node.op, ast.Pow):
+                return a ** b if 0 <= b <= 1 << 12 and abs(a).bit_length() * b <= 1 << 14 else None
+            if isinstance(node.op, ast.LShift):
+                return a << b if 0 <= b <= 1 << 12 else None
+            if isinstance(node.op, ast.RShift):
+                return a >> b if 0 <= b <= 1 << 12 else None
+            if isinstance(node.op, ast.BitAnd):
+                return a & b
+            if isinstance(node.op, ast.BitOr):
+                return a | b
+            if isinstance(node.op, ast.BitXor):
+                return a ^ b
+        except (ZeroDivisionError, ValueError, OverflowError):
+            return None
+    return None
+
+
+def ffi_type_name(ann):
+    """The name the CPython shim prints for a C integer type (`c_byte` is `c_int8`, `c_ubyte` is `c_uint8`)."""
+    return {'c_byte': 'c_int8', 'c_ubyte': 'c_uint8'}.get(ann, ann)
+
+
+def range_check(ann, expr, message, lengths):
+    """AIL lines raising the shim's OverflowError when the int `expr` is outside the range of the C type `ann`.
+
+    An int of a program with @extern stubs is an int64 (such a program is built on the typed path only; a value beyond
+    int64 stops loudly before the call, BIGINT.md A1). So a signed 64-bit type has nothing to check, and a 64-bit
+    unsigned type can only be too small (negative): 2**63 .. 2**64-1 cannot be held, hence cannot be passed (F3b)."""
+    bits, signed = INTS[ann][2], INTS[ann][3]
+    if bits == 64:
+        if signed or lengths:
+            return []
+        test = '%s < 0' % expr
+    elif signed:
+        high = (1 << (bits - 1)) - 1
+        test = '%s > %d' % (expr, high) if lengths else '%s < %d or %s > %d' % (expr, -(1 << (bits - 1)), expr, high)
+    else:
+        test = '%s > %d' % (expr, (1 << bits) - 1) if lengths else '%s < 0 or %s > %d' % (expr, expr, (1 << bits) - 1)
+    return ['    if %s:' % test, '        raise OverflowError("%s")' % message]
+
+
 NATIVE = {'int8': 'int8_t', 'int16': 'int16_t', 'int32': 'int32_t', 'uint8': 'uint8_t', 'uint16': 'uint16_t',
           'uint32': 'uint32_t', 'int': 'int64_t', 'uint64_bits': 'uint64_t'}
 EXCEPTIONS = ('OSError', 'ValueError', 'RuntimeError', 'KeyError', 'IndexError', 'OverflowError', 'EOFError')
@@ -257,6 +322,8 @@ class Session:
         handles_here = [ht for key, ht in self.handles.items() if key not in before]
         if self.handles:
             self._refuse_handle_use(path, tree)
+        if decls:
+            self._refuse_wide_constants(path, tree, decls)
         # a file that imports ail_ffi but declares nothing is left with its import blanked
         block = []
         for ht in handles_here:
@@ -272,6 +339,36 @@ class Session:
             for decl in decls:
                 block.extend(self._wrapper(decl))
         return '\n'.join(lines).rstrip('\n') + '\n' + '\n'.join(block) + ('\n' if block else '')
+
+    def _refuse_wide_constants(self, path, tree, decls):
+        """A constant argument beyond int64 to an integer parameter of a stub declared in this file.
+
+        The compiled program holds ints as int64 (a program with stubs is built on the typed path only). CPython passes
+        `2**63 .. 2**64-1` to a 64-bit unsigned parameter and raises the shim's OverflowError for anything else out of
+        range; the compiled program would stop with `integer overflow` first, so no text or value can match."""
+        by_name = {d.name: d for d in decls}
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in by_name):
+                continue
+            d = by_name[node.func.id]
+            visible = [p for p in d.params if p.length_of is None]
+            pairs = list(zip(visible, node.args)) + [(next((p for p in visible if p.name == k.arg), None), k.value)
+                                                     for k in node.keywords if k.arg is not None]
+            for param, arg in pairs:
+                if param is None or param.ann not in INTS or param.handle is not None:
+                    continue
+                value = _constant_int(arg)
+                if value is None or -(1 << 63) <= value < (1 << 63):
+                    continue
+                bits, signed = INTS[param.ann][2], INTS[param.ann][3]
+                valid = 0 <= value < (1 << bits) if not signed else -(1 << (bits - 1)) <= value < (1 << (bits - 1))
+                text = str(value) if abs(value) < 10 ** 30 else '%d digits' % len(str(abs(value)))
+                self._refuse(path, arg, '%s: argument %s is the constant %s, beyond int64; the compiled program holds ints as int64, so it '
+                             'cannot pass this to %s as CPython does (%s)\n  write instead: %s'
+                             % (d.name, param.name, text, ffi_type_name(param.ann),
+                                'a valid argument' if valid else 'OverflowError: %s does not fit %s' % (param.name, ffi_type_name(param.ann)),
+                                'an argument in -2**63 .. 2**63-1 (values from 2**63 to 2**64-1 need exact ints in compiled programs, FFI step F3b)'
+                                if valid else 'a value inside the range of %s' % ffi_type_name(param.ann)))
 
     def _refuse_export(self, path, tree, imported, module_names):
         """`compile --lib`: only the entry file declares the C API."""
@@ -735,6 +832,15 @@ class Session:
             if p.elem is not None and elem_info(p.elem)[1] > 1:
                 out.append('    if len(%s) %% %d != 0:' % (p.name, elem_info(p.elem)[1]))
                 out.append('        raise ValueError("%s: %s must hold a whole number of %s")' % (d.name, p.name, p.elem))
+        for p in d.params:
+            # CPython's shim checks every int argument against the range of its C type (OverflowError, text below)
+            if p.length_of is not None:
+                target = next(q for q in d.params if q.name == p.length_of)
+                size = elem_info(target.elem)[1] if target.elem is not None else 1
+                n = 'len(%s)' % p.length_of if size == 1 else 'len(%s) // %d' % (p.length_of, size)
+                out.extend(range_check(p.length_type, n, 'length of %s does not fit %s' % (p.length_of, ffi_type_name(p.length_type)), True))
+            elif p.ann in INTS and p.handle is None:
+                out.extend(range_check(p.ann, p.name, '%s: %s does not fit %s' % (d.name, p.name, ffi_type_name(p.ann)), False))
         if d.has_bytearray:
             out.append('    ffi_r = ' + call)
             out.append('    ffi_o = 0')
