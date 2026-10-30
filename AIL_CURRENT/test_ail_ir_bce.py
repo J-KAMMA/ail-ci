@@ -32,7 +32,7 @@ def compile_exe(directory, source, ir="1", stats=None, extra=None):
     if stats:
         env["AIL_IR_STATS"] = str(stats)
     built = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", str(source), "-o", str(exe),
-                            "--syntax", "python"], capture_output=True, text=True, timeout=900, env=env)
+                            "--syntax", "python"] + (["--no-cache"] if stats else []), capture_output=True, text=True, timeout=900, env=env)
     return built, exe
 
 
@@ -78,18 +78,24 @@ class CheckEliminationTests(unittest.TestCase):
         return {r["fn"]: r for r in rows}
 
     def test_lane_loop_gets_a_plain_int64_index(self):
-        rows = self.stats("p04_while_step")
-        self.assertEqual(rows["lanes2"]["path"], "ir", rows["lanes2"])
-        self.assertGreater(rows["lanes2"]["passes"].get("tint_demoted", 0), 0, rows["lanes2"])
+        rows = self.stats("p09_lane_shape")
+        self.assertEqual(rows["lanes"]["path"], "ir", rows["lanes"])
+        self.assertGreater(rows["lanes"]["passes"].get("tint_demoted", 0), 0, rows["lanes"])
 
     def test_loop_versioning_keeps_functions_on_the_ir_path(self):
-        for name in ("p07_version_tail", "p01_last_iter", "p02_mutate"):
+        for name in ("p07_version_tail", "p01_last_iter", "p09_lane_shape"):
             rows = self.stats(name)
             for fn, row in rows.items():
                 if fn.startswith("_ail_") or fn == "main":
                     continue
                 with self.subTest(case=name, fn=fn):
                     self.assertEqual(row["path"], "ir", row)
+
+    def test_matmul_kernel_stays_on_the_ir_path(self):
+        # the "tail skipped" shape of the kernel once made loop versioning leave a stale yield: the verifier rejected the
+        # function and it went back to the legacy emitter (20x the instructions)
+        rows = self.stats("q10_matmul")
+        self.assertEqual(rows["_ail_tam_mmk"]["path"], "ir", rows["_ail_tam_mmk"])
 
 
 if __name__ == "__main__":

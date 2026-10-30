@@ -25,24 +25,29 @@ def blocks(d: list[float], e: list[float], w: int) -> float:
     return t
 
 
+def mk(n: int, v: float, step: float) -> list[float]:
+    out: list[float] = []
+    for i in range(n):
+        out.append(v + float(i) * step)
+    return out
+
+
 def main():
-    for n in (0, 1, 2, 3, 8, 9):
-        d = [float(i) + 0.25 for i in range(n)]
-        e = [float(i) * 0.5 - 1.0 for i in range(n)]
-        print(n, dot2(d, e))
-    d = [float(i) + 0.25 for i in range(9)]
-    for m in (0, 4, 8):
+    for n in (1, 2, 3, 8, 9):
+        print(n, dot2(mk(n, 0.25, 1.0), mk(n, -1.0, 0.5)))
+    d = mk(9, 0.25, 1.0)
+    for m in (1, 4, 8):
         try:
-            print("short e", m, dot2(d, [1.5] * m))
+            print("short e", m, dot2(d, mk(m, 1.5, 0.0)))
         except IndexError as ex:
             print("IndexError", m, ex)
     for w in (1, 2, 4, 5):
         try:
-            print("blocks", w, blocks(d, [2.0] * 9, w))
+            print("blocks", w, blocks(d, mk(9, 2.0, 0.0), w))
         except IndexError as ex:
             print("IndexError", w, ex)
     try:
-        print(blocks(d, [2.0] * 5, 4))
+        print(blocks(d, mk(5, 2.0, 0.0), 4))
     except IndexError as ex:
         print("IndexError", ex)
 
