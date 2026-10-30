@@ -325,6 +325,7 @@ MODULES = (
     'test_ail_cmp_classname',
     'test_ail_ffi_f3b',
     'test_ail_overflow_uncatchable',
+    'test_ail_bound_builtin',
 )
 
 
