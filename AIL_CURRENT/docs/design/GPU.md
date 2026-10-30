@@ -275,6 +275,7 @@ Decided at run time per launch, with a static shortcut:
   runtime, overridable with `AIL_GPU_MIN_WORK` for tests.
 - `AIL_GPU=0` never uses the device; `AIL_GPU=force` ignores the cost model (tests use it so tiny inputs exercise the
   device path); unset = the cost model.
+  **Superseded by 6.4:** the constants and the rule are those of 6.4 (`AIL_GPU=auto`, margin 1.5, cold start earned back).
 - No speed claim is made in this note. fp64 throughput on an RDNA3 iGPU is a small fraction of fp32
   **[unverified: vendor ratio]**, so the benefit for float64 kernels may be small; G7 measures before `auto` is offered
   and the result can stop the work (Q3).
@@ -573,6 +574,112 @@ glue runs the original loop instead of the emulation when the device is not want
 `AIL_GPU=auto` with the model above and a safety factor, constants in one table; (3) reuse buffers between launches and map
 host memory instead of copying on a unified-memory device (the 5 ns per element is mostly copying and page-faulting fresh
 80 to 240 MB allocations: G8); (4) re-fit on the Colab NVIDIA GPU and a second AMD/Intel device before the model is the default.
+
+### 6.4 G4 as built: a declined launch runs the original loop, the cost model, and a cheaper launch (2026-10-30)
+
+Code: `python/pkg-v12/gpu.py` (`ops_expr`, the glue), `python/pkg-v12/gpu_vk.py` (the decision, the model, the buffer pool),
+`test_ail_gpu_g4.py` (22 tests), small changes to the G1 to G3 tests. Without `--gpu` nothing changes.
+
+**1. The declined path.** `ail_gk<k>_run` has a third answer, `GK_DECLINED` (a value no flag word can have). The glue first calls
+`ail_gk<k>_want(...)` (before it allocates or reserves anything), and on a no, or on `GK_DECLINED` from the run, executes the ORIGINAL
+typed loop. The G1 emulation now runs only for `AIL_GPU=emu`, inside the self-test and in the first-launch comparison. A device
+launch that flags is still replayed by the original loop. Declined because: the model said no, below `AIL_GPU_MIN_N`, no loader
+or device, a missing feature, an untrusted class, a failed Vulkan call, a failed first-launch comparison, a static build. The
+result is no longer copied through a temporary: the wrapper hands the device the output list itself and the device copies into it
+only when the flag word is 0 (a flagged launch leaves the list untouched, so the replay starts from the same state as before);
+only a launch that is being compared with the emulation, and `AIL_GPU=emu`, use a temporary. Trace lines: `gpu: k0 declined (...)`
+with the model's two predictions, `gpu: k0 original loop`; a launch that ran prints `gpu: k0 n=... device=<name>` as before, and
+`device=emulation` now appears only for `AIL_GPU=emu`.
+
+**2. The decision (`AIL_GPU=auto`, the default of a `--gpu` build).** Per kernel the emitter counts `ops` per element
+(`ops_expr`: a C expression over the captured scalars and list lengths; arithmetic, comparisons, loads, conversions and
+min/max count 1, a branch counts its dearer side, an inner loop its trip count times its body, a bound it cannot read counts 1,
+which under-counts and so declines more; the 780M kernels give 6, 321 and 6). At run time, before anything is allocated:
+
+```
+t_cpu = n * ops * 0.20 ns
+t_dev = 0.3 ms + bytes * 0.17 ns + n * ops * 0.06 ns          bytes = 8 * (n + sum of the input list lengths)
+launch only if  t_cpu >= 1.5 * t_dev                          (margin 1.5)
+         and the device is not a software device (Vulkan type CPU or virtual)
+         and the cold start has been earned back (below)
+```
+
+The constants are the fit of the 780M measurements of this stage (the buffer pool of item 3 moved the fixed cost from 4.5 ms to
+0.3 ms and the copy from 0.21 to 0.17 ns per byte, so the G3 constants were re-fitted; the fit is in one table in the runtime,
+`AIL_GPU_MODEL=fixed_us,ns_per_byte,ns_per_op_dev,ns_per_op_cpu,margin,init_us` overrides it). **Cold start.** The first device
+launch of a process also pays instance, device, pipeline and self-test (120 to 370 ms measured; one outlier of 720 ms), so a
+launch the model likes is still declined until the sum of what the declined launches would have saved reaches `init_us`
+(300 ms): ski rental. A program that launches a kernel only a few times therefore pays nothing; a program that crosses the line
+pays at most about one cold start once, and gets it back after about six more launches of the kind that crossed it (measured
+below: 1M heavy, 8 launches: 1.1 to 1.2 times the plain loop's total; 40 launches: 0.35 to 0.40). `AIL_GPU_STRICT=1` removes even
+that: only a single launch that saves more than the cold start goes to the device (the heavy kernel from about 7M elements).
+`AIL_GPU_MIN_N=<n>` still overrides the model with the old size rule; `AIL_GPU=force` ignores it; `AIL_GPU=0` never launches.
+No per-device calibration at the first self-test: the self-test's launches are a cold device's, they would not measure the
+steady 0.3 ms, and a second device or driver has not been seen. The constants are the 780M's; a discrete GPU or another driver can
+differ (the margin 1.5 and the software-device rule are what protect it), and re-fitting on the Colab NVIDIA GPU and a second
+AMD/Intel device is still open.
+
+**Auto against `AIL_GPU=0` on the 780M** (Windows driver, mains power, WinLibs gcc 16.1 `-O2 -ffp-contract=off`; the glue of
+`gpu.py` copied into a bench, one process per cell, 8 launches in a row, plain loop timed before and after the launches and
+averaged; 3 process runs per cell; "total" is the 8 launches including the cold start; a ratio below 1 means auto is faster).
+Cells where auto declined run the same machine code as the plain loop; their ratios are timer noise (the loop takes 3 us to 0.1 ms
+there), spread 0.9 to 1.1 except the smallest cells (3 to 10 us per launch, where one timer tick is 10 to 30 percent):
+
+| kernel | n | plain loop, ms | auto, steady ms | auto total / plain total, 8 launches (3 runs) | what auto did |
+| --- | --- | --- | --- | --- | --- |
+| light f64 (6 ops) | 4,096 to 262,144 | 0.003 to 0.19 | same | 0.91 to 2.0 (noise: 3 to 190 us per launch) | declined, original loop |
+| | 1,000,000 | 0.79 | 0.88 | 0.97 to 1.31 (noise) | declined |
+| | 10,000,000 | 9.8 | 10.1 | 0.91 to 1.04 | declined |
+| int64 (6 ops, 3 lists) | 4,096 to 10,000,000 | 0.008 to 19.9 | same | 0.93 to 1.16 (1.3 to 1.5 at 4,096: 8 us) | declined |
+| heavy f64 (321 ops) | 4,096 to 262,144 | 0.28 to 19.5 | same | 0.94 to 1.06 | declined (cold start not yet earned) |
+| | 1,000,000 | 70 | 75 | **1.12 to 1.21** | cold start paid at launch 8 |
+| | 10,000,000 | 975 | 170 | 0.18 to 0.24 | device from launch 1 |
+| heavy f64, 40 launches | 262,144 | 16.0 | 15.5 | 0.93 to 0.94 | device from launch about 28 |
+| | 1,000,000 | 93 | 18.4 | 0.35 to 0.40 | device from launch 8 |
+
+So the one place where auto is slower than `AIL_GPU=0` is a program that launches a 1M-element 321-op kernel about 8 to 12 times
+and then stops: it loses about 0.1 s once (one cold start less the savings so far). That is the ski-rental bound, and it is the
+price of ever using the device for repeated launches; `AIL_GPU_STRICT=1` buys it back. Every other measured cell is a tie or a win.
+Light and int64 kernels never go to the device (their copy costs 3 to 4 ns per element, more than the plain loop's work).
+
+**3. Transfer cost: a buffer pool.** The device buffers (parameters, flag word, result, one per input list) are kept between
+launches and reused when big enough (the memory stays mapped; up to `AIL_GPU_KEEP_MB`, default 512, are kept; a failure
+releases all). The 4.5 ms per launch were mostly allocating, binding and mapping seven small and large buffers on the
+Windows driver and faulting in their pages, not the dispatch. Forced device launches (`AIL_GPU=force`, same bench, 3 runs, medians
+of the 7 launches after the first; min to max in brackets), before and after, plain loop for scale:
+
+| kernel | n | plain loop | device before | device after | after / before |
+| --- | --- | --- | --- | --- | --- |
+| light f64 | 4,096 | 0.004 | 4.78 (4.45 to 22.7) | 0.285 (0.18 to 0.32) | 0.06 |
+| | 65,536 | 0.056 | 5.75 (5.64 to 6.14) | 0.513 (0.51 to 0.53) | 0.09 |
+| | 1,000,000 | 0.93 | 18.5 (14.0 to 20.4) | 3.95 (3.73 to 4.29) | 0.21 |
+| | 10,000,000 | 10.5 | 77.4 (71.0 to 83.4) | 33.2 (31.1 to 37.2) | 0.43 |
+| heavy f64 | 4,096 | 0.40 | 3.91 (3.08 to 4.47) | 0.323 (0.318 to 0.451) | 0.08 |
+| | 65,536 | 6.05 | 6.19 (5.36 to 6.24) | 1.61 (1.53 to 1.68) | 0.26 |
+| | 1,000,000 | 86.3 | 28.6 (28.4 to 29.8) | 19.8 (15.5 to 20.3) | 0.69 |
+| | 10,000,000 | 1006 | 189 (183 to 204) | 155 (142 to 167) | 0.82 |
+| int64 | 4,096 | 0.009 | 5.93 (4.63 to 6.30) | 0.181 (0.145 to 0.307) | 0.03 |
+| | 65,536 | 0.162 | 6.41 (5.13 to 6.86) | 0.503 (0.503 to 0.513) | 0.08 |
+| | 1,000,000 | 2.16 | 24.2 (22.6 to 24.8) | 4.08 (3.94 to 4.48) | 0.17 |
+| | 10,000,000 | 24.2 | 97.8 (93.2 to 100) | 42.5 (34.5 to 45.3) | 0.43 |
+
+The fixed cost is now 0.2 to 0.3 ms; the copy of the inputs into mapped memory is what is left (the light kernel at 10M: 33 ms for
+240 MB). That moves the break-even for the heavy kernel from about 100,000 elements (G3) to below 15,000 (4,096 elements: 1.2 times
+faster, 65,536 elements: 3.7 times faster than the plain loop, was a tie; the model's own threshold with the margin is about 15,000), and the light and int64 kernels stay on the CPU at every size. **Not done:** importing the
+list's own memory (`VK_EXT_external_memory_host`, needs 4096-aligned host pointers that the lists do not have) or a host-visible
+device-local heap, which would remove the input copy on the APU; the memory types of the 780M were not investigated beyond host-cached
+for the result. Unchanged inputs are not detected (comparing costs as much as copying).
+
+**Tests (lavapipe, no device in CI beyond it).** `test_ail_gpu_g4.py`: the ops counter against the kernels of the G3 fit (6, 321,
+6; scalar and length bounds; an unreadable bound counts 1; a branch counts its dearer side); the model on the G3 cells (light and
+int64 never, heavy from 65,536, the margin in the rule, the cold-start credit and `AIL_GPU_STRICT`); at C level that a declined
+launch calls the emulation zero times (an `emu_calls` counter inside the kernel) and `AIL_GPU=emu` once; whole programs (the G2
+program, 9 scenarios including replays at positions 0, 63, 64, 4999) in 12 modes (off, emu, force, auto declined by the model, auto
+on the device, auto with a flagged launch, `MIN_N`, no loader, no features, an untrusted device found by the self-test and by the first
+launch) with the same stdout, exit code and stderr as `AIL_GPU=0` and CPython, no `device=emulation` line outside `emu`/`force`/`MIN_N`,
+and `original loop` for every declined launch; a lavapipe is never used by auto (software device); a pool program with growing,
+shrinking and repeated sizes in six modes. The 780M bit tests (51 kernels x 65,536 operand sets) were repeated on the final code:
+2,779,992 clean elements, 562,344 flagged, 17,200 single launches, 0 differences, 0 missed flags.
 
 ## 7. Colab validation (owner-started, manual)
 

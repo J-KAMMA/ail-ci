@@ -11,9 +11,11 @@
 
 Run-time switches (all read once):
     AIL_GPU=0            skip every kernel (the original CPU loop runs; G1)
-    AIL_GPU=emu          never touch Vulkan: the C emulation runs (the "CPU path" of the kernels)
+    AIL_GPU=emu          never touch Vulkan: the C emulation runs (a test mode, slower than the original loop)
     AIL_GPU=force        use the device for every launch, whatever its size
-    (unset / other)      the device for launches of at least AIL_GPU_MIN_N elements (default 4096), else the emulation
+    (unset / auto)       the cost model of GPU.md 6.4 decides per launch: the device when it predicts a clear win, else the
+                         ORIGINAL typed loop (the wrapper returns GK_DECLINED); AIL_GPU_MIN_N=<n> replaces the model by
+                         "the device for launches of at least n elements"
     AIL_GPU_TRACE=1      one line per launch on stderr: `gpu: k0 n=4096 device=llvmpipe (LLVM 20.1.2, 256 bits)`;
                          `gpu: k0 device unavailable (<why>)` when the device was wanted and not used
     AIL_GPU_DEVICE=name  use the first device whose name contains `name`
@@ -80,6 +82,7 @@ typedef struct { int32_t sType; const void *pNext; uint32_t flags; } gkv_FenceCI
 #define GKV_API12 ((1u << 22) | (2u << 12))
 #define GKV_MAXPIPES 128
 typedef struct { const uint32_t *spv; uint64_t module, dsl, layout, pipe; int ok; } gkv_pipe;
+typedef struct { uint64_t buf, mem; void *ptr; uint64_t cap; int cached; } gkv_buf;   /* a mapped host-visible buffer that later launches reuse */
 static struct {
     int state;                     /* 0 untried, 1 ready, -1 unusable */
     const char *why;
@@ -88,6 +91,7 @@ static struct {
     uint64_t cpool;
     uint32_t family;
     int has_f64, has_i64, szinp64, rte64;
+    uint32_t devtype;              /* VkPhysicalDeviceType: 1 integrated, 2 discrete, 3 virtual, 4 cpu */
     uint32_t driver, vendor;       /* VkPhysicalDeviceProperties.driverVersion / vendorID */
     unsigned untrusted;            /* GKV_T_* classes a self-test or a check found different from the emulation */
     int st;                        /* 1 while a self-test is running (the test hook can aim at it) */
@@ -97,6 +101,7 @@ static struct {
     gkv_MemProps mem;
     int npipes;
     gkv_pipe pipes[GKV_MAXPIPES];
+    gkv_buf pool[43];              /* buffers kept between launches: parameters, flags, result, one per input list (GPU.md 6.4) */
     void *(*gipa)(void *, const char *);
     int32_t (*vkCreateInstance)(const gkv_InstanceCI *, const void *, void **);
     int32_t (*vkEnumeratePhysicalDevices)(void *, uint32_t *, void **);
@@ -145,6 +150,7 @@ static GKV_UNUSED double gkv_now_us(void) {
     return (double)t.tv_sec * 1e6 + (double)t.tv_nsec / 1e3;
 #endif
 }
+static GKV_UNUSED double gkv_envd(const char *name, double dflt) { const char *e = getenv(name); return e && e[0] ? atof(e) : dflt; }
 static GKV_UNUSED const char *gkv_dev_name(void) { return gkv_G.name[0] ? gkv_G.name : "vulkan"; }
 
 #define GKV_LOAD(inst_, fn) do { *(void **)&gkv_G.fn = gkv_G.gipa((inst_), #fn); if (!gkv_G.fn) { gkv_G.why = "the loader lacks " #fn; return 0; } } while (0)
@@ -181,6 +187,7 @@ static GKV_UNUSED int gkv_init(void) {
     if (gkv_G.vkEnumeratePhysicalDevices(gkv_G.inst, &nd, devs) < 0 || nd == 0) { gkv_G.why = "no Vulkan device"; return 0; }
     const char *want = getenv("AIL_GPU_DEVICE");
     int best = -1, best_rank = 99;
+    uint32_t best_type = 0;
     uint32_t best_family = 0;
     gkv_G.why = "no Vulkan 1.2 device with a compute queue";
     for (uint32_t d = 0; d < nd; d++) {
@@ -200,10 +207,10 @@ static GKV_UNUSED int gkv_init(void) {
         for (uint32_t q = 0; q < nq; q++) if ((qf[q].queueFlags & 2u) && qf[q].queueCount > 0) { fam = (int)q; break; }
         if (fam < 0) continue;
         int rank = type == 2 ? 0 : type == 1 ? 1 : type == 3 ? 2 : type == 4 ? 3 : 4;   /* discrete, integrated, virtual, cpu */
-        if (rank < best_rank) { best = (int)d; best_rank = rank; best_family = (uint32_t)fam; }
+        if (rank < best_rank) { best = (int)d; best_rank = rank; best_family = (uint32_t)fam; best_type = type; }
     }
     if (best < 0) return 0;
-    gkv_G.pd = devs[best]; gkv_G.family = best_family;
+    gkv_G.pd = devs[best]; gkv_G.family = best_family; gkv_G.devtype = best_type;
     {
         gkv_FloatCtl fc; memset(&fc, 0, sizeof fc); fc.sType = 1000197000;
         gkv_Props2 pr; memset(&pr, 0, sizeof pr); pr.sType = 1000059001; pr.pNext = &fc;
@@ -271,7 +278,6 @@ static GKV_UNUSED int gkv_init(void) {
     return 1;
 }
 
-typedef struct { uint64_t buf, mem; void *ptr; } gkv_buf;
 static int gkv_memtype(uint32_t bits, int cached) {
     if (cached)       /* the result is read back by the CPU: host-cached memory reads far faster than write-combined memory */
         for (uint32_t i = 0; i < gkv_G.mem.memoryTypeCount; i++)
@@ -280,9 +286,14 @@ static int gkv_memtype(uint32_t bits, int cached) {
         if ((bits & (1u << i)) && (gkv_G.mem.memoryTypes[i].propertyFlags & 6u) == 6u) return (int)i;     /* host visible + coherent */
     return -1;
 }
+static void gkv_rmbuf(gkv_buf *b);
+/* The buffer of a pool slot: the one from the last launch when it is big enough (no allocation, no new pages to fault in),
+   otherwise a new one.  The memory stays mapped. */
 static int gkv_mkbuf(gkv_buf *b, uint64_t size, int cached) {
-    memset(b, 0, sizeof *b);
     if (size < 16) size = 16;
+    if (b->buf && b->ptr && b->cap >= size && b->cached == cached) return 1;
+    gkv_rmbuf(b);
+    b->cap = size; b->cached = cached;
     gkv_BufferCI ci; memset(&ci, 0, sizeof ci);
     ci.sType = 12; ci.size = size; ci.usage = 0x20u;
     if (gkv_G.vkCreateBuffer(gkv_G.dev, &ci, 0, &b->buf) != 0) { b->buf = 0; return 0; }
@@ -373,7 +384,7 @@ static GKV_UNUSED int gkv_launch(const uint32_t *spv, uint32_t nwords, int need_
     for (int i = 0; i < nl; i++) if ((uint64_t)ln[i] * 8 > gkv_G.max_range) { gkv_G.why = "input larger than maxStorageBufferRange"; return 0; }
     if (nl > 36) { gkv_G.why = "too many lists"; return 0; }
     int nb = 3 + nl, ok = 0, have_cb = 0, have_pool = 0, have_fence = 0;
-    gkv_buf bufs[43];
+    gkv_buf *bufs = gkv_G.pool;
     int made = 0;
     uint64_t pool = 0, fence = 0, set = 0;
     void *cb = 0;
@@ -436,11 +447,17 @@ done:
     if (have_cb) gkv_G.vkResetCommandPool(gkv_G.dev, gkv_G.cpool, 0);
     if (have_fence) gkv_G.vkDestroyFence(gkv_G.dev, fence, 0);
     if (have_pool) gkv_G.vkDestroyDescriptorPool(gkv_G.dev, pool, 0);
-    for (int i = made; i-- > 0; ) gkv_rmbuf(&bufs[i]);
+    {   /* the buffers stay for the next launch, up to AIL_GPU_KEEP_MB (default 512); after a failure they are all released */
+        static uint64_t keep = ~0ull;
+        if (keep == ~0ull) keep = (uint64_t)gkv_envd("AIL_GPU_KEEP_MB", 512.0) * 1048576ull;
+        uint64_t held = 0;
+        for (int i = 0; i < 43; i++) held += gkv_G.pool[i].cap;
+        if (!ok || held > keep) for (int i = 0; i < 43; i++) gkv_rmbuf(&gkv_G.pool[i]);
+    }
     return ok;
 }
 
-static GKV_UNUSED int gkv_mode(void) {         /* 0 never (AIL_GPU=emu), 1 by size, 2 always */
+static GKV_UNUSED int gkv_mode(void) {         /* 0 emulation only (AIL_GPU=emu), 1 auto (default), 2 always (AIL_GPU=force) */
     static int v = -1;
     if (v < 0) {
         const char *e = getenv("AIL_GPU");
@@ -448,12 +465,70 @@ static GKV_UNUSED int gkv_mode(void) {         /* 0 never (AIL_GPU=emu), 1 by si
     }
     return v;
 }
-static GKV_UNUSED int64_t gkv_min_n(void) {
-    static int64_t v = -1;
-    if (v < 0) { const char *e = getenv("AIL_GPU_MIN_N"); v = e && e[0] ? (int64_t)atoll(e) : 4096; if (v < 0) v = 0; }
+static GKV_UNUSED int64_t gkv_min_n(void) {   /* AIL_GPU_MIN_N: when set, the size rule alone decides (no cost model); -1 = unset */
+    static int64_t v = -2;
+    if (v == -2) { const char *e = getenv("AIL_GPU_MIN_N"); v = e && e[0] ? (int64_t)atoll(e) : -1; if (v < -1) v = 0; }
     return v;
 }
-static GKV_UNUSED int gkv_want(int64_t n) { int m = gkv_mode(); return m == 2 || (m == 1 && n >= gkv_min_n()); }
+static GKV_UNUSED double gkv_max(double a, double b) { return a > b ? a : b; }
+static GKV_UNUSED double gkv_trip(double lo, double hi) { return hi > lo ? hi - lo : 0.0; }
+
+/* ---- the cost model (GPU.md 6.4) ---------------------------------------------------------------------------------------
+   Fitted on the Radeon 780M (Windows driver), three kernels, n = 4096..10^7, with the buffer pool of this stage (before
+   it the fixed cost was 4.5 ms and the copy 0.21 ns per byte):
+       t_cpu = n * ops * 0.20 ns                              (the plain typed loop, one thread; measured 0.15 to 0.36)
+       t_dev = 0.3 ms + bytes * 0.17 ns + n * ops * 0.06 ns   (fixed launch, copy in/out, arithmetic)
+   `ops` is the kernel's IR operation count per element (gpu.py ops_expr), `bytes` what moves through the buffers (inputs
+   and result).  A launch goes to the device only when t_cpu >= 1.5 * t_dev (a safety margin on a fit that is itself noisy
+   by 10 to 70 percent), the device is not software (a Vulkan CPU device never beats the plain loop it shares cores with)
+   and the process-wide cold start (instance, device, self-test: 120 to 370 ms measured) has been paid back by what the
+   declined launches would have saved: ski rental, so a program that would launch once pays at most the cold start it
+   earned (AIL_GPU_STRICT=1: only a single launch that saves more than the cold start goes).  Constants are overridable for tests and measurements: AIL_GPU_MODEL=fixed_us,ns_per_byte,ns_per_op_dev,
+   ns_per_op_cpu,margin,init_us. */
+static GKV_UNUSED void gkv_trace_why(int k);
+static double gkv_credit;
+static GKV_UNUSED int gkv_model_win(int64_t n, double bytes, double ops, double *tc, double *td) {
+    static double c[6] = { 300.0, 0.17, 0.06, 0.20, 1.5, 300000.0 };
+    static int got;
+    if (!got) {
+        got = 1;
+        const char *e = getenv("AIL_GPU_MODEL");
+        if (e && e[0]) { char *q = (char *)e; for (int i = 0; i < 6 && *q; i++) { c[i] = strtod(q, &q); if (*q == ',') q++; } }
+    }
+    if (ops < 1.0) ops = 1.0;
+    *td = c[0] + (bytes * c[1] + (double)n * ops * c[2]) / 1000.0;
+    *tc = (double)n * ops * c[3] / 1000.0;
+    if (!(*tc >= c[4] * *td)) return 0;
+    if (gkv_G.state == 0) {                   /* cold start still to pay: only once the declined launches' savings would cover it */
+        if (getenv("AIL_GPU_STRICT")) { if (*tc - *td < c[5]) return -1; }   /* strict: one launch has to pay for the cold start by itself */
+        else { gkv_credit += *tc - *td; if (gkv_credit < c[5]) return -1; }
+    }
+    return 1;
+}
+/* 0 declined (the caller runs the original loop), 1 the emulation, 2 the device (it may still decline: no loader, untrusted) */
+static GKV_UNUSED int gkv_decide(int k, int64_t n, double bytes, double ops) {
+    int m = gkv_mode();
+    if (m == 0) return 1;
+    if (m == 2) return 2;
+    if (gkv_min_n() >= 0) {
+        if (n >= gkv_min_n()) return 2;
+        if (gk_tracing()) fprintf(stderr, "gpu: k%d declined (n = %lld is below AIL_GPU_MIN_N = %lld)\n", k, (long long)n, (long long)gkv_min_n());
+        return 0;
+    }
+    double tc, td;
+    int w = gkv_model_win(n, bytes, ops, &tc, &td);
+    if (w <= 0) {
+        if (gk_tracing())
+            fprintf(stderr, "gpu: k%d declined (n = %lld, %.0f ops: predicted device %.0f us, plain loop %.0f us%s)\n", k, (long long)n, ops, td, tc,
+                    w < 0 ? "; the device cold start is not yet repaid" : ", not a clear win");
+        return 0;
+    }
+    if (!gkv_init()) { gkv_trace_why(k); return 0; }
+    if ((gkv_G.devtype == 3 || gkv_G.devtype == 4) && !getenv("AIL_GPU_AUTO_ANY")) {
+        gkv_G.why = "a software device never beats the plain loop"; gkv_trace_why(k); return 0;
+    }
+    return 2;
+}
 
 /* ---- device trust (GPU.md 6.3) ---------------------------------------------------------------------------------------
    A driver's shader compiler may rewrite a float pattern although the module forbids it (lavapipe turned `0.0 - x` into
@@ -586,7 +661,7 @@ def _words_c(words):
     return ',\n'.join(rows)
 
 
-def device_text(kernel, name, k):
+def device_text(kernel, name, k, ops_c='1.0'):
     """(C text, info, words) for the kernel: the SPIR-V array and `<name>_run`, which has the signature of `<name>` (the
     emulation), tries the device and falls back to the emulation.  Before the device is trusted for this kernel it passes
     the self-test `<name>_selftest`, and its first real launch is compared with the emulation (`<name>_agree`): GPU.md 6.3.
@@ -740,34 +815,54 @@ def device_text(kernel, name, k):
         L.append('    free((void *)p_%s);' % lst)
     L += ['    return _r;', '}', '']
 
-    # the wrapper
+    # the wrapper: `<name>_want` decides (declined / emulation / device) before the caller allocates anything;
+    # `<name>_run` runs the kernel when wanted and returns GK_DECLINED when the caller must run the original loop
     scal_args = [('s_' + sc) for sc in kernel.scalars] + [('s_' + sc) for sc in kernel.consts]
+    lens = ' + '.join('(double)n_%s' % lst for lst in lists) or '0.0'
+    L += ['static int %s_dec = -1;      /* the decision of the last _want, used by the _run that follows it */' % name,
+          'static int %s_want(%s) {' % (name, ', '.join(params[:-1])),
+          '    double _ops = %s;' % ops_c,
+          '    return %s_dec = gkv_decide(%d, _cnt, 8.0 * ((double)_cnt + %s), _ops);' % (name, k, lens),
+          '}', '']
     L += ['static unsigned %s_run(%s) {' % (name, ', '.join(params)),
-          '    if (gkv_want(_cnt)) {',
+          '    int _d = %s_dec >= 0 ? %s_dec : %s_want(%s);' % (name, name, name, ', '.join(names[:-1])),
+          '    %s_dec = -1;' % name,
+          '    if (_d == 1) {                           /* AIL_GPU=emu: the emulation, into a temporary (it may stop half way) */',
+          '        %s *_t = (%s *)malloc((size_t)_cnt * 8); if (!_t) return GK_DECLINED;' % (res_c, res_c),
+          '        gk_dev = "emulation";',
+          '        unsigned f = %s(%s);' % (name, ', '.join(names[:-1] + ['_t'])),
+          '        if (f == 0) memcpy(_res, _t, (size_t)_cnt * 8);',
+          '        free(_t); return f;',
+          '    }',
+          '    if (_d == 2) {',
           '        if (gkv_usable(%s)) {' % mask,
           '            if (gkv_check_mode() == 0 && %s_state == 0) %s_state = 1;' % (name, name),
           '            if (%s_state == 0) { int _st = %s_selftest(%s); %s_state = _st > 0 ? 1 : -1; }' % (
               name, name, ', '.join(scal_args), name),
           '            if (%s_state > 0) {' % name,
           '                unsigned f = 0;',
-          '                if (%s_dev(%s, &f, 0)) {' % (name, ', '.join(names)),
-          '                    int _chk = gkv_check_mode();',
-          '                    if (_chk && (_chk > 1 || !%s_first)) {' % name,
+          '                int _chk = gkv_check_mode();',
+          '                int _cmp = _chk && (_chk > 1 || !%s_first);      /* compare with the emulation: into a temporary first */' % name,
+          '                %s *_dst = _res, *_t = 0;' % res_c,
+          '                if (_cmp) { _t = (%s *)malloc((size_t)_cnt * 8); if (!_t) return GK_DECLINED; _dst = _t; }' % res_c,
+          '                if (%s_dev(%s, &f, 0)) {' % (name, ', '.join(names[:-1] + ['_dst'])),
+          '                    if (_cmp) {',
           '                        const char *_what = 0; long long _at = -1;',
           '                        %s_first = 1;' % name,
-          '                        if (!%s_agree(%s, f, &_at, &_what)) {' % (name, ', '.join(names)),
+          '                        if (!%s_agree(%s, f, &_at, &_what)) {' % (name, ', '.join(names[:-1] + ['_dst'])),
           '                            gkv_distrust(%s, %d, _what, _at); %s_state = -1;' % (cls, k, name),
-          '                            goto emu;',
+          '                            free(_t); return GK_DECLINED;',
           '                        }',
+          '                        if (f == 0) memcpy(_res, _t, (size_t)_cnt * 8);',
+          '                        free(_t);',
           '                    }',
           '                    gk_dev = gkv_dev_name(); return f;',
           '                }',
+          '                free(_t);',
           '            }',
           '        }',
           '        gkv_trace_why(%d);' % k,
           '    }',
-          'emu:',
-          '    gk_dev = "emulation";',
-          '    return %s(%s);' % (name, ', '.join(names)),
+          '    return GK_DECLINED;',
           '}']
     return '\n'.join(L) + '\n', info, words

@@ -1,3 +1,18 @@
+## 2026-10-30 -- GPU stage G4: a declined launch runs the original loop; cost model; buffer pool
+
+`ail_gk<k>_run` can answer `GK_DECLINED`; the glue then runs the ORIGINAL typed loop instead of the G1 emulation (which was 1.2x to
+16x slower). `AIL_GPU=auto`, the default of a `--gpu` build, decides in `ail_gk<k>_want` before anything is allocated: the emitter
+counts operations per element (`ops_expr`), and a launch goes to the device only when `t_cpu >= 1.5 * t_dev` with
+`t_cpu = n*ops*0.20 ns`, `t_dev = 0.3 ms + bytes*0.17 ns + n*ops*0.06 ns`, the device is not software, and the cold start (120 to
+370 ms) has been earned back by the launches that were declined (ski rental; `AIL_GPU_STRICT=1` for single-launch only). Constants
+re-fitted on the Radeon 780M after the second change: the device buffers are now kept between launches, which cut the fixed cost of
+a launch from 4.5 ms to 0.2 to 0.3 ms (heavy f64 at 65,536: 6.2 ms to 1.6 ms, 3.7x faster than the plain loop; light f64 at 1M:
+18.5 ms to 4.0 ms, still 4x slower than the plain loop and therefore never chosen). The result is written straight into the output
+list, only when the flag word is 0. Auto against `AIL_GPU=0`: ties within noise wherever it declines, 4x to 5x faster for the
+321-op kernel at 10M, 2.7x at 1M after 40 launches, 1.1x to 1.2x slower for 8 launches at 1M (the cold start not yet repaid).
+`AIL_GPU_MIN_N` still overrides. `test_ail_gpu_g4.py` (22 tests); G1 tests now run the emulation with `AIL_GPU=emu`, G2/G3 expectations
+changed from "the emulation runs" to "the original loop runs". docs/design/GPU.md 6.4.
+
 ## 2026-10-30 -- GPU stage G3 (first part): device trust, the 780M, first measurements
 
 No device is trusted for a kernel any more before it has passed a self-test: `ail_gk<k>_selftest` runs the kernel's own SPIR-V

@@ -78,3 +78,4 @@ jobs:
           python3 AIL_CURRENT/test_ail_gpu_g1.py
           python3 AIL_CURRENT/test_ail_gpu_g2.py -v
           python3 AIL_CURRENT/test_ail_gpu_g3.py -v
+          python3 AIL_CURRENT/test_ail_gpu_g4.py -v
