@@ -317,6 +317,7 @@ MODULES = (
     'test_ail_fz1',
     'test_ail_classnames', 'test_ail_stdtop1', 'test_ail_stdtop2', 'test_ail_stdtop3', 'test_ail_stdtop4', 'test_ail_gpu_g1', 'test_ail_gpu_g2', 'test_ail_gpu_g3', 'test_ail_gpu_g4', 'test_ail_gpu_g5', 'test_ail_array_ref', 'test_ail_array_t2', 'test_ail_covtop1', 'test_ail_ffi_handles', 'test_ail_ffi_objfold', 'test_ail_piece_stubs', 'test_ail_ffi_f3a',
     'test_ail_exc_nobind', 'test_ail_cargo', 'test_ail_fz196', 'test_ail_pre409', 'test_ail_pre427', 'test_ail_pre432',
+    'test_ail_cmp_classname',
 )
 
 
