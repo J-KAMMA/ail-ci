@@ -15354,6 +15354,9 @@ static inline double ail_obj2_ffloormod(double a, double b, int remainder) {
 /*B<*/
 /* the tails of the operators after their int and float arms: a big int, or the type error (cold, so a hot operator is no larger than
    it was before the big ints and is inlined as before) */
+static AIL_BIGFN ail_st ail__floordiv_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb);
+static AIL_BIGFN ail_st ail__mod_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb);
+static AIL_BIGFN ail_st ail__truediv_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb);
 /*P:div<*/static AIL_BIGFN ail_st ail__floordiv_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb) {
     AIL_SLOW_OBJS(a, b);
     if (__builtin_expect(a.tag == AIL_T_BIG || b.tag == AIL_T_BIG, 0)) { ail_st bst; if (ail__big_floordiv(cx, out, a, b, &bst)) return bst; }
@@ -16643,6 +16646,7 @@ static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
         return ail_list_delitem(cx, c, key.i);
     }
     if (c.tag == AIL_T_DICT) return ail_dict_del(cx, c, key);
+    if (c.tag == AIL_T_CLASS) return ail_raise_c(cx, AIL_B_TYPEERROR, "'type' object does not support item deletion");
     return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object doesn't support item deletion", c);
 }
 static inline ail_obj ail_range_new(ail_ctx *cx, int64_t start, int64_t stop, int64_t step); /* defined below */
