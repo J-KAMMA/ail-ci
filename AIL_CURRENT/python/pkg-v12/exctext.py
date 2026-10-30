@@ -124,6 +124,12 @@ class _Handler(ast.NodeTransformer):
         if (node.attr == 'filename' and self.os_family and 'filename' not in self.visible and self.is_e(node.value)
                 and isinstance(node.ctx, ast.Load)):
             return self.field(FILENAME, node)
+        if (node.attr in ('errno', 'strerror') and node.attr not in self.visible and self.is_e(node.value)
+                and isinstance(node.ctx, ast.Load)):
+            # no rewrite, but the OSError the runtime itself raises (open, os.*, pathlib ...) must carry its errno and
+            # strerror (the FILEIO / OSEXC edits); without them `e.errno` ends in a RuntimeError that an outer
+            # `except Exception` swallowed silently
+            self.hits += 1
         if node.attr in self.visible and self.is_e(node.value) and isinstance(node.ctx, ast.Load):
             index, kind = self.visible[node.attr]
             probe = self.call('_ail_exc_attr_' + ('i' if kind == 'b' else kind),
