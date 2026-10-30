@@ -505,15 +505,19 @@ def pong(n):
 
 class Refusals(ModulesBase):
     def test_private_imports(self):
-        files = {"lib.py": "def f():\n    return 1\n\n\ndef _g():\n    return 2\n"}
-        self.refused({**files, "main.py": "from lib import _g\nprint(_g())\n"}, "private name")
-        self.refused({**files, "main.py": "import lib\nprint(lib._g())\n"}, "private name")
+        # one leading underscore is an ordinary name between local modules (test_ail_stdlib_rules1); two are
+        # mangled by CPython inside a class body, which the merge does not do
+        files = {"lib.py": "def f():\n    return 1\n\n\ndef __g():\n    return 2\n"}
+        self.refused({**files, "main.py": "from lib import __g\nprint(__g())\n"}, "two leading underscores")
+        self.refused({**files, "main.py": "import lib\nprint(lib.__g())\n"}, "two leading underscores")
 
     def test_imports_below_the_top_level(self):
         self.refused({"lib.py": "print(1)\nX = 1\n", "main.py": "def f():\n    import lib\n    return lib.X\n\n\nprint(f())\n"},
                      "function-level `import lib`", "lib.py:1")
         self.assertEqual(self.same_as_cpython({"lib.py": "X = 1\n", "main.py": "def f():\n    import lib\n    return lib.X\n\n\nprint(f())\n"}), "1\n")
-        self.refused({"lib.py": "X = 1\n", "main.py": "if True:\n    import lib\nprint(lib.X)\n"}, "below the top level")
+        self.refused({"lib.py": "X = 1\n", "main.py": "import sys\nif len(sys.argv) > 9:\n    import lib\nprint(2)\n"},
+                     "below the top level")
+        self.assertEqual(self.same_as_cpython({"lib.py": "X = 1\n", "main.py": "if True:\n    import lib\nprint(lib.X)\n"}), "1\n")
 
     def test_module_as_value_and_attribute_assignment(self):
         files = {"lib.py": "X = 1\n\n\ndef f():\n    return X\n"}
@@ -1241,8 +1245,8 @@ class PackageRefusals(ModulesBase):
         self.refused({**pkg, "main.py": "import pkg.a\nfrom pkg import *\nprint(X)\n"}, "without __all__")
         self.refused({"lib.py": "__all__ = [name for name in 'ab']\nA = 1\n", "main.py": "from lib import *\n"},
                      "cannot read")
-        self.refused({"lib.py": "__all__ = ['_g']\n\n\ndef _g():\n    return 1\n", "main.py": "from lib import *\n"},
-                     "private name")
+        self.refused({"lib.py": "__all__ = ['__g']\n\n\ndef __g():\n    return 1\n", "main.py": "from lib import *\n"},
+                     "two leading underscores")
         self.refused({"lib.py": "__all__ = ['nothing']\n", "main.py": "from lib import *\n"}, "nothing")
 
     def test_module_attribute_writes_that_cannot_be_followed(self):
