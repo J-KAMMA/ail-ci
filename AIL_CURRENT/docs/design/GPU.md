@@ -788,7 +788,7 @@ shape shares a function; division not fused; calls among the operands not reorde
 `c32` in SPIR-V and C, the sum kernel as a range kernel, the three case programs built with `compile --gpu` on the typed path (kernels present) and run in `AIL_GPU=0`, default, a model that says no, `emu`, `force`, auto on a
 device, no loader, auto without loader, a device without features, an untrusted device found by the self-test, one found by the first launch; the self-test of every new kernel passes on the device;
 a corrupted device (`flip`, `negzero`, `noflag` in the self-test) is found for every kernel of every program; a Horner chain of 40 steps in all modes and sent to the device by a model that says yes.
-G1 (42), G3 (16), T2 (23) re-run on the merged tree.
+G1 (42), G2 (25), G3 (16), G4 (22), T2 (23) and the T1 reference (38) re-run on the merged tree.
 
 **Not done / open.** The cost model constants are G4's; a re-fit with the chains of this stage (the model is conservative for 16 to 64 operations) would move the break-even for chains from about 40 to about 15 operations per input array.
 Reductions run one invocation per block of 1024 elements (uncoalesced; a lane-parallel kernel with a workgroup tree would read 16 consecutive elements per step) because the kernel IR has no workgroup-local memory yet;
