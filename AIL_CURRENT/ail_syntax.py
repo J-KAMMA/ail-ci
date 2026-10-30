@@ -168,6 +168,15 @@ def _threadlib():
     return _threadlib.module
 
 
+def _ailarray():
+    """python/pkg-v12/ailarray.py (`import ail_array`: f64 and int32 arrays lowered onto native loops)."""
+    if not hasattr(_ailarray, "module"):
+        _stdlib5()                               # puts python/pkg-v12 on sys.path
+        import ailarray
+        _ailarray.module = ailarray
+    return _ailarray.module
+
+
 def _stdlib5():
     """python/pkg-v12/stdlib5.py (library batch 5: fractions, enum, namedtuple, random.Random, ... lowered first)."""
     if not hasattr(_stdlib5, "module"):
@@ -3387,6 +3396,12 @@ def _inline_type_aliases(source):
     return source
 
 
+def ail_array_surface(source, notes=None):
+    """`import ail_array` lowered onto native array loops (python/pkg-v12/ailarray.py); the source as written when the
+    program does not import it or a use is not built (the refusal is added to `notes`)."""
+    return _ailarray().rewrite_text(source, notes)
+
+
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
@@ -3405,6 +3420,8 @@ def python_surface(source, notes=None, library=False):
         source = typedpar.rewrite_text(source, notes)
     if any(name in source for name in ("threading", "queue", "concurrent")):
         source = _threadlib().rewrite_text(source, notes)
+    if "ail_array" in source:
+        source = _ailarray().rewrite_text(source, notes)         # typed arrays (docs/design/TYPED_ARRAY.md, T2)
     if any(name in source for name in ("fractions", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword", "calendar",
                                        "abc", "array", "Random", "string", "io", "statistics", "decimal", "unicodedata",
                                        "ipaddress", "html")):
