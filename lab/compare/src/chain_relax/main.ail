@@ -1,0 +1,104 @@
+fn digits_only(s: str) -> bool {
+    if len(s) == 0 { return False; }
+    for ch in s {
+        if ch < "0" or ch > "9" { return False; }
+    }
+    return True;
+}
+
+fn strip0(s: str) -> str {
+    let i = 0;
+    while i < len(s) - 1 and s[i] == "0" { i += 1; }
+    return s[i:];
+}
+
+fn fmt(v: float) -> str {
+    let s = "%.9f" % v;
+    if s[0] == "-" {
+        let allz = True;
+        for ch in s[1:] {
+            if ch != "0" and ch != "." { allz = False; }
+        }
+        if allz { return s[1:]; }
+    }
+    return s;
+}
+
+fn main() {
+    if len(sys.argv) != 4 { return 1; }
+    let a = sys.argv[1];
+    let b = sys.argv[2];
+    let c = sys.argv[3];
+    if not digits_only(a) or not digits_only(b) or not digits_only(c) { return 1; }
+    a = strip0(a);
+    b = strip0(b);
+    c = strip0(c);
+    if len(a) > 8 or len(b) > 8 { return 1; }
+    let n = int(a);
+    let t = int(b);
+    if n < 1 or n > 10000000 or t > 1000000 { return 1; }
+    if len(c) > 20 { return 1; }
+    if len(c) == 20 and c > "18446744073709551615" { return 1; }
+    let x = 0;
+    for ch in c {
+        x = wrapping_add(wrapping_mul(x, 10), ord(ch) - 48);
+    }
+    let h = [0.0] * n;
+    for i in range(n) {
+        x = wrapping_add(wrapping_mul(x, 6364136223846793005), 1442695040888963407);
+        let m = (x >> 33) & 2147483647;
+        h[i] = float((m % 2001) - 1000) / 64.0;
+    }
+    for s in range(1, t + 1) {
+        if s % 2 == 1 {
+            for i in range(n) {
+                let li = i - 1;
+                if li < 0 { li = n - 1; }
+                let ri = i + 1;
+                if ri == n { ri = 0; }
+                let l = h[li];
+                let r = h[ri];
+                let cc = h[i];
+                let d = (l + r) - (cc + cc);
+                let g = d / (1.0 + (d * d + 0.0625) ** 0.5);
+                h[i] = cc + 0.375 * g;
+            }
+        } else {
+            for k in range(n) {
+                let i = n - 1 - k;
+                let li = i - 1;
+                if li < 0 { li = n - 1; }
+                let ri = i + 1;
+                if ri == n { ri = 0; }
+                let l = h[li];
+                let r = h[ri];
+                let cc = h[i];
+                let d = (l + r) - (cc + cc);
+                let g = d / (1.0 + (d * d + 0.0625) ** 0.5);
+                h[i] = cc + 0.375 * g;
+            }
+        }
+    }
+    let sum = 0.0;
+    let energy = 0.0;
+    let mn = h[0];
+    let mx = h[0];
+    for i in range(n) {
+        let v = h[i];
+        sum = sum + v;
+        let ri = i + 1;
+        if ri == n { ri = 0; }
+        let tt = h[ri] - v;
+        energy = energy + tt * tt;
+        if v < mn { mn = v; }
+        if v > mx { mx = v; }
+    }
+    print("sum " + fmt(sum));
+    print("energy " + fmt(energy));
+    print("min " + fmt(mn));
+    print("max " + fmt(mx));
+    print("first " + fmt(h[0]));
+    print("middle " + fmt(h[n // 2]));
+    print("last " + fmt(h[n - 1]));
+    return 0;
+}
