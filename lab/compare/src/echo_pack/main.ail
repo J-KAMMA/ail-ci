@@ -1,0 +1,141 @@
+fn hash_of(d: bytes) -> int {
+    let h = 0;
+    for b in d { h = (h * 257 + b + 1) % 4294967296; }
+    return h;
+}
+
+fn hash_ba(d: bytearray) -> int {
+    let h = 0;
+    for b in d { h = (h * 257 + b + 1) % 4294967296; }
+    return h;
+}
+
+fn flush(out: bytearray, d: bytes, start: int, cnt: int) -> void {
+    if cnt > 0 {
+        out.append(cnt - 1);
+        out.extend(d[start:start + cnt]);
+    }
+}
+
+fn pack(d: bytes) -> int {
+    let n = len(d);
+    let out = bytearray();
+    out.extend(b"EP1");
+    out.append(n % 256);
+    out.append((n // 256) % 256);
+    out.append((n // 65536) % 256);
+    out.append((n // 16777216) % 256);
+    let prev = [-1 for _ in range(n)];
+    let head: dict[int, int] = {};
+    let i = 0;
+    let lstart = 0;
+    let lcnt = 0;
+    while i < n {
+        let bestlen = 0;
+        let bestp = -1;
+        if i + 4 <= n {
+            let key = d[i] * 16777216 + d[i + 1] * 65536 + d[i + 2] * 256 + d[i + 3];
+            let p = -1;
+            if key in head { p = head[key]; }
+            let seen = 0;
+            let maxm = n - i;
+            if maxm > 131 { maxm = 131; }
+            while p >= 0 and seen < 8 and i - p <= 65535 {
+                let m = 4;
+                while m < maxm and d[p + m] == d[i + m] { m += 1; }
+                if m > bestlen {
+                    bestlen = m;
+                    bestp = p;
+                }
+                seen += 1;
+                p = prev[p];
+            }
+        }
+        if bestp >= 0 {
+            flush(out, d, lstart, lcnt);
+            lcnt = 0;
+            out.append(128 + bestlen - 4);
+            let dist = i - bestp;
+            out.append(dist // 256);
+            out.append(dist % 256);
+            let e = i + bestlen;
+            while i < e {
+                if i + 4 <= n {
+                    let k2 = d[i] * 16777216 + d[i + 1] * 65536 + d[i + 2] * 256 + d[i + 3];
+                    if k2 in head { prev[i] = head[k2]; }
+                    head[k2] = i;
+                }
+                i += 1;
+            }
+        } else {
+            if lcnt == 0 { lstart = i; }
+            lcnt += 1;
+            if lcnt == 128 {
+                flush(out, d, lstart, lcnt);
+                lcnt = 0;
+            }
+            if i + 4 <= n {
+                let k3 = d[i] * 16777216 + d[i + 1] * 65536 + d[i + 2] * 256 + d[i + 3];
+                if k3 in head { prev[i] = head[k3]; }
+                head[k3] = i;
+            }
+            i += 1;
+        }
+    }
+    flush(out, d, lstart, lcnt);
+    let h = hash_of(d);
+    out.append(h % 256);
+    out.append((h // 256) % 256);
+    out.append((h // 65536) % 256);
+    out.append((h // 16777216) % 256);
+    write_stdout_bytes(out);
+    return 0;
+}
+
+fn unpack(d: bytes) -> int {
+    let L = len(d);
+    if L < 7 { return 2; }
+    if d[0] != 69 or d[1] != 80 or d[2] != 49 { return 2; }
+    let n = d[3] + d[4] * 256 + d[5] * 65536 + d[6] * 16777216;
+    let pos = 7;
+    let out = bytearray();
+    while len(out) < n {
+        if pos >= L { return 2; }
+        let c = d[pos];
+        pos += 1;
+        if c < 128 {
+            let k = c + 1;
+            if pos + k > L { return 2; }
+            if len(out) + k > n { return 2; }
+            out.extend(d[pos:pos + k]);
+            pos += k;
+        } else {
+            if pos + 2 > L { return 2; }
+            let dist = d[pos] * 256 + d[pos + 1];
+            pos += 2;
+            let ln = c - 128 + 4;
+            if dist == 0 or dist > len(out) { return 2; }
+            if len(out) + ln > n { return 2; }
+            for _ in range(ln) {
+                out.append(out[len(out) - dist]);
+            }
+        }
+    }
+    if pos + 4 != L { return 2; }
+    let want = d[pos] + d[pos + 1] * 256 + d[pos + 2] * 65536 + d[pos + 3] * 16777216;
+    if hash_ba(out) != want { return 2; }
+    write_stdout_bytes(out);
+    return 0;
+}
+
+fn main() {
+    if len(sys.argv) != 2 { return 1; }
+    let mode = sys.argv[1];
+    if mode == "pack" {
+        return pack(read_stdin_bytes(1 << 40));
+    }
+    if mode == "unpack" {
+        return unpack(read_stdin_bytes(1 << 40));
+    }
+    return 1;
+}
