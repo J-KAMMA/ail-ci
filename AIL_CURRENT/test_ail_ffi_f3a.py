@@ -7,10 +7,10 @@ compiled program used to do the same for 64-bit unsigned types and to stop with 
 range")` for narrow ones. Each program below runs under CPython (the shim) and as the compiled executable, in the default
 build, in the typed-only build (`AIL_NO_GENERAL=1`) and with `AIL_UNIFIED_FORCE=1`, and stdout and exit code must be equal.
 
-A program with @extern stubs is built on the typed path only (its ints are int64), so a 64-bit unsigned argument can only
-be too small; the values 2**63 .. 2**64-1 cannot be held and a constant of that size at a stub call is refused at compile
-time with file:line and `write instead:` (exact u64 arguments come with F3b). bool and float arguments to an int
-parameter were already refused at compile time; this module pins that.
+F3a was written when a program with @extern stubs held int64 only, so a 64-bit unsigned argument could only be too small
+and a constant in 2**63 .. 2**64-1 was refused at compile time. F3b (test_ail_ffi_f3b.py) makes those values exact; the
+cases below that used to pin the refusal now pin the exact value. bool and float arguments to an int parameter were
+already refused at compile time; this module pins that.
 """
 import os
 import shutil
@@ -305,16 +305,36 @@ class IntArgumentTests(unittest.TestCase):
                 for needle in needles:
                     self.assertIn(needle, done.stderr + done.stdout)
 
-    def test_a_u64_constant_above_int64_is_refused_with_a_hint(self):
-        self.refused("big_u64", STUBS + "\ndef main():\n    print(f_c_size_t(2**63))\n\nmain()\n",
-                     "big_u64.py:", "f_c_size_t: argument x is the constant 9223372036854775808, beyond int64",
-                     "a valid argument", "write instead: an argument in -2**63 .. 2**63-1")
+    def same_exact(self, name, text, expect_in=()):
+        """A value above int64 is exact in the default and forced-general builds; the legacy int64 emitter (the "typed"
+        mode) stops loudly instead: `integer overflow` on stderr, exit 1, stdout a prefix of CPython's, never a wrong number."""
+        source = self.write(name + ".py", text)
+        cpython = run_cpython(self.dir, source)
+        self.assertEqual(cpython.returncode, 0, cpython.stderr[-600:])
+        for needle in expect_in:
+            self.assertIn(needle, cpython.stdout)
+        for mode, _ in MODES:
+            with self.subTest(mode=mode):
+                done, exe = compile_cli(self.dir, source, mode, "%s_%s" % (name, mode))
+                self.assertEqual(done.returncode, 0, done.stderr[-1500:] + done.stdout[-500:])
+                run = subprocess.run([str(exe)], cwd=self.dir, capture_output=True, text=True, timeout=120)
+                if mode == "typed":
+                    self.assertTrue(cpython.stdout.startswith(run.stdout))
+                    self.assertEqual(run.returncode, 1, run.stderr[-600:])
+                    self.assertIn("integer overflow", run.stderr)
+                else:
+                    self.assertEqual((run.stdout, run.returncode), (cpython.stdout, 0), run.stderr[-600:])
+        return cpython
 
-    def test_every_spelling_of_a_wide_u64_constant_is_refused(self):
+    def test_a_u64_constant_above_int64_is_exact_since_f3b(self):
+        # F3a refused this at compile time (the program held int64 only); F3b passes it exactly, as CPython does
+        self.same_exact("big_u64", STUBS + "\ndef main():\n    print(f_c_size_t(2**63))\n\nmain()\n",
+                                   expect_in=("9223372036854775808\n",))
+
+    def test_every_spelling_of_a_wide_u64_constant_is_exact(self):
         for index, spelling in enumerate(("0xFFFFFFFFFFFFFFFF", "(1 << 64) - 1", "18446744073709551615", "1 << 63", "2**64 - 2**63")):
             with self.subTest(spelling=spelling):
-                self.refused("spell%d" % index, STUBS + "\ndef main():\n    print(f_c_ulong(%s))\n\nmain()\n" % spelling,
-                             "spell%d.py:" % index, "f_c_ulong: argument x is the constant", "beyond int64")
+                self.same_exact("spell%d" % index, STUBS + "\ndef main():\n    print(f_c_ulong(%s))\n\nmain()\n" % spelling)
 
     def test_other_constants_beyond_int64_are_refused(self):
         self.refused("big_other", STUBS + "\ndef main():\n    print(f_c_int(x=2**64))\n\nmain()\n",
