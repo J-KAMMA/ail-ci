@@ -24,7 +24,17 @@ sys.path.insert(0, str(ROOT))
 from test_ail_ffi import CC, compile_cli, run_cpython  # noqa: E402
 
 BINDGEN = ROOT / "ail_bindgen.py"
-RUSTC = shutil.which("rustc")
+
+
+def _working_rustc():
+    # a rustup shim is on PATH even when it has no toolchain installed, so ask before trusting it
+    found = shutil.which("rustc")
+    if found and subprocess.run([found, "--version"], capture_output=True).returncode == 0:
+        return found
+    return None
+
+
+RUSTC = _working_rustc()
 
 
 def have_header(name):

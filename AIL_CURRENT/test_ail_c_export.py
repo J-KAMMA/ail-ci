@@ -32,7 +32,17 @@ ROOT = Path(__file__).resolve().parent
 EXAMPLE = ROOT / 'language_examples' / 'c_export'
 CLI = str(ROOT / 'ail_chatgpt.py')
 CC = os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc')
-RUSTC = shutil.which('rustc')
+
+
+def _working_rustc():
+    # a rustup shim is on PATH even when it has no toolchain installed, so ask before trusting it
+    found = shutil.which('rustc')
+    if found and subprocess.run([found, '--version'], capture_output=True).returncode == 0:
+        return found
+    return None
+
+
+RUSTC = _working_rustc()
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(EXAMPLE))
 

@@ -1,3 +1,12 @@
+## 2026-10-30 -- fz205 suite fix: Rust bridge tests skip when rustc is only a shim (job-fz205-10300805)
+
+`test_ail_c_export` and `test_ail_cratebridge` chose `rustc` with `shutil.which`, which finds a
+rustup shim even when `$HOME/.rustup` has no default toolchain; the tests then ran and failed with
+rustup's "could not choose a version of rustc" instead of being skipped as their docstrings say.
+Both modules now probe `rustc --version` and treat a non-zero exit as "not installed": the Rust
+tests still run wherever a real compiler exists (verified against the installed stable toolchain,
+both pass) and skip otherwise (verified: both modules green with the shim alone).
+
 ## 2026-10-29 -- fz205: the try/else reproducer no longer differs on this tree (job-fz205-10300805)
 
 Re-ran the daily-fuzzer reproducer (seed `2075520206`, CPython 3.12) with `bash ~/tools/cmp.sh` on
