@@ -90,6 +90,7 @@ TINT_ACTIVE = {}
 # that is still an int64 list; `_to_c_once` then compiles the program again with those keys active (TLIST_ACTIVE).
 TLIST_ACTIVE = frozenset()
 TLIST_REQUESTS = set()
+TLIST_OFF = False        # set by `_to_c_once` when the program did not build with lists of exact ints: batch 2's lowering
 # True when the program calls a typed-only runtime primitive (monotonic_ms, tcp_*, ...) that the
 # general path cannot build. Such a program must stay on the typed path even if that means keeping
 # an unproven call result on the legacy emitter; trying the general path would fail outright.
@@ -34994,14 +34995,15 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
 def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0, _tint_exclude=(), _tint_retry=0):
     """`_to_c_once_inner`, again with the lists of exact ints the IR lowering asked for (TLIST_REQUESTS) switched on, until
     the requests stop.  A program that never builds a list from `int(text)` makes no request: one round, unchanged."""
-    global TLIST_ACTIVE
-    saved = TLIST_ACTIVE
+    global TLIST_ACTIVE, TLIST_OFF
+    saved, saved_off = TLIST_ACTIVE, TLIST_OFF
     active = frozenset()
     snapshot = dict(info) if info is not None else None
     try:
         for _round in range(8):
             TLIST_REQUESTS.clear()
             TLIST_ACTIVE = active
+            TLIST_OFF = False
             failure = None
             try:
                 out = _to_c_once_inner(source, name, strict, info, entry, sig, library, external, _sort_stage,
@@ -35010,16 +35012,28 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                 failure = error
             fresh = frozenset(TLIST_REQUESTS) - active
             if not fresh:
-                if failure is not None:
-                    raise failure
-                return out
+                if failure is None:
+                    return out
+                break
             active = active | fresh
             if info is not None:
                 info.clear()
                 info.update(snapshot)
-        raise Unsupported('the lists of exact ints that cross functions did not settle')
+        # the program did not build with lists of exact ints: build it as it was built without them (no program that built
+        # before may be refused because of them)
+        if info is not None:
+            info.clear()
+            info.update(snapshot)
+        TLIST_REQUESTS.clear()
+        TLIST_ACTIVE = frozenset()
+        TLIST_OFF = True
+        try:
+            return _to_c_once_inner(source, name, strict, info, entry, sig, library, external, _sort_stage,
+                                    _tint_exclude, _tint_retry, ())
+        except Unsupported:
+            raise
     finally:
-        TLIST_ACTIVE = saved
+        TLIST_ACTIVE, TLIST_OFF = saved, saved_off
         TLIST_REQUESTS.clear()
 
 

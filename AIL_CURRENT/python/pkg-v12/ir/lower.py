@@ -133,6 +133,8 @@ class Lowering(TextLowering):
         # a program with a list of exact ints (('exact',) is requested by the first one): it was on the exact general path before,
         # so no exact int may be narrowed to int64 anywhere in it (a loud stop where CPython has an answer)
         self.exact_prog = ('exact',) in self.tl_active
+        # the lists of exact ints switched off (pyfunc.TLIST_OFF: the program did not build with them): the lowering of batch 2
+        self.tl_off = bool(getattr(P, 'TLIST_OFF', False))
         self.recursive = recursive
         self.cname = cname
         self.pending = frozenset(pending)
@@ -215,6 +217,8 @@ class Lowering(TextLowering):
             want = None
         have = I.I64 if value.type == I.I1 else value.type
         if have == TINT and kind == self.P.INT:
+            return
+        if have == I.T('span', TINT) and want == I.T('span', I.I64):
             return
         if want != have:
             raise NotS0('type disagreement at line %s: legacy %r, IR %s'
@@ -861,6 +865,10 @@ class Lowering(TextLowering):
         """`v` as an element of a list with element type `elem`. An exact int that may exceed int64 cannot go into an int64
         list: when the list is a local of this function it becomes a list of exact ints, otherwise (`strict`: the caller
         cannot narrow either) the function keeps the exact general path."""
+        if self.tl_off:
+            if strict and elem == I.I64 and v.type == TINT and not self.small_tint(v):
+                raise NotS0('an exact int that may exceed int64 stored in an int64 list')
+            return self.field_value(v, elem, node)
         if elem == I.I64 and v.type == TINT and not self.small_tint(v):
             if self.tainted(v) or exact:
                 if self.local_i64_list(dst):
@@ -1839,7 +1847,7 @@ class Lowering(TextLowering):
         return I.I64 if kind == self.P.INT else I.F64
 
     def store(self, name, v):
-        if v.type == TINT and name not in self.taint and self.tainted(v):
+        if v.type == TINT and not self.tl_off and name not in self.taint and self.tainted(v):
             raise NeedTaint([name])
         if name in getattr(self.ctx, 'gdecl', ()):
             self.b.emit('global.store', [self.coerce(v, self.global_type(name))], [], {'name': name})
