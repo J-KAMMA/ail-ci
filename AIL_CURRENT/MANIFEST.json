@@ -6384,7 +6384,7 @@
     "python/pkg-v12/c_api_bridge.py": "06825f38216030996522ba6faf74d2682e4176a156b057851b67c98fef0bcce6",
     "ail_chatgpt.py": "a40d4049290705524c1e01ebac5ea4949a5eb06f4ef5f1b3964e616ed29cc638",
     "ail_sdk.py": "a83730d50ef012c406d66156891e8ae70266bf386e11eed7b0b1f2dab3e5d19b",
-    "python/pkg-v12/pyfunc.py": "f46465c5d91843cf271add5307cc3f12a68bbf145c26d903a70f8ffab8e804b1",
+    "python/pkg-v12/pyfunc.py": "d00e3919a63442a8c8133a24e31c2a96fcc838d3a93960e15777a95a0b889890",
     "python/pkg-v12/SEMANTICS.md": "876443171e0c057e2ac94e675a32327590dafab810ece4f64aef1e07859ac369",
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
@@ -6464,7 +6464,7 @@
     "python/pkg-v12/ir/effects.py": "8986fb55f8bdb171c624695c168fa79c6c9ea6a284d1a550ec2c216973b20301",
     "python/pkg-v12/ir/text.py": "93467e6d7e3f402f89d96fb42a89e82cf1f42c3f7d5c4e2c4baaaf8c6180a31a",
     "python/pkg-v12/ir/verify.py": "d248dbb322829f48ba93f9d04f8c87efffdc46472828f3512e4d1bb550bba5a4",
-    "python/pkg-v12/ir/lower.py": "7e4189931819e9c394c9a8f55ea9bcfa8e293595093c3f6ef636135556402a67",
+    "python/pkg-v12/ir/lower.py": "a5c82f4846405913cda42943e08363ed2e61172e5f404e7602197582b5e749a4",
     "python/pkg-v12/ir/emit_c.py": "04bc3bf22683d32bca437597706cdce64a2686189c8c46ab068a676ee679b3b5",
     "python/pkg-v12/ir/driver.py": "00bfea8052bd0fd5e7804d78df72728496d0bcf093ce635749bc03ff1b92c6f9",
     "test_ail_ir_s0.py": "badf7cbec695c113ff16f144c60f6cd666d8884e85a355024f5cc3620f16afeb",
@@ -7042,7 +7042,7 @@
     "test_ail_gpu_g1.py": "c1880c9a0013f3e001ae2bb34895f1b885a7ddfc52141cf4ce502e55e16faa7e",
     "test_ail_ffi_objfold.py": "cd653bd3e6e860cc2d7db8bbd129e174c150260b229e2d091f8a7856a61b1c9c",
     "test_ail_tintlist.py": "434d0fbcc59ae8df712bc31eaf7c071556c8355cb29f88eefda5ee90da5be7ac",
-    "test_ail_reclist.py": "6264dc0e7d165c7f4f96622949242928ba74e999ead8e63220046fdd3c94070b"
+    "test_ail_reclist.py": "d3380f9a9c7b2124856e96287e98991e2d476006d23622fe22bc1a4516b51d56"
   },
   "release": "R1.40+xlang-304d34f+native-round72+windows-cpython+workflow-tests-candidate+bracket-read-candidate+n0-v4-candidate+r8-fuzz-plan-v2+r9-byte-arena-sanitizer+r10-native-ledger-n0+r11-n0-fresh-evidence+r12-optimizer-current-chain+r13-xlang-arm64-emulated-gate+r14-native-r11-historical-inputs+r15-native-r11-regression+r16-native-recovered-inputs+r20-native-versioned-scope+r21-native-pinned-input-recovery+r22-provenance-precision+r23-direct-indexed-undefined+r24-protected-lock-line-endings+r25-current-r6-seeds+r26-nullish-ternary+r27-seed777-coercion+r28-includes+r30-indexof+r32-native-model-inputs+r33-native-checkpoint+r36-xlang-dynamic-array+r37-source-bound-gate+r38-host-matrix+r51-native-f32-successor+r52-native-f32-migration-candidate+r53-v1-string-width+r54-v1-runtime-repair+r55-windows-cli-intake",
   "work_id": "r140-xlang-304d34f-integration-20260926",
@@ -24345,7 +24345,7 @@
     "python/pkg-v12/c_api_bridge.py": "06825f38216030996522ba6faf74d2682e4176a156b057851b67c98fef0bcce6",
     "ail_chatgpt.py": "a40d4049290705524c1e01ebac5ea4949a5eb06f4ef5f1b3964e616ed29cc638",
     "ail_sdk.py": "a83730d50ef012c406d66156891e8ae70266bf386e11eed7b0b1f2dab3e5d19b",
-    "python/pkg-v12/pyfunc.py": "f46465c5d91843cf271add5307cc3f12a68bbf145c26d903a70f8ffab8e804b1",
+    "python/pkg-v12/pyfunc.py": "d00e3919a63442a8c8133a24e31c2a96fcc838d3a93960e15777a95a0b889890",
     "python/pkg-v12/SEMANTICS.md": "876443171e0c057e2ac94e675a32327590dafab810ece4f64aef1e07859ac369",
     "test_ail_str_find_alias.py": "2dd4e33b572c730b22c452951de0afb632942917681dd8a4768a712eb54d3553",
     "ail_builtin_api.py": "1ec0d7b3092af502f0195cdee6d8cb11f82c078732cbb75d5c5c5f96721d5425",
@@ -24429,7 +24429,7 @@
     "python/pkg-v12/ir/effects.py": "8986fb55f8bdb171c624695c168fa79c6c9ea6a284d1a550ec2c216973b20301",
     "python/pkg-v12/ir/text.py": "93467e6d7e3f402f89d96fb42a89e82cf1f42c3f7d5c4e2c4baaaf8c6180a31a",
     "python/pkg-v12/ir/verify.py": "d248dbb322829f48ba93f9d04f8c87efffdc46472828f3512e4d1bb550bba5a4",
-    "python/pkg-v12/ir/lower.py": "7e4189931819e9c394c9a8f55ea9bcfa8e293595093c3f6ef636135556402a67",
+    "python/pkg-v12/ir/lower.py": "a5c82f4846405913cda42943e08363ed2e61172e5f404e7602197582b5e749a4",
     "python/pkg-v12/ir/emit_c.py": "04bc3bf22683d32bca437597706cdce64a2686189c8c46ab068a676ee679b3b5",
     "python/pkg-v12/ir/driver.py": "00bfea8052bd0fd5e7804d78df72728496d0bcf093ce635749bc03ff1b92c6f9",
     "test_ail_ir_s0.py": "badf7cbec695c113ff16f144c60f6cd666d8884e85a355024f5cc3620f16afeb",
@@ -25007,7 +25007,7 @@
     "test_ail_gpu_g1.py": "c1880c9a0013f3e001ae2bb34895f1b885a7ddfc52141cf4ce502e55e16faa7e",
     "test_ail_ffi_objfold.py": "cd653bd3e6e860cc2d7db8bbd129e174c150260b229e2d091f8a7856a61b1c9c",
     "test_ail_tintlist.py": "434d0fbcc59ae8df712bc31eaf7c071556c8355cb29f88eefda5ee90da5be7ac",
-    "test_ail_reclist.py": "6264dc0e7d165c7f4f96622949242928ba74e999ead8e63220046fdd3c94070b"
+    "test_ail_reclist.py": "d3380f9a9c7b2124856e96287e98991e2d476006d23622fe22bc1a4516b51d56"
   },
   "base_local_change_scope": "Cross-language pipeline hardened to real-world measurement. incr.py: two new incrementalization pattern classes -- dict argmax (d[k]=d.get(k,0)+POS writes plus keys() rescan with tiebreak become update-site tracking) and sliding window sum (del xs[0] sites emit _wacc-=xs[0]); probe 64/64, mode/wma translations fire with byte-identical oracles. pkg-v12: str(<float>) enabled via existing ail_str_from_float FMT machinery (SEMANTICS.md updated). jstrans.py: deterministic JS->subset translator -- float profile (Number/parseFloat, JS Number->String formatting: integral doubles without .0, NaN/Infinity, -0->0, true / on floats, IEEE remainder), plus parser-surface hardening (ASI, shebang, new Array, function-expr arrows, stdin line-terminator fix via rstrip, null-sentinel re-kinding via vartypes/zero_of, trivial-function inlining, named TErrs for all remaining unsupported constructs). Corpus 17/17 byte-identical vs Node; real-world corpus 0->2 end-to-end with zero generic crashes (12 named TErrs). dominfer.py: machine-derived input domains via differential probing (found 2^53+ integer JS precision boundary on all add-protocol programs).",
   "integration": {

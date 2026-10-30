@@ -207,8 +207,102 @@ class Lowering(TextLowering):
                 raise NotS0('%s has kind %r (not a list of user structs)' % (what, kind))
             if kind[1] in (getattr(P, '_NULLABLE', None) or ()):
                 raise NotS0('%s: class %s may be None (it is optional somewhere)' % (what, kind[1]))
+            if not self.int_fields_small(kind[1]):
+                raise NotS0('%s has kind %r (an int field of %s can hold more than a small int: the exact general path '
+                            'keeps the answer)' % (what, kind, kind[1]))
             return I.olist_type(kind[1])
         raise NotS0('%s has kind %r' % (what, kind))
+
+    def int_fields_small(self, cls):
+        """Whether every int field of class `cls` provably holds a small int (|v| < 2**46) in the whole program: each
+        write to it (constructor argument, `x.f = e`, `x.f op= e`, a dataclass default) is a small literal, a counter step
+        (`+= c`, `-= c`, `x.f = x.f + c`), a variable of `for i in range(n)` / `range(c, n)` (it starts small and moves by
+        1, so it cannot pass 2**46 in any run that finishes), or +, -, % c of those. The fields are int64 slots: a record
+        list lent to the IR is exact only then (an accumulator over them is tagged but its terms, its result handed to a
+        legacy caller and every store back into the field cannot overflow). Otherwise the program keeps the exact general
+        path, as before record lists were lowered."""
+        tree = getattr(self.P, '_PROGRAM_TREE', None)
+        info = self.ctx.classes.get(cls)
+        if tree is None or info is None:
+            return False
+        P = self.P
+        names = [f for f in info.field_order if info.field_types.get(f) == P.INT]
+        if len(names) != len([f for f in info.field_order if info.field_types.get(f) == P.INT]):
+            return False
+        small = 1 << 31
+        rvars = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.For) and isinstance(n.target, ast.Name) and isinstance(n.iter, ast.Call)                     and isinstance(n.iter.func, ast.Name) and n.iter.func.id == 'range' and not n.iter.keywords:
+                a = n.iter.args
+                if len(a) == 1 or (len(a) == 2 and isinstance(a[0], ast.Constant) and type(a[0].value) is int
+                                   and abs(a[0].value) < small):
+                    rvars.add(n.target.id)
+        # a name that is also stored any other way is not a range variable
+        for n in ast.walk(tree):
+            if isinstance(n, (ast.Assign, ast.AugAssign, ast.AnnAssign)):
+                targets = n.targets if isinstance(n, ast.Assign) else [n.target]
+                for t in targets:
+                    for x in ast.walk(t):
+                        if isinstance(x, ast.Name):
+                            rvars.discard(x.id)
+        for n in ast.walk(tree):
+            if isinstance(n, ast.For):
+                for x in ast.walk(n.target):
+                    if isinstance(x, ast.Name) and not (isinstance(n.target, ast.Name) and isinstance(n.iter, ast.Call)
+                                                        and isinstance(n.iter.func, ast.Name) and n.iter.func.id == 'range'):
+                        rvars.discard(x.id)
+
+        def const(e):
+            return isinstance(e, ast.Constant) and type(e.value) is int and abs(e.value) < small
+
+        def ok(e, f):
+            if const(e):
+                return True
+            if isinstance(e, ast.Name):
+                return e.id in rvars
+            if isinstance(e, ast.UnaryOp) and isinstance(e.op, (ast.USub, ast.UAdd)):
+                return ok(e.operand, f)
+            if isinstance(e, ast.BinOp) and isinstance(e.op, (ast.Add, ast.Sub)):
+                for a, b in ((e.left, e.right), (e.right, e.left)):
+                    if isinstance(a, ast.Attribute) and a.attr == f and const(b):
+                        return True                              # a counter step on the field itself
+                return ok(e.left, f) and ok(e.right, f)
+            if isinstance(e, ast.BinOp) and isinstance(e.op, ast.Mod):
+                return const(e.right) and e.right.value > 0
+            return False
+        # (`self.f = f` in the class's own __init__ copies a constructor argument: the call sites are checked instead)
+        init_copies = set()
+        for n in ast.walk(tree):
+            if isinstance(n, ast.ClassDef) and n.name == cls:
+                for m in n.body:
+                    if isinstance(m, ast.FunctionDef) and m.name == '__init__':
+                        params = {a.arg for a in m.args.args}
+                        for st in ast.walk(m):
+                            if isinstance(st, ast.Assign) and isinstance(st.value, ast.Name) and st.value.id in params:
+                                init_copies.add(id(st))
+        for f in names:
+            pos = info.field_order.index(f)
+            for n in ast.walk(tree):
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == cls:
+                    if n.keywords or any(isinstance(a, ast.Starred) for a in n.args):
+                        return False
+                    if len(n.args) <= pos or not ok(n.args[pos], f):
+                        return False
+                elif isinstance(n, ast.Assign) and id(n) not in init_copies:
+                    for t in n.targets:
+                        if isinstance(t, ast.Attribute) and t.attr == f and not ok(n.value, f):
+                            return False
+                        if isinstance(t, (ast.Tuple, ast.List)) and any(isinstance(x, ast.Attribute) and x.attr == f
+                                                                        for x in ast.walk(t)):
+                            return False
+                elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Attribute) and n.target.attr == f:
+                    if not (isinstance(n.op, (ast.Add, ast.Sub)) and const(n.value)):
+                        return False
+                elif isinstance(n, ast.ClassDef) and n.name == cls:
+                    for st in n.body:
+                        if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name) and st.target.id == f                                 and st.value is not None and not ok(st.value, f):
+                            return False
+        return True
 
     def check_kind(self, node, value):
         """The legacy path's type of `node` must agree with the IR type of its value."""

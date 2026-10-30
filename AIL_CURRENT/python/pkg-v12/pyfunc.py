@@ -89,6 +89,7 @@ TINT_ACTIVE = {}
 # of exact ints by value. The IR lowering asks for them (TLIST_REQUESTS) when a list of exact ints meets a parameter or a result
 # that is still an int64 list; `_to_c_once` then compiles the program again with those keys active (TLIST_ACTIVE).
 TLIST_ACTIVE = frozenset()
+_PROGRAM_TREE = None
 TLIST_REQUESTS = set()
 # True when the program calls a typed-only runtime primitive (monotonic_ms, tcp_*, ...) that the
 # general path cannot build. Such a program must stay on the typed path even if that means keeping
@@ -35077,6 +35078,8 @@ def _to_c_once_inner(source, name=None, strict=True, info=None, entry=None, sig=
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    global _PROGRAM_TREE
+    _PROGRAM_TREE = tree                       # (the IR lowering asks which fields of a record can only hold small ints)
     gpu.tag(tree, source.strip())              # `# ail: gpu`: before any pass rewrites the tree
     refuse_field_method_call(tree)
     debug_restore_lines(tree, source.strip())
