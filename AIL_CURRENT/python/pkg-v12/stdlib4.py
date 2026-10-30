@@ -30,9 +30,9 @@ TEXT_MODULES = ('csv', 'datetime')
 UNBUILT = {
     'zoneinfo': 'zoneinfo: a named time zone needs the tz database (and its rules), which is not built, so use a fixed '
                 'offset: datetime.timezone(datetime.timedelta(hours=9), "JST"), or datetime.timezone.utc',
-    'decimal': 'decimal: Decimal needs decimal arithmetic with a context precision and rounding modes, which is not '
-               'built, so keep money as integers scaled by 100 (cents) and print them with divmod, or use a float with '
-               'round() / f"{x:.2f}", or fractions.Fraction for exact rational arithmetic',
+    'decimal': 'decimal: Decimal arithmetic is built (stdtop.py) for the forms its docstring lists and the use named in '
+               'the note above is not, so keep money as integers scaled by 100 (cents) and print them with divmod, or '
+               'use a float with round() / f"{x:.2f}", or fractions.Fraction for exact rational arithmetic',
 }
 
 
