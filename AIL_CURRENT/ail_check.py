@@ -324,6 +324,7 @@ LISTED_MODULES = (
    
     'test_ail_gpu_g2',
     'test_ail_ffi_f3b',
+    'test_ail_overflow_uncatchable',
 )
 
 

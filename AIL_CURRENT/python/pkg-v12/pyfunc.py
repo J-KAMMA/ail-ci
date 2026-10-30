@@ -13055,7 +13055,9 @@ def _numeric_to_int(value, ctx):
             # that does not fit int64 here (A1: int is 64-bit, the result would not fit)
             + ('if (_ail_number_input != _ail_number_input) ail_raise_msg(AIL_EXC_VALUE, "cannot convert float NaN to integer"); '
                'if (__builtin_isinf(_ail_number_input)) ail_die("cannot convert float infinity to integer"); ' if exctext.ACTIVE
-               else 'if (_ail_number_input != _ail_number_input) ail_raise_named(AIL_EXC_VALUE); ') +
+               else 'if (_ail_number_input != _ail_number_input) ail_raise_named(AIL_EXC_VALUE); '
+               + ('if (__builtin_isinf(_ail_number_input)) ail_die("cannot convert float infinity to integer"); '
+                  if os.environ.get('AIL_SURFACE') == 'python' else '')) +
             'ail_die("integer overflow"); } (int64_t)_ail_number_input; })') % value
 def _numeric_expression_needed(node, ctx):
     if isinstance(node, ast.BinOp) and not (_etype(node.left, ctx) in NUM and _etype(node.right, ctx) in NUM):
