@@ -15071,24 +15071,32 @@ static inline const char *ail__tname_c(ail_obj x) {
     if (x.tag == AIL_T_FUNC && ((ail_funcobj *)x.o)->builtin_fn)
         return ((ail_funcobj *)x.o)->builtin_fn == 2 ? "type" : "builtin_function_or_method";
     if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {   /* an instance (and an exception) names its class */
-        static char *tnb;
-        static size_t tnb_cap;
+        /* several names can sit in one message (`'<' not supported between instances of 'A' and 'B'`): rotate the buffers */
+        static char *tnb_r[4];
+        static size_t tnb_cap_r[4];
+        static unsigned tnb_i;
+        unsigned tnb_k = (tnb_i++) & 3;
         ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
-        size_t need = (size_t)cs.n + 1;
-        if (need > tnb_cap) {
-            size_t cap = tnb_cap ? tnb_cap : 80;
+        size_t need = (size_t)cs.n * 4 + 1;
+        if (need > tnb_cap_r[tnb_k]) {
+            size_t cap = tnb_cap_r[tnb_k] ? tnb_cap_r[tnb_k] : 80;
             while (cap < need) cap *= 2;
-            char *grown = (char *)realloc(tnb, cap);
+            char *grown = (char *)realloc(tnb_r[tnb_k], cap);
             if (!grown) ail_die("out of memory");
-            tnb = grown; tnb_cap = cap;
+            tnb_r[tnb_k] = grown; tnb_cap_r[tnb_k] = cap;
         }
         size_t k = 0;
-        for (int64_t i = 0; i < cs.n; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i); tnb[k++] = ch < 128 ? (char)ch : '?'; }
-        tnb[k] = 0;
+        for (int64_t i = 0; i < cs.n; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i);   /* UTF-8, as CPython prints a non-ASCII class name */
+            char *o = tnb_r[tnb_k];
+            if (ch < 0x80) o[k++] = (char)ch;
+            else if (ch < 0x800) { o[k++] = (char)(0xC0 | (ch >> 6)); o[k++] = (char)(0x80 | (ch & 63)); }
+            else if (ch < 0x10000) { o[k++] = (char)(0xE0 | (ch >> 12)); o[k++] = (char)(0x80 | ((ch >> 6) & 63)); o[k++] = (char)(0x80 | (ch & 63)); }
+            else { o[k++] = (char)(0xF0 | (ch >> 18)); o[k++] = (char)(0x80 | ((ch >> 12) & 63)); o[k++] = (char)(0x80 | ((ch >> 6) & 63)); o[k++] = (char)(0x80 | (ch & 63)); } }
+        tnb_r[tnb_k][k] = 0;
         /* the collections pass lowers a typed deque to a class `_AilDeque_<T>`: CPython's operand text names it
            `collections.deque`, never the generated class */
-        if (!strncmp(tnb, "_AilDeque_", 10)) return "collections.deque";
-        return tnb;
+        if (!strncmp(tnb_r[tnb_k], "_AilDeque_", 10)) return "collections.deque";
+        return tnb_r[tnb_k];
     }
     if (x.tag == AIL_T_DICT) {
         if (((ail_gcobj *)x.o)->flags == 1) return "Counter";
