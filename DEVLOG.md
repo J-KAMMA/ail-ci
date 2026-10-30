@@ -1,3 +1,32 @@
+## 2026-10-30 -- rd3 re-applied: top-level-only `check` + strict construct keeps the whole type (job-rbrd3-10300929)
+
+Re-applied the accepted rd3 change on this tree: `ail_chatgpt.py check` routes a top-level-only
+Python-syntax script through `pyc.to_c` (the same entry `compile` uses, which synthesises the `main`
+of SEMANTICS section 33) instead of `pyfunc.to_c`, so it no longer fails with "no def found";
+`--library` still uses `pyfunc.to_c`, and a file with a top-level `def` keeps `pyfunc.to_c` for its
+source positions. `strictmode.split_message` now splits the construct head and clause delimiters
+only at bracket/quote depth zero, so a `--strict` report keeps `print() given a dict[str, int]`
+instead of `print() given a dict[str`.
+
+Because the rewrite unparses the tree and renumbers lines, `pyc` records {rewritten line: source
+line} before the unparse (`_rewrite_line_map`) and maps a refusal's `source_line` back in `_to_c`
+(`_restore_source_lines`); the leading-blank adjustment in `_rewrite_script` is no longer
+`--debug`-only. `test_ail_rd3.py` is new and registered in `ail_check.py`'s `MODULES` tuple (no
+`tests.d/` here). `tools/diff_ids.py` is not present on this tree; `tools/update_manifest.py` was run
+and `--check` passes.
+
+Probes in `/tmp/probes` via `cmp.sh` on both builds, all matching CPython: `p_script` (accumulator
+loop, string join), `p_print`, `p_class`, `p_types` (int, negative, int64 max/min, `%`, `>`),
+`p_empty` (empty list/str), `p_alias` (list aliasing) and `p_through` (a value reaching `print`
+through a method argument, a list item, an attribute and a dict value). `check` refusals by name
+with their source position: `r_dict` 3:1, `r_pos` (comment + blank) 5:1, `r_nest` (inside a `for`)
+5:5, `r_lead` (leading blanks) 6:1, `r_line10` 11:1, `r_single` (single `print([..])`) 1:1; a
+`def`-file refusal `r_strict_def` stays 4:5, and its `--strict` construct is the whole
+`print() given a dict[str, int]` (exit 3, no executable). Ran `test_ail_rd3`, `test_ail_strict`,
+`test_ail_check`, `test_ail_source_check`, `test_ail_check_repair_context`,
+`test_ail_edit_check_report`, `test_ail_debug_lines`, `test_ail_unbound`, `test_ail_fallback_note`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`; all OK.
+
 ## 2026-10-30 -- FFI F3a: integer arguments of an @extern stub behave like the shim's
 
 CPython runs `@extern` stubs through `ail_ffi.py`, which checks every int argument against the range of its C type and

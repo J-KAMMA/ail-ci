@@ -377,6 +377,45 @@ def _entry_name(taken):
     return 'main%d' % i
 
 
+_REWRITE_LINE_MAPS = {}
+
+
+def _line_snapshot(tree):
+    """The (node type, line) of every node, in `ast.walk` order, before `ast.unparse` renumbers."""
+    return [(type(node).__name__, getattr(node, 'lineno', None)) for node in ast.walk(tree)]
+
+
+def _rewrite_line_map(snapshot, text):
+    """{line of the unparsed rewrite: line of the source it was made from}. The rewrite moves
+    statements into a synthesised `def` and unparses the tree, so a refusal's `source_line` counts
+    the rewritten text's lines; nodes the rewrite made up (the `def`, its `return 0`) have no source
+    line and are left out. None when the re-parse does not have the recorded shape."""
+    try:
+        parsed = list(ast.walk(ast.parse(text)))
+    except SyntaxError:
+        return None
+    if [type(node).__name__ for node in parsed] != [entry[0] for entry in snapshot]:
+        return None
+    mapping = {}
+    for node, (_, source_line) in zip(parsed, snapshot):
+        new_line = getattr(node, 'lineno', None)
+        if source_line and new_line and new_line not in mapping:
+            mapping[new_line] = source_line
+    return mapping
+
+
+def _restore_source_lines(error, rewritten):
+    """Map a refusal's `source_line` from the rewritten text back to the source it was made from
+    (see `_rewrite_line_map`); callers such as `check` key their own `source_map` by those lines.
+    Under `--debug` pyfunc.to_c has already put the source lines back on the tree."""
+    mapping = _REWRITE_LINE_MAPS.get(rewritten) if os.environ.get('AIL_DEBUG') != '1' else None
+    if not mapping:
+        return
+    line = getattr(error, 'source_line', None)
+    if line is not None:
+        error.source_line = mapping.get(line)
+
+
 def _rewrite_script(source, force):
     """SEMANTICS section 33: turn top-level STATEMENTS with no matching `def` into one, exactly
     what a human would write by hand as `def main(): ...` then call it -- reusing every existing
@@ -432,8 +471,8 @@ def _rewrite_script(source, force):
     """
     tree = ast.parse(source.strip())
     gpu_marked = gpu.marked_statements(tree, source.strip())        # `# ail: gpu`: the unparse below drops the comments
-    if os.environ.get('AIL_DEBUG') == '1':
-        ast.increment_lineno(tree, source[:len(source) - len(source.lstrip())].count('\n'))     # `.strip()` above ate leading blank lines
+    # `.strip()` above ate leading blank lines; keep every line counted the way the caller sees it
+    ast.increment_lineno(tree, source[:len(source) - len(source.lstrip())].count('\n'))
     expanded = []
     for node in tree.body:
         expanded.extend(_unwrap_main_guard(node))
@@ -508,10 +547,16 @@ def _rewrite_script(source, force):
         body=body, decorator_list=[], returns=None)
     new_tree = ast.Module(body=kept + [main_def], type_ignores=[])
     snapshot = pyfunc.debug_snapshot_lines(new_tree)      # --debug: the unparse renumbers the lines
+    line_snapshot = _line_snapshot(new_tree)              # not --debug-gated: refusals are mapped back too
     ast.fix_missing_locations(new_tree)
     unbound.SCRIPT.add(main_def.name)        # module-scope code: an unassigned read is a NameError (unbound.py)
     text = ast.unparse(new_tree)
     pyfunc.debug_remember_lines(snapshot, text)
+    mapping = _rewrite_line_map(line_snapshot, text)
+    if mapping:
+        _REWRITE_LINE_MAPS[text] = mapping
+        while len(_REWRITE_LINE_MAPS) > 16:      # only the rewrite still in flight needs its map
+            _REWRITE_LINE_MAPS.pop(next(iter(_REWRITE_LINE_MAPS)))
     gpu.remember(new_tree, gpu_marked, text)
     return text
 
@@ -562,6 +607,9 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
         dunders.HINT.update(dunders._dataclass_markers(source))
         try:
             return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+        except Unsupported as error:
+            _restore_source_lines(error, rewritten)
+            raise
         finally:
             dunders.HINT.clear()
     if _is_single_expression(source):
@@ -570,7 +618,11 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
             info.setdefault('ret', 'int')
         return to_pipeline_c(source, name=name, strict=strict)
     rewritten = _rewrite_script(source, force=True)
-    return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+    try:
+        return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+    except Unsupported as error:
+        _restore_source_lines(error, rewritten)
+        raise
 
 
 def _main_for(info):

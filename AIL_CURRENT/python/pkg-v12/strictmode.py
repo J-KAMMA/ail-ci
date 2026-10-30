@@ -70,6 +70,43 @@ def enabled(environ):
     return str(environ.get('AIL_STRICT', '')).strip().lower() not in ('', '0', 'off', 'no', 'false')
 
 
+_CLAUSE_DELIMITERS = ('; ', ' -- ', '. ', ', ', ' (')
+
+
+def _top_level_index(text, delimiters):
+    """Index of the first delimiter that is not inside brackets or quotes, or -1."""
+    depth = 0
+    quote = None
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if quote is not None:
+            if char == '\\':
+                index += 2
+                continue
+            if char == quote:
+                quote = None
+        elif char in '\'"':
+            quote = char
+        elif char in '([{':
+            depth += 1
+        elif char in ')]}':
+            depth = max(0, depth - 1)
+        elif depth == 0 and text.startswith(delimiters, index):
+            return index
+        index += 1
+    return -1
+
+
+def _first_clause(text):
+    """The text before the first clause delimiter that is not inside brackets or quotes.
+
+    A flat `re.split` stopped at the comma inside `dict[str, int]`, so the reported construct was a
+    fragment (`print() given a dict[str`) rather than the phrase the refusal actually names."""
+    index = _top_level_index(text, _CLAUSE_DELIMITERS)
+    return text[:index] if index >= 0 else text
+
+
 def split_message(message, statement=None, kind=None):
     """(construct, reason, write_instead) from a refusal text; write_instead is None when it has none."""
     text = str(message or '').strip()
@@ -93,14 +130,16 @@ def split_message(message, statement=None, kind=None):
     body = ' '.join(re.sub(r'\s*Original refusal:.*$', '', body, flags=re.S).split())
     construct = None
     code = re.match(r'`([^`]+)`', body)
-    head, colon, tail = body.partition(': ')
+    colon = _top_level_index(body, (': ',))
+    head = body[:colon] if colon >= 0 else body
+    tail = body[colon + 2:] if colon >= 0 else ''
     if code:
         construct = code.group(1)
-    elif colon and len(head) <= 60:
+    elif colon >= 0 and len(head) <= 60:
         construct = head
         body = tail.strip() or body
     else:
-        cut = re.split(r'; | -- |\. | \(|, ', body, maxsplit=1)[0]
+        cut = _first_clause(body)
         if len(cut) <= 70:
             construct = cut
     if not construct:
