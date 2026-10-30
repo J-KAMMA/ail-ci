@@ -177,6 +177,11 @@ class Spirv(unittest.TestCase):
             if name.startswith('i_'):
                 self.assertFalse(info['need_f64'], name)
 
+    def test_no_op_srem(self):
+        """NVIDIA 580 (Tesla T4) computes OpSRem wrongly on 64-bit operands (GPU.md 6.3): no kernel may contain it."""
+        for name, (words, info) in self.mods.items():
+            self.assertNotIn(self.sp.OP['SRem'], [op for op, _ in self.instructions(words)], name)
+
     def test_float_controls_execution_modes(self):
         for name, (words, info) in self.mods.items():
             modes = [(ops[1], ops[2:]) for op, ops in self.instructions(words) if op == 16]
@@ -999,6 +1004,77 @@ LISTS_OF = {   # the scenario numbers of errors(): what they exercise
     15: 'inf + -inf', 16: 'underflowing product', 17: 'difference that is a subnormal', 18: 'floor of inf',
     19: 'inf * 0', 20: 'overflow to inf',
 }
+
+
+FLOORDIV_PROGRAM = r'''
+def quot(a: list[int], b: list[int]) -> None:
+    n = len(a)
+    out = [0] * n
+    # ail: gpu
+    for i in range(n):
+        out[i] = a[i] // b[i]
+    print(out)
+
+def rem(a: list[int], b: list[int]) -> None:
+    n = len(a)
+    out = [0] * n
+    # ail: gpu
+    for i in range(n):
+        out[i] = a[i] % b[i]
+    print(out)
+
+def both(a: list[int], b: list[int], c: list[int]) -> None:
+    n = len(a)
+    out = [0] * n
+    # ail: gpu
+    for i in range(n):
+        out[i] = (a[i] + b[i]) // 3 + a[i] * b[i] - c[i] + a[i] % 5 - b[i] // 7
+    print(out)
+
+xs = [0, 1, -1, 2, -2, 3, -3, 7, -7, 22, -22, 100, -100, 206711, -206711, 2147483647, -2147483648, 9007199254740993,
+      -9007199254740993, 8888340891191995778, -8888340891191995778, 9223372036854775807, -9223372036854775807]
+ys = [1, -1, 2, -2, 3, -3, 5, -5, 7, -22, 22, 4, -4, 9223372036854775807, -9223372036854775807, 4294967296, -3037000500]
+a = []
+b = []
+for x in xs:
+    for y in ys:
+        a.append(x)
+        b.append(y)
+quot(a, b)
+rem(a, b)
+# the operands the Tesla T4 got wrong with OpSRem (GPU.md 6.3), and a % b with b = -1
+quot([-1, 3, 3, 8888340891191995778, -206711], [2, -3, -2, -22, 7])
+rem([-1, 3, 3, 8888340891191995778, -206711, -9223372036854775807], [2, -3, -2, -22, 7, -1])
+both([-206711, 5, -9, 100], [0, -3, 4, -7], [-4, 1, 2, 3])
+'''
+
+
+class FloorDivision(unittest.TestCase):
+    """`//` and `%` take the divisor's sign as Python does.  NVIDIA 580 (Tesla T4) computes 64-bit OpSRem wrongly (GPU.md 6.3), so the
+    emitter never uses it; this runs the operands that failed there, plus a grid of signs and magnitudes, on the device (lavapipe in CI)
+    and against CPython."""
+
+    def test_operands_against_python(self):
+        if not CC:
+            self.skipTest('no C compiler')
+        with tempfile.TemporaryDirectory(prefix='ail-gpu2-fd-') as d:
+            b = Build(d, 'fd', FLOORDIV_PROGRAM)
+            self.assertEqual(b.returncode, 0, b.stderr + b.stdout)
+            path = Path(d) / 'fdcpy.py'
+            path.write_text(FLOORDIV_PROGRAM.lstrip('\n'), encoding='utf-8')
+            want, rc = run_python(path)
+            self.assertEqual(rc, 0)
+            out, rc, err = b.run('', AIL_GPU='0')
+            self.assertEqual((out, rc), (want, 0), err[:600])
+            out, rc, err = b.run('', AIL_GPU='force', AIL_GPU_TRACE='1')
+            self.assertEqual((out, rc), (want, 0), err[:600])
+            ran = device_runs(err)
+            if not ran:
+                if REQUIRE_DEVICE:
+                    self.fail('no Vulkan device, but AIL_GPU_REQUIRE_DEVICE is set\n' + err[:600])
+                self.skipTest('no Vulkan device (install mesa-vulkan-drivers for lavapipe)')
+            self.assertGreaterEqual(len(ran), 5, err[:1200])           # the answers above came from the device, not from the CPU path
+            self.assertNotIn('untrusted', err)
 
 
 class Programs(unittest.TestCase):

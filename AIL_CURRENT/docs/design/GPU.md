@@ -210,7 +210,7 @@ inputs were not touched. Replay costs one CPU run of the loop, only on the rare 
 | issue | CPython | rule |
 | --- | --- | --- |
 | overflow of `+ - *` | exact big ints | The typed path keeps int64 with the loud `integer overflow` stop (BIGINT.md section 4, DIFFERENCES C288); bigint-marked functions are not candidates. On the GPU each op checks overflow (sign tests for add/sub, `OpSMulExtended` high word for mul) and sets the flag -> replay, which produces the CPU build's exact behaviour. Requires `shaderInt64`; without it the CPU runs the loop |
-| `//`, `%` | floor division, divisor's sign | **match**: emitted as `OpSDiv`/`OpSRem` plus the floor fix-up; `INT64_MIN // -1` sets the flag |
+| `//`, `%` | floor division, divisor's sign | **match**: emitted as `OpSDiv`, the remainder as `a - (a // d) * d` (never `OpSRem`, see 6.3 "Tesla T4"), plus the floor fix-up; `INT64_MIN // -1` sets the flag |
 | `ZeroDivisionError` | raised at the first failing element | divisor 0 sets the flag -> replay raises it at the same element with the same text |
 | `IndexError` | raised at the first failing element | every `ys[j]` is bounds-checked (negative index normalised as Python does); a miss sets the flag -> replay |
 | `<<`, `>>`, `**` on ints | big ints | **refuse** under the marker until a stage needs them (`**` and `<<` by a variable already mark a function bigint, so it is no candidate) |
@@ -574,6 +574,21 @@ glue runs the original loop instead of the emulation when the device is not want
 `AIL_GPU=auto` with the model above and a safety factor, constants in one table; (3) reuse buffers between launches and map
 host memory instead of copying on a unified-memory device (the 5 ns per element is mostly copying and page-faulting fresh
 80 to 240 MB allocations: G8); (4) re-fit on the Colab NVIDIA GPU and a second AMD/Intel device before the model is the default.
+
+#### Tesla T4 (Colab, NVIDIA 580.82.07, Vulkan 1.4.312), 2026-10-30: `OpSRem` on 64-bit is wrong
+
+The first run on a real NVIDIA device matched every binary64 kernel bit for bit and every int64 kernel except those with `//` or
+`%`. The device answers `-1 // 2` with 0 (Python: -1), `3 // -3` with -2 (-1), `3 % -2` with 1 (-1), and for a large positive dividend
+and divisor -22 a remainder that is nearly the dividend. The SPIR-V was valid and lavapipe agreed with the emulation; the self-test
+(6.3) caught the difference on its first operand with a negative dividend, marked the int64 class untrusted, and the programs kept
+printing what CPython prints on the CPU path. Only kernels using `OpSRem` (and `OpLogicalNotEqual`, which was never shown guilty)
+failed; `OpSDiv`, `OpSNegate`, the multiply overflow check and all comparisons passed. Replacing `OpSRem` by `a - OpSDiv(a, d) * d` and
+the sign test by `(r ^ b) < 0` made every such kernel match on the T4 (variants tried: no `OpSRem`; plus no `OpLogicalNotEqual`; plus
+unsigned divide of the magnitudes: all three matched). `gpu_spirv` now emits no `OpSRem` at all (test `Spirv.test_no_op_srem`).
+
+A harness lesson from the same run: a kernel whose self-test fails makes the whole class untrusted, so every later launch in the process
+returns `GK_DECLINED`. `BitTests` first counted those as "spurious flags" (also on min/max/lt/eq, which cannot flag); it now resets the
+trust state per kernel and prints the distrust message of a declined launch.
 
 ### 6.4 G4 as built: a declined launch runs the original loop, the cost model, and a cheaper launch (2026-10-30)
 
