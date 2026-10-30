@@ -285,3 +285,35 @@ the other way; the eight programs that moved (and t028, t470, which the exact-pr
 on their corpus inputs and on empty, int64-edge and beyond-int64 inputs. `recs_t` is not one of them:
 its blocker is a parameter that is a list of records (`parameter 'recs' has kind ('olist', 'Rec')`), not an int list.
 Tests: `test_ail_tintlist.py`.
+
+## 14. Lists of records as a parameter, the text of lists, and more list operations (2026-10-30, batch 4)
+
+**A `list[Rec]` parameter.** `Rec` is any user struct (int, float and str fields; not a class that may be None, not one of a
+hierarchy, not the front end's own `_AilRow_*` rows). The IR type is `obj<olist<obj<Rec>>>` (C `ail_olist *`, the legacy
+list of counted objects) with two ops: `olist.len` and `olist.get {mode}` (a borrowed element). Lowered: `len(recs)`,
+`for r in recs` (the Python loop: an index that moves up before the body runs and a length read at each step, so a call that
+resized the list is seen as CPython sees it), `r = recs[i]`, `recs[i].f` (the index must be free of calls: the element may be asked
+for twice), `r.f` and `r.f op= v` for int and float fields, a record or the whole list handed to another IR function. The list
+cannot be resized, replaced or read as a value in the IR (no op for it): a callee that does (`recs.clear()`) is lowered by the legacy
+emitter or the program goes to the exact general path, with the same answers. A str field cannot be read in the IR yet (the function
+is refused as before). A function that keeps the list across a call retains it for the whole call, as the legacy path does. A struct
+local that only ever names an element of such a list, in a function that calls no user function, is a *borrowed* place: no
+retain, no release (the element lives as long as the list, which nothing can resize meanwhile); mem2reg then keeps it in a register.
+Accumulators over record fields are tagged: `h += r.hits` is exact, the int64 edges included. Fields are int64 as ever: `r.hits += 1`
+at 2**63-1 stops loudly ("integer overflow"), and a tagged result handed to a legacy caller is narrowed there, loudly, as for every tagged
+result. A function with such a parameter that the lowering still refuses is reported as before (`parameter 'x' has kind ('olist', C)`),
+so the driver keeps it on the legacy emitter and no program changes path that did not move.
+
+**Text of lists.** `str(xs)`, `repr(xs)`, `f"{xs}"`, `f"{xs!r}"` and `print(xs)` of a flat list of int, exact int, float or str:
+the legacy typed path already had f-string and print; `str(xs)`/`repr(xs)` are new there, and the IR writes all of them through the
+runtime's `ail_list_text_{i,f,s,t}` (CPython's list repr: float repr incl. nan/inf/-0.0/1e+16, str quotes and escapes, big exact
+ints). A list built by an expression (slice, `sorted(xs)`, comprehension) is built in a hidden list first. Not covered: a list of
+bool (its elements print True/False, the list holds 0/1), nested lists (the IR has none; the legacy typed path refuses `print` of one),
+a read-only list parameter (a span) in the IR. The 16-bit runtime of the forced general build refuses a non-BMP str literal at compile
+time ("not in the subset"), never prints it wrong; the typed path writes UTF-8 and prints emoji as CPython does.
+`f"{x!r}"` of an int, float or str is lowered too (`index()` of a list builds its message with it).
+
+**List operations** on lists of int, float and exact int that are owned locals: `pop(i)`, `reverse()`, `extend(ys)` (also `+=`),
+`del xs[i]`; `insert`, `remove`, `index`, `count` and `sort(reverse=True)` were already rewritten by the front end into these
+and appends. Errors are the legacy messages (IndexError "pop index out of range", "list assignment index out of range").
+Not covered: slice assignment, a list parameter that the callee modifies, `del` of a dict item or a slice.

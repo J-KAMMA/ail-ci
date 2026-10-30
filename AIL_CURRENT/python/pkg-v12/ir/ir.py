@@ -20,11 +20,11 @@ TEXT = ('str', 'strv', 'bytes', 'bytesv')
 LEAVES = SCALARS + TEXT + ('exc', 'tint')
 # head -> number of type arguments (None: any number)
 HEADS = dict({h: 0 for h in LEAVES}, tup=None, opt=1, obj=1, list=1, dict=2, set=1, bytearray=0,
-             cell=1, fn=2, closure=2, place=1, span=1, plist=1)
+             cell=1, fn=2, closure=2, place=1, span=1, plist=1, olist=1)
 # span<T>: a snapshot of a list's data pointer and length, valid while nothing in between can resize
 # the list (made by LICM in front of a loop that cannot; design §3.6)
 # heads that may only appear directly under obj<..>
-OBJ_INNER = ('list', 'dict', 'set', 'bytearray', 'class', 'plist')
+OBJ_INNER = ('list', 'dict', 'set', 'bytearray', 'class', 'plist', 'olist')
 
 
 class Type(object):
@@ -102,6 +102,18 @@ DICT_II = Type('obj', (Type('dict', (I64, I64)),))
 # a list[str] struct field, borrowed (the legacy `ail_pslist`, section 21): read-only, its elements are views of the
 # field's own storage, valid until the field is next changed
 PLIST = Type('obj', (Type('plist', (STRV,)),))
+
+
+def olist_type(cls):
+    """obj<olist<obj<cls>>>: a list of struct objects (the legacy `ail_olist *`: counted objects, each a pointer)."""
+    return Type('obj', (Type('olist', (Type('obj', (class_type(cls),)),)),))
+
+
+def olist_elem(t):
+    """The element type obj<cls> of an obj<olist<obj<cls>>>, else None."""
+    if t.head == 'obj' and t.args[0].head == 'olist':
+        return t.args[0].args[0]
+    return None
 
 
 def rec_elem(t):
@@ -327,7 +339,10 @@ _op('list.len', 1, 1)
 _op('list.get', 2, 2)
 _op('list.set', 3, 3)
 _op('list.push', 2, 2)
-_op('list.pop', 1, 1)
+_op('list.pop', 1, 2)            # (list) pops the last element; (list, index) the element at index (negative from the end)
+_op('list.reverse', 1, 1)        # (list): `xs.reverse()`, in place
+_op('list.append_all', 2, 2)         # (dst, src): `xs.extend(ys)` with ys a list of the same kind (src may be dst)
+_op('list.delat', 2, 2)          # (list, index): `del xs[i]` (negative from the end; IndexError out of range)
 _op('list.clear', 1, 1)
 _op('field.get', 1, 1)
 _op('field.set', 2, 2)
@@ -419,6 +434,12 @@ _op('field.plist', 1, 1)
 _op('plist.len', 1, 1)
 _op('plist.get', 2, 2)
 _op('plist.has', 2, 2)
+# A list of struct objects (`list[Rec]`, `obj<olist<obj<Rec>>>`, the legacy `ail_olist *`) lent read-only to a function as a
+# parameter: `olist.len (l) -> i64` and `olist.get (l, i) {mode} -> obj<Rec>` (a borrowed element: bind it with
+# `obj.copyref`, which takes its own reference). The IR has no op that resizes or replaces such a list; a callee that
+# could (a call that is not an IR function) has unknown effects.
+_op('olist.len', 1, 1)
+_op('olist.get', 2, 2)
 _op('span.of', 1, 1)
 _op('span.len', 1, 1)
 _op('span.get', 2, 2)

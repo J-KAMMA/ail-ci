@@ -127,6 +127,15 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         elif op == 'list.get':
             eff = eff | Effects(reads=['Elem(%s)' % _root(ins.operands[0], fn, defs)])
         return eff
+    if op == 'list.reverse':
+        loc = 'Elem(%s)' % _root(ins.operands[0], fn, defs)
+        return Effects(reads=[loc], writes=[loc])
+    if op == 'list.append_all':
+        dst, src = 'Elem(%s)' % _root(ins.operands[0], fn, defs), 'Elem(%s)' % _root(ins.operands[1], fn, defs)
+        return Effects(reads=[dst, src], writes=[dst, 'Spine(%s)' % _root(ins.operands[0], fn, defs)], raises=[rtc.DIE])
+    if op == 'list.delat':
+        root = _root(ins.operands[0], fn, defs)
+        return Effects(reads=['Elem(%s)' % root], writes=['Elem(%s)' % root, 'Spine(%s)' % root], raises=[INDEX])
     if op in ('list.push', 'list.pop', 'list.clear', 'list.len'):
         root = _root(ins.operands[0], fn, defs)
         loc = 'Elem(%s)' % root
@@ -137,6 +146,11 @@ def instr_effects(ins, fn, program, places=None, defs=None, summaries=None):
         return Effects(reads=[loc], writes=[loc, 'Spine(%s)' % root], raises=[INDEX] if op == 'list.pop' else [])
     if op in ('field.list', 'list.ref', 'field.plist'):
         return NONE
+    if op in ('olist.len', 'olist.get'):
+        eff = Effects(reads=['Elem(%s)' % _root(ins.operands[0], fn, defs)])
+        if op == 'olist.get' and ins.attrs.get('mode', 'ck') == 'ck':
+            eff = eff | Effects(raises=[INDEX])
+        return eff
     if op in ('plist.len', 'plist.get', 'plist.has'):
         eff = Effects(reads=['Elem(%s)' % _root(ins.operands[0], fn, defs)])
         if op == 'plist.get' and ins.attrs.get('mode', 'ck') == 'ck':

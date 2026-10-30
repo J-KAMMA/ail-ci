@@ -102,6 +102,17 @@ _entry('str_from_int', (N,), (S,), 'ail_str_from_int({A}, {0})', _ALLOC, parts=(
 _entry('str_from_int_buf', (N,), (S,), 'ail_str_from_int_buf((uint8_t[24]){{0}}, {0})', _PURE, parts=('STR',))
 _entry('str_from_float', (F,), (S,), 'ail_str_from_float({A}, {0})', _ALLOC, parts=('STR', 'FREPR', 'FMT'), arena='s')
 _entry('tint_str', (I.TINT,), (S,), 'ail_tint_str({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
+_entry('str_repr', (S,), (S,), 'ail_fmt_repr_str({A}, {0})', _ALLOC, parts=('STR', 'STRREPR'), arena='s')
+# str() / repr() / f"{xs}" / print(xs) of a flat list: CPython's list repr (cruntime.py LISTTEXT)
+_LTEXT = Effects(reads=['Elem(Any)'], allocs=[ARENA], raises=[DIE])
+_entry('list_text_i', (I.T('obj', I.T('list', I.I64)),), (S,), 'ail_list_text_i({A}, ({0})->p, ({0})->n)', _LTEXT,
+       parts=('STR', 'FMT', 'STRREPR', 'LISTTEXT'), arena='s')
+_entry('list_text_f', (I.T('obj', I.T('list', F)),), (S,), 'ail_list_text_f({A}, ({0})->p, ({0})->n)', _LTEXT,
+       parts=('STR', 'FMT', 'STRREPR', 'LISTTEXT', 'FREPR'), arena='s')
+_entry('list_text_s', (I.T('obj', I.T('list', S)),), (S,), 'ail_list_text_s({A}, ({0})->p, ({0})->n)', _LTEXT,
+       parts=('STR', 'FMT', 'STRREPR', 'LISTTEXT', 'SLIST'), arena='s')
+_entry('list_text_t', (I.T('obj', I.T('list', I.TINT)),), (S,), 'ail_list_text_t({A}, ({0})->p, ({0})->n)', _LTEXT,
+       parts=('STR', 'FMT', 'STRREPR', 'LISTTEXT', 'TINTT', 'TLIST', 'TLISTTEXT'), arena='s')
 _entry('tint_mod2', (I.TINT,), (I.TINT,), 'ail_tint_mod2({0})', _PURE, parts=('TINTT',), pure=True)
 _entry('tint_bin', (I.TINT,), (S,), 'ail_tint_bin({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')
 _entry('tint_oct', (I.TINT,), (S,), 'ail_tint_oct({A}, {0})', _ALLOC, parts=('TINTT', 'STR'), arena='s')

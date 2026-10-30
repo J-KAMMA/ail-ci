@@ -8081,8 +8081,10 @@ def _str_value(node, ctx, *, owned_join_return=False):
         if at == EXCEPTION:
             _exc_text_parts(ctx)
             return 'ail_exc_text(%s, &%s)' % (_exception_value(arg, ctx), ctx.sarena())
+        if _list_text_ok(arg, at, ctx):
+            return _list_text(arg, at, ctx)
         if at != INT:
-            raise Unsupported('str() of %s is not built; only str(<int>) and str(<float>) are. '
+            raise Unsupported('str() of %s is not built; only str(<int>), str(<float>) and str() of a flat list are. '
                               'For a list, join its elements: `",".join([str(v) for v in xs])`'
                               % _a(at))
         if _is_bool_expr(arg, ctx):

@@ -30,7 +30,7 @@ from .. import ir as I
 from .. import effects as E
 from . import simplify, symbounds
 
-RESIZING = ('list.push', 'list.pop', 'list.clear', 'rec.push', 'rec.pop', 'ba.push', 'ba.clear', 'ba.extend_lit')
+RESIZING = ('list.push', 'list.pop', 'list.clear', 'list.append_all', 'list.delat', 'list.reverse', 'rec.push', 'rec.pop', 'ba.push', 'ba.clear', 'ba.extend_lit')
 # what can resize a bytearray (whose span a loop may now hold: a bytearray local's load is hoisted)
 BA_RESIZING = ('ba.push', 'ba.clear', 'ba.extend_lit', 'ba.extend')
 U8SPAN = I.T('span', I.T('u8'))
