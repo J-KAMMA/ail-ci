@@ -225,13 +225,35 @@ and not numpy's pairwise sum; users who want Python's result call the builtin `s
 
 | inputs | result | definition |
 | --- | --- | --- |
-| f64 x f64, f32 x f32 | same dtype | `C[i,j]`: sequential `k` from 0, `acc = r(acc + r(A[i,k] * B[k,j]))`, `acc` starting at `-0.0`; `K = 0` gives `+0.0`. The natural CPU order (vectorise over `j`) and GPU.md's "tile over i, j, never split k" |
-| f16 x f16 | f32 (default `acc`) | the exact sum of the exact products, rounded once to f32 (GPU.md 8.7). f16 products are exact in f32, and every product is an integer multiple of `2^-48`, so the reference adds Python ints and rounds once with integer code (section 4.2) |
-| int8 x int8 | int32 | exact integer sum; `OverflowError` if a result leaves int32; order-free (so GPU cooperative matrix may be used under GPU.md 8.7's precondition) |
-| int32 x int32 | int32 | exact, checked, order-free |
+| f64 x f64 | f64 | **built (T6, 2026-10-30).** `C[i, j] = ta.dot(A[i], B[:, j])` bit for bit: the products `r(A[i,k] * B[k,j])` are added along `k` in the **one fixed order** below. K = 0 gives `+0.0` |
+| f32 x f32 | f32 | the same order with `r = r_f32` (not built yet) |
+| f16 x f16 | f32 (default `acc`) | the exact sum of the exact products, rounded once to f32 (GPU.md 8.7). f16 products are exact in f32, and every product is an integer multiple of `2^-48`, so the reference adds Python ints and rounds once with integer code (section 4.2). Not built yet |
+| int8 x int8 | int32 | exact integer sum; `OverflowError` if a result leaves int32; order-free (so GPU cooperative matrix may be used under GPU.md 8.7's precondition). Not built yet |
+| int32 x int32 | int32 | exact, checked, order-free. Not built yet |
 
-`ta.dot(row, col)` (blocked order) and a `1 x K` by `K x 1` `matmul` (sequential) are therefore different functions
-for floats (decision TA4: kept separate for now).
+**The exact order of one output element (f64).** For `K` products `p_k = r(A[i,k] * B[k,j])` (each rounded to binary64; `k = 0..K-1`):
+
+1. cut `k` into **blocks of 1024** (`[0, 1024)`, `[1024, 2048)`, ...; the last may be shorter);
+2. inside a block of length `L` there are **16 lanes**, each starting at `-0.0`; the product with block-local index `u` is added to lane `u % 16`, in increasing `u`, one rounding per add (`lane = lane + p`);
+3. the lanes are combined **8-4-2-1**: `l[i] = l[i] + l[i+w]` for `w = 8, 4, 2, 1` and `i < w` (so `((l0+l8)+(l4+l12)) + ((l2+l10)+(l6+l14))` and so on, exactly 3.5); the block value is `l[0]`;
+4. the block values `b_0 .. b_{n-1}` are combined by `S(lo, hi) = b_lo` when `hi - lo == 1`, else `S(lo, lo+p) + S(lo+p, hi)` with `p` the largest power of two below `hi - lo`;
+5. `K = 0` gives `+0.0`; a NaN result is the canonical NaN (a NaN product or an `inf - inf` anywhere makes the sum NaN).
+
+This is the order of `ta.dot` (3.5) with the row of `A` and the column of `B` as the two vectors, so `ta.matmul(A, B)[i, j]` equals `ta.dot(A[i], B[:, j])` and a `1 x K` by `K x 1` matmul is `ta.dot`. Nothing in it depends on `M`, `N`, the loop nest, the SIMD width, the thread count or the device: a lane never mixes two columns of the output, so an implementation may tile over `i` and `j` as it likes, may vectorise over `j` (16 lanes of one element are independent of the lanes of the next element) or over the 16 lanes of one element, and must not split `k` or reassociate it. No fused multiply-add (the product is rounded before it is added): `-ffp-contract=off` on the CPU, `NoContraction` in SPIR-V. A missing lane (the short last group of a block) is the identity `-0.0`, so an implementation that pads a short group with `-0.0` is exact; padding with `+0.0` is not (`-0.0 + 0.0 = +0.0`).
+
+This replaces the first draft of this table (sequential `k` from 0 with one accumulator): owner decision 2026-10-30, TA4 below. Sequential `k` cannot use the 16 lanes and differs from `dot` in the last bit; the fixed tree costs one extra block-sized lane set and gives one answer on every device.
+
+### 3.8 2-D arrays (T6)
+
+`Array` has a second shape, `(rows, cols)`, row-major and contiguous (a 1-D array has `shape == (n,)`). All of it is defined by the reference; the native lowering builds **f64 only** in this stage (an int32 2-D array is refused by name, the reference accepts every dtype).
+
+- **Construction**: `ta.zeros((r, c), dt)`, `ta.full((r, c), x, dt)`, `ta.array([[...], [...]], dt)` (a non-empty list of lists; rows of different lengths are `ValueError: ail_array: array(): rows differ in length (2 and 1)`). `(n,)` is the same as `n`. Dimensions are checked in order, each with the 1-D texts (`negative length -1`, `a length must be an int, not float`); more than two dimensions: `ail_array has 1-D and 2-D arrays; shape (2, 3, 4)`. Zero dimensions are allowed: `(0, 3)`, `(3, 0)`, `(0, 0)` hold no elements and keep their shape.
+- **Annotation**: `ta.Matrix[ta.f64]` (`ta.Array[...]` is the 1-D annotation). Values are `ta.Array`.
+- **Indexing**: `M[i, j]` (two ints, negative allowed, `IndexError: array index out of range` checked for `i` and then `j`), `M[i]` (a 1-D **copy** of row `i`), `M[a:b:c]` (a 2-D **copy** of the selected rows, columns kept). `M[i, j] = x` stores with the 1-D store rule; `M[i] = row` copies a 1-D array of `cols` elements (`ValueError: ail_array: row assignment needs a 1-D array of 3 elements, not shape (4,)`). Slices with a slice in the second position (`M[0, 1:2]`) are `TypeError: ail_array: a 2-D array takes M[i, j] (two ints), M[i] or M[a:b]`; assigning into a slice of rows is `TypeError: ail_array: slice assignment into a 2-D array is not built; assign one row at a time`. There are no views: a slice or a row never aliases the matrix.
+- **`.shape`, `len`, `.T`**: `M.shape == (rows, cols)`, `len(M) == rows`, `M.T` is a new transposed array (a 1-D array has no `.T`: `ValueError: ail_array: .T needs a 2-D array, not a 1-D one`). `.copy()`, `.tolist()` (list of rows), `.tobytes()` (row-major), `==` (same dtype, same shape, same values), iteration (yields rows) and `repr` (`array([[1.0, 2.0], [3.0, 4.0]], f64)`) follow.
+- **Element-wise operations** use the 1-D rules on the flat data: the same rounding, NaN, IEEE division and in-place semantics. The two operands of an array-array operation must have the **same shape**; `(2, 3) + (3,)` is `ValueError: ail_array: shapes differ: (2, 3) and (3,)` (the row broadcast of 2.3 is not built; write the loop over rows). This covers `+ - * /` (and `// %` on int arrays), unary `-`, `abs`, `sqrt exp log tanh`, `minimum maximum clip`, `astype` and the in-place forms.
+- **Reductions** (`sum dot min max argmin argmax`) take 1-D arrays; a 2-D argument is `ValueError: ail_array.sum(): 2-D arrays are not built here; reduce one row: ta.sum(M[i])`. `ta.matmul` is the 2-D product.
+- **`ta.matmul(A, B)`**, both 2-D f64: `A` is `(m, k)`, `B` is `(k, n)`, the result is `(m, n)` with the order of 3.7. Errors, in this order: not two arrays: `TypeError: ail_array.matmul() needs two ail_array.Array values`; either not 2-D: `ValueError: ail_array.matmul(): needs two 2-D arrays, not shapes (3,) and (2, 3)`; dtypes differ: the standard `TypeError: ail_array: f64 matmul f32: dtypes differ; write a.astype(ta.f32) or b.astype(ta.f64)`; not f64: `TypeError: ail_array.matmul(): only f64 arrays are built in this version, not f32`; inner sizes differ: `ValueError: ail_array: matmul: shapes (2, 3) and (4, 5) do not match: 3 != 4`. The `@` operator is not defined on arrays (decision TA4: `dot` and `matmul` are separate functions).
 
 ## 4. The reference implementation
 
@@ -402,6 +424,78 @@ that: loads widen, arithmetic is `double`, the store is `r_f32`. Lowering this l
 difference (one f32 rounding per op is not the same as binary64 then one rounding). The fast, f32-per-op form is the
 array expression `out = a * b + c`. The docs and the refusal hints point to it.
 
+### 5.6 2-D arrays and `matmul` on the CPU (built, branch array-matmul, 2026-10-30)
+
+Code: `_AilTAM` (rows `r`, columns `c`, and `v`, the row-major data as an `_AilTAF`) and the `_ail_tam_*` functions of
+`python/pkg-v12/prelude_ailarray.py`; kind `'MF'` in `ailarray.py`; tests `test_ail_array_t6.py`, cases `array_t6_cases/`. A
+program that uses no 2-D array gets the same text as before (the prelude is shaken by use). Every element-wise operation of a 2-D
+array is the 1-D function on `.v` (so the bits are T2's, in place included) behind a shape check with the reference's text; this
+is not fused (5.2a is 1-D). `M.shape` is the tuple `(M.r, M.c)` written inline, so it needs a name (`r, c = m.shape`), and a
+tuple used as a value (`print(m.shape)`) is a program the typed path refuses to compile (it runs on the general path, with the
+build's note), as any tuple is.
+
+`ta.matmul(A, B)` is one kernel, `_ail_tam_mmk`, that takes the two data lists and three lists that carry `m`, `k`, `n` as their
+lengths, and returns the result list. It copies `B` transposed once, tiles `j` in groups of 32 (a tile of the transposed `B` stays in
+cache while every row of `A` passes over it), and for each `(i, j)` runs the order of 3.7: per block of 1024 sixteen lanes held in
+sixteen locals, 16 products per loop pass, the short tail of a block staged in a 16-element list with `-0.0` in the lanes it does not
+reach (adding `-0.0` is the identity, so the tail is exact and the 16 add statements need no branches), the 8-4-2-1 tree, and the
+tree over blocks (`_ail_ta_tree`, the one `ta.sum` uses) when `k > 1024`. The tiling and the transposed copy move no element's
+order. What the IR needed, found by measuring: lists as parameters and a returned list (a function that returns an object, or takes
+a list it writes, is built by the legacy emitter, 20x more instructions in the first try); `m`, `k`, `n` from `len()` (an int read
+from a list element or a parameter is a tagged int and every index through it costs a dozen instructions); no name holding a
+product of two lengths (`i * k` is written inside the subscript: 25.7 became 15.9 instructions per multiply-add); one name per
+loop variable.
+
+Measured with `tools/icount.c` (user-space instructions of the whole process, WSL, `-O2 -ffp-contract=off`, default build, typed path),
+the matrix fill and the final sum subtracted by running the same program without the product. "C naive" is a triple loop in C
+`-O2` with the order of 3.7 (`lane[(k - s) % 16] += a[i][k] * b[k][j]`, `B` read with stride); "C locals" is the best C we wrote
+(`B` transposed, sixteen scalar locals, the loop of the AIL kernel). Instructions per multiply-add:
+
+| m x k x n | multiply-adds | AIL | C naive | C locals | CPython reference |
+| --- | --- | --- | --- | --- | --- |
+| 128 x 128 x 128 | 2.10M | 15.9 | 11.8 | 3.4 | - |
+| 256 x 256 x 256 | 16.8M | 15.1 | 10.9 | 2.8 | - |
+| 64 x 2048 x 64 (two blocks) | 8.4M | 14.3 | 10.2 | 2.5 | - |
+| 33 x 17 x 29 (tails) | 16K | 37.8 | 23.3 | 10.4 | - |
+| 32 x 32 x 32 / 64 x 64 x 64 | 33K / 262K | - | - | - | 2,955 / 2,528 |
+
+All outputs (the sum of every element printed with `repr`) equal in the AIL build and both C programs. So the AIL kernel costs about
+1.3x to 1.5x the instructions of the naive C and 4.5x to 5.5x those of the best C, and 165x to 195x fewer than the reference under
+CPython. The gap to the best C is the code the IR emits around every list read (a bounds test and, for a sum of indices, an overflow
+test: about 5 instructions per operand) and the lane locals it spills; the same cost makes `ta.dot` 23.5 instructions per element
+here (`ta.dot` of two 65,536-element arrays, 20 repetitions). Vectorising over `j` (a lane block of one element is independent of the
+next element's) is the way to the C locals' number and is not built; it is an optimisation that cannot change a bit (5.3), and
+`speed-claims` applies before anyone says it is faster. No speed claim is made here beyond the table.
+
+### 5.7 The GPU kernel for `matmul`: the contract (not built; GPU.md 6.2 to 6.5 and M5/M6)
+
+The device side has to produce the bits of 3.7, so what it may and may not do is fixed here, before the code:
+
+- **One invocation per output element** (or per tile of elements): the invocation for `(i, j)` runs the order of 3.7 along `k` in
+  one thread of control: blocks of 1024, sixteen lane accumulators `l0 .. l15` started at `-0.0`, element `u` of a block into lane
+  `u % 16`, the 8-4-2-1 tree, the tree over blocks, `+0.0` for `K = 0`, canonical NaN at the store. Tiling over `i` and `j` (shared
+  memory, several elements per invocation) is free; splitting `k` over invocations or sub-group lanes is not (it would add a
+  reduction in another order). 16 lanes per element are 16 registers of one invocation, not 16 invocations.
+- **No fused multiply-add**: every product is a `NoContraction` `OpFMul` whose result is added by a separate `OpFAdd` (also
+  `NoContraction`); the emitter of GPU.md G2 must decorate it, and G3's self-test has to show that the
+  device honours it (a device that fuses `a * b + c` fails the matmul-specific operand set below and is kept on the CPU).
+- **The short tail** of a block adds nothing to the lanes it does not reach (equivalently `-0.0`, 3.7); the kernel must not add
+  `+0.0`.
+- **64-bit integer index arithmetic** avoids `OpSRem`/`OpSMod` on NVIDIA driver 580 (`a - (a / d) * d` instead); the matmul kernel
+  needs only `i * K + k` style products and one division by the constant 16 (a shift), so it should not need either.
+- **G3 self-test operand sets for matmul** (run once per device, before the first launch; a mismatch with the CPU emulation keeps the
+  device off): (1) `K = 17`, `1025` with `a_k * b_k` chosen so that only the lane order gives the CPU's bits (alternating `1e16`,
+  `1`, `-1e16`); (2) products that overflow to `inf` and cancel to NaN (`inf - inf` in one lane); (3) `-0.0` products only (the
+  identity lanes); (4) subnormal products (flush-to-zero devices fail); (5) a product pair that differs in the last bit when
+  fused. Every set is compared with `_ail_tam_mmk` on the CPU by the 3.7 order.
+- **Cost model entry (G4/G7)**: operations `2 * K` per output element (one multiply, one add), `M * N` elements; transfer bytes
+  `8 * (M * K + K * N)` in and `8 * M * N` out, counted whether or not the data is already resident. `auto` launches when
+  `2 * M * N * K` flops divided by the measured device rate plus the transfer time beats the measured CPU time of the kernel above;
+  `--gpu` must never make a program slower, so a shape under the break-even stays on the CPU and a device that fails the
+  self-test is never used. Constants come from measurements on the laptop iGPU, lavapipe and Colab (G7), not from this note.
+- **Fallback**: no loader, no device, `AIL_GPU=0`, a failed self-test or a failed launch all run the CPU kernel; the result is the
+  same bits by construction.
+
 ## 6. Aliasing, layout and the FFI boundary
 
 ### 6.1 Sharing semantics
@@ -519,7 +613,7 @@ stages run as one sequential line (the "split core fixes" rule).
 | **T3** | **f32, f16, int8**, `astype`, canonical NaN, software f16 conversion, wrapping/saturating ops, `exp log tanh sqrt` | exhaustive f16 tests (9.4) and the edge sets pass; the `array('f')` refusal is lifted using the same f32 store rule (TA8) | T2 |
 | **T4** | SIMD: vectorisable loops, int overflow flags with rescan, the 16-lane reductions, F16C in `x86-64-v3` | 9.6 neutrality passes; instruction counts (`tools/icount.c`) and RSS recorded per op family against the scalar T3 code and against C; no speed claim before that (`speed-claims`) | T3 |
 | **T5** | FFI: arrays as `ptr`/`cptr` arguments, zero copy in AIL and in the shim | 9.10 passes; borrowed-pointer rule documented in AIL_REFERENCE_MORE | T2; FFI F4 (#209: same files `ail_ffi.py`, `ail_ffi_lower.py`) merged first; F3 if u64 lengths are used |
-| **T6** | 2-D arrays, row broadcast, exact `matmul` (3.7) | CPython-equal on 3.7's cases incl. `K = 0`, int32 overflow, f16 exact sums; one MLP forward pass example matches the reference | T4 |
+| **T6** | 2-D arrays (built for f64: 3.8) and exact `matmul` (3.7, built for f64, CPU: 5.6); the row broadcast, f32/f16/int matmul and the GPU kernel (GPU.md 6.2 to 6.5) are later | CPython-equal on 3.7's cases incl. `K = 0`, lane and block boundaries and planted specials; an MLP forward pass example matches the reference | T4 |
 | **T7** | inexact mode (D2): flag, `order='any'`, notes, BLAS `sgemm`/`dgemm` via `@extern`, tolerance suite | notes printed at every use; tolerance tests pass; BLAS results equal the same BLAS through ctypes; this is the array half of GPU.md M1 | T5, T6 |
 | **T8** (optional) | threads over blocks (5.4) | outputs equal for 1..N threads; measured | T4; GIL-free typed parallelism |
 | GPU | M2 (fused element-wise chains over arrays), M4 (array kernels), M5/M6 (matmul) | as GPU.md 8.6 | T3/T6 here, and G1-G6 for the device side (G2 SPIR-V ops, G3 runtime, G4 error replay for int overflow, G5 correctly rounded `/` and `sqrt`: f32 `/` on a GPU is not correctly rounded **[unverified per driver]**, G6 reductions with the order of 3.5) |
@@ -555,8 +649,10 @@ note; the decisions were questions Q1..Q8 of that draft.
   float arrays never raise for these (section 3.1).
 - **TA3 (was Q3). The fixed sum order.** `ta.sum` and `ta.dot` use the 16-lane, 1024-block order of section 3.5; the
   builtin `sum(a)` keeps CPython's meaning.
-- **TA4 (was Q4). `dot` and `matmul` stay separate for now**: blocked order for `dot`, sequential `k` for `matmul`
-  (section 3.7).
+- **TA4 (was Q4). `dot` and `matmul` stay separate functions**, and (owner, 2026-10-30) **one order for both**: the 16-lane,
+  1024-block order of 3.5 along `k`, so `matmul` of a row and a column equals `ta.dot` and every device can reproduce it
+  (section 3.7). The first draft said sequential `k` for `matmul`; that is withdrawn. A fast device-dependent matmul is the
+  explicit opt-in of D2 only (not built).
 - **TA5 (was Q5). 1-D and 2-D first**; N-D is not planned now.
 - **TA6 (was Q6). A numpy subset may come later**, as separate work; this module is not it.
 - **TA7 (was Q7). The name is `ail_array`**, a file beside the program for CPython, later in the `ail-lang` package.

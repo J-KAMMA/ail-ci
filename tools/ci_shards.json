@@ -10,6 +10,7 @@
   "test_ail_array_fuse": 41.2,
   "test_ail_array_ref": 41.2,
   "test_ail_array_t2": 41.2,
+  "test_ail_array_t6": 41.2,
   "test_ail_ascii_char_compare": 2.0,
   "test_ail_batch_edit": 0.8,
   "test_ail_bigint": 796.0,
@@ -738,6 +739,7 @@
    "test_json_pointer_batch"
   ],
   [
+   "test_ail_array_t6",
    "test_ail_borrowed_elements",
    "test_ail_builtin_api",
    "test_ail_bytes_list_fields",
