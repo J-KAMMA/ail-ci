@@ -38,7 +38,7 @@ MODULES = (
     'test_ail_lsp', 'test_ail_project', 'test_ail_debug', 'test_ail_debug_lines', 'test_ail_debug_flush',
     'test_ail_typed_blockers2',
     'test_ail_c_export',
-    'test_ail_unified',
+    'test_ail_unified', 'test_ail_gen_speed',
     'test_ail_ir_gridbounds',
     'test_ail_bugs7',
     'test_ail_unbound',

@@ -1649,16 +1649,16 @@ class Unified(unittest.TestCase):
 
 
     def test_u12_gc_pool(self):
-        """Step 5: the size-class free list under the collector (AIL_UNIFIED=1 with AIL_UNIFIED_POOL=1, not with threads): small strings,
-        float boxes, dicts and lists over several collections print what CPython prints; the C has the pool only
-        with the flag."""
+        """Step 5: the size-class pool under the collector (on by default with AIL_UNIFIED on and no threads; AIL_UNIFIED=0 and
+        AIL_UNIFIED_POOL=0 leave it out): small strings, float boxes, dicts and lists over several collections print what CPython
+        prints; the C has the pool only when it is on."""
         with tempfile.TemporaryDirectory() as d:
             src = Path(d, 'pool_cpython.py')
             src.write_text(POOL, encoding='utf-8')
             cp = run([sys.executable, str(src)]) if ON_312 else None
             outs, cs = {}, {}
-            for mode, env in {'plain': {'AIL_UNIFIED': '0'}, 'unified': {'AIL_UNIFIED': '1', 'AIL_UNIFIED_POOL': '1'},
-                              'nopool': {'AIL_UNIFIED': '1'}}.items():
+            for mode, env in {'plain': {'AIL_UNIFIED': '0'}, 'unified': {'AIL_UNIFIED': '1'},
+                              'nopool': {'AIL_UNIFIED': '1', 'AIL_UNIFIED_POOL': '0'}}.items():
                 source = Path(d, 'pool_' + mode + '.py')
                 source.write_text(POOL, encoding='utf-8')
                 e = dict(os.environ, AIL_NO_CACHE='1')
@@ -1678,7 +1678,7 @@ class Unified(unittest.TestCase):
                 self.assertEqual(cp[:2], outs['unified'][:2])
             self.assertNotIn('ail2u_pool', cs['plain'])
             self.assertIn('ail2u_pool', cs['unified'])
-            self.assertNotIn('ail2u_pool', cs['nopool'])  # opt-in: +4% RSS geomean (up to +30%) for 1.045x
+            self.assertNotIn('ail2u_pool', cs['nopool'])  # the opt-out
             self.assertEqual(outs['nopool'][:2], outs['unified'][:2])
 
 
