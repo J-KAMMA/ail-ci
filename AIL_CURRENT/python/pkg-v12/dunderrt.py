@@ -63,6 +63,8 @@ ENUMS_INPLACE = ENUMS.replace(
 if 'AIL_D2_IADD' not in ENUMS_INPLACE:
     raise RuntimeError('dunderrt: no place for the in-place operators in ENUMS')
 
+# ail_dun_binop keeps 201 bytes per operand name: CPython caps "unsupported operand" names
+# at 100 (binary_op_error) and "can only concatenate" / "can't multiply" at 200.
 FUNCS = '''
 /* ---- operator special methods on instances (dunderrt.py) ---- */
 static ail_ctx *ail__gcx;
@@ -124,7 +126,7 @@ __attribute__((noinline)) static ail_st ail_dun_binop(ail_ctx *cx, ail_obj *out,
     if (f) return f(cx, out, a, b);
     f = ail_dun2(b, rev);
     if (f) return f(cx, out, b, a);
-    char buf[240], na[80], nb[80];
+    char buf[400], na[201], nb[201];
     ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b);
     if (op[0] == '+' && (a.tag == AIL_T_LIST || a.tag == AIL_T_TUPLE || a.tag == AIL_T_STR
                          || !strcmp(na, "collections.deque"))) {
@@ -147,7 +149,7 @@ __attribute__((noinline)) static ail_st ail_dun_binop(ail_ctx *cx, ail_obj *out,
             return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
         }
     }
-    snprintf(buf, sizeof buf, "unsupported operand type(s) for %s: '%s' and '%s'", op, na, nb);
+    snprintf(buf, sizeof buf, "unsupported operand type(s) for %s: '%.100s' and '%.100s'", op, na, nb);
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 static inline int ail_obj_truthy(ail_obj x);
