@@ -53,14 +53,8 @@ BUILTINS = frozenset(dir(builtins))
 MODULE_DUNDERS = frozenset(('__file__', '__package__', '__path__', '__spec__', '__loader__', '__cached__',
                             '__builtins__'))
 NEVER = 10 ** 9
-# C accelerators that CPython's own pure-Python modules import inside `try: ... except ImportError:` and that
-# have a pure-Python fallback written to behave the same (bisect/_bisect, heapq/_heapq, json/_json,
-# functools/_functools, stat/_stat, pickle/_pickle). The compiler has none of them, so the fallback is what runs.
-ACCELERATORS = frozenset(('_bisect', '_heapq', '_json', '_functools', '_stat', '_pickle'))
-IMPORT_ERRORS = frozenset(('ImportError', 'ModuleNotFoundError'))
-# statements an accelerator fallback may consist of: it defines names, it does not do anything
-FALLBACK_STATEMENTS = (ast.Pass, ast.Assign, ast.AnnAssign, ast.Import, ast.ImportFrom, ast.FunctionDef, ast.ClassDef)
 _UNKNOWN = object()                     # a module-level name bound to something the compiler cannot evaluate
+IMPORT_ERRORS = frozenset(('ImportError', 'ModuleNotFoundError'))
 
 
 class _Unfoldable(Exception):
@@ -140,6 +134,7 @@ class Mod:
         self.lazy = {}                  # id(synthetic top-level import) -> the function-level import it stands for
         self.lazy_only = set()          # names bound only by function-level local imports (not module attributes)
         self.pure_cache = False
+        self.guarded = set()            # id of an import statement that stood under `try: ... except ImportError:`
 
 
 class Imp:
@@ -464,9 +459,6 @@ class Program:
         """Resolve, at build time, what a top-level `try: import ... except ImportError:` and a top-level `if`
         around a local import would decide when the module runs:
 
-        * `try:` whose body only imports C accelerators the compiler lacks (ACCELERATORS) becomes the handler's
-          body: CPython without the accelerator runs exactly that. Only a handler that defines names is
-          taken (see FALLBACK_STATEMENTS), and an `else:` (which runs only WITH the accelerator) is refused;
         * `try:` whose body only imports local modules (and binds constants) becomes the body, the `else:` and
           the `finally:` (the import succeeds, so the handler never runs); whether the imported modules could
           raise ImportError themselves is checked once everything is loaded (check_guards);
@@ -499,32 +491,14 @@ class Program:
         imports = [n for n in node.body if isinstance(n, (ast.Import, ast.ImportFrom))]
         if caught is None or not imports:
             return [node]
-        others = [n for n in node.body if not isinstance(n, (ast.Import, ast.ImportFrom))]
-        accel = [self.accelerator(n) for n in imports]
-        if all(accel):
-            if others:
-                return [node]
-            if node.orelse:
-                self.refuse(mod, node.orelse[0], "the `else:` of `try: import %s ... except ImportError:` runs only "
-                            "when the C accelerator exists, and the compiler has none, so CPython and this program "
-                            "would differ.\n  write instead: put the `else:` statements after the `try`, or drop "
-                            "the guard" % ', '.join(sorted(set(accel))))
-            for handler in node.handlers:
-                bad = next((s for s in handler.body if not isinstance(s, FALLBACK_STATEMENTS)
-                            and not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant))), None)
-                if bad is not None:
-                    self.refuse(mod, bad, "the handler of `try: import %s ... except ImportError:` does more than "
-                                "define a fallback (`%s`); the compiler takes this handler because CPython without "
-                                "the C accelerator runs it, but CPython here has the accelerator and would not.\n"
-                                "  write instead: keep only definitions and assignments in the handler"
-                                % (', '.join(sorted(set(accel))), ast.unparse(bad).split('\n')[0][:50]))
-            return self.fold_body(mod, list(caught.body) + list(node.finalbody))
-        if any(accel) or not all(self.is_local_import(n) for n in imports):
+        if not all(self.is_local_import(n) for n in imports):
             return [node]
+        others = [n for n in node.body if not isinstance(n, (ast.Import, ast.ImportFrom))]
         if any(not (isinstance(n, ast.Pass) or isinstance(n, ast.Assign) and isinstance(n.value, ast.Constant)
                     and all(isinstance(t, ast.Name) for t in n.targets)) for n in others):
             return [node]
         self.guards.append((mod, node, imports))
+        mod.guarded.update(id(n) for n in imports)
         return self.fold_body(mod, list(node.body) + list(node.orelse) + list(node.finalbody))
 
     def import_error_handler(self, node):
@@ -537,16 +511,6 @@ class Program:
             if not all(isinstance(k, ast.Name) and k.id in IMPORT_ERRORS for k in kinds):
                 return None
         return node.handlers[0]
-
-    def accelerator(self, node):
-        """The accelerator module an `import _x` / `from _x import ...` statement names, else None."""
-        if isinstance(node, ast.ImportFrom):
-            names = [node.module or ''] if not node.level else ['.']
-        else:
-            names = [a.name for a in node.names]
-        if all(n in ACCELERATORS and not self.local_top(n) for n in names):
-            return names[0]
-        return None
 
     def static_test(self, mod, test):
         """True / False when the test of an `if` has one value for every run of the program, else None."""
@@ -1570,7 +1534,42 @@ class Program:
         mod.alias[key] = entry
         mod.first.setdefault(key, index)
 
+    def drop_overridden(self, mod):
+        """CPython's `def f(): ...` followed later by `try: from accelerator import f except ImportError: pass`
+        ends with the imported f. When the accelerator is a local module (so the import succeeds), the earlier
+        defs of the names that import binds are dropped: a call reads the final binding either way. Only when
+        nothing at module level (outside function bodies) between the def and the import mentions the name."""
+        body = mod.tree.body
+        drop = set()
+        for index, node in enumerate(body):
+            imp = mod.imps.get(id(node))
+            if imp is None or id(node) not in mod.guarded or not imp.local:
+                continue
+            for key, _ in imp.binds:
+                defs = [i for i, n in enumerate(body[:index])
+                        if isinstance(n, ast.FunctionDef) and n.name == key and not n.decorator_list]
+                if not defs:
+                    continue
+                others = [site for (bound, site) in _scan_scope(body)[3] if bound == key
+                          and not isinstance(site, (ast.Import, ast.ImportFrom)) and site not in [body[i] for i in defs]]
+                if others:
+                    continue
+                reads = False
+                for n in body[defs[0] + 1:index]:
+                    if isinstance(n, ast.FunctionDef):
+                        todo = [d for d in n.decorator_list] + _defaults(n.args)
+                    else:
+                        todo = [n]
+                    for t in todo:
+                        if any(isinstance(x, ast.Name) and x.id == key for x in ast.walk(t)):
+                            reads = True
+                if not reads:
+                    drop.update(id(body[i]) for i in defs)
+        if drop:
+            mod.tree.body = [n for n in body if id(n) not in drop]
+
     def analyse(self, mod):
+        self.drop_overridden(mod)
         body = mod.tree.body
         stores, _, _, sites = _scan_scope(body)
         counts, imports = {}, {}

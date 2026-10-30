@@ -97,11 +97,13 @@ def rewrite(source, notes=None):
                               "`isinstance(x, object)` and `class C(object)` are built.\n"
                               "  write instead: `class Marker: pass` and `marker = Marker()` for a sentinel"))
         return source
-    if not edits:
+    if not edits and not need_class:
         return source
     if need_class:
+        exempt = {id(x) for f in ast.walk(tree) if isinstance(f, ast.FunctionDef) and f.name.endswith('_tn')
+                  for x in ast.walk(f)}
         for node in ast.walk(tree):
-            if isinstance(node, ast.Attribute) and node.attr in ('__name__', '__qualname__') and (
+            if id(node) not in exempt and isinstance(node, ast.Attribute) and node.attr in ('__name__', '__qualname__') and (
                     isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
                     and node.value.func.id == 'type' or isinstance(node.value, ast.Attribute)
                     and node.value.attr == '__class__'):

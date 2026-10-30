@@ -3,9 +3,8 @@
 Each program below is a set of files; CPython runs `python3 main.py` as the oracle and `ail_chatgpt.py compile`
 builds the same bytes. The refusals are checked by name with their `write instead:` hint and a file:line.
 
-* `try: from _bisect import * / import _heapq ... except ImportError:` for a C accelerator the compiler lacks: the
-  handler (the pure-Python fallback CPython falls back to without the accelerator) is what runs. A handler that
-  does more than define names, and an `else:` clause, are refused; any other ImportError guard is still refused.
+* `try: from _bisect import * ... except ImportError:`: the bundled stdlib/_bisect.py and _heapq.py have the C modules'
+  behaviour (error texts, argument checks), so the import succeeds as in CPython; the other accelerators are refused.
 * `try: import local_module except ImportError:` and `if <decidable test>: import local_module` (a constant,
   `sys.version_info >= (3, 8)`) at module level: the branch CPython takes is the one built, a module
   in the branch not taken is not loaded at all. A test the compiler cannot decide is refused.
@@ -50,40 +49,26 @@ class Rules(ModulesBase):
         return built.stderr
 
     # ------------------------------------------------------------------ accelerator fallbacks
-    def test_accelerator_import_takes_the_fallback(self):
-        lib = ('try:\n    from _bisect import *\nexcept ImportError:\n    pass\n\n\n'
-               'def where(a, x):\n    lo, hi = 0, len(a)\n    while lo < hi:\n        mid = (lo + hi) // 2\n'
-               '        if a[mid] < x:\n            lo = mid + 1\n        else:\n            hi = mid\n    return lo\n')
-        out = self.same({"lib.py": lib, "main.py": "import lib\nprint(lib.where([1, 3, 5], 4))\n"})
-        self.assertEqual(out, "2\n")
+    def test_accelerator_import_succeeds_with_the_accelerators_own_behaviour(self):
+        # `from _bisect import *` finds a bundled _bisect.py that has the C module's behaviour, so the try
+        # succeeds as in CPython and the program prints what CPython prints (the C texts, not the Python ones)
+        lib = ('try:\n    from _heapq import *\nexcept ImportError:\n    pass\n\n\n'
+               'def first(h):\n    return heappop(h)\n')
+        main = ('import lib\ntry:\n    lib.first([])\nexcept IndexError as e:\n    print("IE", e)\n'
+                'try:\n    lib.first((1, 2))\nexcept TypeError as e:\n    print("TE", e)\n')
+        out = self.same({"lib.py": lib, "main.py": main})
+        self.assertEqual(out, "IE index out of range\nTE heappop() argument must be list, not tuple\n")
 
-    def test_accelerator_fallback_handler_binds_names(self):
-        # the shape of json.decoder: the module takes the C function when it exists, else its own Python one; both
-        # give the same answer, which is what makes the pure-Python fallback a replacement (the handler's None is
-        # a "no accelerator" marker the module itself tests)
-        lib = ('try:\n    from _json import scanstring as c_scanstring\nexcept ImportError:\n    c_scanstring = None\n\n\n'
-               'def py_scanstring(s):\n    return s.upper()\n\n\nscanstring = c_scanstring or py_scanstring\n')
-        write(self.dir, {"lib.py": lib, "main.py": "import lib\nprint(lib.py_scanstring('x'))\n"})
-        built, exe = compile_program(self.dir, "main.py", "1")
-        self.assertEqual(built.returncode, 0, built.stderr)
-        self.assertEqual(subprocess.run([str(exe)], capture_output=True).stdout, b"X\n")
-
-    def test_accelerator_handler_that_does_more_is_refused(self):
-        lib = 'try:\n    from _bisect import *\nexcept ImportError:\n    print("no accelerator")\n'
-        err = self.refused({"lib.py": lib, "main.py": "import lib\n"}, "does more than define a fallback", "lib.py:4")
-        self.assertIn("print", err)
-
-    def test_accelerator_else_clause_is_refused(self):
-        lib = ('try:\n    from _bisect import *\nexcept ImportError:\n    pass\nelse:\n    X = 1\n')
-        self.refused({"lib.py": lib, "main.py": "import lib\n"}, "`else:`", "lib.py:6")
+    def test_accelerators_without_a_model_are_refused(self):
+        for name in ("_json", "_stat", "_functools", "_pickle", "_decimal"):
+            lib = 'try:\n    from %s import *\nexcept ImportError:\n    pass\n' % name
+            err = self.refused_any({"lib.py": lib, "main.py": "import lib\nprint(1)\n"}, "guarded by `except ImportError`")
+            self.assertIn("lib.py", err)
 
     def test_other_import_errors_are_still_refused(self):
         lib = 'try:\n    import readline\nexcept ImportError:\n    readline = None\n'
         err = self.refused_any({"lib.py": lib, "main.py": "import lib\nprint(1)\n"}, "guarded by `except ImportError`")
         self.assertIn("lib.py", err)
-        # an accelerator guard that also does something with the accelerator is not a fallback pattern
-        lib2 = 'try:\n    import _bisect\n    X = _bisect.bisect_left([1], 1)\nexcept ImportError:\n    X = 0\n'
-        self.refused_any({"lib.py": lib2, "main.py": "import lib\nprint(lib.X)\n"}, "guarded by `except ImportError`")
 
     # ------------------------------------------------------------------ local imports under try / if
     def test_local_import_in_try(self):
@@ -96,8 +81,7 @@ class Rules(ModulesBase):
         self.assertEqual(self.same(files), "else\nfinally\n3\n")
 
     def test_local_import_in_try_whose_module_can_raise_import_error(self):
-        files = {"helper.py": "import os\n\n\ndef f(x):\n    return x\n\n\ntry:\n    import nothing_here\n"
-                              "except ImportError:\n    pass\n",
+        files = {"helper.py": "def f(x):\n    return x\n\n\nif f(1) == 1:\n    raise ImportError('x')\n",
                  "main.py": "try:\n    import helper\nexcept ImportError:\n    helper = None\nprint(1)\n"}
         err = self.refused_any(files, "mentions ImportError", "main.py:2")
         self.assertIn("helper", err)
@@ -187,6 +171,10 @@ class Rules(ModulesBase):
 
     def test_object_sentinel_whose_type_name_is_read_is_refused(self):
         self.refused_any({"main.py": "s = object()\nprint(type(s).__name__)\n"}, "main.py", "_ail_object")
+        # the accelerators map the hidden class back: a sentinel passed as a heap says `object`
+        out = self.same({"main.py": "import heapq\ntry:\n    heapq.heappop(object())\nexcept TypeError as e:\n    print(e)\n",
+                         "heapq.py": (STDLIB / "heapq.py").read_text(encoding="utf-8")})
+        self.assertEqual(out, "heappop() argument must be list, not object\n")
 
     # ------------------------------------------------------------------ function aliases
     def test_alias_of_a_function_with_defaults(self):
@@ -216,6 +204,38 @@ class CPythonModules(ModulesBase):
                   'print(heapq.heapreplace(data, 6), data)\n'),
     }
 
+    @staticmethod
+    def probe():
+        """Every function the C modules export, with wrong types, empty input, negative / large lo and hi, key=,
+        non-list heaps: each call prints its result or the exception's type and text."""
+        out = ["import heapq", "import bisect", "", "", "def neg(v):", "    return -v", ""]
+
+        def call(label, expr):
+            out.append("try:")
+            out.append("    print(%r, repr(%s))" % (label, expr))
+            for ex in ("TypeError", "ValueError", "IndexError", "AttributeError"):
+                out.append("except %s as e:" % ex)
+                out.append("    print(%r, %r, e)" % (label, ex))
+        for name in ("heappush", "heappop", "heapify", "heapreplace", "heappushpop"):
+            two = name in ("heappush", "heapreplace", "heappushpop")
+            for label, h in (("tuple", "(1, 2)"), ("none", "None"), ("str", "'ab'"), ("int", "5"), ("dict", "{}"),
+                             ("empty", "[]"), ("cmp", "[3, 1]"), ("ok", "[1, 5, 3]"), ("one", "[7]")):
+                extra = (", 'a'" if label == "cmp" else ", 2") if two else ""
+                call(name + " " + label, "heapq.%s(%s%s)" % (name, h, extra))
+        out += ["h = [5, 2, 8, 1, 9, 3]", "heapq.heapify(h)", "print(h, heapq.heappop(h), h)", "heapq.heappush(h, 0)",
+                "print(h, heapq.heappushpop(h, 4), heapq.heapreplace(h, 6), h)"]
+        for name in ("bisect_left", "bisect_right", "insort_left", "insort_right"):
+            for label, args in (("plain", "[1, 3, 5], 3"), ("neglo", "[1, 3], 2, -1"), ("hi5", "[1, 3], 2, 0, 5"),
+                                ("hilt", "[1, 3], 2, 2, 1"), ("hi-1", "[1, 3], 2, 0, -1"), ("hi-2", "[1, 3], 2, 0, -2"),
+                                ("cmp", "[1, 3], 'a'"), ("nolen", "5, 1"), ("lostr", "[1, 3], 2, 'a'"),
+                                ("histr", "[1, 3], 2, 0, 'b'"), ("lofloat", "[1, 3], 2, 1.5"),
+                                ("hifloat", "[1, 3], 2, 0, 1.5"), ("lonone", "[1, 3], 2, None"),
+                                ("hinone", "[1, 3], 2, 0, None"), ("lobool", "[1, 3], 2, True"),
+                                ("tuple", "(1, 3), 2"), ("empty", "[], 1"), ("str", "'abc', 'b'"),
+                                ("key", "[3, 2, 1], -2, key=neg"), ("keybad", "[1, 3], 2, key=1")):
+                call(name + " " + label, "bisect.%s(%s)" % (name, args))
+        return "\n".join(out) + "\n"
+
     def check(self, name):
         shutil.copy(STDLIB / (name + ".py"), self.dir / (name + ".py"))
         (self.dir / "main.py").write_text(self.USES[name], encoding="utf-8")
@@ -232,6 +252,30 @@ class CPythonModules(ModulesBase):
 
     def test_heapq(self):
         self.check("heapq")
+
+    def test_accelerator_behaviour_matches_the_c_modules(self):
+        """The coordinator's case (heappop([]) says `index out of range`, the C text) and every other exported
+        function against CPython, which runs the C modules."""
+        shutil.copy(STDLIB / "bisect.py", self.dir / "bisect.py")
+        shutil.copy(STDLIB / "heapq.py", self.dir / "heapq.py")
+        (self.dir / "main.py").write_text(self.probe(), encoding="utf-8")
+        expected = subprocess.run([sys.executable, "-B", "main.py"], cwd=self.dir, capture_output=True, timeout=60)
+        self.assertEqual(expected.returncode, 0, expected.stderr.decode())
+        self.assertIn(b"index out of range", expected.stdout)
+        built, exe = compile_program(self.dir, "main.py", "1")
+        self.assertEqual(built.returncode, 0, built.stderr)
+        ran = subprocess.run([str(exe)], capture_output=True, timeout=60)
+        self.assertEqual(ran.returncode, 0, ran.stderr.decode())
+        self.assertEqual(ran.stdout.decode(), expected.stdout.decode())
+
+    def test_calls_the_c_modules_reject_by_arity_or_keyword_are_refused(self):
+        shutil.copy(STDLIB / "heapq.py", self.dir / "heapq.py")
+        for body in ("heapq.heappush([1])", "heapq.heappush(heap=[1], item=3)", "heapq.heappop()"):
+            write(self.dir, {"main.py": "import heapq\ntry:\n    %s\nexcept TypeError as e:\n    print(e)\n" % body})
+            built = subprocess.run([sys.executable, "-B", CLI, "compile", "main.py", "-o", str(self.dir / "out")],
+                                   cwd=self.dir, capture_output=True, text=True, timeout=300)
+            self.assertEqual(built.returncode, 3, built.stderr)
+            self.assertIn("heappush" if "push" in body else "heappop", built.stderr)
 
 
 if __name__ == "__main__":
