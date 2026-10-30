@@ -48,6 +48,7 @@ import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
 from pyfront import Unsupported, fold_int_constants, to_pipeline_c, _number_constant, refuse_field_method_call
 import pyfunc
+import gpu
 from pyfunc import to_c as func_to_c
 from pyfunc import _module_const_scalar, module_table_refusal, _written_globals
 import modtables
@@ -430,6 +431,7 @@ def _rewrite_script(source, force):
     at the `class` check below for what was tested before this paragraph was written.
     """
     tree = ast.parse(source.strip())
+    gpu_marked = gpu.marked_statements(tree, source.strip())        # `# ail: gpu`: the unparse below drops the comments
     if os.environ.get('AIL_DEBUG') == '1':
         ast.increment_lineno(tree, source[:len(source) - len(source.lstrip())].count('\n'))     # `.strip()` above ate leading blank lines
     expanded = []
@@ -510,6 +512,7 @@ def _rewrite_script(source, force):
     unbound.SCRIPT.add(main_def.name)        # module-scope code: an unassigned read is a NameError (unbound.py)
     text = ast.unparse(new_tree)
     pyfunc.debug_remember_lines(snapshot, text)
+    gpu.remember(new_tree, gpu_marked, text)
     return text
 
 
@@ -787,6 +790,7 @@ def build(source, out, strict=True, report=None, force_general=False):
     source, shadow = shadowing.rename_all(source, Unsupported)
     _refuse_round_at_int64_boundary(source)
     try:
+        gpu.check_source(source)         # `compile --gpu`: the syntactic half of the proof, before either path is tried
         result = _build_unshadowed(source, out, strict, report, force_general)
         if last_fallback_reason is not None and shadow:
             last_fallback_reason = shadowing.restore_text(last_fallback_reason, shadow)
@@ -827,6 +831,25 @@ def _refuse_big_capable(source, local=True):
         name = sorted(marks, key=lambda k: (k != '<module>', k))[0]
         raise _BigCapable('%s can need an int beyond int64 (%s); the typed path has int64 only and the general path has exact big ints'
                           % ('the module code' if name == '<module>' else 'function %s()' % name, marks[name]))
+
+
+def refuse_typed_only_big(source):
+    """The big-int gates of the typed-only build, for entry points that call `to_c(strict=True)` directly and have no
+    general-path fallback (`link_objects`, `build_link_units`): an `@extern` program is linked this way. Without them the
+    constant folder let `-2**63-1` through as INT64_MAX, a silent difference. Same refusals, same wording, as a typed-only
+    build of the plain program (`AIL_NO_GENERAL=1`); `**` with a runtime exponent and shifts keep their loud run-time stop."""
+    source = fold_int_constants(source)     # as `_build_unshadowed` does first: `-2**63` and `2**63 - 1` are in-range literals
+    saved = os.environ.get('AIL_NO_GENERAL')
+    os.environ['AIL_NO_GENERAL'] = '1'
+    try:
+        if _is_whole_program(source):
+            _refuse_big_capable(source, local=False)
+        _refuse_typed_big_store(source, False)
+    finally:
+        if saved is None:
+            os.environ.pop('AIL_NO_GENERAL', None)
+        else:
+            os.environ['AIL_NO_GENERAL'] = saved
 
 
 def _typed_only_ok(reason):
@@ -1130,6 +1153,9 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
         if force_general:
             raise Unsupported('general path explicitly requested')
     except Unsupported as _typed_e:
+        if isinstance(_typed_e, gpu.GpuRefusal):
+            raise                       # a marked loop that is not eligible is a refusal, never a general-path fallback
+        gpu.APPLIED.clear()             # the program is built on the general path: no kernel is in it
         # AIL_NO_GENERAL=1: judges use it to ask the TYPED path alone (their negatives assert a
         # by-name refusal of the typed path; through the fallback that refusal would be invisible).
         if os.environ.get('AIL_NO_GENERAL') or legacy_int:
@@ -1288,6 +1314,7 @@ def build_link_units(source, out, unit_map, external=None):
     """Compile typed functions into distinct C objects with one shared runtime state."""
     out = pathlib.Path(out)
     info = {'_want_units': True, '_link_units': True, '_checked_arrays': True}
+    refuse_typed_only_big(source)
     to_c(source, strict=True, info=info, external=external)
     if 'c_units' not in info:
         raise Unsupported('separate linking requires typed functions')
@@ -1419,6 +1446,8 @@ def main(argv=None):
         print(fallback_note(last_fallback_reason), file=sys.stderr)
         if _source_line_marker(last_fallback_line):
             print(_source_line_marker(last_fallback_line), file=sys.stderr)
+    if gpu.enabled():
+        print(gpu.applied_line(), file=sys.stderr)
     print('%s  %d bytes' % (p, p.stat().st_size))
     return 0
 
