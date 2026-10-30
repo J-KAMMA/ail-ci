@@ -177,6 +177,11 @@ class Spirv(unittest.TestCase):
             if name.startswith('i_'):
                 self.assertFalse(info['need_f64'], name)
 
+    def test_no_op_srem(self):
+        """NVIDIA 580 (Tesla T4) computes OpSRem wrongly on 64-bit operands (GPU.md 6.3): no kernel may contain it."""
+        for name, (words, info) in self.mods.items():
+            self.assertNotIn(self.sp.OP['SRem'], [op for op, _ in self.instructions(words)], name)
+
     def test_float_controls_execution_modes(self):
         for name, (words, info) in self.mods.items():
             modes = [(ops[1], ops[2:]) for op, ops in self.instructions(words) if op == 16]
@@ -408,13 +413,17 @@ static void run_%(name)s(void) {
     int clean = 0, flagged = 0, checked = 0, missed = 0, spurious = 0, bad = 0;
     %(pk_decl)s
     %(rt)s *dres = malloc((size_t)N * sizeof(%(rt)s));
+    /* every kernel gets its own trust verdict: one that fails its self-test must not make the kernels after it report
+       "spurious" (a distrusted class declines every later launch with GK_DECLINED, which is not a flag word) */
+    gkv_G.untrusted = 0; %(emu)s_state = 0; %(emu)s_first = 0; gkv_G.distrust[0] = 0;
     for (int i = 0; i < N; i++) {
         ef[i] = %(emu)s(%(one_args)s);
         if (ef[i] == 0) { %(pack)s clean++; } else flagged++;
     }
     if (clean > 0) {
         unsigned f = %(run)s(%(pk_args)s);
-        if (strcmp(gk_dev, "emulation") == 0) { printf("NODEVICE %(name)s\n"); exit(77); }
+        if (f == GK_DECLINED && gkv_G.state != 1) { printf("NODEVICE %(name)s\n"); exit(77); }
+        if (f == GK_DECLINED) printf("  %(name)s: the device declined the launch: %%s\n", gkv_G.distrust[0] ? gkv_G.distrust : (gkv_G.why ? gkv_G.why : "?"));
         if (f != 0) spurious++;
         else {
             int j = 0;
@@ -511,13 +520,15 @@ class BitTests(unittest.TestCase):
     def tearDownClass(cls):
         cls._tmp.cleanup()
 
-    def harness(self, group, entries):
+    def harness(self, group, entries, extra_env=None):
         src = self.dir / (group + '.c')
         src.write_text(_harness(entries, self.N), encoding='utf-8')
         exe = self.dir / group
         r = subprocess.run([CC, '-O1', '-std=gnu11', '-w', str(src), '-o', str(exe), '-lm', '-ldl'], capture_output=True, text=True)
         self.assertEqual(r.returncode, 0, r.stderr[:3000])
-        r = subprocess.run([str(exe)], capture_output=True, text=True, env=_device_env(), timeout=900)
+        env = _device_env()
+        env.update(extra_env or {})
+        r = subprocess.run([str(exe)], capture_output=True, text=True, env=env, timeout=900)
         if r.returncode == 77:
             if REQUIRE_DEVICE:
                 self.fail('no Vulkan device, but AIL_GPU_REQUIRE_DEVICE is set:\n' + r.stdout)
@@ -549,6 +560,19 @@ class BitTests(unittest.TestCase):
         entries = [e for e in CATALOGUE if e[0].startswith('i_')]
         out = self.harness('bits_int', entries)
         self.check(out, entries)
+
+    def test_a_distrusted_kernel_is_reported_and_does_not_poison_the_next(self):
+        """Colab Tesla T4, 2026-10-30: the first int64 kernel whose self-test failed made the device untrusted for the class,
+        every later launch of the process returned GK_DECLINED, and the harness counted each of them as a "spurious flag"
+        (min/max/lt/eq cannot flag at all).  A declined launch is now named as such with the distrust message, and each
+        kernel starts with a fresh trust state, so the second kernel fails (or passes) on its own self-test (k1), not on
+        the first one's (k0).  AIL_GPU_INJECT=flip:selftest makes every self-test fail."""
+        entries = [e for e in CATALOGUE if e[0] in ('i_add', 'i_min')]
+        out = self.harness('bits_declined', entries, {'AIL_GPU_INJECT': 'flip:selftest'})
+        self.assertRegex(out, r'i_add: the device declined the launch: device untrusted for int64 kernels: k0 result bits differ')
+        self.assertRegex(out, r'i_min: the device declined the launch: device untrusted for int64 kernels: k1 result bits differ')
+        self.assertRegex(out, r'K i_add .* spurious=1')
+        self.assertRegex(out, r'K i_min .* spurious=1')
 
 
 # ---------------------------------------------------------------------------------------------------------------------
@@ -980,6 +1004,77 @@ LISTS_OF = {   # the scenario numbers of errors(): what they exercise
     15: 'inf + -inf', 16: 'underflowing product', 17: 'difference that is a subnormal', 18: 'floor of inf',
     19: 'inf * 0', 20: 'overflow to inf',
 }
+
+
+FLOORDIV_PROGRAM = r'''
+def quot(a: list[int], b: list[int]) -> None:
+    n = len(a)
+    out = [0] * n
+    # ail: gpu
+    for i in range(n):
+        out[i] = a[i] // b[i]
+    print(out)
+
+def rem(a: list[int], b: list[int]) -> None:
+    n = len(a)
+    out = [0] * n
+    # ail: gpu
+    for i in range(n):
+        out[i] = a[i] % b[i]
+    print(out)
+
+def both(a: list[int], b: list[int], c: list[int]) -> None:
+    n = len(a)
+    out = [0] * n
+    # ail: gpu
+    for i in range(n):
+        out[i] = (a[i] + b[i]) // 3 + a[i] * b[i] - c[i] + a[i] % 5 - b[i] // 7
+    print(out)
+
+xs = [0, 1, -1, 2, -2, 3, -3, 7, -7, 22, -22, 100, -100, 206711, -206711, 2147483647, -2147483648, 9007199254740993,
+      -9007199254740993, 8888340891191995778, -8888340891191995778, 9223372036854775807, -9223372036854775807]
+ys = [1, -1, 2, -2, 3, -3, 5, -5, 7, -22, 22, 4, -4, 9223372036854775807, -9223372036854775807, 4294967296, -3037000500]
+a = []
+b = []
+for x in xs:
+    for y in ys:
+        a.append(x)
+        b.append(y)
+quot(a, b)
+rem(a, b)
+# the operands the Tesla T4 got wrong with OpSRem (GPU.md 6.3), and a % b with b = -1
+quot([-1, 3, 3, 8888340891191995778, -206711], [2, -3, -2, -22, 7])
+rem([-1, 3, 3, 8888340891191995778, -206711, -9223372036854775807], [2, -3, -2, -22, 7, -1])
+both([-206711, 5, -9, 100], [0, -3, 4, -7], [-4, 1, 2, 3])
+'''
+
+
+class FloorDivision(unittest.TestCase):
+    """`//` and `%` take the divisor's sign as Python does.  NVIDIA 580 (Tesla T4) computes 64-bit OpSRem wrongly (GPU.md 6.3), so the
+    emitter never uses it; this runs the operands that failed there, plus a grid of signs and magnitudes, on the device (lavapipe in CI)
+    and against CPython."""
+
+    def test_operands_against_python(self):
+        if not CC:
+            self.skipTest('no C compiler')
+        with tempfile.TemporaryDirectory(prefix='ail-gpu2-fd-') as d:
+            b = Build(d, 'fd', FLOORDIV_PROGRAM)
+            self.assertEqual(b.returncode, 0, b.stderr + b.stdout)
+            path = Path(d) / 'fdcpy.py'
+            path.write_text(FLOORDIV_PROGRAM.lstrip('\n'), encoding='utf-8')
+            want, rc = run_python(path)
+            self.assertEqual(rc, 0)
+            out, rc, err = b.run('', AIL_GPU='0')
+            self.assertEqual((out, rc), (want, 0), err[:600])
+            out, rc, err = b.run('', AIL_GPU='force', AIL_GPU_TRACE='1')
+            self.assertEqual((out, rc), (want, 0), err[:600])
+            ran = device_runs(err)
+            if not ran:
+                if REQUIRE_DEVICE:
+                    self.fail('no Vulkan device, but AIL_GPU_REQUIRE_DEVICE is set\n' + err[:600])
+                self.skipTest('no Vulkan device (install mesa-vulkan-drivers for lavapipe)')
+            self.assertGreaterEqual(len(ran), 5, err[:1200])           # the answers above came from the device, not from the CPU path
+            self.assertNotIn('untrusted', err)
 
 
 class Programs(unittest.TestCase):

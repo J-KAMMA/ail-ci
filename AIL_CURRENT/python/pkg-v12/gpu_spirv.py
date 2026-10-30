@@ -25,7 +25,8 @@ Exactness rules (GPU.md 3.2, 3.3):
 * comparisons are ordered (`OpFOrd*`), `!=` is unordered; min/max are Python's compare-and-select, never FMin/FMax.
 * int64: `+ - *` and `-x`, `abs` check overflow (xor sign tests; the product by division) and flag; `//` and `%` take the
   divisor's sign as Python does, divide by a safe divisor (never 0 or -1: both are UB in SPIR-V or flagged) and flag
-  zero division and INT64_MIN // -1.
+  zero division and INT64_MIN // -1.  The remainder is
+  `a - (a // d) * d`: `OpSRem` is wrong for 64-bit operands on NVIDIA 580 (Tesla T4, GPU.md 6.3), so it is never emitted.
 * every list read is bounds checked after Python's negative-index rule; a miss flags and reads element 0 of the buffer
   (every buffer holds at least one element) instead.
 
@@ -482,14 +483,16 @@ class Gen:
             bm1 = self.op('IEqual', B, b, self.ci(-1))
             self.flag(bz, GK_ZERODIV)
             d = self.op('Select', I, self.op('LogicalOr', B, bz, bm1), self.ci(1), b)
-            r = self.op('SRem', I, a, d)
-            differ = self.op('LogicalNotEqual', B, self.op('SLessThan', B, r, self.ci(0)),
-                             self.op('SLessThan', B, b, self.ci(0)))
+            # No OpSRem: NVIDIA 580 (Tesla T4) returns a wrong 64-bit remainder for negative operands (GPU.md 6.3).  The
+            # truncated remainder is a - (a // d) * d (wrapping arithmetic is exact here), and "the signs differ" is
+            # (r ^ b) < 0, which needs no OpLogicalNotEqual either.
+            q0 = self.op('SDiv', I, a, d)
+            r = self.op('ISub', I, a, self.op('IMul', I, q0, d))
+            differ = self.op('SLessThan', B, self.op('BitwiseXor', I, r, b), self.ci(0))
             fix = self.op('LogicalAnd', B, self.op('INotEqual', B, r, self.ci(0)), differ)
             if name == 'mod':
                 rr = self.op('Select', I, fix, self.op('IAdd', I, r, b), r)
                 return self.op('Select', I, bm1, self.ci(0), rr)
-            q0 = self.op('SDiv', I, a, d)
             q = self.op('Select', I, fix, self.op('ISub', I, q0, self.ci(1)), q0)
             self.flag(self.op('LogicalAnd', B, bm1, self.op('IEqual', B, a, self.ci(INT64_MIN))), GK_OVERFLOW)
             return self.op('Select', I, bm1, self.op('SNegate', I, a), q)
