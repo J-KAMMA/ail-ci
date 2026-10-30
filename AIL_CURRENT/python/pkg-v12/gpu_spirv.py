@@ -391,6 +391,15 @@ class Gen:
     def x_pos(self, e):
         return self.as_kind(self.ex(e[2]), e[1])
 
+    def x_c32(self, e):
+        """gk_c32 (stage G5): an int that must fit int32 (the array dtype); outside it the overflow flag is set and the value is
+        not used (the CPU replay raises OverflowError with the index)."""
+        a = self.to_i(self.ex(e[2]))
+        bad = self.op('LogicalOr', self.B, self.op('SLessThan', self.B, a, self.ci(-(1 << 31))),
+                      self.op('SGreaterThan', self.B, a, self.ci((1 << 31) - 1)))
+        self.flag(bad, GK_OVERFLOW)
+        return a, 'i'
+
     def x_abs(self, e):
         t = e[1]
         if t == 'f':       # clear the sign bit

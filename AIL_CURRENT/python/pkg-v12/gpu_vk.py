@@ -33,6 +33,7 @@ VK_RUNTIME = r'''
 #ifndef AIL_GKV_RT
 #define AIL_GKV_RT
 #include <time.h>
+#include <math.h>
 /* GPU.md stages G2/G3: Vulkan compute through a loader opened at run time.  Struct layouts below are the 64-bit ABI of
    vulkan_core.h (checked against the header by test_ail_gpu_g2.py). */
 #ifdef _WIN32
@@ -640,6 +641,58 @@ static GKV_UNUSED void gkv_fill_i(int64_t *a, int64_t m, int slot, const int64_t
     }
 }
 
+/* G5: operand sets for the block-sum and block-dot kernels (one invocation per block of 1024 elements, 16 lanes of 64 adds).  The
+   generic sets above are almost all flagged once 1024 of them are added (one NaN or subnormal flags the block), which would
+   test nothing; these blocks are mostly clean and each has a character: rounding of a repeated 0.1, absorption (1e16 + 1),
+   signed zeros, overflow to inf, one inf, cancellation with a residue, powers of two, exact integers, ties at 2**52, and a few
+   that must flag (NaN, a subnormal, inf - inf). */
+#define GKV_ST_BLOCKS 64
+#define GKV_CHK_BLOCKS 8
+static const double gkv_eb[] = { 0.0, -0.0, 1.0, -1.0, 0.5, 2.0, 1.5, 3.0, 0.1, -0.1, 1e300, -1e300, 1.7976931348623157e308, 2.2250738585072014e-308,
+    4503599627370496.0, 4503599627370497.5, 9007199254740992.0, 123456789.123, 0.30000000000000004, 1e-300, -1e-300, 1e16, -1e16, 1e-5 };
+static double gkv_rb_mid(void) {
+    switch (gkv_rnd() % 4) {
+    case 0: return gkv_dof((gkv_rnd() & 0x800fffffffffffffull) | ((uint64_t)(1023 - 30 + gkv_rnd() % 60) << 52));
+    case 1: return (double)((int64_t)(gkv_rnd() % 2001) - 1000);
+    case 2: return 0.1 * (double)((int64_t)(gkv_rnd() % 41) - 20);
+    default: return gkv_dof((gkv_rnd() & 0x800fffffffffffffull) | ((uint64_t)(1023 - 100 + gkv_rnd() % 200) << 52));
+    }
+}
+static double gkv_rb(void) {
+    if (gkv_rnd() % 64 == 0) return gkv_eb[gkv_rnd() % (sizeof gkv_eb / sizeof gkv_eb[0])];
+    return gkv_rb_mid();
+}
+static GKV_UNUSED void gkv_fill_blocks(double *a, int64_t m, int slot) {
+    gkv_rs = 88172645463325252ull + 0x9e3779b97f4a7c15ull * (uint64_t)(slot + 21);
+    for (int64_t b = 0; b * 1024 < m; b++) {
+        int pat = (int)((b + 3 * slot) % 16);
+        int pos = (int)((b * 37 + slot * 11) % 1024);
+        for (int64_t j = 0; j < 1024 && b * 1024 + j < m; j++) {
+            int64_t i = b * 1024 + j;
+            double v;
+            switch (pat) {
+            case 0: v = gkv_rb(); break;
+            case 1: v = 0.1; break;
+            case 2: v = (j % 4 == 0) ? 1e16 : (j % 4 == 2) ? -1e16 : 1.0; break;
+            case 3: v = -0.0; break;
+            case 4: v = (gkv_rnd() & 1) ? 0.0 : -0.0; break;
+            case 5: v = (gkv_rnd() % 7) ? 1.7e308 : -1.0; break;
+            case 6: v = j == pos ? INFINITY : gkv_rb_mid(); break;
+            case 7: v = ((gkv_rnd() & 1) ? 1.0 : -1.0) * 1e-300 * (double)(1 + gkv_rnd() % 5); break;
+            case 8: v = j < 512 ? gkv_rb_mid() : -a[i - 512]; break;
+            case 9: v = ((gkv_rnd() & 1) ? 1.0 : -1.0) * ldexp(1.0, (int)(gkv_rnd() % 121) - 60); break;
+            case 10: v = (double)((int64_t)(gkv_rnd() % 2001) - 1000); break;
+            case 11: v = (j & 1) ? 0.5 : 4503599627370496.0; break;
+            case 12: v = j == pos ? NAN : gkv_rb_mid(); break;
+            case 13: v = j == pos ? 4.9406564584124654e-324 : gkv_rb_mid(); break;
+            case 14: v = j == 3 ? INFINITY : j == 19 ? -INFINITY : gkv_rb_mid(); break;
+            default: v = gkv_dof(gkv_rnd()); break;
+            }
+            a[i] = v;
+        }
+    }
+}
+
 static GKV_UNUSED void gkv_trace_why(int k) { if (gk_tracing()) fprintf(stderr, "gpu: k%d device unavailable (%s)\n", k, gkv_G.why && gkv_G.why[0] ? gkv_G.why : "not used"); }
 #endif
 '''
@@ -691,6 +744,11 @@ def device_text(kernel, name, k, ops_c='1.0'):
     names += ['_cnt', '_res']
     elem_lists = {lst for _c, _t, lst in kernel.elems}
     safe = not (elem_lists & set(kernel.reads))      # elements can be run one at a time (shifted element lists)
+    block = getattr(kernel, 'kind', None) in ('sum', 'dot')       # G5: one invocation per block of 1024 elements
+    st_cnt = 'GKV_ST_BLOCKS' if block else 'GKV_ST_M'           # self-test: invocations, and the length of every list
+    st_len = 'GKV_ST_BLOCKS * 1024' if block else 'GKV_ST_M'
+    chk_n = 'GKV_CHK_BLOCKS' if block else 'GKV_CHK_N'
+
     mask = 'GKV_T_F64 | GKV_T_I64' if info['need_f64'] else 'GKV_T_I64'
     cls = 'GKV_T_F64' if info['need_f64'] else 'GKV_T_I64'
 
@@ -735,7 +793,7 @@ def device_text(kernel, name, k, ops_c='1.0'):
     # the device's answer against the emulation on the first elements of a real launch
     L += ['/* 1 when the device results in _res (valid iff _df == 0) equal the emulation on the first GKV_CHK_N elements; *_at = element */',
           'static int %s_agree(%s, unsigned _df, long long *_at, const char **_what) {' % (name, ', '.join(params)),
-          '    int64_t _m = _cnt < GKV_CHK_N ? _cnt : GKV_CHK_N;',
+          '    int64_t _m = _cnt < %s ? _cnt : %s;' % (chk_n, chk_n),
           '    if (_df != 0) return 1;                  /* replayed anyway: nothing of the device is used */']
     if safe:
         L += ['    for (int64_t _i = 0; _i < _m; _i++) {',
@@ -757,7 +815,7 @@ def device_text(kernel, name, k, ops_c='1.0'):
     scal_params = [q for q in params if ' s_' in q]
     L += ['/* GPU.md 6.3 self-test: 1 passed, 0 the device could not run it, -1 differs from the emulation (class distrusted) */',
           'static int %s_selftest(%s) {' % (name, ', '.join(scal_params) if scal_params else 'void'),
-          '    enum { M = GKV_ST_M };',
+          '    enum { M = %s, LN = %s };' % (st_cnt, st_len),
           '    int _r = 0, _nsel = 0; int64_t _sel[GKV_ST_SINGLES]; unsigned _seen = 0; int64_t _nclean = 0, _nflag = 0;',
           '    double _t0 = gkv_now_us(), _b0 = gkv_G.build_us;',
           '    int64_t _cnt = M;']
@@ -766,12 +824,15 @@ def device_text(kernel, name, k, ops_c='1.0'):
     prev = {'f': None, 'i': None}
     for j, lst in enumerate(lists):
         t = kernel.lists[lst]
-        L.append('    %s *p_%s = (%s *)malloc((size_t)M * 8); int64_t n_%s = M;' % (ct(t), lst, ct(t), lst))
+        L.append('    %s *p_%s = (%s *)malloc((size_t)LN * 8); int64_t n_%s = LN;' % (ct(t), lst, ct(t), lst))
     L.append('    %s *_res = (%s *)calloc((size_t)M, 8);' % (res_c, res_c))
     L.append('    if (!_res%s) goto out;' % ''.join(' || !p_' + lst for lst in lists))
     for j, lst in enumerate(lists):
         t = kernel.lists[lst]
-        L.append('    gkv_fill_%s(p_%s, M, %d, %s);' % ('f' if t == 'f' else 'i', lst, j, prev[t] or 'NULL'))
+        if block:
+            L.append('    gkv_fill_blocks(p_%s, LN, %d);' % (lst, j))
+        else:
+            L.append('    gkv_fill_%s(p_%s, LN, %d, %s);' % ('f' if t == 'f' else 'i', lst, j, prev[t] or 'NULL'))
         prev[t] = 'p_' + lst
     L += ['    unsigned _df = 0;',
           '    gkv_G.st = 1;',

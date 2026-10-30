@@ -5877,7 +5877,7 @@ def main(argv=None):
                 for line in _fallback_notes(args, source, result.stderr, locate=not objects and not separate,
                                              source_map=loading['source_map']):
                     print(line, file=sys.stderr)
-                if gpu_sites:                                             # gpu.py: a marked loop that got no kernel
+                if gpu_sites or 'ail-gpu-path: ' in (result.stderr or ''):   # gpu.py: a marked loop that got no kernel
                     import gpu
                     applied = set()
                     for line in (result.stderr or '').splitlines():
@@ -5885,7 +5885,10 @@ def main(argv=None):
                             applied = {int(n) for n in line.split(':', 1)[1].split()}
                         elif line.startswith('ail-gpu-path: '):                  # G2: which path the kernel can take
                             number, kind, text = line[len('ail-gpu-path: '):].split(' ', 2)
-                            print('note: %s:%s: %s' % (_relpath(source), number, gpu.path_note(kind, text)), file=sys.stderr)
+                            if number.startswith('-'):                          # G5: a loop the compiler marked (ail_array), not a line of the file
+                                print('note: %s: ail_array: %s' % (_relpath(source), gpu.path_note(kind, text)), file=sys.stderr)
+                            else:
+                                print('note: %s:%s: %s' % (_relpath(source), number, gpu.path_note(kind, text)), file=sys.stderr)
                     for number in gpu_sites:
                         if number not in applied:
                             print('note: %s:%d: %s' % (_relpath(source), number, gpu.IGNORED), file=sys.stderr)
