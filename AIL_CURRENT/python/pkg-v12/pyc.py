@@ -1181,6 +1181,7 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
         if isinstance(_typed_e, gpu.GpuRefusal):
             raise                       # a marked loop that is not eligible is a refusal, never a general-path fallback
         gpu.APPLIED.clear()             # the program is built on the general path: no kernel is in it
+        gpu.PATHS.clear()
         # AIL_NO_GENERAL=1: judges use it to ask the TYPED path alone (their negatives assert a
         # by-name refusal of the typed path; through the fallback that refusal would be invisible).
         if os.environ.get('AIL_NO_GENERAL') or legacy_int:
@@ -1473,6 +1474,8 @@ def main(argv=None):
             print(_source_line_marker(last_fallback_line), file=sys.stderr)
     if gpu.enabled():
         print(gpu.applied_line(), file=sys.stderr)
+        for line in gpu.paths_lines():
+            print(line, file=sys.stderr)
     print('%s  %d bytes' % (p, p.stat().st_size))
     return 0
 
