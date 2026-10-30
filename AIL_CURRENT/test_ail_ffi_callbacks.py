@@ -16,7 +16,8 @@ typed path and general path; stdout and the exit code must be equal.
   message instead of running the callback;
 * named refusals with file:line and `write instead:` (lambda, closure, method, local variable, retain=, threads=,
   a parallel worker that makes the call, a mismatched def);
-* programs without callbacks keep the same lowered text and the same adapter C (sha256 against the values F4 gives).
+* programs without callbacks keep the same lowered text and the same adapter C (sha256 against what integ gives
+  without F7).
 """
 import ctypes
 import hashlib
@@ -398,7 +399,7 @@ Each = callback(c_int, c_int, on_error=0,
                 threads=True)
 """
 
-# programs without callbacks: the lowered text and the adapter C, sha256, as F4 writes them (lowered at the fixed path
+# programs without callbacks: the lowered text and the adapter C, sha256, as integ writes them without F7 (F3a changed the lowered text) (lowered at the fixed path
 # below; the adapter's compile step is not run)
 GOLDEN_PATH = "/ail-f7-golden/prog.py"
 GOLDEN = {
@@ -462,9 +463,9 @@ main()
 """,
 }
 GOLDEN_SHA = {
-    "libc": ("d196bb55703c310d3da9a8e100054968bb27f62cc18d8f731a0a0371962240c5",
+    "libc": ("2293496a6257a3bc32a83905e25ae2048046d4fa5c1fbc6bea79fa059767c307",
                "40f67875f01ca2240012b086ad547b333e793ac80af29f018ffc0858779e1390"),
-    "bytes": ("37c47290cc40f8f36398d59ef3935c0d2df8c03467995275906a7b9d936969b9",
+    "bytes": ("c9e99d5c82f035882eb806465f263c61ad75c34596dafcededfd8938dad5f592",
                "0dfe30459b62074b12879f100c4279492160a692ec4cb08ac158d36922f1909f"),
     "handle": ("4671aa3d2fe69e63683510cd10862f68ba17c929954cff4bce79114efef23ccb",
                "a30529176b3286e6065ac5fee9061e17df8c87f65f065c94e4d6698ac2c7d3ef"),
