@@ -750,8 +750,29 @@ class Lowerer:
             out = bout & eout
         return pre + [ast.If(test=test, body=body or [ast.Pass()], orelse=orelse)], out
 
+    def kept_present(self, s, facts):
+        """The names of `facts` (present before the loop `s`) that every store inside `s` keeps present: each is
+        only assigned a value that is not None (or updated in place with `op=`), so the loop head sees them
+        present on every pass, not only the first."""
+        good = set()
+        for n in ast.walk(s):
+            if isinstance(n, ast.Assign) and len(n.targets) == 1 and isinstance(n.targets[0], ast.Name) \
+                    and n.targets[0].id in facts and self.nonnull(n.value):
+                good.add(id(n.targets[0]))
+            elif isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
+                good.add(id(n.target))
+        bad = set()
+        for n in ast.walk(s):
+            if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)) and id(n) not in good:
+                bad.add(n.id)
+            elif isinstance(n, ast.ExceptHandler) and n.name:
+                bad.add(n.name)
+            elif isinstance(n, (ast.Global, ast.Nonlocal)):
+                bad.update(n.names)
+        return facts - bad
+
     def st_While(self, s, facts):
-        entry = facts - _assigned([s])
+        entry = (facts - _assigned([s])) | self.kept_present(s, facts)
         pre, test = self.lower_expr(s.test, entry, test=True, hoist=False)
         t, f = self.tests(s.test)
         body, _ = self.block(s.body, entry | t)
@@ -764,7 +785,7 @@ class Lowerer:
             if isinstance(n, ast.Name) and n.id in self.opt:
                 raise Refused(s, 'a loop variable that is also an Optional variable is not built')
         pre, it = self.lower_expr(s.iter, facts)
-        entry = facts - _assigned([s])
+        entry = (facts - _assigned([s])) | self.kept_present(s, facts)
         body, _ = self.block(s.body, entry)
         orelse, _ = self.block(s.orelse, entry)
         new = copy.copy(s)
@@ -1312,6 +1333,73 @@ def annotate_none_locals(tree):
     return count
 
 
+def _infers_return(fn, returns, optional):
+    """The scalar kind K when the unannotated, plain function `fn` returns None on some path (or returns the
+    result of a call of an Optional function of kind K) and one value of kind K on every other; None otherwise.
+    `optional` maps the names of the Optional functions to their kinds. Falling off the end is not counted as
+    a None return."""
+    if fn.returns is not None or fn.decorator_list:
+        return None
+    for st in fn.body:
+        for n in ast.walk(st):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef, ast.Yield,
+                              ast.YieldFrom, ast.Await, ast.Global, ast.Nonlocal)):
+                return None
+    kinds = _LocalKinds(fn, returns)
+    maybe_none = False
+    found = set()
+    for r in kinds.nodes:
+        if not isinstance(r, ast.Return):
+            continue
+        v = r.value
+        if v is None or _is_none(v):
+            maybe_none = True
+        elif isinstance(v, ast.Call) and isinstance(v.func, ast.Name) and v.func.id in optional:
+            maybe_none = True
+            found.add(optional[v.func.id])
+        else:
+            found.add(kinds.expr(v))
+    if not maybe_none or len(found) != 1:
+        return None
+    kind = found.pop()
+    return kind if kind in KINDS else None
+
+
+def annotate_none_returns(tree):
+    """A module-level function with no return annotation that returns None on some path and one scalar kind
+    (int, float, str, bool) on the others gets `-> <kind> | None`, which the Optional lowering takes (a caller
+    that uses the result where it may be None is refused by name there). A function that only passes on the
+    result of an Optional function is Optional too. Returns the number annotated."""
+    fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
+    names = [n.name for n in fns]
+    returns = {}
+    optional = {}
+    for n in fns:
+        if n.returns is not None and names.count(n.name) == 1:
+            r = ast.unparse(n.returns)
+            if r in KINDS:
+                returns[n.name] = r
+            elif scalar_optional(n.returns) is not None:
+                returns[n.name] = optional[n.name] = scalar_optional(n.returns)
+    count = 0
+    changed = True
+    while changed and count < 64:
+        changed = False
+        for fn in fns:
+            if fn.returns is not None or names.count(fn.name) != 1:
+                continue
+            kind = _infers_return(fn, returns, optional)
+            if kind is None:
+                continue
+            fn.returns = ast.BinOp(left=ast.Name(id=kind, ctx=ast.Load()), op=ast.BitOr(),
+                                   right=ast.Constant(value=None))
+            ast.copy_location(fn.returns, fn)
+            returns[fn.name] = optional[fn.name] = kind
+            count += 1
+            changed = True
+    return count
+
+
 def _replace_stmt(fn, old, new):
     for parent in ast.walk(fn):
         for field in ('body', 'orelse', 'finalbody'):
@@ -1341,11 +1429,27 @@ def candidate(tree):
 
 def rewrite(source, notes=None):
     """The program with its scalar Optionals lowered to flag + value pairs; the source as written when it has none
-    (or when a use is not built -- the reason is then added to `notes`)."""
+    (or when a use is not built -- the reason is then added to `notes`).
+
+    An unannotated function that returns None on some paths and one scalar kind on the others is first given
+    `-> <kind> | None` (`annotate_none_returns`). When the lowering then refuses the program, it is tried again
+    without that inference, so a program that took the lowering before still takes it; the first refusal is kept
+    as a note, because it names the use that may be None where the typed path would only say "the constant None"."""
+    result = _rewrite_once(source, notes, True)
+    if not isinstance(result, tuple):
+        return result
+    again = _rewrite_once(source, notes, False)
+    if notes is not None:
+        notes.append(result[1])
+    return again
+
+
+def _rewrite_once(source, notes, infer):
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return source
+    returned = annotate_none_returns(tree) if infer else 0
     annotated = annotate_none_locals(tree)
     if not candidate(tree) and not annotated:
         return source
@@ -1354,13 +1458,18 @@ def rewrite(source, notes=None):
         ast.fix_missing_locations(lowered)
         return _pad(lowered, source.split('\n'))
     except Refused as exc:
+        if returned:
+            return ('retry', (exc.line, exc.text))
         if notes is not None:
             notes.append((exc.line, exc.text))
         return source
     except (AttributeError, KeyError, IndexError, TypeError, ValueError, RecursionError, AssertionError) as exc:
+        text = ('the Optional rewrite could not handle this program (%s: %s); simplify the Optional '
+                'use or report it' % (type(exc).__name__, exc))
+        if returned:
+            return ('retry', (1, text))
         if notes is not None:
-            notes.append((1, 'the Optional rewrite could not handle this program (%s: %s); simplify the Optional '
-                          'use or report it' % (type(exc).__name__, exc)))
+            notes.append((1, text))
         return source
 
 

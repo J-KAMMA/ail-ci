@@ -127,6 +127,18 @@ class Calls:
                 self.refuse(node, 'a tuple passed to parameter %d of %s(), whose type is not told (it also '
                             'receives other kinds); annotate the parameter' % (i + 1, sig.name if hasattr(sig, 'name')
                                                                                else ast.unparse(node.func)))
+        if not sig.owner and self.cur is not sig and isinstance(sig.node, ast.FunctionDef):
+            # what this call passes to each parameter (tuplib.param_hints settles unannotated ones)
+            covered = set()
+            for j, i in enumerate(keep):
+                if i < len(params):
+                    covered.add(i)
+                    t = None if i in fixed else deep(ts[j])
+                    self.param_obs.setdefault((sig.node.name, i), set()).add(
+                        t if t in (INT, FLT, STR, BYTES) else None)
+            for i in range(len(params)):
+                if i not in covered:
+                    self.param_obs.setdefault((sig.node.name, i), set()).add(None)
         kws = []
         for kw in node.keywords:
             w = next((p[1] for p in sig.params if p[0] == kw.arg), None)

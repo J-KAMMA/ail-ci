@@ -50,13 +50,16 @@ def candidate(tree):
 
 
 class Lower(Stmts, Calls, Lams, Exprs):
-    def __init__(self, source, hints=None, rets=None):
+    def __init__(self, source, hints=None, rets=None, params=None):
         self.source = source
         self.tree = ast.parse(source)
         self.gen = G.Gen()
         self.hints = {} if hints is None else hints
         self.rets_in = {} if rets is None else rets
         self.rets_out = {}
+        self.params_in = {} if params is None else params   # (function, index) -> type told by its callers
+        self.param_obs = {}          # (function, index) -> types the call sites pass (None: not told)
+        self.value_refs = set()      # top-level functions used other than called by name
         self.forced = False
         self.quiet = 0
         self.nohoist = 0
@@ -103,6 +106,11 @@ class Lower(Stmts, Calls, Lams, Exprs):
             elif isinstance(node, ast.ImportFrom) and node.module in ('heapq', 'math', 'functools', 'bisect'):
                 for a in node.names:
                     self.fromnames[a.asname or a.name] = (node.module, a.name)
+        top = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
+        called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
+        self.value_refs = {n.id for n in ast.walk(tree)
+                           if isinstance(n, ast.Name) and n.id in top and id(n) not in called}
+        self.value_refs |= {n.name for n in tree.body if isinstance(n, ast.FunctionDef) and n.decorator_list}
         for node in tree.body:
             if isinstance(node, ast.FunctionDef):
                 self.pristine[node.name] = fresh_copy(node)
@@ -121,6 +129,8 @@ class Lower(Stmts, Calls, Lams, Exprs):
         for i, a in enumerate(plain):
             if owner and i == 0:
                 t = ('cls', owner)
+            elif not owner and a.annotation is None and (fn.name, i) in self.params_in:
+                t = self.params_in[(fn.name, i)]        # what every call site passes (param_hints)
             else:
                 try:
                     t = self.sig_ann(a.annotation)
@@ -231,6 +241,19 @@ class Lower(Stmts, Calls, Lams, Exprs):
             if dt is not None and known(dt):
                 self.hints[key] = dt
         self.cur = None
+
+    def param_hints(self):
+        """(function, index) -> int / float / str / bytes for each unannotated parameter of a top-level
+        function whose every call site passes one and the same of those, and that is only ever called
+        by name: the tuple types of values computed from that parameter are then known."""
+        out = {}
+        for key, seen in self.param_obs.items():
+            if key[0] in self.value_refs or len(seen) != 1:
+                continue
+            t = next(iter(seen))
+            if t in (INT, FLT, STR, BYTES):
+                out[key] = t
+        return out
 
     def class_(self, node):
         name = node.name
@@ -391,6 +414,34 @@ def rewrite(source, notes=None):
         first.process()
         second = Lower(source, first.hints, first.rets_out)
         second.process()
+        if second.errors:
+            # A program the pass refused may be refused only because an unannotated parameter has no
+            # type (`def f(x, y): return x ^ y, x & y`): when every call site passes one and the same
+            # type, run again knowing it, until the types stop moving. The result stands only when
+            # the last run saw exactly the types it was given and refused nothing; a program the pass
+            # already took is never run this way.
+            params = second.param_hints() or first.param_hints()
+            hints, rets, result = second.hints, second.rets_out, None
+            try:
+                for _ in range(4):
+                    if not params:
+                        break
+                    trial = Lower(source, hints, rets, params)
+                    trial.process()
+                    seen = trial.param_hints()
+                    if seen == params:
+                        if not trial.errors:
+                            # again, so the return types settled by the last run are used when it emits
+                            final = Lower(source, trial.hints, trial.rets_out, params)
+                            final.process()
+                            if final.param_hints() == params and not final.errors:
+                                result = final
+                        break
+                    params, hints, rets = seen, trial.hints, trial.rets_out
+            except Refused:
+                result = None
+            if result is not None:
+                second = result
         if second.errors:
             # the compiler refuses the program with its own message; these name what was not built
             if notes is not None:
