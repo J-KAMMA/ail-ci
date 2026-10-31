@@ -16,7 +16,7 @@ POSIX only: it uses mmap.
 """
 import pathlib, subprocess, sys
 
-from pipeline import PipelineError, compiler, link_flags
+from pipeline import PipelineError, compiler, link_flags, STRICT_DECL_FLAGS
 from pyfront import to_pipeline_c
 
 MAIN = r'''
@@ -48,7 +48,7 @@ def build(expr, out, source='xs', strict=False):
     out = pathlib.Path(out)
     c = out.with_suffix('.c')
     c.write_text(to_pipeline_c(expr, source, strict=strict) + MAIN)
-    r = subprocess.run([compiler(), '-O2', '-ffp-contract=off', *link_flags(), '-o', str(out), str(c)],
+    r = subprocess.run([compiler(), '-O2', '-ffp-contract=off', *STRICT_DECL_FLAGS, *link_flags(), '-o', str(out), str(c)],
                        capture_output=True, text=True)
     if r.returncode:
         raise PipelineError('the C compiler rejected this:\n%s' % r.stderr[-800:])

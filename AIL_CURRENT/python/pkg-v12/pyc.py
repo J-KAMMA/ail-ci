@@ -21,7 +21,7 @@ input; Windows reads the same raw file into an owned buffer before calling the g
 """
 import argparse, ast, json, os, pathlib, subprocess, sys
 
-from pipeline import PipelineError, compiler, ffi_link_args, link_flags, sqlite_link_args, extra_libs, opt_flags
+from pipeline import PipelineError, compiler, ffi_link_args, link_flags, sqlite_link_args, extra_libs, opt_flags, STRICT_DECL_FLAGS
 
 # Extra optimizer flags for the generated C. SLP vectorization is off: on a struct of doubles it packs
 # neighbouring fields (vx,vy / vz,m) into 16-byte vectors whose loads straddle the preceding scalar or
@@ -36,6 +36,7 @@ CFLAGS_TUNE += ['-ffp-contract=off']
 # `#pragma omp simd` (emitted only for a flat float list comprehension whose elements cannot call
 # code or raise) is otherwise ignored: enable the loop hint without pulling in the OpenMP runtime.
 CFLAGS_TUNE += ['-fopenmp-simd']
+CFLAGS_TUNE += STRICT_DECL_FLAGS
 # Extra flags for the C compiler, for development: AIL_EXTRA_CFLAGS='-Werror=incompatible-pointer-types' turns the one
 # warning GCC 13 gives for a call of a runtime helper on the wrong struct type into an error (a packed list[str] field passed
 # to an ail_slist_* function compiled and misbehaved before the tests of that stage were run this way).
