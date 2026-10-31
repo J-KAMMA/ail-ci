@@ -1342,6 +1342,14 @@ def _c_expr(node, var, need=None):
 
 def _fold(call, source, need=None):
     """One fold: the verb, the element expression, the guards, and the array it reads."""
+    if isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == 'exec':
+        # `exec` is what a model reaches for to run a snippet; name that, not the fold grammar
+        refusal = Unsupported('exec() is not built: this language compiles the whole program ahead '
+                              'of time, so there is no source text to run at run time.\n'
+                              '  write instead: write the statements in the program itself, or call '
+                              'the function directly')
+        refusal.source_line = getattr(call, 'lineno', None)
+        raise refusal
     if (isinstance(call, ast.Compare) and len(call.ops) == 1
             and isinstance(call.ops[0], (ast.In, ast.NotIn))
             and isinstance(call.comparators[0], ast.Name)
