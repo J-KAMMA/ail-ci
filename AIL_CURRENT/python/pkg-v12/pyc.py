@@ -1236,6 +1236,85 @@ def _python_defs_only_runs_nothing(source):
 _NOTHING_MAIN = '\nint main(void) { return 0; }\n'
 
 
+def _split_units(source_units):
+    """How many translation units to cut one typed program into: AIL_CC_SPLIT (0 or 1 = never), else
+    AIL_CC_JOBS, else 1 (the default: one unit). One unit on Windows, under --debug and in a native build report."""
+    if native_diagnostics.enabled() or os.name == 'nt' or os.environ.get('AIL_TARGET_OS') == 'windows'             or os.environ.get('AIL_DEBUG') == '1' or os.environ.get('AIL_STATIC') == '1':
+        return 1
+    for key in ('AIL_CC_SPLIT', 'AIL_CC_JOBS'):
+        try:
+            value = int(os.environ.get(key) or 0)
+        except ValueError:
+            value = 0
+        if value >= 1:
+            return min(value, 8)
+    return 1                  # off unless asked for: it can cost run time (a few tenths of a percent)
+
+
+def _split_log(message):
+    """AIL_CC_SPLIT_LOG=<file>: append what the split decided (development aid)."""
+    path = os.environ.get('AIL_CC_SPLIT_LOG')
+    if path:
+        with open(path, 'a') as f:
+            f.write(message + chr(10))
+
+
+def _split_build(info, body, main, out):
+    """Compile the typed program as several translation units in parallel (ccsplit.py) and link them.
+    False when the program stays one unit, or when anything about the split build is not clean: the
+    caller then builds the single unit exactly as before."""
+    units = _split_units(None)
+    if units < 2:
+        return False
+    import ccsplit
+    sources = ccsplit.plan(info.get('c_split'), body, main, units, strip=pyfunc._range_strip)
+    if not sources:
+        _split_log('one unit (reason %s) %r' % (ccsplit.last_reason, ccsplit.last_detail))
+        return False
+    _split_log('%d units: %s movable/heaviest %s' % (len(sources), [len(s) for s in sources], ccsplit.last_detail))
+    out = pathlib.Path(out)
+    inherit = ['-fno-strict-aliasing'] if info.get('inherit') else []
+    flags = [*opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), *inherit]
+    paths = []
+    for k, text in enumerate(sources):
+        cp = out.parent / ('%s_u%d.c' % (out.name, k))
+        cp.write_text(text, encoding='utf-8')
+        paths.append((cp, cp.with_suffix('.o')))
+    try:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(len(paths)) as pool:
+            pending = [pool.submit(_cc, [compiler(), *flags, '-c', '-o', str(o), str(cp)] + (['-pthread'] if info.get('pthread') else []),
+                                   capture_output=True, text=True, phase='compile')
+                       for cp, o in paths]
+            results = [p.result() for p in pending]
+        if any(r.returncode for r in results):
+            return False
+        dup = ccsplit.duplicate_state([o for _, o in paths])
+        if dup is None or dup:
+            return False
+        r = _cc([compiler(), *flags, '-o', str(out), *[str(o) for _, o in paths]]
+                + (['-lm'] if info.get('libm') else [])
+                + (['-pthread'] if info.get('pthread') else [])
+                + (sqlite_link_args() if info.get('sqlite') else [])
+                + extra_libs()
+                + ffi_link_args(),
+                capture_output=True, text=True, phase='link')
+        if r.returncode:
+            try:
+                out.unlink()
+            except OSError:
+                pass
+            return False
+        return True
+    finally:
+        for cp, o in paths:
+            for f in (cp, o):
+                try:
+                    f.unlink()
+                except OSError:
+                    pass
+
+
 def _build_unshadowed(source, out, strict, report, force_general):
     """Try the typed path with exact (tagged) ints, then the exact general path. When neither builds the program and the
     typed attempt was stopped by a tagged-int gate (not by another construct), the program was accepted before the big-int
@@ -1466,6 +1545,10 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
+    if _split_build(info, body, main, out):
+        if report is not None:
+            report['boxed'] = []
+        return _finalize_output(out)
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
                        + (['-fno-strict-aliasing'] if info.get('inherit') else [])   # TYPED_INHERITANCE.md section 2
                        + (['-lm'] if info.get('libm') else [])
