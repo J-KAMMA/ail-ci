@@ -308,7 +308,10 @@ class Refusals(unittest.TestCase):
     def test_static_big_int_is_refused_with_line_and_flag(self):
         for body, line in (('    print(k + 9223372036854775808)', 6), ('    print(k + (1 << 200))', 6),
                            ('    print(k + 2 ** 64)', 6), ('    print(k - 9223372036854775809)', 6),
-                           ('    x = 10 ** 30\n    print(k + x)', 6), ('    print(k * 18446744073709551616)', 6)):
+                           ('    x = 10 ** 30\n    print(k + x)', 6), ('    print(k * 18446744073709551616)', 6),
+                           ('    import math\n    print(k + math.factorial(25))', 7),
+                           ('    import math\n    print(k + math.comb(100, 50))', 7),
+                           ('    print(k + int("123456789012345678901234567890"))', 6)):
             with self.subTest(body=body):
                 made, ran = self.build(body)
                 self.assertNotEqual(made.returncode, 0, made.stdout)
@@ -323,7 +326,7 @@ class Refusals(unittest.TestCase):
         self.assertNotIn('general path', made.stderr)
 
     def test_the_text_of_a_big_number_is_a_run_time_stop(self):
-        made, ran = self.build('    print(int("123456789012345678901234567890") + k)')
+        made, ran = self.build('    print(int(str(k) + "123456789012345678901234567890"))')
         self.assertEqual(made.returncode, 0, made.stderr)
         self.assertEqual(ran[:2], (1, ''))
         self.assertEqual(ran[2], 'OverflowError: integer overflow in int()%s\n' % SUFFIX)

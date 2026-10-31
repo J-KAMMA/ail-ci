@@ -1,3 +1,15 @@
+## 2026-10-31 -- ints are 64-bit by default; exact big ints are opt-in
+
+Owner decision: "strongest" over "identical to CPython". A Python-syntax program now gets int64: an operation that leaves int64
+stops the program (exit 1) with `OverflowError: integer overflow in <op> (ints are 64-bit; --exact-int gives exact ints)`, on the
+typed path and on the general path alike; a value that fits prints what CPython prints; a program whose source needs a big int
+statically (an int literal outside int64, a constant expression such as `1 << 200`) is refused at compile time with the line and
+the flag. `compile --exact-int` / `AIL_EXACT_INT=1` is the old behaviour (docs/design/BIGINT.md, section 15 for the wiring). The
+switch is `python/pkg-v12/intmode.py`; in the default mode the gate (bigcap marks, tagged ints, big general path) is off, so
+nothing leaves the typed path for an int-width reason. The general path runs the `AIL_BIGINT=off` runtime with every piece kept.
+`test_ail_int64_default.py` is the boundary matrix (every operation at +-2**63, default and forced general path, against CPython);
+the exact-int tests set the variable in `setUpModule`.
+
 ## 2026-10-30 -- GPU stage G2: SPIR-V for the G1 kernels, and the Vulkan runtime that is opened at run time
 
 The kernel IR of G1 now has a device twin. `python/pkg-v12/gpu_spirv.py` (a SPIR-V writer of about 800 lines, no shaderc or
