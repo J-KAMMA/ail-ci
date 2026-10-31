@@ -5480,11 +5480,9 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(v, float):
             if v != v or v in (float('inf'), float('-inf')):
                 raise Unsupported('a nan/inf float literal')
-            # a float box is a heap object: it goes to a slot at once, so a neighbouring allocation (the
-            # next element of `(1.5, 0.5)`, a call argument) cannot collect it before it is used (C84)
-            t = ctx.tmp()
-            ctx.emit('%s = ail_box_float(cx, %r);' % (t, v))
-            return t
+            # a literal is one immortal static box per site (AIL_FCONST): nothing is allocated, and nothing can collect it
+            # while a neighbouring allocation runs (C84)
+            return 'AIL_FCONST(%r)' % v
         if isinstance(v, str):
             if any(0xd800 <= ord(c) <= 0xdfff for c in v):
                 raise Unsupported('a surrogate string literal')
@@ -12981,7 +12979,10 @@ def _build(source, report, allow_mix=True):
         import safetyrt
         body = safetyrt.patch_sortprim(body)
         body = safetyrt.patch_tuples(body)
-    if compiler.uplan is not None and not compiler.threads and os.environ.get('AIL_UNIFIED_POOL'):
+    if unified.enabled() and not compiler.threads \
+            and os.environ.get('AIL_UNIFIED_POOL', '').strip().lower() not in ('0', 'off', 'no', 'false'):
+        # the size-class pool under the collector: on for every thread-free general-path program unless AIL_UNIFIED=0 (the
+        # all-boxed build as before) or AIL_UNIFIED_POOL=0; it does not need the type plan
         import safetyrt
         body = safetyrt.patch_gcpool(body)
     body = classname.patch_runtime(body)     # F2: a class of an imported module prints with its module

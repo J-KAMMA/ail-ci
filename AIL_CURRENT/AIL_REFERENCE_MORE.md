@@ -44,8 +44,8 @@ blocks_functions message`. `AIL_NO_GENERAL=1` alone still stops at the first ref
 On the general path the compiler infers int / float / bool locals, parameters and results and keeps them as C
 values (about 1.7x faster on general-only programs; same output, stderr and exit status, same RSS within 0.5%).
 It is on by default. `AIL_UNIFIED=0` (also `off`, `no`, `false`) builds the general path with every value boxed, as
-before; `AIL_UNIFIED=1` is still accepted. The size-class free list under the collector is a separate switch and
-stays off unless `AIL_UNIFIED_POOL=1` (it costs RSS). Typed-path programs are not affected.
+before; `AIL_UNIFIED=1` is still accepted. The size-class pool under the collector (blocks of up to 256 bytes cut from slabs and recycled by the sweep, float literals as
+immortal static boxes) is on with it for programs without threads; `AIL_UNIFIED_POOL=0` turns the pool off. Typed-path programs are not affected.
 
 ## Text I/O: main, arguments, stdin lines, print, files
 
