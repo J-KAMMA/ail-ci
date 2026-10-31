@@ -711,6 +711,8 @@ class CallbackTests(unittest.TestCase):
     def test_exception_in_the_third_call_and_other_callbacks(self):
         self.compare("third", THIRD, THIRD_OUT)
 
+    @_exact_int
+
     def test_unsigned_64_bit_and_range_checks(self):
         source = self.write("u64more.py", U64_MORE)
         cpy = run_cpython(self.dir, source)

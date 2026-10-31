@@ -2057,7 +2057,7 @@ class Lowering(TextLowering):
         and not saturated back to INT64_MAX: the loop then runs tagged and still yields INT64_MAX.
         Arithmetic the range pass proves safe keeps its int64 form (and the fast i64 loop)."""
         if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Add, ast.Sub, ast.Mult)) \
-                and not self.proven(node):
+                and not self.proven(node) and self.tint_on:        # (int64 mode: the checked int64 arithmetic below stops loudly)
             left = self.range_bound(node.left)
             right = self.range_bound(node.right)
             if left.type == I.F64 or right.type == I.F64:
