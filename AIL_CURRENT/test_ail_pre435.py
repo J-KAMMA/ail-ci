@@ -30,6 +30,25 @@ CHATGPT = str(ROOT / 'ail_chatgpt.py')
 EXACT_INTS = (ROOT / 'python' / 'pkg-v12' / 'bigint_core.py').is_file()
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -281,6 +300,7 @@ class Pre435Tests(unittest.TestCase):
                 check_refused(self, name, text, needle)
 
     @unittest.skipUnless(EXACT_INTS, 'this legacy compiler has int64 integers only')
+    @_exact_int
     def test_out_of_int64_default_capture_matches_cpython(self):
         for name, (text, _) in REFUSED.items():
             with self.subTest(name=name):

@@ -222,7 +222,7 @@ static inline int64_t ail_tint_mod_pos_i64_i64(ail_tint a, int64_t b) {
     }
     ail_tint m = ail_tint_mod(a, ail_tint_from_int64(b));
     int64_t v;
-    if (!ail_tint_to_int64(m, &v)) ail_die("integer overflow");
+    if (!ail_tint_to_int64(m, &v)) ail_die("OverflowError: integer overflow in % (ints are 64-bit; --exact-int gives exact ints)");
     return v;
 }
 static inline int64_t ail_tint_mod_i64_i64(ail_tint a, int64_t b) {
@@ -241,7 +241,7 @@ static inline int64_t ail_tint_mod_i64_i64(ail_tint a, int64_t b) {
     }
     ail_tint m = ail_tint_mod(a, ail_tint_from_int64(b));
     int64_t v;
-    if (!ail_tint_to_int64(m, &v)) ail_die("integer overflow");
+    if (!ail_tint_to_int64(m, &v)) ail_die("OverflowError: integer overflow in % (ints are 64-bit; --exact-int gives exact ints)");
     return v;
 }
 static inline ail_tint ail_tint_add_i64(ail_tint a, int64_t b) {
@@ -318,7 +318,7 @@ static inline ail_tint ail_tint_mod2(ail_tint a) {
    for a non-negative constant exponent. */
 static AIL_BIGFN ail_tint ail_tint_pow(ail_tint a, ail_tint n) {
     int64_t e;
-    if (!ail_tint_to_int64(n, &e) || e < 0) ail_die("integer overflow");
+    if (!ail_tint_to_int64(n, &e) || e < 0) ail_die("OverflowError: integer overflow in ** (ints are 64-bit; --exact-int gives exact ints)");
     ail_tint r = ail_tint_from_int64(1), b = a;
     while (e) {
         if (e & 1) r = ail_tint_mul(r, b);
@@ -372,7 +372,7 @@ static inline int ail_tint_to_int64(ail_tint x, int64_t *out) {
 }
 static inline int64_t ail_tint_i64(ail_tint x) {
     int64_t v;
-    if (!ail_tint_to_int64(x, &v)) ail_die("integer overflow");
+    if (!ail_tint_to_int64(x, &v)) ail_die("OverflowError: integer overflow in a conversion to int64 (ints are 64-bit; --exact-int gives exact ints)");
     return v;
 }
 static inline int64_t ail_tint_i64_sat(ail_tint x) {

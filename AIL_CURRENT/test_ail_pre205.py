@@ -135,5 +135,24 @@ class Pre205Tests(unittest.TestCase):
             self.refused(slug, text, 'maxsplit constant does not fit in a 64-bit signed integer')
 
 
+import os as _os_exact_int
+
+_SAVED_EXACT_INT = None
+
+
+def setUpModule():
+    # these tests are about exact (arbitrary precision) ints: the opt-in mode (intmode.py, `--exact-int`)
+    global _SAVED_EXACT_INT
+    _SAVED_EXACT_INT = _os_exact_int.environ.get('AIL_EXACT_INT')
+    _os_exact_int.environ['AIL_EXACT_INT'] = '1'
+
+
+def tearDownModule():
+    if _SAVED_EXACT_INT is None:
+        _os_exact_int.environ.pop('AIL_EXACT_INT', None)
+    else:
+        _os_exact_int.environ['AIL_EXACT_INT'] = _SAVED_EXACT_INT
+
+
 if __name__ == '__main__':
     unittest.main()

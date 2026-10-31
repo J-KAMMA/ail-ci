@@ -70,6 +70,25 @@ def two(a: c_int8, b: c_uint64 = 5) -> c_int64: ...
 MIN64 = "(-9223372036854775807 - 1)"
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def literal(v):
     return MIN64 if v == -(1 << 63) else str(v)
 
@@ -326,10 +345,14 @@ class IntArgumentTests(unittest.TestCase):
                     self.assertEqual((run.stdout, run.returncode), (cpython.stdout, 0), run.stderr[-600:])
         return cpython
 
+    @_exact_int
+
     def test_a_u64_constant_above_int64_is_exact_since_f3b(self):
         # F3a refused this at compile time (the program held int64 only); F3b passes it exactly, as CPython does
         self.same_exact("big_u64", STUBS + "\ndef main():\n    print(f_c_size_t(2**63))\n\nmain()\n",
                                    expect_in=("9223372036854775808\n",))
+
+    @_exact_int
 
     def test_every_spelling_of_a_wide_u64_constant_is_exact(self):
         for index, spelling in enumerate(("0xFFFFFFFFFFFFFFFF", "(1 << 64) - 1", "18446744073709551615", "1 << 63", "2**64 - 2**63")):

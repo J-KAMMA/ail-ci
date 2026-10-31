@@ -86,6 +86,25 @@ BUFFER = '''func @buffer(%n: i64) -> (i64) attrs {linkage = "extern", names = ["
 '''
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def fn_of(src):
     fn = text.parse_function(src)
     program = I.Program({fn.sym: fn})
@@ -359,7 +378,7 @@ class ProgramTests(unittest.TestCase):
             for k in cases:
                 expected = cpython_run(tmp, 'uncaught', UNCAUGHT, (k,))
                 status, stdout, stderr = results[k]
-                if k == cases[-1] and status == 1 and last_line(stderr) == 'integer overflow':
+                if k == cases[-1] and status == 1 and last_line(stderr).startswith('OverflowError: integer overflow in '):
                     self.assertEqual(stdout, 'start %d\n' % k)
                     continue
                 self.assertEqual((status, stdout), expected[:2], k)
@@ -384,6 +403,7 @@ class ProgramTests(unittest.TestCase):
             self.assertLessEqual(rss['ir'], rss['legacy'] * 1.05 + 256)
 
     # ------------------------------------------------------------------ the C
+    @_exact_int
     def test_the_c_of_a_list_function_frees_before_the_next_step_and_links_a_frame_only_when_needed(self):
         with tempfile.TemporaryDirectory() as tmp:
             built, exe, entries = compile_program(tmp, 'pipe', PIPE, 'ir', {'AIL_IR': 'verify'}, debug=True)
@@ -476,7 +496,7 @@ class ProgramTests(unittest.TestCase):
                         if name == 'uncaught':             # the last case is a big int: CPython, not the legacy build
                             with tempfile.TemporaryDirectory() as tmp:
                                 expected = cpython_run(tmp, name, source, args_list[k])
-                            if k == len(args_list) - 1 and status == 1 and last_line(stderr) == 'integer overflow':
+                            if k == len(args_list) - 1 and status == 1 and last_line(stderr).startswith('OverflowError: integer overflow in '):
                                 continue                # (the item product stops loudly: see the uncaught test)
                             self.assertEqual((status, stdout), expected[:2], (name, tag, k))
                         elif name != 'fieldshare':         # (sharing: the legacy build copies; S3b's tests cover it)

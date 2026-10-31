@@ -21,6 +21,25 @@ CHATGPT = str(ROOT / 'ail_chatgpt.py')
 MESSAGE = 'a script that is only print(<expression>) needs general object semantics'
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -101,6 +120,8 @@ class Ex32Tests(unittest.TestCase):
                                      (slug, mode, got.stderr[-800:]))
                     self.assertEqual(got.returncode, want[1], (slug, mode, got.stderr[-800:]))
 
+    @_exact_int
+
     def test_out_of_int64_constant_expression_is_refused_by_the_big_int_check(self):
         text = 'print(2 ** 100)\n'
         with tempfile.TemporaryDirectory(prefix='ail-ex32-big-') as directory:
@@ -114,6 +135,8 @@ class Ex32Tests(unittest.TestCase):
                 got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
                 self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0], (mode, got.stderr[-800:]))
                 self.assertEqual(got.returncode, want[1], (mode, got.stderr[-800:]))
+
+    @_exact_int
 
     def test_out_of_int64_expressions_keep_the_general_fallback(self):
         # 2**63 and 1<<63 are one past INT64_MAX and below INT64_MIN: the typed emitter would keep

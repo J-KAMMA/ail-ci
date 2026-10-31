@@ -332,7 +332,7 @@ class ExactUnsignedTests(unittest.TestCase):
     def test_a_value_above_int64_is_a_loud_stop_on_the_legacy_emitter_never_a_negative_number(self):
         run = self.loud_stop("legacy_top", STUBS + "\ndef main():\n    print(1)\n    print(topu())\n    print(2)\n\nmain()\n")
         self.assertEqual((run.returncode, run.stdout), (1, "1\n"))
-        self.assertEqual(run.stderr.strip(), "integer overflow")
+        self.assertTrue(run.stderr.strip().startswith("OverflowError: integer overflow in "), run.stderr)
         run = self.loud_stop("legacy_try", STUBS + '''
 def main():
     print(1)
@@ -492,6 +492,25 @@ main()
         self.assertNotIn(b"4611686018427387904", text)
         run = subprocess.run([str(exe)], cwd=self.dir, capture_output=True, text=True, timeout=60)
         self.assertEqual(run.stdout, "7\n")
+
+
+import os as _os_exact_int
+
+_SAVED_EXACT_INT = None
+
+
+def setUpModule():
+    # these tests are about exact (arbitrary precision) ints: the opt-in mode (intmode.py, `--exact-int`)
+    global _SAVED_EXACT_INT
+    _SAVED_EXACT_INT = _os_exact_int.environ.get('AIL_EXACT_INT')
+    _os_exact_int.environ['AIL_EXACT_INT'] = '1'
+
+
+def tearDownModule():
+    if _SAVED_EXACT_INT is None:
+        _os_exact_int.environ.pop('AIL_EXACT_INT', None)
+    else:
+        _os_exact_int.environ['AIL_EXACT_INT'] = _SAVED_EXACT_INT
 
 
 if __name__ == "__main__":

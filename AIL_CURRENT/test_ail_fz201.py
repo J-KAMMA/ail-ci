@@ -22,6 +22,25 @@ CHATGPT = str(ROOT / 'ail_chatgpt.py')
 HAVE_CC = shutil.which('gcc') is not None
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -176,6 +195,7 @@ print(abs(1.5))
 
 @unittest.skipUnless(HAVE_CC, 'gcc is required')
 class IntPowerBeyondInt64(unittest.TestCase):
+    @_exact_int
     def test_power_is_exact(self):
         for name, text in sorted(PROGRAMS.items()):
             with self.subTest(name):

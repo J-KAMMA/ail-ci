@@ -117,6 +117,25 @@ print(round(1e20))
 '''
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
     src.write_text(text, encoding='utf-8')
@@ -193,6 +212,8 @@ class Fz2Tests(unittest.TestCase):
 
     def test_nan_and_infinity_keep_cpython_exceptions(self):
         self.same('non_finite', NON_FINITE)
+
+    @_exact_int
 
     def test_constant_wide_round_matches_cpython(self):
         self.same('constant', CONSTANT_WIDE)
