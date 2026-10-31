@@ -28,6 +28,25 @@ OVERFLOW = 'int64 constant expression out of range'
 ALIASED = 'an aliased integer power wrapper called with operands not known'
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def compile_source(directory, name, source, general=False):
     path = Path(directory) / (name + '.ail')
     path.write_text(source, encoding='utf-8')
@@ -176,6 +195,8 @@ def run(a, b):
 print(run(2, 3))
 '''),
     )
+
+    @_exact_int
 
     def test_aliased_power_wrappers_are_refused_or_match_cpython(self):
         for general in (False, True):

@@ -447,6 +447,25 @@ main()
 """
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def build_tiny(directory):
     directory = Path(directory)
     (directory / "tiny.h").write_text(TINY_H, encoding="utf8")
@@ -606,6 +625,8 @@ class FFITests(unittest.TestCase):
 
     def test_handles(self):
         self.same("handles", HANDLES, "True 10 11 12\n100 13 True\n")
+
+    @_exact_int
 
     def test_uint64_results_equal_cpython(self):
         # F3b: a 64-bit unsigned result above 2**63 - 1 is the exact int, as under the CPython shim (it used to come back

@@ -1647,7 +1647,7 @@ static int64_t ail__str_to_int_full(ail_str s) {
     int rc = ail__asc_to_int(b, len, 10, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) ail__str_to_int_fail(s);
-    if (rc == 2) ail_die("integer overflow");
+    if (rc == 2) ail_die("OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)");
     if (rc == 3) {
         char text[192];
         int n = snprintf(text, sizeof text, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
@@ -3824,9 +3824,9 @@ static int64_t ail_ipow(int64_t b, int64_t e) {
     while (e) {
         /* strict mode promises that integer overflow stops the program; this multiplied without
            checking, so 2 ** 64 quietly returned 0 in the one mode that exists to prevent it */
-        if (e & 1 && __builtin_mul_overflow(r, b, &r)) ail_die("integer overflow");
+        if (e & 1 && __builtin_mul_overflow(r, b, &r)) ail_die("OverflowError: integer overflow in ** (ints are 64-bit; --exact-int gives exact ints)");
         e >>= 1;
-        if (e && __builtin_mul_overflow(b, b, &b)) ail_die("integer overflow");
+        if (e && __builtin_mul_overflow(b, b, &b)) ail_die("OverflowError: integer overflow in ** (ints are 64-bit; --exact-int gives exact ints)");
     }
     return r;
 }
@@ -5780,7 +5780,7 @@ static inline int64_t ail_bytes_to_int(ail_bytes b) {
         if (c == 95 && k > i && k + 1 < j && b.p[k - 1] != 95) continue;   /* '1_000' */
         uint64_t d = c - 48u;
         if (d > 9u) ail_raise_named(AIL_EXC_VALUE);
-        if (m > (limit - d) / 10u) ail_die("integer overflow");
+        if (m > (limit - d) / 10u) ail_die("OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)");
         m = m * 10u + d;
     }
     return m == (uint64_t)INT64_MAX + 1u ? INT64_MIN : neg ? -(int64_t)m : (int64_t)m;
@@ -6993,7 +6993,7 @@ static void ail_sdict_add(ail_sdict *T, ail_str key, int64_t add, int64_t miss) 
     int64_t slot;
     if (ail_sdict_upsert(T, key, &slot)) {
         int64_t r;
-        if (__builtin_add_overflow(T->table.val[slot], add, &r)) ail_die("integer overflow");
+        if (__builtin_add_overflow(T->table.val[slot], add, &r)) ail_die("OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)");
         T->table.val[slot] = r;
     } else T->table.val[slot] = miss;
 }
@@ -8801,7 +8801,7 @@ static int64_t ail_round0(double x) {
     double r = nearbyint(x);
     fesetround(save);
     if (!(r >= -9223372036854775808.0 && r < 9223372036854775808.0))
-        ail_die("integer overflow");
+        ail_die("OverflowError: integer overflow in round() (ints are 64-bit; --exact-int gives exact ints)");
     return (int64_t)r;
 }
 static double ail_round_n(double x, int64_t n) {
@@ -9498,7 +9498,7 @@ static inline int64_t ail_str_to_int(ail_str s) {
     int rc = ail__asc_to_int(b, len, 10, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) ail_raise_c(AIL_ERR_VALUE, "invalid literal for int() with base 10");
-    if (rc == 2) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+    if (rc == 2) ail_die("OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)");
     if (rc == 3) {
         char msg[192];
         snprintf(msg, sizeof msg, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
@@ -10152,7 +10152,7 @@ static inline ail_obj ail_map_setdefault_hashed(ail_map *m, ail_obj key, ail_obj
 static inline ail_obj ail_obj_add(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t r;
-        if (__builtin_add_overflow(a.i, b.i, &r)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+        if (__builtin_add_overflow(a.i, b.i, &r)) ail_die("OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)");
         return ail_box_int(r);
     }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) return ail_box_float(ail__as_double(a) + ail__as_double(b));
@@ -10171,7 +10171,7 @@ static inline ail_obj ail_obj_add(ail_obj a, ail_obj b) {
 static inline ail_obj ail_obj_sub(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t r;
-        if (__builtin_sub_overflow(a.i, b.i, &r)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+        if (__builtin_sub_overflow(a.i, b.i, &r)) ail_die("OverflowError: integer overflow in - (ints are 64-bit; --exact-int gives exact ints)");
         return ail_box_int(r);
     }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) return ail_box_float(ail__as_double(a) - ail__as_double(b));
@@ -10195,7 +10195,7 @@ static inline ail_obj ail__repeat_vec(ail_obj c, int64_t k) {
 static inline ail_obj ail_obj_mul(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t r;
-        if (__builtin_mul_overflow(a.i, b.i, &r)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+        if (__builtin_mul_overflow(a.i, b.i, &r)) ail_die("OverflowError: integer overflow in * (ints are 64-bit; --exact-int gives exact ints)");
         return ail_box_int(r);
     }
     if (ail__is_num(a.tag) && ail__is_num(b.tag)) return ail_box_float(ail__as_double(a) * ail__as_double(b));
@@ -10224,7 +10224,7 @@ static inline ail_obj ail_obj_floordiv(ail_obj a, ail_obj b) {
     if (ail__is_intlike(a.tag) && ail__is_intlike(b.tag)) {
         int64_t x = a.i, y = b.i;
         if (y == 0) ail_raise_c(AIL_ERR_ZERODIV, "integer division or modulo by zero");
-        if (x == INT64_MIN && y == -1) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+        if (x == INT64_MIN && y == -1) ail_die("OverflowError: integer overflow in // (ints are 64-bit; --exact-int gives exact ints)");
         int64_t q = x / y, r = x % y;
         if (r != 0 && ((r < 0) != (y < 0))) q -= 1;
         return ail_box_int(q);
@@ -10269,12 +10269,12 @@ static inline ail_obj ail_obj_pow(ail_obj a, ail_obj b) {
         while (e) {
             int64_t nr;
             if (e & 1) {
-                if (__builtin_mul_overflow(r, base, &nr)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+                if (__builtin_mul_overflow(r, base, &nr)) ail_die("OverflowError: integer overflow in ** (ints are 64-bit; --exact-int gives exact ints)");
                 r = nr;
             }
             e >>= 1;
             if (e) {
-                if (__builtin_mul_overflow(base, base, &nr)) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+                if (__builtin_mul_overflow(base, base, &nr)) ail_die("OverflowError: integer overflow in ** (ints are 64-bit; --exact-int gives exact ints)");
                 base = nr;
             }
         }
@@ -10298,7 +10298,7 @@ static inline ail_obj ail_obj_pow(ail_obj a, ail_obj b) {
 }
 static inline ail_obj ail_obj_neg(ail_obj a) {
     if (ail__is_intlike(a.tag)) {
-        if (a.i == INT64_MIN) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+        if (a.i == INT64_MIN) ail_die("OverflowError: integer overflow in unary - or abs() (ints are 64-bit; --exact-int gives exact ints)");
         return ail_box_int(-a.i);
     }
     if (a.tag == AIL_FLOAT) return ail_box_float(-a.f);
@@ -10552,7 +10552,7 @@ static inline ail_obj ail_to_int(ail_obj x) {
         case AIL_FLOAT: {
             double v = x.f;
             if (v != v) ail_raise_c(AIL_ERR_VALUE, "cannot convert float NaN to integer");
-            if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) ail_die("OverflowError: integer overflow (this runtime's int64 boundary, not catchable)");
+            if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) ail_die("OverflowError: integer overflow in int(float) (ints are 64-bit; --exact-int gives exact ints)");
             return ail_box_int((int64_t)v);
         }
         case AIL_STR: return ail_box_int(ail_str_to_int(x.s));
@@ -14073,7 +14073,7 @@ static inline ail_st ail_str_to_int(ail_ctx *cx, int64_t *out, ail_obj sobj) {
     return st;
 /*B|*/
     if (rc == 1) return ail_raise_c(cx, AIL_B_VALUEERROR, "invalid literal for int() with base 10");
-    if (rc == 2) return ail_hit_limit(cx, "int_overflow", "int() literal exceeds int64");
+    if (rc == 2) return ail_hit_limit(cx, "int_overflow", "integer overflow in int()");
     if (rc == 3) {
         char msg[192];
         snprintf(msg, sizeof msg, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
@@ -14150,7 +14150,7 @@ static inline ail_st ail_str_to_int_base(ail_ctx *cx, int64_t *out, ail_obj sobj
     return st;
 /*B|*/
     if (rc == 1) return ail__int_badlit(cx, sobj, base);
-    if (rc == 2) return ail_hit_limit(cx, "int_overflow", "int() literal exceeds int64");
+    if (rc == 2) return ail_hit_limit(cx, "int_overflow", "integer overflow in int()");
     if (rc == 3) {
         char msg[192];
         snprintf(msg, sizeof msg, "Exceeds the limit (4300 digits) for integer string conversion: value has %lld digits; use sys.set_int_max_str_digits() to increase the limit", (long long)ndigits);
@@ -14829,6 +14829,10 @@ static inline double ail__as_dbl_ck(ail_ctx *cx, ail_obj x) {
 /*B|*/
 static inline double ail__as_dbl_ck(ail_ctx *cx, ail_obj x) { (void)cx; return ail__as_double(x); }
 /*B>*/
+/*B<*/
+/*B|*/
+static inline ail_st ail__math_double(ail_ctx *cx, double *out, ail_obj x) { (void)cx; *out = x.tag == AIL_T_FLOAT ? ail_float_val(x) : (double)x.i; return AIL_OK; }
+/*B>*/
 /* Convert an int (possibly BIG) or float to double, with CPython's OverflowError for an int
    beyond the double range.  A macro so the conversion's status is propagated by the caller. */
 #define AIL_MATH_DBL(cx, x, v) do { ail_st _md_st = ail__math_double((cx), &(v), (x)); \
@@ -15506,7 +15510,7 @@ static inline ail_st ail_op_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_ob
 /*B<*/
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT ? "float division by zero" : "division by zero");
 /*B|*/
-        if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "division by zero");
+        if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT ? "float division by zero" : "division by zero");
 /*B>*/
         *out = ail_box_float(cx, x / y); return AIL_OK;
     }
@@ -15655,7 +15659,7 @@ static inline ail_st ail_op_neg(ail_ctx *cx, ail_obj *out, ail_obj a) {
 /*B<*/
         if (a.i == INT64_MIN) return ail__ov_neg(cx, out);
 /*B|*/
-        if (a.i == INT64_MIN) return ail_hit_limit(cx, "int_overflow", "integer overflow in unary -");
+        if (a.i == INT64_MIN) return ail_hit_limit(cx, "int_overflow", "integer overflow in unary - or abs()");
 /*B>*/
         *out = ail_box_int(-a.i); return AIL_OK;
     }
@@ -16580,7 +16584,7 @@ static inline ail_st ail_op_len(ail_ctx *cx, ail_obj *out, ail_obj x) {
 /*P>*//*B|*/
 /*B>*/
             uint64_t n = ail__range_count((ail_rangeobj *)x.o);
-            if (n > (uint64_t)INT64_MAX) return ail_hit_limit(cx, "int_overflow", "range length exceeds int64");
+            if (n > (uint64_t)INT64_MAX) return ail_hit_limit(cx, "int_overflow", "integer overflow in range()");
             *out = ail_box_int((int64_t)n); return AIL_OK;
         }
         default: { char buf[64]; snprintf(buf, sizeof buf, "object of type '%s' has no len()", ail_type_name(x.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
@@ -16764,7 +16768,7 @@ static inline ail_st ail_op_getslice(ail_ctx *cx, ail_obj *out, ail_obj c, int h
         __int128 nd = (__int128)r->step * (__int128)st;
         if (ns < INT64_MIN || ns > INT64_MAX || ne < INT64_MIN || ne > INT64_MAX
             || nd < INT64_MIN || nd > INT64_MAX)
-            return ail_hit_limit(cx, "int_overflow", "range slice result exceeds int64");
+            return ail_hit_limit(cx, "int_overflow", "integer overflow in a range slice");
         *out = ail_range_new(cx, (int64_t)ns, (int64_t)ne, (int64_t)nd);
         return AIL_OK;
     }
@@ -17513,7 +17517,7 @@ static inline ail_st ail_to_int(ail_ctx *cx, ail_obj *out, ail_obj x) {
 /*B<*/
             *out = ail_int_from_double(cx, v); return AIL_OK;
 /*B|*/
-            if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "int(float) exceeds int64");
+            if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "integer overflow in int(float)");
             *out = ail_box_int((int64_t)v); return AIL_OK;
 /*B>*/
         }
@@ -17990,7 +17994,7 @@ static inline int ail_main_finish(ail_ctx *cx, ail_st st) {
        typed path and a typed clone of mixed mode (it is still a stop here: no except or finally block runs).
        DIFFERENCES C74. */
     if (st == AIL_LIMIT && cx->limit.name && !strcmp(cx->limit.name, "int_overflow")) {
-        fputs("integer overflow\n", stderr);
+        fprintf(stderr, "OverflowError: %s (ints are 64-bit; --exact-int gives exact ints)\n", cx->limit.detail ? cx->limit.detail : "integer overflow");
         return 1;
     }
     /* AIL_LIMIT (or the flush failure re-tagged above, whose cx->limit was set by
@@ -18571,7 +18575,7 @@ static inline ail_st ail_bi_abs(ail_ctx *cx, ail_obj *out, ail_obj x) {
 /*B<*/
         if (x.i == INT64_MIN) return ail__ov_neg(cx, out);
 /*B|*/
-        if (x.i == INT64_MIN) return ail_hit_limit(cx, "int_overflow", "integer overflow in abs()");
+        if (x.i == INT64_MIN) return ail_hit_limit(cx, "int_overflow", "integer overflow in unary - or abs()");
 /*B>*/
         *out = ail_box_int(x.i < 0 ? -x.i : x.i);
         return AIL_OK;
@@ -18928,7 +18932,7 @@ static inline ail_st ail_bi_int(ail_ctx *cx, ail_obj *out, ail_obj x, int has_ba
                 *out = ail_int_from_double(cx, v); return AIL_OK;
 /*B|*/
                 if (isinf(v)) return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer");
-                if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "int(float) exceeds int64");
+                if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "integer overflow in int(float)");
                 *out = ail_box_int((int64_t)v); return AIL_OK;
 /*B>*/
             }
@@ -18973,7 +18977,7 @@ static inline ail_st ail_bi_int(ail_ctx *cx, ail_obj *out, ail_obj x, int has_ba
         else m = m * (uint64_t)b + (uint64_t)dv;
 /*B|*/
         if (m > (limit - (uint64_t)dv) / (uint64_t)b)
-            return ail_hit_limit(cx, "int_overflow", "int() literal exceeds int64");
+            return ail_hit_limit(cx, "int_overflow", "integer overflow in int()");
         m = m * (uint64_t)b + (uint64_t)dv;
 /*B>*/
         digits_seen++;
@@ -20975,7 +20979,7 @@ static inline ail_st ail__float_to_int_checked(ail_ctx *cx, ail_obj *out, double
 /*B<*/
     *out = ail_int_from_double(cx, v); return AIL_OK;
 /*B|*/
-    if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "float too large to convert to int64");
+    if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "integer overflow in int(float)");
     *out = ail_box_int((int64_t)v); return AIL_OK;
 /*B>*/
 }
@@ -21243,7 +21247,7 @@ static inline ail_st ail_math_factorial(ail_ctx *cx, ail_obj *out, ail_obj n) {
     int64_t r = 1;
     for (int64_t k = 2; k <= n.i; k++) {
         int64_t nr;
-        if (__builtin_mul_overflow(r, k, &nr)) return ail_hit_limit(cx, "int_overflow", "factorial() result exceeds int64");
+        if (__builtin_mul_overflow(r, k, &nr)) return ail_hit_limit(cx, "int_overflow", "integer overflow in math.factorial()");
         r = nr;
     }
     *out = ail_box_int(r); return AIL_OK;
@@ -21277,7 +21281,7 @@ static inline ail_st ail_math_comb(ail_ctx *cx, ail_obj *out, ail_obj n, ail_obj
         ail_int_divmod(cx, &w[2], NULL, w[2], ail_box_int(i + 1));   /* exact at every step */
 /*B|*/
         int64_t nr;
-        if (__builtin_mul_overflow(r, n.i - i, &nr)) return ail_hit_limit(cx, "int_overflow", "comb() result exceeds int64");
+        if (__builtin_mul_overflow(r, n.i - i, &nr)) return ail_hit_limit(cx, "int_overflow", "integer overflow in math.comb()");
         r = nr;
         r /= (i + 1); /* exact: product of kk consecutive ints divisible at each step, same as CPython's algorithm */
 /*B>*/
@@ -21312,7 +21316,7 @@ static inline ail_st ail_math_perm(ail_ctx *cx, ail_obj *out, ail_obj n, ail_obj
         w[0] = ail_int_mul(cx, w[0], w[1]);
 /*B|*/
         int64_t nr;
-        if (__builtin_mul_overflow(r, n.i - i, &nr)) return ail_hit_limit(cx, "int_overflow", "perm() result exceeds int64");
+        if (__builtin_mul_overflow(r, n.i - i, &nr)) return ail_hit_limit(cx, "int_overflow", "integer overflow in math.perm()");
         r = nr;
 /*B>*/
     }
@@ -28510,7 +28514,7 @@ static int64_t ail_range_count(int64_t start, int64_t stop, int64_t step) {
                                  : (uint64_t)start - (uint64_t)stop;
     uint64_t magnitude = step > 0 ? (uint64_t)step : UINT64_C(0) - (uint64_t)step;
     uint64_t count = UINT64_C(1) + (distance - UINT64_C(1)) / magnitude;
-    if (count > (uint64_t)INT64_MAX) ail_die("range length exceeds int64");
+    if (count > (uint64_t)INT64_MAX) ail_die("OverflowError: integer overflow in range() (ints are 64-bit; --exact-int gives exact ints)");
     return (int64_t)count;
 }
 
@@ -29193,7 +29197,7 @@ static int64_t ail_str_to_int_base(ail_str s, int64_t base) {
     int rc = ail__asc_to_int(b, len, base, &v, &ndigits);
     if (b != stackbuf) free(b);
     if (rc == 1) ail__int_base_fail(s, base);
-    if (rc == 2) ail_die("integer overflow");
+    if (rc == 2) ail_die("OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)");
     if (rc == 3) ail__int_base_limit_fail(ndigits);
     return v;
 }
@@ -29960,7 +29964,7 @@ def _piece_text(p, want):
         if 'EXCSTR' in want:
             text = _exctext.apply(text, _exctext.DIE_EDITS, 'the DIE block')
             if 'cannot convert float infinity' not in text:      # (the Python-syntax edit has it already)
-                text = text.replace('!strcmp(w, "integer overflow")', '!strcmp(w, "integer overflow") || !strcmp(w, "cannot convert float infinity to integer")')
+                text = text.replace('(!strncmp(w, "integer overflow", 16) || !strncmp(w, "OverflowError: integer overflow", 31))', '(!strncmp(w, "integer overflow", 16) || !strncmp(w, "OverflowError: integer overflow", 31)) || !strcmp(w, "cannot convert float infinity to integer")')
     if p == 'OSEXC' and 'EXCSTR' in want:
         text = _exctext.apply(text, _exctext.OSEXC_EDITS, 'the OSEXC part')
     if p == 'DIE' and 'FILEEXC' in want:
@@ -30048,7 +30052,7 @@ _OVERFLOW_EXCEPTION_EDITS = (
     ('if (code < 1 || code > 9) code = AIL_EXC_RUNTIME;', 'if (code < 1 || code > 10) code = AIL_EXC_RUNTIME;'),
     ('    if (!strcmp(w, "key error")) return AIL_EXC_KEY;\n',
      '    if (!strcmp(w, "key error")) return AIL_EXC_KEY;\n'
-     '    if (!strcmp(w, "integer overflow") || !strcmp(w, "(34, \'Numerical result out of range\')")) return AIL_EXC_OVERFLOW;\n'),
+     '    if ((!strncmp(w, "integer overflow", 16) || !strncmp(w, "OverflowError: integer overflow", 31)) || !strcmp(w, "(34, \'Numerical result out of range\')")) return AIL_EXC_OVERFLOW;\n'),
 )
 
 

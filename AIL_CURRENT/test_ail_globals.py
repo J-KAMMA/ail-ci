@@ -43,6 +43,25 @@ from ir import text, verify                  # noqa: E402
 from ir.passes import mem2reg, simplify, ranges, licm   # noqa: E402
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def write(directory, files):
     for name, body in files.items():
         path = Path(directory) / name
@@ -290,6 +309,8 @@ def main():
 main()
 ''')
 
+    @_exact_int
+
     def test_a_returned_variable_keeps_the_exact_value_past_int64(self):
         self.same('''x = 4611686018427387904
 
@@ -311,6 +332,8 @@ def main():
 
 main()
 ''', irs=("1",))
+
+    @_exact_int
 
     def test_bit_operations_on_a_variable_past_int64(self):
         self.same('''x = 4611686018427387904

@@ -151,6 +151,25 @@ BIG_INPUT = ' '.join(['9223372036854775807', '-9223372036854775808', '9223372036
 MODES = {'default': {}, 'force': {'AIL_UNIFIED_FORCE': '1'}, 'nopool': {'AIL_UNIFIED_POOL': '0'}, 'plain': {'AIL_UNIFIED': '0'}}
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def build(directory, text, name, mode):
     source, exe = Path(directory, name + '.py'), Path(directory, name + '_' + mode)
     source.write_text(text, encoding='utf-8')
@@ -196,6 +215,8 @@ class GenSpeed(unittest.TestCase):
 
     def test_pooled_objects_across_collections(self):
         self.check('pooled', POOLED)
+
+    @_exact_int
 
     def test_big_ints_into_floats(self):
         self.check('bigints', BIGINTS, BIG_INPUT)

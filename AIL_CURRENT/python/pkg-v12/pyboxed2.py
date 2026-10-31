@@ -1213,9 +1213,10 @@ def _thread_preamble():
     return threadrt.patch_head(_PREAMBLE_HEAD) + threadrt.patch_tail(_PREAMBLE_TAIL)
 
 
-# The list/tuple index errors name the key's class when the program has a class: CPython says
-# "not Box", not "not instance". A no-class program keeps the base runtime's tag-based text
-# (and so its C) byte for byte; only a source that writes a class gets the class-name form.
+# The list/tuple index errors name the key's class when the program has a class: CPython
+# says "not Box", not "not instance". A no-class program keeps the base runtime's tag-based
+# text (and so its C) byte for byte; only a source that writes a class gets the class-name
+# form in the list/tuple getitem, setitem and delitem prelude.
 _INDEX_ERROR_CLASS_EDITS = (
     ("""                char buf[96]; snprintf(buf, sizeof buf, "%s indices must be integers or slices, not %s", c.tag == AIL_T_LIST ? "list" : "tuple", ail_type_name(key.tag));
                 return ail_raise_c(cx, AIL_B_TYPEERROR, buf);""",
@@ -2383,7 +2384,8 @@ def _mix_overflow_fallback(csrc, mangled, overflow):
         helper = ('\nstatic inline void %s(void) { %s = 1; longjmp(%s, 1); }\n'
                   % (hit, overflow, jmp))
     csrc = csrc.replace(marker, marker + decl, 1)
-    csrc = csrc.replace('ail_die("integer overflow")', hit + '()')
+    import re as _re
+    csrc = _re.sub(r'ail_die\("(?:OverflowError: )?integer overflow[^"]*"\)', hit + '()', csrc)
     # int(<inf>) in a Python-syntax program dies with its own text (the "integer overflow" text is not catchable there)
     # and is routed the same way: the boxed body raises CPython's OverflowError
     csrc = csrc.replace('ail_die("cannot convert float infinity to integer")', hit + '()')
@@ -12926,6 +12928,11 @@ def build(source, report, allow_mix=True):
     """One build with the big int support in the program when it can reach it, else (byte for byte what it was before the big ints)
     without (biggate.py): the first pass has it, a second pass without runs when the first shows no creator reachable."""
     mode = os.environ.get('AIL_BIGINT', 'auto')
+    import intmode
+    int64 = intmode.int64_python()
+    if int64:
+        mode = 'off'        # int64 ints (the default for a Python-syntax program, intmode.py): the runtime without big ints,
+        #                     whose overflow is the loud stop
     biggate.ON = mode != 'off'
     body = _build(source, report, allow_mix)
     big = mode != 'off' and (mode == 'on' or report.get('big_enum') or biggate.wants_big(body))
@@ -12937,7 +12944,7 @@ def build(source, report, allow_mix=True):
             biggate.ON = True
     report['bigint'] = big
     pieces = biggate.pieces_for(body) if big else set()
-    body = biggate.resolve(body, big, pieces=pieces)
+    body = biggate.resolve(body, big, pieces=pieces, all_pieces=int64)
     return biggate.strip(body)
 
 

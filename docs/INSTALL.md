@@ -63,7 +63,7 @@ EOF
 ail run --strict fib.py           # 12586269025
 ```
 
-Continue with [the tutorial](tutorial.md).
+Continue with [the quickstart](QUICKSTART.md) or [the tutorial](tutorial.md).
 
 ## macOS
 
