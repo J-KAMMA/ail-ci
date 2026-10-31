@@ -7,7 +7,8 @@ the compiler (`AIL_CURRENT/`), its runtime, the language reference, and the test
 suite can run on GitHub Actions. Development happens elsewhere; this tree is updated by export.
 
 New to AIL? Start with [docs/INSTALL.md](docs/INSTALL.md) (setup and a first compile), then
-[docs/tutorial.md](docs/tutorial.md) (a 15-20 minute tutorial).
+[docs/QUICKSTART.md](docs/QUICKSTART.md) (a 10-minute English tour with complete, tested programs)
+or [docs/tutorial.md](docs/tutorial.md) (a 15-20 minute tutorial).
 
 ## Running the tests
 
