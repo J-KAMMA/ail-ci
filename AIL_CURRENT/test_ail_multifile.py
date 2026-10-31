@@ -608,9 +608,20 @@ class RaisingAndStaleModuleBodies(ModulesBase):
     def test_raising_expressions_start_when_the_function_runs(self):
         # none of these programs calls the function, so CPython never runs the bad module
         for name in ("l33_div_zero", "l34_index_error", "l36_type_error", "l37_int_bad", "l38_unhashable_key",
-                     "l39_big_pow", "l40_bad_comprehension", "l46_key_error"):
+                     "l40_bad_comprehension", "l46_key_error"):
             with self.subTest(name):
                 self.assertEqual(self.same_as_cpython(LAYOUTS[name], irs=("1",)), "ok\n")
+
+    def test_constant_beyond_int64_is_left_to_the_front_end(self):
+        # `2 ** 100000000` in the unused module: built, or refused by the int64 rule of the front end, never by the
+        # module system
+        write(self.dir, LAYOUTS["l39_big_pow"])
+        built, _ = compile_program(self.dir)
+        if built.returncode == 0:
+            self.assertEqual(self.same_as_cpython(LAYOUTS["l39_big_pow"], irs=("1",)), "ok\n")
+        else:
+            self.assertEqual(built.returncode, 3, built.stderr)
+            self.assertIn("int64", built.stderr)
 
     def test_name_error_module_is_left_to_the_front_end(self):
         # the module system now builds it; the front end refuses the undefined name by name
