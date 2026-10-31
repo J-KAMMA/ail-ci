@@ -30,25 +30,6 @@ HAVE_CC = shutil.which('gcc') is not None or shutil.which('cc') is not None
 
 VEC = '''from dataclasses import dataclass
 
-def _exact_int(test):
-    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
-    import functools
-    import os
-
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        saved = os.environ.get('AIL_EXACT_INT')
-        os.environ['AIL_EXACT_INT'] = '1'
-        try:
-            return test(*args, **kwargs)
-        finally:
-            if saved is None:
-                os.environ.pop('AIL_EXACT_INT', None)
-            else:
-                os.environ['AIL_EXACT_INT'] = saved
-    return wrapper
-
-
 @dataclass
 class Vec:
     x: float
@@ -213,6 +194,25 @@ def main():
 
 main()
 '''
+
+
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
 
 
 def compile_default(directory, text, name):

@@ -291,21 +291,6 @@ TEXT_INPUTS = ['', 'Racecar, Noon! level... A "madam" xyz\n', 'ß ss Ssß ǅ ǆ 
                '   \n', 'abcba\tfoo\nboB\n!!!\n', 'Aa éÉ ñÑ 日本日 ١٢١\n']
 
 
-def compile_default(directory, text, name):
-    source, exe = Path(directory, name + '.py'), Path(directory, name + '_x')
-    source.write_text(text, encoding='utf-8')
-    env = dict(os.environ, AIL_NO_CACHE='1')
-    for key in ('AIL_NO_GENERAL', 'AIL_UNIFIED_FORCE', 'AIL_QUIET_FALLBACK'):
-        env.pop(key, None)
-    res = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', source.name, '-o', exe.name],
-                         cwd=directory, capture_output=True, text=True, timeout=900, env=env)
-    return res, exe, source
-
-
-def typed(res):
-    return 'built on the general path' not in res.stderr
-
-
 def _exact_int(test):
     """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
     import functools
@@ -323,6 +308,21 @@ def _exact_int(test):
             else:
                 os.environ['AIL_EXACT_INT'] = saved
     return wrapper
+
+
+def compile_default(directory, text, name):
+    source, exe = Path(directory, name + '.py'), Path(directory, name + '_x')
+    source.write_text(text, encoding='utf-8')
+    env = dict(os.environ, AIL_NO_CACHE='1')
+    for key in ('AIL_NO_GENERAL', 'AIL_UNIFIED_FORCE', 'AIL_QUIET_FALLBACK'):
+        env.pop(key, None)
+    res = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', source.name, '-o', exe.name],
+                         cwd=directory, capture_output=True, text=True, timeout=900, env=env)
+    return res, exe, source
+
+
+def typed(res):
+    return 'built on the general path' not in res.stderr
 
 
 @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
@@ -392,9 +392,13 @@ class TypedReach2(unittest.TestCase):
                   'x ' + words + '\n', '2\n']
         self.check(LENS, 'lens', inputs)
 
+    @_exact_int
+
     def test_int64_elements_whose_arithmetic_leaves_int64(self):
         inputs = ['2', '0', '-1', '4', '99999999999999999999', '-99999999999999999999', '9223372036854775807', '1', '']
         self.check(EDGE, 'edge', [i + chr(10) if i else i for i in inputs], expect_typed=None)
+
+    @_exact_int
 
     def test_int_text_in_a_list_of_lists_is_exact_not_an_overflow_stop(self):
         # (the legacy emitter parses int(<text>) into an int64: a function the IR refuses for its kinds must not keep it)
