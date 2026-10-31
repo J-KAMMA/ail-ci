@@ -326,6 +326,7 @@ LISTED_MODULES = (
     'test_ail_gpu_g2',
     'test_ail_ffi_f3b',
     'test_ail_bigcap_split',
+    'test_ail_optint_exact',
 )
 
 
