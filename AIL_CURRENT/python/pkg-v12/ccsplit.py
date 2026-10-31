@@ -22,9 +22,9 @@ import re
 
 # below this many characters of movable user code, gcc's time is dominated by the shared runtime that
 # every unit parses again, and splitting does not pay (tiny programs build in one unit)
-MIN_MOVABLE = int(os.environ.get('AIL_CC_SPLIT_MIN') or 14000)
+MIN_MOVABLE = int(os.environ.get('AIL_CC_SPLIT_MIN') or 30000)
 # the heaviest unit must hold at most this share of the movable code, or the split cannot pay
-MAX_SHARE = 0.80
+MAX_SHARE = 0.70
 
 _COMMENT = re.compile(r'/\*.*?\*/|//[^\n]*', re.S)
 _STATIC_AT_COL0 = re.compile(r'^static\b', re.M)
@@ -171,7 +171,9 @@ def _items(text):
 def _prefix_functions(prefix):
     """The names of the `static` functions a user function's own prefix defines, or None when the
     prefix holds anything else (data, a non-static function, a type)."""
-    items = _items(prefix)
+    # include-guarded type definitions (`#ifndef X / #define X / typedef ...; / #endif`) may sit in a prefix
+    guards = re.compile(r'^[ \t]*#[ \t]*(?:ifndef|define|endif)\b[^\n]*\n', re.M)
+    items = _items(guards.sub('', prefix))
     if items is None:
         return None
     names = []
@@ -182,6 +184,10 @@ def _prefix_functions(prefix):
         tag = re.match(r'\s*(?:struct|union)\s+(\w+)\s*$', item[:brace])
         if tag and item.rstrip().endswith('};'):
             names.append(tag.group(1))       # a frame type the function's own helpers share
+            continue
+        alias = re.match(r'\s*typedef\s+(?:struct|union)\s*\w*\s*$', item[:brace])
+        if alias and item.rstrip().endswith(';'):
+            names.append(re.findall(r'\w+', item[item.rindex('}') + 1:])[-1])   # a type name other functions may use
             continue
         bare = _ATTRIBUTE.sub(' ', item[:brace])
         fn = _movable_name(bare)
@@ -281,6 +287,7 @@ def plan(split, body, main, units, *, strip=None):
         b[0] += weight[i]
         b[2].append(i)
     used = [b for b in bins if b[2]]
+    last_detail = (total, max(b[0] for b in used))
     if len(used) < 2 or max(b[0] for b in used) > MAX_SHARE * total:
         return _no(11)
     # the lightest unit defines the shared state and holds `main`

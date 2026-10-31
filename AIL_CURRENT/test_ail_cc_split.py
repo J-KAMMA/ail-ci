@@ -18,14 +18,10 @@ sys.path.insert(0, str(PKG))
 import ccsplit  # noqa: E402
 
 PROGRAM = '''
-def fib(n: int) -> int:
-    a = 0
-    b = 1
-    i = 0
-    while i < n:
-        a, b = b, a + b
-        i += 1
-    return a
+def fibr(n: int) -> int:
+    if n < 2:
+        return n
+    return fibr(n - 1) + fibr(n - 2)
 
 def collatz(n: int) -> int:
     steps = 0
@@ -49,22 +45,24 @@ def total(xs: list[int]) -> int:
         s += x
     return s
 
-def words(n: int) -> str:
-    parts = []
-    for i in range(n):
-        parts.append("w" + str(i))
-    return " ".join(parts)
+def spread(xs: list[int]) -> int:
+    lo = xs[0]
+    hi = xs[0]
+    for x in xs:
+        if x < lo:
+            lo = x
+        if x > hi:
+            hi = x
+    return hi - lo
 
 def main():
-    print(fib(30), collatz(27), total(squares(10)))
-    print(words(5))
+    print(fibr(20), collatz(27), total(squares(10)))
     xs = squares(1000)
-    print(len(xs), total(xs))
-    print(len(words(200)))
+    print(len(xs), total(xs), spread(xs))
 
 main()
 '''
-EXPECTED = '832040 111 285\nw0 w1 w2 w3 w4\n1000 332833500\n1090\n'
+EXPECTED = '6765 111 285\n1000 332833500 998001\n'
 
 BUILD = '''
 import sys
@@ -104,13 +102,14 @@ class PlanTests(unittest.TestCase):
     def test_units_define_state_once(self):
         declarations, heads, bodies = self.split()
         main = 'int main(void) { return (int)(a() + b()); }\n'
-        text = declarations + '\n'.join(bodies) + main
+        text = declarations + '\n'.join(bodies)
         old = ccsplit.MIN_MOVABLE
         ccsplit.MIN_MOVABLE = 1
         try:
             units = ccsplit.plan((declarations, heads, bodies), text, main, 2)
         finally:
             ccsplit.MIN_MOVABLE = old
+        self.assertIsNotNone(units, 'reason %s %s' % (ccsplit.last_reason, ccsplit.last_detail))
         self.assertEqual(len(units), 2)
         defining = [u for u in units if 'define AIL_LINK_STATE(type, name, init) type name init' in u]
         self.assertEqual(len(defining), 1)
@@ -125,7 +124,7 @@ class PlanTests(unittest.TestCase):
     def test_deterministic_and_small_programs_stay_one_unit(self):
         declarations, heads, bodies = self.split()
         main = 'int main(void) { return 0; }\n'
-        text = declarations + '\n'.join(bodies) + main
+        text = declarations + '\n'.join(bodies)
         self.assertIsNone(ccsplit.plan((declarations, heads, bodies), text, main, 2))     # below MIN_MOVABLE
         self.assertIsNone(ccsplit.plan((declarations, heads, bodies), text, main, 1))
         self.assertIsNone(ccsplit.plan(None, text, main, 4))
@@ -135,13 +134,59 @@ class PlanTests(unittest.TestCase):
         declarations, heads, bodies = self.split()
         declarations = declarations.replace('static char *pool_cur;', 'static int tbl[] = {1, 2};')
         main = 'int main(void) { return 0; }\n'
-        text = declarations + '\n'.join(bodies) + main
+        text = declarations + '\n'.join(bodies)
         old = ccsplit.MIN_MOVABLE
         ccsplit.MIN_MOVABLE = 1
         try:
             self.assertIsNone(ccsplit.plan((declarations, heads, bodies), text, main, 2))
         finally:
             ccsplit.MIN_MOVABLE = old
+
+
+class SmallerC(unittest.TestCase):
+    """Less C for the same program: shared exit cleanup outside loops, one body for identical clones."""
+
+    FREES = ''.join('ail_list_free(&v_%d); ' % k for k in range(9))
+
+    BODY = ('    if (a) {\n        return 1LL;\n    }\n'
+            '    while (b) {\n        if (c) {\n            return 2LL;\n        }\n    }\n'
+            '    if (d) {\n        return 3LL;\n    }\n')
+
+    def test_returns_outside_loops_share_one_exit(self):
+        import pyfunc
+        text = pyfunc._rewrite_returns(self.BODY, self.FREES, 'int64_t')
+        self.assertEqual(text.count('goto ail_exit_ret;'), 2)
+        self.assertEqual(text.count(self.FREES), 2)          # the loop's own copy and the shared block
+        self.assertIn('{ int64_t _r1 = 2LL; ' + self.FREES + 'return _r1; }', text)
+        self.assertIn('ail_exit_ret: ;\n    ' + self.FREES + 'return _rv;', text)
+        self.assertTrue(text.startswith('    int64_t _rv;\n'))
+
+    def test_few_frees_and_the_off_switch_keep_one_copy_per_return(self):
+        import pyfunc
+        few = 'ail_list_free(&v_0); '
+        self.assertNotIn('ail_exit_ret', pyfunc._rewrite_returns(self.BODY, few, 'int64_t'))
+        old = os.environ.get('AIL_EXIT_MERGE')
+        os.environ['AIL_EXIT_MERGE'] = '0'
+        try:
+            text = pyfunc._rewrite_returns(self.BODY, self.FREES, 'int64_t')
+        finally:
+            if old is None:
+                del os.environ['AIL_EXIT_MERGE']
+            else:
+                os.environ['AIL_EXIT_MERGE'] = old
+        self.assertNotIn('ail_exit_ret', text)
+        self.assertEqual(text.count(self.FREES), 3)
+
+    def test_identical_clone_becomes_a_call(self):
+        import pyfunc
+        head = 'ail_str fmt(double v_v)'
+        body = ('static void ail_unwind_fmt(void **p) { ail_sarena_free(p[0]); }\n'
+                + head + ' {\n    return ail_str_g(v_v);\n}\n')
+        clone = body.replace('fmt', 'fmt__t0')
+        alias = pyfunc._clone_alias(head, body, 'fmt', 'ail_str fmt__t0(double v_v)', clone, 'fmt__t0')
+        self.assertEqual(alias, 'ail_str fmt__t0(double v_v) {\n    return fmt(v_v);\n}\n')
+        other = clone.replace('ail_str_g(v_v)', 'ail_str_r(v_v)')
+        self.assertIsNone(pyfunc._clone_alias(head, body, 'fmt', 'ail_str fmt__t0(double v_v)', other, 'fmt__t0'))
 
 
 @unittest.skipIf(os.name == 'nt' or not shutil.which('gcc'), 'needs gcc and a POSIX shell')

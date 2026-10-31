@@ -35727,7 +35727,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                                          readonly_bytes_consumers=readonly_bytes_consumers,
                                   checked_arrays=bool(info is not None and info.get('_checked_arrays')))
             heads.append(h2)
-            bodies.append(b2)
+            bodies.append(_clone_alias(h, b, cname, h2, b2, csym_variant) or b2)
             body_names.append(f.name)
             symbol_contexts[csym_variant] = ctx2
             ctx.list_calls |= ctx2.list_calls
@@ -37760,6 +37760,33 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         generated = gpu.outline(generated, sig, decls, ctx, cname, _par_decls)
     generated = _range_strip(generated)
     return sig, generated, ctx
+
+
+def _clone_alias(head, body, name, head2, body2, name2):
+    """A specialisation (`fmt__t0`) whose C is the base function's (`fmt`) with only the name changed is
+    emitted as a call to the base instead of a second copy of the body: gcc then compiles it once.
+    Returns the replacement text for `body2`, or None when the two are not identical."""
+    if os.environ.get('AIL_NO_CLONE_DEDUPE') or head.startswith(('static', '__attribute__')):
+        return None
+
+    def norm(text, ident):
+        text = text.replace('ail_unwind_' + ident, 'ail_unwind_' + chr(0))
+        return re.sub(r'(?<![A-Za-z0-9_])%s(?![A-Za-z0-9])' % re.escape(ident), chr(0), text)
+
+    if norm(head2, name2) != norm(head, name) or norm(body2, name2) != norm(body, name):
+        return None
+    m = re.match(r'^(.*?)\b%s\((.*)\)\s*$' % re.escape(name2), head2, re.S)
+    if m is None:
+        return None
+    ret, params = m.group(1).strip(), m.group(2).strip()
+    args = []
+    if params not in ('', 'void'):
+        for p in params.split(','):
+            pm = None if '(' in p or ')' in p else re.search(r'(\w+)\s*(?:\[[^\]]*\])?\s*$', p)
+            if pm is None:
+                return None
+            args.append(pm.group(1))
+    return '%s {\n    %s%s(%s);\n}\n' % (head2, '' if ret == 'void' else 'return ', name, ', '.join(args))
 
 
 # the least number of free/release calls in a function's exit for the returns to share one copy of it

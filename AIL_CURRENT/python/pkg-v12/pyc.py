@@ -1280,7 +1280,7 @@ def _split_build(info, body, main, out):
     if not sources:
         _split_log('one unit (reason %s) %r' % (ccsplit.last_reason, ccsplit.last_detail))
         return False
-    _split_log('%d units: %s' % (len(sources), [len(s) for s in sources]))
+    _split_log('%d units: %s movable/heaviest %s' % (len(sources), [len(s) for s in sources], ccsplit.last_detail))
     out = pathlib.Path(out)
     inherit = ['-fno-strict-aliasing'] if info.get('inherit') else []
     flags = [*opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), *inherit]
