@@ -2599,7 +2599,7 @@ def nexpr(comp, node, ctx):
         if ntype(comp, ctx, node.test) in SCALAR:
             cond = ntest(comp, node.test, ctx)
         else:
-            cond = 'ail_obj_truthy(%s)' % comp.expr(node.test, ctx)
+            cond = comp.truth(comp.expr(node.test, ctx), ctx)
         _open(ctx, 'if (%s) {' % cond)
         ctx.emit('%s = %s;' % (r, nexpr(comp, node.body, ctx)))
         _close(ctx, '} else {')

@@ -1,3 +1,27 @@
+## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
+
+Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this
+integrated tree already carries an equivalent fix at the same main-synthesis site. Building every
+Python-syntax example in `language_examples` with `--syntax python`, only `math.ail` (`LIMIT = 6`
+plus `def sum_to(n)`) was refused on the default build (`not in the subset: the first parameter
+must be the sequence read from the file`); CPython prints nothing and exits 0, and the general
+build already matched. The typed path compiled the definitions and then synthesized the array-entry
+tool wrapper, which requires the entry function's first parameter to be the sequence read from the
+file. Here the site already had `_python_runs_nothing(source, True)` (definitions, including
+literal module constants, on the python surface, with an `AIL_TOOL_MODE` opt-out); both fixes are
+kept: the no-op `int main(void) { return 0; }` is chosen by `_python_runs_nothing(source, True) or
+(not AIL_TOOL_MODE and _module_constant_source(source))`, where `_module_constant_source` is the
+ex13 predicate (no `main`, at least one module constant, no executable statement). A top-level
+statement still runs as a script and a `main` is still the entry point. Probes in `/tmp/probes`
+on both builds via `cmp.sh`: `p_math`, `p_const_after`, `p_const_types`, `p_const_print`,
+`p_const_list`, `p_const_import_class`, `p_const_expr`, `p_const_annot`, `p_const_annot_only`,
+`p_const_print_top`, `p_const_array`, `p_const_side`, `p_const_main`, `p_const_only`,
+`p_defs_only`, `p6_guard`, `p_unused_print`, `p_main_name`, `p_top_call`, `p_side_class` match
+CPython on both builds; `p_const_alias` (`B = A`) and `p_const_call` (`X = len("abc")`) keep the
+pre-existing typed-path `a function with no parameters and no print()/assert` refusal (the general
+path matches CPython), as does `p_const_fstring`; `p_const_empty` and `p_const_guard` (`if False:`
+after a def) are refused by name on the typed path. Added `test_ail_ex13.py`.
+
 ## 2026-10-30 -- FFI F3a: integer arguments of an @extern stub behave like the shim's
 
 CPython runs `@extern` stubs through `ail_ffi.py`, which checks every int argument against the range of its C type and
@@ -169,6 +193,121 @@ attribute, dict value, constructs) match CPython on both builds.
 
 `tools/update_manifest.py` refreshed the stale pins of `ail_chatgpt.py` and `pyfunc.py`;
 `--check` passes.
+## 2026-10-28 -- cov19: `sorted(d.items())` as a value is left to the ordinary emitter
+
+Rebuilding all 219 Python corpus programs on this tree (both the default build and `AIL_IR=1`)
+gives 48 compile-time refusal messages over 24 programs.  After the imports (the stdlib tasks'
+work: textwrap, collections, decimal, unicodedata, struct, re) the largest non-import group was
+`sorted(d.items())` -- 4 messages over 2 programs, tied with `json.loads` without a declared
+type.  The construct itself is already built exactly by the ordinary emitter (a list of AIL
+tuples, so indexing, tuple unpacking, `dict(...)` and the repr agree with CPython); the blanket
+refusal in `sortkeys.py` was raised only by the fallback key-column rewrite, which runs after the
+ordinary compile failed, and it hid the programs' real blockers.
+
+`_Rewriter.sorted_site` now leaves a `sorted(d.items())` call to the ordinary path instead of
+refusing it.  The key-column rewrite cannot take a `.items()` call as its source, so this never
+reorders such a call; a shape the ordinary path cannot build is still refused there by name.
+After the change the same 24 programs are refused (48 messages): `sorted(d.items())` is 0, and
+the two programs report their true blockers (`t456`: a non-name base class; `t467`: `sys.stdin`
+used as a plain value / `list[int] | None`).
+
+Probes in `/tmp/probes/cov19` (`items_value`, `items_key`, `items_routes`, `items_neg_int`,
+`items_mutation`) cover a value, key= with negative/reverse, an argument, a list item, an
+attribute, a dict value, empty/negative/int keys and mutation after the sort; all match CPython
+on both builds.  The unit test in `test_ail_cov19.py` also checks that the rewrite no longer
+raises for `sorted(d.items())` (it did on the base) and still rewrites a keyed list sort.
+`test_ail_cov19` (5 tests), `test_ail_sort_keys`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass on the final commit; `tools/update_manifest.py --check` passes.
+## 2026-10-31 -- ex32 follow-up: the print gate accepts only int64 constant expressions (job-ex32-10311304)
+
+The ex32 gate accepted every integer constant expression a print-only script could fold, including
+`print(1 << 63)`.  That expression is one past INT64_MAX, and on the legacy int64 emitter
+(`AIL_IR=0`) the typed path kept the shift and stopped with `integer overflow` at run time, so
+`test_ail_pre47`'s shift case no longer printed CPython's exact value.  `_print_scalar_constant`
+in `python/pkg-v12/pyc.py` now accepts a folded value only when it lies in the int64 range; a
+larger value keeps the general fallback, and on a typed-only build the existing big-int gate (or,
+for a constant shift it does not mark, the gate's own named print refusal) stops it.
+`test_ail_ex32.py` gained `test_out_of_int64_expressions_keep_the_general_fallback` (2**63,
+1<<63 and INT64_MIN-1: general/default match CPython, typed-only refused by name).
+
+This job also had to stop editing the shared `MODULES` tuple: the integration branch registers
+test modules by file (`AIL_CURRENT/tests.d/`) and the old one-line addition to the tuple applied
+to integ with conflict markers, which broke `test_ail_registry`.  `test_ail_ex32` is now
+registered by `AIL_CURRENT/tests.d/test_ail_ex32.txt` (inert on this older tree, discovered by
+the integration `ail_check.py`).  Reconstructed integ (`origin/integ` + the job diff applied with
+`git apply --3way`): test_ail_registry, test_ail_pre47 and test_ail_ex32 all pass; the code files
+apply cleanly and only DEVLOG/ci_shards conflict, as the workflow tolerates.
+
+Probes in `/tmp/probes/ex32fix_*` (18): int64 boundary cases (add, `1<<62`, `2**63-1`, `-(2**63)`),
+out-of-range (`2**63`, `1<<63`, `10**40`, `(2**70)//(2**5)`, `2**10000`), bool and `1+True`, float,
+text, list, and the argument/list-item/attribute/dict routes all match CPython on the general and
+default builds via `cmp.sh`.  On the typed-only build the in-range cases match, the out-of-range
+ones are refused by name, and bool/float/text/list keep the print refusal; `show(1 << 63)` still
+overflows there exactly as it does on the base (function mode, pre-existing).
+
+## 2026-10-29 -- ex32: a print-only integer constant expression on the typed path (job-ex32-10291111)
+
+`AIL_CURRENT/language_examples/hello.ail` (`print(40 + 2)`) was refused by the typed path with
+"a script that is only print(<expression>) needs general object semantics" although the argument
+is an int constant expression; the default build therefore took the general path.  The gate in
+`python/pkg-v12/pyc.py` now accepts a print argument that is a non-bool Constant or an integer
+constant expression proven by the same exact folder the big-int pass uses; an out-of-int64 result
+is left to the big-int check to name.  Bare bools, floats, text and containers keep the previous
+fallback, and the general path is unchanged.
+
+`hello.ail` now builds on the general, default and typed-only builds and prints `42` / exits 0 on
+all three, matching CPython.  Added `AIL_CURRENT/test_ail_ex32.py` (3 tests) and registered it in
+`ail_check.MODULES`; `test_ail_build_cache` now uses `print(True)` for its general-path-note case,
+since `print(40 + 2)` no longer takes that path.
+
+Probes in `/tmp/probes` (19) via `bash ~/tools/cmp.sh`: `p_ex32_add`, `negative`, `zero`, `sub`,
+`mul`, `floordiv`, `mod`, `shift`, `pow`, `int64`, `big`, `bool_leaf`, `bool_direct`, `float`,
+`str`, `list`, `sep`, `end` and `multi` match CPython on the general and default builds.  On the
+typed-only build the 14 int-expression probes including `hello` match; `bool_direct`, `float`,
+`str` and `list` keep the print refusal; `big` is refused by the big-int check.  Final-state
+tests: test_ail_ex32, test_ail_python_syntax, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (5 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
+## 2026-10-31 -- pre440 suite fix: keep the operand-type text the classname pass matches (job-pre440-10311403)
+
+Integrating the pre440 operand-name caps with the accepted `classname.patch_error_names` pass made
+`test_ail_cmp_classname` print `unsupported operand type(s) for **:` where CPython prints
+`** or pow():` (4 failures: the `operands_and_calls` and `with_dunders` programs, default and
+forced general path).  That pass rewrites the exact runtime text
+`"unsupported operand type(s) for %s: '%s' and '%s'"`; pre440 had changed the format string to
+`'%.100s' and '%.100s'`, so the rewrite no longer matched.
+
+`ail_dun_binop` now keeps its original format string and truncates each operand name to CPython's
+100-character `binary_op_error` cap in 101-byte copies (`na100`/`nb100`).  `can only concatenate`
+and `can't multiply sequence` keep the 201-byte names (CPython's 200 cap).  The C-text pin in
+`test_ail_pre440.py` follows the new declaration.  With the classname pass applied on top the
+merged tree passes `test_ail_cmp_classname` and `test_ail_pre440`.
+
+Probes (`/tmp/probes`, both builds via `cmp.sh`): `p1_widths_routes` (99/100/101/120/250-character
+names for `+`, through an argument, alias, list item, attribute and dict value),
+`p2_concat_widths` (120/199/200/201/250 for str/list/tuple concatenation on either side),
+`p3_multiply_widths` (120/200/201/250 for sequence repeat), `p4_other_ops` (`-`, `*`, `/`, `//`,
+`%`, bitwise, shifts, divmod with 101- and 120-character names) all match CPython on both builds.
+`p5_pow` differs only in CPython's `** or pow()` suffix, identically on the base and unchanged.
+
+## 2026-10-29 -- pre428 review: operand class names in operator TypeErrors (job-pre440-10300211)
+
+The pre428 review recorded as pre-existing that an ordinary-instance class name longer than 79
+characters was cut at 79 in `unsupported operand type(s) for ...` (`u_longinst`: 202 where CPython
+prints 244), on both builds.  The general runtime's `ail_dun_binop` kept each operand name in an
+80-byte buffer.  It now keeps 201 bytes per name and applies CPython's own caps in its messages:
+`unsupported operand type(s) for %s: '%.100s' and '%.100s'` (CPython's `binary_op_error`), while
+`can only concatenate ...` and `can't multiply sequence ...` keep the full name up to CPython's 200
+bytes.  Only a program with a class gets this runtime text, so a no-class program's C is unchanged.
+The other two items in the review's list are separate pre-existing causes and untouched: an
+exception operand still prints `'exception'`, and `**` still omits CPython's `or pow()` suffix
+(ordering also says `'exception'`; `//`, `%` and `/` already name their operands on this tree).
+
+Probes in `/tmp/probes/pre440` on both builds via `cmp.sh`: `p_add_120`, `p_sub_120`, `p_mul_120`,
+`p_add_99`, `p_add_100`, `p_add_101`, `p_add_79`, `p_add_80`, `p_add_long_int`, `p_add_int_long`,
+`p_routes` (argument, alias, list item, attribute, dict value, instance + instance), `p_subclass`,
+`p_other_ops` (list/tuple/str concatenation, sequence repeat, divmod, bitwise, shifts) and
+`p_caps250` (250-character names) all match CPython on both builds.  Added `test_ail_pre440.py`.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
@@ -434,6 +573,110 @@ Added `AIL_CURRENT/test_ail_pre428.py` (7 tests, both builds) and registered it 
 `ail_check.MODULES` and `tools/ci_shards.json`.  `tools/update_manifest.py` and `--check` pass;
 `tools/ci_shards.py --check` passes.  Final-state tests: test_ail_pre428, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3, plus test_ail_left1 (multiplication errors).
+## 2026-10-29 -- pre430: the bigint general path makes the aliased wrappers exact (job-pre430-10300444)
+
+The integration branch now gives a Python-syntax program exact big integers on its general
+path (the bigint work), so the aliased power-wrapper programs no longer stop with `integer
+overflow`: they are built on the general path and print CPython's exact result.  The four
+refusal cases of `test_ail_pre430` (constant overflow, `pow()` spelling, a negative base and
+an alias chain) plus the bool/float/argument/list-item/attribute/dict routes therefore
+failed on both builds of today's integ.  The test now accepts either the named refusal (the
+int64-only path still raises it) or CPython's exact stdout and exit status; a run-time
+`integer overflow` still fails.  The safe constants and the direct wrapper keep requiring an
+exact match on every build.  No compiler code changed: the aliased-wrapper refusal still
+applies where ints are int64.
+
+21 probes in `/tmp/probes` on both builds: on the integration tree all 21 match CPython; on
+this branch 13 are refused by name and 8 match CPython, with no `integer overflow`.
+`test_ail_pre430` passes on both trees.  `tools/update_manifest.py` was run and `--check`
+passes.
+
+## 2026-10-29 -- pre430 suite fix: register the module where the integration hunk is stable (job-pre430-10292334)
+
+The pre430 change added `test_ail_pre430` to `ail_check.MODULES` between `test_ail_pre378` and
+`test_ail_pre293`, a spot the integration tree has since filled with other modules.  Applying
+the job diff alone with `git apply --3way` therefore reinserted `test_ail_pre378` (it appears at
+another position there) or left a conflict, and `test_ail_pre346` failed on the duplicate/stale
+module list.  The registration now sits after the final `test_ail_fz1` entry, whose context is
+unchanged on the integration bases, so the job diff applies cleanly.  The `tools/ci_shards.json`
+placement is removed: a module missing from the file is spread over the shards by name (the case
+`test_ail_pre346` documents and tests), so the job diff no longer rewrites the evolved assignment
+file.  Simulated the culprit steps (`git diff cf01ff6 <this branch> -- . ':!.agent' ':!corpus'
+':!AIL_CURRENT/MANIFEST.json'` through `git apply --3way`) on integration bases `73713ae`,
+`cand-1029233952` and `d68453f`: only the record files conflict, `test_ail_pre346` passes 5/5
+and `test_ail_pre430` still passes.  Probes in `/tmp/probes/pre430fix`: safe aliased constants
+and the direct wrapper match CPython on both builds; out-of-range constants and bool/float/
+argument/list-item/attribute/dict routes are refused by name.
+
+## 2026-10-28 -- pre430: an aliased power wrapper is followed by the constant checks (job-pre430-10281939)
+
+The rbrbpre366 review recorded the aliased power-wrapper probes as pre-existing: on this tree
+`def power(b, e): return b ** e` followed by `q = power` and `print(q(10, 40))` (also the
+`pow()` spelling, a negative base and an alias chain) compiled and then stopped with
+`integer overflow`, where CPython prints the exact unbounded integer.  The check now follows a
+module-level alias (and alias chain) to a one-return wrapper whose body is exactly
+`base ** exponent` or `pow(base, exponent)`.  An exact constant result outside int64 is refused
+with `int64 constant expression out of range`; an aliased wrapper whose operands are not
+statically known is refused with the aliased-wrapper message.  A wrapper body already refused
+by the pre273 rule keeps that diagnostic.  Direct wrapper calls and safe constants keep their
+previous behaviour.
+
+The review's allowed named refusals are kept: a bool base (`q(True, 3)`), a float base and
+values routed through an argument, list item, class attribute or dict value are refused by
+name.  Values that reach a single module-level call site as in-range constants still match
+CPython.  The `int()` alias half of the original accepted change is not applied here; it is a
+separate cause and unchanged.
+
+Probes in `/tmp/probes/pre430b` on both builds via `cmp.sh`: c01-c07 and c14 (bool/float and
+routed operands) and c08/c09 (out-of-range constants) are refused by name; c10 (safe constants),
+c11-c13 (dynamic in-range calls) and c15 (direct wrapper) match CPython.  Final-state tests:
+test_ail_pre430, test_ail_pre364, test_ail_pre367, test_ail_pre299, test_ail_pre331,
+test_ail_pre160, test_ail_pre273, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (10 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
+## 2026-10-29 -- pre435 test follows the exact-bigint default (job-pre435-10292335)
+
+`test_ail_pre435` expected `int()` of a default holding `1e300` to be refused at compile time,
+which was the int64 behavior of this base.  Integers are now exact bigints by default
+(ail-ci#198), and on that compiler all 23 formerly-refused programs print CPython's exact
+integer, so the int64 refusal fix is no longer needed there; this branch keeps it for the
+legacy int64 compiler.  The module now selects its expectation from the compiler: when
+`python/pkg-v12/bigint_core.py` is present the out-of-int64 group must match CPython exactly,
+and on the legacy compiler it keeps the named-refusal check.  The 16 in-range programs still
+match CPython on both.
+
+Probes `/tmp/probes435` (39 programs: list, tuple, dict, alias, negative index, keyword-only,
+container default, attribute, module constant, wrapper call, string/bytes and both float
+boundaries) match CPython on both builds of today's `origin/integ`; on this legacy base the
+23 out-of-range probes are refused by name on both builds and the 16 in-range probes match.
+`test_ail_pre435` passes here (legacy path, 1 skip) and on an `origin/integ` worktree (bigint
+path, 1 skip).  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-28 -- pre435: a default argument captured before a container mutation (job-pre435-10282045)
+
+The pre393 review recorded as pre-existing that a default parameter expression reading a
+module container was checked against the container's final value, after a later mutation had
+dropped it: `M = [1e300]; def f(x=M[0]): return int(x); M[0] = 1; print(f())` stopped with
+`integer overflow` on both builds where CPython prints the exact big integer, and the same
+held for `D["k"]`.  A default is evaluated once when the definition runs, so the int64 check
+now evaluates each top-level definition's parameter defaults with the names visible at that
+`def`, and the call-site int() wrapper check uses the default when a call omits the argument.
+A conversion written directly in a default is checked at the definition as well.  The value is
+refused by name on both builds (`int() of a float outside int64: ... (CPython makes a big
+integer)`, or `int64 constant expression out of range` for text/bytes) through a list, tuple,
+dict, alias, negative index, keyword-only parameter, container default, attribute, module
+constant and wrapper call, for floats at and beyond both int64 boundaries and for strings and
+bytes.  In-range defaults (including the minimum boundary and an empty container), a mutation
+before the definition, an explicit argument overriding the default, a dynamic default and an
+unused function match CPython.
+
+Probes in `/tmp/probes/pre435` (41 programs, both builds via `cmp.sh`): 23 out-of-range
+programs are refused by name, 16 in-range programs match CPython, and 2 already-named refusals
+(a first-class function with defaults and a class-attribute assignment) remain refused by name.
+`test_ail_pre435.py` pins the refusals and matches; `test_ail_pre417`, `test_ail_pre370`,
+`test_ail_pre358`, `test_ail_pre359` and `test_ail_pre340` also pass.  `tools/update_manifest.py`
+was run and `--check` passes; `tools/ci_shards.py --update` registered the new module.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};

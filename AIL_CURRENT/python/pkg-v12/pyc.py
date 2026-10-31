@@ -47,7 +47,9 @@ import cprune
 import shadowing
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
-from pyfront import Unsupported, fold_int_constants, to_pipeline_c, _number_constant, refuse_field_method_call
+from pyfront import (Unsupported, fold_int_constants, to_pipeline_c, _number_constant,
+                     _int_const_value, _IntConstTooLarge, _INT64_MIN, _INT64_MAX,
+                     refuse_field_method_call)
 import pyfunc
 import gpu
 from pyfunc import to_c as func_to_c
@@ -226,6 +228,21 @@ def _cc(command, phase, **kwargs):
     if native_diagnostics.enabled():
         return native_diagnostics.run(command, phase=phase, **kwargs)
     return buildcache.run_cc(command, lambda c: native_diagnostics.run(c, phase=phase, **kwargs))
+
+
+def _cc_jobs(units):
+    """How many independent gcc compiles to run at once: AIL_CC_JOBS if set (1 = serial), else
+    min(2, cpu count) -- two gcc -O2 runs on the large generated units fit a 6 GB machine. A native
+    build report records its operations in order, so it always builds serially."""
+    if native_diagnostics.enabled():
+        return 1
+    try:
+        jobs = int(os.environ.get('AIL_CC_JOBS') or 0)
+    except ValueError:
+        jobs = 0
+    if jobs < 1:
+        jobs = min(2, os.cpu_count() or 1)
+    return max(1, min(jobs, units))
 
 
 def _finalize_output(out):
@@ -525,6 +542,27 @@ def to_c(source, strict=True, name='run', info=None, external=None):
         unbound.SCRIPT.clear()
 
 
+def _print_scalar_constant(node):
+    """A print() argument the typed script path can print without general object semantics.
+
+    A non-bool Constant is already safe.  An integer constant expression (`40 + 2`, as in
+    language_examples/hello.ail) is proven by the same exact folder the big-int pass uses, so the
+    value is a plain int.  It is accepted only when that value fits int64: the typed path has no
+    big ints, so an out-of-range expression would keep the arithmetic and stop with `integer
+    overflow` at run time (AIL_IR=0) instead of printing CPython's exact value.  Such an argument
+    keeps the general fallback; on a typed-only build the big-int gate names it instead.  A bare
+    bool stays out because the typed path erases its object identity to int, which is why this
+    gate exists.
+    """
+    if isinstance(node, ast.Constant):
+        return not isinstance(node.value, bool)
+    try:
+        value = _int_const_value(node)
+    except _IntConstTooLarge:
+        return False
+    return value is not None and _INT64_MIN <= value <= _INT64_MAX
+
+
 def _to_c(source, strict=True, name='run', info=None, external=None):
     """The C for any of three shapes, under one name, so the same `main` serves all of them: one
     expression over `xs` (pipeline mode, unchanged), one or more `def`s (function mode, unchanged
@@ -539,7 +577,7 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
         call = tree.body[0].value
         if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
                 and call.func.id == 'print'
-                and any(not isinstance(arg, ast.Constant) or isinstance(arg.value, bool)
+                and any(not _print_scalar_constant(arg)
                         for arg in call.args + [kw.value for kw in call.keywords])):
             # Typed bools erase their object identity to int; print must retain it.
             # Nonliteral arguments use the existing object-semantics fallback.
@@ -648,6 +686,22 @@ def _has_main_entry(source):
     except SyntaxError:
         return False
     return any(isinstance(n, ast.FunctionDef) and n.name == 'main' for n in tree.body)
+
+
+def _module_constant_source(source):
+    """True for a source whose whole top level is definitions plus at least one module
+    constant, with no `main` and no executable statement. CPython runs such a file's module
+    body (the constants have no effect) and exits 0, so there is no array-entry tool to
+    synthesize; the general path already builds it as a no-op module body."""
+    if _has_main_entry(source):
+        return False
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    if not any(isinstance(n, (ast.Assign, ast.AnnAssign)) for n in tree.body):
+        return False
+    return _rewrite_script(source, force=False) is None
 
 
 def _general_failure(typed, use_typed, failure):
@@ -1282,28 +1336,48 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             # written .c" (test_mixed.py's own spy) still sees the boxed unit -- the one that
             # carries an `AIL_MIXED_TYPED` marker for every wired candidate at its own `extern`
             # declaration, not only the typed unit that defines it.
-            objs = []
+            # The translation units are independent, so their gcc calls run concurrently (_cc_jobs);
+            # every .c is written first, in the serial order, and a failure is reported for the FIRST
+            # failing unit in that order, so the diagnostics and the linked binary match a serial build.
+            cflags = [compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
+                      *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else [])]
+            jobs = _cc_jobs(len(mix_units) + 1)
+            objs, steps = [], []
             for i, (mangled, pyname, csrc) in enumerate(mix_units):
                 tc = out.parent / ('%s_mix%d.c' % (out.name, i))
                 to = out.parent / ('%s_mix%d.o' % (out.name, i))
-                _write_unit(tc, csrc, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-                r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
-                         *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []),
-                         '-c', '-o', str(to), str(tc)],
-                                   capture_output=True, text=True, phase='compile')
-                if r.returncode:
-                    raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path, typed clone of %r):\n%s' %
-                        (pyname, r.stderr[-800:])))
+                steps.append((tc, csrc, [*cflags, '-c', '-o', str(to), str(tc)],
+                              'the C compiler rejected this (general path, typed clone of %r):\n%%s' % (pyname,)))
                 objs.append(str(to))
-            _write_unit(c, boxed_c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
             obj_boxed = out.parent / ('%s_boxed.o' % out.name)
-            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
-                     *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []),
-                     '-c', '-o', str(obj_boxed), str(c)],
-                               capture_output=True, text=True, phase='compile')
-            if r.returncode:
-                raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path):\n%s' %
-                                    r.stderr[-800:]))
+            steps.append((c, boxed_c, [*cflags, '-c', '-o', str(obj_boxed), str(c)],
+                          'the C compiler rejected this (general path):\n%s'))
+
+            def _write(step):
+                _write_unit(step[0], step[1], info.get('c_source_regions', info.get('c_units', (None, []))[1]))
+
+            def _fail(step, r):
+                raise _general_failure(_typed_e, typed_main, PipelineError(step[3] % r.stderr[-800:]))
+
+            if jobs == 1:
+                for step in steps:
+                    _write(step)
+                    r = _cc(step[2], capture_output=True, text=True, phase='compile')
+                    if r.returncode:
+                        _fail(step, r)
+            else:
+                for step in steps:
+                    _write(step)
+                # the boxed unit (last) is by far the longest compile: start it first, so the typed
+                # clones share the other job slot instead of queueing ahead of it
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(jobs) as pool:
+                    pending = {i: pool.submit(_cc, steps[i][2], capture_output=True, text=True, phase='compile')
+                               for i in reversed(range(len(steps)))}
+                    results = [pending[i].result() for i in range(len(steps))]
+                for step, r in zip(steps, results):
+                    if r.returncode:
+                        _fail(step, r)
             r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(),
                      *(['-Wl,--gc-sections'] if boxed_report.get('bigint') else []), '-o', str(out), str(obj_boxed)]
                                + objs + ['-lm'], capture_output=True, text=True, phase='link')
@@ -1325,7 +1399,12 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = (_NOTHING_MAIN if _python_runs_nothing(source, True) else
+    # A definitions-plus-constants source runs nothing under CPython, so it gets a no-op `main`.
+    # `_python_runs_nothing` covers the python surface; `_module_constant_source` names the same
+    # rule for a definitions-only source with a module constant, while AIL_TOOL_MODE still asks
+    # for the library tool entry instead.
+    main = (_NOTHING_MAIN if _python_runs_nothing(source, True)
+            or (not os.environ.get('AIL_TOOL_MODE') and _module_constant_source(source)) else
             _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
     _write_unit(c, body + main, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
