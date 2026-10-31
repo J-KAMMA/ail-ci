@@ -1,12 +1,6 @@
-**Coverage: support the most common construct real programs are still refused for.**
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_pre47 test_ail_registry.
 
-Read `git log --oneline -40` first so you do not redo what another task just did.
-
-1. Build and run every program in `lab/corpus/programs` the way `lab/profile/run.py` does, and count the compile-time refusal messages by construct (imports are the stdlib tasks' job).
-2. Pick the most frequent refused construct that can be supported exactly. Output and exit code must match CPython 3.12 on both builds (default and `AIL_UNIFIED_FORCE=1`). What cannot match stays a named compile-time refusal, never a silent difference.
-3. Add `AIL_CURRENT/test_ail_cov19.py`, registered in `ail_check.py` MODULES, comparing with CPython on both builds, plus one refusal case. Put the before/after refusal counts in the commit message.
-
-Run `python3 tools/update_manifest.py`, then only the new test module, the test modules of the files you touched, and `test_ail_safetynet`. Then commit.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
@@ -15,7 +9,9 @@ Run `python3 tools/update_manifest.py`, then only the new test module, the test 
 - **Records:**
   - New DIFFERENCES rows use placeholder ids `C?-<your branch>-N`.
   - Add a DEVLOG entry at the top with today's date.
-  - Run `python3 tools/update_manifest.py`, then `--check`.
+  - Register a new test module: if `AIL_CURRENT/tests.d/` exists, add `AIL_CURRENT/tests.d/<module>.txt` containing the module
+    name and do NOT edit the tuple in `ail_check.py`; otherwise append it to the `MODULES` tuple.
+  - `git add` new files, run `python3 tools/update_manifest.py`, then `--check`. Do not hand-edit `MANIFEST.json` or `manifest.d/`.
 - **Required tests:** the targeted modules for what you touch, plus test_ail_safetynet, test_ail_files and test_ail_corpus_findings3. Run them on your final commit, not an earlier one.
 - **Mandatory self-check before you report.** A reviewer will repeat it, and past reports were wrong about half the time.
   1. Write probe programs in /tmp/probes/ for every behaviour you changed. Cover the boundaries your implementation implies, not only the example: types, widths, empty, negative, aliasing, values reaching the code through an argument, a list item, an attribute and a dict value, and both builds.
