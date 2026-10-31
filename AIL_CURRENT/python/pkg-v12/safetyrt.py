@@ -2186,13 +2186,16 @@ class generator:
 
 
 def patch_gcpool(c_text):
-    """AIL_UNIFIED=1 only (docs/design/UNIFIED_IR.md section 12): a size-class free list under the collector.
-    `ail_gc_alloc` takes a header-only-or-payload-free block of up to 128 bytes from the list of its class (sizes
-    rounded up to 16) and zeroes it as calloc would; the sweep puts such a block on the list instead of free().
-    The collection schedule is unchanged (gc_bytes is charged and credited exactly as before), so the program
-    cannot tell. The lists hold at most the collector's own threshold (1.5 x cx->gc_threshold: 8 MB or twice the live set, plus the size-class rounding), the
-    most one cycle can free; they are file statics (not in ail_ctx), so the blocks stay reachable for leak
-    checkers. Not used with threads."""
+    """A size-class free list under the collector (default on for a planned, thread-free program since the gen-speed
+    change; `AIL_UNIFIED_POOL=0` is the opt-out, see pyboxed2.build). Every header-plus-payload block of up to 256 bytes
+    (the size classes are 8 bytes apart) is cut from a 256 KB calloc'd slab (no per-block malloc header: a 24-byte float
+    box takes 24 bytes, not 32) or taken from the free list of its class; the sweep puts a dead block on its list
+    instead of calling free(). The class is kept in the upper seven bits of `mark` (bit 0 is the mark; class 0 = a malloc'd
+    block), not derived from `size`, which changes when a container grows. Strings (STRBACK) stay on malloc: their sizes
+    differ so much that a block freed in one class could never serve another, and pooling them costs RSS.
+    The collection schedule is unchanged (gc_bytes is charged and credited exactly as before), so the program cannot tell.
+    The slabs and lists are file statics (not in ail_ctx), so the blocks stay reachable for leak checkers. At exit the heap
+    walk is skipped unless the build is a GC-stress or sanitizer build (the OS takes the memory back). Not used with threads."""
     def one(text, old, new):
         if text.count(old) != 1:
             raise AssertionError('safetyrt: no place for the gc pool: %r' % old[:60])
@@ -2200,28 +2203,62 @@ def patch_gcpool(c_text):
     c_text = one(c_text, '''static inline void *ail_gc_alloc(ail_ctx *cx, uint8_t kind, size_t sz) {
     ail_gc_maybe_collect(cx, sz);
     ail_gcobj *o = (ail_gcobj *)ail_xcalloc(sz);
-''', '''#define AIL2U_POOL_MAX 128
-static ail_gcobj *ail2u_pool[AIL2U_POOL_MAX / 16 + 1];
-static size_t ail2u_pool_bytes;
+    o->kind = kind;
+    o->mark = 0;
+''', '''#define AIL2U_POOL_MAX 256
+#define AIL2U_SLAB (256u * 1024u)
+static ail_gcobj *ail2u_pool[AIL2U_POOL_MAX / 8 + 1];
+static char *ail2u_slab_cur, *ail2u_slab_end;
 static inline void *ail_gc_alloc(ail_ctx *cx, uint8_t kind, size_t sz) {
     ail_gc_maybe_collect(cx, sz);
     ail_gcobj *o;
-    if (sz <= AIL2U_POOL_MAX && sz > 0) {
-        size_t c = (sz + 15) >> 4;
+    uint8_t cls = 0;
+    if (sz <= AIL2U_POOL_MAX && sz > 0 && kind != AIL_K_STRBACK) {
+        size_t c = (sz + 7) >> 3;
+        cls = (uint8_t)c;
         o = ail2u_pool[c];
-        if (o) { ail2u_pool[c] = o->gcnext; ail2u_pool_bytes -= c << 4; memset(o, 0, sz); }
-        else o = (ail_gcobj *)ail_xcalloc(c << 4);
+        if (o) { ail2u_pool[c] = o->gcnext; memset(o, 0, c << 3); }
+        else {
+            if ((size_t)(ail2u_slab_end - ail2u_slab_cur) < (c << 3)) {
+                ail2u_slab_cur = (char *)ail_xcalloc(AIL2U_SLAB);
+                ail2u_slab_end = ail2u_slab_cur + AIL2U_SLAB;
+            }
+            o = (ail_gcobj *)ail2u_slab_cur;
+            ail2u_slab_cur += c << 3;
+        }
     } else o = (ail_gcobj *)ail_xcalloc(sz);
+    o->kind = kind;
+    o->mark = (uint8_t)(cls << 1);
 ''')
-    c_text = one(c_text, '''            cx->gc_bytes -= o->size;
+    c_text = one(c_text, '''    if (!o || o->mark) return;
+    o->mark = 1;
+''', '''    if (!o || (o->mark & 1)) return;
+    o->mark |= 1;
+''')
+    c_text = one(c_text, '''        if (!o->mark) {
+            *link = o->gcnext;
+            cx->gc_bytes -= o->size;
             ail__free_payload(o);
             free(o);
-''', '''            cx->gc_bytes -= o->size;
+        } else {
+            o->mark = 0;
+''', '''        if (!(o->mark & 1)) {
+            *link = o->gcnext;
+            cx->gc_bytes -= o->size;
             ail__free_payload(o);
-            if (o->size <= AIL2U_POOL_MAX && o->size > 0 && ail2u_pool_bytes < cx->gc_threshold + cx->gc_threshold / 2) {
-                size_t c = ((size_t)o->size + 15) >> 4;
-                o->gcnext = ail2u_pool[c]; ail2u_pool[c] = o; ail2u_pool_bytes += c << 4;
-            } else free(o);
+            if (o->mark) { size_t c = o->mark >> 1; o->gcnext = ail2u_pool[c]; ail2u_pool[c] = o; }
+            else free(o);
+        } else {
+            o->mark &= (uint8_t)~1u;
+''')
+    c_text = one(c_text, '''static inline void ail_ctx_destroy(ail_ctx *cx) {
+    ail_gcobj *o = cx->gc_all;
+    while (o) { ail_gcobj *n = o->gcnext; ail__free_payload(o); free(o); o = n; }
+''', '''static inline void ail_ctx_destroy(ail_ctx *cx) {
+#if defined(AIL_GC_STRESS) || defined(__SANITIZE_ADDRESS__)
+    ail_gcobj *o = cx->gc_all;
+    while (o) { ail_gcobj *n = o->gcnext; ail__free_payload(o); if (!o->mark) free(o); o = n; }
+#endif
 ''')
     return c_text
 

@@ -596,7 +596,13 @@ def _apply(P, args, kwargs, result, current):
             from pyfront import Unsupported
             raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
                               % (fn.name, reason))
-        if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason)) \
+        # A tuple result with an int component (what optlib makes of `-> int | None`, or a written
+        # `-> tuple[bool, int]`) is an int64 field on the legacy emitter: an `int(<text>)` beyond int64 stops
+        # there with "integer overflow" where CPython returns the number. Such a function takes the exact
+        # general path like any other the tagged lowering does not cover.
+        _m_tuple = re.search(r"has kind \('obj', '_AilT_([a-z0-9_]+)'\)", str(reason))
+        _int_tuple_text = bool(_m_tuple and 'i' in _m_tuple.group(1).split('_') and _unsafe_text_int)
+        if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason) or _int_tuple_text) \
                 and not _call_result_proof \
                 and not fn.name.startswith(('_Ail', '_ail')) \
                 and not getattr(P, 'TINT_DISABLED', False) \
