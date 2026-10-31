@@ -35917,9 +35917,15 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     _tint_fell = set(TINT_SIGS) - set(TINT_ACTIVE)
     if _tint_fell and _tint_retry < 4:
         retry_info = dict(info) if info is not None else None
-        return _to_c_once(source, name, strict, retry_info, entry, sig, library, external,
-                          _sort_stage=_sort_stage, _tint_exclude=_tint_exclude | _tint_fell,
-                          _tint_retry=_tint_retry + 1)
+        retried = _to_c_once(source, name, strict, retry_info, entry, sig, library, external,
+                             _sort_stage=_sort_stage, _tint_exclude=_tint_exclude | _tint_fell,
+                             _tint_retry=_tint_retry + 1)
+        if info is not None and 'c_split' in retry_info:
+            info['c_split'] = retry_info['c_split']
+        return retried
+    if info is not None:
+        # the pieces of the returned text, for pyc's parallel split of one translation unit (ccsplit.py)
+        info['c_split'] = (declarations, list(heads), list(bodies))
     return declarations + '\n'.join(bodies)
 
 
@@ -37756,13 +37762,34 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     return sig, generated, ctx
 
 
+# the least number of free/release calls in a function's exit for the returns to share one copy of it
+_EXIT_MERGE_MIN_FREES = int(os.environ.get('AIL_EXIT_MERGE_MIN') or 8)
+_C_LITERAL = re.compile(r'"(?:[^"\\]|\\.)*"|\'(?:[^\'\\]|\\.)*\'')
+
+
+def _opens_loop(before):
+    """Whether the `{` that follows `before` (the text of its line up to the brace) opens a loop body."""
+    b = before.lstrip(' \t{}')
+    if b.startswith('else'):
+        b = b[4:].lstrip(' \t{')
+    return b.startswith(('for ', 'for(', 'while ', 'while(')) or b == 'do'
+
+
 def _rewrite_returns(body, frees, ct='int64_t'):
     """`return e;` becomes `{ T r = e; <frees> return r; }` so nothing leaks on any path. A bare
     `return;` -- only ever emitted for a NORET function's own early exit, AIL_TASK_callconv_
     20260915.md, `_stmt`'s `ast.Return` handling -- becomes `{ <frees> return; }`: the same leak
-    this rewrite already closes for every value-returning early exit, with no value to capture."""
-    out, i = [], 0
+    this rewrite already closes for every value-returning early exit, with no value to capture.
+
+    When several returns lie outside every loop they share one copy of the frees instead: each becomes
+    `{ _rv = e; goto ail_exit_ret; }` and the function ends in one `ail_exit_ret: <frees> return _rv;`.
+    A return inside a loop keeps its own copy (merging those lost run time: gcc specialises the frees
+    on what the loop has already established). AIL_EXIT_MERGE=0 turns the sharing off, =all shares
+    every return."""
+    mode = os.environ.get('AIL_EXIT_MERGE', 'outside')
     lines = body.splitlines(keepends=True)
+    # pass 1: the statement each return is, and whether a loop encloses it
+    stack, units = [], []        # units: (kind, text, pad, loop_depth); kind 'code' keeps the line as is
     k = 0
     while k < len(lines):
         line = lines[k]
@@ -37775,16 +37802,46 @@ def _rewrite_returns(body, frees, ct='int64_t'):
                 s += '\n' + lines[k].strip()
                 line += lines[k]
                 k += 1
+        pad = line[:len(line) - len(line.lstrip())]
         if s == 'return;':
-            pad = line[:len(line) - len(line.lstrip())]
-            out.append('%s{ %sreturn; }\n' % (pad, frees))
+            units.append(('void', '', pad, sum(stack)))
         elif s.startswith('return ') and s.endswith(';'):
-            pad = line[:len(line) - len(line.lstrip())]
-            i += 1
-            out.append('%s{ %s _r%d = %s; %sreturn _r%d; }\n'
-                       % (pad, ct, i, s[len('return '):-1], frees, i))
+            units.append(('value', s[len('return '):-1], pad, sum(stack)))
         else:
-            out.append(line)
+            units.append(('code', line, pad, 0))
+            if '{' in line or '}' in line:
+                text = _C_LITERAL.sub('""', line)
+                for pos, ch in enumerate(text):
+                    if ch == '{':
+                        stack.append(1 if _opens_loop(text[:pos].strip()) else 0)
+                    elif ch == '}' and stack:
+                        stack.pop()
+    exits = [u for u in units if u[0] != 'code']
+    if frees.count('_free(') + frees.count('_release(') < _EXIT_MERGE_MIN_FREES:
+        exits = []                  # a few frees are cheaper to repeat than to route through one block
+    shared = {id(u) for u in exits if mode == 'all' or (mode != '0' and u[3] == 0)} if len(exits) > 1 else set()
+    if len(shared) < 2:
+        shared = set()
+    out, i = [], 0
+    for u in units:
+        kind, text, pad, _depth = u
+        if kind == 'code':
+            out.append(text)
+        elif id(u) in shared:
+            out.append('%s{ %sgoto ail_exit_ret; }\n' % (pad, '_rv = %s; ' % text if kind == 'value' else ''))
+        elif kind == 'void':
+            out.append('%s{ %sreturn; }\n' % (pad, frees))
+        else:
+            i += 1
+            out.append('%s{ %s _r%d = %s; %sreturn _r%d; }\n' % (pad, ct, i, text, frees, i))
+    if shared:
+        kind = 'value' if any(u[0] == 'value' for u in exits) else 'void'
+        if kind == 'value':
+            out.insert(0, '    %s _rv;\n' % ct)
+        out.append('    goto ail_exit_end;\n'
+                   'ail_exit_ret: ;\n'
+                   '    %s%s\n'
+                   'ail_exit_end: ;\n' % (frees, 'return _rv;' if kind == 'value' else 'return;'))
     return ''.join(out)
 
 
