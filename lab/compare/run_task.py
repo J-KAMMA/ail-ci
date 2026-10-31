@@ -71,8 +71,11 @@ def fresh_dir(root, label):
         (fresh / sub).mkdir(parents=True)
     env = dict(os.environ, AIL_CACHE=str(fresh / 'cache'), TMPDIR=str(fresh / 'tmp'), CARGO_TARGET_DIR=str(fresh / 'target'),
                GOCACHE=str(fresh / 'gocache'), GOPATH=str(fresh / 'gopath'), GOTMPDIR=str(fresh / 'tmp'),
-               GOTOOLCHAIN='local', GOFLAGS='-modcacherw', XDG_CACHE_HOME=str(fresh / 'xdg'), PYTHONDONTWRITEBYTECODE='1')
+               GOTOOLCHAIN='local', GOFLAGS='-modcacherw', XDG_CACHE_HOME=str(fresh / 'xdg'))
     env.pop('AIL_NO_CACHE', None)
+    # The AIL compiler is Python: its own bytecode (written beside the sources on the first run, like a pip install ships it) is
+    # part of the installed tool, not of the build cache, so it is not cleaned between builds. The strict probe build runs first.
+    env.pop('PYTHONDONTWRITEBYTECODE', None)
     env.pop('AIL_STRICT', None)
     return fresh, env
 

@@ -9594,4 +9594,4 @@ The general path infers int / float / bool variables, parameters and results (`u
 and keeps them as C values; the language's answers do not change (same output, stderr and exit status as the boxed build and
 as CPython; `test_ail_unified.py`). `AIL_UNIFIED=0` (or `off`, `no`, `false`) turns it off and gives the all-boxed C;
 `AIL_UNIFIED=1` is accepted. A program that names `nan` / `inf` keeps its floats boxed (NaN identity, DIFFERENCES C117).
-`AIL_UNIFIED_POOL=1` (the size-class free list under the collector) is a separate opt-in, off by default.
+The size-class pool under the collector (`safetyrt.patch_gcpool`: blocks of up to 256 bytes from 256 KB slabs and per-class free lists, class kept in the upper bits of `mark`) is on by default for a program without threads when `AIL_UNIFIED` is on; `AIL_UNIFIED_POOL=0` (or `off`, `no`, `false`) leaves it out. A float literal of the general path is one immortal static box per site (`AIL_FCONST`).

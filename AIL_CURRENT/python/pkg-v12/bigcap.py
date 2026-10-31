@@ -1282,6 +1282,17 @@ def marked(tree, local=True):
     return reason
 
 
+def transitive(reason):
+    """Whether a marked() reason is only the call-graph closure ('it calls f(), ...' / 'it contains f(), ...')."""
+    return reason.startswith(('it calls ', 'it contains '))
+
+
+def own_marked(tree, local=True):
+    """marked() without the call-graph closure: only the units whose OWN code can make a big int. For a consumer that keeps
+    every value crossing a call exact (a boxed argument, a boxed result), a caller of a marked function needs nothing."""
+    return {k: v for k, v in marked(tree, local).items() if not transitive(v)}
+
+
 def local_int_bounds(fn, defined):
     """The fixed-point local value of every name of `fn` (the same environment `_lp_reason` checks), or an
     empty dict when this is not a function.  A name with an int value whose bounds are complete and fit
