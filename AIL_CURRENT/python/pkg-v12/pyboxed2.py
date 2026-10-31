@@ -12889,8 +12889,10 @@ def build(source, report, allow_mix=True):
     without (biggate.py): the first pass has it, a second pass without runs when the first shows no creator reachable."""
     mode = os.environ.get('AIL_BIGINT', 'auto')
     import intmode
-    if not intmode.exact():
-        mode = 'off'        # int64 ints (the default, intmode.py): the runtime without big ints, whose overflow is the loud stop
+    int64 = intmode.int64_python()
+    if int64:
+        mode = 'off'        # int64 ints (the default for a Python-syntax program, intmode.py): the runtime without big ints,
+        #                     whose overflow is the loud stop
     biggate.ON = mode != 'off'
     body = _build(source, report, allow_mix)
     big = mode != 'off' and (mode == 'on' or report.get('big_enum') or biggate.wants_big(body))
@@ -12902,7 +12904,7 @@ def build(source, report, allow_mix=True):
             biggate.ON = True
     report['bigint'] = big
     pieces = biggate.pieces_for(body) if big else set()
-    body = biggate.resolve(body, big, pieces=pieces, all_pieces=not intmode.exact())
+    body = biggate.resolve(body, big, pieces=pieces, all_pieces=int64)
     return biggate.strip(body)
 
 

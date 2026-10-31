@@ -1229,8 +1229,10 @@ def refuse_variable_int_pow(node):
     if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
         return
     import biggate
-    if biggate.ON:
-        return                        # exact ints (BIGINT.md): the power is a big int, not a program to refuse
+    import intmode
+    if biggate.ON or intmode.int64_python():
+        return                        # exact ints (BIGINT.md): the power is a big int, not a program to refuse; int64 (the
+        #                               default): a value that stays inside int64 runs, one that does not is the run-time stop
     base = int_constant(node.left)
     if base is None or abs(base) < 2 or not -(1 << 63) <= base < (1 << 63):
         return

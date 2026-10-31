@@ -117,6 +117,25 @@ a[i] = 4
 '''
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 @unittest.skipUnless(CC, "needs a C compiler")
 class DebugFlush(unittest.TestCase):
     def build(self, tmp, src, debug, general, force=False):
@@ -196,6 +215,8 @@ class DebugFlush(unittest.TestCase):
 
     def test_item_assignment_bounds_stop(self):
         self.check("typed_bounds_set", TYPED_BOUNDS_SET, 1, site=True)
+
+    @_exact_int
 
     def test_overflow_stop_keeps_what_was_printed(self):
         # The values are exact big ints now, so (like CPython) the run dies at the 4300-digit str() limit on
