@@ -25819,6 +25819,7 @@
     "python/pkg-v12/jsonrt.py",
     "python/pkg-v12/ailfile_core.h",
     "python/pkg-v12/buildcache.py",
+    "python/pkg-v12/unprintable_data.py",
     "python/pkg-v12/ailproc_core.h",
     "python/pkg-v12/proclib.py",
     "python/pkg-v12/ailpath_core.h",
