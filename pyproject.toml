@@ -1,0 +1,20 @@
+[build-system]
+requires = []
+build-backend = "ail_wheel_backend"
+backend-path = ["packaging"]
+
+[project]
+name = "ail-lang"
+dynamic = ["version"]          # packaging/ail_lang/__init__.py __version__ (read by packaging/ail_wheel_backend.py)
+description = "AIL: a Python-like language that compiles to standalone C executables"
+readme = "packaging/README.md"
+license = "MIT OR Apache-2.0"
+license-files = ["LICENSE-APACHE", "LICENSE-MIT"]
+requires-python = ">=3.10"
+dependencies = []
+
+[project.optional-dependencies]
+zig = ["ziglang==0.13.0"]      # a zig cc for machines without gcc/clang (the pin flags-lab already uses)
+
+[project.scripts]
+ail = "ail_lang.cli:main"

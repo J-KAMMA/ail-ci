@@ -1,1 +1,6 @@
 __pycache__/
+
+# pip build output
+build/
+*.egg-info/
+*.whl
