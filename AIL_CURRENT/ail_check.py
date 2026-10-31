@@ -332,6 +332,7 @@ LISTED_MODULES = (
     'test_ail_optint_exact',
     'test_ail_ctime',
     'test_ail_bound_builtin',
+    'test_ail_pre430',
 )
 
 
