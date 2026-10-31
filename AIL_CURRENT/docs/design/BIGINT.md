@@ -175,6 +175,53 @@ collections/group_indices, stdlib3/json_dumps and tuples/bfs; `AIL_NO_GENERAL=1`
 Debug switches: `AIL_IR_TRACE=<file>` appends the traceback (and the tagged-int facts) of every function the IR refuses;
 `AIL_NO_TINT_LEGACY=1` turns the legacy retry of item 2 off.
 
+## 11. What the local proof knows about counters and floats (2026-10-30)
+
+Two gaps kept float programs on the general path (20 to 200 times the instructions; measure-float-refcount.md):
+- An attribute, a list item or a call result had no kind in the proof, so `dx = b1.x - b2.x` (dataclass `x: float`) and
+  `round(acc.x, 6)` looked like unprovable int operations. `ir/driver.py` now gives the proof the typed emitter's own type
+  (`bigcap._Defined.float_oracle`): what the emitter types float is float. Without the oracle (the source-level marking) nothing changes.
+- The counter of `for i in range(...)` was unbounded unless every argument was. With a bounded start (0 for `range(n)`) and a
+  constant step up to 256 it is within 2**48 steps of its start (`_lp_range_value`), the same physical limit as `len()` and the IR's
+  int counters. `i + 1` is proven; `i * i` and `i << 20` are still not. The stop is not looked at, whatever its kind.
+Tests: `test_ail_typedreach1.py`.
+
+## 12. What the tagged-int lowering covers now: the stdin idiom, list[str] parameters, text methods (2026-10-30, batch 2)
+
+Batch 1 found the top cause of a fall to the general path: a function that needs the tagged-int lowering (an `int(token)` or
+an unbounded accumulator is not provably int64) and uses a form `ir/lower.py` refuses. Measured with `ail_chatgpt.py compile`
+(`AIL_NO_CACHE=1`), not with the census alone (the census did not set `AIL_SURFACE=python` and so skipped the gate of
+`ir/driver.py` `_apply`; `lab/census/fallback_census.py` now does, and takes the same two refusals `pyc.build` takes first).
+Now lowered:
+
+- the truth value of an owned list, dict or str (`if not data:`, `if word and ...`);
+- `[f(x) for x in xs[a:b]]`: a slice of an owned list read in place, both bounds clamped as Python does (a negative bound counts
+  from the end; a bound beyond int64, i.e. a tagged int such as `1 + n` with `n = int(data[0])` huge, saturates with
+  `tint.i64sat`, which clamps to the same place, so the result stays exact); a comprehension over `s.split()` itself;
+- `sum`, `min`, `max` of an owned int list, a generator expression or a list comprehension consumed at once (sum is an exact
+  tagged int; min/max keep the first of equal elements and a NaN never replaces; an empty min/max raises ValueError with
+  CPython's message). A sum of floats is not lowered: CPython 3.12 sums floats with compensation;
+- `sep.join(<generator of str>)`; `sorted(xs)` and `sorted(set(xs), reverse=...)` of an owned int list (copy, sort, skip
+  neighbours that are equal); `xs.extend(ys)` of lists of str; `s.casefold()`; `s[a:b:c]` of a str (the runtime's own
+  `ail_str_slice_step`);
+- a `list[str]` parameter, lent read-only: the legacy passes the `{p, n, cap}` struct by value (abi `slist`). Every mention of the
+  parameter in the function must be a read (an element, len(), a loop, comprehension, `in`, join, truth test, `max(p, key=len)`, or an
+  argument to a function that takes a list of str); a store, a method call or a kept slice leaves the function off the lowering;
+
+Still refused (the program stays on the general path): a function returning an object (`Optional[int]` is one), a method, a
+list of objects with a str field, `list[list[int]]` values, `str`-keyed dicts, `groupby`, `iter()`/`next()`, bytes
+conversions (`encode`, `bytes(...).hex()`), the `calendar`/`datetime` modules.
+The rule for what is lowered: nothing here may turn a program that printed CPython's answer on the general path into a program
+that stops. So an exact int that may exceed int64 (`int()` of text, a tagged sum) is never stored into an int64 list by the new
+comprehension sources (a slice, `s.split()`): the function keeps the exact general path (`[int(t) for t in
+sys.stdin.read().split()]` and the whole stdin idiom stay general until the IR has a list of tagged ints; corpus t001, t010, t012,
+t314, t459 are back on the general path for that reason). The element of a comprehension over a slice, and the variable of
+`sum`/`min`/`max`/`join` generators, is a tagged int in the body, so `v * 2` is exact. A `range` loop with a tagged bound and
+an int64 counter is refused (narrowing the bound would stop on `range(10**20, 5)`, which is empty in CPython). Programs that
+take the typed path with these forms: t069, t081, and any program whose int lists hold values that are int64 by construction
+(`len()`, a literal), with a slice bound that is an exact tagged int (saturated, so exact).
+Tests: `test_ail_typedreach2.py`.
+
 ## 14. Per-function exact mode on the general path (2026-10-30)
 
 The general path's unboxing pass (`unified.py`) used to box a function bigcap marks as a whole (`demote (name, '*')`:

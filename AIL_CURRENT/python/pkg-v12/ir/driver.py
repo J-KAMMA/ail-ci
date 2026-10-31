@@ -425,6 +425,9 @@ def _apply(P, args, kwargs, result, current):
         _d = bigcap._Defined(set(getattr(ctx, 'funcs', {})) | set(getattr(ctx, 'classes', {})))
         _d.classes = frozenset(getattr(ctx, 'classes', {}))
         _d.module_ints = bigcap.module_int_consts(getattr(ctx, 'modconsts', None) or {})
+        # the emitter has typed this function: an expression it types float (`b.x` of a dataclass field `x: float`,
+        # `xs[i]` of a list[float]) is a float for the proof too, so `dx = b1.x - b2.x` is no int operation
+        _d.float_oracle = lambda _n: P._etype(_n, ctx) == P.FLT
         _proven = bigcap.proven_int_names(fn, _d)
         _bounds = bigcap.local_int_bounds(fn, _d)
         _names = set(bigcap._lp_params(fn)) | set(bigcap._lp_locals(fn.body))
@@ -618,7 +621,9 @@ def _apply(P, args, kwargs, result, current):
             raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s (int64 mode: the general path '
                               'is tried first, as in the exact mode; the legacy int64 emitter is the last resort)'
                               % (fn.name, reason))
-        if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason) or _int_tuple_text) \
+        # Any other kinds-refused function that would parse an unsafe int(<text>) into an int64 takes it too (a list of
+        # lists, an object field, ...), not only the int tuple.
+        if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason) or _int_tuple_text or _unsafe_text_int) \
                 and not _call_result_proof \
                 and not fn.name.startswith(('_Ail', '_ail')) \
                 and not getattr(P, 'TINT_DISABLED', False) \

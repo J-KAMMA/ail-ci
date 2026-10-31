@@ -1740,14 +1740,15 @@ main()
         self.check("gap_lambda_key_big", text, argv=(str(10 ** 18),), ir_funcs=("total",))
 
     def test_uncovered_construct_in_a_typed_only_build_stops_loudly_on_overflow(self):
-        # a generator expression keeps `total` off the tagged lowering; with no general path the legacy int64 emitter builds it
-        # (before the big-int work this program compiled): the answer is CPython's while the ints fit, and the loud
-        # "integer overflow" stop -- never a wrapped value -- when they do not
+        # a set comprehension keeps `total` off the tagged lowering (a generator expression consumed by sum() is lowered since
+        # typed-reach batch 2); with no general path the legacy int64 emitter builds it (before the big-int work this program
+        # compiled): the answer is CPython's while the ints fit, and the loud "integer overflow" stop -- never a wrapped
+        # value -- when they do not
         text = '''import sys
 
 
 def total(xs: list[int], k: int) -> int:
-    t = sum(v * k for v in xs)
+    t = sum({v * k for v in xs})
     return t
 
 
@@ -1758,9 +1759,9 @@ def main() -> None:
 
 main()
 '''
-        self.check("gap_genexp", text, argv=("1000",))
-        src = Path(self.tmp.name) / "gap_genexp.py"
-        exe = Path(self.tmp.name) / "gap_genexp_loud"
+        self.check("gap_setcomp", text, argv=("1000",))
+        src = Path(self.tmp.name) / "gap_setcomp.py"
+        exe = Path(self.tmp.name) / "gap_setcomp_loud"
         env = dict(os.environ, AIL_NO_CACHE="1", AIL_NO_GENERAL="1")
         made = subprocess.run([sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", str(src), "--syntax",
                                "python", "-o", str(exe)], capture_output=True, text=True, timeout=900, env=env)

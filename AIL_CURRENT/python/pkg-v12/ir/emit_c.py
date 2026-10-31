@@ -100,6 +100,8 @@ def signature(fn, sym=None, linkage=None, byval=False):
             decls.append('const int64_t *v_%s, int64_t v_%s_len' % (n, n))
         elif a == 'flist':
             decls.append('ail_flist v_%s' % n)
+        elif a == 'slist':
+            decls.append('ail_slist v_%s' % n)
         else:
             decls.append(_decl(ctype(p.type), 'v_' + n))
     if fn.attrs.get('ret_list') and byval:
@@ -215,6 +217,7 @@ class Emitter(TextEmitter):
         self.floor = set()
         self.labels = 0
         self.span_names = {}
+        self.slist_params = set()               # parameters that are lists of str, lent by value (abi 'slist')
         self.pending = frozenset(pending)       # callees with an exception entry point `<sym>__ir`
         ops = list(I.walk(fn.body))
         # an exception can leave this function pending: it raises, or calls a function that can
@@ -274,6 +277,9 @@ class Emitter(TextEmitter):
                 self.span_names[p] = ('((int64_t *)%sv_%s)' % (self.pre, n), '%sv_%s_len' % (self.pre, n))
             elif a == 'flist':
                 self.span_names[p] = ('%sv_%s.p' % (self.pre, n), '%sv_%s.n' % (self.pre, n))
+            elif a == 'slist':
+                self.slist_params.add(p)
+                self.names[p] = '(&%sv_%s)' % (self.pre, n)       # the by-value struct, read through its address
 
     # ------------------------------------------------------------------ naming
     def fresh(self, v):
@@ -352,6 +358,8 @@ class Emitter(TextEmitter):
                 fields.append('const int64_t *v_%s; int64_t v_%s_len;' % (n, n))
             elif a == 'flist':
                 fields.append('ail_flist v_%s;' % n)
+            elif a == 'slist':
+                fields.append('ail_slist v_%s;' % n)
             else:
                 fields.append('%s;' % _decl(ctype(p.type), 'v_' + n))
         params = set(fn.param_names)
@@ -713,6 +721,8 @@ class Emitter(TextEmitter):
                          'if (__builtin_isinf(%(x)s)) ail_die("cannot convert float infinity to integer"); ')
             else:
                 inner = 'if (%(x)s != %(x)s) ail_raise_named(AIL_EXC_VALUE); '
+                if os.environ.get('AIL_SURFACE') == 'python':     # an infinity stays CPython's OverflowError, apart from "integer overflow"
+                    inner += 'if (__builtin_isinf(%(x)s)) ail_die("cannot convert float infinity to integer"); '
             self.line(depth, ('if (!(%(x)s >= -9223372036854775808.0 && %(x)s < 9223372036854775808.0)) { '
                               + inner + 'ail_die("OverflowError: integer overflow in int(float) (ints are 64-bit; --exact-int gives exact ints)"); }') % {'x': o[0]})
             return self.assign_new(depth, ins.result, '(int64_t)%s' % o[0])
@@ -883,7 +893,9 @@ class Emitter(TextEmitter):
             for v, text, a in zip(ins.operands, o, abi):
                 if a is None:
                     continue
-                if a in ('array', 'flist') and v in self.defs and self.defs[v].op in ('list.ref', 'field.list'):
+                if a == 'slist':
+                    parts.append('*(%s)' % text)      # the {p, n, cap} struct, by value
+                elif a in ('array', 'flist') and v in self.defs and self.defs[v].op in ('list.ref', 'field.list'):
                     # an owned (or field) list handed to a read-only list parameter: the callee gets
                     # the data pointer and length (an int list) or the {p, n, cap} struct (a float list)
                     parts.append('(%s)->p, (%s)->n' % (text, text) if a == 'array' else '*(%s)' % text)
@@ -1239,7 +1251,7 @@ class Emitter(TextEmitter):
         elem = ins.operands[0].type.args[0].args[0]
         f = 'flist' if elem == I.F64 else 'slist' if elem == I.STRV else 'rlist' if elem.head == 'tup' else 'list'
         d = self.defs.get(ins.operands[0])
-        if d is not None and d.op == 'list.ref':
+        if (d is not None and d.op == 'list.ref') or ins.operands[0] in self.slist_params:
             return self.owned_list_op(ins, depth, o, f)
         if f == 'slist':
             raise I.IRError('a list of str that is not an owned place')
