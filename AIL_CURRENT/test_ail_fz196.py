@@ -270,8 +270,11 @@ class Fz196Tests(unittest.TestCase):
     def test_instance_attribute_replacement_is_refused(self):
         self.refused_by_name('instance_attr', INSTANCE_ATTRIBUTE, 'replacement read through an attribute')
 
-    def test_dynamic_subn_is_refused(self):
-        self.refused_by_name('subn_alias', SUBN_ALIAS, 'subn with a replacement whose kind is not known')
+    def test_dynamic_subn_matches_cpython(self):
+        # an aliased replacement function whose parameter type has no typed rule: the build must not be refused,
+        # it falls back to the general path and prints what CPython prints (both modes)
+        self.same_as_cpython('subn_alias', SUBN_ALIAS)
+
 
 
 if __name__ == '__main__':
