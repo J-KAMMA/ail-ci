@@ -1,3 +1,28 @@
+## 2026-10-31 -- pre437 review fix: rebound generator aliases and recursive lambdas (job-rbpre437-10311923)
+
+Fixed the review defects in the re-applied pre437 change.  `_annotation_reads` followed a
+generator reached through a name to the binding the name had at consumption time, so a rebound
+self-referencing alias (`(g := (y for y in [1])) and (g := (y for y in g)) and list(g)`) and a
+two-name chain (`g := h`) re-entered the same generator until the compiler hit `RecursionError`;
+`execute` likewise re-entered an immediately called recursive lambda (`f := (lambda n: 1 if n else
+f(0))`).  A generator expression now records its environment when it is created, and a
+consumption resolves its first iterable against that snapshot, so the rebound name follows the
+object it named at creation; an active-node set also stops any remaining re-entry of a generator
+or a lambda currently being read (the recursive body is already being visited at the outer call).
+All three review probes (`r22_selfgen_valid`, `r23_lambda_recursion`, `r24_genexp_chain`) now
+print `1`, exit 0 and match CPython on both builds; `r1_selfgen` (a generator whose first
+iterable is the same name before it is bound, CPython NameError) still compiles to `1`, the same
+pre-existing result as the base tree, since this pass models only the class name.  Probes in
+`/tmp/probes` via `cmp.sh`: 14 new cases—valid rebound self/chain/swap/walrus-iterable, recursive
+lambda, empty rebound iterable, and an aliased generator reached through a list item, a dict
+value and a `map` argument—match CPython on both builds; element/iterable reads of `C` through a
+rebound alias and a recursive lambda that reads `C` are refused by name.  Re-ran the original 15
+probes and the review's 24: all matching cases still match, all live cases keep the named
+refusal, no `RecursionError` or traceback remains.  Tests: test_ail_pre437, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3 and test_ail_cmp_classname, 0 failed.  DIFFERENCES
+row C?-job-rbpre437-10311923-1 updated; `tools/update_manifest.py` run, `--check` and
+`tools/ci_shards.py --check` pass; `tools/diff_ids.py` is absent on this tree.
+
 ## 2026-10-31 -- pre437 re-applied: a walrus-bound lambda called from a class annotation (job-rbpre437-10311923)
 
 Re-applied the accepted `job-pre437-10300148` change, whose diff no longer applies because this

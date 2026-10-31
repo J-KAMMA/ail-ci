@@ -2450,19 +2450,27 @@ def _annotation_reads(annotation, name):
             return deferred_of(node.values[-1], env)
         return None
 
-    def visit_generators(generators, shadowed, eager, env):
+    creation = {}
+    active = set()
+
+    def visit_generators(generators, shadowed, eager, env, first_env=None):
         # The first iterable is evaluated in the enclosing scope.  The remaining iterables,
         # conditions and the element run inside the comprehension scope; for a bare generator
         # expression they are deferred until something iterates it.
         inner = shadowed
         for index, generator in enumerate(generators):
-            if index == 0 or eager:
+            if index == 0:
+                # A consumed generator's first iterable was resolved when the object was made,
+                # so a name rebound since then must not be followed to the new object.
+                scope = env if first_env is None else first_env
+                if eager:
+                    consume(generator.iter, inner, scope)
+                else:
+                    visit(generator.iter, inner, scope)
+            elif eager:
                 # An eagerly evaluated iterable is also iterated, so a generator expression
                 # used as one is consumed and its element runs.
-                if eager:
-                    consume(generator.iter, inner, env)
-                else:
-                    visit(generator.iter, inner, env)
+                consume(generator.iter, inner, env)
             inner = inner or name in _annotation_target_names(generator.target)
             if eager:
                 for condition in generator.ifs:
@@ -2470,8 +2478,16 @@ def _annotation_reads(annotation, name):
         return inner
 
     def visit_generator(node, shadowed, env):
-        inner = visit_generators(node.generators, shadowed, True, env)
-        visit(node.elt, inner, env)
+        # A generator that iterates itself through a rebound alias would otherwise be followed
+        # forever; its first iterable resolves to the binding from before the rebound.
+        if id(node) in active:
+            return
+        active.add(id(node))
+        try:
+            inner = visit_generators(node.generators, shadowed, True, env, creation.get(id(node)))
+            visit(node.elt, inner, env)
+        finally:
+            active.discard(id(node))
 
     def consume(node, shadowed, env):
         """Evaluate ``node`` and iterate the value it produces, so a generator runs."""
@@ -2488,30 +2504,38 @@ def _annotation_reads(annotation, name):
 
     def execute(node, shadowed, env, call):
         """Run the body of ``node``, a lambda reached by ``call``."""
-        positional, defaults = lambda_defaults(node)
-        parameters = set()
-        for arg in [*positional, *node.args.kwonlyargs]:
-            parameters.add(arg.arg)
-        for arg in (node.args.vararg, node.args.kwarg):
-            if arg is not None:
+        # A recursive call reached by static evaluation does not run again; its body is
+        # already being read at the outer call.
+        if id(node) in active:
+            return
+        active.add(id(node))
+        try:
+            positional, defaults = lambda_defaults(node)
+            parameters = set()
+            for arg in [*positional, *node.args.kwonlyargs]:
                 parameters.add(arg.arg)
-        inner = dict(env)
-        for parameter in parameters:
-            inner[parameter] = None
-        for parameter, default in defaults.items():
-            inner[parameter] = deferred_of(default, env)
-        if call is not None:
-            supplied = list(call.args)
-            unknown = any(isinstance(arg, ast.Starred) for arg in supplied) or \
-                any(keyword.arg is None for keyword in call.keywords)
-            if not unknown:
-                for parameter, argument in zip(positional, supplied):
-                    inner[parameter.arg] = deferred_of(argument, env)
-                named = {keyword.arg: keyword.value for keyword in call.keywords}
-                for parameter in parameters:
-                    if parameter in named:
-                        inner[parameter] = deferred_of(named[parameter], env)
-        visit(node.body, shadowed or name in parameters, inner)
+            for arg in (node.args.vararg, node.args.kwarg):
+                if arg is not None:
+                    parameters.add(arg.arg)
+            inner = dict(env)
+            for parameter in parameters:
+                inner[parameter] = None
+            for parameter, default in defaults.items():
+                inner[parameter] = deferred_of(default, env)
+            if call is not None:
+                supplied = list(call.args)
+                unknown = any(isinstance(arg, ast.Starred) for arg in supplied) or \
+                    any(keyword.arg is None for keyword in call.keywords)
+                if not unknown:
+                    for parameter, argument in zip(positional, supplied):
+                        inner[parameter.arg] = deferred_of(argument, env)
+                    named = {keyword.arg: keyword.value for keyword in call.keywords}
+                    for parameter in parameters:
+                        if parameter in named:
+                            inner[parameter] = deferred_of(named[parameter], env)
+            visit(node.body, shadowed or name in parameters, inner)
+        finally:
+            active.discard(id(node))
 
     def visit(node, shadowed, env):
         if isinstance(node, ast.Name):
@@ -2576,6 +2600,7 @@ def _annotation_reads(annotation, name):
                     execute(item, shadowed, env, node)
             return
         if isinstance(node, ast.GeneratorExp):
+            creation.setdefault(id(node), dict(env))
             visit_generators(node.generators, shadowed, False, env)
             return
         if isinstance(node, (ast.ListComp, ast.SetComp)):
