@@ -70,6 +70,25 @@ def two(a: c_int8, b: c_uint64 = 5) -> c_int64: ...
 MIN64 = "(-9223372036854775807 - 1)"
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def literal(v):
     return MIN64 if v == -(1 << 63) else str(v)
 
@@ -215,25 +234,6 @@ def compile_cli(directory, source, mode, name):
 def run_cpython(directory, source):
     env = dict(os.environ, PYTHONPATH=str(ROOT), PYTHONDONTWRITEBYTECODE="1")
     return subprocess.run([sys.executable, "-B", source], cwd=directory, capture_output=True, text=True, timeout=300, env=env)
-
-
-def _exact_int(test):
-    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
-    import functools
-    import os
-
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        saved = os.environ.get('AIL_EXACT_INT')
-        os.environ['AIL_EXACT_INT'] = '1'
-        try:
-            return test(*args, **kwargs)
-        finally:
-            if saved is None:
-                os.environ.pop('AIL_EXACT_INT', None)
-            else:
-                os.environ['AIL_EXACT_INT'] = saved
-    return wrapper
 
 
 @unittest.skipUnless(CC, "installed C compiler required")

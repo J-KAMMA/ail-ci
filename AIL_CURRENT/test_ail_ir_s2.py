@@ -115,6 +115,25 @@ TRY_FINALLY = '''func @cleanup(%n: i64) -> (i64) attrs {linkage = "extern", name
 '''
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def fn_of(src):
     fn = text.parse_function(src)
     program = I.Program({fn.sym: fn})
@@ -311,6 +330,7 @@ class ProgramTests(unittest.TestCase):
         self.assertEqual(out[0], 0)
 
     # ------------------------------------------------------------------ uncaught
+    @_exact_int
     def test_uncaught_exceptions_end_the_program_like_the_legacy_build(self):
         cases = list(range(UNCAUGHT_CASES))
         results = self.check_program('uncaught', UNCAUGHT, ['boom', 'mid', 'indexed', 'scan'],
@@ -325,6 +345,8 @@ class ProgramTests(unittest.TestCase):
                 expected = cpython_run(tmp, 'uncaught', UNCAUGHT, (k,))
                 self.assertEqual(results[k][:2], expected[:2], k)
                 self.assertEqual(last_line(results[k][2]), last_line(expected[2]), k)
+
+    @_exact_int
 
     def test_caught_traps_in_an_ir_function(self):
         # (wrap_add(INT64_MAX, 2) is Python's exact 18446744073709551614 in the IR build, where the int64 legacy

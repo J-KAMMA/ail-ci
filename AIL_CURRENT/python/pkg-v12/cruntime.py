@@ -15463,7 +15463,7 @@ static inline ail_st ail_op_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, ail_ob
 /*B<*/
         if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT ? "float division by zero" : "division by zero");
 /*B|*/
-        if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, "division by zero");
+        if (y == 0.0) return ail_raise_c(cx, AIL_B_ZERODIVISIONERROR, a.tag == AIL_T_FLOAT || b.tag == AIL_T_FLOAT ? "float division by zero" : "division by zero");
 /*B>*/
         *out = ail_box_float(cx, x / y); return AIL_OK;
     }

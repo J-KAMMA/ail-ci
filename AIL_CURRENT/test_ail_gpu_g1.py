@@ -885,7 +885,7 @@ class Integers(Base):
     def setUpClass(cls):
         super().setUpClass()
         cls.typed = Build(cls.dir, 'overflow_typed', OVERFLOW_PROGRAM)
-        cls.general = Build(cls.dir, 'overflow_general', OVERFLOW_PROGRAM, env={'AIL_UNIFIED_FORCE': '1'},
+        cls.general = Build(cls.dir, 'overflow_general', OVERFLOW_PROGRAM, env={'AIL_UNIFIED_FORCE': '1', 'AIL_EXACT_INT': '1'},
                             typed_only=False)
         path = cls.dir / 'overflow_cpython.py'
         path.write_text(OVERFLOW_PROGRAM.lstrip('\n'), encoding='utf-8')
