@@ -2102,6 +2102,43 @@ static int ail__utf8_validate(const unsigned char *b, int64_t nb, _Bool *ascii) 
     }
     return 1;
 }
+/* Text that is not UTF-8 (stdin, the command line): CPython's strict decoder raises UnicodeDecodeError with this text
+   (its default stdin mode, surrogateescape, would keep going with lone surrogates, which a str here cannot hold), so
+   the program stops with CPython's own message instead of an internal error. `b` holds the first invalid sequence. */
+static void ail_utf8_fail_text(const unsigned char *b, int64_t nb, char *msg, size_t cap) {
+    int64_t i = 0, bad = 1;
+    const char *why = "invalid start byte";
+    int found = 0;
+    while (i < nb) {
+        unsigned c = b[i], lo = 0x80, hi = 0xBF;
+        int need, k;
+        if (c < 0x80) { i++; continue; }
+        if (c < 0xC2 || c > 0xF4) { found = 1; break; }
+        if (c < 0xE0) need = 1;
+        else if (c < 0xF0) { need = 2; if (c == 0xE0) lo = 0xA0; if (c == 0xED) hi = 0x9F; }
+        else { need = 3; if (c == 0xF0) lo = 0x90; if (c == 0xF4) hi = 0x8F; }
+        for (k = 1; k <= need; k++) {
+            if (i + k >= nb) { why = "unexpected end of data"; bad = k; found = 1; break; }
+            unsigned d = b[i + k];
+            if (d < lo || d > hi) { why = "invalid continuation byte"; bad = k; found = 1; break; }
+            lo = 0x80; hi = 0xBF;
+        }
+        if (found) break;
+        i += need + 1;
+    }
+    if (!found) { snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode the input: invalid data"); return; }
+    if (bad == 1)
+        snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode byte 0x%02x in position %lld: %s",
+                 (unsigned)b[i], (long long)i, why);
+    else
+        snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode bytes in position %lld-%lld: %s",
+                 (long long)i, (long long)(i + bad - 1), why);
+}
+static void ail_stdin_utf8_fail(const unsigned char *b, int64_t nb) {
+    char msg[200];
+    ail_utf8_fail_text(b, nb, msg, sizeof msg);
+    ail_die(msg);
+}
 static ail_str ail_utf8_decode_error(ail_sarena *A, const unsigned char *b, int64_t nb,
                                    const char *bad, int error_code) {
     ail__need_elems(nb, AIL_STR_LIMIT - 1);
@@ -2142,7 +2179,15 @@ static ail_str ail_utf8_decode_m(ail_sarena *A, const unsigned char *b, int64_t 
     return ail_utf8_decode_error(A, b, nb, bad, 0);
 }
 static ail_str ail_utf8_decode(ail_sarena *A, const unsigned char *b, int64_t nb) {
-    return ail_utf8_decode_m(A, b, nb, "stdin is not valid UTF-8");
+    ail__need_elems(nb, AIL_STR_LIMIT - 1);
+    _Bool ascii;
+    if (!ail__utf8_validate(b, nb, &ascii)) ail_stdin_utf8_fail(b, nb);
+    int64_t bcap;
+    uint8_t *q = ail__blk_take(nb + 1, &bcap);
+    if (nb) memcpy(q, b, (size_t)nb);
+    q[nb] = 0;
+    ail_sarena_pushn(A, q, bcap);
+    ail_str r; r.bytes = ascii; r.p = q;  r.n = nb; return r;
 }
 static ail_str ail_stdin_read(ail_sarena *A) {
     /* Read the octets first and ask afterwards whether they are ASCII. If they
@@ -2543,8 +2588,7 @@ err:
     if (!borrowed) free((void *)b);
     return err_code;
 badutf8:
-    if (!borrowed) free((void *)b);
-    ail_die("stdin is not valid UTF-8");
+    ail_stdin_utf8_fail(b, nb);
     return 0;
 }
 
@@ -2661,8 +2705,7 @@ nondig_fail:
     if (!borrowed) free((void *)b);
     return 4;
 badutf8:
-    if (!borrowed) free((void *)b);
-    ail_die("stdin is not valid UTF-8");
+    ail_stdin_utf8_fail(b, nb);
     return 0;
 }
 """
@@ -17234,6 +17277,43 @@ static inline void ail_obj_write_str(ail_ctx *cx, ail_obj x, FILE *f) {
     ail_obj_write_repr(cx, x, f);
 }
 /* Decode stdin bytes once for input(), read() and readline(). */
+/* Text that is not UTF-8 (stdin, the command line): CPython's strict decoder raises UnicodeDecodeError with this text
+   (its default stdin mode, surrogateescape, would keep going with lone surrogates, which a str here cannot hold), so
+   the program stops with CPython's own message instead of an internal error. `b` holds the first invalid sequence. */
+static void ail_utf8_fail_text_g(const unsigned char *b, int64_t nb, char *msg, size_t cap) {
+    int64_t i = 0, bad = 1;
+    const char *why = "invalid start byte";
+    int found = 0;
+    while (i < nb) {
+        unsigned c = b[i], lo = 0x80, hi = 0xBF;
+        int need, k;
+        if (c < 0x80) { i++; continue; }
+        if (c < 0xC2 || c > 0xF4) { found = 1; break; }
+        if (c < 0xE0) need = 1;
+        else if (c < 0xF0) { need = 2; if (c == 0xE0) lo = 0xA0; if (c == 0xED) hi = 0x9F; }
+        else { need = 3; if (c == 0xF0) lo = 0x90; if (c == 0xF4) hi = 0x8F; }
+        for (k = 1; k <= need; k++) {
+            if (i + k >= nb) { why = "unexpected end of data"; bad = k; found = 1; break; }
+            unsigned d = b[i + k];
+            if (d < lo || d > hi) { why = "invalid continuation byte"; bad = k; found = 1; break; }
+            lo = 0x80; hi = 0xBF;
+        }
+        if (found) break;
+        i += need + 1;
+    }
+    if (!found) { snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode the input: invalid data"); return; }
+    if (bad == 1)
+        snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode byte 0x%02x in position %lld: %s",
+                 (unsigned)b[i], (long long)i, why);
+    else
+        snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode bytes in position %lld-%lld: %s",
+                 (long long)i, (long long)(i + bad - 1), why);
+}
+static void ail_stdin_utf8_fail_g(const char *p, int64_t n) {
+    char msg[200];
+    ail_utf8_fail_text_g((const unsigned char *)p, n, msg, sizeof msg);
+    ail_die_bare(msg);
+}
 static inline ail_obj ail_bi_str_from_utf8(ail_ctx *cx, const char *p, int64_t n) {
     if (n < 0 || (uint64_t)n > (SIZE_MAX - sizeof(ail_strback)) / sizeof(((ail_strback *)0)->data[0]))
         ail_die("stdin too large");
@@ -17247,15 +17327,15 @@ static inline ail_obj ail_bi_str_from_utf8(ail_ctx *cx, const char *p, int64_t n
         else if (c >= 0xC2 && c <= 0xDF) { cp = c & 0x1Fu; minimum = 0x80; extra = 1; }
         else if (c >= 0xE0 && c <= 0xEF) { cp = c & 0x0Fu; minimum = 0x800; extra = 2; }
         else if (c >= 0xF0 && c <= 0xF4) { cp = c & 0x07u; minimum = 0x10000; extra = 3; }
-        else ail_die("stdin is not valid UTF-8");
-        if (extra > n - i) ail_die("stdin is not valid UTF-8");
+        else ail_stdin_utf8_fail_g(p, n);
+        if (extra > n - i) ail_stdin_utf8_fail_g(p, n);
         for (int k = 0; k < extra; k++) {
             unsigned next = (unsigned char)p[i++];
-            if ((next & 0xC0) != 0x80) ail_die("stdin is not valid UTF-8");
+            if ((next & 0xC0) != 0x80) ail_stdin_utf8_fail_g(p, n);
             cp = (cp << 6) | (next & 0x3Fu);
         }
         if (cp < minimum || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF)
-            ail_die("stdin is not valid UTF-8");
+            ail_stdin_utf8_fail_g(p, n);
         if (cp > 0xFFFF && sizeof(back->data[0]) < 4)
             ail_die("stdin code point above U+FFFF in the 16-bit v2 runtime");
         back->data[o++] = cp;

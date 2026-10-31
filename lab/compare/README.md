@@ -18,3 +18,13 @@ Compile-time note: the AIL compiler is Python, so a build also pays for loading 
 build, as a pip install ships it, and the timed cold builds (fresh `AIL_CACHE` and `TMPDIR`) reuse it. For the number without
 bytecode run `PYTHONDONTWRITEBYTECODE=1 python3 tools/compile_phases.py <source>`; that tool also splits a build into the Python
 front end and the gcc phases.
+
+Full measurement (one command; manual trigger only, at most 4 task jobs at once):
+
+    gh workflow run compare-lab -R J-KAMMA/ail-ci --ref integ            # all ten tasks
+    gh workflow run compare-lab -R J-KAMMA/ail-ci --ref integ -f tasks='tree_fold tally_lang'
+
+Each program also runs on every public and hidden case of its task (`gen.py`) and is compared with `reference.py`. Wall time is
+the median of 5 runs; instructions come from callgrind (or perf_event if the runner has the counter). Toolchain versions are
+pinned in `toolchains.env` and verified by `check_tools.py`; the report ends with a per-task scorecard (W/L per column) for
+both AIL columns and shows whether each AIL build took the typed or the general path (and the compiler's fallback note).

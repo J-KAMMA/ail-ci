@@ -2709,6 +2709,9 @@ class Compiler(boxclosure.ClosureMixin):
         # operator methods, identity ==, hashing, str() through the class chain and AttributeError on a non-instance
         # are dispatched by the run time in every program that has a class (C30-C32: they were silent or fatal)
         self.dunder_ops = bool(self.classes)
+        # a class with __bool__ / __len__: a truth test of an instance can raise, so the conditions get an error exit
+        self.dunder_truth = any('__len__' in cls['methods'] or '__bool__' in cls['methods']
+                                for cls in self.classes.values())
         # a class defining an in-place operator makes the run time ask it (dunderrt.patch(inplace=...))
         self.dunder_inplace = any(
             any(name in cls['methods'] for name in ('__iadd__', '__isub__', '__imul__',
@@ -5914,6 +5917,9 @@ class Compiler(boxclosure.ClosureMixin):
             return t
         if isinstance(node.op, ast.Not):
             t = ctx.tmp()
+            if self.dunder_truth:
+                ctx.emit('%s = ail_box_bool(!%s);' % (t, self.truth(v, ctx)))
+                return t
             ctx.emit('%s = ail_op_not(%s);' % (t, v))
             return t
         if isinstance(node.op, ast.Invert):
@@ -5934,7 +5940,7 @@ class Compiler(boxclosure.ClosureMixin):
         if len(values) == 1:
             ctx.emit('%s = %s;' % (result, v0))
             return
-        ctx.emit('if (%s) {' % ('ail_obj_truthy(%s)' % v0))
+        ctx.emit('if (%s) {' % self.truth(v0, ctx))
         ctx.indent += 1
         if is_and:
             self._emit_boolop_chain(values[1:], is_and, result, ctx)
@@ -5953,7 +5959,7 @@ class Compiler(boxclosure.ClosureMixin):
     def expr_IfExp(self, node, ctx):
         result = ctx.tmp()
         cond = self.expr(node.test, ctx)
-        ctx.emit('if (ail_obj_truthy(%s)) {' % cond)
+        ctx.emit('if (%s) {' % self.truth(cond, ctx))
         ctx.indent += 1
         v1 = self.expr(node.body, ctx)
         ctx.emit('%s = %s;' % (result, v1))
@@ -6555,7 +6561,7 @@ class Compiler(boxclosure.ClosureMixin):
         self._declare_comp_target(gen.target, val, ctx, declared)
         for cond in gen.ifs:
             cc = self.expr(cond, ctx)
-            ctx.emit('if (ail_obj_truthy(%s)) {' % cc)
+            ctx.emit('if (%s) {' % self.truth(cc, ctx))
             ctx.indent += 1
         self._emit_comp_generators(generators, i + 1, node, ctx, t, add_stmt_fn, declared)
         for cond in gen.ifs:
@@ -8123,12 +8129,14 @@ class Compiler(boxclosure.ClosureMixin):
         t = ctx.tmp()
         if plan:
             lt = self._emit_virtual(plan, v, lambda i: [v], ctx, '__len__')
-            ctx.emit('%s = %s;' % (t, lt))
+            ctx.emit('st = ail_dun_len_chk(cx, &%s, %s);' % (t, lt))
+            ctx.check()
         elif info:
             lt = ctx.tmp()
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], lt, v))
             ctx.check()
-            ctx.emit('%s = %s;' % (t, lt))
+            ctx.emit('st = ail_dun_len_chk(cx, &%s, %s);' % (t, lt))
+            ctx.check()
         elif kind == 'deque':
             # deque is represented as a 2-element wrapper LIST -- ail_op_len on it directly
             # would (wrongly) answer 2, not the element count (see ail_deque_len).
@@ -8291,6 +8299,17 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('%s = ail_obj_repr(cx, %s);' % (t, v))
         return t
 
+    def truth(self, v, ctx):
+        """A C int expression for the truth value of the ail_obj `v`.  When a class defines __bool__ or __len__ the
+        test of an instance runs them, and what they raise leaves through the error exit (dunderrt.ail_dun_truth)."""
+        if not self.dunder_truth:
+            return 'ail_obj_truthy(%s)' % v
+        tv = ctx.new_cvar('tv')
+        ctx.uses_st = True
+        ctx.emit('int %s; if (%s.tag == AIL_T_INST) { st = ail_dun_truth(cx, &%s, %s); if (st != AIL_OK) goto %s; }'
+                 ' else %s = ail_obj_truthy(%s);' % (tv, v, tv, v, ctx.cur_err_target(), tv, v))
+        return tv
+
     def _b_bool(self, args, kwargs, ctx):
         if not args and not kwargs:
             return 'ail_box_bool(0)'
@@ -8298,6 +8317,9 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('bool() with other than exactly one positional argument')
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
+        if self.dunder_truth:
+            ctx.emit('%s = ail_box_bool(%s);' % (t, self.truth(v, ctx)))
+            return t
         ctx.emit('%s = ail_to_bool(%s);' % (t, v))
         return t
 
@@ -11911,7 +11933,7 @@ class Compiler(boxclosure.ClosureMixin):
             self.block(node.body, ctx)
             return
         cond = self.expr(node.test, ctx)
-        ctx.emit('if (ail_obj_truthy(%s)) {' % cond)
+        ctx.emit('if (%s) {' % self.truth(cond, ctx))
         ctx.indent += 1
         self.block(node.body, ctx)
         ctx.indent -= 1
@@ -11933,7 +11955,7 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.indent += 1
         self._gil_check(ctx)
         cond = self.expr(node.test, ctx)
-        ctx.emit('if (!ail_obj_truthy(%s)) break;' % cond)
+        ctx.emit('if (!%s) break;' % self.truth(cond, ctx))
         self.block(node.body, ctx)
         ctx.indent -= 1
         ctx.emit('}')
