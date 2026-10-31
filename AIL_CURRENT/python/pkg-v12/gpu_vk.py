@@ -91,7 +91,7 @@ static struct {
     void *lib, *inst, *pd, *dev, *queue;
     uint64_t cpool;
     uint32_t family;
-    int has_f64, has_i64, szinp64, rte64;
+    int has_f64, has_i64, szinp64, rte64, szinp32, rte32;
     uint32_t devtype;              /* VkPhysicalDeviceType: 1 integrated, 2 discrete, 3 virtual, 4 cpu */
     uint32_t driver, vendor;       /* VkPhysicalDeviceProperties.driverVersion / vendorID */
     unsigned untrusted;            /* GKV_T_* classes a self-test or a check found different from the emulation */
@@ -220,6 +220,7 @@ static GKV_UNUSED int gkv_init(void) {
         memcpy(&gkv_G.driver, pr.p + 4, 4); memcpy(&gkv_G.vendor, pr.p + 8, 4);
         memcpy(&gkv_G.max_range, pr.p + 296 + 28, 4); gkv_G.max_range &= 0xffffffffu;
         gkv_G.szinp64 = fc.szinp64 != 0; gkv_G.rte64 = fc.rte64 != 0;
+        gkv_G.szinp32 = fc.szinp32 != 0; gkv_G.rte32 = fc.rte32 != 0;
     }
     gkv_Features feat; memset(&feat, 0, sizeof feat);
     gkv_G.vkGetPhysicalDeviceFeatures(gkv_G.pd, &feat);
@@ -231,6 +232,7 @@ static GKV_UNUSED int gkv_init(void) {
             if (strstr(dis, "i64")) gkv_G.has_i64 = 0;
             if (strstr(dis, "rte")) gkv_G.rte64 = 0;
             if (strstr(dis, "szinp")) gkv_G.szinp64 = 0;
+            if (strstr(dis, "f32ctl")) { gkv_G.szinp32 = 0; gkv_G.rte32 = 0; }
         }
     }
     gkv_Features on; memset(&on, 0, sizeof on);
@@ -368,19 +370,23 @@ static gkv_pipe *gkv_pipe_for(const uint32_t *spv, uint32_t nwords, int nbind) {
 
 /* One launch.  Returns 1 when the device ran the kernel (*flag is its flag word; `res` holds the result iff *flag == 0),
    0 when it did not (nothing in the caller's memory was touched).  Buffers live for the launch only. */
-static GKV_UNUSED int gkv_launch(const uint32_t *spv, uint32_t nwords, int need_f64, int nl, int nprm, uint64_t *prm,
-                                 const void *const *lp, const int64_t *ln, void *res, int64_t cnt, unsigned *flag, int all) {
+static GKV_UNUSED int gkv_launch_ex(const uint32_t *spv, uint32_t nwords, int need, int nl, int nprm, uint64_t *prm,
+                                    const void *const *lp, const int64_t *ln, void *res, int64_t cnt, uint64_t gx, uint64_t gy,
+                                    unsigned *flag, int all) {
+    /* `need`: bit 0 = binary64 features, bit 1 = binary32 float controls (RTE and signed zero/inf/NaN preservation for 32 bits);
+       `cnt` = elements of the result buffer; (gx, gy) = workgroups dispatched (the matmul kernels of gpu_matmul.py use their own grid) */
     if (!gkv_init()) return 0;
     if (!gkv_G.has_i64) { gkv_G.why = "the device lacks shaderInt64"; return 0; }
-    if (need_f64 && !(gkv_G.has_f64 && gkv_G.szinp64 && gkv_G.rte64)) {
+    if ((need & 1) && !(gkv_G.has_f64 && gkv_G.szinp64 && gkv_G.rte64)) {
         gkv_G.why = "the device lacks shaderFloat64, signed-zero/inf/NaN preservation or round-to-nearest-even for binary64";
         return 0;
     }
+    if ((need & 2) && !(gkv_G.szinp32 && gkv_G.rte32)) {
+        gkv_G.why = "the device lacks signed-zero/inf/NaN preservation or round-to-nearest-even for binary32";
+        return 0;
+    }
     if (cnt <= 0 || cnt > ((int64_t)1 << 40)) { gkv_G.why = "launch size out of range"; return 0; }
-    uint64_t groups = ((uint64_t)cnt + 63) / 64;
-    uint64_t gx = groups < 65535 ? groups : 65535, gy = (groups + gx - 1) / gx;
-    if (gy > 65535) { gkv_G.why = "launch too large"; return 0; }
-    prm[2] = gx * 64;
+    if (gx == 0 || gy == 0 || gx > 65535 || gy > 65535) { gkv_G.why = "launch too large"; return 0; }
     if ((uint64_t)cnt * 8 > gkv_G.max_range) { gkv_G.why = "result larger than maxStorageBufferRange"; return 0; }
     for (int i = 0; i < nl; i++) if ((uint64_t)ln[i] * 8 > gkv_G.max_range) { gkv_G.why = "input larger than maxStorageBufferRange"; return 0; }
     if (nl > 36) { gkv_G.why = "too many lists"; return 0; }
@@ -456,6 +462,15 @@ done:
         if (!ok || held > keep) for (int i = 0; i < 43; i++) gkv_rmbuf(&gkv_G.pool[i]);
     }
     return ok;
+}
+
+static GKV_UNUSED int gkv_launch(const uint32_t *spv, uint32_t nwords, int need_f64, int nl, int nprm, uint64_t *prm,
+                                 const void *const *lp, const int64_t *ln, void *res, int64_t cnt, unsigned *flag, int all) {
+    if (cnt <= 0 || cnt > ((int64_t)1 << 40)) { gkv_G.why = "launch size out of range"; return 0; }
+    uint64_t groups = ((uint64_t)cnt + 63) / 64;
+    uint64_t gx = groups < 65535 ? groups : 65535, gy = (groups + gx - 1) / gx;
+    prm[2] = gx * 64;
+    return gkv_launch_ex(spv, nwords, need_f64, nl, nprm, prm, lp, ln, res, cnt, gx, gy, flag, all);
 }
 
 static GKV_UNUSED int gkv_mode(void) {         /* 0 emulation only (AIL_GPU=emu), 1 auto (default), 2 always (AIL_GPU=force) */

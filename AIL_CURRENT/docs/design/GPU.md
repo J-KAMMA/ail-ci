@@ -810,6 +810,59 @@ Reductions run one invocation per block of 1024 elements (uncoalesced; a lane-pa
 it does not matter for the decision on this device (the copy dominates) but it would on a discrete GPU. `ta.min`/`ta.max`/`argmin`, `astype`, f32/f16 and f64 division/`sqrt` (correctly rounded device division, stage G5 of the plan) are not on the device.
 
 
+### 6.7 GPU matmul for 2-D `ail_array` arrays, as built (2026-10-31)
+
+Code: `python/pkg-v12/gpu_matmul.py`, `python/pkg-v12/gpu_vk.py` (`gkv_launch_ex`: an explicit grid and a result size apart from the
+dispatch; `gkv_launch` calls it, so no existing kernel changes), `test_ail_gpu_mm.py`, `tools/colab/gpu_matmul_colab.py`. Design:
+`TYPED_ARRAY.md` 3.7 and 5.7. Sections 6.1 to 6.5 are on the base this branch was cut from by merging `gpu-t4fix` (G3 to G5) into `integ`.
+
+**API** (Python, over the reference `ail_array`): `gpu_matmul.matmul(a, b, fast=False)` returns the product as a new 2-D `Array`;
+`cpu_matmul` is the same order on the CPU in C, `reference_matmul` the pure-Python oracle (`ta.dot` of a row and a column).
+The C function `ail_gpu_matmul(dt, fast, A, B, C, M, K, N)` is what a compiled program will call (not wired: see "Not built").
+Argument and shape errors are the ones of `ta.matmul` (tested against it); f32 is accepted here, while the CPU path of this version
+builds f64 only (its own error text for f32 stays).
+
+**Default kernel (bit-identical).** One invocation per output element, the order of `TYPED_ARRAY.md` 3.7: blocks of 1024, sixteen
+lanes in sixteen registers starting at -0.0, 16 products per pass, the short tail adds nothing to the lanes it does not reach, the
+8-4-2-1 tree, the block values folded with a stack (two equal perfect subtrees are added as soon as they exist, the rest from the right at
+the end: the same tree as the recursive `S(lo, hi)` of 3.7), `+0.0` for K = 0, a NaN stored as the canonical NaN. Every product is a
+`NoContraction` OpFMul and every add a `NoContraction` OpFAdd; the entry point carries `RoundingModeRTE` and `SignedZeroInfNanPreserve`
+for 64 bits (and 32 bits for f32). f32 computes in real binary32 instructions (one correct rounding, which is what the reference
+computes), reading and writing the 8-byte buffers of the runtime (the host widens and narrows exactly). The data is read in place with
+`j` the fastest index across invocations, so reads of B are coalesced; nothing is tiled, because tiling does not change the bits and
+the order needs no shared memory.
+
+**Subnormal guard.** The runtime cannot rely on `shaderDenormPreserveFloat64` (lavapipe has none), and checking every intermediate in
+the kernel costs a multiple of the arithmetic. Instead the host scans A and B once (`O(MK + KN)`): if `exp(min |a|) + exp(min |b|)` is
+below -900 (f64) or -100 (f32), the CPU kernel runs. With the guard satisfied every nonzero product is at least 2^-902 and so is a multiple of
+2^-954, every partial sum is a multiple of the same, and a nonzero difference of such numbers is far above the smallest normal number: no
+intermediate is subnormal, so a device that flushes them cannot differ. Inputs that trip the guard are rare (`1e-300 * 1e-300`) and
+get the CPU's answer.
+
+**Trust.** The self-test (once per process and kernel) runs six matmul-specific operand sets on the device and on the CPU kernel and
+compares bits: K = 1025 with 1e16, 1, -1e16 (only the lane order gets it right), inf and NaN, -0.0 products, a pair that a fused
+multiply-add gets wrong, and random data over 6 blocks (the stack). The first real launch compares its first 256 outputs with the CPU
+kernel. A difference marks the binary64 class untrusted (the CPU kernel runs from then on). `AIL_GPU_INJECT=flip` exercises it.
+
+**Fast kernel (opt-in, `fast=True`, NOT bit-identical).** A 32 x 32 tile per workgroup of 64 invocations, 4 x 4 outputs each, K in steps
+of 8 through shared memory, one accumulator per output summed in increasing k, plain OpFMul/OpFAdd that the driver may fuse. Its bits
+differ from the default kernel's and may differ between devices; tests only bound the difference. No self-test and no guard (it makes no
+promise). It needs `shaderFloat64` for the buffers (and nothing more); it runs on f32 data in binary32.
+
+**Shapes.** Tested: non-square, M, N off every tile edge (1 x N, N x 1, 65 x 64, 31 x 65), K at 1023, 1024, 1025, 2047, 2048, 2049, around
+5 blocks, 70 blocks; empty dimensions (M = 0 or N = 0 give an empty result with the shape, K = 0 gives +0.0 and never launches).
+
+**Switches.** `AIL_GPU=0` or `emu`: CPU kernel only. `AIL_GPU_TRACE=1`: one line per call. `AIL_GPU_DEVICE`, `AIL_VULKAN_LIB`,
+`AIL_GPU_DISABLE=rte` (a test hook), `AIL_GPU_CHECK=0` (skip trust checks: measuring only) as in 6.3. There is no cost model for this
+call: a caller who asks for the device and gets it pays the launch and the copies (the host copies A, B in and C out, like every
+kernel here; the benchmark script reports that end-to-end time).
+
+**Not built.** (1) No compiled-program hook: `ta.matmul` in an AIL program still runs the CPU kernel of `array-matmul` (PR 260), which
+is not in `integ`; calling `ail_gpu_matmul` from the prelude needs that branch merged. (2) int8/int32/int64: the CPU reference has no
+integer matmul to be identical to (int64 would need an overflow rule first, TA decisions: raise); skipped, not cheap. (3) f16,
+cooperative matrix, device-resident arrays between calls. (4) Speed claims: none here; `tools/colab/gpu_matmul_colab.py` measures
+512 to 4096 for f32 and f64 and prints the table for the owner to paste.
+
 ## 7. Colab validation (owner-started, manual)
 
 The owner has a paid Google Colab subscription with NVIDIA GPUs (T4/L4/A100 class, CUDA). It is useful as a second real
