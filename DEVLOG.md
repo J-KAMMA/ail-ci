@@ -366,6 +366,45 @@ registered it in `ail_check.MODULES` and `tools/ci_shards.json`; added DIFFERENC
 `C?-job-rbpre429-10290923-1`.  Final-state tests on the code commit: test_ail_pre429 (8),
 test_ail_fz2 (7), test_ail_pre54 (4), test_ail_pre104 (1), test_ail_safetynet (5),
 test_ail_files (18, one skipped) and test_ail_corpus_findings3 (2), all OK.
+## 2026-10-29 -- pre433 under exact ints (job-rbpre433-10292335)
+
+Integers are exact by default now (ail-ci#198), so the pre433 items no longer stop with a named
+int64 refusal: a Python-syntax build prints the exact power CPython does.  `test_ail_pre433.py`
+now probes the compiler's integer mode with `10 ** 40`: in exact mode every default route
+(positional, leading, keyword-only, negative, module alias, list item, class attribute, dict
+value, empty/expanded `*`, explicit argument, the 10**19 and 2**63 boundaries) must build and
+match CPython on both builds; in int64 mode the old named refusal is required.  No compiler
+change was needed; the default-binding fix still applies where int64 is enforced, `ail check`
+for Python syntax (verified: it refuses the recorded default with `int64 constant expression out
+of range`).  Probes in `/tmp/probes`: 21 `p433_*.py` programs match CPython on both builds
+against today's integ (`origin/integ` d68453f plus the pre433 change); on this int64 tree the
+same out-of-range programs are refused by name and the safe ones match.  Final-state tests:
+test_ail_pre433, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass.
+`tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-28 -- pre433: a power base from a function default is refused (job-rbpre433-10282254)
+
+The rbpre386 review's first still-differing item reproduced on this tree on both builds:
+`def f(x=10): print(x**40); f()` compiled and then stopped with `integer overflow`, where
+CPython prints the bignum.  The constant-power pass bound a parameter from explicit call-site
+arguments only; `_binpow_power_parameters` now carries its statically known default, and
+`_binpow_argument_value` binds a constant `*` expansion at the call, so the default is checked
+as CPython binds it.  The power is refused by name at compile time (`int64 constant expression
+out of range`) on both builds for positional, leading and keyword-only defaults; a negative
+default; defaults read from a module alias, a list item, a class attribute and a dict value;
+empty and expanded `*`; the 10**18/10**19 and 2**62/2**63 boundaries; an explicit out-of-range
+argument; and mixed call sites.  In-range defaults, explicit safe calls, bases 0/1/-1, bool and
+float defaults, and an uncalled function match CPython.
+
+The other recorded items (`int(10)**40`, module tuple unpack, and the function-local
+`dict.get`/tuple/instance-attribute bases) are separate causes and are unchanged here.
+Probes in `/tmp/probes`: `p433_default.py` plus 22 `p433_def_*.py` programs match CPython or
+are refused by name on both builds via `cmp.sh`; `p433_intpow.py` and `p433_tuple.py` still
+show the recorded pre-existing `integer overflow`.  Added `test_ail_pre433.py` and registered
+it in `ail_check.MODULES`.  Final-state tests: test_ail_pre433, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3, test_ail_pre351, test_ail_pre372 and
+test_ail_pre33 pass.  `tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
