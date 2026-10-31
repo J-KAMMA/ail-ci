@@ -2542,6 +2542,8 @@ class Compiler(boxclosure.ClosureMixin):
                     if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name):
                         inst_fields.add(st.target.id)
         self.inst_field_names = frozenset(inst_fields)
+        import boundbuiltin
+        boundbuiltin.rewrite_tree(tree, Unsupported)    # `f = frozenset(xs).__contains__`, `add = s.add`, `j = ",".join`
         # A bound method taken as a value (`Box(acc.add)`) is not modelled: the stored value would
         # fail at run time when called.  With one in the program, a field call stays refused.
         method_names = {m.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef)

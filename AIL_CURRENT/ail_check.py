@@ -328,6 +328,7 @@ LISTED_MODULES = (
     'test_ail_bigcap_split',
     'test_ail_optint_exact',
     'test_ail_ctime',
+    'test_ail_bound_builtin',
 )
 
 
