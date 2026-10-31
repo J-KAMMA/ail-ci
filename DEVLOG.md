@@ -19,6 +19,66 @@ every pair agreed, and the Rust tests were skipped exactly when `RUSTC` was `Non
 failing shim, absent) and not skipped when it was set (fake working rustc). A real toolchain is
 not installed here, so the compile-and-run path was not exercised on this runner; `cmp.sh` AIL
 probes do not apply because no language behaviour changed.
+## 2026-10-31 -- pre437 review fix: rebound generator aliases and recursive lambdas (job-rbpre437-10311923)
+
+Fixed the review defects in the re-applied pre437 change.  `_annotation_reads` followed a
+generator reached through a name to the binding the name had at consumption time, so a rebound
+self-referencing alias (`(g := (y for y in [1])) and (g := (y for y in g)) and list(g)`) and a
+two-name chain (`g := h`) re-entered the same generator until the compiler hit `RecursionError`;
+`execute` likewise re-entered an immediately called recursive lambda (`f := (lambda n: 1 if n else
+f(0))`).  A generator expression now records its environment when it is created, and a
+consumption resolves its first iterable against that snapshot, so the rebound name follows the
+object it named at creation; an active-node set also stops any remaining re-entry of a generator
+or a lambda currently being read (the recursive body is already being visited at the outer call).
+All three review probes (`r22_selfgen_valid`, `r23_lambda_recursion`, `r24_genexp_chain`) now
+print `1`, exit 0 and match CPython on both builds; `r1_selfgen` (a generator whose first
+iterable is the same name before it is bound, CPython NameError) still compiles to `1`, the same
+pre-existing result as the base tree, since this pass models only the class name.  Probes in
+`/tmp/probes` via `cmp.sh`: 14 new cases—valid rebound self/chain/swap/walrus-iterable, recursive
+lambda, empty rebound iterable, and an aliased generator reached through a list item, a dict
+value and a `map` argument—match CPython on both builds; element/iterable reads of `C` through a
+rebound alias and a recursive lambda that reads `C` are refused by name.  Re-ran the original 15
+probes and the review's 24: all matching cases still match, all live cases keep the named
+refusal, no `RecursionError` or traceback remains.  Tests: test_ail_pre437, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3 and test_ail_cmp_classname, 0 failed.  DIFFERENCES
+row C?-job-rbpre437-10311923-1 updated; `tools/update_manifest.py` run, `--check` and
+`tools/ci_shards.py --check` pass; `tools/diff_ids.py` is absent on this tree.
+
+## 2026-10-31 -- pre437 re-applied: a walrus-bound lambda called from a class annotation (job-rbpre437-10311923)
+
+Re-applied the accepted `job-pre437-10300148` change, whose diff no longer applies because this
+integrated tree already carries the rustc-shim check inline in `test_ail_c_export.py` /
+`test_ail_cratebridge.py` and registers new test modules through `AIL_CURRENT/tests.d/`.  The
+pre423 review recorded as pre-existing that `class C: x: ((f := (lambda: C)) and f()) = 1`
+compiled and printed `1` on both builds, where CPython evaluates the annotation, calls the lambda
+and raises `NameError` because `C` is unbound.  `_annotation_reads` deferred the lambda body but
+never followed the name the assignment expression bound.  It now keeps an environment of `:=`
+bindings, resolved to the lambda or generator a value names, and follows values through names,
+subscripted literal aggregates (`l[0]`, `d["k"]`), `__call__`, and statically known
+`if`/`and`/`or` results.  A call through such a name runs the body, and an immediately called
+lambda binds its arguments to the parameters; a known consumer (`list(g)`) or an unpacking
+(`[*g]`) runs a generator reached through a name.  `_annotation_truth` now reports a lambda or
+generator expression as truthy and a `:=` expression by its value, so `(f := lambda: C) or f()`
+and `(lambda: C) or (lambda: C)()` match CPython instead of being refused.  Calling a lambda with
+its own parameter named `C`, an unused binding, a statically dead branch and an empty `map`
+argument still match CPython.  The rustc-shim probe moved into `ail_testenv.rustc_path()` (both
+test modules use it; the inline duplicate was dropped).  An alias to a generator over a
+statically empty iterable is refused, the same pre-existing over-refusal as the direct
+`list(C for _ in [])` form.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: the 22 matching cases in `m_matching`
+(no call, `or` returns a lambda, dead `if`/`and`, a shadowing parameter/body/call, a container
+with no call, an unused genexp, an empty `map` argument, `bool`, a nested lambda, a default
+argument, lambda and genexp truthy `or`, a dead `or`, a plain annotation, an empty tuple `and`,
+`None or`, a big int, a negative int and `0.0`) match CPython on both builds; the 13 live cases
+(`p_call`, `p_paren`, `p_chain`, `p_list`, `p_neg_list`, `p_tuple`, `p_dict`, `p_dunder`,
+`p_arg`, `p_body`, `p_consumer`, `p_star`, `p_default`) are refused by name on both builds where
+CPython raises `NameError`; `p_direct_empty_genexp` (CPython accepts) is refused by name, the
+pre-existing over-refusal.  Final-state tests: test_ail_pre437, test_ail_c_export,
+test_ail_cratebridge, test_ail_pre423, test_ail_pre410, test_ail_files, test_ail_safetynet and
+test_ail_corpus_findings3 (8 modules, 0 failed, 451 s).  `tools/diff_ids.py` is not present on
+this tree; `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --update`
+added the module (and the previously missing `test_ail_cc_jobs`) and `--check` exits 0.
 
 ## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
 

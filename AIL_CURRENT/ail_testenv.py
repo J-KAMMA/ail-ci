@@ -46,3 +46,18 @@ def objcopy_available():
 def glibc_cookie_streams():
     """fopencookie() is a glibc extension (macOS has funopen, MinGW neither)."""
     return sys.platform.startswith('linux')
+
+
+def rustc_path():
+    """The `rustc` on PATH if it can run, else None.
+
+    A rustup shim with no default toolchain is on PATH but fails every call, so `shutil.which`
+    alone reports it as installed and the Rust tests fail instead of skipping."""
+    found = shutil.which('rustc')
+    if not found:
+        return None
+    try:
+        probe = subprocess.run([found, '--version'], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return found if probe.returncode == 0 else None
