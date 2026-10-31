@@ -599,7 +599,10 @@ def _apply(P, args, kwargs, result, current):
             from pyfront import Unsupported
             raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s'
                               % (fn.name, reason))
-        if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason)) \
+        # (a function the IR refuses for its kinds keeps the legacy emitter, unless that emitter would parse an int(<text>)
+        # into an int64 and stop at "integer overflow" on a value CPython keeps exactly: then the whole program takes the
+        # exact general path, as in the IR-failure branch below)
+        if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason) or _unsafe_text_int) \
                 and not _call_result_proof \
                 and not fn.name.startswith(('_Ail', '_ail')) \
                 and not getattr(P, 'TINT_DISABLED', False) \

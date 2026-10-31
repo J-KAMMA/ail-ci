@@ -259,6 +259,29 @@ INT_INPUTS = ['', '\n', '   \n', '3\n1 2 3\n', '5\n3 1 2 3 1\n', '3\n5 5 5\n', '
               '-99999999999999999999\n1 2 3\n', '10\n1 2\n', 'x\n', '1__0\n1\n', '3\n1 x 3\n', '2\n-5 -7\n',
               '4\n7 7 8 9\n', '1\n', '1\n-3\n']
 # a value past int64 inside the list: exact on the general path, a loud stop (never a wrong answer) on the typed path
+MATRIX = '''import sys
+
+
+def main() -> None:
+    data = sys.stdin.read().split()
+    r = int(data[0])
+    c = int(data[1])
+    vals = list(map(int, data[2:2 + r * c]))
+    a: list[list[int]] = [vals[i * c:(i + 1) * c] for i in range(r)]
+    t: list[list[int]] = [[a[i][j] for i in range(r)] for j in range(c)]
+    p: list[list[int]] = [
+        [sum(a[i][k] * a[j][k] for k in range(c)) for j in range(r)]
+        for i in range(r)
+    ]
+    lines = [" ".join(map(str, row)) for row in t]
+    lines += [" ".join(map(str, row)) for row in p]
+    print(chr(10).join(lines))
+
+
+main()
+'''
+MATRIX_INPUTS = ['2 2\n1 2\n3 4\n', '2 4\n-9223372036854775808 8 9223372036854775808 -2\n-9223372036854775809 0 99999999999999999999 3\n',
+                 '1 1\n99999999999999999999\n', '1 2\n9223372036854775807 9223372036854775807\n']
 BIG_VALUES = ['4\n-9223372036854775808 9223372036854775807 0 -1\n',
               '2\n9223372036854775807 -9223372036854775808 7\n',
               '2\n99999999999999999999 1\n', '3\n-99999999999999999999 5 5\n']
@@ -346,6 +369,10 @@ class TypedReach2(unittest.TestCase):
     def test_int64_elements_whose_arithmetic_leaves_int64(self):
         inputs = ['2', '0', '-1', '4', '99999999999999999999', '-99999999999999999999', '9223372036854775807', '1', '']
         self.check(EDGE, 'edge', [i + chr(10) if i else i for i in inputs], expect_typed=None)
+
+    def test_int_text_in_a_list_of_lists_is_exact_not_an_overflow_stop(self):
+        # (the legacy emitter parses int(<text>) into an int64: a function the IR refuses for its kinds must not keep it)
+        self.check(MATRIX, 'matrix', MATRIX_INPUTS, expect_typed=None)
 
     # T4
     def test_mutated_list_parameter_keeps_python_semantics(self):
