@@ -66,9 +66,93 @@ def rewrite(source, notes=None):
     except (SyntaxError, ValueError):
         return source
     try:
+        hoisted = _hoist_pure_loop_defs(source, tree)
+        if hoisted != source:
+            source, tree = hoisted, ast.parse(hoisted)
+    except (SyntaxError, ValueError, AttributeError, KeyError, IndexError, TypeError, RecursionError, _Skip):
+        pass
+    try:
         return _Program(source, tree).run()
     except (_Skip, AttributeError, KeyError, IndexError, TypeError, ValueError, RecursionError):
         return source
+
+
+def _hoist_pure_loop_defs(source, tree):
+    """A `def` that is a direct statement of a `for` / `while` body of a top-level function, captures
+    none of that function's locals (it reads only its own parameters, module names and built-ins),
+    is called only inside that loop body and is not decorated, is a pure helper: the loop builds a
+    fresh copy of it every pass and that is all. It is moved to the module level, as written, so the
+    compilers see an ordinary function (the move keeps every other line where it was: the def's lines
+    are blanked and the text goes at the end). Anything else is left as written."""
+    lines = source.split('\n')
+    module_names = set()
+    for n in tree.body:
+        if isinstance(n, (ast.FunctionDef, ast.ClassDef)):
+            module_names.add(n.name)
+        elif isinstance(n, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.For, ast.With, ast.Import,
+                            ast.ImportFrom, ast.If, ast.While, ast.Try)):
+            module_names |= _stores(n)
+    moved = []                    # (first line, last line, dedented text)
+    taken = set(module_names) | {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    for outer in tree.body:
+        if not isinstance(outer, ast.FunctionDef):
+            continue
+        loops = [n for n in ast.walk(outer) if isinstance(n, (ast.For, ast.While)) and not n.orelse]
+        defs_by_name = {}
+        for n in ast.walk(outer):
+            if isinstance(n, ast.FunctionDef) and n is not outer:
+                defs_by_name.setdefault(n.name, []).append(n)
+        params = {a.arg for a in outer.args.args + outer.args.posonlyargs + outer.args.kwonlyargs}
+        for vararg in (outer.args.vararg, outer.args.kwarg):
+            if vararg:
+                params.add(vararg.arg)
+        rebound = {n.id for n in ast.walk(outer) if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del))}
+        outer_bound = (params | _stores(outer.body)) - (set(defs_by_name) - rebound - params)
+        for loop in loops:
+            for inner in loop.body:
+                if not isinstance(inner, ast.FunctionDef) or inner.decorator_list:
+                    continue
+                if len(defs_by_name.get(inner.name, ())) != 1 or inner.name in module_names \
+                        or inner.name in outer_bound:
+                    continue
+                if any(isinstance(n, ast.Constant) and isinstance(n.value, (str, bytes)) and
+                       n.end_lineno != n.lineno for n in ast.walk(inner)):
+                    continue                      # a multi-line string would change when moved
+                if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Global, ast.Nonlocal,
+                                      ast.Yield, ast.YieldFrom, ast.Await))
+                       and n is not inner for n in ast.walk(inner)):
+                    continue
+                if (inner.args.vararg or inner.args.kwarg or inner.args.kwonlyargs or inner.args.posonlyargs
+                        or inner.args.defaults or inner.returns is not None
+                        or any(a.annotation is not None for a in inner.args.args)):
+                    continue                      # defaults and annotations are evaluated where the def runs
+                free, own, nonlocal_names = _free_names(inner)
+                if nonlocal_names or any(f in outer_bound and f not in module_names for f in free):
+                    continue
+                # every mention of the name is a call inside this loop body, after the def
+                inside = {id(n) for s in loop.body for n in ast.walk(s)}
+                uses = [n for n in ast.walk(outer) if isinstance(n, ast.Name) and n.id == inner.name]
+                calls = {id(c.func) for c in ast.walk(outer) if isinstance(c, ast.Call)}
+                own_body = {id(n) for n in ast.walk(inner)}
+                if not uses or any(id(u) not in inside or id(u) not in calls
+                                   or (id(u) not in own_body and u.lineno <= inner.end_lineno) for u in uses):
+                    continue
+                if sum(1 for s in loop.body if s is not inner) == 0:
+                    continue
+                indent = inner.col_offset
+                block = lines[inner.lineno - 1:inner.end_lineno]
+                if any('\t' in l[:indent] or l[:indent].strip() for l in block if l.strip()):
+                    continue
+                moved.append((inner.lineno, inner.end_lineno, [l[indent:] for l in block]))
+    if not moved:
+        return source
+    for first, last, _ in moved:
+        for k in range(first - 1, last):
+            lines[k] = ''
+    text = '\n'.join(lines).rstrip('\n') + '\n'
+    for _, _, block in moved:
+        text += '\n\n' + '\n'.join(block).rstrip('\n') + '\n'
+    return text
 
 
 def _first_hop(node):

@@ -21877,6 +21877,18 @@ def _stmt_inner(node, ctx, ind):
             v = _bytes_value(fake, ctx)
             return _flush(ctx, pad) + '%s%s = %s;\n' % (pad, ctx.cname(node.target.id), v)
         _at = ctx.type_of(node.target.id)
+        if (_at == BYTEARRAY and isinstance(node.op, ast.Add)
+                and not (isinstance(node.value, ast.Name) and node.value.id == node.target.id)
+                and _etype(node.value, ctx) in (BYTES, BYTEARRAY)):
+            # `buf += chunk` appends the bytes in place, exactly `buf.extend(chunk)` (a list of ints
+            # is a TypeError for `+=`, so only a bytes or bytearray value takes this route)
+            extend = ast.Expr(value=ast.Call(
+                func=ast.Attribute(value=ast.Name(id=node.target.id, ctx=ast.Load()), attr='extend',
+                                   ctx=ast.Load()),
+                args=[node.value], keywords=[]))
+            ast.copy_location(extend, node)
+            ast.fix_missing_locations(extend)
+            return _stmt_inner(extend, ctx, ind)
         if _at not in NUM:
             raise Unsupported('augmented assignment to %s; a container is not rebound by += -- '
                               'grow a list with .append(), a set with .add(), and a dict with '
@@ -32625,6 +32637,37 @@ def _collect_direct_nested_defs(outer):
     through to the bare-node-name refusal `_stmt` already had (which is exactly the failure mode
     pkg-closure's task note names)."""
     inners = [s for s in outer.body if isinstance(s, ast.FunctionDef)]
+    # A `def` that is a direct statement of a `for`/`while` body (no `else`, no `if` around it) is
+    # lifted too, provided every mention of its name is a call inside that same body after the def:
+    # the helper is only ever called in place, so one shared C function behaves as the fresh closure
+    # each iteration would build (its captured locals are passed at the call, which is CPython's
+    # late binding). Anything else about a def in a loop is still refused by `_StrayScan`.
+    loop_defs = {}                        # id(def) -> the statement list (loop body) that holds it
+
+    def _loop_body_defs(statements):
+        for stmt in statements:
+            if isinstance(stmt, (ast.For, ast.While)) and not stmt.orelse:
+                for inner in stmt.body:
+                    if isinstance(inner, ast.FunctionDef):
+                        loop_defs[id(inner)] = stmt.body
+                        inners.append(inner)
+                _loop_body_defs(stmt.body)
+    _loop_body_defs(outer.body)
+    if loop_defs:
+        names = [s.name for s in inners]
+        if len(set(names)) != len(names):
+            raise Unsupported('a nested def inside a loop whose name is defined more than once in the '
+                              'enclosing function is not available')
+        for inner in inners:
+            body = loop_defs.get(id(inner))
+            if body is None:
+                continue
+            inside = {id(n) for stmt in body for n in ast.walk(stmt)}    # includes the def's own body
+            for node in ast.walk(outer):
+                if isinstance(node, ast.Name) and node.id == inner.name and id(node) not in inside:
+                    raise Unsupported(
+                        'a nested def inside a loop (%r) that is used outside that loop body is not '
+                        'available: define it once, outside the loop' % inner.name)
     inner_ids = {id(s) for s in inners}
 
     class _StrayScan(ast.NodeVisitor):
@@ -32793,7 +32836,16 @@ def _lift_in_function(outer, counter, nested_captures):
         nested_captures[new_name] = captured
         helpers.append(new_fn)
 
-    outer.body = [s for s in outer.body if id(s) not in inner_ids]
+    def _drop(statements):
+        kept = []
+        for stmt in statements:
+            if id(stmt) in inner_ids:
+                continue
+            if isinstance(stmt, (ast.For, ast.While)):
+                stmt.body = _drop(stmt.body) or [ast.copy_location(ast.Pass(), stmt)]
+            kept.append(stmt)
+        return kept
+    outer.body = _drop(outer.body)
     return helpers
 
 
@@ -32924,7 +32976,8 @@ class _ListEvidence:
             if node.func.attr in ('strip', 'lstrip', 'rstrip', 'lower', 'upper', 'replace'):
                 return self.text_kind(node.func.value)
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
-            if node.func.id == 'read_bytes':
+            # `sys.stdin.buffer.read()` reaches this pass spelled read_stdin_bytes(n)
+            if node.func.id in ('read_bytes', 'read_stdin_bytes') and node.func.id not in self.functions:
                 return 'bytes'
             if node.func.id == 'str' and node.func.id not in self.functions:
                 return 'str'
@@ -33468,6 +33521,19 @@ class _ListLowering:
                 handler.body = self.body(handler.body)
         prelude = []
         self.evaluated = [node.target] if isinstance(node, ast.AugAssign) else []
+        if isinstance(node, ast.Delete) and self.releasing_delete(node):
+            self.changed = True
+            return [ast.copy_location(ast.Pass(), node)]
+        if isinstance(node, ast.For):
+            lowered = self.reversed_loop(node)
+            if lowered is not None:
+                return lowered
+        if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute) and node.value.func.attr == 'extend'
+                and len(node.value.args) == 1 and not node.value.keywords):
+            lowered = self.extend_reversed(node)
+            if lowered is not None:
+                return lowered
         if (isinstance(node, ast.Expr) and isinstance(node.value, ast.Call)
                 and isinstance(node.value.func, ast.Name) and self.heapq_name(node.value.func.id)):
             lowered = self.heapq_call(node.value, prelude, statement=True)
@@ -33618,7 +33684,22 @@ class _ListLowering:
         if isinstance(node, ast.IfExp):
             node.test = self.expression(node.test, prelude)
             return node
-        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.Lambda)):
+        node = self.map_as_comprehension(node)
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            # the first iterable is evaluated at once, in the enclosing scope, before anything in
+            # the element expression, so a step slice there can be built ahead of the statement
+            first = node.generators[0]
+            if isinstance(first.iter, ast.Subscript) and isinstance(first.iter.slice, ast.Slice):
+                of_bytes = (self.evidence.is_list(first.iter.value)
+                            and self.evidence.elem(first.iter.value) == 'bytes')
+                if first.iter.slice.step is None and of_bytes:
+                    # a contiguous slice of a list of bytes is copied the same way (step 1)
+                    first.iter.slice.step = ast.copy_location(ast.Constant(value=1), first.iter)
+                if first.iter.slice.step is not None:
+                    first.iter = self.expression(first.iter, prelude)
+            self.index_bytes_walk(node)
+            return node
+        if isinstance(node, ast.Lambda):
             return node
         if isinstance(node, ast.Compare):
             node.left = self.expression(node.left, prelude)
@@ -34194,6 +34275,193 @@ class _ListLowering:
         self.changed = True
         return self.result(result, node)
 
+    # -- `del name`, `reversed(xs)` ------------------------------------------------------------
+    def releasing_delete(self, node):
+        """`del x` of plain local names that nothing reads or binds afterwards, outside every loop:
+        it only releases memory, so it is dropped (the typed path owns and frees its buffers)."""
+        fn = getattr(self, 'current_fn', None)
+        if fn is None or not all(isinstance(t, ast.Name) for t in node.targets):
+            return False
+        names = {t.id for t in node.targets}
+        for sub in ast.walk(fn):
+            if isinstance(sub, (ast.Global, ast.Nonlocal)) and names & set(sub.names):
+                return False
+            if isinstance(sub, (ast.FunctionDef, ast.Lambda, ast.AsyncFunctionDef)) and sub is not fn:
+                if any(isinstance(n, ast.Name) and n.id in names for n in ast.walk(sub)):
+                    return False
+        loops = [n for n in ast.walk(fn) if isinstance(n, (ast.For, ast.While, ast.AsyncFor))]
+        if any(node is n for loop in loops for stmt in loop.body + loop.orelse for n in ast.walk(stmt)):
+            return False
+        end = (getattr(node, 'end_lineno', node.lineno), getattr(node, 'end_col_offset', node.col_offset))
+        for sub in ast.walk(fn):
+            if isinstance(sub, ast.Name) and sub.id in names and (sub.lineno, sub.col_offset) >= end:
+                return False
+        return True
+
+    def reversed_name(self, call):
+        """The list name `xs` of a `reversed(xs)` call over a list this pass knows, else None."""
+        if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == 'reversed'
+                and not call.keywords and len(call.args) == 1 and isinstance(call.args[0], ast.Name)
+                and self.builtin_free('reversed', 'range', 'len') and self.evidence.is_list(call.args[0])
+                and call.args[0].id in self.evidence.names):
+            return call.args[0].id
+        return None
+
+    def changes_list(self, body, name):
+        """Whether `body` could add to, remove from or replace the list `name` (or hand it to code
+        that might): reversed() walks the live list, the rewritten loop would not see that."""
+        safe = ('len', 'sum', 'min', 'max', 'sorted', 'list', 'tuple', 'set', 'any', 'all', 'print')
+        for stmt in body:
+            for n in ast.walk(stmt):
+                if isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, (ast.Store, ast.Del)):
+                    return True
+                if isinstance(n, ast.Subscript) and isinstance(n.value, ast.Name) and n.value.id == name \
+                        and isinstance(n.ctx, (ast.Store, ast.Del)):
+                    return True
+                if isinstance(n, ast.Call):
+                    if (isinstance(n.func, ast.Attribute) and isinstance(n.func.value, ast.Name)
+                            and n.func.value.id == name and n.func.attr not in ('index', 'count', 'copy')):
+                        return True
+                    for arg in (*n.args, *(k.value for k in n.keywords)):
+                        if isinstance(arg, ast.Name) and arg.id == name and not (
+                                isinstance(n.func, ast.Name) and n.func.id in safe and self.builtin_free(n.func.id)):
+                            return True
+                if isinstance(n, (ast.NamedExpr, ast.AugAssign)) and isinstance(n.target, ast.Name) \
+                        and n.target.id == name:
+                    return True
+        return False
+
+    def reversed_loop(self, node):
+        """`for v in reversed(xs): body` as an index loop from the end."""
+        name = self.reversed_name(node.iter)
+        if name is None or not isinstance(node.target, ast.Name) or self.changes_list(node.body, name):
+            return None
+        out, _ = self.build('for $i in range(len(__X) - 1, -1, -1):\n    __V = __X[$i]', node,
+                            X=ast.Name(id=name, ctx=ast.Load()), V=node.target)
+        loop = out[0]
+        loop.body.extend(node.body)
+        loop.orelse = node.orelse
+        self.changed = True
+        return [loop]
+
+    def extend_reversed(self, node):
+        """`ys.extend(reversed(xs))` as an append loop from the end of `xs`."""
+        call = node.value
+        source = self.reversed_name(call.args[0])
+        if source is None or not isinstance(call.func.value, ast.Name) or call.func.value.id == source:
+            return None
+        if not self.evidence.is_list(call.func.value) or 'extend' in self.evidence.methods:
+            return None
+        out, _ = self.build('for $i in range(len(__X) - 1, -1, -1):\n    __Y.append(__X[$i])', node,
+                            X=ast.Name(id=source, ctx=ast.Load()), Y=ast.Name(id=call.func.value.id, ctx=ast.Load()))
+        self.changed = True
+        return out
+
+    # -- walking a list of bytes (`data = sys.stdin.buffer.read().split()`) ----------------------
+    # The typed path indexes a list of bytes (`data[i]`) and loops over one with `for`, but a
+    # comprehension, `map(int, data)` or a generator cannot walk it as a flat sequence. These are
+    # rewritten onto indexing, `[int(data[i]) for i in range(len(data))]`, when nothing in the
+    # element or the conditions can change the list or rebind a name (CPython's own order).
+    _INDEX_WALK_CALLS = ('int', 'float', 'len', 'ord', 'abs', 'bool', 'str', 'min', 'max', 'chr', 'round')
+
+    def builtin_free(self, *names):
+        return all(name not in self.evidence.functions and name not in self.evidence.classes
+                   for name in names)
+
+    def bytes_list_name(self, node):
+        return (isinstance(node, ast.Name) and node.id in self.evidence.names
+                and self.evidence.elem(node) == 'bytes')
+
+    def map_as_comprehension(self, node):
+        """`list(map(int, bs))`, `sum(map(float, bs))`, ... over a list of bytes (or a slice of one)
+        as the comprehension it stands for."""
+        if (not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name) or node.keywords
+                or len(node.args) != 1 or node.func.id not in ('list', 'sum', 'min', 'max', 'sorted', 'set')
+                or not self.builtin_free(node.func.id)):
+            return node
+        mapped = node.args[0]
+        if (not isinstance(mapped, ast.Call) or not isinstance(mapped.func, ast.Name) or mapped.func.id != 'map'
+                or mapped.keywords or len(mapped.args) != 2 or not self.builtin_free('map')
+                or not isinstance(mapped.args[0], ast.Name) or mapped.args[0].id not in ('int', 'float')
+                or not self.builtin_free(mapped.args[0].id)):
+            return node
+        source = mapped.args[1]
+        base = source
+        while isinstance(base, ast.Subscript) and isinstance(base.slice, ast.Slice):
+            base = base.value
+        if not self.bytes_list_name(base):
+            return node
+        var = self.fresh() + 'x'
+        element = ast.Call(func=ast.Name(id=mapped.args[0].id, ctx=ast.Load()),
+                           args=[ast.Name(id=var, ctx=ast.Load())], keywords=[])
+        generator = ast.comprehension(target=ast.Name(id=var, ctx=ast.Store()), iter=source, ifs=[], is_async=0)
+        if node.func.id == 'list':
+            comp = ast.ListComp(elt=element, generators=[generator])
+        else:
+            comp = ast.GeneratorExp(elt=element, generators=[generator])
+        for sub in ast.walk(comp):
+            ast.copy_location(sub, node)
+            sub._ail_synth = True
+        ast.fix_missing_locations(comp)
+        self.changed = True
+        if node.func.id == 'list':
+            return comp
+        node.args[0] = comp
+        return node
+
+    def index_bytes_walk(self, node):
+        if not isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)) or len(node.generators) != 1:
+            return
+        gen = node.generators[0]
+        if gen.is_async or not isinstance(gen.target, ast.Name) or not self.bytes_list_name(gen.iter):
+            return
+        if not self.builtin_free('range', 'len'):
+            return
+        source, var = gen.iter.id, gen.target.id
+
+        def root(expr):
+            while isinstance(expr, (ast.Attribute, ast.Subscript, ast.Call)):
+                expr = expr.func if isinstance(expr, ast.Call) else expr.value
+            return expr
+        for part in (node.elt, *gen.ifs):
+            for n in ast.walk(part):
+                if isinstance(n, (ast.NamedExpr, ast.Lambda, ast.Await, ast.Yield, ast.YieldFrom,
+                                  ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+                    return
+                if isinstance(n, ast.Call):
+                    func = n.func
+                    if isinstance(func, ast.Name) and func.id in self._INDEX_WALK_CALLS and self.builtin_free(func.id):
+                        continue
+                    # a method of the bytes element itself cannot change the list
+                    if (isinstance(func, ast.Attribute) and isinstance(root(func.value), ast.Name)
+                            and root(func.value).id == var):
+                        continue
+                    return
+        index = self.fresh() + 'i'
+
+        class Index(ast.NodeTransformer):
+            def visit_Name(self, name):
+                if name.id == var and isinstance(name.ctx, ast.Load):
+                    out = ast.Subscript(value=ast.Name(id=source, ctx=ast.Load()),
+                                        slice=ast.Name(id=index, ctx=ast.Load()), ctx=ast.Load())
+                    for sub in ast.walk(out):
+                        ast.copy_location(sub, name)
+                        sub._ail_synth = True
+                    return out
+                return name
+        node.elt = Index().visit(node.elt)
+        gen.ifs = [Index().visit(cond) for cond in gen.ifs]
+        gen.target = ast.copy_location(ast.Name(id=index, ctx=ast.Store()), gen.target)
+        gen.iter = ast.Call(func=ast.Name(id='range', ctx=ast.Load()),
+                            args=[ast.Call(func=ast.Name(id='len', ctx=ast.Load()),
+                                           args=[ast.Name(id=source, ctx=ast.Load())], keywords=[])],
+                            keywords=[])
+        for sub in ast.walk(gen.iter):
+            ast.copy_location(sub, node)
+            sub._ail_synth = True
+        ast.fix_missing_locations(node)
+        self.changed = True
+
     def step_slice(self, node, prelude):
         element = self.evidence.elem(node.value)
         if element is None:
@@ -34364,6 +34632,13 @@ def _lower_list_operations(tree):
               and node.func.attr == 'sort' and node.keywords):
             wanted = True
         elif isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice) and node.slice.step is not None:
+            wanted = True
+        elif (isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)) and len(node.generators) == 1
+              and isinstance(node.generators[0].iter, (ast.Name, ast.Subscript))):
+            wanted = True           # a walk over a list of bytes is rewritten onto indexing
+        elif isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('map', 'reversed'):
+            wanted = True
+        elif isinstance(node, ast.Delete) and all(isinstance(t, ast.Name) for t in node.targets):
             wanted = True
         elif isinstance(node, (ast.BinOp, ast.AugAssign)) and isinstance(node.op, ast.Add):
             wanted = True
