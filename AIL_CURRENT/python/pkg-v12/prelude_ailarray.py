@@ -710,6 +710,189 @@ def _ail_taf_dot(a: _AilTAF, b: _AilTAF) -> float:
     return _ail_taf_fsum(a.d, b.d, True)
 
 
+def _ail_ta_cn(x: float, inf: float) -> float:
+    """x, with a NaN made the canonical quiet NaN (positive, payload 0): `abs(inf - inf)` is that NaN on every CPU, whatever sign
+    the hardware gives inf - inf.  One expression, so a GPU kernel can inline it (and a NaN never reaches the device's result:
+    the kernel flags it first and the CPU loop makes this value)."""
+    return x if x == x else abs(inf - inf)
+
+
+def _ail_taf_gk_sum(d: list[float], nfull: int, nb: int) -> list[float]:
+    out = [0.0] * nb
+    for _ailg_sum in range(nfull):
+        b = _ailg_sum * 1024
+        a0 = -0.0
+        a1 = -0.0
+        a2 = -0.0
+        a3 = -0.0
+        a4 = -0.0
+        a5 = -0.0
+        a6 = -0.0
+        a7 = -0.0
+        a8 = -0.0
+        a9 = -0.0
+        a10 = -0.0
+        a11 = -0.0
+        a12 = -0.0
+        a13 = -0.0
+        a14 = -0.0
+        a15 = -0.0
+        for j in range(64):
+            q = b + j * 16 + 0
+            a0 = a0 + d[q]
+            a1 = a1 + d[q + 1]
+            a2 = a2 + d[q + 2]
+            a3 = a3 + d[q + 3]
+            a4 = a4 + d[q + 4]
+            a5 = a5 + d[q + 5]
+            a6 = a6 + d[q + 6]
+            a7 = a7 + d[q + 7]
+        for j in range(64):
+            q = b + j * 16 + 8
+            a8 = a8 + d[q]
+            a9 = a9 + d[q + 1]
+            a10 = a10 + d[q + 2]
+            a11 = a11 + d[q + 3]
+            a12 = a12 + d[q + 4]
+            a13 = a13 + d[q + 5]
+            a14 = a14 + d[q + 6]
+            a15 = a15 + d[q + 7]
+        a0 = a0 + a8
+        a1 = a1 + a9
+        a2 = a2 + a10
+        a3 = a3 + a11
+        a4 = a4 + a12
+        a5 = a5 + a13
+        a6 = a6 + a14
+        a7 = a7 + a15
+        a0 = a0 + a4
+        a1 = a1 + a5
+        a2 = a2 + a6
+        a3 = a3 + a7
+        a0 = a0 + a2
+        a1 = a1 + a3
+        a0 = a0 + a1
+        out[_ailg_sum] = a0
+    return out
+
+
+def _ail_taf_gk_dot(d: list[float], e: list[float], nfull: int, nb: int) -> list[float]:
+    out = [0.0] * nb
+    for _ailg_dot in range(nfull):
+        b = _ailg_dot * 1024
+        a0 = -0.0
+        a1 = -0.0
+        a2 = -0.0
+        a3 = -0.0
+        a4 = -0.0
+        a5 = -0.0
+        a6 = -0.0
+        a7 = -0.0
+        a8 = -0.0
+        a9 = -0.0
+        a10 = -0.0
+        a11 = -0.0
+        a12 = -0.0
+        a13 = -0.0
+        a14 = -0.0
+        a15 = -0.0
+        for j in range(64):
+            q = b + j * 16 + 0
+            a0 = a0 + d[q] * e[q]
+            a1 = a1 + d[q + 1] * e[q + 1]
+            a2 = a2 + d[q + 2] * e[q + 2]
+            a3 = a3 + d[q + 3] * e[q + 3]
+            a4 = a4 + d[q + 4] * e[q + 4]
+            a5 = a5 + d[q + 5] * e[q + 5]
+            a6 = a6 + d[q + 6] * e[q + 6]
+            a7 = a7 + d[q + 7] * e[q + 7]
+        for j in range(64):
+            q = b + j * 16 + 8
+            a8 = a8 + d[q] * e[q]
+            a9 = a9 + d[q + 1] * e[q + 1]
+            a10 = a10 + d[q + 2] * e[q + 2]
+            a11 = a11 + d[q + 3] * e[q + 3]
+            a12 = a12 + d[q + 4] * e[q + 4]
+            a13 = a13 + d[q + 5] * e[q + 5]
+            a14 = a14 + d[q + 6] * e[q + 6]
+            a15 = a15 + d[q + 7] * e[q + 7]
+        a0 = a0 + a8
+        a1 = a1 + a9
+        a2 = a2 + a10
+        a3 = a3 + a11
+        a4 = a4 + a12
+        a5 = a5 + a13
+        a6 = a6 + a14
+        a7 = a7 + a15
+        a0 = a0 + a4
+        a1 = a1 + a5
+        a2 = a2 + a6
+        a3 = a3 + a7
+        a0 = a0 + a2
+        a1 = a1 + a3
+        a0 = a0 + a1
+        out[_ailg_dot] = a0
+    return out
+
+
+def _ail_taf_tailblock(d: list[float], e: list[float], s: int, t: int, dot: bool) -> float:
+    """The value of the last, short block [s, t) of a sum or dot: the lanes and the tree of design 3.5."""
+    lanes = [-0.0] * 16
+    for k in range(s, t):
+        lane = (k - s) % 16
+        if dot:
+            lanes[lane] = lanes[lane] + d[k] * e[k]
+        else:
+            lanes[lane] = lanes[lane] + d[k]
+    w = 8
+    while w > 0:
+        for i in range(w):
+            lanes[i] = lanes[i] + lanes[i + w]
+        w = w // 2
+    return lanes[0]
+
+
+def _ail_taf_gsum(a: _AilTAF) -> float:
+    """ta.sum with the whole blocks computed by the kernel `_ail_taf_gk_sum` (one invocation per block of 1024; the GPU may run
+    it), the short last block here, and the tree over the blocks as in `_ail_taf_fsum`: the same bits."""
+    n = len(a.d)
+    if n == 0:
+        return 0.0
+    nb = (n + 1023) // 1024
+    nfull = n // 1024
+    blocks = _ail_taf_gk_sum(a.d, nfull, nb)
+    if nb > nfull:
+        blocks[nfull] = _ail_taf_tailblock(a.d, a.d, nfull * 1024, n, False)
+    r = _ail_ta_tree(blocks, 0, nb)
+    if r != r:
+        return math.nan
+    return r
+
+
+def _ail_taf_gdot(a: _AilTAF, b: _AilTAF) -> float:
+    if len(b.d) != len(a.d):
+        _ail_ta_shapes(len(a.d), len(b.d))
+    n = len(a.d)
+    if n == 0:
+        return 0.0
+    nb = (n + 1023) // 1024
+    nfull = n // 1024
+    blocks = _ail_taf_gk_dot(a.d, b.d, nfull, nb)
+    if nb > nfull:
+        blocks[nfull] = _ail_taf_tailblock(a.d, b.d, nfull * 1024, n, True)
+    r = _ail_ta_tree(blocks, 0, nb)
+    if r != r:
+        return math.nan
+    return r
+
+
+def _ail_ta_c32(v: int, op: int, k: int) -> int:
+    """The int32 range check of an element-wise kernel (stage G5): the value, or the OverflowError of `_ail_tai_over`."""
+    if v < -2147483648 or v > 2147483647:
+        _ail_tai_over(op, k)
+    return v
+
+
 def _ail_taf_extreme(a: _AilTAF, smaller: bool, name: str) -> list[int]:
     """[index of the min/max (the first NaN if any)]"""
     n = len(a.d)

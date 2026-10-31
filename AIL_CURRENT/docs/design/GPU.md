@@ -1,6 +1,6 @@
-# GPU offload (design 2026-10-29; G1 and G2 built, see 6.1 and 6.2)
+# GPU offload (design 2026-10-29; G1 to G4 built (6.1 to 6.4), G5 (typed arrays on the device) in 6.5)
 
-Design note for running parts of an AIL program on a GPU. Stages G1 and G2 are built (sections 6.1, 6.2); the rest is design. The roadmap keeps the
+Design note for running parts of an AIL program on a GPU. Stages G1 to G4 and the typed-array part of G5 are built (sections 6.1 to 6.5); the rest is design. The roadmap keeps the
 implementation last (IR core -> correctness -> coverage -> FFI/modules -> tooling -> release -> GPU); this note fixes the
 design now so the earlier stages do not close doors. Oracle: CPython 3.12, as everywhere else.
 
@@ -210,7 +210,7 @@ inputs were not touched. Replay costs one CPU run of the loop, only on the rare 
 | issue | CPython | rule |
 | --- | --- | --- |
 | overflow of `+ - *` | exact big ints | The typed path keeps int64 with the loud `integer overflow` stop (BIGINT.md section 4, DIFFERENCES C288); bigint-marked functions are not candidates. On the GPU each op checks overflow (sign tests for add/sub, `OpSMulExtended` high word for mul) and sets the flag -> replay, which produces the CPU build's exact behaviour. Requires `shaderInt64`; without it the CPU runs the loop |
-| `//`, `%` | floor division, divisor's sign | **match**: emitted as `OpSDiv`/`OpSRem` plus the floor fix-up; `INT64_MIN // -1` sets the flag |
+| `//`, `%` | floor division, divisor's sign | **match**: emitted as `OpSDiv`, the remainder as `a - (a // d) * d` (never `OpSRem`, see 6.3 "Tesla T4"), plus the floor fix-up; `INT64_MIN // -1` sets the flag |
 | `ZeroDivisionError` | raised at the first failing element | divisor 0 sets the flag -> replay raises it at the same element with the same text |
 | `IndexError` | raised at the first failing element | every `ys[j]` is bounds-checked (negative index normalised as Python does); a miss sets the flag -> replay |
 | `<<`, `>>`, `**` on ints | big ints | **refuse** under the marker until a stage needs them (`**` and `<<` by a variable already mark a function bigint, so it is no candidate) |
@@ -275,6 +275,7 @@ Decided at run time per launch, with a static shortcut:
   runtime, overridable with `AIL_GPU_MIN_WORK` for tests.
 - `AIL_GPU=0` never uses the device; `AIL_GPU=force` ignores the cost model (tests use it so tiny inputs exercise the
   device path); unset = the cost model.
+  **Superseded by 6.4:** the constants and the rule are those of 6.4 (`AIL_GPU=auto`, margin 1.5, cold start earned back).
 - No speed claim is made in this note. fp64 throughput on an RDNA3 iGPU is a small fraction of fp32
   **[unverified: vendor ratio]**, so the benefit for float64 kernels may be small; G7 measures before `auto` is offered
   and the result can stop the work (Q3).
@@ -457,6 +458,358 @@ budget measurement, the cost model constants (G7) and a table of tested drivers.
   parameter is read-only, and `ys = xs` is refused by name), so it is tested at the C level (output over input, same index) and by
   G1's `gk_disjoint` unit tests. **Speed: unmeasured.** Nothing in G2 measures time; lavapipe is a CPU.
 
+### 6.3 G3 (first part) as built: device trust, the 780M, and the first measurements (2026-10-30)
+
+Code: `python/pkg-v12/gpu_vk.py` (self-test, first-launch comparison, test hook, host-cached result memory),
+`test_ail_gpu_g3.py`; no change to `gpu.py`, `gpu_spirv.py` or the C of programs built without `--gpu`. G2 left the question
+what to do about a driver whose shader compiler rewrites a pattern that the module forbids (lavapipe: `0.0 - x` to `-x`).
+A list of known-good drivers would not cover the next driver; a check on the device itself does.
+
+**The self-test (per kernel, at first use).** Before a process first trusts a device for a kernel `k`, `ail_gk<k>_selftest`
+runs THAT kernel's own SPIR-V over 4096 operand sets and compares it with the C emulation of the same kernel:
+- Operands: for the first 33 x 33 (28 x 28 for ints) elements the pair table of the edge values of the bit tests of 5.1
+  (+-0, +-inf, NaN-free edge floats, 2**-1000 neighbours, subnormals, 2**53, 2**63, int64 limits, 3037000499/500), a
+  different permutation per list so three-operand kernels see many triples; the rest are neighbours of the previous list's
+  value (equal, negated, +-4 ulp, halved) and random bit patterns with tiny and 2**-1000 exponents. Fixed seeds: the same
+  sets every run. The kernel's captured scalars are the real ones.
+- Clean elements (the emulation does not flag them) must come back bit for bit. The device is launched once over all 4096 with
+  `all` set (the results of a flagged launch are read too; the shader stores every element's result before it ORs the
+  flag). A launch the emulation flags must flag on the device, and a launch the emulation accepts must not be flagged. One
+  single-element launch per new flag bit the emulation raised (at most 6) must flag on the device, which checks the guards
+  one element at a time (a missed denormal/NaN/overflow flag is the dangerous failure: a wrong value with flag 0).
+- Kernels that also read an iterated list by computed index cannot be cut into single elements; they are compared on the
+  whole launch (no kernel in the G1/G2 catalogue is of that kind).
+- Trust classes: `binary64` kernels and `int64` kernels. A difference in a binary64 kernel marks binary64 untrusted for the
+  process (every later binary64 kernel takes the CPU path), a difference in an int64 kernel marks int64 untrusted; a binary64
+  kernel needs both classes. The per-device, per-process cache is the state in the runtime (one device per process,
+  chosen by `AIL_GPU_DEVICE` or the rank rule); the trace names the device, `driverVersion` and `vendorID` it was judged on.
+  **No disk cache**: the check is per kernel (the shader under test is the program's own), so a cache keyed by device,
+  driver and AIL version would have to be keyed by kernel too; with 7 to 25 ms per kernel on the 780M it does not pay.
+- **First launch.** The first real launch of each kernel is compared with the emulation on its first 4096 elements
+  (elements run one at a time; a flagged emulation element requires a flagged device launch). `AIL_GPU_CHECK=all` repeats this
+  for every launch; `AIL_GPU_CHECK=0` skips self-test and comparison and exists to measure their cost.
+- **What happens on a difference.** One trace line (`gpu: k0 device <name> (driver 0x..., vendor 0x...) differs from the CPU
+  emulation: result bits differ (element 1); untrusted for binary64 kernels, the CPU path runs`), the device answer is thrown
+  away and the emulation's is used, and all later launches of the class run the CPU path (`gpu: k1 device unavailable (device
+  untrusted ...)`). The program's stdout and exit code are the ones of `AIL_GPU=0` (tested).
+- **Limits, stated plainly.** 4096 operand sets are a sample, not a proof: a driver that rewrites a pattern only for operand
+  combinations that the sets miss, or only above some size, is not found. The first-launch comparison covers the program's
+  own first 4096 elements, not the rest. What the check does remove is the class of failure found in G2 (a rewrite of a
+  pattern for a few special operands, here +0.0) for every kernel on every device without a list. The test hook
+  `AIL_GPU_INJECT=<flip|negzero|noflag>[:selftest|:launch]` simulates a bad driver; `RealBug` in `test_ail_gpu_g3.py` also
+  removes the G2 workaround (`Gen.zero_sign`) from the emitter and shows that the self-test then finds the real lavapipe
+  rewrite (skipped on a driver that does not have it).
+
+**Cost of the check (measured, noisy).** One launch costs 3 to 5 ms fixed on the 780M with the Windows driver, so a
+self-test with one 4096-element launch and 1 to 3 single launches takes 7 ms (warm, many kernels in one process) to 12 to 21
+ms (the first kernel of a process), plus 0.1 to 0.2 ms to build the pipeline, which the first launch needs anyway; the
+first-launch comparison adds up to about 5 ms (emulation of 4096 elements of the 320-op kernel below; 0.05 ms for a 5-op kernel).
+Per-process cold start of the first device launch (instance, device, pipeline, self-test, comparison) was 100 to 300 ms with
+or without the check; the medians of 6 runs per kernel were 161/156/198 ms with the check and 140/145/136 ms with `AIL_GPU_CHECK=0` (a difference of 11 to 62 ms, inside a spread of 100 to 300 ms). On lavapipe a warm self-test takes about 4 ms.
+
+**Real hardware: AMD Radeon 780M (driver 0x00800156, vendor 0x1002) through `vulkan-1.dll` (Vulkan loader 1.4.304.0), built
+natively on Windows with WinLibs gcc 16.1 (UCRT) found on the PATH; nothing was installed.** The runtime's `LoadLibraryA`
+path worked unchanged (only `setenv` needed a one-line shim in the test harness; the generated program code does not use
+it). The three bit-test harnesses of 5.1 (51 kernels x 65,536 operand sets, 2.78 million clean elements compared) ran on the device:
+
+| group | kernels | clean elements compared bit for bit | flagged elements | single flagged launches checked | differences |
+| --- | --- | --- | --- | --- | --- |
+| float arithmetic | 18 | 931,789 | 247,859 | 7,200 | 0 |
+| comparisons and conversions | 18 | 952,820 | 226,828 | 6,400 | 0 |
+| int64 | 15 | 895,383 | 87,657 | 3,600 | 0 |
+
+The self-test passed for every kernel on the 780M. **So no pattern was found where the 780M differs from the CPU emulation;**
+that is a statement about these 51 kernels and these operand sets, and the Windows driver is one driver. The 780M reports
+`shaderFloat64`, `shaderInt64`, round-to-nearest-even and signed-zero/inf/NaN preservation for binary64 (otherwise the float
+kernels would not have run).
+
+**Measurements (this laptop with the Radeon 780M, Windows 11, "balanced" power plan, on mains power; noise: run
+to run spread of 10 to 70 percent, 3 runs per cell; nothing else was stopped).** Host buffers, one device launch includes
+creating the buffers, copying the inputs in, the dispatch, the fence wait and copying the result out. CPU loop = the
+plain C loop gcc -O2 -ffp-contract=off makes of the Python loop (single thread), `emu` = the G1 emulation (what runs today
+when the device is not used), device = the median of 7 launches after the first. Times in ms; median of the three process
+runs for the device column, `cpu` and `emu` are medians of 5 and 3 in-process repeats of the middle run.
+
+| kernel | n | CPU loop | emulation | device (steady) | device vs CPU loop |
+| --- | --- | --- | --- | --- | --- |
+| light f64: `(x+y)*(x-y)+x*0.1` (5 ops) | 4,096 | 0.002 | 0.05 | 4.6 | ~2000x slower |
+| | 65,536 | 0.05 | 0.97 | 5.3 | 100x slower |
+| | 1,000,000 | 1.0 | 16 | 16 (10 to 17) | 10 to 16x slower |
+| | 10,000,000 | 10.8 | 176 | 58 (56 to 63) | 5x slower |
+| heavy f64: 64-step recurrence (~320 ops) | 4,096 | 0.3 | 2.3 to 4.6 | 3.6 (3.0 to 4.0) | 12x slower |
+| | 65,536 | 5.2 | 49.6 | 4.9 (4.7 to 5.2) | 1.06x faster (tie) |
+| | 1,000,000 | 74.5 | 758 | 27.9 (25 to 28) | 2.7x faster |
+| | 10,000,000 | 961 (733 to 1010) | 12,756 | 152 (143 to 188) | 6x faster |
+| int64: `(x+y)//3 + x*y - z` (3 lists, ~8 ops) | 4,096 | 0.008 | 0.01 | 5.1 | 600x slower |
+| | 65,536 | 0.12 | 0.12 | 6.2 | 50x slower |
+| | 1,000,000 | 2.3 | 3.0 | 19 (16 to 21) | 8x slower |
+| | 10,000,000 | 22.5 | 27.2 | 92 (76 to 97) | 4x slower |
+
+Cold start of the first device launch of a process (instance + device + pipeline + self-test + comparison): 125 to 270 ms
+in these runs.
+
+What the numbers say, and no more than that:
+- A fixed cost of about 4 to 5 ms per launch on this driver puts the break-even beyond 4,096 elements for every kernel
+  measured; the placeholder `AIL_GPU_MIN_N = 4096` sends launches to a device that is 12x to 2000x slower for them.
+- The device wins only where the arithmetic per element is large (here the 64-step loop): about a tie at 65,536 elements and
+  2.7x to 6x faster at 1M to 10M. For the light and the int64 kernels it loses at every size up to 10M, 4x to 16x at
+  1M and 10M. They are bound by moving 16 to 24 bytes per element through new buffers (about 5 ns per element in these runs).
+- These are binary64 and int64 kernels on an integrated GPU; the speed of other kernels, other drivers and discrete GPUs is
+  not measured here.
+- **Memory type matters more than the shader.** The first measurement used write-combined memory for the result buffer
+  (the first host-visible, coherent type): reading the result back was the dominant cost (light kernel 10M: 446 ms, heavy
+  1M: 74 ms, heavy 10M: 587 ms). The result buffer now asks for host-visible, coherent, cached memory first (falling back
+  to the old type), which gave the table above (58, 28 and 152 ms). The results are unchanged (the same bits, the bit tests
+  repeated on the final code).
+- **The CPU path today is the emulation, not the plain loop.** When the device is not used (below `AIL_GPU_MIN_N`, no
+  device, untrusted device), `ail_gk<k>_run` runs the G1 emulation, which carries a check per operation: 1.2x (the int64 kernel) to 16x (the light f64 kernel) slower than the plain loop in the table above (light 176 vs 10.8 ms, heavy 12,756 vs 961 ms, int64 27 vs 22.5 ms at 10M). It is exact, and it is what makes
+  the fallback bit-identical without a replay, but a program that falls back pays for it. (`AIL_GPU=0` runs the plain loop.)
+
+**Where this leaves the cost model (the G7 placeholder).** Not changed in this stage; the numbers above support a model but
+only from three kernels on one device, and applying one needs the fallback to be the plain loop. A fit from this table:
+`t_device = 4.5 ms + n * (5 ns + ops * 0.07 ns)` and `t_cpu = n * ops * 0.25 ns`, with `ops` the number of IR operations of the
+kernel body (loops multiplied by their trip count when it is a constant), gives "never for ops below about 28; for 320 ops
+from about 100,000 elements", which matches all twelve cells. Next steps, in order: (1) let the wrapper return "declined" so the
+glue runs the original loop instead of the emulation when the device is not wanted; (2) count `ops` in the emitter and add
+`AIL_GPU=auto` with the model above and a safety factor, constants in one table; (3) reuse buffers between launches and map
+host memory instead of copying on a unified-memory device (the 5 ns per element is mostly copying and page-faulting fresh
+80 to 240 MB allocations: G8); (4) re-fit on the Colab NVIDIA GPU and a second AMD/Intel device before the model is the default.
+
+#### Tesla T4 (Colab, NVIDIA 580.82.07, Vulkan 1.4.312), 2026-10-30: `OpSRem` on 64-bit is wrong
+
+The first run on a real NVIDIA device matched every binary64 kernel bit for bit and every int64 kernel except those with `//` or
+`%`. The device answers `-1 // 2` with 0 (Python: -1), `3 // -3` with -2 (-1), `3 % -2` with 1 (-1), and for a large positive dividend
+and divisor -22 a remainder that is nearly the dividend. The SPIR-V was valid and lavapipe agreed with the emulation; the self-test
+(6.3) caught the difference on its first operand with a negative dividend, marked the int64 class untrusted, and the programs kept
+printing what CPython prints on the CPU path. Only kernels using `OpSRem` (and `OpLogicalNotEqual`, which was never shown guilty)
+failed; `OpSDiv`, `OpSNegate`, the multiply overflow check and all comparisons passed. Replacing `OpSRem` by `a - OpSDiv(a, d) * d` and
+the sign test by `(r ^ b) < 0` made every such kernel match on the T4 (variants tried: no `OpSRem`; plus no `OpLogicalNotEqual`; plus
+unsigned divide of the magnitudes: all three matched). `gpu_spirv` now emits no `OpSRem` at all (test `Spirv.test_no_op_srem`).
+
+A harness lesson from the same run: a kernel whose self-test fails makes the whole class untrusted, so every later launch in the process
+returns `GK_DECLINED`. `BitTests` first counted those as "spurious flags" (also on min/max/lt/eq, which cannot flag); it now resets the
+trust state per kernel and prints the distrust message of a declined launch.
+
+### 6.4 G4 as built: a declined launch runs the original loop, the cost model, and a cheaper launch (2026-10-30)
+
+Code: `python/pkg-v12/gpu.py` (`ops_expr`, the glue), `python/pkg-v12/gpu_vk.py` (the decision, the model, the buffer pool),
+`test_ail_gpu_g4.py` (22 tests), small changes to the G1 to G3 tests. Without `--gpu` nothing changes.
+
+**1. The declined path.** `ail_gk<k>_run` has a third answer, `GK_DECLINED` (a value no flag word can have). The glue first calls
+`ail_gk<k>_want(...)` (before it allocates or reserves anything), and on a no, or on `GK_DECLINED` from the run, executes the ORIGINAL
+typed loop. The G1 emulation now runs only for `AIL_GPU=emu`, inside the self-test and in the first-launch comparison. A device
+launch that flags is still replayed by the original loop. Declined because: the model said no, below `AIL_GPU_MIN_N`, no loader
+or device, a missing feature, an untrusted class, a failed Vulkan call, a failed first-launch comparison, a static build. The
+result is no longer copied through a temporary: the wrapper hands the device the output list itself and the device copies into it
+only when the flag word is 0 (a flagged launch leaves the list untouched, so the replay starts from the same state as before);
+only a launch that is being compared with the emulation, and `AIL_GPU=emu`, use a temporary. Trace lines: `gpu: k0 declined (...)`
+with the model's two predictions, `gpu: k0 original loop`; a launch that ran prints `gpu: k0 n=... device=<name>` as before, and
+`device=emulation` now appears only for `AIL_GPU=emu`.
+
+**2. The decision (`AIL_GPU=auto`, the default of a `--gpu` build).** Per kernel the emitter counts `ops` per element
+(`ops_expr`: a C expression over the captured scalars and list lengths; arithmetic, comparisons, loads, conversions and
+min/max count 1, a branch counts its dearer side, an inner loop its trip count times its body, a bound it cannot read counts 1,
+which under-counts and so declines more; the 780M kernels give 6, 321 and 6). At run time, before anything is allocated:
+
+```
+t_cpu = n * ops * 0.20 ns
+t_dev = 0.3 ms + bytes * 0.17 ns + n * ops * 0.06 ns          bytes = 8 * (n + sum of the input list lengths)
+launch only if  t_cpu >= 1.5 * t_dev                          (margin 1.5)
+         and the device is not a software device (Vulkan type CPU or virtual)
+         and the cold start has been earned back (below)
+```
+
+The constants are the fit of the 780M measurements of this stage (the buffer pool of item 3 moved the fixed cost from 4.5 ms to
+0.3 ms and the copy from 0.21 to 0.17 ns per byte, so the G3 constants were re-fitted; the fit is in one table in the runtime,
+`AIL_GPU_MODEL=fixed_us,ns_per_byte,ns_per_op_dev,ns_per_op_cpu,margin,init_us` overrides it). **Cold start.** The first device
+launch of a process also pays instance, device, pipeline and self-test (120 to 370 ms measured; one outlier of 720 ms), so a
+launch the model likes is still declined until the sum of what the declined launches would have saved reaches `init_us`
+(300 ms): ski rental. A program that launches a kernel only a few times therefore pays nothing; a program that crosses the line
+pays at most about one cold start once, and gets it back after about six more launches of the kind that crossed it (measured
+below: 1M heavy, 8 launches: 1.1 to 1.2 times the plain loop's total; 40 launches: 0.35 to 0.40). `AIL_GPU_STRICT=1` removes even
+that: only a single launch that saves more than the cold start goes to the device (the heavy kernel from about 7M elements).
+`AIL_GPU_MIN_N=<n>` still overrides the model with the old size rule; `AIL_GPU=force` ignores it; `AIL_GPU=0` never launches.
+No per-device calibration at the first self-test: the self-test's launches are a cold device's, they would not measure the
+steady 0.3 ms, and a second device or driver has not been seen. The constants are the 780M's; a discrete GPU or another driver can
+differ (the margin 1.5 and the software-device rule are what protect it), and re-fitting on the Colab NVIDIA GPU and a second
+AMD/Intel device is still open.
+
+**Auto against `AIL_GPU=0` on the 780M** (Windows driver, mains power, WinLibs gcc 16.1 `-O2 -ffp-contract=off`; the glue of
+`gpu.py` copied into a bench, one process per cell, 8 launches in a row, plain loop timed before and after the launches and
+averaged; 3 process runs per cell; "total" is the 8 launches including the cold start; a ratio below 1 means auto is faster).
+Cells where auto declined run the same machine code as the plain loop; their ratios are timer noise (the loop takes 3 us to 0.1 ms
+there), spread 0.9 to 1.1 except the smallest cells (3 to 10 us per launch, where one timer tick is 10 to 30 percent):
+
+| kernel | n | plain loop, ms | auto, steady ms | auto total / plain total, 8 launches (3 runs) | what auto did |
+| --- | --- | --- | --- | --- | --- |
+| light f64 (6 ops) | 4,096 to 262,144 | 0.003 to 0.19 | same | 0.91 to 2.0 (noise: 3 to 190 us per launch) | declined, original loop |
+| | 1,000,000 | 0.79 | 0.88 | 0.97 to 1.31 (noise) | declined |
+| | 10,000,000 | 9.8 | 10.1 | 0.91 to 1.04 | declined |
+| int64 (6 ops, 3 lists) | 4,096 to 10,000,000 | 0.008 to 19.9 | same | 0.93 to 1.16 (1.3 to 1.5 at 4,096: 8 us) | declined |
+| heavy f64 (321 ops) | 4,096 to 262,144 | 0.28 to 19.5 | same | 0.94 to 1.06 | declined (cold start not yet earned) |
+| | 1,000,000 | 70 | 75 | **1.12 to 1.21** | cold start paid at launch 8 |
+| | 10,000,000 | 975 | 170 | 0.18 to 0.24 | device from launch 1 |
+| heavy f64, 40 launches | 262,144 | 16.0 | 15.5 | 0.93 to 0.94 | device from launch about 28 |
+| | 1,000,000 | 93 | 18.4 | 0.35 to 0.40 | device from launch 8 |
+
+So the one place where auto is slower than `AIL_GPU=0` is a program that launches a 1M-element 321-op kernel about 8 to 12 times
+and then stops: it loses about 0.1 s once (one cold start less the savings so far). That is the ski-rental bound, and it is the
+price of ever using the device for repeated launches; `AIL_GPU_STRICT=1` buys it back. Every other measured cell is a tie or a win.
+Light and int64 kernels never go to the device (their copy costs 3 to 4 ns per element, more than the plain loop's work).
+
+**3. Transfer cost: a buffer pool.** The device buffers (parameters, flag word, result, one per input list) are kept between
+launches and reused when big enough (the memory stays mapped; up to `AIL_GPU_KEEP_MB`, default 512, are kept; a failure
+releases all). The 4.5 ms per launch were mostly allocating, binding and mapping seven small and large buffers on the
+Windows driver and faulting in their pages, not the dispatch. Forced device launches (`AIL_GPU=force`, same bench, 3 runs, medians
+of the 7 launches after the first; min to max in brackets), before and after, plain loop for scale:
+
+| kernel | n | plain loop | device before | device after | after / before |
+| --- | --- | --- | --- | --- | --- |
+| light f64 | 4,096 | 0.004 | 4.78 (4.45 to 22.7) | 0.285 (0.18 to 0.32) | 0.06 |
+| | 65,536 | 0.056 | 5.75 (5.64 to 6.14) | 0.513 (0.51 to 0.53) | 0.09 |
+| | 1,000,000 | 0.93 | 18.5 (14.0 to 20.4) | 3.95 (3.73 to 4.29) | 0.21 |
+| | 10,000,000 | 10.5 | 77.4 (71.0 to 83.4) | 33.2 (31.1 to 37.2) | 0.43 |
+| heavy f64 | 4,096 | 0.40 | 3.91 (3.08 to 4.47) | 0.323 (0.318 to 0.451) | 0.08 |
+| | 65,536 | 6.05 | 6.19 (5.36 to 6.24) | 1.61 (1.53 to 1.68) | 0.26 |
+| | 1,000,000 | 86.3 | 28.6 (28.4 to 29.8) | 19.8 (15.5 to 20.3) | 0.69 |
+| | 10,000,000 | 1006 | 189 (183 to 204) | 155 (142 to 167) | 0.82 |
+| int64 | 4,096 | 0.009 | 5.93 (4.63 to 6.30) | 0.181 (0.145 to 0.307) | 0.03 |
+| | 65,536 | 0.162 | 6.41 (5.13 to 6.86) | 0.503 (0.503 to 0.513) | 0.08 |
+| | 1,000,000 | 2.16 | 24.2 (22.6 to 24.8) | 4.08 (3.94 to 4.48) | 0.17 |
+| | 10,000,000 | 24.2 | 97.8 (93.2 to 100) | 42.5 (34.5 to 45.3) | 0.43 |
+
+The fixed cost is now 0.2 to 0.3 ms; the copy of the inputs into mapped memory is what is left (the light kernel at 10M: 33 ms for
+240 MB). That moves the break-even for the heavy kernel from about 100,000 elements (G3) to below 15,000 (4,096 elements: 1.2 times
+faster, 65,536 elements: 3.7 times faster than the plain loop, was a tie; the model's own threshold with the margin is about 15,000), and the light and int64 kernels stay on the CPU at every size. **Not done:** importing the
+list's own memory (`VK_EXT_external_memory_host`, needs 4096-aligned host pointers that the lists do not have) or a host-visible
+device-local heap, which would remove the input copy on the APU; the memory types of the 780M were not investigated beyond host-cached
+for the result. Unchanged inputs are not detected (comparing costs as much as copying).
+
+**Tests (lavapipe, no device in CI beyond it).** `test_ail_gpu_g4.py`: the ops counter against the kernels of the G3 fit (6, 321,
+6; scalar and length bounds; an unreadable bound counts 1; a branch counts its dearer side); the model on the G3 cells (light and
+int64 never, heavy from 65,536, the margin in the rule, the cold-start credit and `AIL_GPU_STRICT`); at C level that a declined
+launch calls the emulation zero times (an `emu_calls` counter inside the kernel) and `AIL_GPU=emu` once; whole programs (the G2
+program, 9 scenarios including replays at positions 0, 63, 64, 4999) in 12 modes (off, emu, force, auto declined by the model, auto
+on the device, auto with a flagged launch, `MIN_N`, no loader, no features, an untrusted device found by the self-test and by the first
+launch) with the same stdout, exit code and stderr as `AIL_GPU=0` and CPython, no `device=emulation` line outside `emu`/`force`/`MIN_N`,
+and `original loop` for every declined launch; a lavapipe is never used by auto (software device); a pool program with growing,
+shrinking and repeated sizes in six modes. The 780M bit tests (51 kernels x 65,536 operand sets) were repeated on the final code:
+2,779,992 clean elements, 562,344 flagged, 17,200 single launches, 0 differences, 0 missed flags.
+
+### 6.5 G5 as built: typed arrays (`ail_array`) on the device (2026-10-30)
+
+Code: `python/pkg-v12/ailarray.py` (class `Fuser`: the rewrite of a `--gpu` build), `prelude_ailarray.py` (the block kernels of `ta.sum` /
+`ta.dot`, `_ail_ta_c32`, `_ail_ta_cn`), `gpu.py` (internal markers, the IR node `c32`), `gpu_spirv.py` (`x_c32`), `gpu_vk.py` (self-test
+and first-launch shape of the block kernels), `test_ail_gpu_g5.py`, `array_g5_cases/`. Base: G4 plus T1/T2 (#225/#235). Without `--gpu`
+the lowering of `ailarray.py` is T2's, text for text (tested); with it the loops below carry a marker that is a NAME, not a comment,
+because the surface passes unparse the program several times and a comment does not survive that.
+
+**What goes to the device** (everything else in `ail_array` runs T2's code):
+
+| op | kernel | notes |
+| --- | --- | --- |
+| f64 `+ - *` and unary minus, between arrays and with a scalar | one generated function per expression SHAPE, one loop | fused, see the rule below |
+| `ta.sum(a)` of f64 | `_ail_taf_gk_sum`: one invocation per whole block of 1024 elements | 16 lanes x 64 adds in index order, then the 8-4-2-1 tree; the short last block and the tree over the blocks run on the CPU: the order of TYPED_ARRAY.md 3.5 on every device |
+| `ta.dot(a, b)` of f64 | `_ail_taf_gk_dot`, the same with `d[q] * e[q]`; **opt-in** (`AIL_GPU_ARRAY_SLOW=1`) | same bits as the CPU for f64 (the products are rounded, then added) |
+| int32 `+ - *`, array with array or scalar | `_ail_tai_k*`: one kernel per operation, **opt-in** (`AIL_GPU_ARRAY_SLOW=1` at build time, like the `ta.dot` kernel) | the int32 range is checked in the kernel (new IR node `c32`: the overflow flag when the value is outside int32); the flagged launch is replayed by the CPU loop, which raises T2's `OverflowError` with the operation and the lowest index |
+| f64 `/`, `abs`, `sqrt`, `exp`, `minimum`, ..., int32 `// %`, `astype`, in-place `+=`, slices, min/max | not on the device | no correctly rounded device division (G5 of the plan), or the output overlaps an input (G1's pointer check declines it) |
+
+**The fusion rule.** After T2's lowering has turned `a * b + a` into nested `_ail_taf_bin` calls, a tree of f64 `+ - *` / unary minus whose
+leaves are plain names, constants or attribute chains (scalar operands: also `float(x)`, `-x`, `x * y`, `x + y`, `x - y` of those), at most 256
+operations, becomes ONE call of `_ail_taf_fu<N>`: the shape checks in the order the unfused code made them (same text), then a loop
+`o = [_ail_ta_cn(<expr>, inf) for _ailg_map in range(n)]`. Arithmetic is unchanged: the same binary64 operations in the same order, no
+fused multiply-add (`-ffp-contract=off`, `NoContraction` in the module), and a NaN is made canonical once, at the end, which is the same bits as after every
+operation (an operation with a NaN operand gives a NaN). A tree with an operand that is a call, a subscript or a division is not fused as a
+whole (evaluating all operands first could change which error comes first): each single operation is still rewritten (its two operands are
+evaluated where they stood), so `g(a) * b + g(b) * a` is three single-operation kernels, two of which share a function. Trees of the same shape
+(leaves and scalars numbered by first use) share one function and one kernel. int32 chains are not fused: the `OverflowError` of `a + b * a`
+names the multiplication over the whole array first, and a per-element chain would name the first failing element of either operation.
+
+**Decision and cost.** `ops_expr` counts the new kernels like the old ones (a load, an operation, a comparison: 1 each; the inner loop of a block
+kernel: 64 x its body, about 3.2 per element for `ta.sum`). The constants of 6.4 are unchanged. Consequences, from the model and then measured below:
+a chain pays for its copy only when it is long (about 40 operations with one input array, about 60 with two); `ta.sum`, `ta.dot` and int32 never do.
+Two things were found on the way and are in the code: (1) the function that holds a marked loop is emitted by the legacy emitter, which fills
+`[0] * n` one element at a time and checks every element access, so the kernel loops are written as comprehensions (no fill, one reserve) and the
+whole-block loops of `ta.sum` / `ta.dot` use eight accumulators per pass, two passes (16 accumulators and the loaded values spill out of registers);
+(2) even so the int32 loop is 1.6 to 1.8x and the `ta.dot` loop 10 to 29 percent slower on the CPU than T2's, which is why those two are opt-in (`AIL_GPU_ARRAY_SLOW=1` at build time):
+`--gpu` must not make programs slower, and the model never uses them on this device.
+
+**Bit tests.** `array_g5_cases/sumdot.py`, `fused.py`, `int32.py` (each built with `compile --gpu`, typed path only, run in every mode, stdout and
+exit code compared with CPython running the T1 reference `ail_array.py` on the same text):
+- `sumdot.py`: 9 data kinds (ramp of 0.1, 1e16 / 1 / -1e16, random, 1/k, all -0.0, +-1e308, 1e-300 scale, 1 + eps, wide) x lengths
+  0, 1, 2, 15, 16, 17, 31, 32, 33, 1023, 1024, 1025, 1536, 2047, 2048, 2049, 3071, 3072, 3073, 4097, 5000, 20000, 100003; inf, NaN, -inf (cancelling
+  across blocks), -0.0, 1e308 x2, 1e-310 and +-1e308 planted at positions 0, 1, 15, 16, 17, 1023, 1024, 1025, 2047, 2048, 2049 of a 2100-element array
+  (two whole blocks and a short third); all -0.0 / all 0.0 / mixes at 1, 16, 1024, 1040, 2048, 2049; a 70000-element array with a NaN at the end and one
+  whose infinities meet in the tree. Printed: the bits of `ta.sum` and `ta.dot` (hex) and their reprs.
+- `fused.py`: 11 chains (`a*b + a`, `(a+b)*(a-b) - c*0.5`, `2.0 - a*b`, `-(a*b) + c`, `a*3 + 1`, `s*a - b*s + c`, each single operation, `-a`, and a
+  depth-5 chain) on 5 data kinds (including 1e290 and 1e-150 scales, where products overflow and underflow) at lengths 0, 1, 2, 63, 64, 65, 127..129,
+  255..257, 4095..4097, 100003; 12 special values (inf, -inf, NaN, -0.0, 0.0, 1e308, -1e308, 1e-310, 5e-324, 2**-1000, 1.5 * 2**-1000, 2**53 + 1) planted
+  in the three operands and the scalar at 5 positions of 65- and 4097-element arrays; shape errors; NaN / inf / int scalars. Printed: a hash of every bit
+  of every result (n <= 4100) or the bits of ends, middle, `ta.sum` and `ta.dot` of the result.
+- `int32.py`: add / sub / mul, with a scalar on either side and a scalar outside int32, at the same lengths for ranges that fit, near +-2**31 and with
+  overflow at positions 0, 1, 63, 64 and n - 1 (the message names the operation and the lowest failing index), shape error, chains where the multiplication fails first.
+
+**Real hardware: AMD Radeon 780M, Windows driver 0x00800156, WinLibs gcc 16.1, `-O2 -ffp-contract=off`, the `program.c` of a `compile --gpu --debug-dir` build in WSL
+compiled natively on Windows (the whole program, not a harness).** The three case programs print byte for byte what CPython with the T1 reference prints
+in `AIL_GPU=0`, `emu`, `force` (229 / 1,448 / 335 device launches for `int32` / `fused` / `sumdot`), auto with a model that says yes (the same counts),
+auto as shipped (0 launches: declined), no loader, and an untrusted device (`flip:selftest`). Every new kernel passed its self-test on the 780M
+(`selftest ok device=AMD Radeon 780M Graphics`; e.g. the sum kernel: 43 clean blocks compared bit for bit, 21 flagged, 2 single launches). On lavapipe (LLVM 20.1.2): the same programs in `0`, `emu`, `force` and auto, the same stdout and exit code (1,431 / 220 / 333 emulation launches and 1,448 / 229 / 335 device launches).
+
+**Measurements on the 780M** (Windows 11, mains power, the machine shared with other work: run-to-run spread 5 to 60 percent, so each cell is the median of 3 process
+runs of the median of 6 to 14 repeats, min..max of those three medians in brackets; the repeats of one process allocate a new result each time, as a program does).
+"T2 CPU" = the same program built WITHOUT `--gpu` (T2's code, one pass per operation); "off" = `--gpu` build, `AIL_GPU=0` (the fused loop); "auto" = the shipped default;
+"force" = `AIL_GPU=force`. Times in ms. Chains are Horner's rule in one array `x` with scalar coefficients, so `cN` has N multiplications and N additions
+(`c1` is `a * b + a` with two arrays). The cold start of the first device launch (instance, device, shader, self-test) is 150 to 630 ms per process on this laptop and is in the `first` repeat only.
+
+| op | n | T2 CPU | off (fused CPU) | auto | force (device) | what auto did |
+| --- | --- | --- | --- | --- | --- | --- |
+| `a*b + a` (3 ops) | 1M | 12.2 [11.1..12.6] | 8.8 [7.5..9.3] | 8.8 | 5.8 [5.6..7.6] | declined |
+| | 10M | 104 [94..123] | 94 [74..171] | 87 | 59 [57..70] | declined |
+| Horner 4 (8 ops) | 1M | 47.8 [46..51] | 5.4 [5.0..6.3] | 5.3 | 5.1 [4.9..5.2] | declined |
+| | 10M | 486 [452..584] | 45.5 [44.5..48.9] | 46.1 | 37.6 [35.9..66] | declined |
+| Horner 16 (32 ops) | 1M | 128 [122..135] | 15.3 [15.0..30] | 13.6 | 6.8 [6.3..7.2] | declined |
+| | 4M | 613 [573..644] | 44.6 [44.6..48.8] | 45.5 | 23.6 [23.0..31] | declined |
+| | 10M | 1,509 [1,290..1,699] | 96.9 [95..99] | 113 | 55.8 [53.8..58.1] | declined |
+| Horner 32 (64 ops) | 1M | 256 [229..271] | 34.7 [30..57] | 29.1 | 11.7 [11.4..11.8] | declined |
+| | 4M | 1,250 [1,136..1,471] | 128 [127..130] | 118 | 45.2 [43.7..55.7] | declined |
+| | 10M | 3,695 [3,385..4,042] | 298 [284..303] | 108 | 109 [104..109] | device |
+| Horner 64 (128 ops) | 1M | 721 [557..781] | 88.2 [82..89] | 81.8 | 34.4 [29..37] | declined |
+| | 4M | 2,903 [2,579..3,547] | 326 [323..341] | 130 | 135 [131..141] | device |
+| | 10M | 16,036 [15,685..16,237] | 770 [761..782] | 276 | 263 [262..283] | device |
+| `ta.sum` | 1M | 0.47 | 0.79 [0.41..0.87] | 0.44 | 1.20 | declined |
+| | 10M | 6.7 [5.5..7.2] | 5.4 [5.4..5.7] | 5.1 | 8.4 [8.3..8.9] | declined |
+| `ta.dot` (opt-in kernel) | 1M | 0.76 [0.59..0.93] | 0.98 [0.95..2.7] | 0.79 | 2.3 | declined |
+| | 10M | 7.4 [6.3..7.6] | 8.2 [7.7..9.7] | 9.2 | 23.7 [22.9..24.4] | declined |
+| int32 `a + b` (opt-in kernel) | 1M | 2.6 | 4.4 [4.2..4.6] | 4.5 | 4.4 | declined |
+| | 10M | 28.6 [28.0..30.0] | 52.7 [43.6..66.6] | 42.4 | 44.1 | declined |
+
+An earlier sweep of the same programs on a quieter machine (older loop shape, 3 runs): `a*b + a` at 1M: T2 6.0, off 5.0, auto 5.4, force 5.5; at 10M: 59.5 / 50.4 / 54.8 / 50.6, a tie
+within the spread. Horner 64 at 10M: T2 11,790, off 889, auto 312, force 329. The ordering of the table is the same in both sweeps.
+
+What the numbers say, and no more than that:
+- **Fusion is the big win and it needs no device.** The fused loop (`off`) is 1.1x (3 ops) to 21x (128 ops) faster than T2's one-pass-per-operation code, because T2 allocates and
+  fills an array per operation. It is what runs when the device is declined, so a `--gpu` build is faster than a plain build for every chain.
+- **The device wins for long chains and only for them.** Against the fused CPU loop: 3 ops a tie (1.0 to 1.5x faster, inside the spread of this machine); 8 ops about 1.0 to 1.2x; 32 ops 1.7 to 2.2x
+  (1M to 10M); 64 ops 2.7 to 3.0x; 128 ops 2.6 to 2.9x. The copy of the inputs and the result (16 bytes per element for one input array) is what a short chain cannot pay for.
+- **auto is conservative.** It picked the device where the device was at least as good (Horner 32 at 10M, Horner 64 at 4M and 10M: 2.7x, 2.5x and 2.8x faster than `off`) and never ran slower than `off` beyond the spread,
+  but it left a 1.7x to 3x on the table for the 32- to 128-op chains at 1M to 4M and for Horner 16 (the model needs about 40 operations per input array and the ski-rental cold start): the constants of 6.4 were not re-fitted here.
+- **`ta.sum` and `ta.dot` never win on this device.** They are bound by memory on the CPU (0.4 to 0.7 ns per element) and the device has to copy 8 to 16 bytes per element first: 1.5x to 3x slower forced.
+  The block kernel's CPU loop is as fast as T2's or faster for `ta.sum` (equal within the spread on Windows, 1.7x faster in WSL) and 10 to 29 percent SLOWER for `ta.dot`, which is why the `ta.dot` kernel is opt-in.
+- **int32 never wins** (1.6x to 1.7x slower forced than the CPU) and its CPU loop is 1.6 to 1.8x slower than T2's (the function that holds a marked loop is emitted by the legacy emitter), so its kernels are opt-in too.
+- The 3 to 5 percent differences between modes where auto declined are noise (the same machine code runs).
+
+**Tests.** `test_ail_gpu_g5.py` (19 tests, `gpu` CI job and `GPU_JOB` of `tools/ci_shards.py`): the text of the lowering (nothing added without the switch; one function and one loop for a chain; same
+shape shares a function; division not fused; calls among the operands not reordered; int32 and dot opt-in), the lowered text run by CPython equals the reference on the three case programs, the IR node
+`c32` in SPIR-V and C, the sum kernel as a range kernel, the three case programs built with `compile --gpu` on the typed path (kernels present) and run in `AIL_GPU=0`, default, a model that says no, `emu`, `force`, auto on a
+device, no loader, auto without loader, a device without features, an untrusted device found by the self-test, one found by the first launch; the self-test of every new kernel passes on the device;
+a corrupted device (`flip`, `negzero`, `noflag` in the self-test) is found for every kernel of every program; a Horner chain of 40 steps in all modes and sent to the device by a model that says yes.
+G1 (42), G2 (25), G3 (16), G4 (22), T2 (23) and the T1 reference (38) re-run on the merged tree.
+
+**Not done / open.** The cost model constants are G4's; a re-fit with the chains of this stage (the model is conservative for 16 to 64 operations) would move the break-even for chains from about 40 to about 15 operations per input array.
+Reductions run one invocation per block of 1024 elements (uncoalesced; a lane-parallel kernel with a workgroup tree would read 16 consecutive elements per step) because the kernel IR has no workgroup-local memory yet;
+it does not matter for the decision on this device (the copy dominates) but it would on a discrete GPU. `ta.min`/`ta.max`/`argmin`, `astype`, f32/f16 and f64 division/`sqrt` (correctly rounded device division, stage G5 of the plan) are not on the device.
+
+
 ## 7. Colab validation (owner-started, manual)
 
 The owner has a paid Google Colab subscription with NVIDIA GPUs (T4/L4/A100 class, CUDA). It is useful as a second real
@@ -588,7 +941,8 @@ cooperative-matrix path itself is tested only on the laptop and Colab, by hand (
   element. G7 may find that only int and comparison-heavy kernels pay off. The design stops cleanly there.
 - **Driver bugs.** A driver that ignores `NoContraction` or RTE would give wrong bits with no flag. Mitigation: the bit
   tests run on every device before it is trusted, and a device whose start-up feature list is not on a tested list can be
-  kept on the CPU (decided in G3; this costs a small table of known-good driver versions).
+  kept on the CPU (decided in G3; this costs a small table of known-good driver versions). **Built in G3 (6.3) as a run-time
+  self-test instead of a list**: every kernel is checked on the device it will run on, so an unlisted driver is covered too.
 - **lavapipe is not a GPU.** It runs SPIR-V through LLVM on the CPU, so it cannot find bugs that depend on real GPU
   scheduling or memory. The laptop and Colab runs cover that, by hand only.
 - **Proof scope creep.** The eligible body is deliberately the `parallel for` body; widening it (structs, nested lists)

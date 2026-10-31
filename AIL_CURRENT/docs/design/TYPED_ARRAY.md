@@ -456,7 +456,7 @@ stages run as one sequential line (the "split core fixes" rule).
 | **T6** | 2-D arrays, row broadcast, exact `matmul` (3.7) | CPython-equal on 3.7's cases incl. `K = 0`, int32 overflow, f16 exact sums; one MLP forward pass example matches the reference | T4 |
 | **T7** | inexact mode (D2): flag, `order='any'`, notes, BLAS `sgemm`/`dgemm` via `@extern`, tolerance suite | notes printed at every use; tolerance tests pass; BLAS results equal the same BLAS through ctypes; this is the array half of GPU.md M1 | T5, T6 |
 | **T8** (optional) | threads over blocks (5.4) | outputs equal for 1..N threads; measured | T4; GIL-free typed parallelism |
-| GPU | M2 (fused element-wise chains over arrays), M4 (array kernels), M5/M6 (matmul) | as GPU.md 8.6 | T3/T6 here, and G1-G6 for the device side (G2 SPIR-V ops, G3 runtime, G4 error replay for int overflow, G5 correctly rounded `/` and `sqrt`: f32 `/` on a GPU is not correctly rounded **[unverified per driver]**, G6 reductions with the order of 3.5) |
+| GPU | **done for f64 chains, ta.sum and (opt-in) ta.dot, int32 + - * (opt-in) as stage G5, GPU.md 6.5**; M2 (fused element-wise chains over arrays), M4 (array kernels), M5/M6 (matmul) | as GPU.md 8.6 | T3/T6 here, and G1-G6 for the device side (G2 SPIR-V ops, G3 runtime, G4 error replay for int overflow, G5 correctly rounded `/` and `sqrt`: f32 `/` on a GPU is not correctly rounded **[unverified per driver]**, G6 reductions with the order of 3.5) |
 
 ## 11. Risks
 
