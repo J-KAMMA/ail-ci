@@ -89,7 +89,7 @@ def private_controls(work, variants, gcc, rustc, report):
                 tests.append(('carry', b'\0' * 7, ['3', '1'], 0, b'0 1 1 0 7\n', b''))
             else:
                 tests = [('column_at_max_minus_one', struct.pack('<q', 1), [str(hi - 1), '0'], 0, b'0 0 0 0 8\n1\n', b''),
-                         ('fatal_column_increment', struct.pack('<q', 1), [str(hi), '0'], 1, b'', b'integer overflow\r\n' if sys.platform == 'win32' else b'integer overflow\n'),
+                         ('fatal_column_increment', struct.pack('<q', 1), [str(hi), '0'], 1, b'', (b'OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)\r\n' if sys.platform == 'win32' else b'OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)\n')),
                          ('caught_before_column_increment', struct.pack('<q', 1), [str(hi), str(hi)], 0,
                           f'1 {hi} {hi} 0 8\n'.encode(), b'')]
             for name, data, argv, code, expected, stderr in tests:

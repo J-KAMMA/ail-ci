@@ -196,6 +196,25 @@ main()
 '''
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def compile_default(directory, text, name):
     """Compile with the default pipeline; returns (result, exe, generated C text)."""
     source, exe, dbg = Path(directory, name + '.py'), Path(directory, name + '_x'), Path(directory, name + '_dbg')
@@ -263,6 +282,8 @@ class TypedReach(unittest.TestCase):
     def test_exception_inside_loop(self):
         _, _, want = self.build_and_compare(RAISES, 'raises')
         self.assertNotEqual(want.returncode, 0)       # CPython raises ZeroDivisionError at i == 2; so must the build
+
+    @_exact_int
 
     def test_counters_at_and_past_int64_edge_stay_exact(self):
         # i * 4 for i near 2**62 and k + 4 for k near 2**63 pass int64: they must print exactly as CPython does

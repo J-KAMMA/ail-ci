@@ -1,4 +1,15 @@
 """Portable entry for the AIL source snapshot; no implicit model calls."""
+import os as _os, sys as _sys
+if __name__ == "__main__" and _os.environ.get("AIL_SERVER") == "1" and _sys.argv[1:2] in (["compile"], ["check"]):
+    # Opt-in resident compile server (ail_server.py): it has the compiler imported already. Any problem before the
+    # build starts on the server means the normal path below;  is that answer.
+    try:
+        import ail_server as _ail_server
+        _served = _ail_server.client(_sys.argv[1:])
+    except Exception:
+        _served = None
+    if _served is not None:
+        raise SystemExit(_served)
 import ast
 import argparse
 import copy
@@ -1030,6 +1041,29 @@ def _mutated_parameters(fn):
     return names
 
 
+def _add_function_aliases(tree, module_counts, functions):
+    """Add module-level ``q = wrapper`` names to a function-name map.
+
+    The int()/float wrapper pass checks a call by the name it is written with.  A wrapper
+    reached through an alias variable (``q = power``) must be checked exactly like the
+    wrapper itself; a name stored more than once or a function definition of the same name
+    is left alone, so a rebound or shadowed alias stays ordinary code."""
+    changed = True
+    while changed:
+        changed = False
+        for statement in tree.body:
+            if not (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and isinstance(statement.value, ast.Name)):
+                continue
+            target, source = statement.targets[0].id, statement.value.id
+            if (source in functions and target not in functions
+                    and module_counts.get(target) == 1):
+                functions[target] = functions[source]
+                changed = True
+    return functions
+
+
 def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes,
                         constants=None):
     candidates = {}
@@ -1099,7 +1133,7 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
             if normalized != functions.get(name, {}):
                 functions[name] = normalized
                 changed = True
-    return functions
+    return _add_function_aliases(tree, module_counts, functions)
 
 
 def _all_bound_names(root):
@@ -1780,6 +1814,9 @@ def _fold_float_int_text(text):
     return text
 
 
+_DYNAMIC_POW_REFUSALS = [True]      # False while the int64-default build runs the static checks (intmode.py)
+
+
 def _check_int64_literals(tree):
     """A brace-syntax (`.ail`) program keeps 64-bit ints: a literal beyond them is named at its own position here.
     (A Python-syntax program has big ints; the typed path names such a literal and the general path builds it.)"""
@@ -2350,9 +2387,11 @@ def _annotation_reads(annotation, name):
     """The reads of ``name`` in ``annotation`` that run when the annotation is evaluated.
 
     A lambda body and a generator-expression element are deferred: creating the object does not
-    read the name.  The body runs only when the lambda is called directly, and the element only
-    when a known consumer iterates the generator (or it is unpacked or iterated by a
-    comprehension).  Defaults and the first generator iterable are evaluated immediately.
+    read the name.  The body runs only when the lambda is called, and the element only when a
+    known consumer iterates the generator (or it is unpacked or iterated by a comprehension).
+    Defaults and the first generator iterable are evaluated immediately.  A name bound by an
+    assignment expression (``f := lambda: C``) is resolved to the object it names, so a later
+    call or consumption through that name runs the deferred part too.
     """
     reads = []
     consumers = {
@@ -2373,30 +2412,169 @@ def _annotation_reads(annotation, name):
                     if default is not None]
         return parameters, defaults
 
-    def visit_generators(generators, shadowed, eager):
+    def lambda_defaults(node):
+        args = node.args
+        positional = [*args.posonlyargs, *args.args]
+        mapping = {}
+        offset = len(positional) - len(args.defaults)
+        for index, default in enumerate(args.defaults):
+            mapping[positional[offset + index].arg] = default
+        for arg, default in zip(args.kwonlyargs, args.kw_defaults):
+            if default is not None:
+                mapping[arg.arg] = default
+        return positional, mapping
+
+    def deferred_of(node, env):
+        """The deferred objects the value of ``node`` may be, or ``None`` if unknown.
+
+        Names bound by an assignment expression are resolved, and an aggregate is followed
+        element-wise because a subscript call can reach a stored lambda or generator.
+        """
+        if isinstance(node, (ast.Lambda, ast.GeneratorExp)):
+            return frozenset((node,))
+        if isinstance(node, ast.NamedExpr):
+            value = deferred_of(node.value, env)
+            if isinstance(node.target, ast.Name):
+                env[node.target.id] = value
+            return value
+        if isinstance(node, ast.Name):
+            return env.get(node.id)
+        if isinstance(node, ast.Constant):
+            return frozenset()
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            items = set()
+            for element in node.elts:
+                inner = element.value if isinstance(element, ast.Starred) else element
+                part = deferred_of(inner, env)
+                if part is None:
+                    return None
+                items |= part
+            return frozenset(items)
+        if isinstance(node, ast.Dict):
+            items = set()
+            for value in node.values:
+                if value is None:
+                    return None
+                part = deferred_of(value, env)
+                if part is None:
+                    return None
+                items |= part
+            return frozenset(items)
+        if isinstance(node, ast.Subscript):
+            return deferred_of(node.value, env)
+        if isinstance(node, ast.Attribute):
+            if node.attr == '__call__':
+                return deferred_of(node.value, env)
+            return None
+        if isinstance(node, ast.IfExp):
+            truth = _annotation_truth(node.test)
+            if truth is True:
+                return deferred_of(node.body, env)
+            if truth is False:
+                return deferred_of(node.orelse, env)
+            return None
+        if isinstance(node, ast.BoolOp):
+            for operand in node.values:
+                truth = _annotation_truth(operand)
+                if isinstance(node.op, ast.And):
+                    if truth is False:
+                        return deferred_of(operand, env)
+                else:
+                    if truth is True:
+                        return deferred_of(operand, env)
+                if truth is None:
+                    return None
+            return deferred_of(node.values[-1], env)
+        return None
+
+    creation = {}
+    active = set()
+
+    def visit_generators(generators, shadowed, eager, env, first_env=None):
         # The first iterable is evaluated in the enclosing scope.  The remaining iterables,
         # conditions and the element run inside the comprehension scope; for a bare generator
         # expression they are deferred until something iterates it.
         inner = shadowed
         for index, generator in enumerate(generators):
-            if index == 0 or eager:
+            if index == 0:
+                # A consumed generator's first iterable was resolved when the object was made,
+                # so a name rebound since then must not be followed to the new object.
+                scope = env if first_env is None else first_env
+                if eager:
+                    consume(generator.iter, inner, scope)
+                else:
+                    visit(generator.iter, inner, scope)
+            elif eager:
                 # An eagerly evaluated iterable is also iterated, so a generator expression
                 # used as one is consumed and its element runs.
-                if eager and isinstance(generator.iter, ast.GeneratorExp):
-                    visit_generator(generator.iter, inner)
-                else:
-                    visit(generator.iter, inner)
+                consume(generator.iter, inner, env)
             inner = inner or name in _annotation_target_names(generator.target)
             if eager:
                 for condition in generator.ifs:
-                    visit(condition, inner)
+                    visit(condition, inner, env)
         return inner
 
-    def visit_generator(node, shadowed):
-        inner = visit_generators(node.generators, shadowed, True)
-        visit(node.elt, inner)
+    def visit_generator(node, shadowed, env):
+        # A generator that iterates itself through a rebound alias would otherwise be followed
+        # forever; its first iterable resolves to the binding from before the rebound.
+        if id(node) in active:
+            return
+        active.add(id(node))
+        try:
+            inner = visit_generators(node.generators, shadowed, True, env, creation.get(id(node)))
+            visit(node.elt, inner, env)
+        finally:
+            active.discard(id(node))
 
-    def visit(node, shadowed):
+    def consume(node, shadowed, env):
+        """Evaluate ``node`` and iterate the value it produces, so a generator runs."""
+        if isinstance(node, ast.GeneratorExp):
+            visit_generator(node, shadowed, env)
+            return
+        if isinstance(node, ast.Name):
+            target = env.get(node.id)
+            if target and all(isinstance(item, ast.GeneratorExp) for item in target):
+                for item in target:
+                    visit_generator(item, shadowed, env)
+                return
+        visit(node, shadowed, env)
+
+    def execute(node, shadowed, env, call):
+        """Run the body of ``node``, a lambda reached by ``call``."""
+        # A recursive call reached by static evaluation does not run again; its body is
+        # already being read at the outer call.
+        if id(node) in active:
+            return
+        active.add(id(node))
+        try:
+            positional, defaults = lambda_defaults(node)
+            parameters = set()
+            for arg in [*positional, *node.args.kwonlyargs]:
+                parameters.add(arg.arg)
+            for arg in (node.args.vararg, node.args.kwarg):
+                if arg is not None:
+                    parameters.add(arg.arg)
+            inner = dict(env)
+            for parameter in parameters:
+                inner[parameter] = None
+            for parameter, default in defaults.items():
+                inner[parameter] = deferred_of(default, env)
+            if call is not None:
+                supplied = list(call.args)
+                unknown = any(isinstance(arg, ast.Starred) for arg in supplied) or \
+                    any(keyword.arg is None for keyword in call.keywords)
+                if not unknown:
+                    for parameter, argument in zip(positional, supplied):
+                        inner[parameter.arg] = deferred_of(argument, env)
+                    named = {keyword.arg: keyword.value for keyword in call.keywords}
+                    for parameter in parameters:
+                        if parameter in named:
+                            inner[parameter] = deferred_of(named[parameter], env)
+            visit(node.body, shadowed or name in parameters, inner)
+        finally:
+            active.discard(id(node))
+
+    def visit(node, shadowed, env):
         if isinstance(node, ast.Name):
             if not shadowed and isinstance(node.ctx, ast.Load) and node.id == name:
                 reads.append(node)
@@ -2404,19 +2582,24 @@ def _annotation_reads(annotation, name):
         if isinstance(node, ast.Lambda):
             _, defaults = lambda_parts(node)
             for default in defaults:
-                visit(default, shadowed)
+                visit(default, shadowed, env)
+            return
+        if isinstance(node, ast.NamedExpr):
+            visit(node.value, shadowed, env)
+            if isinstance(node.target, ast.Name):
+                env[node.target.id] = deferred_of(node.value, env)
             return
         if isinstance(node, ast.IfExp):
-            visit(node.test, shadowed)
+            visit(node.test, shadowed, env)
             truth = _annotation_truth(node.test)
             if truth is not False:
-                visit(node.body, shadowed)
+                visit(node.body, shadowed, env)
             if truth is not True:
-                visit(node.orelse, shadowed)
+                visit(node.orelse, shadowed, env)
             return
         if isinstance(node, ast.BoolOp):
             for index, operand in enumerate(node.values):
-                visit(operand, shadowed)
+                visit(operand, shadowed, env)
                 truth = _annotation_truth(operand)
                 if isinstance(node.op, ast.And):
                     if truth is False:
@@ -2426,47 +2609,52 @@ def _annotation_reads(annotation, name):
                         return
                 if truth is None:
                     for rest in node.values[index + 1:]:
-                        visit(rest, shadowed)
+                        visit(rest, shadowed, env)
                     return
             return
         if isinstance(node, ast.Call):
             consumer = _annotation_callee_name(node.func) in consumers
             if isinstance(node.func, ast.Lambda):
-                parameters, defaults = lambda_parts(node.func)
+                _, defaults = lambda_parts(node.func)
                 for default in defaults:
-                    visit(default, shadowed)
-                visit(node.func.body, shadowed or name in parameters)
+                    visit(default, shadowed, env)
+                deferred = (node.func,)
             else:
-                visit(node.func, shadowed)
+                visit(node.func, shadowed, env)
+                deferred = deferred_of(node.func, env) or ()
             for argument in node.args:
-                if consumer and isinstance(argument, ast.GeneratorExp):
-                    visit_generator(argument, shadowed)
+                if consumer:
+                    consume(argument, shadowed, env)
                 else:
-                    visit(argument, shadowed)
+                    visit(argument, shadowed, env)
             for keyword in node.keywords:
-                if consumer and isinstance(keyword.value, ast.GeneratorExp):
-                    visit_generator(keyword.value, shadowed)
+                if consumer:
+                    consume(keyword.value, shadowed, env)
                 else:
-                    visit(keyword.value, shadowed)
+                    visit(keyword.value, shadowed, env)
+            for item in deferred:
+                if isinstance(item, ast.Lambda):
+                    execute(item, shadowed, env, node)
             return
         if isinstance(node, ast.GeneratorExp):
-            visit_generators(node.generators, shadowed, False)
+            creation.setdefault(id(node), dict(env))
+            visit_generators(node.generators, shadowed, False, env)
             return
         if isinstance(node, (ast.ListComp, ast.SetComp)):
-            visit(node.elt, visit_generators(node.generators, shadowed, True))
+            visit(node.elt, visit_generators(node.generators, shadowed, True, env), env)
             return
         if isinstance(node, ast.DictComp):
-            inner = visit_generators(node.generators, shadowed, True)
-            visit(node.key, inner)
-            visit(node.value, inner)
+            inner = visit_generators(node.generators, shadowed, True, env)
+            visit(node.key, inner, env)
+            visit(node.value, inner, env)
             return
-        if isinstance(node, ast.Starred) and isinstance(node.value, ast.GeneratorExp):
-            visit_generator(node.value, shadowed)
+        if isinstance(node, ast.Starred):
+            consume(node.value, shadowed, env)
             return
         for child in ast.iter_child_nodes(node):
-            visit(child, shadowed)
+            visit(child, shadowed, env)
 
-    visit(annotation, False)
+    visit(annotation, False, {})
     return reads
 
 
@@ -2494,6 +2682,10 @@ def _annotation_truth(node):
     truth = _constant_truth(node)
     if truth is not None:
         return truth
+    if isinstance(node, (ast.Lambda, ast.GeneratorExp)):
+        return True
+    if isinstance(node, ast.NamedExpr):
+        return _annotation_truth(node.value)
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         if any(isinstance(element, ast.Starred) for element in node.elts):
             return None
@@ -3014,6 +3206,8 @@ def _check_int64_pow_constants(tree, known):
                 error.source_column = node.col_offset
                 raise error
             return
+        if not _DYNAMIC_POW_REFUSALS[0]:
+            return          # int64 default (Python syntax): a value that only exists at run time is the run-time stop's
         if dynamic_alias:
             if base is not None and base in (-1, 0, 1):
                 return
@@ -4800,19 +4994,35 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             # subset (`int64_literals`), for Python syntax too (bigint): a Python-syntax program has big ints, so a build
             # names it at the typed path (pyfunc: 'does not fit in a 64-bit signed integer') and the general path
             # builds it exactly
-            if not declarations_only and (syntax == 'ail' or (syntax == 'python' and int64_literals)):
-                _check_int64_constants(tree)
-                if (syntax == 'ail' and not entry) or syntax == 'python':
-                    _check_int64_literals(tree)       # (a brace entry file is named by the type stage, with its position)
-                _check_int64_constant_positions(tree)
-                _check_int64_unary_constants(tree)
-                _check_int64_local_cancellations(tree)
-                _check_int64_int_base_constants(tree)
-                module_known = _known_module_constants(tree)
-                _check_int64_pow_constants(tree, module_known)
-                _check_int64_augmented_powers(tree, module_known)
-                _check_int64_routed_augmented_powers(tree, module_known)
-                _check_class_attribute_assignment(tree)       # (the general path has per-class tables: class attributes are assignable)
+            # int64 default (2026-10-31): a Python-syntax program has int64 ints unless --exact-int / AIL_EXACT_INT=1 asks for the
+            # exact ones, so a static need of a big int is refused by these checks in a build too, with the flag named
+            exact_ints = os.environ.get('AIL_EXACT_INT', '').strip().lower() in ('1', 'on', 'yes', 'true')
+            if not declarations_only and (syntax == 'ail' or (syntax == 'python' and (int64_literals or not exact_ints))):
+                _DYNAMIC_POW_REFUSALS[0] = not (syntax == 'python' and not exact_ints and not int64_literals)
+                try:
+                    _check_int64_constants(tree)
+                    if (syntax == 'ail' and not entry) or syntax == 'python':
+                        _check_int64_literals(tree)       # (a brace entry file is named by the type stage, with its position)
+                    _check_int64_constant_positions(tree)
+                    _check_int64_unary_constants(tree)
+                    _check_int64_local_cancellations(tree)
+                    _check_int64_int_base_constants(tree)
+                    module_known = _known_module_constants(tree)
+                    _check_int64_pow_constants(tree, module_known)
+                    _check_int64_augmented_powers(tree, module_known)
+                    _check_int64_routed_augmented_powers(tree, module_known)
+                    if syntax == 'ail' or int64_literals:
+                        _check_class_attribute_assignment(tree)   # (the general path has per-class tables: class attributes are assignable)
+                except ValueError as refusal:
+                    if syntax == 'python' and not exact_ints and not int64_literals and '--exact-int' not in str(refusal):
+                        hint = ('\n  write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) '
+                                'for exact big ints, about 20x slower')
+                        wrapped = type(refusal)(str(refusal) + hint)
+                        wrapped.__dict__.update(refusal.__dict__)
+                        raise wrapped from None
+                    raise
+                finally:
+                    _DYNAMIC_POW_REFUSALS[0] = True
             if not declarations_only:
                 _check_genexpr_hash_keys(tree)    # not an int64 check: every build keeps a generator expression as a list
             if merged is not None and merged.positions:
@@ -5899,6 +6109,10 @@ def main(argv=None):
     compile_cmd.add_argument('--strict', action='store_true',
         help='build on the typed path or refuse, listing every blocker with a rewrite (also AIL_STRICT=1); '
              'with --json the blockers are printed as ail.strict/1 JSON')
+    compile_cmd.add_argument('--exact-int', action='store_true',
+        help='exact (arbitrary precision) ints as in CPython; the default is 64-bit ints that stop with an OverflowError-style '
+             'message on overflow, and a program whose source needs a big int is refused at compile time (also AIL_EXACT_INT=1; '
+             'the exact path is the general path, about 20x slower)')
     compile_cmd.add_argument('--static', action='store_true',
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
     compile_cmd.add_argument('--gpu', action='store_true',
@@ -5957,6 +6171,8 @@ def main(argv=None):
         os.environ['AIL_NO_CACHE'] = '1'
     if getattr(args, 'gpu', False):
         os.environ['AIL_GPU_BUILD'] = '1'
+    if getattr(args, 'exact_int', False):
+        os.environ['AIL_EXACT_INT'] = '1'
     if getattr(args, 'static', False):
         if sys.platform == 'darwin' and not getattr(args, 'target', None):
             parser.error('--static is not supported on macOS: Apple ships no static C library, so the '
@@ -6304,6 +6520,7 @@ def main(argv=None):
                         hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
                         if Path(str(object_path) + '.json').is_file() else '-')],
                     environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
+                    'exact' if str(environment.get('AIL_EXACT_INT', '')).strip().lower() in ('1', 'on', 'yes', 'true') else 'int64',
                     *(['classes', environment['AIL_CLASS_NAMES']] if environment.get('AIL_CLASS_NAMES') else []),
                     *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
                     *(['link', ffi_env['AIL_FFI_LINK']] if link else []),

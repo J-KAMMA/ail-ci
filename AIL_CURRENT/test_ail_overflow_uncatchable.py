@@ -247,5 +247,24 @@ class OverflowUncatchableTests(unittest.TestCase):
         self.assertEqual(ran.stdout, self.cpython("legit_d", LEGIT.replace("print(to_int(1e30))", "print(1)")))
 
 
+import os as _os_exact_int
+
+_SAVED_EXACT_INT = None
+
+
+def setUpModule():
+    # these tests are about exact (arbitrary precision) ints: the opt-in mode (intmode.py, `--exact-int`)
+    global _SAVED_EXACT_INT
+    _SAVED_EXACT_INT = _os_exact_int.environ.get('AIL_EXACT_INT')
+    _os_exact_int.environ['AIL_EXACT_INT'] = '1'
+
+
+def tearDownModule():
+    if _SAVED_EXACT_INT is None:
+        _os_exact_int.environ.pop('AIL_EXACT_INT', None)
+    else:
+        _os_exact_int.environ['AIL_EXACT_INT'] = _SAVED_EXACT_INT
+
+
 if __name__ == "__main__":
     unittest.main()

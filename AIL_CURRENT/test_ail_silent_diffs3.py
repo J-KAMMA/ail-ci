@@ -29,6 +29,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def compile_source(directory, name, source, mode):
     path = Path(directory) / (name + '.py')
     path.write_text(source, encoding='utf-8')
@@ -223,8 +242,12 @@ class LenDunder(unittest.TestCase):
                     self.assertEqual(out, expected, err)
                     self.assertEqual(rc, status, err)
 
+    @_exact_int
+
     def test_static_class(self):
         self.check('len_static', len_static_source())
+
+    @_exact_int
 
     def test_dynamic_receiver(self):
         self.check('len_dynamic', LEN_DYNAMIC)

@@ -1,3 +1,135 @@
+## 2026-10-31 -- fz205 re-applied: Rust bridge tests skip when rustc is only a shim (job-rbfz205-10311922)
+
+Re-applied the accepted `job-fz205-10300805` change. Its diff no longer applies because this
+integrated tree already rejects the rustup shim, inline, in both modules:
+`RUSTC = shutil.which('rustc')` followed by `if RUSTC and subprocess.run([RUSTC, '--version'],
+capture_output=True).returncode: RUSTC = None` (`test_ail_c_export.py:35-37`,
+`test_ail_cratebridge.py:27-29`). That is the accepted `_working_rustc()` predicate, so both sides'
+fix is kept and no code changed. The accepted branch's other entry (the try/else reproducer, seed
+`2075520206`, already fixed by `test_ail_fz1`) records no code change, so there was nothing further
+to apply. `tools/diff_ids.py` is not present on this tree.
+
+Verified on this runner, where `/home/runner/.cargo/bin/rustc` is a shim that exits 1 for
+`--version`: `test_ail_c_export` + `test_ail_cratebridge` ran 28 tests, OK, the two Rust tests
+skipped by name (`rustc is not installed` / `rustc required`); `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` ran 25 tests, OK (1 unrelated skip). Probes in
+`/tmp/probes` compared the accepted and tree predicates and imported both modules under four PATH
+scenarios -- real shim, fake shim that fails, absent, and a fake `rustc --version` that succeeds:
+every pair agreed, and the Rust tests were skipped exactly when `RUSTC` was `None` (real shim,
+failing shim, absent) and not skipped when it was set (fake working rustc). A real toolchain is
+not installed here, so the compile-and-run path was not exercised on this runner; `cmp.sh` AIL
+probes do not apply because no language behaviour changed.
+## 2026-10-31 -- pre437 review fix: rebound generator aliases and recursive lambdas (job-rbpre437-10311923)
+
+Fixed the review defects in the re-applied pre437 change.  `_annotation_reads` followed a
+generator reached through a name to the binding the name had at consumption time, so a rebound
+self-referencing alias (`(g := (y for y in [1])) and (g := (y for y in g)) and list(g)`) and a
+two-name chain (`g := h`) re-entered the same generator until the compiler hit `RecursionError`;
+`execute` likewise re-entered an immediately called recursive lambda (`f := (lambda n: 1 if n else
+f(0))`).  A generator expression now records its environment when it is created, and a
+consumption resolves its first iterable against that snapshot, so the rebound name follows the
+object it named at creation; an active-node set also stops any remaining re-entry of a generator
+or a lambda currently being read (the recursive body is already being visited at the outer call).
+All three review probes (`r22_selfgen_valid`, `r23_lambda_recursion`, `r24_genexp_chain`) now
+print `1`, exit 0 and match CPython on both builds; `r1_selfgen` (a generator whose first
+iterable is the same name before it is bound, CPython NameError) still compiles to `1`, the same
+pre-existing result as the base tree, since this pass models only the class name.  Probes in
+`/tmp/probes` via `cmp.sh`: 14 new cases—valid rebound self/chain/swap/walrus-iterable, recursive
+lambda, empty rebound iterable, and an aliased generator reached through a list item, a dict
+value and a `map` argument—match CPython on both builds; element/iterable reads of `C` through a
+rebound alias and a recursive lambda that reads `C` are refused by name.  Re-ran the original 15
+probes and the review's 24: all matching cases still match, all live cases keep the named
+refusal, no `RecursionError` or traceback remains.  Tests: test_ail_pre437, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3 and test_ail_cmp_classname, 0 failed.  DIFFERENCES
+row C?-job-rbpre437-10311923-1 updated; `tools/update_manifest.py` run, `--check` and
+`tools/ci_shards.py --check` pass; `tools/diff_ids.py` is absent on this tree.
+
+## 2026-10-31 -- pre437 re-applied: a walrus-bound lambda called from a class annotation (job-rbpre437-10311923)
+
+Re-applied the accepted `job-pre437-10300148` change, whose diff no longer applies because this
+integrated tree already carries the rustc-shim check inline in `test_ail_c_export.py` /
+`test_ail_cratebridge.py` and registers new test modules through `AIL_CURRENT/tests.d/`.  The
+pre423 review recorded as pre-existing that `class C: x: ((f := (lambda: C)) and f()) = 1`
+compiled and printed `1` on both builds, where CPython evaluates the annotation, calls the lambda
+and raises `NameError` because `C` is unbound.  `_annotation_reads` deferred the lambda body but
+never followed the name the assignment expression bound.  It now keeps an environment of `:=`
+bindings, resolved to the lambda or generator a value names, and follows values through names,
+subscripted literal aggregates (`l[0]`, `d["k"]`), `__call__`, and statically known
+`if`/`and`/`or` results.  A call through such a name runs the body, and an immediately called
+lambda binds its arguments to the parameters; a known consumer (`list(g)`) or an unpacking
+(`[*g]`) runs a generator reached through a name.  `_annotation_truth` now reports a lambda or
+generator expression as truthy and a `:=` expression by its value, so `(f := lambda: C) or f()`
+and `(lambda: C) or (lambda: C)()` match CPython instead of being refused.  Calling a lambda with
+its own parameter named `C`, an unused binding, a statically dead branch and an empty `map`
+argument still match CPython.  The rustc-shim probe moved into `ail_testenv.rustc_path()` (both
+test modules use it; the inline duplicate was dropped).  An alias to a generator over a
+statically empty iterable is refused, the same pre-existing over-refusal as the direct
+`list(C for _ in [])` form.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: the 22 matching cases in `m_matching`
+(no call, `or` returns a lambda, dead `if`/`and`, a shadowing parameter/body/call, a container
+with no call, an unused genexp, an empty `map` argument, `bool`, a nested lambda, a default
+argument, lambda and genexp truthy `or`, a dead `or`, a plain annotation, an empty tuple `and`,
+`None or`, a big int, a negative int and `0.0`) match CPython on both builds; the 13 live cases
+(`p_call`, `p_paren`, `p_chain`, `p_list`, `p_neg_list`, `p_tuple`, `p_dict`, `p_dunder`,
+`p_arg`, `p_body`, `p_consumer`, `p_star`, `p_default`) are refused by name on both builds where
+CPython raises `NameError`; `p_direct_empty_genexp` (CPython accepts) is refused by name, the
+pre-existing over-refusal.  Final-state tests: test_ail_pre437, test_ail_c_export,
+test_ail_cratebridge, test_ail_pre423, test_ail_pre410, test_ail_files, test_ail_safetynet and
+test_ail_corpus_findings3 (8 modules, 0 failed, 451 s).  `tools/diff_ids.py` is not present on
+this tree; `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py --update`
+added the module (and the previously missing `test_ail_cc_jobs`) and `--check` exits 0.
+## 2026-10-31 -- quickstart docs re-applied with the job DEVLOG entry (job-rbrel1-10312119)
+
+Re-applied the accepted `job-rel1-10292334` change, whose diff no longer applies to this
+integrated tree: added `docs/QUICKSTART.md` (167 lines), the three complete programs in
+`AIL_CURRENT/language_examples/quickstart/` (`hello.py`, `word_counts.py`, `counter.py`),
+`test_ail_quickstart_docs.py` registered through `AIL_CURRENT/tests.d/test_ail_quickstart_docs.txt`
+(this tree's scheme, not the `LISTED_MODULES` tuple), the README link, a two-line
+`tools/ci_shards.json` placement (weight 10.0) and one `DIFFERENCES.md` row. The rel1
+`docs/INSTALL.md` rewrite was not applied over this tree's newer 169-line guide; a link to the
+quickstart was added instead. No compiler behaviour changed.
+
+Probes in `/tmp/probes/rbrel1fix` via `cmp.sh`, both builds: `p_hello`, `p_word_counts`, `p_counter`
+(the three documented programs), `p_wc_empty` (empty list and empty strings), `p_unicode` (`é`,
+sort order), `p_routes` (values through a list item, an attribute and a dict value) and
+`p_counter_empty_neg` (empty and negative totals) match CPython on both builds, as does
+`p_plain`; `p_outside_subset` (the documented match program) is refused by name on both builds,
+and `compile --syntax python outside_subset.py -o outside_subset` prints exactly the documented
+message and exits 3; `check --syntax python language_examples/quickstart/hello.py` exits 0.
+Final-state tests with `-j 2`: test_ail_quickstart_docs, test_ail_pre346, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3, 0 failed. `tools/update_manifest.py --check` and
+`tools/ci_shards.py --check` exit 0.
+## 2026-10-31 -- stdlib1 re-applied: textwrap.shorten / indent and string.capwords (job-rbstdlib1-10312120)
+
+Re-applied the accepted `job-stdlib1-10292333` change (base `1b0444b`, fetched anonymously
+from J-KAMMA/ail-ci), whose diff no longer applies to this tree. `ail_syntax.py` and
+`ail_testenv.py` applied verbatim: `_ail_tw_wrap_more` (the max_lines / placeholder path) now
+backs `_ail_tw_wrap`, and the new `_ail_tw_shorten`, `_ail_tw_indent` and
+`_ail_string_capwords` helpers are wired through `_MATH_DEPS`, `_SMALL_MODULES`, `_SMALL_NOTE`
+and `small_call`, so `textwrap.shorten(text, width)` (positional or keyword), `textwrap.indent`
+and `string.capwords` build; `TextWrapper`, `shorten(..., placeholder=...)`, a duplicate width
+and `string.Template` stay named compile-time refusals. `ail_testenv.rustc_path()` replaces the
+two tests' inline rustc-shim probes; both sides' fix is kept (the helper runs the same
+`rustc --version` probe, now with a timeout and exception handling).
+
+The conflicts were the shared-line records. This tree registers test modules through
+`AIL_CURRENT/tests.d/`, so `test_ail_stdlib1` is registered by the new
+`AIL_CURRENT/tests.d/test_ail_stdlib1.txt` instead of editing the `ail_check.MODULES` tuple (the
+incoming hunk), and `ail_check.py` is unchanged. `tools/ci_shards.json` keeps its current
+(reordered) shard layout and gains the weight 10.0 plus the shard entry. `tools/diff_ids.py` is
+not present on this tree, so it was not run; `tools/update_manifest.py` was run and `--check`
+passes.
+
+Probes in `/tmp/probes` on both builds (`bash ~/tools/cmp.sh`): `p_shorten`, `p_shorten_kw`,
+`p_shorten_types` (width 0 / -1 / 4 / 5 / 6, bytes and None text, long word), `p_indent`,
+`p_indent_route`, `p_indent_types`, `p_capwords`, `p_capwords_route`, `p_capwords_types` and
+the wrap/fill control `p_control` all match CPython 3.12 on the general and default builds;
+`p_refuse_shorten` (placeholder), `p_refuse_shorten_dup` (duplicate width) and
+`p_refuse_template` are refused by name on both builds. Tests on the final state:
+test_ail_stdlib1 (5), test_ail_c_export + test_ail_cratebridge (28), and test_ail_safetynet +
+test_ail_files + test_ail_corpus_findings3 + test_ail_pre346 (30, 1 skipped), all OK.
+
 ## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
 
 Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this
@@ -471,6 +603,63 @@ attribute, dict value, aliased) are refused by name; `p_noner` (ints, floats, ne
 stability, `.sort()`) matches CPython on both builds; `p_keyerr` shows a user `ValueError` in a
 key keeps its message.  Added `test_ail_refuzz95.py` (registered in `ail_check.py`).
 
+## 2026-10-31 -- rbpre420 follow-up: keep the no-class C for list/tuple index errors (job-rbpre420-10312035)
+
+The pre421 C-identity check failed after the pre420 re-apply.  Making the v2 runtime's
+list/tuple getitem text class-aware unconditionally changed the generated C of every
+general-path program that writes no class.  The runtime text is restored to the base
+`ail_type_name(key.tag)` form, and `pyboxed2._INDEX_ERROR_CLASS_EDITS` again carries the read
+rewrite next to the two write rewrites; all three are applied only when `source_has_class` is
+set (a class statement in the program's own source, before the preludes inject theirs).  A
+class-bearing program still names the class for a read, a store and a deletion, capped at
+CPython's 200 characters; a no-class program emits C byte-identical to base.
+`test_ail_pre420` is unchanged and still passes.
+
+Final-state tests: test_ail_pre420 (1), test_ail_pre421 (2), test_ail_safetynet (5),
+test_ail_files (18, 1 skipped) and test_ail_corpus_findings3 (2) all pass.  Probes in
+`/tmp/probes`, both builds via `cmp.sh`: `pre420_routes.py` (instance, subclass and exception
+keys; argument, alias, list item, attribute and dict value routes; list and tuple; empty,
+negative and valid indexes; `__index__`; bytes/bytearray/float/str/None/bool keys; store and
+deletion), `pre420_long.py` (class names of 1/32/33/200/201/210 characters),
+`pre420_noclass.py` (float/str/None/bool keys, empty and negative indexes, valid
+store/delete) and `pre420_uncaught.py` (exit status) all match CPython.  A no-class
+`--debug-dir` build has `ail_type_name(key.tag)` once and none of the class-name `tnbuf`
+writes; a class-bearing one has the three class-name writes the pre421 check expects.
+
+`test_ail_pre366` is not in this tree or on origin/integ.  Its branch version (fetched from
+origin/job-pre366-10280649) fails the same 28 refusal subtests here and on the untouched HEAD
+tree, because this snapshot lacks the aliased power/int wrapper refusals it tests; its 14
+matching subtests pass on both.  That failure is unrelated to this change.
+`tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-29 -- re-apply pre420: a list/tuple index error names the instance's class (job-rbpre420-10290915)
+
+Re-applied the accepted pre420 change on this tree. The pre411 review recorded as pre-existing,
+on both builds, that an instance without `__index__` used as a list or tuple index printed the
+runtime tag instead of the class: `list indices must be integers or slices, not instance` where
+CPython prints `not C` (and a subclass's name). The general path built that message with
+`ail_type_name(key.tag)`, the tag table; it now uses `ail__tname_c(key)`, the object-to-name
+helper that already serves the item errors, and the text is built in a dynamically sized buffer
+capped at 200 characters like CPython's `%.200s` (the old 96-byte stack buffer also truncated a
+long class name).
+
+This tree already carried an independent fix for the read error in
+`pyboxed2._INDEX_ERROR_CLASS_EDITS`, which rewrote the old runtime text at compile time. Keeping
+both sides' fixes: the runtime now owns the read error directly, so that first rewrite was
+removed, while the write-side rewrite (`ail_op_setitem`/`ail_op_delitem`) is retained.
+
+Added `AIL_CURRENT/test_ail_pre420.py` (both builds) and registered it in
+`ail_check.MODULES`; it covers a list, a tuple, an empty list/tuple, a subclass, a
+210-character class name, an instance that does define `__index__`, and float/str/None keys,
+with the value reaching the subscription directly and through an argument, a list item, an
+attribute and a dict value. Probes in `/tmp/probes` on both builds via `cmp.sh`:
+`pre420_types.py`, `pre420_long.py` and `pre420_exc.py` match CPython (the long probe uses
+class names of 200, 201, 210 and 500 characters; the only remaining line in `pre420_types.py`
+is the instance `KeyError` repr, whose address cannot match). A non-int `__index__` return
+(`list indices ... not float` instead of `__index__ returned non-int (type float)`) is a
+separate pre-existing cause, left unchanged. Final-state tests: test_ail_pre420,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3. `tools/diff_ids.py` is not
+present on this tree; `tools/update_manifest.py` was run and `--check` passes.
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
@@ -1062,6 +1251,56 @@ All match CPython on both builds.  Final-state tests: test_ail_pre395 (17.9 s),
 test_ail_safetynet (132.8 s), test_ail_files (137.2 s) and test_ail_corpus_findings3
 (246.9 s), 4 modules, 380 s, 0 failed.  `tools/update_manifest.py` was run and `--check`
 passes.
+## 2026-10-31 -- pre366: reconcile the alias test with the integration's exact ints (job-rbrbpre366-10312036)
+
+The integration branch now carries the same alias/wrapper fix independently, reconciled as
+`test_ail_pre430`: for Python syntax its general path has exact big integers, so the int64
+gate is skipped and an aliased `q = power` call that leaves int64 prints CPython's exact
+result instead of being refused.  The 2026-10-28 pre366 test still asserted a named refusal
+for every unsafe alias route, so `test_ail_pre366` failed on the integration tree (28
+subtests: all 14 alias cases, both builds) even though the compiler was correct there.  The
+test now follows the integration's rule: an unsafe call site is either refused by name
+(int64 constant overflow, aliased operands not known, `int()` of a float outside int64) or
+it builds and must print CPython's exact result; a run-time `integer overflow` is never
+accepted.  Coverage keeps the direct, alias-chain, module-constant, bool, argument,
+list-item, class-attribute, dict-value, float-base and int() routes plus new width/empty/
+boundary and rebound-alias cases; safe constants and direct wrapper calls must match CPython
+on both builds.  The alias source change (`_add_function_aliases`) is unchanged: it is the
+fix that produces the named refusals on this (pre-bigint) tree.
+
+`test_ail_pre421` was checked against a reconstructed integration merge (origin/integ plus
+this source and test change) and passes; this change does not touch the class-name index
+path.
+
+Probes in `/tmp/probes2` (28 programs, both builds via `cmp.sh`): on this tree 16 are
+refused by name (p01-p05 overflow, p06-p12 aliased operands, p13-p16 `int()` float) and 12
+match CPython (p17-p28); on the integration merge all 28 match CPython.  Final tests:
+test_ail_pre366, test_ail_pre160, test_ail_pre273, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` run and `--check` passes.
+
+## 2026-10-28 -- re-apply accepted pre366 on the current tree (job-rbrbpre366-10281613)
+
+Re-applied the accepted pre366 alias/wrapper change (job-rbpre366-10281113) on this tree.  The
+only source conflict was `_wrapper_int_params`: this tree keeps its `constants` argument and
+`_mutated_parameters`, and now also returns `_add_function_aliases(...)` so an aliased `int()`
+wrapper is checked like the wrapper itself.  The pow hunks applied around the existing
+`_pow_parameter_bindings` and symmetric constant-exponent (>= 63) rule, which stay: the
+symmetric rule remains on the builtin `pow` path, while the new wrapper/alias call-site checks
+cover `q = power` and alias chains.  Added `AIL_CURRENT/test_ail_pre366.py`, registered it in
+`ail_check.MODULES` and `tools/ci_shards.json` (weight 10.0), and added DIFFERENCES row
+`C?-job-rbrbpre366-10281613-1`.  `tools/diff_ids.py` is not present on this tree, so it could
+not be run; `tools/update_manifest.py` was run and `--check` passes.
+
+Probes in `/tmp/probes` (24 programs, both builds via `cmp.sh`): the 15 refused ones are `r01`-`r05`
+with `int64 constant expression out of range`, `r06`-`r10` and `m09` with the aliased-wrapper
+wording, and `r11`-`r14` with `int() of a float outside int64`; the other 9 (`m01`-`m08`,
+`m10`) match CPython.  Coverage includes `**` and `pow()` wrapper bodies, negative base,
+alias chain, module constants, argument/list-item/attribute/dict-value routes, a float base,
+and an aliased `int()` reached directly, through an alias chain, a list item and a dict value.
+
+Final tests on the committed tree: `test_ail_pre366`, `test_ail_pre160`, `test_ail_pre273`,
+`test_ail_pre371`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+pass.
 
 ## 2026-10-28 -- pre404: a lambda body follows a renamed comprehension target (job-pre404-10281108)
 

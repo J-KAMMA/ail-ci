@@ -72,6 +72,25 @@ GOOD = '''func @collatz(%n: i64) -> (i64) attrs {linkage = "extern", names = ["n
 '''
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def parse(src):
     return text.parse_function(src)
 
@@ -565,6 +584,8 @@ class GeneratedProgramTests(unittest.TestCase):
                     self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                     self.assertEqual(legacy.stdout, expected)
                     self.assertEqual(entries, [])
+
+    @_exact_int
 
     def test_overflow_and_zero_division_keep_their_messages(self):
         source = ('def grow(n: int) -> int:\n    x = n\n    for i in range(80):\n        x = x * 3\n    return x\n\n'

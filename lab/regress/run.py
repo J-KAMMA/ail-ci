@@ -380,16 +380,42 @@ def check_program(p, base, head, mem_kb, deadline):
         shutil.rmtree(work, ignore_errors=True)
 
 
+INT64_MIN, INT64_MAX = -(1 << 63), (1 << 63) - 1
+BIG_TOKEN = re.compile(r'-?\d{10,}')
+LARGE = 1 << 31
+
+
+def needs_big_int(text, c):
+    """Does the case itself work with big numbers: an int of magnitude 2**31 or more in the input or in what CPython
+    printed? (A product or a shift of such values can leave int64 although the printed result does not; a case with small
+    numbers that stops is a real regression.)"""
+    seen = text + c['out'].decode('utf-8', 'replace')
+    return any(abs(int(m)) >= LARGE for m in BIG_TOKEN.findall(seen))
+
+
+def int64_stop(rh, text, c):
+    """Owner decision 2026-10-31: ints are 64-bit by default. A case that needs a big int may stop loudly with the named
+    OverflowError (or its program be refused at compile time naming --exact-int); anything else that stops is a regression."""
+    if not rh['built']:
+        return '--exact-int' in rh['err'] or 'AIL_EXACT_INT' in rh['err']      # the source itself needs a big int
+    if not needs_big_int(text, c):
+        return False
+    return rh['rc'] == 1 and rh['err'].startswith('OverflowError: integer overflow in ')
+
+
 def classify(p, idx, text, c, runs, b, h, f):
     rb, rh, rf = runs['base'], runs['head'], runs['force']
     cats = []
-    if same(rb, c) and not same(rh, c):
+    allowed = same(rb, c) and not same(rh, c) and int64_stop(rh, text, c)
+    if same(rb, c) and not same(rh, c) and not allowed:
         cats.append('REGRESSION')
     if rh['built'] and rh['rc'] == 0 and (rh['out'] != c['out'] or c['rc'] != 0):
         cats.append('SILENT')
     if rf['built'] and rf['rc'] == 0 and (rf['out'] != c['out'] or c['rc'] != 0):
         cats.append('SILENT-FORCE')
     info = []
+    if allowed:
+        info.append('int64-stop')
     if same(rb, c) and rf['built'] and not same(rf, c) and 'SILENT-FORCE' not in cats:
         info.append('force-loud')
     if not same(rb, c) and same(rh, c):
@@ -451,6 +477,11 @@ def report(args, results, known, started, base_ref, head_ref):
         md += ['No regression and no silent difference.', '']
     if known_hit:
         md += ['### Listed in lab/regress/known.txt (not failing)', '', table(known_hit, cols, 20), '']
+    int64_stops = [r for r in rows if 'int64-stop' in r['info']]
+    if int64_stops:
+        md += ['### Information: cases that need a big int and now stop or are refused (int64 default, owner decision 2026-10-31)',
+               '', '%d case(s); the stop must be the named OverflowError or a compile-time refusal naming --exact-int.' %
+               len(int64_stops), '', table(int64_stops, cols, 15), '']
     force_loud = [r for r in rows if 'force-loud' in r['info']]
     if force_loud:
         md += ['### Information: only the AIL_UNIFIED_FORCE=1 build is refused or stops', '',

@@ -291,6 +291,25 @@ TEXT_INPUTS = ['', 'Racecar, Noon! level... A "madam" xyz\n', 'ß ss Ssß ǅ ǆ 
                '   \n', 'abcba\tfoo\nboB\n!!!\n', 'Aa éÉ ñÑ 日本日 ١٢١\n']
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def compile_default(directory, text, name):
     source, exe = Path(directory, name + '.py'), Path(directory, name + '_x')
     source.write_text(text, encoding='utf-8')
@@ -342,8 +361,11 @@ class TypedReach2(unittest.TestCase):
             self.same(exe, source, stdin, loud_ok=True)
 
     # T1 + T2 + T3
+    @_exact_int
     def test_stdin_idiom_typed_and_equal(self):
         self.check(STDIN_IDIOM, 'idiom', INT_INPUTS + BIG_VALUES, expect_typed=None)
+
+    @_exact_int
 
     def test_max_of_empty_generator_raises_like_cpython(self):
         self.check(MINMAX, 'minmax', ['', '1 2 3\n', '-5\n', '  \n', '1 99999999999999999999 -3\n'] + BIG_VALUES,
@@ -355,8 +377,12 @@ class TypedReach2(unittest.TestCase):
     def test_casefold_stepped_slice_extend_typed(self):
         self.check(TEXT, 'text', TEXT_INPUTS)
 
+    @_exact_int
+
     def test_range_bounds_tagged_counter_int64(self):
         self.check(BITONIC, 'bitonic', ['', '1 2 3 2 1\n', '5\n', '1 3 2 4 3 5\n', '3 3 3\n'] + BIG_VALUES, expect_typed=None)
+
+    @_exact_int
 
     def test_slice_with_a_tagged_bound_stays_typed_and_exact(self):
         words = 'a bb ccc dd e ffff ggg'
@@ -366,9 +392,13 @@ class TypedReach2(unittest.TestCase):
                   'x ' + words + '\n', '2\n']
         self.check(LENS, 'lens', inputs)
 
+    @_exact_int
+
     def test_int64_elements_whose_arithmetic_leaves_int64(self):
         inputs = ['2', '0', '-1', '4', '99999999999999999999', '-99999999999999999999', '9223372036854775807', '1', '']
         self.check(EDGE, 'edge', [i + chr(10) if i else i for i in inputs], expect_typed=None)
+
+    @_exact_int
 
     def test_int_text_in_a_list_of_lists_is_exact_not_an_overflow_stop(self):
         # (the legacy emitter parses int(<text>) into an int64: a function the IR refuses for its kinds must not keep it)
