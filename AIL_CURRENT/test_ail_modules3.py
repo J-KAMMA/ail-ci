@@ -243,10 +243,11 @@ class MultiFileForms(ModulesBase):
 
 class LazyDefaultRefusals(ModulesBase):
     def test_default_reading_a_rebound_constant_is_refused_by_name(self):
+        # MODSYS: the message names the definition (`lazy.py defines ... (line N)`), not the import line
         self.refused(REFUSALS["lazy_default_rebound"], "main.py:4:5", "function-level `import lazy`",
-                     "lazy.py:1")
+                     "lazy.py defines", "(line 3)")
         self.refused(REFUSALS["lazy_default_bumped"], "main.py:4:5", "function-level `import lazy`",
-                     "lazy.py:3")
+                     "lazy.py defines")
 
 
 if __name__ == "__main__":

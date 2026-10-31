@@ -81,9 +81,32 @@ def compile_case(directory, text, general):
                           capture_output=True, text=True, timeout=900, env=env)
 
 
+# MODSYS: `html` and `math` exist, so these guarded imports are decided when the program is built (the handler never
+# runs); the program must then behave as CPython does, or be refused for something other than the guard
+DECIDED = ['html_import_error', 'html_from_import', 'two_modules', 'module_not_found', 'tuple_handler', 'alias', 'math_import', 'in_a_function', 'inside_if', 'inside_loop']
+
+
 class OptionalImportRefusal(unittest.TestCase):
+    def test_guarded_imports_of_modules_that_exist_are_decided_at_build_time(self):
+        for name in DECIDED:
+            text = REFUSED[name][0]
+            for general in (True, False):
+                with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
+                    built = compile_case(directory, text, general)
+                    message = built.stdout + built.stderr
+                    if built.returncode == 0:
+                        want = subprocess.run([sys.executable, '-B', '-c', text], capture_output=True, timeout=60)
+                        got = subprocess.run([str(Path(directory, 'prog'))], capture_output=True, timeout=120,
+                                             cwd=directory)
+                        self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want.stdout, message)
+                    else:
+                        self.assertIn(built.returncode, (2, 3), message)
+                        self.assertNotIn('guarded by', message)
+
     def test_refusals_name_the_import_and_its_position(self):
         for name, (text, where, phrases) in REFUSED.items():
+            if name in DECIDED:
+                continue
             for general in (True, False):
                 with self.subTest(name=name, general=general), tempfile.TemporaryDirectory() as directory:
                     built = compile_case(directory, text, general)
