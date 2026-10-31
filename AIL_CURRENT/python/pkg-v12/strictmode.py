@@ -281,6 +281,13 @@ def collect(text, to_c, unsupported, *, library=False, external=None, max_blocke
         original_tree = ast.parse(text.strip())
     except SyntaxError:
         pass
+    if original_tree is not None and not any(
+            isinstance(node, ast.FunctionDef) for node in original_tree.body):
+        # `to_c` here is the typed FUNCTION emitter: it reads top-level `def`s only, so a script
+        # (or a file whose only def is `async def`) always stops at the bare "no def found",
+        # which locates nothing. The compiler rewrites a script into a function and names the
+        # real construct, so leave that refusal (now positioned) to the caller.
+        return [], None
     blockers, gone, removed_functions = [], set(), set()
     stopped = None
     for _ in range(max_blockers * 3):

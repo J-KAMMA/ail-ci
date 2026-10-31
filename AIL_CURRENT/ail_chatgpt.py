@@ -3116,12 +3116,19 @@ def _check_int64_pow_constants(tree, known):
             check(node, local, scope_names, wrapper_names, wrapper_aliases, values)
 
 
-def _static_aug_pow_int(node, known, values, attributes, passthrough, global_name):
+def _static_aug_pow_int(node, known, values, attributes, passthrough, global_name,
+                        assigned=None, seen=None):
     """The int a base or exponent expression denotes for the augmented-power check, or None.
 
     ``known`` holds the int-only constants the arithmetic folders may use; ``values`` also
     holds safe flat containers and class values, so the shared resolver can reach an int
-    through a list item, a dict value, a class attribute and a passthrough call."""
+    through a list item, a dict value, a class attribute and a passthrough call.  ``assigned``
+    maps a name to the statement that last bound it, which lets a list or dict item keep an
+    integer element the shared container folder cannot represent (for example a wide power
+    followed by a shift)."""
+    value = _const_fold_int(node)
+    if type(value) is int:
+        return value
     value = _constant_int(node, known, shifts=True)
     if type(value) is int:
         return value
@@ -3133,7 +3140,63 @@ def _static_aug_pow_int(node, known, values, attributes, passthrough, global_nam
         return value
     value = _constant_value(node, lambda name: values.get(name, _UNKNOWN), global_name,
                             passthrough, attributes)
-    return value if type(value) is int else None
+    if type(value) is int:
+        return value
+    if assigned is None:
+        return None
+    seen = set() if seen is None else seen
+    if isinstance(node, ast.Name):
+        expression = assigned.get(node.id)
+        if isinstance(expression, ast.AST) and id(expression) not in seen:
+            return _static_aug_pow_int(expression, known, values, attributes, passthrough,
+                                       global_name, assigned, seen | {id(expression)})
+        return None
+    if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+            and isinstance(node.ctx, ast.Load)):
+        expression = assigned.get(('attr', node.value.id, node.attr))
+        if isinstance(expression, ast.AST) and id(expression) not in seen:
+            return _static_aug_pow_int(expression, known, values, attributes, passthrough,
+                                       global_name, assigned, seen | {id(expression)})
+        return None
+    if not isinstance(node, ast.Subscript):
+        return None
+    container = node.value
+    if isinstance(container, ast.Name):
+        bound = assigned.get(container.id)
+        if isinstance(bound, ast.AST):
+            container = bound
+    if not isinstance(container, (ast.List, ast.Tuple, ast.Dict)):
+        return None
+    key = _static_aug_pow_int(node.slice, known, values, attributes, passthrough, global_name,
+                              assigned, seen)
+    if isinstance(container, (ast.List, ast.Tuple)):
+        if type(key) is not int or not -len(container.elts) <= key < len(container.elts):
+            return None
+        element = container.elts[key]
+        return _static_aug_pow_int(element, known, values, attributes, passthrough,
+                                   global_name, assigned, seen | {id(element)})
+    key_value = _constant_value(node.slice, lambda name: values.get(name, _UNKNOWN),
+                                global_name, passthrough, attributes)
+    if key_value is _UNKNOWN:
+        key_value = key
+    for key_node, value_node in zip(container.keys, container.values):
+        if key_node is None:
+            continue
+        found = _constant_value(key_node, lambda name: values.get(name, _UNKNOWN),
+                                global_name, passthrough, attributes)
+        if found is _UNKNOWN:
+            found = _static_aug_pow_int(key_node, known, values, attributes, passthrough,
+                                        global_name, assigned, seen)
+        if found is _UNKNOWN:
+            continue
+        try:
+            matches = found == key_value
+        except Exception:
+            matches = False
+        if matches:
+            return _static_aug_pow_int(value_node, known, values, attributes, passthrough,
+                                       global_name, assigned, seen | {id(value_node)})
+    return None
 
 
 def _scope_binding_names(statement):
@@ -3205,9 +3268,9 @@ def _check_augmented_power_scope(body, known, values, parameters, declared, attr
             if (name not in parameters and name not in declared
                     and isinstance(assigned.get(name), ast.AST)):
                 base = _static_aug_pow_int(assigned[name], known, values, attributes,
-                                           passthrough, global_name)
+                                           passthrough, global_name, assigned)
                 exponent = _static_aug_pow_int(statement.value, known, values, attributes,
-                                               passthrough, global_name)
+                                               passthrough, global_name, assigned)
                 if base is not None and exponent is not None:
                     value = _exact_pow_or_too_big(base, exponent)
             # An augmented target never keeps the earlier value for a later statement.
@@ -3236,12 +3299,29 @@ def _check_augmented_power_scope(body, known, values, parameters, declared, attr
             for name in _scope_binding_names(statement.value):
                 assigned[name] = _UNKNOWN
             assigned[statement.targets[0].id] = statement.value
+        elif (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Attribute)
+                and isinstance(statement.targets[0].value, ast.Name)
+                and isinstance(statement.targets[0].ctx, ast.Store)):
+            if _call_runs_at_runtime(statement.value):
+                assigned.clear()
+            for name in _scope_binding_names(statement.value):
+                assigned[name] = _UNKNOWN
+            target = statement.targets[0]
+            assigned[('attr', target.value.id, target.attr)] = statement.value
         else:
             if _call_runs_at_runtime(statement):
                 assigned.clear()
             else:
                 for name in _scope_binding_names(statement):
                     assigned[name] = _UNKNOWN
+                for inner in ast.walk(statement):
+                    if (isinstance(inner, ast.Subscript) and isinstance(inner.ctx, ast.Store)
+                            and isinstance(inner.value, ast.Name)):
+                        assigned[inner.value.id] = _UNKNOWN
+                    elif (isinstance(inner, ast.Attribute) and isinstance(inner.ctx, ast.Store)
+                            and isinstance(inner.value, ast.Name)):
+                        assigned[('attr', inner.value.id, inner.attr)] = _UNKNOWN
 
 
 def _check_int64_augmented_powers(tree, module_known):
@@ -3277,6 +3357,158 @@ def _check_int64_augmented_powers(tree, module_known):
         _check_augmented_power_scope(function.body, local, local_values, parameters, declared,
                                      attributes, passthrough,
                                      lambda name, local_names=local_names: name not in local_names)
+
+
+def _check_int64_routed_augmented_powers(tree, module_known):
+    """Refuse ``b **= e`` when constant arguments reach the parameters through calls.
+
+    ``_check_augmented_power_scope`` folds a parameterless straight-line body, but a function
+    whose augmented base and exponent are parameters was left to the fixed-width run time even
+    when every reachable call supplies constants whose exact result leaves int64.  The call
+    graph is followed from module-scope calls, binding parameter names to statically known
+    arguments (including containers and aliases); an augmented power whose exact result does
+    not fit int64 is refused by name.  Arguments the fold cannot resolve, stores before the
+    statement, calls inside a loop and powers whose result fits are left unchanged."""
+    module_counts = _binding_counts(tree.body)
+    global_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            global_names.update(node.names)
+    program_bound = _all_bound_names(tree)
+    known = _scope_constant_map(tree.body, tree, {}, module_counts, set(module_counts),
+                                set(), global_names, program_bound)
+    attributes = _known_class_attributes(tree, known)
+    parents = {child: parent for parent in ast.walk(tree)
+               for child in ast.iter_child_nodes(parent)}
+    safe_containers = _safe_module_containers(tree, module_counts, global_names, parents)
+    module_nodes = {}
+    for statement in tree.body:
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)
+                and module_counts.get(statement.targets[0].id) == 1
+                and (statement.targets[0].id in safe_containers
+                     or not isinstance(statement.value, (ast.List, ast.Tuple, ast.Dict)))):
+            module_nodes[statement.targets[0].id] = statement.value
+    functions = {}
+    for node in tree.body:
+        if (isinstance(node, ast.FunctionDef) and not node.decorator_list
+                and module_counts.get(node.name) == 1):
+            functions[node.name] = node
+    if not functions:
+        return
+
+    def refuse(node, value):
+        shown = 'too large' if value is _CONST_INT_TOO_BIG else _constant_diagnostic(value)
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def resolve(node, env, scope_known, parameters, nodes):
+        if isinstance(node, ast.Name):
+            if node.id in env:
+                return env[node.id]
+            if node.id in parameters:
+                return _UNKNOWN
+        lookup = scope_known if scope_known is not None else known
+        value = _pow_static_int(node, lookup)
+        if type(value) is not int:
+            value = _static_aug_pow_int(node, lookup, known, attributes, {},
+                                        lambda unused: True, nodes)
+        return value if type(value) is int else _UNKNOWN
+
+    def bind(callee, arguments, keywords, env, scope_known, parameters, nodes):
+        positional = [argument.arg for argument in
+                      (*callee.args.posonlyargs, *callee.args.args)]
+        every = _scope_parameters(callee)
+        bound = {}
+        for index, argument in enumerate(arguments):
+            if isinstance(argument, ast.Starred):
+                return None
+            if index >= len(positional):
+                if callee.args.vararg is None:
+                    return None
+                break
+            value = resolve(argument, env, scope_known, parameters, nodes)
+            if value is not _UNKNOWN:
+                bound[positional[index]] = value
+        for keyword in keywords:
+            if keyword.arg is None or keyword.arg not in every or keyword.arg in bound:
+                return None
+            value = resolve(keyword.value, env, scope_known, parameters, nodes)
+            if value is not _UNKNOWN:
+                bound[keyword.arg] = value
+        return bound
+
+    def loop_scope_nodes(function):
+        inside = set()
+
+        def visit(node, in_loop):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                      ast.Lambda)):
+                    continue
+                nested = in_loop or isinstance(child, (ast.For, ast.AsyncFor, ast.While))
+                if nested:
+                    inside.add(id(child))
+                visit(child, nested)
+
+        visit(function, False)
+        return inside
+
+    def scan(function, env, depth, seen):
+        if depth > 12:
+            return
+        key = (id(function), tuple(sorted(env.items())))
+        if key in seen:
+            return
+        seen = seen | {key}
+        scope_known = _function_local_int_constants(function, known)
+        parameters = _scope_parameters(function)
+        bindings = _binding_counts(function.body)
+        stored_at = {}
+        for inner in _walk_own_scope(function):
+            if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del)):
+                stored_at.setdefault(inner.id, []).append((inner.lineno, inner.col_offset))
+        looped = loop_scope_nodes(function)
+
+        def env_at(node):
+            position = (node.lineno, node.col_offset)
+            repeated = id(node) in looped
+            return {name: value for name, value in env.items()
+                    if name not in stored_at
+                    or not (repeated or any(where < position for where in stored_at[name]))}
+
+        for node in _walk_own_scope(function):
+            if (isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Pow)
+                    and isinstance(node.target, ast.Name)):
+                current = env_at(node)
+                if node.target.id not in current:
+                    continue
+                base = current[node.target.id]
+                exponent = resolve(node.value, current, scope_known, parameters, None)
+                if type(base) is int and type(exponent) is int and exponent >= 0:
+                    value = _exact_pow_or_too_big(base, exponent)
+                    if value is _CONST_INT_TOO_BIG or not _INT64_MIN <= value <= _INT64_MAX:
+                        refuse(node, value)
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and isinstance(node.func.ctx, ast.Load)):
+                name = node.func.id
+                if (name in functions and name not in bindings and name not in parameters
+                        and name not in env):
+                    current = env_at(node)
+                    bound = bind(functions[name], node.args, node.keywords, current,
+                                 scope_known, parameters, None)
+                    if bound is not None:
+                        scan(functions[name], bound, depth + 1, seen)
+
+    for node in _walk_module_scope(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and isinstance(node.func.ctx, ast.Load) and node.func.id in functions):
+            bound = bind(functions[node.func.id], node.args, node.keywords, {}, None, set(),
+                         module_nodes)
+            if bound is not None:
+                scan(functions[node.func.id], bound, 0, set())
 
 
 _BINPOW_CONST_OPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
@@ -3426,12 +3658,57 @@ def _binpow_param_constants(function, lookup, global_name, attributes, passthrou
     return found
 
 
+def _binpow_default_values(function, module_known, attributes, passthrough):
+    """A parameter's statically known default value, evaluated in the defining scope."""
+    defaults = {}
+    positional = [argument.arg for argument in (*function.args.posonlyargs, *function.args.args)]
+    for name, node in zip(positional[len(positional) - len(function.args.defaults):],
+                          function.args.defaults):
+        defaults[name] = _constant_value(node, lambda item: module_known.get(item, _UNKNOWN),
+                                         lambda unused: True, passthrough, attributes)
+    for name, node in zip((argument.arg for argument in function.args.kwonlyargs),
+                          function.args.kw_defaults):
+        if node is not None:
+            defaults[name] = _constant_value(node, lambda item: module_known.get(item, _UNKNOWN),
+                                             lambda unused: True, passthrough, attributes)
+    return defaults
+
+
+def _binpow_argument_value(node, parameter, index, value_of, default):
+    """The value a call binds to a power parameter, including a constant ``*`` expansion.
+
+    ``index`` is the positional slot, or None for a keyword-only parameter.  An omitted
+    argument takes the parameter's default; a ``*`` argument whose value is not a flat
+    constant tuple keeps the value unknown, so nothing is assumed about it.  Only a tuple is
+    expanded: it cannot be mutated after the value was recorded."""
+    if index is not None:
+        position = 0
+        for argument in node.args:
+            if isinstance(argument, ast.Starred):
+                expanded = value_of(argument.value)
+                if (not isinstance(expanded, tuple)
+                        or any(isinstance(item, (list, tuple, dict)) for item in expanded)):
+                    return _UNKNOWN
+                if position <= index < position + len(expanded):
+                    return expanded[index - position]
+                position += len(expanded)
+            else:
+                if position == index:
+                    return value_of(argument)
+                position += 1
+    for keyword in node.keywords:
+        if keyword.arg == parameter:
+            return value_of(keyword.value)
+    return default
+
+
 def _binpow_power_parameters(tree, module_known, module_int_known, attributes, passthrough,
                              program_bound=None):
     """Module functions whose parameter is the base of a power with a known int exponent.
 
-    ``name -> {parameter: (argument index, [exponents])}``.  A parameter the function rebinds
-    is left out: ``_binpow_param_constants`` folds that use instead."""
+    ``name -> {parameter: (argument index, [exponents], default)}``.  A parameter the function
+    rebinds is left out: ``_binpow_param_constants`` folds that use instead.  A call that omits
+    the parameter is checked with its constant default, the value CPython binds there."""
     counts = _binding_counts(tree.body)
     if program_bound is None:
         program_bound = _all_bound_names(tree)
@@ -3449,6 +3726,7 @@ def _binpow_power_parameters(tree, module_known, module_int_known, attributes, p
         lookup, global_name = _binpow_function_lookup(function, module_known, module_int_known,
                                                        program_bound=program_bound)
         rebound = set(_function_scope_stores(function)) | _scope_declared(function)
+        defaults = _binpow_default_values(function, module_known, attributes, passthrough)
         uses = {}
         for node in _walk_own_scope(function):
             if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
@@ -3461,7 +3739,7 @@ def _binpow_power_parameters(tree, module_known, module_int_known, attributes, p
                 continue
             uses.setdefault(base.id, []).append(exponent)
         if uses:
-            found[function.name] = {name: (mapped[name], exponents)
+            found[function.name] = {name: (mapped[name], exponents, defaults.get(name, _UNKNOWN))
                                     for name, exponents in uses.items()}
     return found
 
@@ -3513,11 +3791,8 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
             return
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and global_name(node.func.id) and node.func.id in power_parameters):
-            for parameter, (index, exponents) in power_parameters[node.func.id].items():
-                argument = _bound_argument(node, parameter, index)
-                if argument is None:
-                    continue
-                value = value_of(argument)
+            for parameter, (index, exponents, default) in power_parameters[node.func.id].items():
+                value = _binpow_argument_value(node, parameter, index, value_of, default)
                 if type(value) is not int:
                     continue
                 for exponent in exponents:
@@ -4536,6 +4811,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 module_known = _known_module_constants(tree)
                 _check_int64_pow_constants(tree, module_known)
                 _check_int64_augmented_powers(tree, module_known)
+                _check_int64_routed_augmented_powers(tree, module_known)
                 _check_class_attribute_assignment(tree)       # (the general path has per-class tables: class attributes are assignable)
             if not declarations_only:
                 _check_genexpr_hash_keys(tree)    # not an int64 check: every build keeps a generator expression as a list

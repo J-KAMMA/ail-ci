@@ -6844,7 +6844,18 @@ class Compiler(boxclosure.ClosureMixin):
         args = node.args
         kwargs = {kw.arg: kw.value for kw in node.keywords}
         if isinstance(f, ast.Name):
-            return self._call_name(f.id, args, kwargs, ctx)
+            try:
+                return self._call_name(f.id, args, kwargs, ctx)
+            except Unsupported as refusal:
+                # an unbound `exec(...)`: name the construct and its rewrite here, not the generic
+                # "name ... is not a known function" that says nothing an author can act on
+                if f.id == 'exec' and "is not a known function/class/builtin" in str(refusal):
+                    refusal.args = ('exec() is not built: this language compiles the whole program '
+                                    'ahead of time, so there is no source text to run at run time.\n'
+                                    '  write instead: write the statements in the program itself, or '
+                                    'call the function directly',)
+                    refusal.source_line = node.lineno
+                raise
         if isinstance(f, ast.Attribute):
             return self._call_attribute(f, args, kwargs, ctx)
         # a lambda literal is never a class; inside a class-attribute value the class branch would
@@ -9691,7 +9702,7 @@ class Compiler(boxclosure.ClosureMixin):
                 raise Unsupported('chr() with the surrogate code point U+%04X' % cp)
         cp = _const_int(node)
         if cp is not None and not WIDE_STRINGS and 0x10000 <= cp <= 0x10FFFF:
-            raise Unsupported('chr() with the non-BMP code point U+%04X in the 16-bit v2 runtime' % cp)
+            raise Unsupported('chr() of the non-BMP code point U+%04X in the 16-bit v2 runtime' % cp)
         v = self.expr(args[0], ctx)
         t = ctx.tmp()
         ctx.emit('st = ail_bi_chr(cx, &%s, %s);' % (t, v))
@@ -12149,7 +12160,10 @@ class Compiler(boxclosure.ClosureMixin):
         raise Unsupported('a match statement (not modelled by the general path)')
 
     def stmt_AsyncFunctionDef(self, node, ctx):
-        raise Unsupported('async def (not modelled by the general path)')
+        refusal = Unsupported('async def: this language has no coroutines or event loop.\n'
+                              '  write instead: an ordinary `def`')
+        refusal.source_line = node.lineno
+        raise refusal
 
     def stmt_Assert(self, node, ctx):
         """`AssertionError` is now a real builtin class (AIL_B_ASSERTIONERROR, added to the core

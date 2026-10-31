@@ -14099,7 +14099,9 @@ def _expr(node, ctx):
             finally:
                 ctx.pre = saved
         return _call(node, ctx)
-    raise Unsupported(_shape_refusal(node, _EXPR_SHAPE_REFUSALS, 'expression'))
+    refusal = Unsupported(_shape_refusal(node, _EXPR_SHAPE_REFUSALS, 'expression'))
+    refusal.source_line = getattr(node, 'lineno', None)
+    raise refusal
 
 
 def _field_list_kind(node, ctx):
@@ -22341,14 +22343,18 @@ def _stmt_inner(node, ctx, ind):
                     _exc_text_parts(ctx)
                 return pre + ('%s{ int64_t _dk = %s; if (_dk >= %s.n || _dk < -%s.n) ail_die("list assignment index out of range"); '
                               '(void)ail_list_pop(&%s, _dk); }\n' % (pad, k, c, c, c))
-        raise Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
+        refusal = Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
     if isinstance(node, ast.Assert):
         # F4 (DESIGN_FOUNDATION_20260914.md section 5): `ail_die` given a value the program
         # built, not a literal the compiler chose. Ordinary Python's own way to fail with a
         # description -- `assert cond, msg` -- rather than a new builtin, the same way F3 reuses
         # `print` instead of inventing one.
         return _assert_stmt(node, ctx, pad)
-    raise Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
+    refusal = Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
+    refusal.source_line = getattr(node, 'lineno', None)
+    raise refusal
 
 
 def _raise_stmt(node, ctx, pad):

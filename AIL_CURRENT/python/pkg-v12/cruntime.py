@@ -15801,6 +15801,25 @@ static inline ail_st ail__vec_merge_sort(ail_ctx *cx, ail_obj *p, ail_obj *keys,
     for (int64_t x = lo; x < hi; x++) { p[x] = tmp[x]; keys[x] = ktmp[x]; }
     return AIL_OK;
 }
+/* A NaN key gives no total order, so CPython's Timsort leaves a specific, input-dependent
+   permutation that this stable merge sort does not reproduce -- the sort would differ
+   silently. Refuse it by name instead (DIFFERENCES C?-job-refuzz95-10300605-1), the same stop the typed path's
+   ail_flist_sort already takes for a plain float list. A key function's result counts too,
+   and a tuple/list key is scanned item by item because its comparison can reach a NaN. */
+static inline ail_st ail__sort_nan_check(ail_ctx *cx, ail_obj *p, int64_t n, int depth) {
+    for (int64_t i = 0; i < n; i++) {
+        ail_obj k = p[i];
+        if (k.tag == AIL_T_FLOAT) {
+            if (isnan(ail_float_val(k)))
+                return ail_raise_c(cx, AIL_B_VALUEERROR, "sorted()/list.sort() over a NaN key: NaN has no total order, so this build refuses rather than differ silently from CPython (DIFFERENCES C?-job-refuzz95-10300605-1)");
+        } else if ((k.tag == AIL_T_TUPLE || k.tag == AIL_T_LIST) && depth < 32) {
+            ail_vecobj *e = (ail_vecobj *)k.o;
+            ail_st st = ail__sort_nan_check(cx, e->p, e->n, depth + 1);
+            if (st != AIL_OK) return st;
+        }
+    }
+    return AIL_OK;
+}
 /* ail_list_sort -- the key function (if not AIL_T_NONE) is called EXACTLY ONCE per
    element, into a scratch `keys` array (decorate), the merge sort above compares only
    those decorations (never re-invoking the key), then the element array is left permuted
@@ -15836,6 +15855,7 @@ static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_n
         ail_obj t = v->p[i]; v->p[i] = v->p[j]; v->p[j] = t;
         t = keys[i]; keys[i] = keys[j]; keys[j] = t;
     }
+    if (st == AIL_OK) st = ail__sort_nan_check(cx, keys, n, 0);
     if (st == AIL_OK) st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);
     AIL_FRAME_LEAVE(cx, fr);
     AIL_FRAME_LEAVE(cx, frl);
@@ -18641,7 +18661,15 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
 /*B<*/
             *out = ail_int_from_double(cx, r);
 /*B|*/
-            if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "integer overflow in round()");
+            /* A finite value outside int64 is this language's declared 64-bit stop.  The typed
+               path (pre54/pre104/fz2) makes it an ordinary `integer overflow` that a program with
+               an active try can catch as OverflowError; the fz2 review recorded the general path's
+               uncatchable AIL_LIMIT stop as a pre-existing difference.  Raising the same named
+               exception here makes catch/except (and a bare `except`) behave the same on both
+               builds; uncaught it still ends the program with exit 1 and the "integer overflow"
+               text (now prefixed by CPython's own class name). */
+            if (r >= 9223372036854775808.0 || r < -9223372036854775808.0)
+                return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "integer overflow in round() (ints are 64-bit; --exact-int gives exact ints)");
             *out = ail_box_int((int64_t)r);
 /*B>*/
             return AIL_OK;
@@ -19114,7 +19142,7 @@ static inline ail_st ail_bi_chr(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.i < 0 || x.i > 0x10FFFF) return ail_raise_c(cx, AIL_B_VALUEERROR, "chr() arg not in range(0x110000)");
     if (x.i >= 0xD800 && x.i <= 0xDFFF) ail_die("chr() surrogate code point is unsupported");
     if (x.i > 0xFFFF && sizeof(((ail_strback *)0)->data[0]) < 4)
-        ail_die("chr() non-BMP code point requires 32-bit strings");
+        return ail_hit_limit(cx, "chr_non_bmp", "chr() of the non-BMP code point requires 32-bit strings");
     ail_strback *b = ail_strback_alloc(cx, 1); b->data[0] = x.i;
     *out = ail_str_view((ail_gcobj *)b, 0, 1);
     return AIL_OK;
