@@ -327,6 +327,7 @@ LISTED_MODULES = (
     'test_ail_gpu_g2',
     'test_ail_ffi_f3b',
     'test_ail_gen_speed', 'test_ail_bigcap_split', 'test_ail_optint_exact', 'test_ail_ctime', 'test_ail_bound_builtin',
+    'test_ail_stdlib_rules1',
 )
 
 
