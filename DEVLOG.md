@@ -433,6 +433,49 @@ show the recorded pre-existing `integer overflow`.  Added `test_ail_pre433.py` a
 it in `ail_check.MODULES`.  Final-state tests: test_ail_pre433, test_ail_safetynet,
 test_ail_files, test_ail_corpus_findings3, test_ail_pre351, test_ail_pre372 and
 test_ail_pre33 pass.  `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-29 -- rd1: `exec(...)`, `async def` and the `--strict` big-int refusal name file:line (job-rd1-10300248)
+
+The tutorial (ail-ci#222) hit three compile-time refusals that printed no position, so a reader
+could not tell which line to change: an unbound `exec(...)`, an `async def`, and a program whose
+exact integer leaves int64 under `--strict`.  Each now prints `path:line:col: not in the subset:
+...` and a `  write instead: ` line, like the other refusals, on both the default build and
+`AIL_UNIFIED_FORCE=1`.
+
+`pyfront._fold` names `exec()` for the pipeline single-expression shape; `pyboxed2.expr_Call`
+rewrites the general path's generic "name 'exec' is not a known function" to the same named
+refusal with the rewrite hint, and `stmt_AsyncFunctionDef` now carries its `source_line`.  The
+typed path's last-resort `_shape_refusal` sites (including `async def`) now set `source_line`.
+`pyc._refuse_big_capable` builds a positioned `_BigCapable` with a `write instead:` hint, and the
+new `_big_capable_node` locates the construct (a literal beyond int64, `**`, a variable shift, a
+math/factorial call, or a call to a marked function) instead of defaulting to line 1.  Because
+`pyc._rewrite_script` renumbers a script through `ast.unparse`, new-line→source-line is recorded and
+`_remap_rewrite_line` restores the author's line for a refusal raised from the synthesized function
+(this is what puts `async def` on line 1 of a script whose `main()` was moved).  `strictmode.collect`
+returns no blockers for a file with no top-level sync `def`, so the real (now positioned) refusal is
+printed instead of the bare "no def found" blocker; a program with top-level `def`s still gets the
+ranked blocker list, each blocker naming `path:line:col`.  `AIL_UNIFIED_FORCE=1 --strict` keeps its
+pre-existing configuration refusal ("general path explicitly requested") before the big-int gate.
+
+Probes in `/tmp/probes` run with `bash ~/tools/cmp.sh <probe> $PWD` on both builds: the exact-int
+programs `rd1_big_pow`, `rd1_big_toplevel`, `rd1_big_literal_def`, `rd1_big_neg`, `rd1_big_arg`,
+`rd1_big_list`, `rd1_big_attr`, `rd1_big_dict` and `rd1_big_inrange` match CPython; the refusal
+shapes `rd1_exec_top`, `rd1_exec_argvar`, `rd1_exec_def`, `rd1_exec_method`, `rd1_async_alone`,
+`rd1_async_script` and `rd1_async_after_stmt` are refused by name with a position and hint on both
+builds (`exec` 2:1/2:5/3:9, `async` 1:1, and the shifted script 2:1).  Under `--strict` the
+exec/async shapes print either the positioned refusal or the positioned blocker list, and the
+big-int shapes are refused at the construct (`rd1_big_pow` 2:5,
+`rd1_big_toplevel`/`rd1_big_neg`/`rd1_big_list`/`rd1_big_dict` 1:1, `rd1_big_arg` 5:1,
+`rd1_big_attr` 3:9).  Two pre-existing unpositioned refusals remain out of this task's scope: a
+bare `x = exec` (name error) and an `async def` method inside a class body (the class-body screen
+refuses it before the async gate).
+
+`test_ail_rd1.py` is new: it compares the exact-int programs with CPython on both builds and runs
+the four exec/async refusal programs through both builds × `--strict`, plus the seven strict
+big-int positions.  Targeted tests (final tree): `test_ail_rd1`, `test_ail_strict`,
+`test_ail_bigint`, `test_ail_fallback_note`, `test_ail_refusal_messages`, `test_ail_python_syntax`,
+`test_ail_freestanding`, `test_ail_freestanding2`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (11 modules, `par_check -j 2`, 429s);
+`update_manifest.py --check` passes.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
