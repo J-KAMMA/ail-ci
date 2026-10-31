@@ -1,3 +1,16 @@
+## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
+
+The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
+printed `nan` and `f'{nan:+08.2f}'` lost both the sign and its zero-padding position, where CPython
+prints `+nan` / `+0000nan`. The general `ail_obj_format` NaN arm now builds the word `nan`, applies
+the sign flag through `ail__apply_sign`, then pads. `ail__pad` also treats a leading space as a
+sign for `=` zero padding, so `' 08.2f'` gives CPython's ` 0000nan` instead of the previous
+`0000 nan`. Probes `p_min_sign`, `p_nansign`, `p_nansign_widths` and `p_nansign_upper` cover both
+NaN signs, `+`/space, widths 0..9, zero/`=`/fill/alignment, the f-string, `format()` and `%` forms,
+infinity and `-0.0`, through an argument, a list item, an attribute and a dict value; all match
+CPython on the default and general builds. `test_ail_fz208` gained a `test_explicit_sign_flags`
+case (4 cases, 4 modes).
+
 ## 2026-10-31 -- fz208: a fixed-point float field never prints a NaN's sign (job-fz208-11010638)
 
 The daily fuzzer (seed 2075719067) found `NAN` vs `-NAN`. `1e308 * 10 % 0.75` is a negative

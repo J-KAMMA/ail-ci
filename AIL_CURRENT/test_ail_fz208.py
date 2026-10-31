@@ -59,6 +59,40 @@ show(xs[0])
 show(d['n'])
 '''
 
+
+SIGNS = r'''class S:
+    def __init__(self, v):
+        self.v = v
+
+
+def mk():
+    return 1e308 * 10 % 0.75
+
+
+def show(tag, v):
+    print(tag, f'{v:+f}|{v: f}|{v:+08.2f}|{v: 08.2f}|{v:+8.2f}|{v: 8.2f}')
+    print(tag, f'{v:+<8.2f}|{v:+^9.2f}|{v:+>8.2f}|{v:*>8.2f}|{v:0=8.2f}')
+    print(tag, format(v, '+f'), format(v, ' f'), format(v, '+08.2f'), format(v, ' 08.2f'),
+          format(v, '+8.2f'), format(v, ' 8.2f'))
+    print(tag, '%+f|% f|%+08.2f|% 08.2f|%+8.2f|% 8.2f' % (v, v, v, v, v, v))
+
+
+p = float('nan')
+n = float('-nan')
+mi = 1e308 * 10
+for tag, v in (('pos', p), ('neg', n), ('mm', mi - mi), ('inf', mi), ('ninf', -mi),
+               ('n0', -0.0), ('z', 0.0)):
+    show(tag, v)
+v = mk()
+s = S(v)
+xs = [v, 1.0]
+d = {'n': v}
+show('arg', v)
+show('list', xs[0])
+show('attr', s.v)
+show('dict', d['n'])
+'''
+
 MODES = (
     ('default', {}),
     ('general', {'AIL_UNIFIED_FORCE': '1'}),
@@ -110,6 +144,9 @@ class NanFixedFormat(unittest.TestCase):
 
     def test_argument_list_attribute_dict(self):
         self.check('values', VALUES)
+
+    def test_explicit_sign_flags(self):
+        self.check('signs', SIGNS)
 
 
 if __name__ == '__main__':

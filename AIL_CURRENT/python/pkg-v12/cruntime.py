@@ -17596,7 +17596,7 @@ static inline ail_obj ail__pad(ail_ctx *cx, const char *content, int64_t clen, a
     int64_t pad = f.width - clen; if (pad < 0) pad = 0;
     ail_strbuild bu = ail_str_buf(cx, clen + pad);
     int64_t o = 0;
-    if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
+    if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+' || content[0] == ' ')) {
         bu.buf[o++] = content[0];
         for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 1; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
@@ -17685,7 +17685,13 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
 /*B|*/
         double v = x.tag == AIL_T_FLOAT ? ail_float_val(x) : (double)x.i;
 /*B>*/
-        if (v != v) { *out = ail__pad(cx, "nan", 3, f, 1); return AIL_OK; }
+        if (v != v) {
+            char nbuf[4]; nbuf[0] = ' '; memcpy(nbuf + 1, "nan", 3);
+            int nlen = 3;
+            const char *ntxt = ail__apply_sign(nbuf, &nlen, f.sign);
+            *out = ail__pad(cx, ntxt, nlen, f, 1);
+            return AIL_OK;
+        }
         /* The text of a fixed-point double is up to 309 integer digits plus the fraction; a
            fixed stack buffer truncates (or overruns) for a value near the top of the double
            range.  Size it from the required length instead. */
