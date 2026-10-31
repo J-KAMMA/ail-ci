@@ -31,6 +31,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Check manifest pins
+        # AIL_CURRENT/manifest.d/ holds the pins (one line per file); tests are registered by files in
+        # AIL_CURRENT/tests.d/, which tools/ci_shards.py reads through ail_check.MODULES
         run: python3 tools/update_manifest.py --check
       - name: Byte-compile the compiler
         # every build spawns `python3 -B pyc.py`, which never writes __pycache__: on a fresh checkout

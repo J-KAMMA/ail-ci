@@ -66,7 +66,7 @@ def source_version():
 
 class WheelContents(unittest.TestCase):
     def setUp(self):
-        self.manifest = json.loads((ROOT / "MANIFEST.json").read_text(encoding="utf-8"))
+        self.manifest = __import__("ail_manifest").load(ROOT)
         self.zip = zipfile.ZipFile(wheel_path)
         self.addCleanup(self.zip.close)
         self.names = set(self.zip.namelist())

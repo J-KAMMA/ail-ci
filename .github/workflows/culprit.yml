@@ -45,7 +45,7 @@ jobs:
           MODS: ${{ inputs.modules }}
         run: |
           git fetch -q origin "+refs/heads/$BR:refs/remotes/origin/$BR"
-          git diff "$JB" "origin/$BR" -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json' > /tmp/job.diff
+          git diff "$JB" "origin/$BR" -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json' ':!AIL_CURRENT/manifest.d' > /tmp/job.diff
           git apply --3way --whitespace=nowarn /tmp/job.diff || echo "some hunks did not apply"
           cd AIL_CURRENT
           rc=0
