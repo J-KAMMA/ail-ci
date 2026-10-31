@@ -1,3 +1,25 @@
+## 2026-10-31 -- fz205 re-applied: Rust bridge tests skip when rustc is only a shim (job-rbfz205-10311922)
+
+Re-applied the accepted `job-fz205-10300805` change. Its diff no longer applies because this
+integrated tree already rejects the rustup shim, inline, in both modules:
+`RUSTC = shutil.which('rustc')` followed by `if RUSTC and subprocess.run([RUSTC, '--version'],
+capture_output=True).returncode: RUSTC = None` (`test_ail_c_export.py:35-37`,
+`test_ail_cratebridge.py:27-29`). That is the accepted `_working_rustc()` predicate, so both sides'
+fix is kept and no code changed. The accepted branch's other entry (the try/else reproducer, seed
+`2075520206`, already fixed by `test_ail_fz1`) records no code change, so there was nothing further
+to apply. `tools/diff_ids.py` is not present on this tree.
+
+Verified on this runner, where `/home/runner/.cargo/bin/rustc` is a shim that exits 1 for
+`--version`: `test_ail_c_export` + `test_ail_cratebridge` ran 28 tests, OK, the two Rust tests
+skipped by name (`rustc is not installed` / `rustc required`); `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` ran 25 tests, OK (1 unrelated skip). Probes in
+`/tmp/probes` compared the accepted and tree predicates and imported both modules under four PATH
+scenarios -- real shim, fake shim that fails, absent, and a fake `rustc --version` that succeeds:
+every pair agreed, and the Rust tests were skipped exactly when `RUSTC` was `None` (real shim,
+failing shim, absent) and not skipped when it was set (fake working rustc). A real toolchain is
+not installed here, so the compile-and-run path was not exercised on this runner; `cmp.sh` AIL
+probes do not apply because no language behaviour changed.
+
 ## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
 
 Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this
