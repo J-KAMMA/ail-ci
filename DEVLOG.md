@@ -447,6 +447,29 @@ big-int positions.  Targeted tests (final tree): `test_ail_rd1`, `test_ail_stric
 `test_ail_freestanding`, `test_ail_freestanding2`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass (11 modules, `par_check -j 2`, 429s);
 `update_manifest.py --check` passes.
+## 2026-10-29 -- refuzz95: a sort over a NaN key is refused by name, never silently different
+
+An old job (fuzz95) found that `sorted()` / `.sort()` over floats (or keys) that contain a NaN
+gives a different permutation from CPython 3.12 with no error: every comparison with a NaN is
+false, so CPython's Timsort leaves a specific, input-dependent order that the runtime's stable
+merge sort does not reproduce.  Re-checked on today's `integ`: the typed path already stops by
+name (`ail_flist_sort` and the KEYSORT float-column check raise `ValueError`), but the boxed
+path's `ail_list_sort` (python/pkg-v12/cruntime.py, the v2 runtime string) sorted silently.
+
+`ail_list_sort` now scans the decorate keys before the merge -- a key function's result, and a
+tuple/list key item by item (because a tuple/list comparison can reach a NaN too) -- and raises a
+named `ValueError` ("sorted()/list.sort() over a NaN key: ... (DIFFERENCES
+C?-job-refuzz95-10300605-1)").  This is the same runtime "stop by name" the typed path uses
+(C119 style); NaN-free keys keep the same stable merge sort and the same order, and a NaN used
+elsewhere does not refuse an unrelated NaN-free sort.  The change is confined to the boxed sort
+runtime: every generated-code pin source is sort-free and hashes unchanged.
+
+Probes in `/tmp/probes/refuzz95` on both builds via `cmp.sh`: `p_repro`, `p_nan_tuple`,
+`p_nan_listkey`, `p_nan_keyfn`, `p_nan_allnan` and `p_routes` (direct, argument, list item,
+attribute, dict value, aliased) are refused by name; `p_noner` (ints, floats, negatives,
+`reverse=True`, `key=`, tuples, strings, `-0.0`, empty, single, `inf`, a 10-element merge,
+stability, `.sort()`) matches CPython on both builds; `p_keyerr` shows a user `ValueError` in a
+key keeps its message.  Added `test_ail_refuzz95.py` (registered in `ail_check.py`).
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
