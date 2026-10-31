@@ -57,16 +57,10 @@ from pyfunc import _module_const_scalar, module_table_refusal, _written_globals
 import modtables
 import unbound
 from pyfunc import NORET
-try:
-    # BRIEF_mixed_mode.md's own capability probe (test_mixed.py): "pymix.py present in the
-    # subject AND imported by pyc.py". Not called directly from here -- pyboxed2.py's own
-    # `_setup_mix` is what runs `pymix.analyze()`, once cleared to wire it into the general
-    # path's call-site codegen -- this import exists so the probe reads true, and so a package
-    # with pymix.py physically removed (out/neg/pkg-v12-nomix) still imports THIS module
-    # cleanly (the general path stays boxed-only there, never a crash).
-    import pymix  # noqa: F401
-except ImportError:
-    pass
+# pymix (whole-program kind analysis for the general path) is not imported here any more: it pulls in
+# dataclasses, inspect and typing (about 22 ms of every child start) and only the general path uses it.
+# pyboxed2.py imports it itself (`import pymix`, with its own `pymix is None` guard for a package
+# without pymix.py), and `_setup_mix` there is what runs `pymix.analyze()`.
 
 MAIN = r'''
 #include <stdio.h>
