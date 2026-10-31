@@ -1074,8 +1074,20 @@ def _lp_safe_dicts(stmts):
     return good
 
 
-def _lp_reason(defs, module_stmts, defined):
-    """The first local-proof failure among these defs (or the module code when `defs` is None), or None."""
+def _lp_int_failure(reason):
+    """Whether a local-proof failure is an int operation that can leave int64 (not merely a value
+    whose kind the proof cannot name, such as abs() of a proven float)."""
+    return ('not proven int or float' not in reason
+            and any(word in reason for word in ('int', 'operand', 'shift', 'power', 'overflow')))
+
+
+def _lp_reason(defs, module_stmts, defined, prefer_int=False):
+    """The first local-proof failure among these defs (or the module code when `defs` is None), or None.
+
+    With `prefer_int`, a failure that only says a value's kind is unproven (for example `abs()` of
+    a float, which can never need a big int) does not hide a later int operation such as `**` whose
+    result can leave int64: the int failure is returned instead.  Without it the first failure is
+    returned, exactly as before."""
     for fn in (defs if defs is not None else [None]):
         if fn is None:
             stmts = module_stmts
@@ -1113,9 +1125,10 @@ def _lp_reason(defs, module_stmts, defined):
         for node in _walk_own(stmts):
             if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
                 discarded.add(id(node.value))
-        bad = []
         safe_dicts = _lp_safe_dicts(stmts) if fn is not None and 'get' not in defined else set()
+        pending = None
         for node in _walk_own(stmts):
+            bad = []
             if isinstance(node, ast.AugAssign):
                 _lp_eval(ast.BinOp(left=node.target, op=node.op, right=node.value), env, defined, bad)
             elif isinstance(node, (ast.BinOp, ast.UnaryOp)):
@@ -1127,7 +1140,15 @@ def _lp_reason(defs, module_stmts, defined):
                         and node.func.attr == 'get' and node.func.value.id in safe_dicts):
                     _lp_bad(bad, 'a call result not proven to fit int64')
             if bad:
-                return bad[0]
+                if not prefer_int:
+                    return bad[0]
+                int_bad = next((why for why in bad if _lp_int_failure(why)), None)
+                if int_bad is not None:
+                    return int_bad
+                if pending is None:
+                    pending = bad[0]
+        if pending is not None:
+            return pending
     return None
 
 
