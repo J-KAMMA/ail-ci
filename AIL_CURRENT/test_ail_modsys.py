@@ -163,6 +163,13 @@ class GuardedImports(ModulesBase):
                        "print(NAME, impl.K)\n"}, irs=ONE)
         self.assertEqual(out, "lib 3\n")
 
+    def test_import_under_a_condition_the_build_cannot_decide(self):
+        files = {"lib.py": "print('lib starts')\nK = 4\n",
+                 "main.py": "import sys\n\nif len(sys.argv) %s 5:\n    import lib\n    print(lib.K)\nprint('done')\n"}
+        for op, want in (("<", "lib starts\n4\ndone\n"), (">", "done\n")):
+            with self.subTest(op=op):
+                self.assertEqual(self.same_as_cpython({**files, "main.py": files["main.py"] % op}, irs=ONE), want)
+
     def test_missing_module_without_a_handler_for_it_is_refused(self):
         self.refused({"main.py": "try:\n    import no_such_module_xyz\nexcept KeyError:\n    pass\nprint(1)\n"},
                      "no handler of this `try` catches ImportError")

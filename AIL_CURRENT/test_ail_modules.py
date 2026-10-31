@@ -519,8 +519,11 @@ class Refusals(ModulesBase):
             irs=("1",)), "1\n1\n")
         self.assertEqual(self.same_as_cpython({"lib.py": "X = 1\n", "main.py": "def f():\n    import lib\n    return lib.X\n\n\nprint(f())\n"}), "1\n")
         # a condition the build cannot decide keeps the refusal (a constant or platform test is decided, see MODSYS)
-        self.refused({"lib.py": "X = 1\n", "main.py": "import sys\nif len(sys.argv) > 5:\n    import lib\nprint(1)\n"},
+        self.refused({"lib.py": "X = 1\n", "main.py": "import sys\nif len(sys.argv) > 5:\n    import lib\nprint(lib.X)\n"},
                      "below the top level")
+        self.assertEqual(self.same_as_cpython(
+            {"lib.py": "print('lib')\nX = 1\n", "main.py": "import sys\nif len(sys.argv) > 5:\n    import lib\n    print(lib.X)\n"
+                                                           "print(1)\n"}, irs=("1",)), "1\n")
         self.assertEqual(self.same_as_cpython({"lib.py": "X = 1\n", "main.py": "if True:\n    import lib\nprint(lib.X)\n"},
                                               irs=("1",)), "1\n")
 

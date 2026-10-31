@@ -1082,6 +1082,22 @@ class Program:
         refused."""
         top = {id(n) for n in mod.tree.body}
         found = []
+        module_level = set()           # ids of imports under a condition, loop or try at module level
+        cur_top = [None]                # the top-level statement being visited
+
+        def module_reads(stmt):
+            """Names read by `stmt` when the module body runs (function bodies do not run then)."""
+            names, todo = set(), [stmt]
+            while todo:
+                n = todo.pop()
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                    todo.extend(n.decorator_list if not isinstance(n, ast.Lambda) else [])
+                    todo.extend(_defaults(n.args))
+                    continue
+                if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+                    names.add(n.id)
+                todo.extend(ast.iter_child_nodes(n))
+            return names
 
         def refuse(node, why):
             self.refuse(mod, node, "import of a local module or package below the top level (%s) is not "
@@ -1094,11 +1110,17 @@ class Program:
                     return
                 if isinstance(child, ast.ImportFrom) and child.level and mod.entry:
                     self.absolute(mod, child)       # the entry-file relative-import refusal is specific
+                if scope == 'class':
+                    refuse(child, "inside a class body")
                 if scope != 'func':
-                    if tried:
-                        refuse(child, "inside a try block, whose ImportError handler the compiler cannot model")
-                    refuse(child, "inside a condition or loop at module level" if scope == 'module'
-                           else "inside a class body")
+                    # started where it stands, like a function-level import, when no module-level code outside the
+                    # statement that holds it reads what it binds (CPython would fail there when the import did not run)
+                    bound = {a.asname or a.name.split('.')[0] for a in child.names}
+                    dotted = isinstance(child, ast.Import) and any('.' in a.name and not a.asname for a in child.names)
+                    if dotted or any(bound & module_reads(x) for x in mod.tree.body if x is not cur_top[0]):
+                        refuse(child, "inside a condition, loop or try block at module level, and the code after it "
+                               "reads %s (or binds a submodule)" % ', '.join(sorted(bound)))
+                    module_level.add(id(child))
                 if tried:
                     # the module is found (its import cannot raise ImportError), so the handlers never see it
                     failure = self.import_failure(mod, child)
@@ -1128,6 +1150,8 @@ class Program:
                 if isinstance(value, list):
                     for index, child in enumerate(value):
                         if isinstance(child, ast.stmt):
+                            if node is mod.tree:
+                                cur_top[0] = child
                             handle(node, field, value, index, child, scope, tried)
             for sub in list(getattr(node, 'handlers', None) or ()) + list(getattr(node, 'cases', None) or ()):
                 visit(sub, scope, tried)
@@ -1143,11 +1167,11 @@ class Program:
             synthetic.append(clone)
             slot = ast.copy_location(ast.Pass(), node)
             mod.lazy_slot[id(clone)] = slot
-            if forced:
+            if forced or id(node) in module_level:
                 mod.force_init.add(id(clone))
             items[index] = slot
         body = mod.tree.body
-        if mod.entry or forced:
+        if mod.entry or forced or module_level:
             at = 0                    # after the docstring and the leading imports: those run first
             while at < len(body) and (isinstance(body[at], (ast.Import, ast.ImportFrom))
                                       or at == 0 and isinstance(body[at], ast.Expr)
