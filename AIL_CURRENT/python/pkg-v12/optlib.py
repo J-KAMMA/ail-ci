@@ -27,8 +27,8 @@ a comprehension / a `while` test, ordering comparisons and `in` of a value not k
 import ast
 import copy
 
-KINDS = ('int', 'float', 'bool', 'str')
-ZERO = {'int': 0, 'float': 0.0, 'bool': False, 'str': ''}
+KINDS = ('int', 'float', 'bool', 'str', 'bytes')
+ZERO = {'int': 0, 'float': 0.0, 'bool': False, 'str': '', 'bytes': b''}
 # calls whose evaluation may be reordered with an Optional call hoisted ahead of the statement
 SAFE_CALLS = frozenset(('print', 'str', 'repr', 'len', 'abs', 'min', 'max', 'bool', 'int', 'float', 'round', 'sum'))
 PURE_BIN = (ast.Add, ast.Sub, ast.Mult, ast.BitAnd, ast.BitOr, ast.BitXor, ast.LShift, ast.RShift)
@@ -366,7 +366,7 @@ class Lowerer:
     NONNULL_BUILTINS = frozenset(('len', 'int', 'float', 'str', 'bool', 'abs', 'min', 'max', 'sum', 'round', 'ord',
                                   'chr', 'repr', 'sorted', 'list', 'range', 'divmod', 'pow', 'hex', 'bin', 'oct',
                                   'tuple', 'set', 'dict', 'format', 'any', 'all', 'input', 'enumerate', 'zip',
-                                  'reversed', 'isinstance', 'hash',
+                                  'reversed', 'isinstance', 'hash', 'bytes', 'bytearray',
                                   # G11: the sqlite3 column readers never return None (a NULL is tested first)
                                   '_ail_sq_ci', '_ail_sq_cf', '_ail_sq_cs', '_ail_sq_cb'))
 
@@ -623,6 +623,13 @@ class Lowerer:
             return hoisted + [ast.Return(value=call)]
         self.wrapped(value)
         pre, v = self.lower_expr(value, facts)
+        if kind in ('str', 'bytes') and not isinstance(v, (ast.Name, ast.Constant)):
+            # a str / bytes tuple element is settled from a name, a literal or a slice, not from a call or a method:
+            # bind the value to a name first (evaluated once, before the return, as in the source)
+            self.rv_count = getattr(self, 'rv_count', 0) + 1
+            temp = '_ail_rv%d' % self.rv_count
+            pre = pre + [ast.AnnAssign(target=_name(temp, ast.Store()), annotation=_name(kind), value=v, simple=1)]
+            v = _name(temp)
         return pre + [ast.Return(value=ast.Tuple(elts=[_const(True), v], ctx=ast.Load()))]
 
     def assign_opt(self, name, value, facts, node):
@@ -821,6 +828,8 @@ class Lowerer:
             body = v
         elif kind == 'str':
             body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const('')])
+        elif kind == 'bytes':
+            body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const(b'')])
         elif kind == 'float':
             body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const(0.0)])
         else:
@@ -1212,13 +1221,15 @@ class _LocalKinds:
         if isinstance(e, ast.Constant):
             v = e.value
             return ('bool' if isinstance(v, bool) else 'int' if isinstance(v, int) else 'float' if isinstance(v, float)
-                    else 'str' if isinstance(v, str) else None)
+                    else 'str' if isinstance(v, str) else 'bytes' if isinstance(v, bytes) else None)
         if isinstance(e, ast.Name):
             return self.kind(e.id)
         if isinstance(e, ast.BinOp):
             a, b = self.expr(e.left), self.expr(e.right)
             if a == b == 'str' and isinstance(e.op, ast.Add) or a == 'str' and isinstance(e.op, ast.Mod):
                 return 'str'
+            if a == b == 'bytes' and isinstance(e.op, ast.Add):
+                return 'bytes'
             if a in ('int', 'bool') and b in ('int', 'bool'):
                 return 'float' if isinstance(e.op, ast.Div) else 'int'
             if a in ('int', 'float', 'bool') and b in ('int', 'float', 'bool'):
@@ -1234,9 +1245,13 @@ class _LocalKinds:
         if isinstance(e, ast.IfExp):
             a, b = self.expr(e.body), self.expr(e.orelse)
             return a if a == b else None
+        if isinstance(e, ast.Subscript) and isinstance(e.slice, ast.Slice):
+            t = self.expr(e.value)
+            return t if t in ('str', 'bytes') else None
         if isinstance(e, ast.Subscript) and not isinstance(e.slice, ast.Slice):
             t = self.expr(e.value)
-            return 'str' if t == 'str' else _elem_kind(t) if t and t.startswith('list[') else None
+            return ('str' if t == 'str' else 'int' if t == 'bytes'
+                    else _elem_kind(t) if t and t.startswith('list[') else None)
         if isinstance(e, ast.Call):
             f = e.func
             if isinstance(f, ast.Name):
@@ -1246,6 +1261,8 @@ class _LocalKinds:
                     return 'float'
                 if f.id in ('str', 'chr', 'repr'):
                     return 'str'
+                if f.id == 'bytes' and f.id not in self.known and f.id not in self.returns:
+                    return 'bytes'
                 if f.id == 'range':
                     return 'range'
                 if f.id in self.returns:
@@ -1267,6 +1284,13 @@ class _LocalKinds:
                     return 'str'
                 if t == 'str' and f.attr in ('find', 'rfind', 'count', 'index'):
                     return 'int'
+                if t == 'bytes' and f.attr in ('strip', 'lstrip', 'rstrip', 'lower', 'upper', 'replace', 'translate',
+                                               'ljust', 'rjust', 'center', 'zfill'):
+                    return 'bytes'
+                if t == 'bytes' and f.attr in ('find', 'rfind', 'count', 'index'):
+                    return 'int'
+                if t == 'bytes' and f.attr == 'decode':
+                    return 'str'
         return None
 
 
@@ -1312,6 +1336,54 @@ def annotate_none_locals(tree):
     return count
 
 
+# A scalar Optional result is a (flag, value) tuple.  The typed path keeps an `int(text)` that does not fit int64
+# exact only through a tagged result, which a tuple element does not carry: `-> int | None` with an `int(text)`
+# inside stops with "integer overflow" in the default build (an annotated program, as written).  An unannotated
+# function that used to be built exactly on the general path must not start doing that, so the inference stops at
+# the kinds that hold no integer.
+INFERRED_RETURN_KINDS = ('str', 'bytes', 'float')
+
+
+def annotate_none_returns(tree):
+    """A function with no return annotation whose `return` statements are `return None` (or a bare `return`) and
+    `return <a value of one scalar kind>`, and whose body cannot fall off its end, gets `-> <kind> | None`, which the
+    Optional lowering below takes (a use of the result that it cannot prove present is refused by name, and the
+    program then keeps its old route).  The kind is told as for a local (`_LocalKinds`); a return whose kind cannot
+    be told leaves the function alone.  Returns the number of functions annotated."""
+    count = 0
+    returns = {}
+    for n in tree.body:
+        if isinstance(n, ast.FunctionDef) and n.returns is not None:
+            r = ast.unparse(n.returns)
+            if r in KINDS:
+                returns[n.name] = r
+    for fn in [n for n in tree.body if isinstance(n, ast.FunctionDef)]:
+        if fn.returns is not None or fn.decorator_list:
+            continue
+        if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.Yield, ast.YieldFrom))
+               for st in fn.body for n in ast.walk(st)):
+            continue
+        if not _terminates(fn.body):
+            continue
+        kinds = _LocalKinds(fn, returns)
+        rets = [n for n in kinds.nodes if isinstance(n, ast.Return)]
+        absent = [r for r in rets if r.value is None or _is_none(r.value)]
+        present = [r for r in rets if not (r.value is None or _is_none(r.value))]
+        if not absent or not present:
+            continue
+        found = {kinds.expr(r.value) for r in present}
+        if len(found) != 1:
+            continue
+        kind = found.pop()
+        if kind not in INFERRED_RETURN_KINDS:
+            continue
+        fn.returns = ast.BinOp(left=ast.Name(id=kind, ctx=ast.Load()), op=ast.BitOr(), right=ast.Constant(value=None))
+        ast.copy_location(fn.returns, fn)
+        returns[fn.name] = kind + ' | None'
+        count += 1
+    return count
+
+
 def _replace_stmt(fn, old, new):
     for parent in ast.walk(fn):
         for field in ('body', 'orelse', 'finalbody'):
@@ -1346,7 +1418,8 @@ def rewrite(source, notes=None):
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return source
-    annotated = annotate_none_locals(tree)
+    annotated = annotate_none_returns(tree)
+    annotated += annotate_none_locals(tree)
     if not candidate(tree) and not annotated:
         return source
     try:

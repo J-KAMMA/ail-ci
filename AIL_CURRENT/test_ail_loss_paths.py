@@ -313,8 +313,9 @@ class LossPathTests(unittest.TestCase):
         self.check_oracle(COUNTERS, "counters")
 
     def test_if_add_still_traps_on_overflow(self):
-        # (the legacy int64 emitter, AIL_IR=0, traps; the IR build has exact ints, so it prints what CPython prints:
-        # no OverflowError at all)
+        # (the legacy int64 emitter, AIL_IR=0, stops with an uncatchable `integer overflow` in a Python-syntax program
+        # (test_ail_overflow_uncatchable.py); the IR build has exact ints, so it prints what CPython prints: no
+        # OverflowError at all)
         python = subprocess.run([sys.executable, "-c", OVERFLOW], capture_output=True, text=True, timeout=60)
         self.assertEqual(python.stdout, "0 9223372036854775812" + chr(10) + "no" + chr(10) + "5" + chr(10))
         with tempfile.TemporaryDirectory() as directory:
@@ -323,8 +324,13 @@ class LossPathTests(unittest.TestCase):
                     built, exe = compile_run(directory, OVERFLOW, "overflow", ir)
                     self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                     ran = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
-                    self.assertEqual(ran.returncode, 0, ran.stderr)
-                    self.assertEqual(ran.stdout, OVERFLOW_EXPECTED if ir == "0" else python.stdout)
+                    if ir == "0":
+                        self.assertNotEqual(ran.returncode, 0)
+                        self.assertIn("integer overflow", ran.stderr)
+                        self.assertEqual(ran.stdout, "")
+                    else:
+                        self.assertEqual(ran.returncode, 0, ran.stderr)
+                        self.assertEqual(ran.stdout, python.stdout)
 
     def test_int_dict_and_set_hit_paths_match_cpython(self):
         self.check_oracle(DICTS, "dicts")
