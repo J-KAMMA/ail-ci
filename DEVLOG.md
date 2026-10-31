@@ -24,6 +24,28 @@ Added `AIL_CURRENT/test_ail_stdlib31.py`, registered through `AIL_CURRENT/tests.
 shard entry to `tools/ci_shards.json`.  `tools/diff_ids.py` is not present on this tree;
 `tools/update_manifest.py` was run and `--check` passes.  Final-state tests: test_ail_stdlib31,
 test_ail_stdlib1, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+## 2026-10-31 -- stdlib25 re-applied: textwrap.shorten coverage (job-rbstdlib25-11010244)
+
+Re-applied the accepted `job-stdlib25-11010103` change, whose diff no longer applies to this
+integrated tree. Its `textwrap.shorten` lowering is already present here through the newer
+`stdlib1` implementation (`_ail_tw_wrap_more` with the max-lines/placeholder path backs
+`_ail_tw_wrap` and `_ail_tw_shorten`), which also builds `textwrap.indent`; both sides' behaviour
+is therefore kept by leaving `ail_syntax.py` unchanged. The accepted coverage was added:
+`test_ail_stdlib25.py` and its `AIL_CURRENT/tests.d/test_ail_stdlib25.txt` registration (this
+tree's scheme, so the `ail_check.MODULES` tuple is untouched), plus one `DIFFERENCES.md` row.
+No compiler behaviour changed.
+
+Probes in `/tmp/probes/rbstdlib25` on both `cmp.sh` builds: `p_main` (widths 0, -1, 1, 4..12,
+20 and 70 over empty, whitespace-only, short, long, hyphenated and em-dash text), `p_routes`
+(values through an argument, a list item, an instance attribute, a dict value, a keyword and an
+expression, including widths 4/5/6 around the placeholder), `p_unicode` (multi-byte and CJK text,
+widths 1..20) and `p_types` (bytes/None/int text, float/str/bool widths, empty text with a
+too-narrow width) match CPython 3.12 on the default and general builds; `p_refuse` (a
+`placeholder=` argument) is refused by name on both builds. Final-state tests with `-j 2`:
+test_ail_stdlib25, test_ail_stdlib1, test_ail_pre360, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3, 0 failed. `tools/update_manifest.py` was run; `--check` passes.
+`tools/diff_ids.py` is not present on this tree, and `tools/ci_shards.py --check` is the shard
+check used here.
 
 ## 2026-10-31 -- fz205 re-applied: Rust bridge tests skip when rustc is only a shim (job-rbfz205-10311922)
 
