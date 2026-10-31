@@ -434,6 +434,110 @@ Added `AIL_CURRENT/test_ail_pre428.py` (7 tests, both builds) and registered it 
 `ail_check.MODULES` and `tools/ci_shards.json`.  `tools/update_manifest.py` and `--check` pass;
 `tools/ci_shards.py --check` passes.  Final-state tests: test_ail_pre428, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3, plus test_ail_left1 (multiplication errors).
+## 2026-10-29 -- pre430: the bigint general path makes the aliased wrappers exact (job-pre430-10300444)
+
+The integration branch now gives a Python-syntax program exact big integers on its general
+path (the bigint work), so the aliased power-wrapper programs no longer stop with `integer
+overflow`: they are built on the general path and print CPython's exact result.  The four
+refusal cases of `test_ail_pre430` (constant overflow, `pow()` spelling, a negative base and
+an alias chain) plus the bool/float/argument/list-item/attribute/dict routes therefore
+failed on both builds of today's integ.  The test now accepts either the named refusal (the
+int64-only path still raises it) or CPython's exact stdout and exit status; a run-time
+`integer overflow` still fails.  The safe constants and the direct wrapper keep requiring an
+exact match on every build.  No compiler code changed: the aliased-wrapper refusal still
+applies where ints are int64.
+
+21 probes in `/tmp/probes` on both builds: on the integration tree all 21 match CPython; on
+this branch 13 are refused by name and 8 match CPython, with no `integer overflow`.
+`test_ail_pre430` passes on both trees.  `tools/update_manifest.py` was run and `--check`
+passes.
+
+## 2026-10-29 -- pre430 suite fix: register the module where the integration hunk is stable (job-pre430-10292334)
+
+The pre430 change added `test_ail_pre430` to `ail_check.MODULES` between `test_ail_pre378` and
+`test_ail_pre293`, a spot the integration tree has since filled with other modules.  Applying
+the job diff alone with `git apply --3way` therefore reinserted `test_ail_pre378` (it appears at
+another position there) or left a conflict, and `test_ail_pre346` failed on the duplicate/stale
+module list.  The registration now sits after the final `test_ail_fz1` entry, whose context is
+unchanged on the integration bases, so the job diff applies cleanly.  The `tools/ci_shards.json`
+placement is removed: a module missing from the file is spread over the shards by name (the case
+`test_ail_pre346` documents and tests), so the job diff no longer rewrites the evolved assignment
+file.  Simulated the culprit steps (`git diff cf01ff6 <this branch> -- . ':!.agent' ':!corpus'
+':!AIL_CURRENT/MANIFEST.json'` through `git apply --3way`) on integration bases `73713ae`,
+`cand-1029233952` and `d68453f`: only the record files conflict, `test_ail_pre346` passes 5/5
+and `test_ail_pre430` still passes.  Probes in `/tmp/probes/pre430fix`: safe aliased constants
+and the direct wrapper match CPython on both builds; out-of-range constants and bool/float/
+argument/list-item/attribute/dict routes are refused by name.
+
+## 2026-10-28 -- pre430: an aliased power wrapper is followed by the constant checks (job-pre430-10281939)
+
+The rbrbpre366 review recorded the aliased power-wrapper probes as pre-existing: on this tree
+`def power(b, e): return b ** e` followed by `q = power` and `print(q(10, 40))` (also the
+`pow()` spelling, a negative base and an alias chain) compiled and then stopped with
+`integer overflow`, where CPython prints the exact unbounded integer.  The check now follows a
+module-level alias (and alias chain) to a one-return wrapper whose body is exactly
+`base ** exponent` or `pow(base, exponent)`.  An exact constant result outside int64 is refused
+with `int64 constant expression out of range`; an aliased wrapper whose operands are not
+statically known is refused with the aliased-wrapper message.  A wrapper body already refused
+by the pre273 rule keeps that diagnostic.  Direct wrapper calls and safe constants keep their
+previous behaviour.
+
+The review's allowed named refusals are kept: a bool base (`q(True, 3)`), a float base and
+values routed through an argument, list item, class attribute or dict value are refused by
+name.  Values that reach a single module-level call site as in-range constants still match
+CPython.  The `int()` alias half of the original accepted change is not applied here; it is a
+separate cause and unchanged.
+
+Probes in `/tmp/probes/pre430b` on both builds via `cmp.sh`: c01-c07 and c14 (bool/float and
+routed operands) and c08/c09 (out-of-range constants) are refused by name; c10 (safe constants),
+c11-c13 (dynamic in-range calls) and c15 (direct wrapper) match CPython.  Final-state tests:
+test_ail_pre430, test_ail_pre364, test_ail_pre367, test_ail_pre299, test_ail_pre331,
+test_ail_pre160, test_ail_pre273, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (10 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
+## 2026-10-29 -- pre435 test follows the exact-bigint default (job-pre435-10292335)
+
+`test_ail_pre435` expected `int()` of a default holding `1e300` to be refused at compile time,
+which was the int64 behavior of this base.  Integers are now exact bigints by default
+(ail-ci#198), and on that compiler all 23 formerly-refused programs print CPython's exact
+integer, so the int64 refusal fix is no longer needed there; this branch keeps it for the
+legacy int64 compiler.  The module now selects its expectation from the compiler: when
+`python/pkg-v12/bigint_core.py` is present the out-of-int64 group must match CPython exactly,
+and on the legacy compiler it keeps the named-refusal check.  The 16 in-range programs still
+match CPython on both.
+
+Probes `/tmp/probes435` (39 programs: list, tuple, dict, alias, negative index, keyword-only,
+container default, attribute, module constant, wrapper call, string/bytes and both float
+boundaries) match CPython on both builds of today's `origin/integ`; on this legacy base the
+23 out-of-range probes are refused by name on both builds and the 16 in-range probes match.
+`test_ail_pre435` passes here (legacy path, 1 skip) and on an `origin/integ` worktree (bigint
+path, 1 skip).  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-28 -- pre435: a default argument captured before a container mutation (job-pre435-10282045)
+
+The pre393 review recorded as pre-existing that a default parameter expression reading a
+module container was checked against the container's final value, after a later mutation had
+dropped it: `M = [1e300]; def f(x=M[0]): return int(x); M[0] = 1; print(f())` stopped with
+`integer overflow` on both builds where CPython prints the exact big integer, and the same
+held for `D["k"]`.  A default is evaluated once when the definition runs, so the int64 check
+now evaluates each top-level definition's parameter defaults with the names visible at that
+`def`, and the call-site int() wrapper check uses the default when a call omits the argument.
+A conversion written directly in a default is checked at the definition as well.  The value is
+refused by name on both builds (`int() of a float outside int64: ... (CPython makes a big
+integer)`, or `int64 constant expression out of range` for text/bytes) through a list, tuple,
+dict, alias, negative index, keyword-only parameter, container default, attribute, module
+constant and wrapper call, for floats at and beyond both int64 boundaries and for strings and
+bytes.  In-range defaults (including the minimum boundary and an empty container), a mutation
+before the definition, an explicit argument overriding the default, a dynamic default and an
+unused function match CPython.
+
+Probes in `/tmp/probes/pre435` (41 programs, both builds via `cmp.sh`): 23 out-of-range
+programs are refused by name, 16 in-range programs match CPython, and 2 already-named refusals
+(a first-class function with defaults and a class-attribute assignment) remain refused by name.
+`test_ail_pre435.py` pins the refusals and matches; `test_ail_pre417`, `test_ail_pre370`,
+`test_ail_pre358`, `test_ail_pre359` and `test_ail_pre340` also pass.  `tools/update_manifest.py`
+was run and `--check` passes; `tools/ci_shards.py --update` registered the new module.
+
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};

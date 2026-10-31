@@ -332,6 +332,7 @@ LISTED_MODULES = (
     'test_ail_gen_speed', 'test_ail_bigcap_split', 'test_ail_optint_exact', 'test_ail_ctime',
     'test_ail_bound_builtin',
     'test_ail_overflow_uncatchable', 'test_ail_py_typed_gaps',
+    'test_ail_pre435', 'test_ail_pre430',
 )
 
 
