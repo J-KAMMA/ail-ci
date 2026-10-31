@@ -604,7 +604,9 @@ class LICM(object):
         fast_region = I.Region([], [fast, I.Instr('yield', list(fast.results))])
         slow_region = I.Region([], [loop, I.Instr('yield', list(loop.results))])
         choose = I.Instr('if', [guard], results, {}, [fast_region, slow_region])
-        self.replace_uses(loop, results)
+        # the two yields just made hand the copies' results to `choose`; every other use of the loop's results
+        # (a later `if` that yields them unchanged, say a tail that is skipped) now reads `choose`'s results
+        self.replace_uses(loop, results, (fast_region.instrs[-1], slow_region.instrs[-1]))
         self.frozen.add(loop)
         for ins in I.walk(loop.regions[0]):
             if ins.op in I.LOOP_OPS:
@@ -684,20 +686,15 @@ class LICM(object):
             conds.append(emit('cmp.lt', [value(f), lens[id(base)]], I.I1))
         return conds
 
-    def replace_uses(self, loop, results):
+    def replace_uses(self, loop, results, keep):
         m = dict(zip(loop.results, results))
         if not m:
             return
-        own = set(id(i) for i in I.walk(loop.regions[0])) | {id(loop)}
+        own = set(id(i) for i in I.walk(loop.regions[0])) | {id(loop)} | set(id(i) for i in keep)
         for ins in I.walk(self.fn.body):
-            if id(ins) in own or ins.op == 'yield' and any(v in m for v in ins.operands) and \
-                    self._yields_loop(ins, loop):
+            if id(ins) in own:
                 continue
             ins.operands = [m.get(v, v) for v in ins.operands]
-
-    @staticmethod
-    def _yields_loop(ins, loop):
-        return list(ins.operands) == list(loop.results)
 
 
 def run(fn, summaries=None):

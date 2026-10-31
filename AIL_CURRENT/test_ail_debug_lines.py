@@ -189,8 +189,9 @@ class DebugLines(unittest.TestCase):
         # statement keeps its line in the line table below and in the crash report)
         self.assertTrue(all(name.endswith("divide.py") for line, name in calls if line == 7), calls)
         lines = dwarf_lines(self.dir / "debug", "divide.py")
-        # no statement on a neighbouring line (11 is `def main`: the zero-initialised tagged locals sit on it)
-        self.assertEqual(sorted(lines), [2, 6, 7, 11, 12, 13, 14, 17])
+        # no statement on a neighbouring line (11 is `def main`: it carried the zero-initialised tagged locals, which
+        # the int64 demotion pass removes from this program)
+        self.assertEqual(sorted(lines), [2, 6, 7, 12, 13, 14, 17])
 
     def test_the_second_c_line_of_a_statement_keeps_its_line(self):
         # `xs = [..]` is several C lines (free, push, push, ...): none may fall on the next source line

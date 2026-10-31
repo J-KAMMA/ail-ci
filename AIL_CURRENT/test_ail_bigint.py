@@ -1549,7 +1549,10 @@ main()
         body = body[:body.index("\n}\n")]
         for name in ("v_i", "v_j", "v_k", "v_lines"):
             self.assertNotIn("ail_tint %s " % name, body, name)
-        self.assertIn("ail_tint v_total ", body)
+        # `total` is the one counter that stays tagged. With the tagged-int demotion pass the loop variables are
+        # SSA temporaries (ir<N>), so look for its arithmetic rather than for the name v_total.
+        self.assertIn("ail_tint_add_i64(", body)
+        self.assertEqual(body.count("ail_tint_add"), 1, body)
 
     def test_handler_takes_the_user_classes_derived_from_its_class(self):
         # `except ValueError` in an IR function must take BadInput and Missing, raised by a function the IR does not lower
