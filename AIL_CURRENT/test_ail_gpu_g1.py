@@ -42,6 +42,25 @@ CC = shutil.which('cc') or shutil.which('gcc') or shutil.which('clang')
 INT64_MAX, INT64_MIN = (1 << 63) - 1, -(1 << 63)
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def run_python(path, stdin=''):
     r = subprocess.run([sys.executable, '-B', str(path)], input=stdin, capture_output=True, text=True, timeout=120)
     return r.stdout, r.returncode
@@ -956,6 +975,8 @@ class General(Base):
         self.assertEqual(len(notes), 10)
         self.assertTrue(all('the general path never offloads' in line for line in notes))
         self.assertIn('float_general.py:8:', notes[0])
+
+    @_exact_int
 
     def test_a_function_that_needs_tagged_ints_is_built_on_the_general_path(self):
         text = '''
