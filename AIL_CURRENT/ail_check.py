@@ -258,6 +258,7 @@ LISTED_MODULES = (
     'test_ail_pre345',
     'test_ail_pre353',
     'test_ail_pre354',
+    'test_ail_pre366',
     'test_ail_pre377',
     'test_ail_pre358',
     'test_ail_pre359',
