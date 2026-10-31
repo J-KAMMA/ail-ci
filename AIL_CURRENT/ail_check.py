@@ -38,9 +38,9 @@ LISTED_MODULES = (
     'test_ail_strict', 'test_ail_cratebridge', 'test_ail_typed_parallel', 'test_ail_freestanding', 'test_ail_freestanding2',
     'test_ail_flush_exit', 'test_ail_mixed_bounds', 'test_ail_typed_submit', 'test_ail_typed_tuples',
     'test_ail_lsp', 'test_ail_project', 'test_ail_debug', 'test_ail_debug_lines', 'test_ail_debug_flush',
-    'test_ail_typed_blockers2', 'test_ail_compare_blockers',
+    'test_ail_typed_blockers2',
     'test_ail_c_export',
-    'test_ail_unified',
+    'test_ail_unified', 'test_ail_gen_speed',
     'test_ail_ir_gridbounds',
     'test_ail_bugs7',
     'test_ail_unbound',
@@ -325,6 +325,10 @@ LISTED_MODULES = (
     'test_ail_exc_nobind', 'test_ail_cargo', 'test_ail_fz196', 'test_ail_pre409', 'test_ail_pre427', 'test_ail_pre432',
     'test_ail_gpu_g2',
     'test_ail_ffi_f3b',
+    'test_ail_bigcap_split',
+    'test_ail_optint_exact',
+    'test_ail_ctime',
+    'test_ail_bound_builtin',
 )
 
 

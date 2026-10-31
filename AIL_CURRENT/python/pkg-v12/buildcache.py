@@ -250,13 +250,17 @@ def sources_hash(package):
             continue
         signature.update(('%s\0%d\0%d\n' % (p.relative_to(package).as_posix(), info.st_size, info.st_mtime_ns)).encode())
     memo = root() / 'srcsig' / signature.hexdigest()
-    try:
-        value = memo.read_text().strip()
-        if len(value) == 64:
-            _sources[package] = value
-            return value
-    except OSError:
-        pass
+    # A second copy of the memo lives beside the compiler's bytecode: a build with a clean AIL_CACHE (every cold build)
+    # then does not read and hash 8 MB of sources again, the same way it does not compile them again.
+    beside = package / '__pycache__' / ('ail-srcsig-' + signature.hexdigest())
+    for place in (memo, beside):
+        try:
+            value = place.read_text().strip()
+            if len(value) == 64:
+                _sources[package] = value
+                return value
+        except OSError:
+            pass
     h = hashlib.sha256()
     for p in names:
         h.update(p.relative_to(package).as_posix().encode() + b'\0')
@@ -268,6 +272,16 @@ def sources_hash(package):
         memo.write_text(value)
     except OSError:
         pass
+    if not os.environ.get('PYTHONDONTWRITEBYTECODE'):         # the same switch as the compiler's bytecode (ail_chatgpt._compiler_python)
+        try:
+            beside.parent.mkdir(exist_ok=True)
+            for old in beside.parent.glob('ail-srcsig-*'):
+                old.unlink()
+            temporary = beside.with_name(beside.name + '.%d.tmp' % os.getpid())
+            temporary.write_text(value)
+            os.replace(temporary, beside)
+        except OSError:
+            pass
     return value
 
 
