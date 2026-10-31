@@ -1,3 +1,50 @@
+## 2026-10-31 -- ex19 re-applied: a definition-only Python module runs nothing (job-rbex19-10311922)
+
+Re-applied the accepted `job-ex19-10290511` change, whose diff no longer applies because this
+integrated tree already carries the ex13 no-op gate (`_python_runs_nothing` /
+`_module_constant_source`) at the same main-synthesis site.  Kept both fixes: the ex13 gate still
+serves a definitions-plus-constants source, and the accepted signature rule now covers a
+definition-only source without a module constant.  The typed `_main_for` emits a no-op
+`int main(void) { return 0; }` when the entry's first parameter is not the array instead of
+refusing, and the general path (`pyboxed2.py`) infers the last definition's parameter kinds with
+`pyfunc._param_kinds` before choosing its array entry, so an annotated scalar
+(`def increment(x: int)`) no longer prints `usage: tool FILE`.  The sequence entry and top-level
+calls are unchanged; a zero-parameter last function keeps its old behaviour.  `ail_testenv.rustc()`
+now retries a rustup proxy with the toolchain found beside the cargo bin, so the c_export and
+cratebridge tests do not skip when a test runs with a scratch HOME.
+
+Probes in `/tmp/probes/ex19` on both builds via `cmp.sh`: `p_const_scalar_def`, `p_scalar_def`,
+`p_float_def`, `p_str_def`, `p_scalar_def_after_const`, `p_two_defs_scalar`,
+`p_scalar_def_and_print` match CPython (exit 0, empty stdout for the definition-only ones).
+`p_scalar_def_then_assign` still refuses on the default build by name and `p_zero_def` keeps the
+pre-existing zero-parameter refusal/link failure.  Not changed: `integer_series.ail` still prints
+`usage: tool FILE` and exits 2 on both builds where CPython prints nothing (its last parameter is
+the input sequence, the legacy pipeline convention).  Final-state tests: test_ail_ex19,
+test_ail_python_syntax, test_ail_reference_examples, test_ail_lang_gaps, test_ail_short_style_traps,
+test_ail_fallback_note, test_ail_builtin_shadowing, test_ail_pre165, test_ail_pre218,
+test_ail_pre44, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+## 2026-10-31 -- fz205 re-applied: Rust bridge tests skip when rustc is only a shim (job-rbfz205-10311922)
+
+Re-applied the accepted `job-fz205-10300805` change. Its diff no longer applies because this
+integrated tree already rejects the rustup shim, inline, in both modules:
+`RUSTC = shutil.which('rustc')` followed by `if RUSTC and subprocess.run([RUSTC, '--version'],
+capture_output=True).returncode: RUSTC = None` (`test_ail_c_export.py:35-37`,
+`test_ail_cratebridge.py:27-29`). That is the accepted `_working_rustc()` predicate, so both sides'
+fix is kept and no code changed. The accepted branch's other entry (the try/else reproducer, seed
+`2075520206`, already fixed by `test_ail_fz1`) records no code change, so there was nothing further
+to apply. `tools/diff_ids.py` is not present on this tree.
+
+Verified on this runner, where `/home/runner/.cargo/bin/rustc` is a shim that exits 1 for
+`--version`: `test_ail_c_export` + `test_ail_cratebridge` ran 28 tests, OK, the two Rust tests
+skipped by name (`rustc is not installed` / `rustc required`); `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` ran 25 tests, OK (1 unrelated skip). Probes in
+`/tmp/probes` compared the accepted and tree predicates and imported both modules under four PATH
+scenarios -- real shim, fake shim that fails, absent, and a fake `rustc --version` that succeeds:
+every pair agreed, and the Rust tests were skipped exactly when `RUSTC` was `None` (real shim,
+failing shim, absent) and not skipped when it was set (fake working rustc). A real toolchain is
+not installed here, so the compile-and-run path was not exercised on this runner; `cmp.sh` AIL
+probes do not apply because no language behaviour changed.
+
 ## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
 
 Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this
