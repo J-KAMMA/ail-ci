@@ -7,6 +7,7 @@ sees ordinary code plus a few helper functions appended to the program (only the
   (_csv.c `parse_process_char`, the same states, so quoting, doubled quotes, embedded newlines, escapes,
   `skipinitialspace`, `strict` and the end-of-data rules give the same rows). The source is `sys.stdin`
   (or any list of str lines such as `text.splitlines(True)`, `io.StringIO(text)` is not built).
+  QUOTE_NONNUMERIC is refused by name (the rows are strings here; the general path builds the floats).
   The reader name becomes the list of rows plus a cursor, so `for row in reader`, `next(reader)`,
   `next(reader, None)` (the `is None` test is rewritten), `list(reader)` and comprehensions over it
   consume from the cursor exactly as the iterator does.
@@ -617,6 +618,9 @@ class Csv:
         positional = ['dialect'] if kind == 'reader' else ['fieldnames', 'restkey', 'restval', 'dialect']
         d, extras = self.dialect(call, positional, extra=('fieldnames', 'restkey', 'restval')
                                  if kind == 'DictReader' else ())
+        if d.quoting == NONNUMERIC:
+            self.refuse(call, 'csv.QUOTE_NONNUMERIC is not built for a %s: it yields float and str '
+                              '(the general path builds it)' % self.csv_attr(call.func))
         if d.quotechar is None and d.quoting != NONE:
             d.quoting = NONE
         info = Reader(name, kind, self.fresh('pos'), self.fresh('hdr') if kind == 'DictReader' else None,
