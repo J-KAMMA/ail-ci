@@ -37811,9 +37811,9 @@ def _rewrite_returns(body, frees, ct='int64_t'):
     When several returns lie outside every loop they share one copy of the frees instead: each becomes
     `{ _rv = e; goto ail_exit_ret; }` and the function ends in one `ail_exit_ret: <frees> return _rv;`.
     A return inside a loop keeps its own copy (merging those lost run time: gcc specialises the frees
-    on what the loop has already established). AIL_EXIT_MERGE=0 turns the sharing off, =all shares
-    every return."""
-    mode = os.environ.get('AIL_EXIT_MERGE', 'outside')
+    on what the loop has already established). The sharing is OFF unless AIL_EXIT_MERGE=1 (=all shares
+    every return): it measured a small run-time loss on ticket_audit."""
+    mode = os.environ.get('AIL_EXIT_MERGE', '0')
     lines = body.splitlines(keepends=True)
     # pass 1: the statement each return is, and whether a loop encloses it
     stack, units = [], []        # units: (kind, text, pad, loop_depth); kind 'code' keeps the line as is
@@ -37846,7 +37846,7 @@ def _rewrite_returns(body, frees, ct='int64_t'):
     exits = [u for u in units if u[0] != 'code']
     if frees.count('_free(') + frees.count('_release(') < _EXIT_MERGE_MIN_FREES:
         exits = []                  # a few frees are cheaper to repeat than to route through one block
-    shared = {id(u) for u in exits if mode == 'all' or (mode != '0' and u[3] == 0)} if len(exits) > 1 else set()
+    shared = {id(u) for u in exits if mode == 'all' or (mode == '1' and u[3] == 0)} if len(exits) > 1 else set()
     if len(shared) < 2:
         shared = set()
     out, i = [], 0

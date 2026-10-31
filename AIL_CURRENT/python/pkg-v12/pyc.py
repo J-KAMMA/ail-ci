@@ -1238,7 +1238,7 @@ _NOTHING_MAIN = '\nint main(void) { return 0; }\n'
 
 def _split_units(source_units):
     """How many translation units to cut one typed program into: AIL_CC_SPLIT (0 or 1 = never), else
-    AIL_CC_JOBS, else min(4, cpu count). One unit on Windows, under --debug and in a native build report."""
+    AIL_CC_JOBS, else 1 (the default: one unit). One unit on Windows, under --debug and in a native build report."""
     if native_diagnostics.enabled() or os.name == 'nt' or os.environ.get('AIL_TARGET_OS') == 'windows'             or os.environ.get('AIL_DEBUG') == '1' or os.environ.get('AIL_STATIC') == '1':
         return 1
     for key in ('AIL_CC_SPLIT', 'AIL_CC_JOBS'):
@@ -1248,16 +1248,7 @@ def _split_units(source_units):
             value = 0
         if value >= 1:
             return min(value, 8)
-    units = min(4, os.cpu_count() or 1)
-    try:                      # each gcc -O2 on a large unit takes a few hundred MB: leave room
-        with open('/proc/meminfo') as f:
-            for line in f:
-                if line.startswith('MemAvailable:'):
-                    units = max(1, min(units, int(line.split()[1]) // (700 * 1024)))
-                    break
-    except (OSError, ValueError):
-        pass
-    return units
+    return 1                  # off unless asked for: it can cost run time (a few tenths of a percent)
 
 
 def _split_log(message):

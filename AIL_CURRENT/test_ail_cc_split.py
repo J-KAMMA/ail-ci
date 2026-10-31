@@ -152,30 +152,34 @@ class SmallerC(unittest.TestCase):
             '    while (b) {\n        if (c) {\n            return 2LL;\n        }\n    }\n'
             '    if (d) {\n        return 3LL;\n    }\n')
 
-    def test_returns_outside_loops_share_one_exit(self):
+    def rewrite(self, frees, merge):
         import pyfunc
-        text = pyfunc._rewrite_returns(self.BODY, self.FREES, 'int64_t')
+        old = os.environ.get('AIL_EXIT_MERGE')
+        if merge is None:
+            os.environ.pop('AIL_EXIT_MERGE', None)
+        else:
+            os.environ['AIL_EXIT_MERGE'] = merge
+        try:
+            return pyfunc._rewrite_returns(self.BODY, frees, 'int64_t')
+        finally:
+            if old is None:
+                os.environ.pop('AIL_EXIT_MERGE', None)
+            else:
+                os.environ['AIL_EXIT_MERGE'] = old
+
+    def test_returns_outside_loops_share_one_exit_when_asked(self):
+        text = self.rewrite(self.FREES, '1')
         self.assertEqual(text.count('goto ail_exit_ret;'), 2)
         self.assertEqual(text.count(self.FREES), 2)          # the loop's own copy and the shared block
         self.assertIn('{ int64_t _r1 = 2LL; ' + self.FREES + 'return _r1; }', text)
         self.assertIn('ail_exit_ret: ;\n    ' + self.FREES + 'return _rv;', text)
         self.assertTrue(text.startswith('    int64_t _rv;\n'))
 
-    def test_few_frees_and_the_off_switch_keep_one_copy_per_return(self):
-        import pyfunc
-        few = 'ail_list_free(&v_0); '
-        self.assertNotIn('ail_exit_ret', pyfunc._rewrite_returns(self.BODY, few, 'int64_t'))
-        old = os.environ.get('AIL_EXIT_MERGE')
-        os.environ['AIL_EXIT_MERGE'] = '0'
-        try:
-            text = pyfunc._rewrite_returns(self.BODY, self.FREES, 'int64_t')
-        finally:
-            if old is None:
-                del os.environ['AIL_EXIT_MERGE']
-            else:
-                os.environ['AIL_EXIT_MERGE'] = old
+    def test_default_keeps_one_copy_per_return(self):
+        text = self.rewrite(self.FREES, None)
         self.assertNotIn('ail_exit_ret', text)
         self.assertEqual(text.count(self.FREES), 3)
+        self.assertNotIn('ail_exit_ret', self.rewrite('ail_list_free(&v_0); ', '1'))   # too few frees
 
     def test_identical_clone_becomes_a_call(self):
         import pyfunc
