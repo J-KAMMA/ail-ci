@@ -1791,6 +1791,9 @@ def _fold_float_int_text(text):
     return text
 
 
+_DYNAMIC_POW_REFUSALS = [True]      # False while the int64-default build runs the static checks (intmode.py)
+
+
 def _check_int64_literals(tree):
     """A brace-syntax (`.ail`) program keeps 64-bit ints: a literal beyond them is named at its own position here.
     (A Python-syntax program has big ints; the typed path names such a literal and the general path builds it.)"""
@@ -3025,6 +3028,8 @@ def _check_int64_pow_constants(tree, known):
                 error.source_column = node.col_offset
                 raise error
             return
+        if not _DYNAMIC_POW_REFUSALS[0]:
+            return          # int64 default (Python syntax): a value that only exists at run time is the run-time stop's
         if dynamic_alias:
             if base is not None and base in (-1, 0, 1):
                 return
@@ -4811,19 +4816,35 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             # subset (`int64_literals`), for Python syntax too (bigint): a Python-syntax program has big ints, so a build
             # names it at the typed path (pyfunc: 'does not fit in a 64-bit signed integer') and the general path
             # builds it exactly
-            if not declarations_only and (syntax == 'ail' or (syntax == 'python' and int64_literals)):
-                _check_int64_constants(tree)
-                if (syntax == 'ail' and not entry) or syntax == 'python':
-                    _check_int64_literals(tree)       # (a brace entry file is named by the type stage, with its position)
-                _check_int64_constant_positions(tree)
-                _check_int64_unary_constants(tree)
-                _check_int64_local_cancellations(tree)
-                _check_int64_int_base_constants(tree)
-                module_known = _known_module_constants(tree)
-                _check_int64_pow_constants(tree, module_known)
-                _check_int64_augmented_powers(tree, module_known)
-                _check_int64_routed_augmented_powers(tree, module_known)
-                _check_class_attribute_assignment(tree)       # (the general path has per-class tables: class attributes are assignable)
+            # int64 default (2026-10-31): a Python-syntax program has int64 ints unless --exact-int / AIL_EXACT_INT=1 asks for the
+            # exact ones, so a static need of a big int is refused by these checks in a build too, with the flag named
+            exact_ints = os.environ.get('AIL_EXACT_INT', '').strip().lower() in ('1', 'on', 'yes', 'true')
+            if not declarations_only and (syntax == 'ail' or (syntax == 'python' and (int64_literals or not exact_ints))):
+                _DYNAMIC_POW_REFUSALS[0] = not (syntax == 'python' and not exact_ints and not int64_literals)
+                try:
+                    _check_int64_constants(tree)
+                    if (syntax == 'ail' and not entry) or syntax == 'python':
+                        _check_int64_literals(tree)       # (a brace entry file is named by the type stage, with its position)
+                    _check_int64_constant_positions(tree)
+                    _check_int64_unary_constants(tree)
+                    _check_int64_local_cancellations(tree)
+                    _check_int64_int_base_constants(tree)
+                    module_known = _known_module_constants(tree)
+                    _check_int64_pow_constants(tree, module_known)
+                    _check_int64_augmented_powers(tree, module_known)
+                    _check_int64_routed_augmented_powers(tree, module_known)
+                    if syntax == 'ail' or int64_literals:
+                        _check_class_attribute_assignment(tree)   # (the general path has per-class tables: class attributes are assignable)
+                except ValueError as refusal:
+                    if syntax == 'python' and not exact_ints and not int64_literals and '--exact-int' not in str(refusal):
+                        hint = ('\n  write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) '
+                                'for exact big ints, about 20x slower')
+                        wrapped = type(refusal)(str(refusal) + hint)
+                        wrapped.__dict__.update(refusal.__dict__)
+                        raise wrapped from None
+                    raise
+                finally:
+                    _DYNAMIC_POW_REFUSALS[0] = True
             if not declarations_only:
                 _check_genexpr_hash_keys(tree)    # not an int64 check: every build keeps a generator expression as a list
             if merged is not None and merged.positions:
@@ -5910,6 +5931,10 @@ def main(argv=None):
     compile_cmd.add_argument('--strict', action='store_true',
         help='build on the typed path or refuse, listing every blocker with a rewrite (also AIL_STRICT=1); '
              'with --json the blockers are printed as ail.strict/1 JSON')
+    compile_cmd.add_argument('--exact-int', action='store_true',
+        help='exact (arbitrary precision) ints as in CPython; the default is 64-bit ints that stop with an OverflowError-style '
+             'message on overflow, and a program whose source needs a big int is refused at compile time (also AIL_EXACT_INT=1; '
+             'the exact path is the general path, about 20x slower)')
     compile_cmd.add_argument('--static', action='store_true',
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
     compile_cmd.add_argument('--gpu', action='store_true',
@@ -5968,6 +5993,8 @@ def main(argv=None):
         os.environ['AIL_NO_CACHE'] = '1'
     if getattr(args, 'gpu', False):
         os.environ['AIL_GPU_BUILD'] = '1'
+    if getattr(args, 'exact_int', False):
+        os.environ['AIL_EXACT_INT'] = '1'
     if getattr(args, 'static', False):
         if sys.platform == 'darwin' and not getattr(args, 'target', None):
             parser.error('--static is not supported on macOS: Apple ships no static C library, so the '
@@ -6315,6 +6342,7 @@ def main(argv=None):
                         hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
                         if Path(str(object_path) + '.json').is_file() else '-')],
                     environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
+                    'exact' if str(environment.get('AIL_EXACT_INT', '')).strip().lower() in ('1', 'on', 'yes', 'true') else 'int64',
                     *(['classes', environment['AIL_CLASS_NAMES']] if environment.get('AIL_CLASS_NAMES') else []),
                     *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
                     *(['link', ffi_env['AIL_FFI_LINK']] if link else []),

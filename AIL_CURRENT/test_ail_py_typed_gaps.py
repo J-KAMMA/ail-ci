@@ -248,6 +248,25 @@ sys.exit(main())
 '''
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 class PyTypedGaps(unittest.TestCase):
     def check(self, name, text, stdins, typed_only, irs=('1',)):
         with tempfile.TemporaryDirectory() as tmp:
@@ -263,6 +282,8 @@ class PyTypedGaps(unittest.TestCase):
     def test_p1_optional_bytes_typed(self):
         self.check('optb', OPT_BYTES, ['key=val', 'a=', '', 'abcd', '==', 'zz=zz\n'], True)
 
+    @_exact_int
+
     def test_p2_int_returns_are_not_inferred(self):
         # an `int(text)` beyond int64 stays exact: the function is built on the general path
         self.check('reti', RET_INT, ['5 7 x 0 100 101', '', '007 12a', '99999999999999999999 3 -4'], False)
@@ -272,6 +293,8 @@ class PyTypedGaps(unittest.TestCase):
 
     def test_p2_inferred_str_return_typed(self):
         self.check('rets', RET_STR, ['a bb cccc dd\nxx yy\n\nabcde'], True)
+
+    @_exact_int
 
     def test_p2_mixed_kinds_keep_their_route(self):
         self.check('retm', RET_MIXED, ['-1 0 5 12345678901234567890'], False)

@@ -136,10 +136,17 @@ def cond(new, old=''):
     return OPEN + new + MID + old + CLOSE
 
 
-def resolve(text, big, keep=False, pieces=None):
+def resolve(text, big, keep=False, pieces=None, all_pieces=False):
     """Pick one side of every block (and drop the /*U*/ marks unless `keep`). `pieces` limits the
     /*P:name<*/ blocks: a named piece keeps its first side only when the program names it."""
     k = 1 if big else 2
+    if all_pieces and not big:
+        # int64 mode (intmode.py): the runtime without big ints is the whole runtime, so every piece is kept on its
+        # old side (a program that uses divmod or pow() has no creator to make the gate pick the big world)
+        text = _LINEBLOCK.sub(lambda m: m.group(k), text)
+        text = _BLOCK.sub(lambda m: m.group(k), text)
+        text = _PBLOCK.sub(lambda m: m.group(2), text)
+        return text if keep else text.replace(UMARK, '')
     text = _LINEBLOCK.sub(lambda m: m.group(k), text)
     text = _BLOCK.sub(lambda m: m.group(k), text)
     if pieces is False:

@@ -952,6 +952,25 @@ except csv.Error as e: print("E", e)
 print(repr(out.getvalue()))
 '''
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def build(directory, text, name, **env):
     source, exe = Path(directory, name + ".ail"), Path(directory, name)
     source.write_text(text, encoding="utf-8")
@@ -991,6 +1010,8 @@ class Refused(unittest.TestCase):
             built, _ = build(directory, text, "r", AIL_UNIFIED_FORCE="1")
             self.assertNotEqual(built.returncode, 0)
             self.assertIn(word, built.stdout + built.stderr)
+
+    @_exact_int
 
     def test_wide_flag_member(self):
         self.refused("from enum import Flag\n\nclass W(Flag):\n    A = 1\n    B = 1 << 63\n\nprint(W.A)\n", "63 bits")

@@ -274,7 +274,7 @@ static void *ail_th_entry(void *p) {
     if (st == AIL_LIMIT) {
         ail_out_flush(cx);
         if (cx->limit.name && !strcmp(cx->limit.name, "int_overflow")) {
-            fputs("integer overflow\n", stderr);      /* as the main thread ends it (ail_main_finish) */
+            fprintf(stderr, "OverflowError: %s (ints are 64-bit; --exact-int gives exact ints)\n", cx->limit.detail ? cx->limit.detail : "integer overflow");      /* as the main thread ends it (ail_main_finish) */
             fflush(stderr);
             _exit(1);
         }

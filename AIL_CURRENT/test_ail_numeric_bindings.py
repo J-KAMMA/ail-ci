@@ -84,7 +84,7 @@ class NumericBindingTypeTests(unittest.TestCase):
  def test_nonmixed_full_c_is_unchanged(self):
   import hashlib
   sources=('fn main()->int {let x=7;print(x);x+=2;print(x);return 0;}','fn main()->int {let x=1.5;print(x);return 0;}')
-  pins=('20e0e98d62c708d2fb1982bc4b28e67fc83f136f165abe423d904971fc235978','9230c95deca3372ed0fce651a7fd6e1da7442e04ca7543dd88f17a570ac67e81')
+  pins=('da02407073668de1310d60128f537859dd7f949ca60843d62a16ca98d6002ec1','9230c95deca3372ed0fce651a7fd6e1da7442e04ca7543dd88f17a570ac67e81')
   for source,pin in zip(sources,pins):self.assertEqual(hashlib.sha256(generated(source).encode()).hexdigest(),pin)
 @unittest.skipUnless(os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc'),'installed C compiler required')
 class NumericBindingNativeTests(unittest.TestCase):
@@ -109,5 +109,6 @@ class NumericBindingNativeTests(unittest.TestCase):
     built=subprocess.run([compiler,'-std=c11','-O2',str(path),'-lm','-o',str(binary)],capture_output=True,timeout=180)
     self.assertEqual(built.returncode,0,built.stderr.decode(errors='replace'))
     result=subprocess.run([str(binary)],capture_output=True,timeout=30)
-    self.assertEqual((result.returncode,result.stdout,result.stderr.replace(b'\r\n',b'\n')),(1,b'',b'integer overflow\n'))
+    self.assertEqual((result.returncode,result.stdout),(1,b''))
+    self.assertTrue(result.stderr.replace(b'\r\n',b'\n').startswith(b'OverflowError: integer overflow in '), result.stderr)
 if __name__=='__main__':unittest.main()
