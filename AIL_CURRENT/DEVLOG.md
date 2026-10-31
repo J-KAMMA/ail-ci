@@ -1,3 +1,61 @@
+## 2026-10-30 -- GPU stage G2: SPIR-V for the G1 kernels, and the Vulkan runtime that is opened at run time
+
+The kernel IR of G1 now has a device twin. `python/pkg-v12/gpu_spirv.py` (a SPIR-V writer of about 800 lines, no shaderc or
+spirv-tools at user build time) lowers a kernel to a compute shader; `python/pkg-v12/gpu_vk.py` is the C runtime that goes
+into a `--gpu` program: it opens `libvulkan.so.1` with dlopen at run time (never linked), declares the Vulkan structs it
+needs itself, picks a device, and runs one pipeline per kernel. The wrapper `ail_gk<k>_run` has the signature of the G1
+emulation, tries the device and falls back to the emulation on any missing piece (no loader, no device, no compute queue, a
+device without shaderInt64 / shaderFloat64 / round-to-nearest-even / signed-zero-inf-NaN preservation for binary64, a failed
+allocation or submit, a static build), so the program prints the same bytes either way. The device sets the same flag bits
+as the emulation (a superset is allowed, a subset is not); flag != 0 discards the result and the original loop replays.
+Switches: `AIL_GPU=0` (original CPU loop), `AIL_GPU=emu` (the CPU emulation, no Vulkan), `AIL_GPU=force` (device for every
+launch), unset (device from `AIL_GPU_MIN_N`=4096 elements; placeholder until the G7 cost model), `AIL_GPU_TRACE=1`,
+`AIL_GPU_DEVICE=<name>`; test hooks `AIL_VULKAN_LIB`, `AIL_GPU_DISABLE`. The build prints one note per kernel naming the path it
+can take. A bit test on lavapipe found that the device compiler folds `0.0 - x` into `-x` (wrong sign of zero for +0.0), so
+the emitter now computes the sign of an exact zero, `-x` and `abs(x)` with integer bit operations. There is no int32 kernel
+yet: the typed array module is not in this base, and the G1 kernels are int64 with the overflow flag. Programs without
+`--gpu` are byte-identical. `test_ail_gpu_g2.py` runs in its own CI job on lavapipe (`gpu` in tests.yml), not in the shards.
+
+## 2026-10-30 -- FFI F3b: exact unsigned 64-bit results and arguments, `check="allones"`
+
+An `@extern` result of `c_uint64 c_ulong c_ulonglong c_size_t` above 2**63 - 1 used to come back as the negative int
+with the same bits; F3a refused a constant argument in `2**63 .. 2**64-1` because the program held int64 only. Both are exact
+now, as under the CPython shim. The C adapter and the object format are unchanged (the adapter still returns the int64 bits);
+`ail_ffi_lower.py` writes the conversion into the AIL wrapper with constants that all fit int64 (`bits + 4 * 2**62`, so no
+wide literal reaches the typed gates of PR #230), and the tagged lowering adds them exactly. A constant argument in the upper
+half is rebuilt from a generated C function that returns its bits. The legacy int64 emitter (`AIL_NO_GENERAL=1 AIL_IR=0`)
+stops with `integer overflow` (exit 1) when such a value appears. `check="allones"` fires on the unsigned `(T)-1`;
+`check="minus1"` / `"negative"` on an unsigned result never fire and are refused by name. 64-bit signed parameters are
+checked against int64 as well. Binary-size and call-cost numbers are in the PR. `test_ail_ffi_f3b.py`; F3a's refusal tests
+for the upper-half constants became exactness tests.
+## 2026-10-30 -- repre20: chr() of a non-BMP code point on the general path stops by name (job-repre20-10300611)
+
+Today's integ already refused a statically known non-BMP `chr()` argument at build time (`test_ail_pre36.py`, added after the old pre20 diff), but a value only known at run time still reached `ail_bi_chr`'s `ail_die` and ended with `AIL internal error: chr() non-BMP code point requires 32-bit strings`. The general runtime stores UTF-16 units and cannot represent U+10000..U+10FFFF; the typed/default build can. `ail_bi_chr` now returns `ail_hit_limit(cx, "chr_non_bmp", ...)` (the uncatchable `AIL limit: chr_non_bmp`, exit 3) for such a value, in the `str_title_nonascii` limit style, and the build-time refusal wording is `chr() of the non-BMP code point U+... in the 16-bit v2 runtime` (pre267's `bytes.decode()` style). `test_ail_pre36.py` was updated for the wording; new `test_ail_repre20.py` (8 tests) compares with CPython through a literal, an argument, a list item, an attribute, a dict value and stdin on both builds, checks the limit is uncatchable (`except`/`finally` do not run), and keeps the U+FFFF boundary and the ValueError range errors unchanged.
+
+Probes in `/tmp/probes`: `p20_literal` (general refused by name; the default build of a lone top-level statement falls back to the general path here, the three-line `p20_default` matches CPython), `p20_runtime_value` / `p20_attr_only` / `p20_dict_only` / `p20_try` (named limit, exit 3), `p20_bmp` / `p20_range` (match on both builds), `p20_typed_simple` (default matches CPython, general stops with the limit).
+
+## 2026-10-30 -- GPU stage G1: `# ail: gpu`, the eligibility proof, kernel IR and its CPU emulation
+
+`compile --gpu` (or `AIL_GPU_BUILD=1`) reads `# ail: gpu` on the line before a loop (or at the end of a list-comprehension
+assignment), proves the loop eligible (docs/design/GPU.md 1.1, 1.3) or refuses it by name with file:line and a `write
+instead:` hint, lowers it to a kernel IR (`python/pkg-v12/gpu.py`) and emits the kernel as a C function that runs on the CPU
+with the flag word and CPU replay of GPU.md 3.1 / 5.1. No SPIR-V, no Vulkan, no cost model (G2, G3, G7). A program without a
+marker, or built without `--gpu`, generates byte-identical C. Section 6.1 of GPU.md lists what is built, the refusals, and
+every deviation from the design. `test_ail_gpu_g1.py` (42 tests) compares marked programs byte for byte with CPython, with
+the same binary under `AIL_GPU=0` and with the build without `--gpu`; covers empty and one-element lists, lists of different
+lengths, NaN/inf/-0.0/denormals, values at the int64 limits, division by zero and an IndexError inside the body, every
+refusal, and the unchanged-C proof.
+## 2026-10-31 -- cov19 suite fix: register through tests.d, not the module tuple (job-cov19-10311304)
+
+The integration of the accepted cov19 change merged the edited `MODULES` line into the new
+`LISTED_MODULES` group, leaving a duplicate copy of that group. `merge_modules` deduplicates it,
+so `MODULES[:len(LISTED_MODULES)] != LISTED_MODULES` and `test_ail_registry` failed. The kept
+cov19 behaviour and its test are unchanged; `test_ail_cov19` is now registered the way the
+integration tree expects, as `AIL_CURRENT/tests.d/test_ail_cov19.txt`, and the tuple is left
+alone. `test_ail_pre47` passes here and with the cov19 diff applied alone on the integration
+base; the candidate failure was bisected to the separate ex32 integration (`ac4836c`), whose
+`print(1<<63)` typed-path regression reproduces with the cov19 sort change reverted.
+
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 
 The accepted base-runtime mapping for `list assignment index out of range` changes the emitted C

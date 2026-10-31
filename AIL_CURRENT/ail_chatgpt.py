@@ -1,4 +1,15 @@
 """Portable entry for the AIL source snapshot; no implicit model calls."""
+import os as _os, sys as _sys
+if __name__ == "__main__" and _os.environ.get("AIL_SERVER") == "1" and _sys.argv[1:2] in (["compile"], ["check"]):
+    # Opt-in resident compile server (ail_server.py): it has the compiler imported already. Any problem before the
+    # build starts on the server means the normal path below;  is that answer.
+    try:
+        import ail_server as _ail_server
+        _served = _ail_server.client(_sys.argv[1:])
+    except Exception:
+        _served = None
+    if _served is not None:
+        raise SystemExit(_served)
 import ast
 import argparse
 import copy
@@ -14,7 +25,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
-from ail_syntax import SyntaxErrorAIL, detect, fold_constants, python_surface, python_wording, translate
+from ail_syntax import SyntaxErrorAIL, ail_array_surface, detect, fold_constants, python_surface, python_wording, translate
 import ail_sexpr
 import ail_modules
 
@@ -371,12 +382,23 @@ _UNKNOWN = object()
 
 def _shallow_walk(nodes):
     stack = list(nodes)
+    AST = ast.AST
     while stack:
         node = stack.pop()
         yield node
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
             continue
-        stack.extend(ast.iter_child_nodes(node))
+        for name in node._fields:
+            try:
+                field = getattr(node, name)
+            except AttributeError:
+                continue
+            if isinstance(field, AST):
+                stack.append(field)
+            elif isinstance(field, list):
+                for item in field:
+                    if isinstance(item, AST):
+                        stack.append(item)
 
 
 def _binding_counts(nodes):
@@ -1297,7 +1319,7 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
 
 class _Int64CallChecker(ast.NodeVisitor):
     def __init__(self, known, passthrough, int_params, int_shadowed, attributes, program_bound,
-                 argument_containers=None):
+                 argument_containers=None, int_defaults=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
@@ -1305,6 +1327,7 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.attributes = attributes
         self.program_bound = program_bound
         self.argument_containers = argument_containers or {}
+        self.int_defaults = int_defaults or {}
         self.shadow = []
         self.value_scopes = [known]
 
@@ -1344,15 +1367,18 @@ class _Int64CallChecker(ast.NodeVisitor):
             self._check_conversion(node, self._value(node.args[0]))
         if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
                 and self._global_name(node.func.id)):
+            defaults = self.int_defaults.get(node.func.id, {})
             for name, (index, paths) in self.int_params[node.func.id].items():
                 argument = _bound_argument(node, name, index)
-                if argument is not None:
+                if argument is None:
+                    value = defaults.get(name, _UNKNOWN)
+                else:
                     value = self._value(argument)
                     if (value is _UNKNOWN and isinstance(argument, ast.Name)
                             and self._global_name(argument.id)):
                         value = self.argument_containers.get(argument.id, _UNKNOWN)
-                    for path in paths:
-                        self._check_conversion(node, _constant_path_value(value, path))
+                for path in paths:
+                    self._check_conversion(node, _constant_path_value(value, path))
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
@@ -1670,6 +1696,39 @@ def _call_argument_containers(tree, module_counts, global_names, parents, known)
     return values
 
 
+def _function_default_constants(tree, module_envs, known, module_counts, passthrough,
+                                attributes):
+    """Constant parameter defaults, evaluated with the names visible at the ``def``.
+
+    A default is evaluated once, when the definition runs, so a module container mutated by a
+    later statement still contributes the value it held at the definition; the final module
+    map would have dropped it.  Only unique top-level functions are recorded, matching the
+    call-site int() wrapper check that consumes this map.
+    """
+    scopes = {id(statement): local for statement, local in zip(tree.body, module_envs)}
+    defaults = {}
+    for fn in tree.body:
+        if (not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+                or fn.decorator_list or module_counts.get(fn.name) != 1):
+            continue
+        local = scopes.get(id(fn), known)
+        args = fn.args
+        positional = [arg.arg for arg in (*args.posonlyargs, *args.args)]
+        nodes = dict(zip(positional[len(positional) - len(args.defaults):], args.defaults))
+        for arg, node in zip(args.kwonlyargs, args.kw_defaults):
+            if node is not None:
+                nodes[arg.arg] = node
+        values = {}
+        for name, node in nodes.items():
+            value = _constant_value(node, lambda item: local.get(item, _UNKNOWN),
+                                    lambda unused: True, passthrough, attributes)
+            if value is not _UNKNOWN:
+                values[name] = value
+        if values:
+            defaults[fn.name] = values
+    return defaults
+
+
 def _fold_float_int_text(text):
     """Rewrite `float(<an exact int constant outside int64>)` to a float literal.
 
@@ -1771,14 +1830,24 @@ def _check_int64_literals(tree):
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes,
                                      known)
+    int_defaults = _function_default_constants(tree, module_envs, known, module_counts,
+                                               passthrough, attributes)
     argument_containers = _call_argument_containers(tree, module_counts, global_names, parents,
                                                    known)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
-                      program_bound, argument_containers).visit(tree)
+                      program_bound, argument_containers, int_defaults).visit(tree)
     module_checker = _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
-                                       program_bound, argument_containers)
+                                       program_bound, argument_containers, int_defaults)
     safe_calls = {'len', 'print', 'str', 'repr', 'int'} - program_bound
     for statement, local in zip(tree.body, module_envs):
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            module_checker.value_scopes = [local]
+            for decorator in statement.decorator_list:
+                module_checker.visit(decorator)
+            module_checker._visit_outer_arguments(statement.args)
+            if statement.returns is not None:
+                module_checker.visit(statement.returns)
+            continue
         if not _scope_simple_statement(statement):
             continue
         if (_scope_has_int_call(statement)
@@ -1807,7 +1876,8 @@ def _check_int64_literals(tree):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
-    _check_int64_binpow_constants(tree, known, attributes, passthrough, parents, maxsplit)
+    _check_int64_binpow_constants(tree, known, attributes, passthrough, parents, maxsplit,
+                                  program_bound)
 
 
 _INT_BINARY = {
@@ -2714,6 +2784,86 @@ def _pow_alias_names(tree):
     return _pow_aliases(tree.body, {'pow'}, stores, parameters)
 
 
+def _pow_body_refused_by_pre273(body):
+    """Whether pyfront's pre273 rule refuses this wrapper body at its definition.
+
+    The gate mirrors that rule exactly: only a ``base ** exponent`` BinOp whose base folds
+    with ``pyfront.int_constant`` is refused there.  A base that only the wider
+    ``_const_fold_int`` folds (a ``~`` operand, or a bool leaf) is left to the call-site
+    checks, because nothing else refuses it."""
+    if not (isinstance(body, ast.BinOp) and isinstance(body.op, ast.Pow)):
+        return False
+    from pyfront import int_constant
+    base = int_constant(body.left)
+    return (base is not None and abs(base) >= 2
+            and -(1 << 63) <= base < (1 << 63)
+            and not _pow_exponent_is_constant(body.right))
+
+
+def _pow_wrapper_functions(tree, module_counts):
+    """Module functions whose body is exactly one returned power.
+
+    ``def power(b, e): return b ** e`` and its builtin spelling ``return pow(b, e)`` are
+    followed at their call sites just like a direct ``**``/``pow()``.  A wrapper with more
+    than one statement, a decorator, a rebound name or extra parameters is not folded."""
+    wrappers = {}
+    for fn in tree.body:
+        if (not isinstance(fn, ast.FunctionDef) or fn.decorator_list
+                or module_counts.get(fn.name) != 1 or fn.args.vararg is not None
+                or fn.args.kwarg is not None or len(fn.body) != 1
+                or not isinstance(fn.body[0], ast.Return) or fn.body[0].value is None):
+            continue
+        value = fn.body[0].value
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Pow):
+            base_node, exponent_node = value.left, value.right
+        elif (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                and value.func.id == 'pow' and not value.keywords
+                and len(value.args) == 2
+                and not any(isinstance(argument, ast.Starred) for argument in value.args)):
+            base_node, exponent_node = value.args
+        else:
+            continue
+        wrappers[fn.name] = (fn, base_node, exponent_node,
+                             _pow_body_refused_by_pre273(value))
+    return wrappers
+
+
+def _pow_parameter_indices(function):
+    positional = [argument.arg for argument in (*function.args.posonlyargs, *function.args.args)]
+    mapped = {name: index for index, name in enumerate(positional)}
+    mapped.update((argument.arg, None) for argument in function.args.kwonlyargs)
+    return mapped
+
+
+def _pow_wrapper_scope(body, initial, initial_aliases, stores, parameters, shadowed):
+    """Map call names in one scope to a module power wrapper, including ``q = power`` aliases.
+
+    ``shadowed`` is true inside a function: a name the function rebinds or takes as a
+    parameter no longer names the module function, while a single alias assignment adds a
+    new name.  At module scope the wrapper definitions themselves are the initial names."""
+    names = dict(initial)
+    aliases = set(initial_aliases)
+    if shadowed:
+        names = {name: target for name, target in names.items()
+                 if name not in parameters and stores.get(name, 0) == 0}
+        aliases = {name for name in aliases if name in names}
+    changed = True
+    while changed:
+        changed = False
+        for statement in body:
+            if not (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and isinstance(statement.value, ast.Name)):
+                continue
+            target, source = statement.targets[0].id, statement.value.id
+            if (source in names and target not in names
+                    and stores.get(target) == 1 and target not in parameters):
+                names[target] = names[source]
+                aliases.add(target)
+                changed = True
+    return names, aliases
+
+
 def _walk_module_scope(tree):
     """Nodes at module scope, not descending into functions, classes or lambdas."""
     stack = list(tree.body)
@@ -2833,7 +2983,7 @@ def _pow_parameter_bindings(tree, known):
 
 
 def _check_int64_pow_constants(tree, known):
-    """Refuse ``pow(base, exp)`` on constant ints whose exact result leaves int64, by name.
+    """Refuse ``pow(base, exp)``/``base ** exp`` on constant ints outside int64, by name.
 
     AIL ints are fixed width, so ``pow(2, 63)`` compiled and then stopped with ``integer
     overflow`` where CPython keeps the bignum.  The two-argument form is folded here (the
@@ -2844,22 +2994,25 @@ def _check_int64_pow_constants(tree, known):
     the run-time power can leave the range (the pre273 rule for ``**``).  The symmetric
     shape -- an exponent of at least 63 (2**63 already leaves int64) with a base computed
     at run time -- is refused as well, so a constant base that reaches the call through a
-    parameter, list item, attribute or dict value cannot stop with ``integer overflow``."""
+    parameter, list item, attribute or dict value cannot stop with ``integer overflow``.
+
+    A module-level wrapper whose body is exactly ``return b ** e`` or ``return pow(b, e)``
+    is followed at its call sites, including through an alias variable (``q = power``) and
+    an alias chain.  A wrapper reached through an alias whose operands are not statically
+    known is refused by name: its result can leave int64, which the fixed-width run time
+    would only report as ``integer overflow``.  Direct wrapper calls with run-time operands
+    keep their previous behaviour."""
     names = _pow_alias_names(tree)
     if not names:
         return
     bindings = _pow_parameter_bindings(tree, known)
+    module_stores = _binding_counts(tree.body)
+    wrappers = _pow_wrapper_functions(tree, module_stores)
+    module_names, module_aliases = _pow_wrapper_scope(
+        tree.body, {name: name for name in wrappers}, set(), module_stores, set(), False)
 
-    def check(node, scope_known, scope_names, scope_values):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id in scope_names):
-            return
-        if len(node.args) != 2 or node.keywords or any(
-                isinstance(argument, ast.Starred) for argument in node.args):
-            return
-        base_node, exponent_node = node.args
-        base = _pow_static_int(base_node, scope_known)
-        exponent = _pow_static_int(exponent_node, scope_known)
+    def refuse(node, base, exponent, exponent_node, computed_rule=False, dynamic_alias=False,
+               base_node=None, scope_known=None, scope_values=None):
         if base is not None and exponent is not None:
             if exponent < 0:
                 return
@@ -2872,7 +3025,20 @@ def _check_int64_pow_constants(tree, known):
                 error.source_column = node.col_offset
                 raise error
             return
-        if (base is not None and abs(base) >= 2 and _INT64_MIN <= base <= _INT64_MAX
+        if dynamic_alias:
+            if base is not None and base in (-1, 0, 1):
+                return
+            error = ValueError(
+                'an aliased integer power wrapper called with operands not known at compile '
+                'time can leave the signed 64-bit range of an AIL int, so it is refused by '
+                'name at compile time; CPython computes it exactly with an unbounded int. '
+                'Call the wrapper by its own name for the run-time behaviour, or write the '
+                'operands as constants')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+        if (computed_rule and base is not None and abs(base) >= 2
+                and _INT64_MIN <= base <= _INT64_MAX
                 and not _pow_exponent_is_constant(exponent_node)):
             error = ValueError(
                 'pow() with the integer constant base %d and an exponent computed at run time '
@@ -2883,7 +3049,7 @@ def _check_int64_pow_constants(tree, known):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
-        if (exponent is not None and exponent >= 63
+        if (scope_values is not None and exponent is not None and exponent >= 63
                 and _pow_base_is_runtime_int(base_node, scope_known, scope_values)):
             error = ValueError(
                 'pow() with the integer constant exponent %d and a base computed at run time '
@@ -2895,6 +3061,44 @@ def _check_int64_pow_constants(tree, known):
             error.source_column = node.col_offset
             raise error
 
+    def check_wrapper(node, descriptor, scope_known, aliased):
+        function, base_node, exponent_node, body_refused = descriptor
+        if body_refused:
+            # The wrapper body is already refused by the pre273 rule at its definition;
+            # keep that diagnostic instead of the call-site one.
+            return
+        mapped = _pow_parameter_indices(function)
+        local = {name: value for name, value in scope_known.items() if name not in mapped}
+        for parameter, index in mapped.items():
+            argument = _bound_argument(node, parameter, index)
+            if argument is None:
+                continue
+            value = _pow_static_int(argument, scope_known)
+            if value is not None:
+                local[parameter] = value
+        base = _pow_static_int(base_node, local)
+        exponent = _pow_static_int(exponent_node, local)
+        refuse(node, base, exponent, exponent_node, dynamic_alias=aliased)
+
+    def check(node, scope_known, scope_names, wrapper_names, wrapper_aliases, scope_values):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            return
+        name = node.func.id
+        if name in scope_names:
+            if len(node.args) != 2 or node.keywords or any(
+                    isinstance(argument, ast.Starred) for argument in node.args):
+                return
+            base_node, exponent_node = node.args
+            base = _pow_static_int(base_node, scope_known)
+            exponent = _pow_static_int(exponent_node, scope_known)
+            refuse(node, base, exponent, exponent_node, computed_rule=True,
+                   base_node=base_node, scope_known=scope_known, scope_values=scope_values)
+        elif name in wrapper_names:
+            if len(node.args) > 2 or any(keyword.arg is None for keyword in node.keywords):
+                return
+            check_wrapper(node, wrappers[wrapper_names[name]], scope_known,
+                          name in wrapper_aliases)
+
     functions = [node for node in ast.walk(tree)
                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
     function_nodes = set()
@@ -2902,7 +3106,7 @@ def _check_int64_pow_constants(tree, known):
         function_nodes.update(id(node) for node in _walk_own_scope(function))
     for node in ast.walk(tree):
         if id(node) not in function_nodes:
-            check(node, known, names, {})
+            check(node, known, names, module_names, module_aliases, {})
     for function in functions:
         local = _function_local_int_constants(function, known)
         ints, values = bindings.get(id(function), ({}, {}))
@@ -2915,18 +3119,27 @@ def _check_int64_pow_constants(tree, known):
             parameters.add(function.args.vararg.arg)
         if function.args.kwarg is not None:
             parameters.add(function.args.kwarg.arg)
-        scope_names = _pow_aliases(function.body, names,
-                                   _function_scope_stores(function), parameters)
+        stores = _function_scope_stores(function)
+        scope_names = _pow_aliases(function.body, names, stores, parameters)
+        wrapper_names, wrapper_aliases = _pow_wrapper_scope(
+            function.body, module_names, module_aliases, stores, parameters, True)
         for node in _walk_own_scope(function):
-            check(node, local, scope_names, values)
+            check(node, local, scope_names, wrapper_names, wrapper_aliases, values)
 
 
-def _static_aug_pow_int(node, known, values, attributes, passthrough, global_name):
+def _static_aug_pow_int(node, known, values, attributes, passthrough, global_name,
+                        assigned=None, seen=None):
     """The int a base or exponent expression denotes for the augmented-power check, or None.
 
     ``known`` holds the int-only constants the arithmetic folders may use; ``values`` also
     holds safe flat containers and class values, so the shared resolver can reach an int
-    through a list item, a dict value, a class attribute and a passthrough call."""
+    through a list item, a dict value, a class attribute and a passthrough call.  ``assigned``
+    maps a name to the statement that last bound it, which lets a list or dict item keep an
+    integer element the shared container folder cannot represent (for example a wide power
+    followed by a shift)."""
+    value = _const_fold_int(node)
+    if type(value) is int:
+        return value
     value = _constant_int(node, known, shifts=True)
     if type(value) is int:
         return value
@@ -2938,7 +3151,63 @@ def _static_aug_pow_int(node, known, values, attributes, passthrough, global_nam
         return value
     value = _constant_value(node, lambda name: values.get(name, _UNKNOWN), global_name,
                             passthrough, attributes)
-    return value if type(value) is int else None
+    if type(value) is int:
+        return value
+    if assigned is None:
+        return None
+    seen = set() if seen is None else seen
+    if isinstance(node, ast.Name):
+        expression = assigned.get(node.id)
+        if isinstance(expression, ast.AST) and id(expression) not in seen:
+            return _static_aug_pow_int(expression, known, values, attributes, passthrough,
+                                       global_name, assigned, seen | {id(expression)})
+        return None
+    if (isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+            and isinstance(node.ctx, ast.Load)):
+        expression = assigned.get(('attr', node.value.id, node.attr))
+        if isinstance(expression, ast.AST) and id(expression) not in seen:
+            return _static_aug_pow_int(expression, known, values, attributes, passthrough,
+                                       global_name, assigned, seen | {id(expression)})
+        return None
+    if not isinstance(node, ast.Subscript):
+        return None
+    container = node.value
+    if isinstance(container, ast.Name):
+        bound = assigned.get(container.id)
+        if isinstance(bound, ast.AST):
+            container = bound
+    if not isinstance(container, (ast.List, ast.Tuple, ast.Dict)):
+        return None
+    key = _static_aug_pow_int(node.slice, known, values, attributes, passthrough, global_name,
+                              assigned, seen)
+    if isinstance(container, (ast.List, ast.Tuple)):
+        if type(key) is not int or not -len(container.elts) <= key < len(container.elts):
+            return None
+        element = container.elts[key]
+        return _static_aug_pow_int(element, known, values, attributes, passthrough,
+                                   global_name, assigned, seen | {id(element)})
+    key_value = _constant_value(node.slice, lambda name: values.get(name, _UNKNOWN),
+                                global_name, passthrough, attributes)
+    if key_value is _UNKNOWN:
+        key_value = key
+    for key_node, value_node in zip(container.keys, container.values):
+        if key_node is None:
+            continue
+        found = _constant_value(key_node, lambda name: values.get(name, _UNKNOWN),
+                                global_name, passthrough, attributes)
+        if found is _UNKNOWN:
+            found = _static_aug_pow_int(key_node, known, values, attributes, passthrough,
+                                        global_name, assigned, seen)
+        if found is _UNKNOWN:
+            continue
+        try:
+            matches = found == key_value
+        except Exception:
+            matches = False
+        if matches:
+            return _static_aug_pow_int(value_node, known, values, attributes, passthrough,
+                                       global_name, assigned, seen | {id(value_node)})
+    return None
 
 
 def _scope_binding_names(statement):
@@ -3010,9 +3279,9 @@ def _check_augmented_power_scope(body, known, values, parameters, declared, attr
             if (name not in parameters and name not in declared
                     and isinstance(assigned.get(name), ast.AST)):
                 base = _static_aug_pow_int(assigned[name], known, values, attributes,
-                                           passthrough, global_name)
+                                           passthrough, global_name, assigned)
                 exponent = _static_aug_pow_int(statement.value, known, values, attributes,
-                                               passthrough, global_name)
+                                               passthrough, global_name, assigned)
                 if base is not None and exponent is not None:
                     value = _exact_pow_or_too_big(base, exponent)
             # An augmented target never keeps the earlier value for a later statement.
@@ -3041,12 +3310,29 @@ def _check_augmented_power_scope(body, known, values, parameters, declared, attr
             for name in _scope_binding_names(statement.value):
                 assigned[name] = _UNKNOWN
             assigned[statement.targets[0].id] = statement.value
+        elif (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Attribute)
+                and isinstance(statement.targets[0].value, ast.Name)
+                and isinstance(statement.targets[0].ctx, ast.Store)):
+            if _call_runs_at_runtime(statement.value):
+                assigned.clear()
+            for name in _scope_binding_names(statement.value):
+                assigned[name] = _UNKNOWN
+            target = statement.targets[0]
+            assigned[('attr', target.value.id, target.attr)] = statement.value
         else:
             if _call_runs_at_runtime(statement):
                 assigned.clear()
             else:
                 for name in _scope_binding_names(statement):
                     assigned[name] = _UNKNOWN
+                for inner in ast.walk(statement):
+                    if (isinstance(inner, ast.Subscript) and isinstance(inner.ctx, ast.Store)
+                            and isinstance(inner.value, ast.Name)):
+                        assigned[inner.value.id] = _UNKNOWN
+                    elif (isinstance(inner, ast.Attribute) and isinstance(inner.ctx, ast.Store)
+                            and isinstance(inner.value, ast.Name)):
+                        assigned[('attr', inner.value.id, inner.attr)] = _UNKNOWN
 
 
 def _check_int64_augmented_powers(tree, module_known):
@@ -3082,6 +3368,158 @@ def _check_int64_augmented_powers(tree, module_known):
         _check_augmented_power_scope(function.body, local, local_values, parameters, declared,
                                      attributes, passthrough,
                                      lambda name, local_names=local_names: name not in local_names)
+
+
+def _check_int64_routed_augmented_powers(tree, module_known):
+    """Refuse ``b **= e`` when constant arguments reach the parameters through calls.
+
+    ``_check_augmented_power_scope`` folds a parameterless straight-line body, but a function
+    whose augmented base and exponent are parameters was left to the fixed-width run time even
+    when every reachable call supplies constants whose exact result leaves int64.  The call
+    graph is followed from module-scope calls, binding parameter names to statically known
+    arguments (including containers and aliases); an augmented power whose exact result does
+    not fit int64 is refused by name.  Arguments the fold cannot resolve, stores before the
+    statement, calls inside a loop and powers whose result fits are left unchanged."""
+    module_counts = _binding_counts(tree.body)
+    global_names = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            global_names.update(node.names)
+    program_bound = _all_bound_names(tree)
+    known = _scope_constant_map(tree.body, tree, {}, module_counts, set(module_counts),
+                                set(), global_names, program_bound)
+    attributes = _known_class_attributes(tree, known)
+    parents = {child: parent for parent in ast.walk(tree)
+               for child in ast.iter_child_nodes(parent)}
+    safe_containers = _safe_module_containers(tree, module_counts, global_names, parents)
+    module_nodes = {}
+    for statement in tree.body:
+        if (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                and isinstance(statement.targets[0], ast.Name)
+                and module_counts.get(statement.targets[0].id) == 1
+                and (statement.targets[0].id in safe_containers
+                     or not isinstance(statement.value, (ast.List, ast.Tuple, ast.Dict)))):
+            module_nodes[statement.targets[0].id] = statement.value
+    functions = {}
+    for node in tree.body:
+        if (isinstance(node, ast.FunctionDef) and not node.decorator_list
+                and module_counts.get(node.name) == 1):
+            functions[node.name] = node
+    if not functions:
+        return
+
+    def refuse(node, value):
+        shown = 'too large' if value is _CONST_INT_TOO_BIG else _constant_diagnostic(value)
+        error = ValueError(f'int64 constant expression out of range: {shown}')
+        error.source_line = node.lineno
+        error.source_column = node.col_offset
+        raise error
+
+    def resolve(node, env, scope_known, parameters, nodes):
+        if isinstance(node, ast.Name):
+            if node.id in env:
+                return env[node.id]
+            if node.id in parameters:
+                return _UNKNOWN
+        lookup = scope_known if scope_known is not None else known
+        value = _pow_static_int(node, lookup)
+        if type(value) is not int:
+            value = _static_aug_pow_int(node, lookup, known, attributes, {},
+                                        lambda unused: True, nodes)
+        return value if type(value) is int else _UNKNOWN
+
+    def bind(callee, arguments, keywords, env, scope_known, parameters, nodes):
+        positional = [argument.arg for argument in
+                      (*callee.args.posonlyargs, *callee.args.args)]
+        every = _scope_parameters(callee)
+        bound = {}
+        for index, argument in enumerate(arguments):
+            if isinstance(argument, ast.Starred):
+                return None
+            if index >= len(positional):
+                if callee.args.vararg is None:
+                    return None
+                break
+            value = resolve(argument, env, scope_known, parameters, nodes)
+            if value is not _UNKNOWN:
+                bound[positional[index]] = value
+        for keyword in keywords:
+            if keyword.arg is None or keyword.arg not in every or keyword.arg in bound:
+                return None
+            value = resolve(keyword.value, env, scope_known, parameters, nodes)
+            if value is not _UNKNOWN:
+                bound[keyword.arg] = value
+        return bound
+
+    def loop_scope_nodes(function):
+        inside = set()
+
+        def visit(node, in_loop):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef,
+                                      ast.Lambda)):
+                    continue
+                nested = in_loop or isinstance(child, (ast.For, ast.AsyncFor, ast.While))
+                if nested:
+                    inside.add(id(child))
+                visit(child, nested)
+
+        visit(function, False)
+        return inside
+
+    def scan(function, env, depth, seen):
+        if depth > 12:
+            return
+        key = (id(function), tuple(sorted(env.items())))
+        if key in seen:
+            return
+        seen = seen | {key}
+        scope_known = _function_local_int_constants(function, known)
+        parameters = _scope_parameters(function)
+        bindings = _binding_counts(function.body)
+        stored_at = {}
+        for inner in _walk_own_scope(function):
+            if isinstance(inner, ast.Name) and isinstance(inner.ctx, (ast.Store, ast.Del)):
+                stored_at.setdefault(inner.id, []).append((inner.lineno, inner.col_offset))
+        looped = loop_scope_nodes(function)
+
+        def env_at(node):
+            position = (node.lineno, node.col_offset)
+            repeated = id(node) in looped
+            return {name: value for name, value in env.items()
+                    if name not in stored_at
+                    or not (repeated or any(where < position for where in stored_at[name]))}
+
+        for node in _walk_own_scope(function):
+            if (isinstance(node, ast.AugAssign) and isinstance(node.op, ast.Pow)
+                    and isinstance(node.target, ast.Name)):
+                current = env_at(node)
+                if node.target.id not in current:
+                    continue
+                base = current[node.target.id]
+                exponent = resolve(node.value, current, scope_known, parameters, None)
+                if type(base) is int and type(exponent) is int and exponent >= 0:
+                    value = _exact_pow_or_too_big(base, exponent)
+                    if value is _CONST_INT_TOO_BIG or not _INT64_MIN <= value <= _INT64_MAX:
+                        refuse(node, value)
+            elif (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                    and isinstance(node.func.ctx, ast.Load)):
+                name = node.func.id
+                if (name in functions and name not in bindings and name not in parameters
+                        and name not in env):
+                    current = env_at(node)
+                    bound = bind(functions[name], node.args, node.keywords, current,
+                                 scope_known, parameters, None)
+                    if bound is not None:
+                        scan(functions[name], bound, depth + 1, seen)
+
+    for node in _walk_module_scope(tree):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and isinstance(node.func.ctx, ast.Load) and node.func.id in functions):
+            bound = bind(functions[node.func.id], node.args, node.keywords, {}, None, set(),
+                         module_nodes)
+            if bound is not None:
+                scan(functions[node.func.id], bound, 0, set())
 
 
 _BINPOW_CONST_OPS = (ast.Add, ast.Sub, ast.Mult, ast.Div, ast.FloorDiv, ast.Mod,
@@ -3231,12 +3669,57 @@ def _binpow_param_constants(function, lookup, global_name, attributes, passthrou
     return found
 
 
+def _binpow_default_values(function, module_known, attributes, passthrough):
+    """A parameter's statically known default value, evaluated in the defining scope."""
+    defaults = {}
+    positional = [argument.arg for argument in (*function.args.posonlyargs, *function.args.args)]
+    for name, node in zip(positional[len(positional) - len(function.args.defaults):],
+                          function.args.defaults):
+        defaults[name] = _constant_value(node, lambda item: module_known.get(item, _UNKNOWN),
+                                         lambda unused: True, passthrough, attributes)
+    for name, node in zip((argument.arg for argument in function.args.kwonlyargs),
+                          function.args.kw_defaults):
+        if node is not None:
+            defaults[name] = _constant_value(node, lambda item: module_known.get(item, _UNKNOWN),
+                                             lambda unused: True, passthrough, attributes)
+    return defaults
+
+
+def _binpow_argument_value(node, parameter, index, value_of, default):
+    """The value a call binds to a power parameter, including a constant ``*`` expansion.
+
+    ``index`` is the positional slot, or None for a keyword-only parameter.  An omitted
+    argument takes the parameter's default; a ``*`` argument whose value is not a flat
+    constant tuple keeps the value unknown, so nothing is assumed about it.  Only a tuple is
+    expanded: it cannot be mutated after the value was recorded."""
+    if index is not None:
+        position = 0
+        for argument in node.args:
+            if isinstance(argument, ast.Starred):
+                expanded = value_of(argument.value)
+                if (not isinstance(expanded, tuple)
+                        or any(isinstance(item, (list, tuple, dict)) for item in expanded)):
+                    return _UNKNOWN
+                if position <= index < position + len(expanded):
+                    return expanded[index - position]
+                position += len(expanded)
+            else:
+                if position == index:
+                    return value_of(argument)
+                position += 1
+    for keyword in node.keywords:
+        if keyword.arg == parameter:
+            return value_of(keyword.value)
+    return default
+
+
 def _binpow_power_parameters(tree, module_known, module_int_known, attributes, passthrough,
                              program_bound=None):
     """Module functions whose parameter is the base of a power with a known int exponent.
 
-    ``name -> {parameter: (argument index, [exponents])}``.  A parameter the function rebinds
-    is left out: ``_binpow_param_constants`` folds that use instead."""
+    ``name -> {parameter: (argument index, [exponents], default)}``.  A parameter the function
+    rebinds is left out: ``_binpow_param_constants`` folds that use instead.  A call that omits
+    the parameter is checked with its constant default, the value CPython binds there."""
     counts = _binding_counts(tree.body)
     if program_bound is None:
         program_bound = _all_bound_names(tree)
@@ -3254,6 +3737,7 @@ def _binpow_power_parameters(tree, module_known, module_int_known, attributes, p
         lookup, global_name = _binpow_function_lookup(function, module_known, module_int_known,
                                                        program_bound=program_bound)
         rebound = set(_function_scope_stores(function)) | _scope_declared(function)
+        defaults = _binpow_default_values(function, module_known, attributes, passthrough)
         uses = {}
         for node in _walk_own_scope(function):
             if not (isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow)):
@@ -3266,12 +3750,13 @@ def _binpow_power_parameters(tree, module_known, module_int_known, attributes, p
                 continue
             uses.setdefault(base.id, []).append(exponent)
         if uses:
-            found[function.name] = {name: (mapped[name], exponents)
+            found[function.name] = {name: (mapped[name], exponents, defaults.get(name, _UNKNOWN))
                                     for name, exponents in uses.items()}
     return found
 
 
-def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, parents, maxsplit):
+def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, parents, maxsplit,
+                                  program_bound=None):
     """Refuse ``base ** exponent`` on statically known ints whose exact result leaves int64.
 
     Module constants, literal containers read by subscript, class and instance attributes, a
@@ -3287,7 +3772,8 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
     module_int_known = _known_module_constants(tree)
     module_lookup = lambda name: module_known.get(name, _UNKNOWN)
     module_global = lambda name: True
-    program_bound = _all_bound_names(tree)
+    if program_bound is None:
+        program_bound = _all_bound_names(tree)
     power_parameters = _binpow_power_parameters(tree, module_known, module_int_known,
                                                 attributes, passthrough, program_bound)
 
@@ -3316,11 +3802,8 @@ def _check_int64_binpow_constants(tree, module_known, attributes, passthrough, p
             return
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
                 and global_name(node.func.id) and node.func.id in power_parameters):
-            for parameter, (index, exponents) in power_parameters[node.func.id].items():
-                argument = _bound_argument(node, parameter, index)
-                if argument is None:
-                    continue
-                value = value_of(argument)
+            for parameter, (index, exponents, default) in power_parameters[node.func.id].items():
+                value = _binpow_argument_value(node, parameter, index, value_of, default)
                 if type(value) is not int:
                     continue
                 for exponent in exponents:
@@ -4210,11 +4693,13 @@ def _refuse_load(error):
 
 def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only=False,
                   separate=False, module_paths=(), origins=None, source_map=None, declarations_only=False, source_bytes=None,
-                  notes=None, local_imports=False, ffi=None, prelower=None, int64_literals=False):
+                  notes=None, local_imports=False, ffi=None, prelower=None, int64_literals=False,
+                  postlower=None, merge_library=False):
     """Resolve source imports once and validate their shared declaration scope.
 
-    `prelower` rewrites the entry's text right after it is read (ail_export.lower for `--lib`); the
-    classes it leaves behind are then allowed in a module-only Python source.
+    `prelower` rewrites the entry's text right after it is read, `postlower` after the local modules are merged
+    into it (ail_export.lower for `--lib`); the classes they leave behind are then allowed in a module-only
+    Python source. `merge_library` lets a module-only (library) entry import its own local modules.
 
     `local_imports` lets a Python-syntax entry import sibling modules (ail_modules, stage G1): their
     bodies are merged into the entry's text before everything below sees it."""
@@ -4259,6 +4744,16 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             if path.suffix.lower() == '.py':
                 syntax = 'python'
             merged = None
+            if entry and syntax == 'python' and 'ail_array' in text:
+                # typed arrays (TYPED_ARRAY.md T2): lowered before the module merge, which would otherwise pull in the
+                # pure-Python reference file `ail_array.py` that sits beside the program
+                refused = []
+                locations = {}
+                text = ail_array_surface(text, refused)
+                if refused:
+                    error = ValueError(refused[0][1])
+                    error.source_line, error.source_column = refused[0][0], 0
+                    raise error
             if ffi is not None and syntax == 'python':
                 # G4: `@extern` stubs become ordinary functions over a generated C object (ail_ffi_lower.py);
                 # a file that does not mention ail_ffi is returned untouched
@@ -4269,13 +4764,23 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                   if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
                 except (SyntaxError, ValueError):
                     entry_defs = None
-            if local_imports and entry and syntax == 'python' and not module_only:
+            if local_imports and entry and syntax == 'python' and (not module_only or merge_library):
                 merged = ail_modules.merge_program(path, text, **({} if ffi is None else {'read': ffi.read}))
+                # F2: the front end's own passes (enum lowering) print class names too; the compiler process gets it from _surface_env
+                class_names = _class_names_env(merged)
+                if class_names:
+                    os.environ['AIL_CLASS_NAMES'] = class_names
+                else:
+                    os.environ.pop('AIL_CLASS_NAMES', None)
                 if merged is not None:
                     _MERGED_ENTRIES[str(path)] = merged
                     text = merged.text
                     for line in merged.notes:
                         print(line, file=sys.stderr)
+            if postlower is not None and entry:
+                text = postlower(text)
+                if merged is not None:
+                    merged.positions = {}       # the lowered text has other line numbers
             imports = []
             declarations = {}
             locations = {}
@@ -4317,6 +4822,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                 module_known = _known_module_constants(tree)
                 _check_int64_pow_constants(tree, module_known)
                 _check_int64_augmented_powers(tree, module_known)
+                _check_int64_routed_augmented_powers(tree, module_known)
                 _check_class_attribute_assignment(tree)       # (the general path has per-class tables: class attributes are assignable)
             if not declarations_only:
                 _check_genexpr_hash_keys(tree)    # not an int64 check: every build keeps a generator expression as a list
@@ -4413,7 +4919,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                                                   for arg in fn.args.args):
                     contracts.append(path)
         if (module_only or not entry) and ((not tree.body and not imports) or any(not (isinstance(node, ast.FunctionDef)
-                or (syntax == 'ail' or prelower is not None) and isinstance(node, ast.ClassDef))
+                or (syntax == 'ail' or prelower is not None or postlower is not None) and isinstance(node, ast.ClassDef))
                 and not _module_constant(node) for node in tree.body)):
             raise ValueError(f'AIL module needs functions, structs, or literal constants only: {path}')
         if separate and not entry and any(
@@ -4429,7 +4935,34 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) else None)
             if name is not None:
                 if name in names:
-                    raise ValueError(f'duplicate AIL name: {name}')
+                    duplicate = ValueError(
+                        f'duplicate AIL name: {name}'
+                        + ('' if syntax == 'ail' else
+                           f' (`def {name}` / `class {name}` is bound a second time at module level; a '
+                           'function here has one definition, which also rules out the `@f.register` / '
+                           '`def _(...)` overload pattern)\n  write instead: give each function its own name '
+                           'and call the right one (or dispatch with isinstance in one function)'))
+                    duplicate.source_line = getattr(node, 'lineno', None)
+                    duplicate.source_column = getattr(node, 'col_offset', 0)
+                    if syntax == 'python' and getattr(node, 'lineno', None):
+                        where = (merged.positions.get(node.lineno) if merged is not None
+                                 else (str(path), node.lineno, node.col_offset + 1))
+                        if merged is None:
+                            # the lowered text carries the prelude: find the second definition in the file as written
+                            try:
+                                found = [i for i, source_line in enumerate(
+                                    Path(path).read_text(encoding='utf-8').splitlines(), 1)
+                                    if re.match(r'(?:async\s+)?(?:def|class)\s+%s\b' % re.escape(name), source_line)]
+                            except (OSError, UnicodeError):
+                                found = []
+                            if len(found) >= 2:
+                                where = (str(path), found[1], 1)
+                        if where is not None:
+                            located = ValueError(f'AIL {"source" if entry else "module"} {where[0]}: '
+                                                 f'line {where[1]}: {duplicate}')
+                            located.refusal = (where[0], where[1], where[2], str(duplicate))
+                            raise located from duplicate
+                    raise duplicate
                 names.add(name)
             if isinstance(node, ast.FunctionDef):
                 functions.append(node)
@@ -4898,7 +5431,8 @@ def _source_check(args):
             if not re.fullmatch(r'[A-Za-z_]\w*', name):
                 raise ValueError('invalid bundled API module name: ' + name)
             try:
-                manifest = json.loads((ROOT / 'MANIFEST.json').read_text(encoding='utf8'))
+                import ail_manifest
+                manifest = ail_manifest.load(ROOT)
             except (json.JSONDecodeError, UnicodeError) as error:
                 raise ValueError('invalid bundled API manifest: ' + str(error)) from error
             selected = manifest.get('sdk_files') if isinstance(manifest, dict) else None
@@ -5045,6 +5579,18 @@ def _source_check(args):
     print(json.dumps(report, ensure_ascii=False))
     return status
 
+def _compiler_python():
+    """The interpreter command that runs the compiler's own code (pkg-v12/pyc.py) in a child process.
+
+    The compiler is about 180k lines of Python. Without cached bytecode every build compiles all of it again, which
+    costs 2-4 s of a 2-8 s build. So the child may write __pycache__ next to the sources (Python skips the write
+    when the directory is read-only, and a pip install ships the bytecode). PYTHONDONTWRITEBYTECODE=1 keeps the old
+    behaviour (-B) for a caller that wants a source tree it never touches."""
+    if os.environ.get('PYTHONDONTWRITEBYTECODE'):
+        return [sys.executable, '-B']
+    return [sys.executable]
+
+
 def _surface_env(args, source, env=None):
     """The environment for a compiler run: `AIL_SURFACE=python` for a def-syntax entry, which makes
     the compiler refuse list/dict/set sharing it would otherwise copy (pkg-v12/aliasrefuse.py)."""
@@ -5058,7 +5604,19 @@ def _surface_env(args, source, env=None):
         env['AIL_SURFACE'] = 'python'
     else:
         env.pop('AIL_SURFACE', None)
+    # F2: the printed names of the classes the module merge renamed (python/pkg-v12/classname.py)
+    merged = _MERGED_ENTRIES.get(str(source)) or _MERGED_ENTRIES.get(str(Path(source).resolve()))
+    names = _class_names_env(merged)
+    if names:
+        env['AIL_CLASS_NAMES'] = names
+    else:
+        env.pop('AIL_CLASS_NAMES', None)
     return env
+
+
+def _class_names_env(merged):
+    classes = getattr(merged, 'classes', None)
+    return json.dumps({k: list(v) for k, v in classes.items()}, sort_keys=True) if classes else ''
 
 
 def _python_source(args, data):
@@ -5092,7 +5650,8 @@ def _python_notes(message, notes, source):
             break
     # library batch 4 (csv, datetime, ...): the import is refused because a use was not built; say which
     found = re.search(r"import of '(csv|datetime|decimal|fractions|unicodedata|statistics|textwrap|enum|string)'; [^\n]*?by hand",
-                      message)
+                      message) or re.search(r"(decimal)\.\w+ is not built: decimal needs exact[^\n]*(?:\n  write instead: [^\n]*)?",
+                                            message) or re.search(r"(unicodedata|ipaddress|html)\.\w+ \(not yet published in NAMES_library\.json\)", message)
     if found:
         for entries in notes.values():
             named = [text.split(';')[0] for _, text in entries if found.group(1) in text.split(':')[0]]
@@ -5353,6 +5912,10 @@ def main(argv=None):
              'with --json the blockers are printed as ail.strict/1 JSON')
     compile_cmd.add_argument('--static', action='store_true',
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
+    compile_cmd.add_argument('--gpu', action='store_true',
+        help="build the loops marked '# ail: gpu' as GPU kernels (docs/design/GPU.md; stage G1 runs the kernel on the "
+             "CPU as an emulation, same output): a marked loop that is not provably eligible is refused by name "
+             "(also AIL_GPU_BUILD=1)")
     compile_cmd.add_argument('--lib', metavar='NAME',
         help='build the @export functions of the source as a C library: -o DIR receives lib<NAME>.so, '
              'lib<NAME>.a and <NAME>.h (error codes, NAME_last_error(), NAME_free(); see NATIVE_LIBRARIES.md)')
@@ -5403,6 +5966,8 @@ def main(argv=None):
     args = parser.parse_args(argv)
     if getattr(args, 'no_cache', False):
         os.environ['AIL_NO_CACHE'] = '1'
+    if getattr(args, 'gpu', False):
+        os.environ['AIL_GPU_BUILD'] = '1'
     if getattr(args, 'static', False):
         if sys.platform == 'darwin' and not getattr(args, 'target', None):
             parser.error('--static is not supported on macOS: Apple ships no static C library, so the '
@@ -5502,7 +6067,8 @@ def main(argv=None):
         print(json.dumps(report, indent=2))
         return 2 if not report['python_supported'] or args.check and report['build_check']['status'] != 'passed' else 0
     if args.command == 'integrity':
-        manifest = json.loads((ROOT/'MANIFEST.json').read_text(encoding='utf8'))
+        import ail_manifest
+        manifest = ail_manifest.load(ROOT)
         pins = manifest['sha256']
         is_sdk = manifest.get('kind') == 'ail_language_sdk'
         # A source checkout's sha256 map also holds pins of files from earlier archive layouts that
@@ -5549,7 +6115,7 @@ def main(argv=None):
         with tempfile.TemporaryDirectory(prefix='ail-module-') as directory:
             prepared, target = Path(directory) / ('module.c' if is_c else 'module.py'), Path(directory) / 'module.o'
             prepared.write_text(text, encoding='utf8')
-            command = [sys.executable, '-B', str(ROOT/'python/pkg-v12/pyc.py'),
+            command = [*_compiler_python(), str(ROOT/'python/pkg-v12/pyc.py'),
                        '--file', str(source if is_c else prepared), str(target), '--strict']
             command += ['--compile-c', str(args.interface.resolve())] if is_c else ['--compile-object']
             if args.c_api_name is not None:
@@ -5612,10 +6178,30 @@ def main(argv=None):
         if source.suffix.lower() not in ('.ail', '.py') or not source.is_file():
             parser.error('source must be an existing .ail or .py file')
         notes = {}
+        gpu_sites = []
+        if args.command == 'compile' and os.environ.get('AIL_GPU_BUILD', '').strip().lower() in ('1', 'on', 'yes', 'true') \
+                and source.suffix.lower() == '.py':
+            # `compile --gpu`: the syntactic half of the proof on the file as written (python/pkg-v12/gpu.py)
+            sys.path.insert(0, str(ROOT / 'python/pkg-v12'))
+            import gpu
+            try:
+                gpu_sites = gpu.sites_of(source.read_text(encoding='utf-8'))
+            except gpu.GpuRefusal as refusal:
+                line = getattr(refusal, 'source_line', None)
+                lines = source.read_text(encoding='utf-8').strip().splitlines()
+                where = _relpath(source)
+                if line is not None and 0 < line <= len(lines):
+                    text = lines[line - 1]
+                    where += ':%d:%d' % (line, len(text) - len(text.lstrip()) + 1)
+                return native_build.emit(args, {}, 3, message='%s: not in the subset: %s' % (where, refusal))
+            except (SyntaxError, ValueError, OSError):
+                gpu_sites = []
         loading = native_build.loading(args) or {'source_map': {}}
-        ffi = None if library else _ffi_session(args)
+        ffi = None if library and not export_lib else _ffi_session(args)
         if export_lib and (separate or args.target):
             parser.error('--lib cannot be combined with --separate or --target')
+        if export_lib:
+            ffi.library_entry = source          # F1: local modules and @extern stubs; only the entry says @export
 
         def lower_exports(text):
             import ail_export
@@ -5624,20 +6210,32 @@ def main(argv=None):
         try:
             source_text, contracts, unit_map = _load_sources(
                 source, args.module, args.syntax, module_only=library, separate=separate,
-                module_paths=args.module_path, notes=notes, local_imports=not library, ffi=ffi,
-                prelower=lower_exports if export_lib else None, **loading)
+                module_paths=args.module_path, notes=notes, local_imports=not library or bool(export_lib), ffi=ffi,
+                postlower=lower_exports if export_lib else None, merge_library=bool(export_lib), **loading)
+            if export_lib:
+                ffi.extra_libs = list(getattr(args, 'link', None) or [])
+                ffi.refuse_shared_links(args.lib)
         except (OSError, UnicodeError, SyntaxError, ValueError) as error:
             _refuse_load(error)
         prelude_units = _PRELUDE_UNITS.get(str(source), ())
         if export_lib:
             if not output.is_dir():
                 parser.error('--lib output must be an existing directory (-o DIR)')
+            ffi_args = []
+            if ffi.decls:
+                try:
+                    ffi_object = ffi.build(ROOT / 'ail_chatgpt.py', c_api_name=args.lib + '_core')
+                except (OSError, ValueError, subprocess.SubprocessError) as error:
+                    return native_build.emit(args, {}, 2, 'ffi', str(error))
+                ffi_args = ['--object', str(ffi_object)]
+            ffi_args += ['--ffi-link=' + flag for flag in (ffi.link_args if ffi.decls else ffi._link_args())]
             with tempfile.TemporaryDirectory(prefix='ail-export-source-') as temporary:
                 prepared, manifest = Path(temporary) / 'library.py', Path(temporary) / 'exports.json'
                 prepared.write_text(source_text, encoding='utf8')
                 manifest.write_text(json.dumps(lowered['manifest']), encoding='utf8')
                 result = native_build.invoke(args, [sys.executable, '-B', str(ROOT/'python/pkg-v12/c_export.py'),
-                                       str(prepared), '--manifest', str(manifest), '--name', args.lib, '-o', str(output)],
+                                       str(prepared), '--manifest', str(manifest), '--name', args.lib, '-o', str(output),
+                                       *ffi_args],
                                       temporary, timeout=240)
                 if not native_build.enabled(args):
                     return result.returncode
@@ -5685,7 +6283,7 @@ def main(argv=None):
             build_source = Path(tmp) / 'combined.ail'
             build_source.write_text(source_text, encoding='utf-8')
             strict = _strict_requested(args)
-            command = [sys.executable, '-B', str(ROOT/'python/pkg-v12/pyc.py'),
+            command = [*_compiler_python(), str(ROOT/'python/pkg-v12/pyc.py'),
                        '--file', str(build_source), str(target), '--strict']
             for object_path in [*objects, *ffi_objects]:
                 command += ['--object', str(object_path.resolve())]
@@ -5717,6 +6315,7 @@ def main(argv=None):
                         hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
                         if Path(str(object_path) + '.json').is_file() else '-')],
                     environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
+                    *(['classes', environment['AIL_CLASS_NAMES']] if environment.get('AIL_CLASS_NAMES') else []),
                     *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
                     *(['link', ffi_env['AIL_FFI_LINK']] if link else []),
                     *(['debug', hashlib.sha256(line_map.read_bytes()).hexdigest()] if debug else []))
@@ -5776,6 +6375,18 @@ def main(argv=None):
                 for line in _fallback_notes(args, source, result.stderr, locate=not objects and not separate,
                                              source_map=loading['source_map']):
                     print(line, file=sys.stderr)
+                if gpu_sites:                                             # gpu.py: a marked loop that got no kernel
+                    import gpu
+                    applied = set()
+                    for line in (result.stderr or '').splitlines():
+                        if line.startswith('ail-gpu-applied:'):
+                            applied = {int(n) for n in line.split(':', 1)[1].split()}
+                        elif line.startswith('ail-gpu-path: '):                  # G2: which path the kernel can take
+                            number, kind, text = line[len('ail-gpu-path: '):].split(' ', 2)
+                            print('note: %s:%s: %s' % (_relpath(source), number, gpu.path_note(kind, text)), file=sys.stderr)
+                    for number in gpu_sites:
+                        if number not in applied:
+                            print('note: %s:%d: %s' % (_relpath(source), number, gpu.IGNORED), file=sys.stderr)
                 # typedpar.py: why a thread / executor / pool use runs under the general path's lock
                 for path, entries in notes.items():
                     for line, text in entries:

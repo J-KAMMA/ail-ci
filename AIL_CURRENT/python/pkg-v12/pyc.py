@@ -46,23 +46,20 @@ import buildcache
 import shadowing
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
-from pyfront import Unsupported, fold_int_constants, to_pipeline_c, _number_constant, refuse_field_method_call
+from pyfront import (Unsupported, fold_int_constants, to_pipeline_c, _number_constant,
+                     _int_const_value, _IntConstTooLarge, _INT64_MIN, _INT64_MAX,
+                     refuse_field_method_call)
 import pyfunc
+import gpu
 from pyfunc import to_c as func_to_c
 from pyfunc import _module_const_scalar, module_table_refusal, _written_globals
 import modtables
 import unbound
 from pyfunc import NORET
-try:
-    # BRIEF_mixed_mode.md's own capability probe (test_mixed.py): "pymix.py present in the
-    # subject AND imported by pyc.py". Not called directly from here -- pyboxed2.py's own
-    # `_setup_mix` is what runs `pymix.analyze()`, once cleared to wire it into the general
-    # path's call-site codegen -- this import exists so the probe reads true, and so a package
-    # with pymix.py physically removed (out/neg/pkg-v12-nomix) still imports THIS module
-    # cleanly (the general path stays boxed-only there, never a crash).
-    import pymix  # noqa: F401
-except ImportError:
-    pass
+# pymix (whole-program kind analysis for the general path) is not imported here any more: it pulls in
+# dataclasses, inspect and typing (about 22 ms of every child start) and only the general path uses it.
+# pyboxed2.py imports it itself (`import pymix`, with its own `pymix is None` guard for a package
+# without pymix.py), and `_setup_mix` there is what runs `pymix.analyze()`.
 
 MAIN = r'''
 #include <stdio.h>
@@ -224,6 +221,21 @@ def _cc(command, phase, **kwargs):
     if native_diagnostics.enabled():
         return native_diagnostics.run(command, phase=phase, **kwargs)
     return buildcache.run_cc(command, lambda c: native_diagnostics.run(c, phase=phase, **kwargs))
+
+
+def _cc_jobs(units):
+    """How many independent gcc compiles to run at once: AIL_CC_JOBS if set (1 = serial), else
+    min(2, cpu count) -- two gcc -O2 runs on the large generated units fit a 6 GB machine. A native
+    build report records its operations in order, so it always builds serially."""
+    if native_diagnostics.enabled():
+        return 1
+    try:
+        jobs = int(os.environ.get('AIL_CC_JOBS') or 0)
+    except ValueError:
+        jobs = 0
+    if jobs < 1:
+        jobs = min(2, os.cpu_count() or 1)
+    return max(1, min(jobs, units))
 
 
 def _finalize_output(out):
@@ -430,6 +442,7 @@ def _rewrite_script(source, force):
     at the `class` check below for what was tested before this paragraph was written.
     """
     tree = ast.parse(source.strip())
+    gpu_marked = gpu.marked_statements(tree, source.strip())        # `# ail: gpu`: the unparse below drops the comments
     if os.environ.get('AIL_DEBUG') == '1':
         ast.increment_lineno(tree, source[:len(source) - len(source.lstrip())].count('\n'))     # `.strip()` above ate leading blank lines
     expanded = []
@@ -506,11 +519,37 @@ def _rewrite_script(source, force):
         body=body, decorator_list=[], returns=None)
     new_tree = ast.Module(body=kept + [main_def], type_ignores=[])
     snapshot = pyfunc.debug_snapshot_lines(new_tree)      # --debug: the unparse renumbers the lines
+    reading = [(type(node).__name__, getattr(node, 'lineno', None)) for node in ast.walk(new_tree)]
     ast.fix_missing_locations(new_tree)
     unbound.SCRIPT.add(main_def.name)        # module-scope code: an unassigned read is a NameError (unbound.py)
     text = ast.unparse(new_tree)
     pyfunc.debug_remember_lines(snapshot, text)
+    # the unparse renumbers every line; keep new line -> source line so a refusal raised while
+    # compiling the rewritten text still names file:line in the program the author wrote
+    lines = {}
+    try:
+        parsed = ast.parse(text)
+    except SyntaxError:
+        parsed = None
+    if parsed is not None:
+        for (kind, old), node in zip(reading, ast.walk(parsed)):
+            if kind == type(node).__name__ and old and getattr(node, 'lineno', None):
+                lines.setdefault(node.lineno, old)
+    _REWRITE_LINE_MAPS[text] = lines
+    gpu.remember(new_tree, gpu_marked, text)
     return text
+
+
+_REWRITE_LINE_MAPS = {}
+
+
+def _remap_rewrite_line(error, text):
+    """A refusal from the rewritten script text names its line there; put back the source line."""
+    line = getattr(error, 'source_line', None)
+    mapped = _REWRITE_LINE_MAPS.get(text, {}).get(line) if isinstance(line, int) else None
+    if mapped:
+        error.source_line = mapped
+    return error
 
 
 def to_c(source, strict=True, name='run', info=None, external=None):
@@ -519,6 +558,27 @@ def to_c(source, strict=True, name='run', info=None, external=None):
         return _to_c(fold_int_constants(source), strict, name, info, external)
     finally:
         unbound.SCRIPT.clear()
+
+
+def _print_scalar_constant(node):
+    """A print() argument the typed script path can print without general object semantics.
+
+    A non-bool Constant is already safe.  An integer constant expression (`40 + 2`, as in
+    language_examples/hello.ail) is proven by the same exact folder the big-int pass uses, so the
+    value is a plain int.  It is accepted only when that value fits int64: the typed path has no
+    big ints, so an out-of-range expression would keep the arithmetic and stop with `integer
+    overflow` at run time (AIL_IR=0) instead of printing CPython's exact value.  Such an argument
+    keeps the general fallback; on a typed-only build the big-int gate names it instead.  A bare
+    bool stays out because the typed path erases its object identity to int, which is why this
+    gate exists.
+    """
+    if isinstance(node, ast.Constant):
+        return not isinstance(node.value, bool)
+    try:
+        value = _int_const_value(node)
+    except _IntConstTooLarge:
+        return False
+    return value is not None and _INT64_MIN <= value <= _INT64_MAX
 
 
 def _to_c(source, strict=True, name='run', info=None, external=None):
@@ -535,7 +595,7 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
         call = tree.body[0].value
         if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
                 and call.func.id == 'print'
-                and any(not isinstance(arg, ast.Constant) or isinstance(arg.value, bool)
+                and any(not _print_scalar_constant(arg)
                         for arg in call.args + [kw.value for kw in call.keywords])):
             # Typed bools erase their object identity to int; print must retain it.
             # Nonliteral arguments use the existing object-semantics fallback.
@@ -559,6 +619,8 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
         dunders.HINT.update(dunders._dataclass_markers(source))
         try:
             return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+        except Unsupported as error:
+            raise _remap_rewrite_line(error, rewritten)
         finally:
             dunders.HINT.clear()
     if _is_single_expression(source):
@@ -567,7 +629,10 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
             info.setdefault('ret', 'int')
         return to_pipeline_c(source, name=name, strict=strict)
     rewritten = _rewrite_script(source, force=True)
-    return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+    try:
+        return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+    except Unsupported as error:
+        raise _remap_rewrite_line(error, rewritten)
 
 
 def _main_for(info):
@@ -644,6 +709,22 @@ def _has_main_entry(source):
     except SyntaxError:
         return False
     return any(isinstance(n, ast.FunctionDef) and n.name == 'main' for n in tree.body)
+
+
+def _module_constant_source(source):
+    """True for a source whose whole top level is definitions plus at least one module
+    constant, with no `main` and no executable statement. CPython runs such a file's module
+    body (the constants have no effect) and exits 0, so there is no array-entry tool to
+    synthesize; the general path already builds it as a no-op module body."""
+    if _has_main_entry(source):
+        return False
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    if not any(isinstance(n, (ast.Assign, ast.AnnAssign)) for n in tree.body):
+        return False
+    return _rewrite_script(source, force=False) is None
 
 
 def _general_failure(typed, use_typed, failure):
@@ -743,6 +824,30 @@ def _refuse_round_at_int64_boundary(source):
             raise refusal
 
 
+def _refuse_lambda_positional_only(source):
+    """Refuse a lambda that declares a positional-only parameter (`lambda x, /: ...`) by name.
+
+    Every lambda lowering reads `args.args` for the parameters it binds, so a positional-only
+    parameter was silently dropped: a one-argument call that CPython rejects for a missing
+    ordinary parameter produced a value instead (found by the pre413 review through map() and
+    key=).  The subset has no route for a positional-only lambda, so name it at compile time on
+    both builds; a `def` with positional-only parameters keeps its existing support.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Lambda) and node.args.posonlyargs:
+            refusal = Unsupported(
+                'a lambda with a positional-only parameter (`lambda x, /: ...`) is not in the '
+                'subset\n'
+                '  write instead: use a nested `def` with positional-only parameters, or list '
+                'every lambda parameter as a plain positional one')
+            refusal.source_line = getattr(node, 'lineno', None)
+            raise refusal
+
+
 def _source_line_marker(line):
     """`ail-source-line: N` on its own stderr line, for ail_chatgpt.py to turn into file:line:col.
     Printed only when it asks for it (AIL_REPORT_SOURCE_LINE=1); it removes the line from the text."""
@@ -785,8 +890,10 @@ def build(source, out, strict=True, report=None, force_general=False):
     # A module-level definition shadowing a built-in (`def abs`, `def heappush`) is renamed before
     # either path sees it, so the general path's name-keyed dispatch honours it too (shadowing.py).
     source, shadow = shadowing.rename_all(source, Unsupported)
+    _refuse_lambda_positional_only(source)
     _refuse_round_at_int64_boundary(source)
     try:
+        gpu.check_source(source)         # `compile --gpu`: the syntactic half of the proof, before either path is tried
         result = _build_unshadowed(source, out, strict, report, force_general)
         if last_fallback_reason is not None and shadow:
             last_fallback_reason = shadowing.restore_text(last_fallback_reason, shadow)
@@ -805,6 +912,45 @@ class _BigCapable(Unsupported):
     """The typed path was skipped because a rule-2/3/4 local proof failed; `build` first tries the exact general path."""
 
 
+def _big_capable_node(tree, name, marks):
+    """The AST node whose line best locates a bigcap refusal: the construct itself when it is in
+    the named unit, otherwise the marked callee the reason points at. `None` when there is none."""
+    import re
+
+    def unit_nodes(unit):
+        if unit == '<module>':
+            body = [s for s in tree.body
+                    if not isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+            return [node for stmt in body for node in ast.walk(stmt)]
+        found = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == unit:
+                found.extend(ast.walk(node))
+        return found
+
+    target = name
+    called = re.search(r'it (?:calls|contains) (\w+)\(\)', marks.get(name, ''))
+    if called is not None and called.group(1) in marks:
+        target = called.group(1)
+    nodes = unit_nodes(target) or unit_nodes(name)
+    for node in nodes:
+        if isinstance(node, ast.Constant) and type(node.value) is int \
+                and not -(1 << 63) <= node.value < (1 << 63):
+            return node
+        if isinstance(node, (ast.BinOp, ast.AugAssign)) and isinstance(node.op, (ast.Pow, ast.LShift)):
+            return node
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr in (
+                    'factorial', 'comb', 'perm', 'isqrt', 'from_bytes'):
+                return node
+            if isinstance(func, ast.Name) and func.id in marks:
+                return node
+    fns = [n for n in ast.walk(tree)
+           if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == target]
+    return fns[0] if fns else None
+
+
 def _refuse_big_capable(source, local=True):
     """docs/design/BIGINT.md section 5 and rules 2-4: a whole program with a function that can need a big int (an int literal
     beyond int64, `**`/`<<`/math calls, or rule 4's unproven int local) is not built on the typed path, which has int64 only.
@@ -818,15 +964,39 @@ def _refuse_big_capable(source, local=True):
     prelude = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
     if prelude:                       # library prelude units are not the program's own code (BIGINT.md rules 2-4)
         tree.body = [n for n in tree.body if getattr(n, 'name', None) not in prelude]
-    marks = bigcap.marked(tree, local=local)
+    marks = bigcap.marked(tree, local=local, typed=True)
     if os.environ.get('AIL_NO_GENERAL'):
         # a typed-only build keeps `2 ** k` and `int.from_bytes(...)` (their int64 overflow is the loud stop they always
         # had); `math.factorial`, an out-of-range literal and a variable shift stay refused by name
         marks = {k: v for k, v in marks.items() if not _typed_only_ok(v)}
     if marks:
         name = sorted(marks, key=lambda k: (k != '<module>', k))[0]
-        raise _BigCapable('%s can need an int beyond int64 (%s); the typed path has int64 only and the general path has exact big ints'
-                          % ('the module code' if name == '<module>' else 'function %s()' % name, marks[name]))
+        refusal = _BigCapable('%s can need an int beyond int64 (%s); the typed path has int64 only and the general path has exact big ints\n'
+                              '  write instead: run without --strict (or without AIL_NO_GENERAL=1) so the general '
+                              'path computes exact big integers, or keep every value and intermediate inside int64'
+                              % ('the module code' if name == '<module>' else 'function %s()' % name, marks[name]))
+        node = _big_capable_node(tree, name, marks)
+        refusal.source_line = getattr(node, 'lineno', None) or getattr(tree.body[0], 'lineno', 1)
+        raise refusal
+
+
+def refuse_typed_only_big(source):
+    """The big-int gates of the typed-only build, for entry points that call `to_c(strict=True)` directly and have no
+    general-path fallback (`link_objects`, `build_link_units`): an `@extern` program is linked this way. Without them the
+    constant folder let `-2**63-1` through as INT64_MAX, a silent difference. Same refusals, same wording, as a typed-only
+    build of the plain program (`AIL_NO_GENERAL=1`); `**` with a runtime exponent and shifts keep their loud run-time stop."""
+    source = fold_int_constants(source)     # as `_build_unshadowed` does first: `-2**63` and `2**63 - 1` are in-range literals
+    saved = os.environ.get('AIL_NO_GENERAL')
+    os.environ['AIL_NO_GENERAL'] = '1'
+    try:
+        if _is_whole_program(source):
+            _refuse_big_capable(source, local=False)
+        _refuse_typed_big_store(source, False)
+    finally:
+        if saved is None:
+            os.environ.pop('AIL_NO_GENERAL', None)
+        else:
+            os.environ['AIL_NO_GENERAL'] = saved
 
 
 def _typed_only_ok(reason):
@@ -1026,12 +1196,53 @@ def _refuse_typed_big_store(source, force_general=False):
 _TINT_GATE_WORDS = ('tagged-int', 'tagged local', 'can need an int beyond int64')
 
 
+def _python_runs_nothing(source, constants=False):
+    """Whether a Python-syntax program (AIL_SURFACE=python) has a top level that only defines things
+    (def, class, import, a docstring; with `constants`, also assignments of plain literals), so that
+    CPython prints nothing and exits 0. AIL_TOOL_MODE=1 opts out (library "tool" mode)."""
+    if os.environ.get('AIL_SURFACE') != 'python' or os.environ.get('AIL_TOOL_MODE'):
+        return False
+    try:
+        tree = ast.parse(source.strip())
+    except (SyntaxError, ValueError):
+        return False
+    if not tree.body:
+        return False
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom, ast.Pass)):
+            continue
+        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+            continue
+        if constants and isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
+            try:
+                ast.literal_eval(node.value)
+            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+                return False
+            continue
+        return False
+    return True
+
+
+def _python_defs_only_runs_nothing(source):
+    """A Python-syntax program that only defines things runs nothing under CPython: no output,
+    exit 0. Left alone the build would treat the file as a library "tool" (the last def becomes the
+    entry; a `usage: tool FILE` line, exit 2), so a trailing `pass` gives the module body one
+    statement and the ordinary script `main` is built. ail/brace syntax keeps tool mode."""
+    if not _python_runs_nothing(source):
+        return source
+    return source.rstrip('\n') + '\npass\n'
+
+
+_NOTHING_MAIN = '\nint main(void) { return 0; }\n'
+
+
 def _build_unshadowed(source, out, strict, report, force_general):
     """Try the typed path with exact (tagged) ints, then the exact general path. When neither builds the program and the
     typed attempt was stopped by a tagged-int gate (not by another construct), the program was accepted before the big-int
     work: build it once more on the legacy int64 emitter, whose overflow is a loud stop (never a wrap-around). The
     hard big-int constructs (`_refuse_big_capable`) stay refused."""
     source = fold_int_constants(source)
+    source = _python_defs_only_runs_nothing(source)
     try:
         return _build_unshadowed_exact(source, out, strict, report, force_general)
     except (Unsupported, PipelineError) as first:
@@ -1089,6 +1300,10 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
         if force_general:
             raise Unsupported('general path explicitly requested')
     except Unsupported as _typed_e:
+        if isinstance(_typed_e, gpu.GpuRefusal):
+            raise                       # a marked loop that is not eligible is a refusal, never a general-path fallback
+        gpu.APPLIED.clear()             # the program is built on the general path: no kernel is in it
+        gpu.PATHS.clear()
         # AIL_NO_GENERAL=1: judges use it to ask the TYPED path alone (their negatives assert a
         # by-name refusal of the typed path; through the fallback that refusal would be invisible).
         if os.environ.get('AIL_NO_GENERAL') or legacy_int:
@@ -1178,30 +1393,49 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             # written .c" (test_mixed.py's own spy) still sees the boxed unit -- the one that
             # carries an `AIL_MIXED_TYPED` marker for every wired candidate at its own `extern`
             # declaration, not only the typed unit that defines it.
-            objs = []
+            # The translation units are independent, so their gcc calls run concurrently (_cc_jobs);
+            # every .c is written first, in the serial order, and a failure is reported for the FIRST
+            # failing unit in that order, so the diagnostics and the linked binary match a serial build.
+            cflags = [compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
+                      *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else [])]
+            jobs = _cc_jobs(len(mix_units) + 1)
+            objs, steps = [], []
             for i, (mangled, pyname, csrc) in enumerate(mix_units):
                 tc = out.parent / ('%s_mix%d.c' % (out.name, i))
                 to = out.parent / ('%s_mix%d.o' % (out.name, i))
-                tc.write_text(csrc, encoding='utf-8')
-                native_diagnostics.generated(tc, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-                r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
-                         *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []),
-                         '-c', '-o', str(to), str(tc)],
-                                   capture_output=True, text=True, phase='compile')
-                if r.returncode:
-                    raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path, typed clone of %r):\n%s' %
-                        (pyname, r.stderr[-800:])))
+                steps.append((tc, csrc, [*cflags, '-c', '-o', str(to), str(tc)],
+                              'the C compiler rejected this (general path, typed clone of %r):\n%%s' % (pyname,)))
                 objs.append(str(to))
-            c.write_text(boxed_c, encoding='utf-8')
-            native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
             obj_boxed = out.parent / ('%s_boxed.o' % out.name)
-            r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables',
-                     *(['-ffunction-sections', '-fdata-sections'] if boxed_report.get('bigint') else []),
-                     '-c', '-o', str(obj_boxed), str(c)],
-                               capture_output=True, text=True, phase='compile')
-            if r.returncode:
-                raise _general_failure(_typed_e, typed_main, PipelineError('the C compiler rejected this (general path):\n%s' %
-                                    r.stderr[-800:]))
+            steps.append((c, boxed_c, [*cflags, '-c', '-o', str(obj_boxed), str(c)],
+                          'the C compiler rejected this (general path):\n%s'))
+
+            def _write(step):
+                step[0].write_text(step[1], encoding='utf-8')
+                native_diagnostics.generated(step[0], info.get('c_source_regions', info.get('c_units', (None, []))[1]))
+
+            def _fail(step, r):
+                raise _general_failure(_typed_e, typed_main, PipelineError(step[3] % r.stderr[-800:]))
+
+            if jobs == 1:
+                for step in steps:
+                    _write(step)
+                    r = _cc(step[2], capture_output=True, text=True, phase='compile')
+                    if r.returncode:
+                        _fail(step, r)
+            else:
+                for step in steps:
+                    _write(step)
+                # the boxed unit (last) is by far the longest compile: start it first, so the typed
+                # clones share the other job slot instead of queueing ahead of it
+                from concurrent.futures import ThreadPoolExecutor
+                with ThreadPoolExecutor(jobs) as pool:
+                    pending = {i: pool.submit(_cc, steps[i][2], capture_output=True, text=True, phase='compile')
+                               for i in reversed(range(len(steps)))}
+                    results = [pending[i].result() for i in range(len(steps))]
+                for step, r in zip(steps, results):
+                    if r.returncode:
+                        _fail(step, r)
             r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(),
                      *(['-Wl,--gc-sections'] if boxed_report.get('bigint') else []), '-o', str(out), str(obj_boxed)]
                                + objs + ['-lm'], capture_output=True, text=True, phase='link')
@@ -1223,7 +1457,13 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
+    # A definitions-plus-constants source runs nothing under CPython, so it gets a no-op `main`.
+    # `_python_runs_nothing` covers the python surface; `_module_constant_source` names the same
+    # rule for a definitions-only source with a module constant, while AIL_TOOL_MODE still asks
+    # for the library tool entry instead.
+    main = (_NOTHING_MAIN if _python_runs_nothing(source, True)
+            or (not os.environ.get('AIL_TOOL_MODE') and _module_constant_source(source)) else
+            _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
@@ -1246,6 +1486,7 @@ def build_link_units(source, out, unit_map, external=None):
     """Compile typed functions into distinct C objects with one shared runtime state."""
     out = pathlib.Path(out)
     info = {'_want_units': True, '_link_units': True, '_checked_arrays': True}
+    refuse_typed_only_big(source)
     to_c(source, strict=True, info=info, external=external)
     if 'c_units' not in info:
         raise Unsupported('separate linking requires typed functions')
@@ -1256,7 +1497,8 @@ def build_link_units(source, out, unit_map, external=None):
     grouped = {0: []}
     for name, body in bodies:
         grouped.setdefault(unit_map.get(name, 0), []).append(body)
-    main = _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info)
+    main = (_NOTHING_MAIN if _python_runs_nothing(source, True) else
+            _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
     references = ''
     if external is not None:
         from module_object import _binding_references
@@ -1376,6 +1618,10 @@ def main(argv=None):
         print(fallback_note(last_fallback_reason), file=sys.stderr)
         if _source_line_marker(last_fallback_line):
             print(_source_line_marker(last_fallback_line), file=sys.stderr)
+    if gpu.enabled():
+        print(gpu.applied_line(), file=sys.stderr)
+        for line in gpu.paths_lines():
+            print(line, file=sys.stderr)
     print('%s  %d bytes' % (p, p.stat().st_size))
     return 0
 

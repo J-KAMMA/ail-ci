@@ -54,6 +54,7 @@ import stdlib4
 import float64_fusion
 import sortkeys
 import parallel
+import gpu
 import rebinding
 import string_repeat_fusion
 import borrowed_callback
@@ -2713,6 +2714,7 @@ class Ctx:
         self.has_try = False
         self.par_depth = 0          # > 0 while compiling the body of a `parallel for`
         self.par_regions = {}       # parallel-for number -> facts _par_outline needs
+        self.gpu_regions = {}       # `# ail: gpu` site number -> facts gpu.outline needs (GPU.md G1)
         # (struct name, numeric list field) -> (pointer C name, count C name) while a loop whose body
         # provably never resizes or replaces that field is being emitted (`_span_cache_plan`).
         # Only the code emitter reads it; no type or kind query does, so it needs no epoch bump.
@@ -13053,7 +13055,9 @@ def _numeric_to_int(value, ctx):
             # that does not fit int64 here (A1: int is 64-bit, the result would not fit)
             + ('if (_ail_number_input != _ail_number_input) ail_raise_msg(AIL_EXC_VALUE, "cannot convert float NaN to integer"); '
                'if (__builtin_isinf(_ail_number_input)) ail_die("cannot convert float infinity to integer"); ' if exctext.ACTIVE
-               else 'if (_ail_number_input != _ail_number_input) ail_raise_named(AIL_EXC_VALUE); ') +
+               else 'if (_ail_number_input != _ail_number_input) ail_raise_named(AIL_EXC_VALUE); '
+               + ('if (__builtin_isinf(_ail_number_input)) ail_die("cannot convert float infinity to integer"); '
+                  if os.environ.get('AIL_SURFACE') == 'python' else '')) +
             'ail_die("integer overflow"); } (int64_t)_ail_number_input; })') % value
 def _numeric_expression_needed(node, ctx):
     if isinstance(node, ast.BinOp) and not (_etype(node.left, ctx) in NUM and _etype(node.right, ctx) in NUM):
@@ -14094,7 +14098,9 @@ def _expr(node, ctx):
             finally:
                 ctx.pre = saved
         return _call(node, ctx)
-    raise Unsupported(_shape_refusal(node, _EXPR_SHAPE_REFUSALS, 'expression'))
+    refusal = Unsupported(_shape_refusal(node, _EXPR_SHAPE_REFUSALS, 'expression'))
+    refusal.source_line = getattr(node, 'lineno', None)
+    raise refusal
 
 
 def _field_list_kind(node, ctx):
@@ -19287,7 +19293,10 @@ def _listcomp_into_temp(node, ctx):
     # comprehension's own element loop, wiping everything but the last element. The
     # allocator cannot know where its caller will place the fill.
     ctx.pre.append('%s_clear(&%s);' % (helper, c))
-    ctx.pre.append('{ %s }' % ' '.join(lines))
+    block = '{ %s }' % ' '.join(lines)
+    if getattr(node, 'gpu', None) is not None and kind in (FLIST, LIST) and not string_source and not struct_source:
+        block = gpu.region(ctx, node.gpu, block, dest=c)
+    ctx.pre.append(block)
     return c
 
 
@@ -21872,6 +21881,18 @@ def _stmt_inner(node, ctx, ind):
             v = _bytes_value(fake, ctx)
             return _flush(ctx, pad) + '%s%s = %s;\n' % (pad, ctx.cname(node.target.id), v)
         _at = ctx.type_of(node.target.id)
+        if (_at == BYTEARRAY and isinstance(node.op, ast.Add)
+                and _etype(node.value, ctx) in (BYTES, BYTEARRAY)
+                and not (isinstance(node.value, ast.Name) and node.value.id == node.target.id)):
+            # `ba += chunk` extends the bytearray in place (CPython's bytearray.__iadd__) for a bytes or bytearray
+            # chunk; a list, a str or an int is a TypeError there and is not rewritten.  `ba += ba` is a BufferError
+            # in CPython ("Existing exports of data"), so that one stays refused (a copy, `ba += ba[:]`, is fine)
+            extend = ast.Call(func=ast.Attribute(value=node.target, attr='extend', ctx=ast.Load()),
+                              args=[node.value], keywords=[])
+            ast.copy_location(extend, node)
+            ast.fix_missing_locations(extend)
+            call_c = _bytearray_method(extend, ctx, as_stmt=True)
+            return _flush(ctx, pad) + '%s(void)(%s);\n' % (pad, call_c)
         if _at not in NUM:
             raise Unsupported('augmented assignment to %s; a container is not rebound by += -- '
                               'grow a list with .append(), a set with .add(), and a dict with '
@@ -21911,6 +21932,8 @@ def _stmt_inner(node, ctx, ind):
     if isinstance(node, ast.For):
         if getattr(node, 'par', None) is not None:
             return _par_for(node, ctx, ind)
+        if getattr(node, 'gpu', None) is not None:
+            return gpu.region(ctx, node.gpu, _for(node, ctx, ind)) + '\n'
         return _for(node, ctx, ind)
     if isinstance(node, ast.Return):
         if ctx.ret in (EXCEPTION, BYTEARRAY, BINARYFILE, TCPSOCKET):
@@ -22319,14 +22342,18 @@ def _stmt_inner(node, ctx, ind):
                     _exc_text_parts(ctx)
                 return pre + ('%s{ int64_t _dk = %s; if (_dk >= %s.n || _dk < -%s.n) ail_die("list assignment index out of range"); '
                               '(void)ail_list_pop(&%s, _dk); }\n' % (pad, k, c, c, c))
-        raise Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
+        refusal = Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
     if isinstance(node, ast.Assert):
         # F4 (DESIGN_FOUNDATION_20260914.md section 5): `ail_die` given a value the program
         # built, not a literal the compiler chose. Ordinary Python's own way to fail with a
         # description -- `assert cond, msg` -- rather than a new builtin, the same way F3 reuses
         # `print` instead of inventing one.
         return _assert_stmt(node, ctx, pad)
-    raise Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
+    refusal = Unsupported(_shape_refusal(node, _STMT_SHAPE_REFUSALS, 'statement'))
+    refusal.source_line = getattr(node, 'lineno', None)
+    raise refusal
 
 
 def _raise_stmt(node, ctx, pad):
@@ -27319,7 +27346,7 @@ def _promote_floats(fn, ctx):
     _seed_local_annotations(fn, ctx)
     nodes = tuple(ast.walk(fn))
     for _ in range(len(nodes) + 1):
-        _bind_object_types(fn, ctx)
+        _bind_object_types(fn, ctx, nodes)
         changed = False
         for node in nodes:
             if not isinstance(node, (ast.Assign, ast.AnnAssign)) or node.value is None:
@@ -27343,7 +27370,7 @@ def _promote_floats(fn, ctx):
     for name in ctx.blist:
         if name not in ctx.kind:
             ctx.types[name] = BLIST
-    _bind_object_types(fn, ctx)
+    _bind_object_types(fn, ctx, nodes)
     # `slist_names`: every name ever assigned a list of str (AIL_TASK_strops_20260915.md Part B)
     # -- the SLIST counterpart of `container_names` below, needed for the identical reason
     # (`words = s.split()` is settled in `_stmt`'s own SLIST branch, not here). Grown in the SAME
@@ -28255,20 +28282,30 @@ def _mark_tuple_dicts(fn, ctx):
     return out
 
 
-def _bind_object_types(fn, ctx):
+def _bind_object_types(fn, ctx, nodes=None, assigned_names=None):
     """Seed `ctx.types` with the class of a local first assigned a constructor call, or a call to
     another function already known (from `ctx.funcs`, mid fixed-point) to return one -- the same
     job `_bind_container_types` does for LIST/FLIST, done here for class instances, and for the
     same reason: `return p` has to be recognisable as producing an instance while `_signatures` is
     still deciding every function's signature, before a single line of C exists for this body to
-    walk instead."""
-    nodes = list(ast.walk(fn))
-    assigned_names = {target.id for node in nodes for target in (node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []) if isinstance(target, ast.Name)}
-    for handler in (node for node in nodes if isinstance(node, ast.ExceptHandler) and node.name):
-        if handler.name in ctx.kind or handler.name in assigned_names or handler.name in ctx.modconsts:
-            raise Unsupported('exception handler binding %r conflicts with an existing local, parameter or constant' % handler.name)
-        ctx.types[handler.name] = EXCEPTION
-        ctx.exception_handler_names.add(handler.name)
+    walk instead.
+
+    `nodes`, when the caller already has `ast.walk(fn)`'s result, is that same sequence: the walk
+    is the whole function, and `_promote_floats` asks for this pass several times over it, so the
+    caller hands its own tuple in rather than paying for the walk again. `assigned_names` is the
+    matching set of assigned target names; it is needed only to check an `except ... as name`
+    handler, so without one it is never built (nor asked for)."""
+    if nodes is None:
+        nodes = list(ast.walk(fn))
+    handlers = [node for node in nodes if isinstance(node, ast.ExceptHandler) and node.name]
+    if handlers:
+        if assigned_names is None:
+            assigned_names = {target.id for node in nodes for target in (node.targets if isinstance(node, ast.Assign) else [node.target] if isinstance(node, ast.AnnAssign) else []) if isinstance(target, ast.Name)}
+        for handler in handlers:
+            if handler.name in ctx.kind or handler.name in assigned_names or handler.name in ctx.modconsts:
+                raise Unsupported('exception handler binding %r conflicts with an existing local, parameter or constant' % handler.name)
+            ctx.types[handler.name] = EXCEPTION
+            ctx.exception_handler_names.add(handler.name)
     def known(value):
         try:
             return _etype(value, ctx)
@@ -35030,6 +35067,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         from module_object import _struct_source
         source = _struct_source(external['structs']) + source
     tree = ast.parse(source.strip())
+    gpu.tag(tree, source.strip())              # `# ail: gpu`: before any pass rewrites the tree
     refuse_field_method_call(tree)
     debug_restore_lines(tree, source.strip())
     _read_only_sequence_annotations(tree)
@@ -35132,6 +35170,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     if _MODCONSTS.vars:
         _check_module_variables(tree, _MODCONSTS.vars)
     parallel.prepare(tree, Unsupported)
+    gpu.prepare(tree, source.strip())          # `# ail: gpu` loops (a no-op without `compile --gpu`)
     _hoist_augassign_indexes(tree)
     _lower_set_method_spellings(tree)
     _lower_list_operations(tree)
@@ -37711,6 +37750,8 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         generated = _c_identifier_replace(generated, token, value)
     if ctx.par_regions:
         generated = _par_outline(generated, sig, decls, ctx, cname)
+    if ctx.gpu_regions:
+        generated = gpu.outline(generated, sig, decls, ctx, cname, _par_decls)
     generated = _range_strip(generated)
     return sig, generated, ctx
 

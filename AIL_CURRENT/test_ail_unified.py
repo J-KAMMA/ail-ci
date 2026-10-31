@@ -1446,7 +1446,10 @@ class Unified(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             cs = {}
             for mode, env in (('plain', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '0'}),
+                              # the plan of BIGINT.md section 6 (a marked function boxed whole); section 14's exact
+                              # mode unboxes the bounded part of these marked functions (test_ail_bigcap_split)
                               ('unified', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '1', 'AIL_BIGINT': 'off',
+                                           'AIL_UNIFIED_EXACT': '0',
                                            'AIL_UNIFIED_STATS': str(Path(d, 'stats.jsonl'))})):
                 source = Path(d, 'p_%s.py' % mode)
                 source.write_text(text, encoding='utf-8')
@@ -1503,7 +1506,8 @@ class Unified(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             cs = {}
             for mode, env in (('plain', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '0'}),
-                              ('unified', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '1'})):
+                              ('unified', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '1',
+                                           'AIL_UNIFIED_EXACT': '0'})):     # section 6's plan (see test_u5)
                 source = Path(d, 'p_%s.py' % mode)
                 source.write_text(text, encoding='utf-8')
                 envs = dict(os.environ)
@@ -1520,11 +1524,11 @@ class Unified(unittest.TestCase):
                      'for (int64_t _uvk', '_uv->p['):
             self.assertNotIn(form, plain)
             self.assertNotIn(form, c)
-        # the unannotated tuple loops are boxed: no unboxed local; only the run-time changes every plan gets (section 15) differ
+        # the unannotated tuple loops are boxed: no unboxed local; only the run-time changes every plan gets (section 15) differ (and the gc pool)
         sys.path[:0] = [str(PKG)]
         try:
             import safetyrt
-            plain = safetyrt.patch_tuples(safetyrt.patch_sortprim(plain))
+            plain = safetyrt.patch_gcpool(safetyrt.patch_tuples(safetyrt.patch_sortprim(plain)))
         finally:
             sys.path.remove(str(PKG))
         self.assertEqual(plain, c)
@@ -1649,16 +1653,16 @@ class Unified(unittest.TestCase):
 
 
     def test_u12_gc_pool(self):
-        """Step 5: the size-class free list under the collector (AIL_UNIFIED=1 with AIL_UNIFIED_POOL=1, not with threads): small strings,
-        float boxes, dicts and lists over several collections print what CPython prints; the C has the pool only
-        with the flag."""
+        """Step 5: the size-class pool under the collector (on by default with AIL_UNIFIED on and no threads; AIL_UNIFIED=0 and
+        AIL_UNIFIED_POOL=0 leave it out): small strings, float boxes, dicts and lists over several collections print what CPython
+        prints; the C has the pool only when it is on."""
         with tempfile.TemporaryDirectory() as d:
             src = Path(d, 'pool_cpython.py')
             src.write_text(POOL, encoding='utf-8')
             cp = run([sys.executable, str(src)]) if ON_312 else None
             outs, cs = {}, {}
-            for mode, env in {'plain': {'AIL_UNIFIED': '0'}, 'unified': {'AIL_UNIFIED': '1', 'AIL_UNIFIED_POOL': '1'},
-                              'nopool': {'AIL_UNIFIED': '1'}}.items():
+            for mode, env in {'plain': {'AIL_UNIFIED': '0'}, 'unified': {'AIL_UNIFIED': '1'},
+                              'nopool': {'AIL_UNIFIED': '1', 'AIL_UNIFIED_POOL': '0'}}.items():
                 source = Path(d, 'pool_' + mode + '.py')
                 source.write_text(POOL, encoding='utf-8')
                 e = dict(os.environ, AIL_NO_CACHE='1')
@@ -1678,15 +1682,15 @@ class Unified(unittest.TestCase):
                 self.assertEqual(cp[:2], outs['unified'][:2])
             self.assertNotIn('ail2u_pool', cs['plain'])
             self.assertIn('ail2u_pool', cs['unified'])
-            self.assertNotIn('ail2u_pool', cs['nopool'])  # opt-in: +4% RSS geomean (up to +30%) for 1.045x
+            self.assertNotIn('ail2u_pool', cs['nopool'])  # the opt-out
             self.assertEqual(outs['nopool'][:2], outs['unified'][:2])
 
 
     def test_u14_sort_tuples(self):
         """Step 6: a sort on float or int keys (natural merge sort on (key, index) records) and a tuple of up to 8 items in
         one allocation. Floats (ties, -0.0, inf, runs, descending), ints (int64 ends), reverse, mixed and generic keys, NaN
-        (the old path, the same bytes as before), tuples of every size around the inline limit, growth, keys, GC. Same bytes as CPython
-        (NaN: as the general path); the C has the fast paths with the plan only."""
+        (now refused by name on both builds: no silent difference from CPython), tuples of every size around the inline limit, growth, keys, GC. Same bytes as CPython
+        (NaN: refused by name); the C has the fast paths with the plan only."""
         with tempfile.TemporaryDirectory() as d:
             res = {}
             for name, src in (('sortprim', SORTPRIM), ('tuples15', TUPLES15), ('sortnan', SORTNAN)):
@@ -1704,11 +1708,21 @@ class Unified(unittest.TestCase):
                     c = Path(d, name + '_' + mode + '.d', 'program.c').read_text(encoding='utf-8', errors='replace')
                     self.assertEqual('ail2u_sort_prim' in c, mode == 'unified', (name, mode))
                     self.assertEqual('ail2u_sort_prim' in c, 'ktmp = NULL' in c, (name, mode))
-                self.assertEqual(res[name, 'general'][0], 0, res[name, 'general'])
-                self.assertEqual(res[name, 'general'][:2], res[name, 'unified'][:2], name)
-                if ON_312 and name != "sortnan":
-                    cp = run([sys.executable, str(Path(d, name + '.py'))])
-                    self.assertEqual(cp[:2], res[name, 'unified'][:2], name)
+                if name == 'sortnan':
+                    # a NaN key has no total order; both builds now stop by name (refuzz95) rather
+                    # than return a permutation that differs from CPython with no error
+                    for mode in ('general', 'unified'):
+                        code, out, err = res[name, mode]
+                        self.assertNotEqual(code, 0, res[name, mode])
+                        self.assertIn('ValueError', err, res[name, mode])
+                        self.assertIn('refuzz95', err, res[name, mode])
+                    self.assertEqual(res[name, 'general'][:2], res[name, 'unified'][:2], name)
+                else:
+                    self.assertEqual(res[name, 'general'][0], 0, res[name, 'general'])
+                    self.assertEqual(res[name, 'general'][:2], res[name, 'unified'][:2], name)
+                    if ON_312:
+                        cp = run([sys.executable, str(Path(d, name + '.py'))])
+                        self.assertEqual(cp[:2], res[name, 'unified'][:2], name)
 
 
 if __name__ == '__main__':

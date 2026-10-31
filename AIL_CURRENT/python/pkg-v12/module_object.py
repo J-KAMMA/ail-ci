@@ -47,7 +47,7 @@ def identity():
                 implementation={name: digest(package / name) for name in
                                 ('pyfunc.py', 'cruntime.py', 'float64_fusion.py', 'string_repeat_fusion.py', 'sortkeys.py', 'parallel.py', 'pyc.py', 'module_object.py', 'c_object.py',
                                  'pyfront.py', 'pipeline.py', 'native_diagnostics.py', 'c_api_bridge.py', 'callable_types.py',
-                                 'borrowed_callback.py')})
+                                 'borrowed_callback.py', 'gpu.py', 'gpu_spirv.py', 'gpu_vk.py')})
 
 
 def contract_symbol(contract):
@@ -797,11 +797,12 @@ def load_objects(paths, *, require_dependencies=True, c_api_namespace=None):
 
 
 def link_objects(source, output, paths, *, unit_map=None):
-    from pyc import _io_main_for, _main_for, _finalize_output, to_c, build_link_units
+    from pyc import _io_main_for, _main_for, _finalize_output, to_c, build_link_units, refuse_typed_only_big
     from pyfunc import NORET
     metadata = load_objects(paths)
     _check_external_names(source, {**metadata['exports'], **metadata['constants'], **metadata['structs']})
     source = _constant_source(metadata['constants']) + source
+    refuse_typed_only_big(source)          # no general-path fallback here: refuse by name what the typed-only build refuses
     with tempfile.TemporaryDirectory(prefix='ail-object-entry-') as directory:
         staged_objects = []
         for index, original in enumerate(metadata['objects']):

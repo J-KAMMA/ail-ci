@@ -1,0 +1,128 @@
+name: compare-lab
+
+# Language comparison: the same ten programs (lab/compare/src/<task>/) built in C (gcc -O2), Rust (rustc, opt-level 3),
+# Go, Nim (-d:release) and run by CPython 3.12, against AIL built from this checkout (the .ail source, and the CPython
+# source compiled by AIL). One job per task; each reports instructions, peak RSS, binary size, compile time, build disk
+# and the AIL typed/general path, and every stdout and exit code is checked against the task's CPython reference.
+# The report job merges the tasks into tables (AIL first, ratio vs the best other language) and a JSON artifact.
+# Every program also runs on all public and hidden cases of its task (gen.py) against the CPython reference; wall time is
+# the median of 5 runs. Toolchain versions are pinned in lab/compare/toolchains.env: missing ones are installed, and the
+# job fails if the versions found differ. At most 4 task jobs run at once (the free runners are shared).
+# Manual only (no push or schedule trigger): `gh workflow run compare-lab -R J-KAMMA/ail-ci --ref integ`;
+# `tasks` limits the run to some tasks, e.g. -f tasks='tree_fold tally_lang'.
+on:
+  workflow_dispatch:
+    inputs:
+      tasks:
+        description: 'Space separated task names (default: all ten)'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: compare-lab-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    runs-on: ubuntu-24.04
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - id: m
+        env:
+          WANT: ${{ inputs.tasks }}
+        run: |
+          all=$(ls lab/compare/src)
+          want=${WANT:-$all}
+          for t in $want; do test -d "lab/compare/src/$t" || { echo "unknown task: $t"; exit 1; }; done
+          echo "matrix=$(printf '%s\n' $want | jq -R . | jq -sc '{task: .}')" >> "$GITHUB_OUTPUT"
+
+  measure:
+    name: ${{ matrix.task }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install toolchains
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq valgrind time
+          # Nim 2.2.12 prebuilt tarball, checksum from nim-lang.org/download
+          curl -fsSL -o nim.tar.xz https://nim-lang.org/download/nim-2.2.12-linux_x64.tar.xz
+          echo "7df1611449a6842af69322aa2c1206942982650a5f6bc0d37bc8ec109932f638  nim.tar.xz" | sha256sum -c -
+          tar xf nim.tar.xz -C "$HOME"
+          echo "$HOME/nim-2.2.12/bin" >> "$GITHUB_PATH"
+          # Go and Rust: the versions pinned in lab/compare/toolchains.env. The runner image usually has them already;
+          # otherwise install exactly the pinned one (Go from the checksummed tarball, Rust through rustup).
+          . lab/compare/toolchains.env
+          if [ "$(go version 2>/dev/null | awk '{print $3}')" != "go$GO" ]; then
+            curl -fsSL -o go.tar.gz "https://go.dev/dl/go$GO.linux-amd64.tar.gz"
+            echo "1fc94b57134d51669c72173ad5d49fd62afb0f1db9bf3f798fd98ee423f8d730  go.tar.gz" | sha256sum -c -
+            sudo rm -rf /usr/local/go-pinned && sudo mkdir /usr/local/go-pinned && sudo tar xf go.tar.gz -C /usr/local/go-pinned --strip-components=1
+            echo "/usr/local/go-pinned/bin" >> "$GITHUB_PATH"
+          fi
+          if [ "$(rustc --version 2>/dev/null | awk '{print $2}')" != "$RUSTC" ]; then
+            command -v rustup >/dev/null || { curl -fsSL https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none; . "$HOME/.cargo/env"; }
+            rustup toolchain install "$RUSTC" --profile minimal --no-self-update
+            rustup default "$RUSTC"
+          fi
+          # a hardware instruction counter is rarely exposed on a hosted VM; try, fall back to callgrind
+          sudo sysctl -w kernel.perf_event_paranoid=-1 || true
+      - name: Versions
+        run: |
+          export PATH="$HOME/nim-2.2.12/bin:$PATH"
+          python3 lab/compare/check_tools.py
+          gcc --version | head -1; rustc --version; go version; nim --version | head -1; python3 --version; valgrind --version
+          nproc; free -g | head -2; df -h . | tail -1
+      - name: Measure ${{ matrix.task }}
+        run: |
+          export PATH="$HOME/nim-2.2.12/bin:$PATH"
+          sudo sysctl -w kernel.perf_event_paranoid=-1 || true
+          python3 lab/compare/run_task.py --task "${{ matrix.task }}" --out "result-${{ matrix.task }}.json"
+      - name: Keep results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: result-${{ matrix.task }}
+          path: result-${{ matrix.task }}.json
+          if-no-files-found: ignore
+
+  report:
+    name: report
+    needs: [plan, measure]
+    if: always() && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: result-*
+          path: results
+      - name: Merge
+        run: |
+          python3 lab/compare/merge.py results --json compare-report.json > compare-report.md
+          cat compare-report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: compare-report
+          path: |
+            compare-report.md
+            compare-report.json

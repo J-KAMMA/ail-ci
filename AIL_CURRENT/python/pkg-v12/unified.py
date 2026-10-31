@@ -43,6 +43,7 @@ come from unified_lists.py, solved again in every round of the fixed point, and 
 import ast
 import os
 import biggate
+import bigcap
 
 import pyfunc
 
@@ -129,6 +130,7 @@ class FnPlan(object):
         self.calls_in = []               # (caller plan or None, call node)
         self.own_updates = []            # `own` filtered to the shapes the fixed point's round reads
         self.own_returns = []            # `own` filtered to its `return` statements
+        self.exact = False               # a marked function: an int expression is unboxed only when it is bounded
 
     def unboxed(self, name):
         t = self.vtype.get(name)
@@ -765,6 +767,12 @@ class Plan(object):
         self.stats = {}
 
 
+def exact_enabled():
+    """Per-function exact mode for the functions bigcap marks (the default); AIL_UNIFIED_EXACT=0 boxes a marked function
+    and, transitively, every caller of one, as before."""
+    return os.environ.get('AIL_UNIFIED_EXACT', '').strip().lower() not in ('0', 'off', 'no', 'false')
+
+
 def proven_ints():
     """BIGINT.md section 6: an unboxed int local is kept only where its range is proven (AIL_UNIFIED_PROVEN=1); the default
     is chosen by the measurement recorded there."""
@@ -815,11 +823,24 @@ def fn_bits(plan, fp):
     return got
 
 
+def _user_len(tree):
+    """Whether a class of the program defines __len__ (then len() of an unknown value is any int)."""
+    got = getattr(tree, '_ail_user_len', None)
+    if got is None:
+        got = any(isinstance(n, ast.FunctionDef) and n.name == '__len__' for n in ast.walk(tree)) if tree is not None else True
+        try:
+            tree._ail_user_len = got
+        except AttributeError:
+            pass
+    return got
+
+
 def _bounds(plan, fp, tree, ints):
     consts = getattr(plan, '_mconsts', None)
     if consts is None:
         consts = plan._mconsts = _module_int_consts(tree)
     B = {v: 0 for v in ints}
+    exact_len = getattr(fp, 'exact', False) and _user_len(tree)
     for v in fp.params:
         if v in B:
             B[v] = _INF
@@ -871,6 +892,8 @@ def _bounds(plan, fp, tree, ints):
         if isinstance(e, ast.UnaryOp):
             return bits(e.operand) if isinstance(e.op, (ast.USub, ast.UAdd, ast.Invert)) else _INF
         if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in ('len', 'ord') and e.func.id not in plan.fn_names:
+            if e.func.id == 'len' and exact_len and not (e.args and bigcap._lp_builtin_len_arg(e.args[0])):
+                return _INF         # an exact function: a class's __len__ can return any int (BIGINT.md section 14)
             return 40 if e.func.id == 'len' else 21
         if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in ('abs', 'min', 'max') and e.args \
                 and e.func.id not in plan.fn_names and not e.keywords:
@@ -990,28 +1013,39 @@ def analyze(comp, tree, demote, nofloat=False):
                     and bigcap._lp_reason([node], None, _defined))}
     _prelude = set(getattr(comp, 'prelude_names', ()))
     _prelude |= {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
-    _marks = {k: v for k, v in bigcap.marked(tree).items()
+    # Exact mode (the default; AIL_UNIFIED_EXACT=0 is the old rule): a marked function is not boxed whole. Its int
+    # expressions are unboxed only where their bit bound (fn_bits) is below 63, everything else is the general path's
+    # boxed, promoting int; its floats and bools stay unboxed. Only the functions whose OWN code is marked are exact: a
+    # value that crosses a call stays exact without marking the caller (an exact function's int result is unboxed only
+    # when it is bounded, an unbounded one is boxed; a boxed argument fails the specialised body's entry guard).
+    _exact_mode = exact_enabled()
+    _mark_fn = bigcap.own_marked if _exact_mode else bigcap.marked
+    _marks = {k: v for k, v in _mark_fn(tree).items()
               if k not in _prelude and not k.startswith(('_ail', '_Ail'))}
     _local_demote = any(
         k != '<module>' and k not in _ann
         and not v.startswith(('it calls ', 'it contains '))
         for k, v in _marks.items())
-    _demote_names = {k for k in bigcap.marked(tree, local=False)
+    _demote_names = {k for k in _mark_fn(tree, local=False)
                      if k not in _prelude and not k.startswith(('_ail', '_Ail'))}
     if _local_demote:
         _demote_names |= set(_marks)
+    plan.exact = set()
     for _name in _demote_names:
         if _name == '<module>':
             continue
-        demote.add((_name, '*'))
-        demote.add(('pfu_' + _name, '*'))
+        _keys = {_name, 'pfu_' + _name}
         for _key, _info in comp.functions.items():
             if _key == _name:
-                demote.add((_info['cname'], '*'))
+                _keys.add(_info['cname'])
         for _c in comp.class_order:
             _info = comp.classes[_c]['methods'].get(_name)
             if _info is not None:
-                demote.add((_info['cname'], '*'))
+                _keys.add(_info['cname'])
+        if _exact_mode:
+            plan.exact |= _keys
+        else:
+            demote.update((_k, '*') for _k in _keys)
     plan.id_callees = _identity_callees(tree, names_all)     # C101
 
     # ---- module constants: one top-level `NAME = <int/float/bool literal>`, never stored elsewhere
@@ -1088,6 +1122,7 @@ def analyze(comp, tree, demote, nofloat=False):
                and n.func.id in ('locals', 'vars', 'eval', 'exec', 'globals') for n in own):
             continue
         fp = FnPlan(cname, info, node)
+        fp.exact = cname in plan.exact
         fp.is_method = info.get('is_method', False)
         fp.pyname = node.name
         par = par_all
@@ -1230,6 +1265,7 @@ def analyze(comp, tree, demote, nofloat=False):
         if any(name in p.locals for p in plan.fns.values()):
             continue
         sp = FnPlan('pfu_' + name, info, info['node'])
+        sp.exact = base.exact or sp.name in plan.exact
         sp.is_method = False
         sp.pyname = name
         sp.locals = set(base.locals)
@@ -1604,7 +1640,7 @@ def analyze(comp, tree, demote, nofloat=False):
         ps = list(args.posonlyargs) + list(args.args)
         return bool(ps) and all(a.annotation is not None and isinstance(a.annotation, ast.Name)
                                 and a.annotation.id in ('int', '__ail_checked_int__') for a in ps)
-    more = {(fp.name, v) for fp in plan.fns.values() if not _annotated(fp)
+    more = {(fp.name, v) for fp in plan.fns.values() if not _annotated(fp) or fp.exact
             for v in unproven_ints(plan, fp, tree)} - demote
     if more:
         return analyze(comp, tree, demote | more, nofloat)
@@ -2050,6 +2086,9 @@ def etype(plan, fp, n, env):
     """The lattice value of expression `n` in function `fp`, under the variable types `env`.
     A scalar answer means the emitter can produce the value unboxed (`Emit.nexpr`)."""
     t = _etype(plan, fp, n, env)
+    if t == INT and fp is not None and fp.exact and not isinstance(n, (ast.Name, ast.Constant))             and fn_bits(plan, fp)(n) > 62 and _row_read(plan, fp, n) is None:
+        # (a row read of a constant table is an int64 literal of the table, and the table loop reads it only natively)
+        return OBJ            # an exact function: an unbounded int expression is the boxed, promoting int
     return OBJ if (t == FLOAT and plan.nofloat) else t
 
 
@@ -2560,7 +2599,7 @@ def nexpr(comp, node, ctx):
         if ntype(comp, ctx, node.test) in SCALAR:
             cond = ntest(comp, node.test, ctx)
         else:
-            cond = 'ail_obj_truthy(%s)' % comp.expr(node.test, ctx)
+            cond = comp.truth(comp.expr(node.test, ctx), ctx)
         _open(ctx, 'if (%s) {' % cond)
         ctx.emit('%s = %s;' % (r, nexpr(comp, node.body, ctx)))
         _close(ctx, '} else {')

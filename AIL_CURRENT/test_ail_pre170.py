@@ -196,7 +196,9 @@ def _build_and_run(directory, name, text, general, run_args=()):
     src = Path(directory) / (name + '.ail')
     src.write_text(text, encoding='utf-8')
     exe = Path(directory) / ('exe_' + name + ('_g' if general else '_d'))
-    env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
+    # These programs only define things and call `entry` as a library tool, which Python syntax
+    # now runs like CPython (nothing) unless tool mode is asked for
+    env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1', AIL_TOOL_MODE='1')
     env.pop('AIL_NO_GENERAL', None)
     if general:
         env['AIL_UNIFIED_FORCE'] = '1'

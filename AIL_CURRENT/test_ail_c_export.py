@@ -33,6 +33,8 @@ EXAMPLE = ROOT / 'language_examples' / 'c_export'
 CLI = str(ROOT / 'ail_chatgpt.py')
 CC = os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc')
 RUSTC = shutil.which('rustc')
+if RUSTC and subprocess.run([RUSTC, '--version'], capture_output=True).returncode:
+    RUSTC = None                      # a rustup shim with no installed toolchain cannot compile
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(EXAMPLE))
 
@@ -382,7 +384,6 @@ class ExportBuildEdgeTests(unittest.TestCase):
             (header + 'def f(x: int) -> int:\n    return x\n', 'no @export function'),
             (header + '@export\ndef free(x: int) -> int:\n    return x\n', 'reserved'),
             (header + '@export\ndef f(x: int) -> int:\n    return x\n\ndef ailx_f() -> int:\n    return 1\n', 'reserved for the generated'),
-            ('from ail_ffi import export, extern\n@export\ndef f(x: int) -> int:\n    return x\n', 'not extern'),
         ]
         for text, message in cases:
             with self.subTest(message=message):

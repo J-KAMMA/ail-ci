@@ -1,21 +1,102 @@
 name: tests
 
+# ci-light-v1 (2026-10-30): ~/agents/ci greps for this marker to know that integ has the smoke mode.
+#
+# tools/ci_plan.py (the `plan` job) decides what runs:
+#   full   all 20 shards + gpu: push to main or integ, workflow_dispatch, pull requests from cand-* / claude-batch-*
+#          (the merge gates of the automation), pull requests to main, and pull requests labelled `full-ci`
+#   smoke  every other pull request: update_manifest --check, ci_shards --check and the PR's own or directly
+#          affected test modules (a fixed set when a changed code file maps to nothing cheap); gpu only when a
+#          gpu/spirv/vulkan file changed
+# A pull request reaches integ through a gate branch, so the full suite has always run on a head that contains it.
+# Job names: `shard i/20` and `gpu (lavapipe)` as before; `plan` and `smoke` are new.
 on:
   push:
-    branches: [main]
+    branches: [main, integ]
   pull_request:
+    types: [opened, synchronize, reopened, labeled]
   workflow_dispatch:
 
 permissions:
   contents: read
+  checks: read
 
 concurrency:
   group: tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  plan:
+    name: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      mode: ${{ steps.plan.outputs.mode }}
+      modules: ${{ steps.plan.outputs.modules }}
+      gpu: ${{ steps.plan.outputs.gpu }}
+      carry: ${{ steps.plan.outputs.carry }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Plan
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          ACTION: ${{ github.event.action }}
+          HEAD_REF: ${{ github.head_ref }}
+          BASE_REF: ${{ github.base_ref }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BEFORE: ${{ github.event.before }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
+        run: python3 tools/ci_plan.py
+
+  smoke:
+    name: smoke
+    needs: plan
+    if: ${{ needs.plan.outputs.mode == 'smoke' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Carried over
+        if: ${{ needs.plan.outputs.carry == 'true' }}
+        run: echo "the head only merges the base into a head whose smoke passed and its own diff is unchanged (see the plan job)"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        if: ${{ needs.plan.outputs.carry != 'true' }}
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        if: ${{ needs.plan.outputs.carry != 'true' }}
+        with:
+          python-version: '3.12'
+      - name: Check manifest pins and the shard map
+        if: ${{ needs.plan.outputs.carry != 'true' }}
+        run: |
+          python3 tools/update_manifest.py --check
+          python3 tools/ci_shards.py --check
+      - name: Byte-compile the compiler
+        if: ${{ needs.plan.outputs.carry != 'true' && needs.plan.outputs.modules != '' }}
+        run: python3 -m compileall -q -j 0 AIL_CURRENT tools
+      - name: Run the smoke modules
+        if: ${{ needs.plan.outputs.carry != 'true' && needs.plan.outputs.modules != '' }}
+        env:
+          MODULES: ${{ needs.plan.outputs.modules }}
+        run: |
+          gcc --version | head -1
+          echo "modules: $MODULES"
+          python3 tools/par_check.py -j 4 $MODULES
+
   suite:
     name: shard ${{ matrix.shard }}/20
+    needs: plan
+    if: ${{ needs.plan.outputs.mode == 'full' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     strategy:
@@ -31,7 +112,13 @@ jobs:
         with:
           python-version: '3.12'
       - name: Check manifest pins
+        # AIL_CURRENT/manifest.d/ holds the pins (one line per file); tests are registered by files in
+        # AIL_CURRENT/tests.d/, which tools/ci_shards.py reads through ail_check.MODULES
         run: python3 tools/update_manifest.py --check
+      - name: Byte-compile the compiler
+        # every build spawns `python3 -B pyc.py`, which never writes __pycache__: on a fresh checkout
+        # each compile re-parsed the whole compiler (1.3-1.6 s per build on the dev laptop, 2026-10-29)
+        run: python3 -m compileall -q -j 0 AIL_CURRENT tools
       - name: Run shard
         env:
           SHARD: ${{ matrix.shard }}
@@ -42,3 +129,71 @@ jobs:
           modules=$(python3 tools/ci_shards.py --shard "$SHARD")
           echo "modules: $modules"
           python3 tools/par_check.py -j 4 $modules
+
+  gpu:
+    name: gpu (lavapipe)
+    needs: plan
+    if: ${{ needs.plan.outputs.mode == 'full' || needs.plan.outputs.gpu == 'true' }}
+    # GPU.md section 5.1: the SPIR-V kernels run on lavapipe (Mesa's software Vulkan) and must print what the CPU path and
+    # CPython print.  One job, kept out of the 20 shards.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - name: Install lavapipe, the Vulkan loader, the Vulkan headers and spirv-tools
+        # dev and CI only: spirv-val checks every emitted module, the headers check the structs the runtime declares itself.
+        # A built program needs none of these (libvulkan is opened at run time, and optionally).
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mesa-vulkan-drivers libvulkan1 libvulkan-dev spirv-tools
+      - name: Byte-compile the compiler
+        run: python3 -m compileall -q -j 0 AIL_CURRENT tools
+      - name: GPU tests (G1 emulation, G2 SPIR-V on lavapipe)
+        env:
+          AIL_GPU_REQUIRE_DEVICE: '1'
+          LP_NUM_THREADS: '2'
+        run: |
+          gcc --version | head -1
+          spirv-val --version | head -1
+          python3 AIL_CURRENT/test_ail_gpu_g1.py
+          python3 AIL_CURRENT/test_ail_gpu_g2.py -v
+
+  wheel:
+    name: wheel
+    # Cheap (about 2 minutes): only on pull requests that touch packaging, the docs or the tutorial test. Builds the ail-lang
+    # wheel in a fresh venv, installs it, runs `ail run` on a hello world and a typed program, then every sample of
+    # docs/tutorial.md through the installed `ail` (tools/wheel_check.py). Nothing is uploaded or published.
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Did the pull request touch packaging or docs?
+        id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq '^(pyproject\.toml|packaging/|docs/|README\.md|LICENSE-|tools/wheel_check\.py|AIL_CURRENT/(ail_sdk|test_ail_tutorial)\.py)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "no packaging or docs change: nothing to do"
+          fi
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        if: ${{ steps.paths.outputs.run == 'true' }}
+        with:
+          python-version: '3.12'
+      - name: Build the wheel in a fresh venv and run the tutorial samples
+        if: ${{ steps.paths.outputs.run == 'true' }}
+        run: |
+          gcc --version | head -1
+          python3 tools/wheel_check.py

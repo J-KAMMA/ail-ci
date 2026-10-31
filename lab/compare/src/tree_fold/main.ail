@@ -1,0 +1,354 @@
+struct T { nm: list[str]; w: list[int]; dep: list[int]; par: list[int]; }
+
+fn is_lower(c: int) -> bool { return c >= 97 and c <= 122; }
+
+fn parse_tree(data: bytes, end: int, t: T) -> bool {
+    let pos = 0;
+    let stack: list[int] = [];
+    let n = 0;
+    while true {
+        # expect a node at pos
+        let s = pos;
+        while pos < end and is_lower(data[pos]) { pos += 1; }
+        if pos == s or pos - s > 16 { return false; }
+        if pos >= end or data[pos] != 58 { return false; }
+        let name = data[s:pos].decode();
+        pos += 1;
+        let ds = pos;
+        let v = 0;
+        while pos < end and data[pos] >= 48 and data[pos] <= 57 {
+            v = v * 10 + data[pos] - 48;
+            if v > 1000000 { return false; }
+            pos += 1;
+        }
+        if pos == ds { return false; }
+        if data[ds] == 48 and pos - ds > 1 { return false; }
+        t.nm.append(name);
+        t.w.append(v);
+        t.dep.append(len(stack));
+        if len(stack) > 0 { t.par.append(stack[len(stack) - 1]); } else { t.par.append(-1); }
+        let me = n;
+        n += 1;
+        if pos < end and data[pos] == 91 {
+            stack.append(me);
+            pos += 1;
+            continue;
+        }
+        # after state
+        let again = false;
+        while true {
+            if pos >= end { return len(stack) == 0; }
+            let c = data[pos];
+            if c == 93 {
+                if len(stack) == 0 { return false; }
+                stack.pop();
+                pos += 1;
+            } elif c == 32 {
+                if len(stack) == 0 { return false; }
+                pos += 1;
+                break;
+            } else {
+                return false;
+            }
+        }
+    }
+    return false;
+}
+
+# parse a decimal number 0..10^15 in data[a:b]; -1 if bad
+fn parse_num(data: bytes, a: int, b: int) -> int {
+    if b <= a or b - a > 16 { return -1; }
+    if data[a] == 48 and b - a > 1 { return -1; }
+    let v = 0;
+    for i in range(a, b) {
+        let c = data[i];
+        if c < 48 or c > 57 { return -1; }
+        v = v * 10 + c - 48;
+    }
+    if v > 1000000000000000 { return -1; }
+    return v;
+}
+
+fn name_ok(data: bytes, a: int, b: int) -> bool {
+    if b <= a { return false; }
+    for i in range(a, b) {
+        let c = data[i];
+        if not (is_lower(c) or c == 43) { return false; }
+    }
+    return true;
+}
+
+fn compact(t: T, keep: list[bool]) -> void {
+    let n = len(t.nm);
+    let mp = [0] * n;
+    let nm: list[str] = [];
+    let w: list[int] = [];
+    let dep: list[int] = [];
+    let par: list[int] = [];
+    for i in range(n) {
+        if keep[i] {
+            mp[i] = len(nm);
+            nm.append(t.nm[i]);
+            w.append(t.w[i]);
+            dep.append(t.dep[i]);
+            if t.par[i] < 0 { par.append(-1); } else { par.append(mp[t.par[i]]); }
+        }
+    }
+    t.nm = nm; t.w = w; t.dep = dep; t.par = par;
+}
+
+fn rebuild(t: T, cl: list[int], cs: list[int]) -> void {
+    let n = len(t.nm);
+    let stack = [0];
+    let ord: list[int] = [];
+    while len(stack) > 0 {
+        let v = stack.pop();
+        ord.append(v);
+        let k = cs[v + 1] - 1;
+        while k >= cs[v] { stack.append(cl[k]); k -= 1; }
+    }
+    let ni = [0] * n;
+    for k in range(n) { ni[ord[k]] = k; }
+    let nm: list[str] = [];
+    let w: list[int] = [];
+    let dep: list[int] = [];
+    let par: list[int] = [];
+    for k in range(n) {
+        let o = ord[k];
+        nm.append(t.nm[o]);
+        w.append(t.w[o]);
+        dep.append(t.dep[o]);
+        if t.par[o] < 0 { par.append(-1); } else { par.append(ni[t.par[o]]); }
+    }
+    t.nm = nm; t.w = w; t.dep = dep; t.par = par;
+}
+
+fn counts(t: T) -> list[int] {
+    let n = len(t.nm);
+    let cs = [0] * (n + 1);
+    for i in range(1, n) { cs[t.par[i] + 1] += 1; }
+    for i in range(n) { cs[i + 1] += cs[i]; }
+    return cs;
+}
+
+fn subw(t: T) -> list[int] {
+    let n = len(t.nm);
+    let sub = t.w.copy();
+    let i = n - 1;
+    while i >= 1 { sub[t.par[i]] += sub[i]; i -= 1; }
+    return sub;
+}
+
+fn do_mirror(t: T) -> void {
+    let n = len(t.nm);
+    let cs = counts(t);
+    let pos = cs.copy();
+    let cl = [0] * n;
+    let i = n - 1;
+    while i >= 1 {
+        let p = t.par[i];
+        cl[pos[p]] = i;
+        pos[p] += 1;
+        i -= 1;
+    }
+    rebuild(t, cl, cs);
+}
+
+fn do_sort(t: T) -> void {
+    let n = len(t.nm);
+    let cs = counts(t);
+    let sub = subw(t);
+    let nm = t.nm;
+    let par = t.par;
+    let idx = [i for i in range(1, n)];
+    idx.sort(key=lambda i: (par[i], -sub[i], nm[i], i));
+    rebuild(t, idx, cs);
+}
+
+fn do_prune(t: T, lim: int) -> void {
+    let n = len(t.nm);
+    let sub = subw(t);
+    let keep: list[bool] = [];
+    for i in range(n) { keep.append(i == 0 or sub[i] >= lim); }
+    compact(t, keep);
+}
+
+fn find_first(t: T, name: str) -> int {
+    let n = len(t.nm);
+    for i in range(n) { if t.nm[i] == name { return i; } }
+    return -1;
+}
+
+fn do_cut(t: T, name: str) -> void {
+    let i = find_first(t, name);
+    if i <= 0 { return; }
+    let n = len(t.nm);
+    let d = t.dep[i];
+    let j = i + 1;
+    while j < n and t.dep[j] > d {
+        t.dep[j] -= 1;
+        if t.par[j] == i { t.par[j] = t.par[i]; }
+        j += 1;
+    }
+    let keep = [true] * n;
+    keep[i] = false;
+    compact(t, keep);
+}
+
+fn do_fold(t: T) -> void {
+    let n = len(t.nm);
+    let cc = [0] * n;
+    for i in range(1, n) { cc[t.par[i]] += 1; }
+    let mp = [0] * n;
+    let nm: list[str] = [];
+    let w: list[int] = [];
+    let dep: list[int] = [];
+    let par: list[int] = [];
+    for i in range(n) {
+        if i > 0 and t.par[i] > 0 and cc[t.par[i]] == 1 { continue; }
+        let k = len(nm);
+        let name = t.nm[i];
+        let wt = t.w[i];
+        mp[i] = k;
+        if i > 0 {
+            let j = i;
+            while cc[j] == 1 {
+                j += 1;
+                name += "+";
+                name += t.nm[j];
+                wt += t.w[j];
+                mp[j] = k;
+            }
+        }
+        nm.append(name);
+        w.append(wt);
+        if t.par[i] < 0 { par.append(-1); dep.append(0); }
+        else { par.append(mp[t.par[i]]); dep.append(dep[mp[t.par[i]]] + 1); }
+    }
+    t.nm = nm; t.w = w; t.dep = dep; t.par = par;
+}
+
+fn do_print(t: T) -> str {
+    let n = len(t.nm);
+    let out = "";
+    for i in range(n) {
+        if i > 0 {
+            let pd = t.dep[i - 1];
+            let d = t.dep[i];
+            if d > pd { out += "["; }
+            else {
+                let k = pd - d;
+                while k > 0 { out += "]"; k -= 1; }
+                out += " ";
+            }
+        }
+        out += t.nm[i];
+        out += ":";
+        out += str(t.w[i]);
+    }
+    let k = t.dep[n - 1];
+    while k > 0 { out += "]"; k -= 1; }
+    out += "\n";
+    return out;
+}
+
+fn do_find(t: T, name: str) -> str {
+    let i = find_first(t, name);
+    if i < 0 { return "none\n"; }
+    let parts: list[str] = [];
+    while i >= 0 { parts.append(t.nm[i]); i = t.par[i]; }
+    parts.reverse();
+    return "/".join(parts) + "\n";
+}
+
+fn main() {
+    let data = read_stdin_bytes(1 << 40);
+    let total = len(data);
+    if total == 0 { return 1; }
+    let lend = total;
+    if data[total - 1] == 10 { lend = total - 1; }
+    # operations: code, int arg, str arg
+    let codes: list[int] = [];
+    let iargs: list[int] = [];
+    let sargs: list[str] = [];
+    let t = T([], [], [], []);
+    let a = 0;
+    let first = true;
+    while a <= lend {
+        let b = a;
+        while b < lend and data[b] != 10 { b += 1; }
+        if b == a { return 1; }
+        if first {
+            if not parse_tree(data, b, t) { return 1; }
+            first = false;
+        } else {
+            let sp = a;
+            while sp < b and data[sp] != 32 { sp += 1; }
+            let kw = data[a:sp].decode();
+            let code = -1;
+            let iv = 0;
+            let sv = "";
+            if sp == b {
+                if kw == "total" { code = 0; }
+                elif kw == "stats" { code = 1; }
+                elif kw == "print" { code = 5; }
+                elif kw == "sort" { code = 7; }
+                elif kw == "mirror" { code = 8; }
+                elif kw == "fold" { code = 9; }
+                else { return 1; }
+            } else {
+                if kw == "level" {
+                    code = 2; iv = parse_num(data, sp + 1, b);
+                    if iv < 0 { return 1; }
+                } elif kw == "prune" {
+                    code = 6; iv = parse_num(data, sp + 1, b);
+                    if iv < 0 { return 1; }
+                } elif kw == "find" or kw == "cut" {
+                    if not name_ok(data, sp + 1, b) { return 1; }
+                    sv = data[sp + 1:b].decode();
+                    if kw == "find" { code = 3; } else { code = 10; }
+                } else { return 1; }
+            }
+            codes.append(code);
+            iargs.append(iv);
+            sargs.append(sv);
+        }
+        a = b + 1;
+        if b >= lend { break; }
+    }
+    let out = "";
+    for q in range(len(codes)) {
+        let c = codes[q];
+        if c == 0 {
+            let s = 0;
+            for x in t.w { s += x; }
+            out += str(s); out += "\n";
+        } elif c == 1 {
+            let n = len(t.nm);
+            let cc = [0] * n;
+            for i in range(1, n) { cc[t.par[i]] += 1; }
+            let leaves = 0; let wide = 0; let h = 0;
+            for i in range(n) {
+                if cc[i] == 0 { leaves += 1; }
+                if cc[i] > wide { wide = cc[i]; }
+                if t.dep[i] > h { h = t.dep[i]; }
+            }
+            out += f"nodes={n} leaves={leaves} height={h} widest={wide}\n";
+        } elif c == 2 {
+            let cnt = 0; let s = 0;
+            let n = len(t.nm);
+            for i in range(n) {
+                if t.dep[i] == iargs[q] { cnt += 1; s += t.w[i]; }
+            }
+            out += f"{cnt} {s}\n";
+        } elif c == 3 { out += do_find(t, sargs[q]); }
+        elif c == 5 { out += do_print(t); }
+        elif c == 6 { do_prune(t, iargs[q]); }
+        elif c == 7 { do_sort(t); }
+        elif c == 8 { do_mirror(t); }
+        elif c == 9 { do_fold(t); }
+        elif c == 10 { do_cut(t, sargs[q]); }
+    }
+    print(out, end="");
+    return 0;
+}

@@ -66,7 +66,7 @@ def source_version():
 
 class WheelContents(unittest.TestCase):
     def setUp(self):
-        self.manifest = json.loads((ROOT / "MANIFEST.json").read_text(encoding="utf-8"))
+        self.manifest = __import__("ail_manifest").load(ROOT)
         self.zip = zipfile.ZipFile(wheel_path)
         self.addCleanup(self.zip.close)
         self.names = set(self.zip.namelist())
@@ -89,8 +89,8 @@ class WheelContents(unittest.TestCase):
             self.assertTrue(not set(parts) & set(PRIVATE_PARTS), name)
             self.assertNotIn("docs/design", name)
             self.assertNotIn("__pycache__", name)
-        # the private trees exist in the source tree, so the check above is not vacuous
-        self.assertTrue((ROOT / "evidence").exists() or (REPO / "experiments").exists())
+        # the private trees exist in the private repository, so there the check above is not vacuous (the public
+        # mirror ail-ci has none of them, and the wheel is built from what it has)
         self.assertFalse(any(name.startswith(("experiments", "docs", "tasks", "evidence")) for name in self.names))
         selected = set(self.manifest["sdk_files"])
         for name in selected:

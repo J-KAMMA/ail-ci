@@ -23,6 +23,7 @@ Not built, refused by name: the functional API `Enum("Color", "RED GREEN")`, mix
 Difference: `isinstance(member, int)` is False for an IntEnum member.
 """
 import ast
+import classname
 import copy
 
 import stdlib5
@@ -202,6 +203,8 @@ def lower_class(cls, kind, binder, enums):
                     value = ast.Constant(value=last + 1)
                 else:
                     refuse(item, 'enum class %s: auto() after a value that is not an int' % cls.name)
+            if kind_name == 'IntEnum':
+                check_intenum_member(item, cls.name, target, value)
             lit = literal(value)
             last = lit if lit is not None else last
             dump = ast.dump(value)
@@ -243,6 +246,22 @@ def lower_class(cls, kind, binder, enums):
     new._ail_enum_info = info
     enums[cls.name] = info
     return [new]
+
+
+def check_intenum_member(node, cls_name, member, value):
+    """CPython creates an IntEnum member with int(value) while the class statement runs (enum.py
+    __set_name__ -> _new_member_); a literal that int() rejects makes class creation raise."""
+    try:
+        val = ast.literal_eval(value)
+    except (ValueError, SyntaxError, TypeError):
+        return
+    args = val if isinstance(val, tuple) else (val,)
+    try:
+        int(*args)
+    except (ValueError, TypeError, OverflowError) as exc:
+        refuse(node, 'enum class %s: IntEnum member %s has the value %r, which int() rejects at class creation '
+               'in CPython (%s: %s); write a value int() accepts'
+               % (cls_name, member, val, type(exc).__name__, exc))
 
 
 def const_int(node, env, cls):
@@ -419,7 +438,7 @@ def generated(info):
     lines = []
     for member, var in info.members:
         value, index = info.values[var]
-        lines.append('%s = %s(%r, %r, %s, %d)' % (var, info.name, info.name, member, ast.unparse(value), index))
+        lines.append('%s = %s(%r, %r, %s, %d)' % (var, info.name, classname.display(info.name), member, ast.unparse(value), index))
     lines.append('%s = [%s]' % (info.all, ', '.join(var for _, var in info.members)))
     entries = ['%r: %s' % (m, v) for m, v in info.members] + ['%r: %s' % (a, v) for a, v in info.aliases]
     lines.append('%s = {%s}' % (info.map, ', '.join(entries)))
@@ -452,7 +471,7 @@ class Uses(ast.NodeTransformer):
             if node.attr in info.attrs or node.attr.startswith('__'):
                 return node                         # a method taken from the class: left as written
             return ast.copy_location(ast.Call(func=ast.Name(id='_ail_en_noattr', ctx=ast.Load()),
-                                              args=[ast.Constant(value=info.name), ast.Constant(value=node.attr)],
+                                              args=[ast.Constant(value=classname.display(info.name)), ast.Constant(value=node.attr)],
                                               keywords=[]), node)
         return self.generic_visit(node)
 

@@ -12,9 +12,10 @@ module text with the same behaviour as CPython running `python3 entry.py`:
   `from .m import f`, `from .. import y` and `from m import *` (honouring `__all__` and the
   underscore rule) are understood; parent packages run before their children, each module body runs
   once, spliced in at its first import, in CPython's order (depth first);
-* top-level functions and variables of an imported module `p.m` are renamed `p__m__name`; classes
-  keep their names (a class name is printed by repr, and it is refused when two modules define the
-  same one); the entry module keeps all its names;
+* top-level functions, variables and classes of an imported module `p.m` are renamed `p__m__name`; the
+  entry module keeps all its names. A class keeps its printed name: `Merged.classes` maps the merged
+  name to (name, module), and `python/pkg-v12/classname.py` gives every place that prints a class
+  name (repr, `__name__`, exception text) the name CPython prints;
 * module state is shared the way CPython shares it: there is one variable per module global, so a
   function that says `global x`, a module that writes `m.x = v`, and every reader of `m.x` see the
   same variable. `from m import x` copies the value at that moment, so a global that changes after
@@ -81,11 +82,12 @@ class ModuleRefusal(ValueError):
 
 
 class Merged:
-    def __init__(self, text, positions, notes, names):
+    def __init__(self, text, positions, notes, names, classes=None):
         self.text = text
         self.positions = positions      # merged line -> (path, line, column)
         self.notes = notes
         self.names = names              # renamed top-level name -> 'module.name', for messages
+        self.classes = classes or {}    # merged class name -> (class name, module name), for printing
 
 
 def unmangle(text, names):
@@ -1598,14 +1600,7 @@ def _assign_names(program, mods):
     kept = program.kept
     for mod in mods:
         for name, kind in mod.kinds.items():
-            if mod.entry or kind == 'class':
-                other = kept.get(name)
-                if other is not None and other[0] is not mod:
-                    program.refuse(mod, _def_node(mod, name),
-                                   "name %r is defined in both %s and %s; classes keep their names (a class name is "
-                                   "printed by repr) and the entry module keeps all of its names, so this compiler "
-                                   "cannot tell them apart.\n  write instead: rename one of them"
-                                   % (name, other[0].path.name, mod.path.name))
+            if mod.entry:
                 kept[name] = (mod, 'def')
                 mod.merged[name] = name
     for mod in mods:
@@ -1627,6 +1622,20 @@ def _assign_names(program, mods):
             new += '_'
         used.add(new)
         return new
+    for mod in mods:
+        if mod.entry:
+            continue
+        for name, kind in mod.kinds.items():
+            if kind == 'class':
+                mod.merged[name] = fresh('%s__%s' % (mod.prefix, name))
+    for mod in mods:
+        if mod.entry:
+            continue
+        for node in mod.tree.body:
+            # the compiler flattens a method to `Class__method`: keep the renamed class's from colliding
+            if isinstance(node, ast.ClassDef) and mod.kinds.get(node.name) == 'class':
+                used.update('%s__%s' % (mod.merged[node.name], m.name) for m in node.body
+                            if isinstance(m, (ast.FunctionDef, ast.AsyncFunctionDef)))
     for mod in mods:
         if mod.entry:
             continue
@@ -1941,6 +1950,12 @@ def merge_program(entry_path, entry_text, read=None):
     program.prepare_stores(mods)
     program.check_lazy_values(mods)
     _assign_names(program, mods)
+    classes = {}
+    for mod in mods:
+        if not mod.entry:
+            for node in _module_classes(mod.tree):
+                if node.name in mod.merged:
+                    classes[mod.merged[node.name]] = (node.name, mod.name)
 
     output, std_seen, future, stack, positions = [], {}, [], [], {}
 
@@ -2075,7 +2090,20 @@ def merge_program(entry_path, entry_text, read=None):
                 names[new] = '%s.%s' % (mod.name, old)
         for key, new in mod.snaps.items():
             names[new] = key if mod.entry else '%s.%s' % (mod.name, key)
-    return Merged(text, _positions(module, text), program.notes, names)
+    return Merged(text, _positions(module, text), program.notes, names, classes)
+
+
+def _module_classes(tree):
+    """The classes defined at a module's top level (also under `if` / `try` / `with`, not in a def or class)."""
+    found, todo = [], list(tree.body)
+    while todo:
+        node = todo.pop()
+        if isinstance(node, ast.ClassDef):
+            found.append(node)
+        elif not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for field in ('body', 'orelse', 'finalbody', 'handlers'):
+                todo.extend(getattr(node, field, None) or [])
+    return found
 
 
 def _positions(module, text):

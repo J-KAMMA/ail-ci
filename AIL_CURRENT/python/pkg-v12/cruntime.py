@@ -2102,6 +2102,43 @@ static int ail__utf8_validate(const unsigned char *b, int64_t nb, _Bool *ascii) 
     }
     return 1;
 }
+/* Text that is not UTF-8 (stdin, the command line): CPython's strict decoder raises UnicodeDecodeError with this text
+   (its default stdin mode, surrogateescape, would keep going with lone surrogates, which a str here cannot hold), so
+   the program stops with CPython's own message instead of an internal error. `b` holds the first invalid sequence. */
+static void ail_utf8_fail_text(const unsigned char *b, int64_t nb, char *msg, size_t cap) {
+    int64_t i = 0, bad = 1;
+    const char *why = "invalid start byte";
+    int found = 0;
+    while (i < nb) {
+        unsigned c = b[i], lo = 0x80, hi = 0xBF;
+        int need, k;
+        if (c < 0x80) { i++; continue; }
+        if (c < 0xC2 || c > 0xF4) { found = 1; break; }
+        if (c < 0xE0) need = 1;
+        else if (c < 0xF0) { need = 2; if (c == 0xE0) lo = 0xA0; if (c == 0xED) hi = 0x9F; }
+        else { need = 3; if (c == 0xF0) lo = 0x90; if (c == 0xF4) hi = 0x8F; }
+        for (k = 1; k <= need; k++) {
+            if (i + k >= nb) { why = "unexpected end of data"; bad = k; found = 1; break; }
+            unsigned d = b[i + k];
+            if (d < lo || d > hi) { why = "invalid continuation byte"; bad = k; found = 1; break; }
+            lo = 0x80; hi = 0xBF;
+        }
+        if (found) break;
+        i += need + 1;
+    }
+    if (!found) { snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode the input: invalid data"); return; }
+    if (bad == 1)
+        snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode byte 0x%02x in position %lld: %s",
+                 (unsigned)b[i], (long long)i, why);
+    else
+        snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode bytes in position %lld-%lld: %s",
+                 (long long)i, (long long)(i + bad - 1), why);
+}
+static void ail_stdin_utf8_fail(const unsigned char *b, int64_t nb) {
+    char msg[200];
+    ail_utf8_fail_text(b, nb, msg, sizeof msg);
+    ail_die(msg);
+}
 static ail_str ail_utf8_decode_error(ail_sarena *A, const unsigned char *b, int64_t nb,
                                    const char *bad, int error_code) {
     ail__need_elems(nb, AIL_STR_LIMIT - 1);
@@ -2142,7 +2179,15 @@ static ail_str ail_utf8_decode_m(ail_sarena *A, const unsigned char *b, int64_t 
     return ail_utf8_decode_error(A, b, nb, bad, 0);
 }
 static ail_str ail_utf8_decode(ail_sarena *A, const unsigned char *b, int64_t nb) {
-    return ail_utf8_decode_m(A, b, nb, "stdin is not valid UTF-8");
+    ail__need_elems(nb, AIL_STR_LIMIT - 1);
+    _Bool ascii;
+    if (!ail__utf8_validate(b, nb, &ascii)) ail_stdin_utf8_fail(b, nb);
+    int64_t bcap;
+    uint8_t *q = ail__blk_take(nb + 1, &bcap);
+    if (nb) memcpy(q, b, (size_t)nb);
+    q[nb] = 0;
+    ail_sarena_pushn(A, q, bcap);
+    ail_str r; r.bytes = ascii; r.p = q;  r.n = nb; return r;
 }
 static ail_str ail_stdin_read(ail_sarena *A) {
     /* Read the octets first and ask afterwards whether they are ASCII. If they
@@ -2543,8 +2588,7 @@ err:
     if (!borrowed) free((void *)b);
     return err_code;
 badutf8:
-    if (!borrowed) free((void *)b);
-    ail_die("stdin is not valid UTF-8");
+    ail_stdin_utf8_fail(b, nb);
     return 0;
 }
 
@@ -2661,8 +2705,7 @@ nondig_fail:
     if (!borrowed) free((void *)b);
     return 4;
 badutf8:
-    if (!borrowed) free((void *)b);
-    ail_die("stdin is not valid UTF-8");
+    ail_stdin_utf8_fail(b, nb);
     return 0;
 }
 """
@@ -5918,12 +5961,16 @@ static __attribute__((noinline)) int64_t ail_bytes_rfind_octet_portable(const un
     return -1;
 }
 #if (defined(__x86_64__) || defined(__i386__)) && defined(__GNUC__)
-#include <immintrin.h>
+/* GCC vector extensions plus the one builtin instead of <immintrin.h>: that header costs about 0.3 s of cc1 in every build that
+   pastes the runtime (it declares every x86 intrinsic).  Same instructions as _mm256_cmpeq_epi8 / _mm256_movemask_epi8. */
+typedef char ail_v32qi __attribute__((vector_size(32)));
+typedef char ail_v32qi_u __attribute__((vector_size(32), aligned(1), may_alias));
 static __attribute__((target("avx2"), noinline)) int64_t ail_bytes_rfind_octet_avx2(const unsigned char *p, int64_t n, unsigned char byte) {
-    __m256i target = _mm256_set1_epi8((char)byte);
+    const char b = (char)byte;
+    const ail_v32qi target = {b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b};
     while (n >= 32) {
-        __m256i word = _mm256_loadu_si256((const __m256i *)(p + n - 32));
-        uint32_t mask = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(word, target));
+        ail_v32qi word = *(const ail_v32qi_u *)(p + n - 32);
+        uint32_t mask = (uint32_t)__builtin_ia32_pmovmskb256((ail_v32qi)(word == target));
         n -= 32;
         if (mask) return n + 31 - __builtin_clz((unsigned int)mask);
     }
@@ -11253,6 +11300,11 @@ static inline ail_obj ail_box_float(ail_ctx *cx, double v) {
     ail_obj r; r.tag = AIL_T_FLOAT; r.o = (ail_gcobj *)b; return r;
 }
 static inline double ail_float_val(ail_obj x) { return ((ail_floatbox *)x.o)->v; }
+/* a float literal of the program text: one static box per site, immortal (mark bit set, in no collector list), so
+   evaluating the literal allocates nothing and is never collected. A float is immutable, so sharing the box between
+   evaluations of one site is CPython's own behaviour (one constant object per code object). */
+#define AIL_FCONST(v) ({ static ail_floatbox ail__k = {{AIL_K_FLOATBOX, 1, 0, 0, 0, 0}, (v)}; \
+                         ail_obj ail__r; ail__r.tag = AIL_T_FLOAT; ail__r.o = &ail__k.hdr; ail__r; })
 
 /* ===================================================================================
    ail_vecobj (list/tuple backing) and ail_raise_c/ail_hit_limit are needed BY
@@ -15071,24 +15123,32 @@ static inline const char *ail__tname_c(ail_obj x) {
     if (x.tag == AIL_T_FUNC && ((ail_funcobj *)x.o)->builtin_fn)
         return ((ail_funcobj *)x.o)->builtin_fn == 2 ? "type" : "builtin_function_or_method";
     if ((x.tag == AIL_T_INST || x.tag == AIL_T_EXC) && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {   /* an instance (and an exception) names its class */
-        static char *tnb;
-        static size_t tnb_cap;
+        /* several names can sit in one message (`'<' not supported between instances of 'A' and 'B'`): rotate the buffers */
+        static char *tnb_r[4];
+        static size_t tnb_cap_r[4];
+        static unsigned tnb_i;
+        unsigned tnb_k = (tnb_i++) & 3;
         ail_str cs = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
-        size_t need = (size_t)cs.n + 1;
-        if (need > tnb_cap) {
-            size_t cap = tnb_cap ? tnb_cap : 80;
+        size_t need = (size_t)cs.n * 4 + 1;
+        if (need > tnb_cap_r[tnb_k]) {
+            size_t cap = tnb_cap_r[tnb_k] ? tnb_cap_r[tnb_k] : 80;
             while (cap < need) cap *= 2;
-            char *grown = (char *)realloc(tnb, cap);
+            char *grown = (char *)realloc(tnb_r[tnb_k], cap);
             if (!grown) ail_die("out of memory");
-            tnb = grown; tnb_cap = cap;
+            tnb_r[tnb_k] = grown; tnb_cap_r[tnb_k] = cap;
         }
         size_t k = 0;
-        for (int64_t i = 0; i < cs.n; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i); tnb[k++] = ch < 128 ? (char)ch : '?'; }
-        tnb[k] = 0;
+        for (int64_t i = 0; i < cs.n; i++) { uint32_t ch = (uint32_t)ail_chr(cs, i);   /* UTF-8, as CPython prints a non-ASCII class name */
+            char *o = tnb_r[tnb_k];
+            if (ch < 0x80) o[k++] = (char)ch;
+            else if (ch < 0x800) { o[k++] = (char)(0xC0 | (ch >> 6)); o[k++] = (char)(0x80 | (ch & 63)); }
+            else if (ch < 0x10000) { o[k++] = (char)(0xE0 | (ch >> 12)); o[k++] = (char)(0x80 | ((ch >> 6) & 63)); o[k++] = (char)(0x80 | (ch & 63)); }
+            else { o[k++] = (char)(0xF0 | (ch >> 18)); o[k++] = (char)(0x80 | ((ch >> 12) & 63)); o[k++] = (char)(0x80 | ((ch >> 6) & 63)); o[k++] = (char)(0x80 | (ch & 63)); } }
+        tnb_r[tnb_k][k] = 0;
         /* the collections pass lowers a typed deque to a class `_AilDeque_<T>`: CPython's operand text names it
            `collections.deque`, never the generated class */
-        if (!strncmp(tnb, "_AilDeque_", 10)) return "collections.deque";
-        return tnb;
+        if (!strncmp(tnb_r[tnb_k], "_AilDeque_", 10)) return "collections.deque";
+        return tnb_r[tnb_k];
     }
     if (x.tag == AIL_T_DICT) {
         if (((ail_gcobj *)x.o)->flags == 1) return "Counter";
@@ -15354,6 +15414,9 @@ static inline double ail_obj2_ffloormod(double a, double b, int remainder) {
 /*B<*/
 /* the tails of the operators after their int and float arms: a big int, or the type error (cold, so a hot operator is no larger than
    it was before the big ints and is inlined as before) */
+static AIL_BIGFN ail_st ail__floordiv_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb);
+static AIL_BIGFN ail_st ail__mod_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb);
+static AIL_BIGFN ail_st ail__truediv_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb);
 /*P:div<*/static AIL_BIGFN ail_st ail__floordiv_slow(ail_ctx *cx, ail_obj *out, uint8_t ta, int64_t pa, uint8_t tb, int64_t pb) {
     AIL_SLOW_OBJS(a, b);
     if (__builtin_expect(a.tag == AIL_T_BIG || b.tag == AIL_T_BIG, 0)) { ail_st bst; if (ail__big_floordiv(cx, out, a, b, &bst)) return bst; }
@@ -15738,6 +15801,25 @@ static inline ail_st ail__vec_merge_sort(ail_ctx *cx, ail_obj *p, ail_obj *keys,
     for (int64_t x = lo; x < hi; x++) { p[x] = tmp[x]; keys[x] = ktmp[x]; }
     return AIL_OK;
 }
+/* A NaN key gives no total order, so CPython's Timsort leaves a specific, input-dependent
+   permutation that this stable merge sort does not reproduce -- the sort would differ
+   silently. Refuse it by name instead (DIFFERENCES C?-job-refuzz95-10300605-1), the same stop the typed path's
+   ail_flist_sort already takes for a plain float list. A key function's result counts too,
+   and a tuple/list key is scanned item by item because its comparison can reach a NaN. */
+static inline ail_st ail__sort_nan_check(ail_ctx *cx, ail_obj *p, int64_t n, int depth) {
+    for (int64_t i = 0; i < n; i++) {
+        ail_obj k = p[i];
+        if (k.tag == AIL_T_FLOAT) {
+            if (isnan(ail_float_val(k)))
+                return ail_raise_c(cx, AIL_B_VALUEERROR, "sorted()/list.sort() over a NaN key: NaN has no total order, so this build refuses rather than differ silently from CPython (DIFFERENCES C?-job-refuzz95-10300605-1)");
+        } else if ((k.tag == AIL_T_TUPLE || k.tag == AIL_T_LIST) && depth < 32) {
+            ail_vecobj *e = (ail_vecobj *)k.o;
+            ail_st st = ail__sort_nan_check(cx, e->p, e->n, depth + 1);
+            if (st != AIL_OK) return st;
+        }
+    }
+    return AIL_OK;
+}
 /* ail_list_sort -- the key function (if not AIL_T_NONE) is called EXACTLY ONCE per
    element, into a scratch `keys` array (decorate), the merge sort above compares only
    those decorations (never re-invoking the key), then the element array is left permuted
@@ -15773,6 +15855,7 @@ static inline ail_st ail_list_sort(ail_ctx *cx, ail_obj lst, ail_obj key_fn_or_n
         ail_obj t = v->p[i]; v->p[i] = v->p[j]; v->p[j] = t;
         t = keys[i]; keys[i] = keys[j]; keys[j] = t;
     }
+    if (st == AIL_OK) st = ail__sort_nan_check(cx, keys, n, 0);
     if (st == AIL_OK) st = ail__vec_merge_sort(cx, v->p, keys, tmp, ktmp, 0, n);
     AIL_FRAME_LEAVE(cx, fr);
     AIL_FRAME_LEAVE(cx, frl);
@@ -16643,6 +16726,7 @@ static inline ail_st ail_op_delitem(ail_ctx *cx, ail_obj c, ail_obj key) {
         return ail_list_delitem(cx, c, key.i);
     }
     if (c.tag == AIL_T_DICT) return ail_dict_del(cx, c, key);
+    if (c.tag == AIL_T_CLASS) return ail_raise_c(cx, AIL_B_TYPEERROR, "'type' object does not support item deletion");
     return ail__raise_item_tname(cx, AIL_B_TYPEERROR, "'%s' object doesn't support item deletion", c);
 }
 static inline ail_obj ail_range_new(ail_ctx *cx, int64_t start, int64_t stop, int64_t step); /* defined below */
@@ -16826,6 +16910,15 @@ static inline ail_st ail_iter_reversed(ail_ctx *cx, ail_obj *out, ail_obj seq) {
     }
     if (seq.tag == AIL_T_LIST && ((ail_vecobj *)seq.o)->from_generator)
         return ail_raise_c(cx, AIL_B_TYPEERROR, "'generator' object is not reversible");
+    if (seq.tag == AIL_T_DICT) {
+        /* reversed(dict): the keys, last inserted first */
+        ail_obj ks = ail_dict_keys(cx, seq);
+        ((ail_vecobj *)ks.o)->hdr.aux = 0;
+        AIL_ROOT1(cx, frk, ks);
+        *out = ail__iter_wrap(cx, AIL_IT_REVERSED, ks, ail_box_none(), ((ail_vecobj *)ks.o)->n - 1);
+        AIL_FRAME_LEAVE(cx, frk);
+        return AIL_OK;
+    }
     if (seq.tag == AIL_T_LIST || seq.tag == AIL_T_TUPLE) n = ((ail_vecobj *)seq.o)->n;
     else if (seq.tag == AIL_T_STR) n = seq.sv.len;
     else { char buf[64]; snprintf(buf, sizeof buf, "'%s' object is not reversible", ail_type_name(seq.tag)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
@@ -17204,6 +17297,43 @@ static inline void ail_obj_write_str(ail_ctx *cx, ail_obj x, FILE *f) {
     ail_obj_write_repr(cx, x, f);
 }
 /* Decode stdin bytes once for input(), read() and readline(). */
+/* Text that is not UTF-8 (stdin, the command line): CPython's strict decoder raises UnicodeDecodeError with this text
+   (its default stdin mode, surrogateescape, would keep going with lone surrogates, which a str here cannot hold), so
+   the program stops with CPython's own message instead of an internal error. `b` holds the first invalid sequence. */
+static void ail_utf8_fail_text_g(const unsigned char *b, int64_t nb, char *msg, size_t cap) {
+    int64_t i = 0, bad = 1;
+    const char *why = "invalid start byte";
+    int found = 0;
+    while (i < nb) {
+        unsigned c = b[i], lo = 0x80, hi = 0xBF;
+        int need, k;
+        if (c < 0x80) { i++; continue; }
+        if (c < 0xC2 || c > 0xF4) { found = 1; break; }
+        if (c < 0xE0) need = 1;
+        else if (c < 0xF0) { need = 2; if (c == 0xE0) lo = 0xA0; if (c == 0xED) hi = 0x9F; }
+        else { need = 3; if (c == 0xF0) lo = 0x90; if (c == 0xF4) hi = 0x8F; }
+        for (k = 1; k <= need; k++) {
+            if (i + k >= nb) { why = "unexpected end of data"; bad = k; found = 1; break; }
+            unsigned d = b[i + k];
+            if (d < lo || d > hi) { why = "invalid continuation byte"; bad = k; found = 1; break; }
+            lo = 0x80; hi = 0xBF;
+        }
+        if (found) break;
+        i += need + 1;
+    }
+    if (!found) { snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode the input: invalid data"); return; }
+    if (bad == 1)
+        snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode byte 0x%02x in position %lld: %s",
+                 (unsigned)b[i], (long long)i, why);
+    else
+        snprintf(msg, cap, "UnicodeDecodeError: 'utf-8' codec can't decode bytes in position %lld-%lld: %s",
+                 (long long)i, (long long)(i + bad - 1), why);
+}
+static void ail_stdin_utf8_fail_g(const char *p, int64_t n) {
+    char msg[200];
+    ail_utf8_fail_text_g((const unsigned char *)p, n, msg, sizeof msg);
+    ail_die_bare(msg);
+}
 static inline ail_obj ail_bi_str_from_utf8(ail_ctx *cx, const char *p, int64_t n) {
     if (n < 0 || (uint64_t)n > (SIZE_MAX - sizeof(ail_strback)) / sizeof(((ail_strback *)0)->data[0]))
         ail_die("stdin too large");
@@ -17217,15 +17347,15 @@ static inline ail_obj ail_bi_str_from_utf8(ail_ctx *cx, const char *p, int64_t n
         else if (c >= 0xC2 && c <= 0xDF) { cp = c & 0x1Fu; minimum = 0x80; extra = 1; }
         else if (c >= 0xE0 && c <= 0xEF) { cp = c & 0x0Fu; minimum = 0x800; extra = 2; }
         else if (c >= 0xF0 && c <= 0xF4) { cp = c & 0x07u; minimum = 0x10000; extra = 3; }
-        else ail_die("stdin is not valid UTF-8");
-        if (extra > n - i) ail_die("stdin is not valid UTF-8");
+        else ail_stdin_utf8_fail_g(p, n);
+        if (extra > n - i) ail_stdin_utf8_fail_g(p, n);
         for (int k = 0; k < extra; k++) {
             unsigned next = (unsigned char)p[i++];
-            if ((next & 0xC0) != 0x80) ail_die("stdin is not valid UTF-8");
+            if ((next & 0xC0) != 0x80) ail_stdin_utf8_fail_g(p, n);
             cp = (cp << 6) | (next & 0x3Fu);
         }
         if (cp < minimum || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF)
-            ail_die("stdin is not valid UTF-8");
+            ail_stdin_utf8_fail_g(p, n);
         if (cp > 0xFFFF && sizeof(back->data[0]) < 4)
             ail_die("stdin code point above U+FFFF in the 16-bit v2 runtime");
         back->data[o++] = cp;
@@ -18531,7 +18661,15 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
 /*B<*/
             *out = ail_int_from_double(cx, r);
 /*B|*/
-            if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "round() result exceeds int64");
+            /* A finite value outside int64 is this language's declared 64-bit stop.  The typed
+               path (pre54/pre104/fz2) makes it an ordinary `integer overflow` that a program with
+               an active try can catch as OverflowError; the fz2 review recorded the general path's
+               uncatchable AIL_LIMIT stop as a pre-existing difference.  Raising the same named
+               exception here makes catch/except (and a bare `except`) behave the same on both
+               builds; uncaught it still ends the program with exit 1 and the "integer overflow"
+               text (now prefixed by CPython's own class name). */
+            if (r >= 9223372036854775808.0 || r < -9223372036854775808.0)
+                return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "integer overflow");
             *out = ail_box_int((int64_t)r);
 /*B>*/
             return AIL_OK;
@@ -19004,7 +19142,7 @@ static inline ail_st ail_bi_chr(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.i < 0 || x.i > 0x10FFFF) return ail_raise_c(cx, AIL_B_VALUEERROR, "chr() arg not in range(0x110000)");
     if (x.i >= 0xD800 && x.i <= 0xDFFF) ail_die("chr() surrogate code point is unsupported");
     if (x.i > 0xFFFF && sizeof(((ail_strback *)0)->data[0]) < 4)
-        ail_die("chr() non-BMP code point requires 32-bit strings");
+        return ail_hit_limit(cx, "chr_non_bmp", "chr() of the non-BMP code point requires 32-bit strings");
     ail_strback *b = ail_strback_alloc(cx, 1); b->data[0] = x.i;
     *out = ail_str_view((ail_gcobj *)b, 0, 1);
     return AIL_OK;
@@ -28660,6 +28798,43 @@ def repr_runtime_for_host(source):
     marker = 'static const uint32_t ail_repr_unprintable[][2] = {\n'
     before, remainder = source.split(marker, 1)
     _, after = remainder.split('};', 1)
+    return before + marker + _host_unprintable_rows() + '};' + after
+
+
+_HOST_ROWS = None
+
+
+def _host_unprintable_rows():
+    """The `{low, high},` rows of the code points above 127 that this Python's str.isprintable()
+    rejects. Scanning all 1.1M code points took ~0.15 s on every compile (2026-10-29 profile: 2-7% of
+    a build), so the rows are kept once per process and once per Python on disk; they depend only on
+    the interpreter's Unicode data, which the file name pins."""
+    global _HOST_ROWS
+    if _HOST_ROWS is not None:
+        return _HOST_ROWS
+    import os
+    import re
+    import unicodedata
+    try:
+        # the table shipped for this Unicode database: a clean AIL_CACHE has no on-disk copy yet
+        import unprintable_data
+        flat = unprintable_data.ROWS.get(unicodedata.unidata_version)
+        if flat is not None and sys.implementation.name == 'cpython':
+            _HOST_ROWS = ''.join('    {%d, %d},\n' % (flat[i], flat[i + 1]) for i in range(0, len(flat), 2))
+            return _HOST_ROWS
+    except ImportError:
+        pass
+    cache = None
+    try:
+        import buildcache
+        cache = buildcache.root() / ('unprintable-%s-%s-%s.txt' % (
+            sys.implementation.name, '.'.join(map(str, sys.version_info[:3])), unicodedata.unidata_version))
+        text = cache.read_text(encoding='ascii')
+        if re.fullmatch(r'(    \{\d+, \d+\},\n)+', text):
+            _HOST_ROWS = text
+            return text
+    except Exception:
+        pass
     ranges = []
     start = end = None
     for codepoint in range(128, 0x110000):
@@ -28672,8 +28847,16 @@ def repr_runtime_for_host(source):
             end = codepoint
     if start is not None:
         ranges.append((start, end))
-    table = ''.join(f'    {{{low}, {high}}},\n' for low, high in ranges)
-    return before + marker + table + '};' + after
+    _HOST_ROWS = ''.join(f'    {{{low}, {high}}},\n' for low, high in ranges)
+    if cache is not None:
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True)
+            temporary = cache.with_name(cache.name + '.%d.tmp' % os.getpid())
+            temporary.write_text(_HOST_ROWS, encoding='ascii')
+            os.replace(temporary, cache)
+        except OSError:
+            pass
+    return _HOST_ROWS
 
 LIBM_FUNCS = {'sin': 1, 'cos': 1, 'tan': 1, 'asin': 1, 'acos': 1, 'atan': 1, 'sinh': 1, 'cosh': 1, 'tanh': 1, 'asinh': 1, 'acosh': 1, 'atanh': 1, 'exp': 1, 'exp2': 1, 'expm1': 1, 'log': 1, 'log1p': 1, 'log2': 1, 'log10': 1, 'cbrt': 1, 'floor': 1, 'ceil': 1, 'trunc': 1, 'fabs': 1, 'atan2': 2, 'pow': 2, 'fmod': 2, 'copysign': 2, 'hypot': 2}
 LIBM = r'''
@@ -29776,7 +29959,8 @@ def _piece_text(p, want):
         text = _os_exception(text)
         if 'EXCSTR' in want:
             text = _exctext.apply(text, _exctext.DIE_EDITS, 'the DIE block')
-            text = text.replace('!strcmp(w, "integer overflow")', '!strcmp(w, "integer overflow") || !strcmp(w, "cannot convert float infinity to integer")')
+            if 'cannot convert float infinity' not in text:      # (the Python-syntax edit has it already)
+                text = text.replace('!strcmp(w, "integer overflow")', '!strcmp(w, "integer overflow") || !strcmp(w, "cannot convert float infinity to integer")')
     if p == 'OSEXC' and 'EXCSTR' in want:
         text = _exctext.apply(text, _exctext.OSEXC_EDITS, 'the OSEXC part')
     if p == 'DIE' and 'FILEEXC' in want:
@@ -29868,8 +30052,24 @@ _OVERFLOW_EXCEPTION_EDITS = (
 )
 
 
+# CPython ints never overflow, so a Python-syntax program (AIL_SURFACE=python) must not see its int64
+# boundary as a catchable OverflowError: `except OverflowError`, `except Exception` or a bare `except`
+# would run a handler CPython never enters (a silent difference). There the "integer overflow" trap stays
+# what A1 declares, a loud uncatchable stop (stderr, exit 1). The float-power range error (34, ...) is
+# CPython's own OverflowError and stays catchable. A program in the AIL syntax keeps the catchable
+# int64 OverflowError (A1).
+_OVERFLOW_EXCEPTION_PYTHON_EDIT = (
+    _OVERFLOW_EXCEPTION_EDITS[-1][0],
+    _OVERFLOW_EXCEPTION_EDITS[-1][0]
+    + '    if (!strcmp(w, "(34, \'Numerical result out of range\')") || !strcmp(w, "cannot convert float infinity to integer"))\n'
+    '        return AIL_EXC_OVERFLOW;\n')
+
+
 def _overflow_exception(text):
-    for old, new in _OVERFLOW_EXCEPTION_EDITS:
+    edits = _OVERFLOW_EXCEPTION_EDITS
+    if _os.environ.get('AIL_SURFACE') == 'python':
+        edits = edits[:-1] + (_OVERFLOW_EXCEPTION_PYTHON_EDIT,)
+    for old, new in edits:
         if text.count(old) != 1:
             raise AssertionError('DIE block changed; update _OVERFLOW_EXCEPTION_EDITS: ' + old)
         text = text.replace(old, new)

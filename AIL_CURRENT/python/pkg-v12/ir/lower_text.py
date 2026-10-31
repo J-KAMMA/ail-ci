@@ -344,7 +344,13 @@ class TextLowering(object):
         cur = self.cursor_of(node.value)
         if isinstance(node.slice, ast.Slice):
             if node.slice.step is not None:
-                raise self.NotS0('a stepped str slice')
+                # `s[a:b:c]`: one runtime call applying CPython's clamping (and the ValueError of a zero step)
+                zero = self.const(I.I64, 0)
+                lo = self.as_int(self.expr(node.slice.lower)) if node.slice.lower else zero
+                hi = self.as_int(self.expr(node.slice.upper)) if node.slice.upper else zero
+                st = self.as_int(self.expr(node.slice.step))
+                return self.rt('str_slice_step', [base, lo, hi, st],
+                               {'haslo': int(node.slice.lower is not None), 'hashi': int(node.slice.upper is not None)})
             lo = self.as_int(self.expr(node.slice.lower)) if node.slice.lower else self.const(I.I64, 0)
             hi = self.as_int(self.expr(node.slice.upper)) if node.slice.upper else self.const(I.I64, (1 << 63) - 1)
             if cur is not None:
@@ -444,7 +450,7 @@ class TextLowering(object):
                 chars = self.expr(node.args[0])
                 return self.rt('str_%s_chars' % attr, [recv, chars])
             return self.rt('str_%s' % attr, [recv])
-        if attr in ('lower', 'upper') and self.is_str(f.value) and not node.args and not node.keywords:
+        if attr in ('lower', 'upper', 'casefold') and self.is_str(f.value) and not node.args and not node.keywords:
             return self.rt('str_' + attr, [self.expr(f.value)])
         if attr == 'decode' and self.text_kind(f.value) == 'bytes' and not node.args and not node.keywords:
             return self.decode_value(f.value)
@@ -463,6 +469,16 @@ class TextLowering(object):
                 and isinstance(node.args[0], ast.Name) and self.is_slist_name(node.args[0].id):
             sep = self.expr(f.value)
             return self.b.value('list.join', [sep, self.container(node.args[0])], STRV)
+        if attr == 'join' and self.is_str(f.value) and len(node.args) == 1 and not node.keywords                 and isinstance(node.args[0], (ast.GeneratorExp, ast.ListComp)):
+            # `sep.join(str(x) for x in xs)`: the pieces are built in a hidden list of str, joined, and released
+            comp = node.args[0]
+            if isinstance(comp, ast.GeneratorExp):
+                comp = ast.copy_location(ast.ListComp(elt=comp.elt, generators=comp.generators), comp)
+            sep = self.expr(f.value)
+            tmp = self.comprehension(comp, self.P.SLIST)
+            joined = self.b.value('list.join', [sep, self.list_ref(tmp)], STRV)
+            self.b.emit('list.reset', [self.list_ref(tmp)], [], {'drop': True})
+            return joined
         raise self.NotS0('str method %s()' % attr)
 
     def bytes_arg(self, node):

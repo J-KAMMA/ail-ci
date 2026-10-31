@@ -22,6 +22,7 @@ Two halves.
   arguments it was built with (`ail_exarg`), the text of a trap becomes CPython's, and a KeyError keeps its key.
 """
 import ast
+import classname
 
 import userexc
 
@@ -123,6 +124,12 @@ class _Handler(ast.NodeTransformer):
         if (node.attr == 'filename' and self.os_family and 'filename' not in self.visible and self.is_e(node.value)
                 and isinstance(node.ctx, ast.Load)):
             return self.field(FILENAME, node)
+        if (node.attr in ('errno', 'strerror') and node.attr not in self.visible and self.is_e(node.value)
+                and isinstance(node.ctx, ast.Load)):
+            # no rewrite, but the OSError the runtime itself raises (open, os.*, pathlib ...) must carry its errno and
+            # strerror (the FILEIO / OSEXC edits); without them `e.errno` ends in a RuntimeError that an outer
+            # `except Exception` swallowed silently
+            self.hits += 1
         if node.attr in self.visible and self.is_e(node.value) and isinstance(node.ctx, ast.Load):
             index, kind = self.visible[node.attr]
             probe = self.call('_ail_exc_attr_' + ('i' if kind == 'b' else kind),
@@ -598,11 +605,12 @@ def classes_table(text):
     """The DIE block (with whatever code splices it has) taking the codes of `Exception` and of the user classes."""
     import re
     reserved = ['', 'URLError', 'HTTPError'] if userexc.reserved() else []           # codes 29 (spare), 30, 31: urllib (G12)
-    names = CLASS_NAMES + reserved + list(userexc.NAMES)
+    names = CLASS_NAMES + reserved + [classname.qualified(n) for n in userexc.NAMES]   # F2: `b.Error` for a class of module b
     last = len(names) - 1
     quoted = ', '.join('"%s"' % n for n in names)
     shown = len(CLASS_NAMES) + len(reserved)
-    qualified = ', '.join('"%s"' % (('urllib.error.' + n if n else n) if len(CLASS_NAMES) <= i < shown else n if i < shown else '__main__.' + n)
+    qualified = ', '.join('"%s"' % (('urllib.error.' + n if n else n) if len(CLASS_NAMES) <= i < shown else n if i < shown
+                                       else n if classname.module(userexc.NAMES[i - shown]) != '__main__' else '__main__.' + n)
                           for i, n in enumerate(names))
     function, count = re.subn(r'static const char \*ail_exception_name\(int code\) \{.*?\n\}\n',
                               lambda m: ('static const char *ail_exception_name(int code) {\n    static const char *names[] =\n        {%s};\n'

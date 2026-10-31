@@ -10,7 +10,7 @@ when any of these holds:
   2. it contains `**` (or `**=`, or the two-argument `pow`) with a non-constant exponent, or with a constant exponent where the
      result can exceed int64: a literal base b with |b| ** e >= 2**63, any other base with e >= 4 (a base that is not a literal is
      unknown here, and e >= 4 is where a 16-bit base already overflows; squares and cubes of int64 values stay typed);
-  3. it contains `<<` (or `<<=`) by a non-constant amount;
+  3. it contains `<<` (or `<<=`) by a non-constant amount (unless the amount and the operand's width are proven, `_shift_proven`);
   4. it calls math.factorial / comb / perm with arguments whose value is not a constant (or whose constant result is beyond
      int64), `int(s)` on a constant string of more than 18 digits, or `int.from_bytes`;
   5. it calls a marked function (transitively; a method is matched by its name).
@@ -116,7 +116,224 @@ def _const_float(node):
     return None
 
 
-def _own_reason(fn_nodes, defined, module_values=None, float_names=()):
+_SHIFT_AMOUNT_MAX = 1 << 12
+
+
+def _range_const_args(call, consts):
+    """(lo, hi, step) of `range(...)` with constant int arguments (module constants allowed), or None."""
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == 'range'
+            and 1 <= len(call.args) <= 3 and not call.keywords):
+        return None
+    vals = []
+    for a in call.args:
+        v = _const_int(a)
+        if v is None and isinstance(a, ast.Name):
+            v = consts.get(a.id)
+        if v is None:
+            return None
+        vals.append(v)
+    if len(vals) == 1:
+        return 0, vals[0], 1
+    if len(vals) == 2:
+        return vals[0], vals[1], 1
+    return vals[0], vals[1], vals[2]
+
+
+def amount_bounds(stmts, params=(), consts=None, banned=frozenset()):
+    """{name: upper bound} for the int locals of a unit (`stmts` = its body) whose value is statically small and non-negative:
+
+      * a name stored exactly once, by `name = <int constant>` (so `SH = 22`);
+      * a name stored exactly twice, `name = c0` and `name += c1` (c0, c1 >= 0 constants), where every loop around the `+=`
+        is `for .. in range(constants)`: the value is at most c0 + c1 * (the product of the loop counts);
+      * the target of a `for name in range(constants)`, stored nowhere else.
+
+    The unit's own code is walked (a nested def or class is a unit of its own), and a name that is a parameter, is declared
+    global / nonlocal anywhere (`banned`), or is stored by anything else (a tuple target, a `with`, an `except`, a walrus, `del`,
+    a comprehension) has no bound. A while loop around the `+=` removes the bound: the count is unknown."""
+    consts = consts or {}
+    stores = {}
+    for n in _walk_own(stmts):
+        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            stores[n.id] = stores.get(n.id, 0) + 1
+    inits, augs, fors, assigns = {}, {}, {}, {}
+
+    def visit(body, mult):
+        for st in body:
+            if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Name):
+                assigns.setdefault(st.targets[0].id, []).append(st.value)
+                v = _const_int(st.value)
+                if v is not None:
+                    inits.setdefault(st.targets[0].id, []).append(v)
+            elif isinstance(st, ast.AugAssign) and isinstance(st.target, ast.Name) and isinstance(st.op, ast.Add):
+                v = _const_int(st.value)
+                augs.setdefault(st.target.id, []).append(None if v is None or mult is None else (v, mult))
+            elif isinstance(st, (ast.For, ast.AsyncFor)):
+                rng = _range_const_args(st.iter, consts)
+                m2 = None
+                if rng is not None and mult is not None:
+                    lo, hi, step = rng
+                    count = len(range(lo, hi, step)) if step else None
+                    m2 = None if count is None else mult * count
+                    if isinstance(st.target, ast.Name) and count is not None:
+                        top = max(abs(lo), abs(hi))
+                        fors.setdefault(st.target.id, []).append((min(lo, hi) if count else 0, top))
+                elif isinstance(st.target, ast.Name):
+                    fors.setdefault(st.target.id, []).append(None)
+                visit(st.body, m2)
+                visit(st.orelse, mult)
+                continue
+            elif isinstance(st, (ast.While,)):
+                visit(st.body, None)
+                visit(st.orelse, mult)
+                continue
+            for field in ('body', 'orelse', 'finalbody'):
+                sub = getattr(st, field, None)
+                if isinstance(sub, list) and sub and isinstance(sub[0], ast.stmt):
+                    visit(sub, mult)
+            for h in getattr(st, 'handlers', ()):
+                visit(h.body, mult)
+            for c in getattr(st, 'cases', ()):
+                visit(c.body, mult)
+
+    visit(stmts, 1)
+    out = {}
+    for name, count in stores.items():
+        if name in params or name in banned:
+            continue
+        i, a, f = inits.get(name, []), augs.get(name, []), fors.get(name, [])
+        if f:
+            if count == len(f) == 1 and not i and not a and f[0] is not None and f[0][0] >= 0:
+                out[name] = f[0][1]
+            continue
+        if len(i) == 1 and i[0] >= 0 and count == 1 + len(a) and all(x is not None and x[0] >= 0 for x in a):
+            total = i[0] + sum(v * m for v, m in a)
+            out[name] = total
+    # the bit length of the other names that are only ever assigned bounded expressions (`v = int(w) & 3`)
+    bits = {n: ub.bit_length() for n, ub in out.items()}
+    for _ in range(6):
+        grew = False
+        for name, values in assigns.items():
+            if name in bits or name in params or name in banned or stores.get(name) != len(values) \
+                    or name in inits and name in augs:
+                continue
+            got = [_value_bits(v, out, bits) for v in values]
+            if all(g is not None for g in got):
+                bits[name] = max(got)
+                grew = True
+        if not grew:
+            break
+    return out, bits
+
+
+def _amount_ub(node, bounds):
+    """An upper bound of the shift amount `node`, which is statically within [0, _SHIFT_AMOUNT_MAX], or None. A constant, a
+    name of `amount_bounds`, `x & C`, `x % C` (C a positive constant: Python's % by a positive modulus is never negative) and
+    a sum of such amounts."""
+    v = _const_int(node)
+    if v is not None:
+        return v if 0 <= v <= _SHIFT_AMOUNT_MAX else None
+    if isinstance(node, ast.Name):
+        ub = bounds.get(node.id)
+        return ub if ub is not None and ub <= _SHIFT_AMOUNT_MAX else None
+    if isinstance(node, ast.BinOp):
+        if isinstance(node.op, ast.BitAnd):
+            for side in (node.left, node.right):
+                c = _const_int(side)
+                if c is not None and 0 <= c <= _SHIFT_AMOUNT_MAX:
+                    return c
+            return None
+        if isinstance(node.op, ast.Mod):
+            c = _const_int(node.right)
+            return c - 1 if c is not None and 0 < c <= _SHIFT_AMOUNT_MAX + 1 else None
+        if isinstance(node.op, ast.Add):
+            x, y = _amount_ub(node.left, bounds), _amount_ub(node.right, bounds)
+            return None if x is None or y is None else x + y
+    return None
+
+
+def _value_bits(node, bounds, bits=None):
+    """An upper bound of the bit length of |value| of an int expression, from the expression alone, or None when it is not
+    bounded by that. Only the forms that bound a value whatever their inputs are: a constant, a name of `amount_bounds`,
+    `x & C` (C >= 0), `x % C` (C > 0), `len(..)`, `ord(..)`, and + - * | ^ << >> // of bounded parts."""
+    v = _const_int(node)
+    if v is not None:
+        return abs(v).bit_length()
+    if isinstance(node, ast.Name):
+        if bits is not None and node.id in bits:
+            return bits[node.id]
+        ub = bounds.get(node.id)
+        return None if ub is None else ub.bit_length()
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        return _value_bits(node.operand, bounds, bits)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in ('len', 'ord') \
+            and len(node.args) == 1 and not node.keywords:
+        return 48 if node.func.id == 'len' else 21
+    if isinstance(node, ast.IfExp):
+        x, y = _value_bits(node.body, bounds, bits), _value_bits(node.orelse, bounds, bits)
+        return None if x is None or y is None else max(x, y)
+    if isinstance(node, ast.BinOp):
+        op = node.op
+        if isinstance(op, ast.BitAnd):
+            best = None
+            for side in (node.left, node.right):
+                c = _const_int(side)
+                if c is not None and c >= 0:
+                    best = c.bit_length() if best is None else min(best, c.bit_length())
+            return best
+        if isinstance(op, ast.Mod):
+            c = _const_int(node.right)
+            return (c - 1).bit_length() if c is not None and c > 0 else None
+        if isinstance(op, ast.FloorDiv):
+            c = _const_int(node.right)
+            return _value_bits(node.left, bounds, bits) if c is not None and c >= 1 else None
+        if isinstance(op, ast.RShift):
+            return _value_bits(node.left, bounds, bits)
+        lb, rb = _value_bits(node.left, bounds, bits), _value_bits(node.right, bounds, bits)
+        if lb is None or rb is None:
+            return None
+        if isinstance(op, (ast.Add, ast.Sub)):
+            return max(lb, rb) + 1
+        if isinstance(op, ast.Mult):
+            return lb + rb
+        if isinstance(op, (ast.BitOr, ast.BitXor)):
+            return max(lb, rb)
+        if isinstance(op, ast.LShift):
+            ub = _amount_ub(node.right, bounds)
+            return None if ub is None else lb + ub
+    return None
+
+
+def _shift_proven(left, right, bounds):
+    """A `left << right` whose amount is statically small and whose result provably fits in 62 bits whatever the inputs are:
+    the same exposure as a shift by a constant of a value that fits, which the typed path computes in int64."""
+    if bounds is None:
+        return False
+    ubs, vbits = bounds
+    ub = _amount_ub(right, ubs)
+    bits = _value_bits(left, ubs, vbits)
+    return ub is not None and bits is not None and bits + ub <= 62
+
+
+_FROM_BYTES_MAX = 7          # a byte string of at most 7 bytes is below 2**56: its int fits int64 (signed or not, either order)
+
+
+def _bytes_len_ub(node):
+    """An upper bound of the length of a bytes expression from its form alone (a literal, or a slice with constant
+    non-negative bounds and no step), or None."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, bytes):
+        return len(node.value)
+    if isinstance(node, ast.Subscript) and isinstance(node.slice, ast.Slice):
+        sl = node.slice
+        lo = 0 if sl.lower is None else _const_int(sl.lower)
+        hi = None if sl.upper is None else _const_int(sl.upper)
+        if sl.step is None and lo is not None and hi is not None and 0 <= lo and 0 <= hi:
+            return max(hi - lo, 0)
+    return None
+
+
+def _own_reason(fn_nodes, defined, module_values=None, float_names=(), typed=None, typed_pass=False):
     """The first reason a function's own code (not its callees) can need a big int, or None."""
     if module_values:
         # The module literal is only the value at the power when nothing in this function stored the
@@ -167,14 +384,16 @@ def _own_reason(fn_nodes, defined, module_values=None, float_names=()):
                 r = _pow_reason(n.left, n.right, module_values, float_names)
                 if r:
                     return '`**` with ' + r
-            elif isinstance(n.op, ast.LShift) and _const_int(n.right) is None and not isinstance(n.right, ast.Constant):
+            elif isinstance(n.op, ast.LShift) and _const_int(n.right) is None and not isinstance(n.right, ast.Constant) \
+                    and not _shift_proven(n.left, n.right, typed):
                 return '`<<` by an amount that is not a constant'
         elif isinstance(n, ast.AugAssign):
             if isinstance(n.op, ast.Pow):
                 r = _pow_reason(n.target, n.value, module_values, float_names)
                 if r:
                     return '`**=` with ' + r
-            elif isinstance(n.op, ast.LShift) and _const_int(n.value) is None and not isinstance(n.value, ast.Constant):
+            elif isinstance(n.op, ast.LShift) and _const_int(n.value) is None and not isinstance(n.value, ast.Constant) \
+                    and not _shift_proven(n.target, n.value, typed):
                 return '`<<=` by an amount that is not a constant'
         elif isinstance(n, ast.Call):
             f = n.func
@@ -186,7 +405,8 @@ def _own_reason(fn_nodes, defined, module_values=None, float_names=()):
                 if _const_math_fits(base, n.args):
                     continue                   # constant arguments whose result fits int64 (factorial(10))
                 return 'a call of math.%s' % base
-            if isinstance(f, ast.Attribute) and f.attr == 'from_bytes' and isinstance(f.value, ast.Name) and f.value.id == 'int':
+            if isinstance(f, ast.Attribute) and f.attr == 'from_bytes' and isinstance(f.value, ast.Name) and f.value.id == 'int' \
+                    and not (typed_pass and n.args and (_bytes_len_ub(n.args[0]) or _FROM_BYTES_MAX + 1) <= _FROM_BYTES_MAX):
                 return 'a call of int.from_bytes'
             if isinstance(f, ast.Name) and f.id == 'pow' and 'pow' not in defined and len(n.args) == 2 and not n.keywords:
                 r = _pow_reason(n.args[0], n.args[1], module_values, float_names)
@@ -271,6 +491,7 @@ class _Defined(set):
     """The program's function names, plus the class names (a class call builds a non-int object)."""
     classes = frozenset()
     module_ints = {}        # module constants (assigned once, never rebound) -> their int value
+    float_oracle = None     # optional: node -> True when the typed emitter's own typing says the expression is a float
 
 
 def module_int_consts(table):
@@ -335,6 +556,44 @@ def _lp_seq(node):
                              ast.GeneratorExp, ast.JoinedStr))
 
 
+def _lp_oracle_float(node, defined):
+    """The typed emitter's own type of `node` is float (an attribute of a dataclass field `x: float`, an element of a
+    list[float], the result of a function declared `-> float`). The oracle is given only where the emitter has already typed
+    the function (ir/driver.py); a proof without one (the source-level `marked` scan) keeps these values unknown."""
+    oracle = getattr(defined, 'float_oracle', None)
+    if oracle is None:
+        return False
+    try:
+        return bool(oracle(node))
+    except Exception:
+        return False
+
+
+def _lp_range_value(node, vals):
+    """The value of the counter of `for i in range(...)` (also in a comprehension): the join of the bounded arguments when
+    every argument is bounded; otherwise, for a bounded start and a constant nonzero step, the start plus at most _LP_LEN
+    steps. A counter moves one step per iteration, so reaching 2**48 steps from its start takes some 2.8e14 iterations of
+    one loop (days of run time); the same physical limit as a len() (_LP_LEN) and as the IR's int counters
+    (ir/lower.py `_counters`). Arithmetic on the counter is still checked against its bounds (`i * i` is not proven).
+    Returns None when nothing is proven."""
+    if all(v[0] in _LP_INTS and v[1] is not None for v in vals):
+        return _lp_int(min(v[1] for v in vals), max(v[2] for v in vals))
+    args = node.args          # (the stop is not looked at: its kind and size do not move the counter's start)
+    if len(args) == 1:
+        start, step = _lp_int(0, 0), 1
+    elif len(args) == 2:
+        start, step = vals[0], 1
+    else:
+        start, step = vals[0], _const_int(args[2])
+    if step is None or step == 0 or abs(step) > 1 << 8:
+        return None
+    if start[0] not in _LP_INTS or start[1] is None or start[2] is None:
+        return None
+    if step > 0:
+        return _lp_int(start[1], start[2] + _LP_LEN * step)
+    return _lp_int(start[1] + _LP_LEN * step, start[2])
+
+
 def _lp_eval(node, env, defined, bad):
     """One expression's local value: ('int', lo, hi), float, bool, str, other or unknown.  `bad` is a list while the proof is
     being checked (an unproven int operation is appended there); None during the fixed-point iteration."""
@@ -359,6 +618,8 @@ def _lp_eval(node, env, defined, bad):
             known = getattr(defined, 'module_ints', {}).get(node.id)
             if known is not None:
                 return _lp_int(known, known)
+        if (got is None or got[0] == 'unknown') and _lp_oracle_float(node, defined):
+            return _LP_FLOAT
         return got or _LP_UNKNOWN
     if isinstance(node, ast.UnaryOp):
         if isinstance(node.op, (ast.USub, ast.UAdd)):
@@ -539,12 +800,12 @@ def _lp_eval(node, env, defined, bad):
         if isinstance(node.value, ast.Name) and node.value.id == 'math' \
                 and node.attr in ('pi', 'e', 'tau', 'inf', 'nan'):
             return _LP_FLOAT
-        return _LP_UNKNOWN
+        return _LP_FLOAT if _lp_oracle_float(node, defined) else _LP_UNKNOWN
     if isinstance(node, ast.Subscript):
         _lp_eval(node.value, env, defined, bad)
         if not isinstance(node.slice, ast.Slice):
             _lp_eval(node.slice, env, defined, bad)
-        return _LP_UNKNOWN
+        return _LP_FLOAT if _lp_oracle_float(node, defined) else _LP_UNKNOWN
     if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
         for x in node.elts:
             _lp_eval(x.value if isinstance(x, ast.Starred) else x, env, defined, bad)
@@ -564,8 +825,9 @@ def _lp_eval(node, env, defined, bad):
                     and 'range' not in defined and not it.keywords and 1 <= len(it.args) <= 3 \
                     and not any(isinstance(a, ast.Starred) for a in it.args):
                 vals = [_lp_eval(a, sub, defined, bad) for a in it.args]
-                if all(v[0] in _LP_INTS and v[1] is not None for v in vals):
-                    _lp_assign(gen.target, _lp_int(min(v[1] for v in vals), max(v[2] for v in vals)), sub, defined)
+                counter = _lp_range_value(it, vals)
+                if counter is not None:
+                    _lp_assign(gen.target, counter, sub, defined)
                 else:
                     _lp_bad(bad, 'a loop over an unproven range')
                     _lp_assign(gen.target, _lp_int(), sub, defined)
@@ -598,7 +860,7 @@ def _lp_eval(node, env, defined, bad):
             if name in _LP_EXC_CALLS:
                 return _LP_OTHER
             if name in defined:
-                return _LP_UNKNOWN
+                return _LP_FLOAT if _lp_oracle_float(node, defined) else _LP_UNKNOWN
             if name in _LP_COLLECTION_CALLS:
                 return _LP_OTHER
             if name in _LP_STR_CALLS:
@@ -951,11 +1213,8 @@ def _lp_run(stmts, env, defined, fixed=None, seqmap=None):
                     and 'range' not in defined and not it.keywords and 1 <= len(it.args) <= 3 \
                     and not any(isinstance(a, ast.Starred) for a in it.args):
                 vals = [_lp_eval(a, env, defined, None) for a in it.args]
-                if all(v[0] in _LP_INTS and v[1] is not None for v in vals):
-                    lo = min(v[1] for v in vals)
-                    hi = max(v[2] for v in vals)
-                    iv = _lp_int(lo, hi)
-                else:
+                iv = _lp_range_value(it, vals)
+                if iv is None:
                     iv = _lp_int()
             else:
                 lit = _lp_iter_value(it, env, defined)
@@ -1074,8 +1333,20 @@ def _lp_safe_dicts(stmts):
     return good
 
 
-def _lp_reason(defs, module_stmts, defined):
-    """The first local-proof failure among these defs (or the module code when `defs` is None), or None."""
+def _lp_int_failure(reason):
+    """Whether a local-proof failure is an int operation that can leave int64 (not merely a value
+    whose kind the proof cannot name, such as abs() of a proven float)."""
+    return ('not proven int or float' not in reason
+            and any(word in reason for word in ('int', 'operand', 'shift', 'power', 'overflow')))
+
+
+def _lp_reason(defs, module_stmts, defined, prefer_int=False):
+    """The first local-proof failure among these defs (or the module code when `defs` is None), or None.
+
+    With `prefer_int`, a failure that only says a value's kind is unproven (for example `abs()` of
+    a float, which can never need a big int) does not hide a later int operation such as `**` whose
+    result can leave int64: the int failure is returned instead.  Without it the first failure is
+    returned, exactly as before."""
     for fn in (defs if defs is not None else [None]):
         if fn is None:
             stmts = module_stmts
@@ -1113,9 +1384,10 @@ def _lp_reason(defs, module_stmts, defined):
         for node in _walk_own(stmts):
             if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
                 discarded.add(id(node.value))
-        bad = []
         safe_dicts = _lp_safe_dicts(stmts) if fn is not None and 'get' not in defined else set()
+        pending = None
         for node in _walk_own(stmts):
+            bad = []
             if isinstance(node, ast.AugAssign):
                 _lp_eval(ast.BinOp(left=node.target, op=node.op, right=node.value), env, defined, bad)
             elif isinstance(node, (ast.BinOp, ast.UnaryOp)):
@@ -1127,7 +1399,15 @@ def _lp_reason(defs, module_stmts, defined):
                         and node.func.attr == 'get' and node.func.value.id in safe_dicts):
                     _lp_bad(bad, 'a call result not proven to fit int64')
             if bad:
-                return bad[0]
+                if not prefer_int:
+                    return bad[0]
+                int_bad = next((why for why in bad if _lp_int_failure(why)), None)
+                if int_bad is not None:
+                    return int_bad
+                if pending is None:
+                    pending = bad[0]
+        if pending is not None:
+            return pending
     return None
 
 
@@ -1173,13 +1453,23 @@ def enabled():
     return os.environ.get('AIL_SURFACE') == 'python'
 
 
-def marked(tree, local=True):
+def marked(tree, local=True, typed=False):
     """{unit name: reason} for every marked unit of the module: each def (by its own name; a method by the method name, a nested
     def by its own name) and '<module>' for the module-level code. A unit that contains a marked nested def is marked too.
     `local=False` keeps only the constructs that make a big int without an overflow (the pre-B1 hard marks); it is used to
-    let a program that only the typed path can build keep the typed path instead of failing on a rule-4 demotion."""
+    let a program that only the typed path can build keep the typed path instead of failing on a rule-4 demotion.
+    A `<<` whose amount is statically within [0, 4096] and whose operand's bit length plus that amount is at most 62 is
+    not marked (`_shift_proven`; AIL_BIGCAP_SHIFT=0 turns the proof off). `typed=True` is for the typed attempt only
+    (pyc._refuse_big_capable): `int.from_bytes` of a bytes literal or a constant-bounds slice of at most 7 bytes fits int64, so it
+    is not a mark there (AIL_BIGCAP_FROM_BYTES=0 turns that off); the general path's consumers keep it marked."""
     if not enabled():
         return {}
+    banned = set()
+    shift_proof = os.environ.get('AIL_BIGCAP_SHIFT', '1') != '0'
+    if shift_proof:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.Global, ast.Nonlocal)):
+                banned.update(node.names)
     module_values = {}
     written = set()
     for node in ast.walk(tree):
@@ -1250,7 +1540,21 @@ def marked(tree, local=True):
                 float_names = {n for n, v in local_int_bounds(defs[0], defined).items() if v is not None and v[0] == 'float'}
             except Exception:
                 float_names = set()
-        r = _own_reason(nodes, defined, values, float_names)
+        tb = None
+        if shift_proof:
+            try:
+                if defs is None:
+                    tb = amount_bounds(module_body, (), defined.module_ints, banned)
+                elif len(defs) == 1:
+                    a = defs[0].args
+                    params = {x.arg for x in a.posonlyargs + a.args + a.kwonlyargs}
+                    params |= {x.arg for x in (a.vararg, a.kwarg) if x is not None}
+                    tb = amount_bounds(defs[0].body, params, defined.module_ints, banned)
+                else:
+                    tb = None
+            except Exception:
+                tb = None
+        r = _own_reason(nodes, defined, values, float_names, tb, typed and os.environ.get('AIL_BIGCAP_FROM_BYTES', '1') != '0')
         if r:
             reason[name] = r
         if local:
@@ -1280,6 +1584,17 @@ def marked(tree, local=True):
                     if o != '<module>' and o not in reason:
                         reason[o] = 'it contains %s(), which can need a big int (%s)' % (name, reason[name]); changed = True
     return reason
+
+
+def transitive(reason):
+    """Whether a marked() reason is only the call-graph closure ('it calls f(), ...' / 'it contains f(), ...')."""
+    return reason.startswith(('it calls ', 'it contains '))
+
+
+def own_marked(tree, local=True):
+    """marked() without the call-graph closure: only the units whose OWN code can make a big int. For a consumer that keeps
+    every value crossing a call exact (a boxed argument, a boxed result), a caller of a marked function needs nothing."""
+    return {k: v for k, v in marked(tree, local).items() if not transitive(v)}
 
 
 def local_int_bounds(fn, defined):
