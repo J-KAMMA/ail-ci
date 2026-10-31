@@ -519,12 +519,37 @@ def _rewrite_script(source, force):
         body=body, decorator_list=[], returns=None)
     new_tree = ast.Module(body=kept + [main_def], type_ignores=[])
     snapshot = pyfunc.debug_snapshot_lines(new_tree)      # --debug: the unparse renumbers the lines
+    reading = [(type(node).__name__, getattr(node, 'lineno', None)) for node in ast.walk(new_tree)]
     ast.fix_missing_locations(new_tree)
     unbound.SCRIPT.add(main_def.name)        # module-scope code: an unassigned read is a NameError (unbound.py)
     text = ast.unparse(new_tree)
     pyfunc.debug_remember_lines(snapshot, text)
+    # the unparse renumbers every line; keep new line -> source line so a refusal raised while
+    # compiling the rewritten text still names file:line in the program the author wrote
+    lines = {}
+    try:
+        parsed = ast.parse(text)
+    except SyntaxError:
+        parsed = None
+    if parsed is not None:
+        for (kind, old), node in zip(reading, ast.walk(parsed)):
+            if kind == type(node).__name__ and old and getattr(node, 'lineno', None):
+                lines.setdefault(node.lineno, old)
+    _REWRITE_LINE_MAPS[text] = lines
     gpu.remember(new_tree, gpu_marked, text)
     return text
+
+
+_REWRITE_LINE_MAPS = {}
+
+
+def _remap_rewrite_line(error, text):
+    """A refusal from the rewritten script text names its line there; put back the source line."""
+    line = getattr(error, 'source_line', None)
+    mapped = _REWRITE_LINE_MAPS.get(text, {}).get(line) if isinstance(line, int) else None
+    if mapped:
+        error.source_line = mapped
+    return error
 
 
 def to_c(source, strict=True, name='run', info=None, external=None):
@@ -594,6 +619,8 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
         dunders.HINT.update(dunders._dataclass_markers(source))
         try:
             return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+        except Unsupported as error:
+            raise _remap_rewrite_line(error, rewritten)
         finally:
             dunders.HINT.clear()
     if _is_single_expression(source):
@@ -602,7 +629,10 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
             info.setdefault('ret', 'int')
         return to_pipeline_c(source, name=name, strict=strict)
     rewritten = _rewrite_script(source, force=True)
-    return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+    try:
+        return func_to_c(rewritten, name=name, strict=strict, info=info, external=external)
+    except Unsupported as error:
+        raise _remap_rewrite_line(error, rewritten)
 
 
 def _main_for(info):
@@ -882,6 +912,45 @@ class _BigCapable(Unsupported):
     """The typed path was skipped because a rule-2/3/4 local proof failed; `build` first tries the exact general path."""
 
 
+def _big_capable_node(tree, name, marks):
+    """The AST node whose line best locates a bigcap refusal: the construct itself when it is in
+    the named unit, otherwise the marked callee the reason points at. `None` when there is none."""
+    import re
+
+    def unit_nodes(unit):
+        if unit == '<module>':
+            body = [s for s in tree.body
+                    if not isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))]
+            return [node for stmt in body for node in ast.walk(stmt)]
+        found = []
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == unit:
+                found.extend(ast.walk(node))
+        return found
+
+    target = name
+    called = re.search(r'it (?:calls|contains) (\w+)\(\)', marks.get(name, ''))
+    if called is not None and called.group(1) in marks:
+        target = called.group(1)
+    nodes = unit_nodes(target) or unit_nodes(name)
+    for node in nodes:
+        if isinstance(node, ast.Constant) and type(node.value) is int \
+                and not -(1 << 63) <= node.value < (1 << 63):
+            return node
+        if isinstance(node, (ast.BinOp, ast.AugAssign)) and isinstance(node.op, (ast.Pow, ast.LShift)):
+            return node
+        if isinstance(node, ast.Call):
+            func = node.func
+            if isinstance(func, ast.Attribute) and func.attr in (
+                    'factorial', 'comb', 'perm', 'isqrt', 'from_bytes'):
+                return node
+            if isinstance(func, ast.Name) and func.id in marks:
+                return node
+    fns = [n for n in ast.walk(tree)
+           if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name == target]
+    return fns[0] if fns else None
+
+
 def _refuse_big_capable(source, local=True):
     """docs/design/BIGINT.md section 5 and rules 2-4: a whole program with a function that can need a big int (an int literal
     beyond int64, `**`/`<<`/math calls, or rule 4's unproven int local) is not built on the typed path, which has int64 only.
@@ -902,8 +971,13 @@ def _refuse_big_capable(source, local=True):
         marks = {k: v for k, v in marks.items() if not _typed_only_ok(v)}
     if marks:
         name = sorted(marks, key=lambda k: (k != '<module>', k))[0]
-        raise _BigCapable('%s can need an int beyond int64 (%s); the typed path has int64 only and the general path has exact big ints'
-                          % ('the module code' if name == '<module>' else 'function %s()' % name, marks[name]))
+        refusal = _BigCapable('%s can need an int beyond int64 (%s); the typed path has int64 only and the general path has exact big ints\n'
+                              '  write instead: run without --strict (or without AIL_NO_GENERAL=1) so the general '
+                              'path computes exact big integers, or keep every value and intermediate inside int64'
+                              % ('the module code' if name == '<module>' else 'function %s()' % name, marks[name]))
+        node = _big_capable_node(tree, name, marks)
+        refusal.source_line = getattr(node, 'lineno', None) or getattr(tree.body[0], 'lineno', 1)
+        raise refusal
 
 
 def refuse_typed_only_big(source):
