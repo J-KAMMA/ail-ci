@@ -23,6 +23,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from ail_testenv import rustc_path  # noqa: E402
 from test_ail_ffi import CC, compile_cli, run_cpython  # noqa: E402
+from ail_testenv import rustc_path  # noqa: E402
 
 BINDGEN = ROOT / "ail_bindgen.py"
 RUSTC = rustc_path()
