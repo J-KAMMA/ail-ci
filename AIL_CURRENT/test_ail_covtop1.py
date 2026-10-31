@@ -267,7 +267,8 @@ for s in steps:
     print(s.name, s.action(16))
 """
 
-CASES = [('field_calls', FIELD_CALLS), ('nested_genexp', NESTED_GENEXP), ('function_values', FUNCTION_VALUES)]
+CASES = [('field_calls', FIELD_CALLS), ('nested_genexp', NESTED_GENEXP), ('function_values', FUNCTION_VALUES),
+         ('builtin_bound_field', BUILTIN_BOUND_FIELD)]
 
 
 def compile_program(directory, text, name, force):
@@ -328,10 +329,6 @@ class CovTop1(unittest.TestCase):
         # a bound method taken as a value (`acc.add`) is not modelled: refuse, do not crash at run time
         self.refused('bound_method_field', BOUND_METHOD_FIELD, '.fn()')
         self.refused('bound_method_field_force', BOUND_METHOD_FIELD, '.fn()', force=True)
-
-    def test_field_with_builtin_bound_method_refused(self):
-        self.refused('builtin_bound_field', BUILTIN_BOUND_FIELD, '.fn()')
-        self.refused('builtin_bound_field_force', BUILTIN_BOUND_FIELD, '.fn()', force=True)
 
     def test_field_named_like_builtin_method_refused(self):
         self.refused('builtin_named_field', BUILTIN_NAMED_FIELD, 'builtin_named_field.py:3', 'write instead')
