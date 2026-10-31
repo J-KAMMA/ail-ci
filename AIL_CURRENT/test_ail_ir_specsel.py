@@ -27,6 +27,25 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 CELLS = '''
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 class Rule:
     def __init__(self, b: list[int], s: list[int]):
         self.b = b
@@ -351,6 +370,8 @@ class SpecSelectTests(unittest.TestCase):
         self.check_oracle(EDGES, "edges")
         # tagged ints make the adds/subtractions exact (tint ops), which specsel does not flatten
         self.assertEqual(self.stats(EDGES, "edges")["mix"]["path"], "ir")
+
+    @_exact_int
 
     def test_checked_add_overflows_exactly_when_its_arm_runs(self):
         with tempfile.TemporaryDirectory() as directory:

@@ -374,6 +374,10 @@ def _apply(P, args, kwargs, result, current):
     recursive = bool(bound.get('recursive', False))
     import intmode
     _py = intmode.exact_python()
+    # int64 mode (the default for a Python-syntax program): no tagged ints, but the analysis below still tells which functions
+    # exact mode would have handed to the general path when the IR cannot lower them (`_would_tint`); the same functions go
+    # there now, because the legacy emitter has the AIL syntax's list semantics, not Python's (a list swap, an alias)
+    _int64_py = intmode.int64_python()
     # A mixed-mode clone with the tagged lowering turned OFF is explicitly asking for the legacy
     # int64 emitter (pymix's own selection probe, and `_setup_mix`'s retry after a tagged attempt
     # the IR cannot lower): the checks below are conditions for *tagged* lowering, not for the
@@ -416,7 +420,7 @@ def _apply(P, args, kwargs, result, current):
     _proof = None
     try:
         import bigcap
-        if not _py:
+        if not (_py or _int64_py):
             raise RuntimeError
         _d = bigcap._Defined(set(getattr(ctx, 'funcs', {})) | set(getattr(ctx, 'classes', {})))
         _d.classes = frozenset(getattr(ctx, 'classes', {}))
@@ -442,6 +446,9 @@ def _apply(P, args, kwargs, result, current):
     except Exception:
         _needs_tint = False
         _no_tint_locals = False
+    _would_tint = _needs_tint if _int64_py else False
+    if _int64_py:
+        _needs_tint = False                  # nothing is tagged in int64 mode
     def _text_int(n):
         if not (isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
                 and n.func.id in ('int', '_ail_int2') and n.args):
@@ -603,6 +610,13 @@ def _apply(P, args, kwargs, result, current):
         # general path like any other the tagged lowering does not cover.
         _m_tuple = re.search(r"has kind \('obj', '_AilT_([a-z0-9_]+)'\)", str(reason))
         _int_tuple_text = bool(_m_tuple and 'i' in _m_tuple.group(1).split('_') and _unsafe_text_int)
+        if _would_tint and 'has kind (' not in str(reason) and not _call_result_proof \
+                and not fn.name.startswith(('_Ail', '_ail')) and not _io_like \
+                and fn.name not in getattr(P, 'TINT_EXCLUDED', ()) and cname not in getattr(P, 'TINT_EXCLUDED', ()) \
+                and not getattr(P, 'TINT_DISABLED', False) and not os.environ.get('AIL_NO_GENERAL'):
+            from pyfront import Unsupported
+            raise Unsupported('%s() has ints the local proof cannot bound and the IR cannot lower it, and the legacy emitter '
+                              'does not have Python\'s list semantics: %s' % (fn.name, reason))
         if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason) or _int_tuple_text) \
                 and not _call_result_proof \
                 and not fn.name.startswith(('_Ail', '_ail')) \
