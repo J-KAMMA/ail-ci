@@ -862,7 +862,7 @@ def _refuse_big_capable(source, local=True):
     prelude = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
     if prelude:                       # library prelude units are not the program's own code (BIGINT.md rules 2-4)
         tree.body = [n for n in tree.body if getattr(n, 'name', None) not in prelude]
-    marks = bigcap.marked(tree, local=local)
+    marks = bigcap.marked(tree, local=local, typed=True)
     if os.environ.get('AIL_NO_GENERAL'):
         # a typed-only build keeps `2 ** k` and `int.from_bytes(...)` (their int64 overflow is the loud stop they always
         # had); `math.factorial`, an out-of-range literal and a variable shift stay refused by name
