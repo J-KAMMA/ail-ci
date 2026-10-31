@@ -1,3 +1,30 @@
+## 2026-10-31 -- pre366: reconcile the alias test with the integration's exact ints (job-rbrbpre366-10312036)
+
+The integration branch now carries the same alias/wrapper fix independently, reconciled as
+`test_ail_pre430`: for Python syntax its general path has exact big integers, so the int64
+gate is skipped and an aliased `q = power` call that leaves int64 prints CPython's exact
+result instead of being refused.  The 2026-10-28 pre366 test still asserted a named refusal
+for every unsafe alias route, so `test_ail_pre366` failed on the integration tree (28
+subtests: all 14 alias cases, both builds) even though the compiler was correct there.  The
+test now follows the integration's rule: an unsafe call site is either refused by name
+(int64 constant overflow, aliased operands not known, `int()` of a float outside int64) or
+it builds and must print CPython's exact result; a run-time `integer overflow` is never
+accepted.  Coverage keeps the direct, alias-chain, module-constant, bool, argument,
+list-item, class-attribute, dict-value, float-base and int() routes plus new width/empty/
+boundary and rebound-alias cases; safe constants and direct wrapper calls must match CPython
+on both builds.  The alias source change (`_add_function_aliases`) is unchanged: it is the
+fix that produces the named refusals on this (pre-bigint) tree.
+
+`test_ail_pre421` was checked against a reconstructed integration merge (origin/integ plus
+this source and test change) and passes; this change does not touch the class-name index
+path.
+
+Probes in `/tmp/probes2` (28 programs, both builds via `cmp.sh`): on this tree 16 are
+refused by name (p01-p05 overflow, p06-p12 aliased operands, p13-p16 `int()` float) and 12
+match CPython (p17-p28); on the integration merge all 28 match CPython.  Final tests:
+test_ail_pre366, test_ail_pre160, test_ail_pre273, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` run and `--check` passes.
+
 ## 2026-10-28 -- re-apply accepted pre366 on the current tree (job-rbrbpre366-10281613)
 
 Re-applied the accepted pre366 alias/wrapper change (job-rbpre366-10281113) on this tree.  The
