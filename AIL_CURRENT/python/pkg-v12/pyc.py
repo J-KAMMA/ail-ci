@@ -47,7 +47,8 @@ import shadowing
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
 from pyfront import (Unsupported, fold_int_constants, to_pipeline_c, _number_constant,
-                     _int_const_value, _IntConstTooLarge, refuse_field_method_call)
+                     _int_const_value, _IntConstTooLarge, _INT64_MIN, _INT64_MAX,
+                     refuse_field_method_call)
 import pyfunc
 from pyfunc import to_c as func_to_c
 from pyfunc import _module_const_scalar, module_table_refusal, _written_globals
@@ -527,16 +528,20 @@ def _print_scalar_constant(node):
 
     A non-bool Constant is already safe.  An integer constant expression (`40 + 2`, as in
     language_examples/hello.ail) is proven by the same exact folder the big-int pass uses, so the
-    value is a plain int; a result beyond int64 is left to the big-int check to name rather than
-    refused here with the generic print message.  A bare bool stays out because the typed path
-    erases its object identity to int, which is why this gate exists.
+    value is a plain int.  It is accepted only when that value fits int64: the typed path has no
+    big ints, so an out-of-range expression would keep the arithmetic and stop with `integer
+    overflow` at run time (AIL_IR=0) instead of printing CPython's exact value.  Such an argument
+    keeps the general fallback; on a typed-only build the big-int gate names it instead.  A bare
+    bool stays out because the typed path erases its object identity to int, which is why this
+    gate exists.
     """
     if isinstance(node, ast.Constant):
         return not isinstance(node.value, bool)
     try:
-        return _int_const_value(node) is not None
+        value = _int_const_value(node)
     except _IntConstTooLarge:
-        return True
+        return False
+    return value is not None and _INT64_MIN <= value <= _INT64_MAX
 
 
 def _to_c(source, strict=True, name='run', info=None, external=None):

@@ -3,8 +3,9 @@
 `language_examples/hello.ail` is `print(40 + 2)`.  The typed path refused it with
 "a script that is only print(<expression>) needs general object semantics" although 40 + 2 is a
 proven int constant expression, so the default build had to take the general path.  The print
-gate now accepts integer constant expressions (an out-of-int64 result is left to the big-int
-check to name) while bool, float, text and container arguments keep the old fallback.  Every
+gate now accepts integer constant expressions whose exact value fits int64; an out-of-int64
+result keeps the general fallback (the big-int gate names it on a typed-only build when it marks
+the construct), while bool, float, text and container arguments keep the old fallback.  Every
 result is compared with CPython on the general, default and typed-only builds.
 """
 import os
@@ -113,6 +114,29 @@ class Ex32Tests(unittest.TestCase):
                 got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
                 self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0], (mode, got.stderr[-800:]))
                 self.assertEqual(got.returncode, want[1], (mode, got.stderr[-800:]))
+
+    def test_out_of_int64_expressions_keep_the_general_fallback(self):
+        # 2**63 and 1<<63 are one past INT64_MAX and below INT64_MIN: the typed emitter would keep
+        # the arithmetic and stop with `integer overflow` at run time, so the print gate must not
+        # accept them (test_ail_pre47 runs the same shift with the legacy AIL_IR=0 emitter).
+        cases = {
+            'pow_boundary': 'print(2 ** 63)\n',
+            'shift_boundary': 'print(1 << 63)\n',
+            'below_min': 'print(-(2 ** 63) - 1)\n',
+        }
+        with tempfile.TemporaryDirectory(prefix='ail-ex32-oob-') as directory:
+            for slug, text in cases.items():
+                want = cpython(directory, slug, text)
+                _, typed = build(directory, slug + '_t', text, 't')
+                self.assertNotEqual(typed.returncode, 0, (slug, (typed.stdout + typed.stderr)[-1200:]))
+                self.assertIn('not in the subset', typed.stdout + typed.stderr)
+                for mode in ('g', 'd'):
+                    exe, built = build(directory, slug + '_' + mode, text, mode)
+                    self.assertEqual(built.returncode, 0, (slug, mode, built.stdout + built.stderr))
+                    got = subprocess.run([str(exe)], capture_output=True, timeout=120, cwd=directory)
+                    self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0],
+                                     (slug, mode, got.stderr[-800:]))
+                    self.assertEqual(got.returncode, want[1], (slug, mode, got.stderr[-800:]))
 
 
 if __name__ == '__main__':
