@@ -21,12 +21,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
+from ail_testenv import rustc_path  # noqa: E402
 from test_ail_ffi import CC, compile_cli, run_cpython  # noqa: E402
 
 BINDGEN = ROOT / "ail_bindgen.py"
-RUSTC = shutil.which("rustc")
-if RUSTC and subprocess.run([RUSTC, "--version"], capture_output=True).returncode:
-    RUSTC = None                      # a rustup shim with no installed toolchain cannot compile
+RUSTC = rustc_path()
 
 
 def have_header(name):
