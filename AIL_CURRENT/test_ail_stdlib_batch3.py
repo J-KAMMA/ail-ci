@@ -232,6 +232,25 @@ def first_difference(name, stdin, ran, expected):
             lines[source] if source is not None else None, seed, ran.stderr[:300]))
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 class Batch3Tests(unittest.TestCase):
     def same_as_cpython(self, text, name, stdin=b"", oracle_text=None):
         with tempfile.TemporaryDirectory() as directory:
@@ -309,6 +328,8 @@ class Batch3Tests(unittest.TestCase):
     # -- json ----------------------------------------------------------------------------------------------
     def test_json_shapes(self):
         self.same_as_cpython(SHAPES["j1"], "json_shapes")
+
+    @_exact_int
 
     def test_json_generated_documents(self):
         docs = json_documents()
