@@ -1,3 +1,25 @@
+## 2026-10-31 -- quickstart docs re-applied with the job DEVLOG entry (job-rbrel1-10312119)
+
+Re-applied the accepted `job-rel1-10292334` change, whose diff no longer applies to this
+integrated tree: added `docs/QUICKSTART.md` (167 lines), the three complete programs in
+`AIL_CURRENT/language_examples/quickstart/` (`hello.py`, `word_counts.py`, `counter.py`),
+`test_ail_quickstart_docs.py` registered through `AIL_CURRENT/tests.d/test_ail_quickstart_docs.txt`
+(this tree's scheme, not the `LISTED_MODULES` tuple), the README link, a two-line
+`tools/ci_shards.json` placement (weight 10.0) and one `DIFFERENCES.md` row. The rel1
+`docs/INSTALL.md` rewrite was not applied over this tree's newer 169-line guide; a link to the
+quickstart was added instead. No compiler behaviour changed.
+
+Probes in `/tmp/probes/rbrel1fix` via `cmp.sh`, both builds: `p_hello`, `p_word_counts`, `p_counter`
+(the three documented programs), `p_wc_empty` (empty list and empty strings), `p_unicode` (`é`,
+sort order), `p_routes` (values through a list item, an attribute and a dict value) and
+`p_counter_empty_neg` (empty and negative totals) match CPython on both builds, as does
+`p_plain`; `p_outside_subset` (the documented match program) is refused by name on both builds,
+and `compile --syntax python outside_subset.py -o outside_subset` prints exactly the documented
+message and exits 3; `check --syntax python language_examples/quickstart/hello.py` exits 0.
+Final-state tests with `-j 2`: test_ail_quickstart_docs, test_ail_pre346, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3, 0 failed. `tools/update_manifest.py --check` and
+`tools/ci_shards.py --check` exit 0.
+
 ## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
 
 Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this
