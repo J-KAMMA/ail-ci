@@ -572,7 +572,8 @@ class FunctionLevelRefusals(ModulesBase):
         self.refuse("l7_attr", "main.py:4:11", "module 'a' has no top-level name 'lib'")
 
     def test_two_functions_import_different_things_under_one_name(self):
-        self.refuse("l10_twoimports", "main.py:6:5", "'f' is bound to two different imports")
+        # MODSYS: they are two local names in CPython, so each function gets a name of its own
+        self.assertEqual(self.same_as_cpython(LAYOUTS["l10_twoimports"], irs=("1",)), "lib.f other.f\n")
 
     def test_function_level_name_that_the_module_also_defines(self):
         self.refuse("l12_conflict", "a.py:1:1", "'lib' is imported and also assigned")

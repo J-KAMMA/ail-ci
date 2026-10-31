@@ -80,6 +80,29 @@ class ModuleAttributes(ModulesBase):
         self.assertEqual(out, "main.py __main__ None\n")
 
 
+class Cycles(ModulesBase):
+    """Import cycles run in CPython's order: the module that is still starting has the names defined so far."""
+
+    def test_cycle_where_the_name_is_defined_before_the_import(self):
+        out = self.same_as_cpython({
+            "a.py": "print('a starts')\nX = 1\n\n\ndef fa():\n    return X + 1\n\n\nimport b\n\nprint('a ends', b.Y)\n",
+            "b.py": "print('b starts')\nfrom a import X, fa\nY = X + 10\nprint('b sees', X, fa())\n",
+            "main.py": "import a\nprint(a.X, a.b.Y)\n"}, irs=ONE)
+        self.assertEqual(out, "a starts\nb starts\nb sees 1 2\na ends 11\n1 11\n")
+
+    def test_cycle_that_reads_a_name_before_it_is_defined_is_refused(self):
+        # CPython: ImportError (cannot import name 'X' from partially initialized module 'a')
+        self.refused({"a.py": "import b\nX = 1\n", "b.py": "from a import X\n", "main.py": "import a\nprint(a.X)\n"},
+                     "import cycle", "so CPython raises ImportError")
+
+    def test_function_level_from_import_in_a_cycle(self):
+        out = self.same_as_cpython({
+            "a.py": "import b\n\n\ndef fa():\n    return 'a'\n",
+            "b.py": "import a\n\n\ndef fb():\n    from a import fa\n    return fa() + 'b'\n",
+            "main.py": "import a\nimport b\nprint(b.fb())\n"}, irs=ONE)
+        self.assertEqual(out, "ab\n")
+
+
 class GuardedImports(ModulesBase):
     def test_try_import_of_a_module_that_exists(self):
         out = self.same_as_cpython({
@@ -120,6 +143,25 @@ class GuardedImports(ModulesBase):
             "main.py": "def run(x):\n    try:\n        import lib\n        return lib.f(x)\n    except ImportError:\n"
                        "        return -1\n\nprint(run(4))\n"}, irs=ONE)
         self.assertEqual(out, "12\n")
+
+    def test_try_that_does_more_than_import_runs_the_code_before_the_failing_import(self):
+        out = self.same_as_cpython({
+            "main.py": "try:\n    X = 1\n    import no_such_module_xyz\n    X = 2\nexcept ImportError:\n    Y = 5\n"
+                       "finally:\n    print('fin')\nprint(X, Y)\n"}, irs=ONE)
+        self.assertEqual(out, "fin\n1 5\n")
+
+    def test_c_module_without_a_python_fallback_is_refused(self):
+        self.refused({"main.py": "try:\n    from _collections import deque\nexcept ImportError:\n    pass\nprint(1)\n"},
+                     "no Python fallback")
+
+    def test_conditions_on_the_platform_and_version_choose_the_import(self):
+        out = self.same_as_cpython({
+            "lib.py": "K = 3\n",
+            "main.py": "import sys\nif sys.platform == 'win32':\n    import no_such_module_xyz as impl\n    NAME = 'win'\n"
+                       "elif sys.version_info >= (3, 8) and not sys.platform.startswith('win'):\n    import lib as impl\n"
+                       "    NAME = 'lib'\nelse:\n    import no_such_other_xyz as impl\n    NAME = 'old'\n"
+                       "print(NAME, impl.K)\n"}, irs=ONE)
+        self.assertEqual(out, "lib 3\n")
 
     def test_missing_module_without_a_handler_for_it_is_refused(self):
         self.refused({"main.py": "try:\n    import no_such_module_xyz\nexcept KeyError:\n    pass\nprint(1)\n"},
@@ -187,6 +229,38 @@ class LazyStart(ModulesBase):
             "b.py": "print('b starts')\n\n\ndef fb():\n    from a import fa\n    return 'b' + fa()\n",
             "main.py": "import a\nprint(a.both())\n"}, irs=ONE)
         self.assertEqual(out, "b starts\na starts\naba\n")
+
+    def test_function_that_returns_a_lazily_imported_module(self):
+        out = self.same_as_cpython({
+            "lib.py": "print('lib starts')\nK = 5\n\n\ndef f(x):\n    return x + K\n",
+            "helper.py": "def L():\n    import lib\n    return lib\n\n\ndef twice():\n    return L().f(1) * 2\n",
+            "main.py": "import helper\nfrom helper import L\n\nprint('go')\nprint(helper.L().f(2), helper.L().K)\n"
+                       "print(L().f(1), helper.twice())\nL()\n"}, irs=ONE)
+        self.assertEqual(out, "go\nlib starts\n7 5\n6 12\n")
+
+    def test_one_name_bound_to_different_modules_in_two_branches(self):
+        out = self.same_as_cpython({
+            "lib_a.py": "print('a starts')\nNAME = 'a'\n\n\ndef run(x):\n    return x + 1\n",
+            "lib_b.py": "print('b starts')\nNAME = 'b'\n\n\ndef run(x):\n    return x * 2\n",
+            "main.py": "def pick(flag):\n    if flag:\n        import lib_a as impl\n    else:\n"
+                       "        import lib_b as impl\n    return impl.run(10), impl.NAME\n\n\n"
+                       "print(pick(True))\nprint(pick(False))\nprint(pick(True))\n"}, irs=ONE)
+        self.assertEqual(out, "a starts\n(11, 'a')\nb starts\n(20, 'b')\n(11, 'a')\n")
+
+    def test_module_value_from_a_getter_is_refused(self):
+        self.refused({"lib.py": "K = 5\n", "helper.py": "def L():\n    import lib\n    return lib\n",
+                      "main.py": "import helper\nm = helper.L()\nprint(m.K)\n"},
+                     "returned by a call and used as a value")
+
+    def test_class_with_builtin_method_decorators(self):
+        out = self.same_as_cpython({
+            "lib.py": "print('lib starts')\nBASE = 10\n\n\nclass Shape:\n    count = 0\n\n    def __init__(self, n):\n"
+                      "        self.n = n\n\n    @staticmethod\n    def twice(x):\n        return x * 2\n\n"
+                      "    @classmethod\n    def make(cls, n):\n        return cls(n + BASE)\n\n"
+                      "    @property\n    def double(self):\n        return self.n * 2\n",
+            "main.py": "def run():\n    import lib\n    s = lib.Shape.make(1)\n    return lib.Shape.twice(3), s.double\n\n\n"
+                       "print(run())\n"}, irs=ONE)
+        self.assertEqual(out, "lib starts\n(6, 22)\n")
 
     def test_definition_that_needs_a_computed_value_is_refused(self):
         self.refused({"lib.py": "import os\nBASE = os.getcwd()\n\n\ndef f(x=BASE):\n    return x\n",

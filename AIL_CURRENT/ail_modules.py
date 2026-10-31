@@ -278,6 +278,9 @@ class Program:
         self.kept = {}
         self.ext = {}                   # (Mod, attr) -> (writer Mod, node): `m.attr = v` somewhere
         self.top_cache = {}
+        self.getters = {}
+        self.after_name = None
+        self.uses_after = False
 
     def dunder_node(self, mod, name):
         """The value of `__file__` / `__package__` / `__path__` of `mod` as a constant expression, else None.
@@ -290,6 +293,28 @@ class Program:
         if name == '__path__' and mod.kind != 'module' and not mod.entry:
             return ast.List(elts=[ast.Constant(str(d)) for d in mod.dirs], ctx=ast.Load())
         return None
+
+    def find_getters(self, mods):
+        """Functions of the form `def f(): import m; return m` (the usual lazy import of a module that is used
+        through a getter): a call `f().name` is the module's `name`. {(module name, function): (Mod, node)}."""
+        self.getters = {}
+        for mod in mods:
+            slots = {id(s) for s in mod.lazy_slot.values()}
+            for node in mod.tree.body:
+                if not isinstance(node, ast.FunctionDef) or node.decorator_list:
+                    continue
+                a = node.args
+                if a.posonlyargs or a.args or a.kwonlyargs or a.vararg or a.kwarg:
+                    continue
+                body = [s for s in node.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant)
+                                                     and isinstance(s.value.value, str))]
+                if len(body) < 2 or not isinstance(body[-1], ast.Return) or not isinstance(body[-1].value, ast.Name):
+                    continue
+                if not all(isinstance(s, ast.Pass) and id(s) in slots for s in body[:-1]):
+                    continue
+                entry = mod.alias.get(body[-1].value.id)
+                if entry is not None and entry[0] == 'mod' and mod.kinds.get(node.name) == 'func':
+                    self.getters[(mod.name, node.name)] = (entry[1], node)
 
     def refuse(self, mod, node, text):
         raise ModuleRefusal(mod.path, getattr(node, 'lineno', 1), getattr(node, 'col_offset', 0) + 1, text)
@@ -536,7 +561,9 @@ class Program:
         """None when the import statement `node` (in a `try:` that catches ImportError) succeeds, else the text
         of the ModuleNotFoundError / ImportError CPython would raise. Local modules are searched like `load`;
         any other module succeeds when the build machine's CPython has it (the compiler then refuses it by
-        name later if it cannot build it), except a C accelerator, which is taken as absent."""
+        name later if it cannot build it), except a C accelerator, which is taken as absent (`accel_failure` tells
+        the caller, which then checks that the handler defines what the import would have bound)."""
+        self.accel_failure = False
         if isinstance(node, ast.Import):
             names = [a.name for a in node.names]
         else:
@@ -551,9 +578,123 @@ class Program:
                             break                       # a brace .ail that shadows a modelled module: a std import
                         return "No module named %r" % '.'.join(parts[:i])
                 continue
-            if self.accelerator(top) or not self.cpython_has(top):
+            if self.accelerator(top):
+                self.accel_failure = True
+                return "No module named %r" % name
+            if not self.cpython_has(top):
                 return "No module named %r" % name
         return None
+
+    TARGETS = {'linux': ('linux', 'posix'), 'linux-arm64': ('linux', 'posix'), 'macos': ('darwin', 'posix'),
+               'macos-x86_64': ('darwin', 'posix'), 'windows': ('win32', 'nt')}
+
+    def target_values(self):
+        """(sys.platform, os.name) of the program being built: the host, or the --target of a cross build."""
+        target = os.environ.get('AIL_TARGET')
+        if not target and '--target' in sys.argv[:-1]:
+            target = sys.argv[sys.argv.index('--target') + 1]
+        return self.TARGETS.get(target, (sys.platform, os.name) if not target else (None, None))
+
+    def std_bindings(self, mod):
+        """Names bound by the standard-library imports at the top of `mod` (the analysis has not run yet when a
+        condition is folded): name -> ('import', module) | ('from', module, name)."""
+        found = {}
+        for node in mod.tree.body:
+            if isinstance(node, ast.Import) and not self.is_local_import(node):
+                for a in node.names:
+                    found[a.asname or a.name.split('.')[0]] = ('import', a.name)
+            elif isinstance(node, ast.ImportFrom) and not node.level and not self.is_local_import(node):
+                for a in node.names:
+                    found[a.asname or a.name] = ('from', node.module, a.name)
+        return found
+
+    def static_value(self, mod, n, std=None):
+        """The value of expression `n` when it only depends on the build: constants, `sys.platform`, `os.name`,
+        `sys.version_info`, `sys.implementation.name`, `TYPE_CHECKING`, and comparisons, `not`, `and` / `or`, str
+        `startswith` / `endswith` of those. _UNKNOWN otherwise."""
+        if std is None:
+            std = self.std_bindings(mod)
+        if isinstance(n, ast.Constant):
+            return n.value
+        if isinstance(n, ast.Tuple):
+            vals = [self.static_value(mod, e, std) for e in n.elts]
+            return _UNKNOWN if any(v is _UNKNOWN for v in vals) else tuple(vals)
+        if isinstance(n, ast.Name):
+            if n.id == 'TYPE_CHECKING' and std.get(n.id) == ('from', 'typing', 'TYPE_CHECKING'):
+                return False
+            if n.id == '__debug__' and n.id not in mod.kinds:
+                return True
+            return _UNKNOWN
+        if isinstance(n, ast.Attribute):
+            chain, cur = [n.attr], n.value
+            while isinstance(cur, ast.Attribute):
+                chain.append(cur.attr)
+                cur = cur.value
+            if not isinstance(cur, ast.Name) or cur.id in mod.kinds or cur.id in mod.alias:
+                return _UNKNOWN
+            chain.reverse()
+            signature = std.get(cur.id)
+            if signature is None or signature[0] != 'import':
+                return _UNKNOWN
+            first = signature[1].split('.')[0]
+            dotted = '.'.join([first] + chain) if (cur.id == first or '.' not in signature[1]) else None
+            platform, osname = self.target_values()
+            if dotted == 'sys.platform':
+                return platform if platform is not None else _UNKNOWN
+            if dotted == 'os.name':
+                return osname if osname is not None else _UNKNOWN
+            if dotted == 'sys.version_info':
+                return tuple(sys.version_info)
+            if dotted == 'sys.implementation.name':
+                return 'cpython'
+            if dotted == 'typing.TYPE_CHECKING':
+                return False
+            return _UNKNOWN
+        if isinstance(n, ast.Subscript):
+            base = self.static_value(mod, n.value, std)
+            if base is _UNKNOWN or not isinstance(base, tuple):
+                return _UNKNOWN
+            if isinstance(n.slice, ast.Slice):
+                parts = [None if x is None else self.static_value(mod, x, std) for x in (n.slice.lower, n.slice.upper, n.slice.step)]
+                return _UNKNOWN if any(x is _UNKNOWN for x in parts) else base[slice(*parts)]
+            index = self.static_value(mod, n.slice, std)
+            return base[index] if isinstance(index, int) and -len(base) <= index < len(base) else _UNKNOWN
+        if isinstance(n, ast.UnaryOp) and isinstance(n.op, ast.Not):
+            v = self.static_value(mod, n.operand, std)
+            return _UNKNOWN if v is _UNKNOWN else (not v)
+        if isinstance(n, ast.BoolOp):
+            vals = [self.static_value(mod, e, std) for e in n.values]
+            is_and = isinstance(n.op, ast.And)
+            for v in vals:
+                if v is _UNKNOWN:
+                    return _UNKNOWN
+                if bool(v) != is_and:
+                    return v
+            return vals[-1]
+        if isinstance(n, ast.Compare):
+            left = self.static_value(mod, n.left, std)
+            if left is _UNKNOWN:
+                return _UNKNOWN
+            ops = {ast.Eq: operator.eq, ast.NotEq: operator.ne, ast.Lt: operator.lt, ast.LtE: operator.le,
+                   ast.Gt: operator.gt, ast.GtE: operator.ge, ast.In: lambda a, b: a in b,
+                   ast.NotIn: lambda a, b: a not in b}
+            for op, comparator in zip(n.ops, n.comparators):
+                right = self.static_value(mod, comparator, std)
+                if right is _UNKNOWN or type(op) not in ops:
+                    return _UNKNOWN
+                try:
+                    if not ops[type(op)](left, right):
+                        return False
+                except TypeError:
+                    return _UNKNOWN
+                left = right
+            return True
+        if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in ('startswith', 'endswith')
+                and len(n.args) == 1 and not n.keywords):
+            base, arg = self.static_value(mod, n.func.value, std), self.static_value(mod, n.args[0], std)
+            if isinstance(base, str) and isinstance(arg, (str, tuple)):
+                return getattr(base, n.func.attr)(arg)
+        return _UNKNOWN
 
     def resolve_guarded(self, mod):
         """Replace each `try:` whose body only imports (and binds constants) and has a handler for ImportError by
@@ -598,18 +739,77 @@ class Program:
                 return node.body + node.orelse
             return None
 
+        def needed(stmt):
+            """The names a successful import statement would bind (a star import: none)."""
+            if isinstance(stmt, ast.Import):
+                return {a.asname or a.name.split('.')[0] for a in stmt.names}
+            return {a.asname or a.name for a in stmt.names if a.name != '*'}
+
+        def fallback_defines(stmt, handler):
+            """A C accelerator that is taken as absent needs a handler that defines what the import would have bound."""
+            if not self.accel_failure:
+                return
+            missing = needed(stmt) - set(_scan_scope(handler.body)[0])
+            if missing:
+                self.refuse(mod, stmt, "import of the CPython C module %r guarded by `except ImportError`: this compiler "
+                            "does not provide it, and the handler does not define %s, so there is no Python fallback.\n"
+                            "  write instead: define %s in the handler, or import it without `try:`"
+                            % (stmt.module if isinstance(stmt, ast.ImportFrom) else stmt.names[0].name,
+                               ', '.join(sorted(missing)), ', '.join(sorted(missing))))
+
+        def handlers_without_import_errors(handlers):
+            kept = []
+            for h in handlers:
+                if h.type is not None:
+                    types = h.type.elts if isinstance(h.type, ast.Tuple) else [h.type]
+                    rest = [t for t in types if not (isinstance(t, ast.Name)
+                                                     and t.id in ('ImportError', 'ModuleNotFoundError'))]
+                    if not rest:
+                        continue
+                    if len(rest) != len(types):
+                        h = copy.copy(h)
+                        h.type = rest[0] if len(rest) == 1 else ast.Tuple(rest, ast.Load())
+                kept.append(h)
+            return kept
+
         def replace(node):
             imports = own_imports(node.body)
             if not imports:
                 return None
             if not all(map(simple, node.body)):
+                direct = [i for i, st in enumerate(node.body) if isinstance(st, (ast.Import, ast.ImportFrom))]
+                for i in direct:
+                    text = self.import_failure(mod, node.body[i])
+                    if text is None:
+                        continue
+                    stmt = node.body[i]
+                    for h in node.handlers:
+                        if self.handler_catches(h, text.startswith('No module named')):
+                            fallback_defines(stmt, h)
+                            # the statements before the import run; then (no exception) the handler's body
+                            body = list(h.body)
+                            if h.name:
+                                error = ast.Call(ast.Name('ImportError', ast.Load()), [ast.Constant(text)], [])
+                                body.insert(0, ast.copy_location(ast.Assign([ast.Name(h.name, ast.Store())], error), h))
+                            pre = node.body[:i] or [ast.copy_location(ast.Pass(), node)]
+                            others = handlers_without_import_errors(node.handlers)
+                            if not others and not node.finalbody:
+                                return node.body[:i] + body
+                            if not others:
+                                return [ast.copy_location(ast.Try(body=node.body[:i] + body, handlers=[], orelse=[],
+                                                                   finalbody=node.finalbody), node)]
+                            return [ast.copy_location(ast.Try(body=pre, handlers=others, orelse=body,
+                                                               finalbody=node.finalbody), node)]
+                    self.refuse(mod, stmt, "the import fails here (%s) and no handler of this `try` catches ImportError: "
+                                "CPython stops with ModuleNotFoundError.\n  write instead: remove the import, or provide "
+                                "the module" % text)
                 for stmt in imports:
                     text = self.import_failure(mod, stmt)
                     if text is not None:
-                        self.refuse(mod, stmt, "the import fails here (%s), inside a `try:` that does more than import; "
-                                    "CPython would run the handler, and the compiler can only choose a branch for a "
-                                    "`try:` that holds nothing but imports.\n  write instead: put the imports alone "
-                                    "in the `try:` (and the rest after it)" % text)
+                        self.refuse(mod, stmt, "the import fails here (%s), inside a `try:` in a nested statement; "
+                                    "CPython would run the handler, and the compiler can only choose a branch for an "
+                                    "import that is a direct statement of the `try:`.\n  write instead: put the "
+                                    "import directly in the `try:` body" % text)
                 return prune(node)
             if not node.handlers or not any(self.handler_catches(h, True) or self.handler_catches(h, False)
                                             for h in node.handlers):
@@ -626,13 +826,17 @@ class Program:
                     text = self.import_failure(mod, s)
                     if text is not None:
                         failed = (s, text)
+                        accelerated = self.accel_failure
                         break
                 pre.append(s)
+            if failed is not None:
+                self.accel_failure = accelerated
             if failed is None:
                 return pre + node.orelse + node.finalbody
             stmt, text = failed
             for h in node.handlers:
                 if self.handler_catches(h, text.startswith('No module named')):
+                    fallback_defines(stmt, h)
                     body = list(h.body)
                     if h.name:
                         error = ast.Call(ast.Name('ImportError', ast.Load()), [ast.Constant(text)], [])
@@ -645,6 +849,11 @@ class Program:
         def block(stmts):
             out = []
             for s in stmts:
+                if isinstance(s, ast.If):
+                    value = self.static_value(mod, s.test)
+                    if value is not _UNKNOWN and (own_imports(s.body) or own_imports(s.orelse)):
+                        out.extend(block(s.body if value else s.orelse))
+                        continue
                 if isinstance(s, ast.Try):
                     got = replace(s)
                     if got is not None:
@@ -679,9 +888,140 @@ class Program:
             out.append(node)
         mod.tree.body = out
 
+    def split_conflicting_imports(self, mod):
+        """A function that binds one name to different local modules in different branches
+        (`if c: import a as impl` / `else: import b as impl`) and only reads attributes of it (`impl.f(x)`): each
+        import gets a name of its own, the branch records which one ran in `impl` (a number), and each
+        `impl.f` becomes `a.f if impl == 0 else b.f`. A function that uses `impl` in any other way keeps the
+        conflict, which is refused by name later."""
+        def functions(stmts):
+            for st in stmts:
+                if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    yield st
+                for field in ('body', 'orelse', 'finalbody'):
+                    if isinstance(getattr(st, field, None), list):
+                        yield from functions(getattr(st, field))
+                for sub_node in list(getattr(st, 'handlers', None) or ()) + list(getattr(st, 'cases', None) or ()):
+                    yield from functions(sub_node.body)
+        for fn in list(functions(mod.tree.body)):
+            groups, todo = {}, list(fn.body)
+            while todo:
+                st = todo.pop(0)
+                if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    continue
+                if isinstance(st, ast.Import) and len(st.names) == 1 and st.names[0].asname and self.is_local_import(st):
+                    groups.setdefault(st.names[0].asname, []).append(st)
+                for field in ('body', 'orelse', 'finalbody'):
+                    if isinstance(getattr(st, field, None), list):
+                        todo.extend(getattr(st, field))
+                for sub_node in list(getattr(st, 'handlers', None) or ()) + list(getattr(st, 'cases', None) or ()):
+                    todo.extend(sub_node.body)
+            for name, group in groups.items():
+                if len({st.names[0].name for st in group}) < 2:
+                    continue
+                reads = sum(1 for x in ast.walk(fn) if isinstance(x, ast.Name) and x.id == name)
+                attrs = [x for x in ast.walk(fn) if isinstance(x, ast.Attribute) and isinstance(x.value, ast.Name)
+                         and x.value.id == name and isinstance(x.ctx, ast.Load)]
+                if reads != len(attrs) or any(isinstance(x, ast.Name) and x.id == name and not isinstance(x.ctx, ast.Load)
+                                              for x in ast.walk(fn)):
+                    continue
+                aliases = ['_ail_alt%d_%s' % (k, name) for k in range(len(group))]
+                by_id = {id(st): k for k, st in enumerate(group)}
+
+                class Split(ast.NodeTransformer):
+                    def visit_Import(self, node):
+                        k = by_id.get(id(node))
+                        if k is None:
+                            return node
+                        node.names[0].asname = aliases[k]
+                        record = ast.Assign([ast.Name(name, ast.Store())], ast.Constant(k))
+                        ast.copy_location(record, node)
+                        return [node, record]
+
+                    def visit_Attribute(self, node):
+                        self.generic_visit(node)
+                        if isinstance(node.value, ast.Name) and node.value.id == name and isinstance(node.ctx, ast.Load):
+                            chosen = ast.Attribute(ast.Name(aliases[-1], ast.Load()), node.attr, ast.Load())
+                            for k in range(len(aliases) - 2, -1, -1):
+                                test = ast.Compare(ast.Name(name, ast.Load()), [ast.Eq()], [ast.Constant(k)])
+                                chosen = ast.IfExp(test, ast.Attribute(ast.Name(aliases[k], ast.Load()), node.attr,
+                                                                       ast.Load()), chosen)
+                            return ast.copy_location(chosen, node)
+                        return node
+                Split().visit(fn)
+
+    def rename_conflicting_function_imports(self, mod):
+        """Two functions that import the same name from different places (`from pyfunc import to_c` in one,
+        `from pyc import to_c` in another) have two local names in CPython. The lifted imports share one module-level
+        alias table, so each of them gets a name of its own: the name is renamed inside the function."""
+        def functions(stmts):
+            for st in stmts:
+                if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    yield st
+                for field in ('body', 'orelse', 'finalbody'):
+                    if isinstance(getattr(st, field, None), list):
+                        yield from functions(getattr(st, field))
+                for sub_node in list(getattr(st, 'handlers', None) or ()) + list(getattr(st, 'cases', None) or ()):
+                    yield from functions(sub_node.body)
+
+        def own_imports(fn):
+            out, todo = [], list(fn.body)
+            while todo:
+                st = todo.pop(0)
+                if isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    continue
+                if isinstance(st, (ast.Import, ast.ImportFrom)) and self.is_local_import(st):
+                    out.append(st)
+                for field in ('body', 'orelse', 'finalbody'):
+                    if isinstance(getattr(st, field, None), list):
+                        todo.extend(getattr(st, field))
+                for sub_node in list(getattr(st, 'handlers', None) or ()) + list(getattr(st, 'cases', None) or ()):
+                    todo.extend(sub_node.body)
+            return out
+
+        bindings = {}                    # bound name -> {target: [(function, alias node)]}
+        for fn in functions(mod.tree.body):
+            for st in own_imports(fn):
+                try:
+                    where = self.absolute(mod, st) if isinstance(st, ast.ImportFrom) else None
+                except ModuleRefusal:
+                    continue
+                for a in st.names:
+                    if a.name == '*':
+                        continue
+                    if isinstance(st, ast.ImportFrom):
+                        bound, target = a.asname or a.name, ('from', where, a.name)
+                    elif a.asname:
+                        bound, target = a.asname, ('import', a.name)
+                    else:
+                        continue
+                    bindings.setdefault(bound, {}).setdefault(target, []).append((fn, a))
+        top_names = set(_scan_scope([x for x in mod.tree.body if not (id(x) in mod.lazy)])[0])
+        for name, targets in bindings.items():
+            if len(targets) < 2 or name in top_names:
+                continue
+            owners = [fn for entries in targets.values() for fn, _ in entries]
+            if len(set(map(id, owners))) != len(owners):
+                continue                 # one function binds the name twice: the other split handles `import as`
+            for fn in owners:
+                if any((isinstance(x, ast.Name) and x.id == name and not isinstance(x.ctx, ast.Load))
+                       or (isinstance(x, ast.arg) and x.arg == name)
+                       or (isinstance(x, (ast.Global, ast.Nonlocal)) and name in x.names) for x in ast.walk(fn)):
+                    break
+            else:
+                for k, entries in enumerate(targets.values()):
+                    new = '_ail_f%d_%s' % (k, name)
+                    for fn, alias in entries:
+                        alias.asname = new
+                        for x in ast.walk(fn):
+                            if isinstance(x, ast.Name) and x.id == name:
+                                x.id = new
+
     def lift_lazy(self, mod):
         self.resolve_guarded(mod)
         self.hoist_try_imports(mod)
+        self.split_conflicting_imports(mod)
+        self.rename_conflicting_function_imports(mod)
         """A local import inside a function is moved to the module's top level: a synthetic copy goes
         at the end of the module body (at the start for the entry file) and the statement itself
         becomes `pass`; the function then reads the name as a module-level alias. That is the same
@@ -1248,6 +1588,13 @@ class Program:
         while isinstance(root, ast.Attribute):
             root = root.value
         name = target.attr if isinstance(target, ast.Attribute) else getattr(target, 'id', None)
+        # the builtin method decorators, and `@prop.setter` on a property of the same class body
+        if (isinstance(d, ast.Name) and d.id in ('staticmethod', 'classmethod', 'property')
+                and d.id not in mod.kinds and d.id not in mod.alias and d.id not in mod.std):
+            return None
+        if (isinstance(d, ast.Attribute) and d.attr in ('setter', 'getter', 'deleter') and isinstance(d.value, ast.Name)
+                and d.value.id not in mod.kinds and d.value.id not in mod.alias and d.value.id not in mod.std):
+            return None
         if (name not in self.PURE_DECORATORS or not isinstance(root, ast.Name) or root.id in mod.kinds
                 or root.id in mod.alias):
             return d
@@ -1635,6 +1982,16 @@ class Program:
             return self.std_sig(entry[1], entry[2])
         return None
 
+    def origin(self, entry):
+        """(module, name) a ('member', module, name) import ends up at, following re-exports of analysed modules."""
+        owner, name = entry[1], entry[2]
+        for _ in range(30):
+            nxt = owner.alias.get(name) if owner.analysed else None
+            if nxt is None or nxt[0] != 'member':
+                break
+            owner, name = nxt[1], nxt[2]
+        return owner, name
+
     def bind(self, mod, imp, index, key, entry):
         node = imp.node
         if entry[0] == 'std':
@@ -1651,6 +2008,9 @@ class Program:
                 mod.first.setdefault(key, index)
                 return
         old = mod.alias.get(key)
+        if (old is not None and old != entry and old[0] == 'member' and entry[0] == 'member'
+                and self.origin(old) == self.origin(entry) and key not in mod.std):
+            return                  # two function-level imports of one object (`pyc.to_c` is `pyfunc.to_c`)
         if (old is not None and old != entry) or key in mod.std:
             self.refuse(mod, node, "%r is bound to two different imports in %s.\n"
                         "  write instead: give one of them another name with `as`" % (key, mod.path.name))
@@ -1934,6 +2294,8 @@ class Rewriter(ast.NodeTransformer):
         self.dry = dry                # only collect `m.attr = v` writes
         self.frames = []              # one set of module globals to declare per function / class body
         self.comp = 0
+        self.getter_fn = False        # inside a function of the form `def f(): import m; return m`
+        self.ok_calls = set()         # ids of getter calls used as `f().name` or as a statement
 
     def module_level(self, name):
         for position in range(len(self.scopes) - 1, -1, -1):
@@ -1994,7 +2356,49 @@ class Rewriter(ast.NodeTransformer):
             base = self.module_ref(node.value)
             if base is not None:
                 return self.module_value(base, node.attr, node)
+        elif isinstance(node, ast.Call):
+            return self.getter_of(node)
         return None
+
+    def getter_of(self, call):
+        """The module that `f()` returns when `f` is a getter (`def f(): import m; return m`), else None."""
+        if call.args or call.keywords or not self.program.getters:
+            return None
+        func, found = call.func, None
+        if isinstance(func, ast.Name) and self.module_level(func.id):
+            found = self.program.resolve(self.mod, func.id)
+        elif isinstance(func, ast.Attribute):
+            base = self.module_ref(func.value)
+            if base is not None:
+                found = self.program.resolve(base, func.attr, 0, True)
+        if found is None or found[0] != 'var':
+            return None
+        got = self.program.getters.get((found[1].name, found[2]))
+        return None if got is None else got[0]
+
+    def visit_Call(self, node):
+        if not self.dry and id(node) not in self.ok_calls:
+            target = self.getter_of(node)
+            if target is not None:
+                self.program.refuse(self.mod, node, "module %r returned by a call and used as a value (passed, stored "
+                                    "or compared); this compiler needs a module to be named at each use.\n"
+                                    "  write instead: use `%s().name` directly, or `import %s` where you use it"
+                                    % (target.name, ast.unparse(node.func), target.name))
+        self.generic_visit(node)
+        return node
+
+    def visit_Expr(self, node):
+        if isinstance(node.value, ast.Call):
+            self.ok_calls.add(id(node.value))
+        self.generic_visit(node)
+        return node
+
+    def visit_Return(self, node):
+        if (self.getter_fn and not self.dry and isinstance(node.value, ast.Name) and self.scopes
+                and len(self.scopes) == 1):
+            return ast.copy_location(ast.Return(ast.Constant(None)), node)
+        self.generic_visit(node)
+        return node
 
     def visit_Name(self, node):
         name = node.id
@@ -2039,6 +2443,28 @@ class Rewriter(ast.NodeTransformer):
         if target is None:
             self.generic_visit(node)
             return node
+        if isinstance(node.value, ast.Call):
+            return self.getter_attribute(node, target)
+        return self.module_attribute(node, target)
+
+    def getter_attribute(self, node, target):
+        """`f().name` where `f` returns a module: the call still runs (it starts the module), then the name."""
+        if self.dry:
+            return node
+        if not isinstance(node.ctx, ast.Load):
+            self.program.refuse(self.mod, node, "`%s().%s` is assigned or deleted through a function that returns "
+                                "module %s.\n  write instead: `import %s` and assign `%s.%s`"
+                                % (ast.unparse(node.value.func), node.attr, target.name, target.name,
+                                   target.name, node.attr))
+        self.ok_calls.add(id(node.value))
+        call = self.visit(node.value)
+        value = self.module_attribute(ast.copy_location(ast.Attribute(ast.Name('_', ast.Load()), node.attr,
+                                                                        ast.Load()), node), target)
+        self.program.uses_after = True
+        after = ast.Call(ast.Name(self.program.after_name, ast.Load()), [call, value], [])
+        return ast.copy_location(after, node)
+
+    def module_attribute(self, node, target):
         attr = node.attr
         stored = not isinstance(node.ctx, ast.Load)
         if self.dry:
@@ -2135,6 +2561,7 @@ class Rewriter(ast.NodeTransformer):
             node.body.insert(0, ast.copy_location(ast.Global(names=sorted(names)), node.body[0]))
 
     def visit_function(self, node):
+        original_name = getattr(node, 'name', None)
         if not isinstance(node, ast.Lambda):
             node.decorator_list = [self.visit(d) for d in node.decorator_list]
             if node.returns is not None:
@@ -2148,6 +2575,10 @@ class Rewriter(ast.NodeTransformer):
         if not isinstance(node, ast.Lambda) and not self.dry:
             node.name = self.rename_binding(node.name)
         names, global_names = _function_locals(node)
+        was_getter = self.getter_fn
+        self.getter_fn = (not isinstance(node, ast.Lambda) and not self.scopes
+                          and (self.program.getters.get((self.mod.name, original_name)) or (0, 0))[1]
+                          is node)
         self.scopes.append(['func', names, global_names])
         self.running += 1
         self.frames.append(set())
@@ -2158,6 +2589,7 @@ class Rewriter(ast.NodeTransformer):
         needed = self.frames.pop()
         self.running -= 1
         self.scopes.pop()
+        self.getter_fn = was_getter
         if not isinstance(node, ast.Lambda):
             self.declare_globals(node, needed)
         return node
@@ -2232,6 +2664,7 @@ def merge_program(entry_path, entry_text, read=None):
     mods = [entry] + reachable
     program.prepare_stores(mods)
     program.check_lazy_values(mods)
+    program.find_getters(mods)
     _assign_names(program, mods)
     classes = {}
     for mod in mods:
@@ -2426,7 +2859,14 @@ def merge_program(entry_path, entry_text, read=None):
         mod.done = True
         stack.pop()
 
+    program.after_name = '_ail_after'
+    while program.after_name in program_ids or program.after_name in program.kept:
+        program.after_name += '_'
     expand(entry)
+    if program.uses_after:
+        helper = ast.parse('def %s(_ail_a, _ail_b):\n    return _ail_b\n' % program.after_name).body[0]
+        helper._ail_path = entry.path
+        output.insert(0, helper)
     if future:
         head = ast.ImportFrom('__future__', [ast.alias(n) for n in future], 0)
         head._ail_path = entry.path
