@@ -1,3 +1,27 @@
+## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
+
+Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this
+integrated tree already carries an equivalent fix at the same main-synthesis site. Building every
+Python-syntax example in `language_examples` with `--syntax python`, only `math.ail` (`LIMIT = 6`
+plus `def sum_to(n)`) was refused on the default build (`not in the subset: the first parameter
+must be the sequence read from the file`); CPython prints nothing and exits 0, and the general
+build already matched. The typed path compiled the definitions and then synthesized the array-entry
+tool wrapper, which requires the entry function's first parameter to be the sequence read from the
+file. Here the site already had `_python_runs_nothing(source, True)` (definitions, including
+literal module constants, on the python surface, with an `AIL_TOOL_MODE` opt-out); both fixes are
+kept: the no-op `int main(void) { return 0; }` is chosen by `_python_runs_nothing(source, True) or
+(not AIL_TOOL_MODE and _module_constant_source(source))`, where `_module_constant_source` is the
+ex13 predicate (no `main`, at least one module constant, no executable statement). A top-level
+statement still runs as a script and a `main` is still the entry point. Probes in `/tmp/probes`
+on both builds via `cmp.sh`: `p_math`, `p_const_after`, `p_const_types`, `p_const_print`,
+`p_const_list`, `p_const_import_class`, `p_const_expr`, `p_const_annot`, `p_const_annot_only`,
+`p_const_print_top`, `p_const_array`, `p_const_side`, `p_const_main`, `p_const_only`,
+`p_defs_only`, `p6_guard`, `p_unused_print`, `p_main_name`, `p_top_call`, `p_side_class` match
+CPython on both builds; `p_const_alias` (`B = A`) and `p_const_call` (`X = len("abc")`) keep the
+pre-existing typed-path `a function with no parameters and no print()/assert` refusal (the general
+path matches CPython), as does `p_const_fstring`; `p_const_empty` and `p_const_guard` (`if False:`
+after a def) are refused by name on the typed path. Added `test_ail_ex13.py`.
+
 ## 2026-10-30 -- FFI F3a: integer arguments of an @extern stub behave like the shim's
 
 CPython runs `@extern` stubs through `ail_ffi.py`, which checks every int argument against the range of its C type and
