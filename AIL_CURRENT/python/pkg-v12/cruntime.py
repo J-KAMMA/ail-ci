@@ -18669,7 +18669,7 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
                builds; uncaught it still ends the program with exit 1 and the "integer overflow"
                text (now prefixed by CPython's own class name). */
             if (r >= 9223372036854775808.0 || r < -9223372036854775808.0)
-                return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "integer overflow in round() (ints are 64-bit; --exact-int gives exact ints)");
+                return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "integer overflow");
             *out = ail_box_int((int64_t)r);
 /*B>*/
             return AIL_OK;

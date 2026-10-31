@@ -4800,19 +4800,32 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             # subset (`int64_literals`), for Python syntax too (bigint): a Python-syntax program has big ints, so a build
             # names it at the typed path (pyfunc: 'does not fit in a 64-bit signed integer') and the general path
             # builds it exactly
-            if not declarations_only and (syntax == 'ail' or (syntax == 'python' and int64_literals)):
-                _check_int64_constants(tree)
-                if (syntax == 'ail' and not entry) or syntax == 'python':
-                    _check_int64_literals(tree)       # (a brace entry file is named by the type stage, with its position)
-                _check_int64_constant_positions(tree)
-                _check_int64_unary_constants(tree)
-                _check_int64_local_cancellations(tree)
-                _check_int64_int_base_constants(tree)
-                module_known = _known_module_constants(tree)
-                _check_int64_pow_constants(tree, module_known)
-                _check_int64_augmented_powers(tree, module_known)
-                _check_int64_routed_augmented_powers(tree, module_known)
-                _check_class_attribute_assignment(tree)       # (the general path has per-class tables: class attributes are assignable)
+            # int64 default (2026-10-31): a Python-syntax program has int64 ints unless --exact-int / AIL_EXACT_INT=1 asks for the
+            # exact ones, so a static need of a big int is refused by these checks in a build too, with the flag named
+            exact_ints = os.environ.get('AIL_EXACT_INT', '').strip().lower() in ('1', 'on', 'yes', 'true')
+            if not declarations_only and (syntax == 'ail' or (syntax == 'python' and (int64_literals or not exact_ints))):
+                try:
+                    _check_int64_constants(tree)
+                    if (syntax == 'ail' and not entry) or syntax == 'python':
+                        _check_int64_literals(tree)       # (a brace entry file is named by the type stage, with its position)
+                    _check_int64_constant_positions(tree)
+                    _check_int64_unary_constants(tree)
+                    _check_int64_local_cancellations(tree)
+                    _check_int64_int_base_constants(tree)
+                    module_known = _known_module_constants(tree)
+                    _check_int64_pow_constants(tree, module_known)
+                    _check_int64_augmented_powers(tree, module_known)
+                    _check_int64_routed_augmented_powers(tree, module_known)
+                    if syntax == 'ail' or int64_literals:
+                        _check_class_attribute_assignment(tree)   # (the general path has per-class tables: class attributes are assignable)
+                except ValueError as refusal:
+                    if syntax == 'python' and not exact_ints and not int64_literals and '--exact-int' not in str(refusal):
+                        hint = ('\n  write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) '
+                                'for exact big ints, about 20x slower')
+                        wrapped = type(refusal)(str(refusal) + hint)
+                        wrapped.__dict__.update(refusal.__dict__)
+                        raise wrapped from None
+                    raise
             if not declarations_only:
                 _check_genexpr_hash_keys(tree)    # not an int64 check: every build keeps a generator expression as a list
             if merged is not None and merged.positions:

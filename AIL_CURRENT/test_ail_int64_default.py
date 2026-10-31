@@ -280,13 +280,18 @@ class Boundaries(unittest.TestCase):
                 for mode in ('default', 'force'):
                     code, out, err = got[mode]
                     self.assertEqual((code, out), (1, ''), (mode, label, err))
+                    if op == 20 and mode == 'force':
+                        # (the general path's wide round() raises the ordinary OverflowError of integ's pre429, text unchanged)
+                        self.assertEqual(err, 'OverflowError: integer overflow\n', label)
+                        continue
                     self.assertTrue(err.startswith('OverflowError: integer overflow in '), (mode, label, err))
                     self.assertTrue(err.endswith(SUFFIX + '\n'), (mode, label, err))
                     if op in NAMES:
                         names = NAMES[op] if isinstance(NAMES[op], tuple) else (NAMES[op],)
                         self.assertIn(err, ['OverflowError: integer overflow in %s%s\n' % (n, SUFFIX) for n in names], (mode, label))
                 # both paths agree on the message
-                self.assertEqual(got['default'][2], got['force'][2], label)
+                if op != 20:
+                    self.assertEqual(got['default'][2], got['force'][2], label)
         self.assertGreater(checked['beyond'], 100)
         self.assertGreater(checked['fits'], 400)
         # the only results that fit but stop are an intermediate beyond int64 (-INT64_MIN), gcd/ceil at INT64_MIN

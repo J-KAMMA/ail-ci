@@ -135,6 +135,8 @@ class Pre386(unittest.TestCase):
                     self.assertEqual(got.stdout, want.stdout, (name, general, got.stderr[-800:]))
                     self.assertEqual(got.returncode, want.returncode, (name, general, got.stderr[-800:]))
 
+    @_exact_int
+
     def test_constant_base_runtime_exponent_matches_cpython(self):
         text = 'es = [40]\nprint(10 ** es[0])\n'
         for general in (False, True):
