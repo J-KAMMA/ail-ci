@@ -1,3 +1,19 @@
+## 2026-10-31 -- recsv1 re-applied: QUOTE_NONNUMERIC on a csv reader is refused by name (job-rbrecsv1-10312118)
+
+Re-applied the accepted `job-recsv1-10300430` change, whose diff no longer applies here. This tree
+already carried an equivalent reader refusal in `csvlib.make_reader` (parameterized by
+`csv_attr`); both sides are kept by adopting the accepted message
+(`csv.QUOTE_NONNUMERIC is not built for a reader: it yields float and str; the general path builds
+it`), so `stdlib4` hands the program to the general path and CPython's float/str cells are
+produced. `csv.DictReader` is refused the same way; the writer refusal is unchanged. The module
+docstring now says both sides refuse it.
+
+The Rust toolchain probe moved from two inline copies into `ail_testenv.rustc()` (it runs
+`rustc --version` and returns None for a rustup shim with no toolchain); `test_ail_c_export.py` and
+`test_ail_cratebridge.py` import it. `test_ail_recsv1.py` is registered through the new
+`AIL_CURRENT/tests.d/test_ail_recsv1.txt` (this tree lists modules there, not in the
+`ail_check.py` tuple). Probes and tests are listed in the report.
+
 ## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
 
 Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this
