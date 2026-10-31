@@ -1780,6 +1780,9 @@ def _fold_float_int_text(text):
     return text
 
 
+_DYNAMIC_POW_REFUSALS = [True]      # False while the int64-default build runs the static checks (intmode.py)
+
+
 def _check_int64_literals(tree):
     """A brace-syntax (`.ail`) program keeps 64-bit ints: a literal beyond them is named at its own position here.
     (A Python-syntax program has big ints; the typed path names such a literal and the general path builds it.)"""
@@ -3014,6 +3017,8 @@ def _check_int64_pow_constants(tree, known):
                 error.source_column = node.col_offset
                 raise error
             return
+        if not _DYNAMIC_POW_REFUSALS[0]:
+            return          # int64 default (Python syntax): a value that only exists at run time is the run-time stop's
         if dynamic_alias:
             if base is not None and base in (-1, 0, 1):
                 return
@@ -4804,6 +4809,7 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
             # exact ones, so a static need of a big int is refused by these checks in a build too, with the flag named
             exact_ints = os.environ.get('AIL_EXACT_INT', '').strip().lower() in ('1', 'on', 'yes', 'true')
             if not declarations_only and (syntax == 'ail' or (syntax == 'python' and (int64_literals or not exact_ints))):
+                _DYNAMIC_POW_REFUSALS[0] = not (syntax == 'python' and not exact_ints and not int64_literals)
                 try:
                     _check_int64_constants(tree)
                     if (syntax == 'ail' and not entry) or syntax == 'python':
@@ -4826,6 +4832,8 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                         wrapped.__dict__.update(refusal.__dict__)
                         raise wrapped from None
                     raise
+                finally:
+                    _DYNAMIC_POW_REFUSALS[0] = True
             if not declarations_only:
                 _check_genexpr_hash_keys(tree)    # not an int64 check: every build keeps a generator expression as a list
             if merged is not None and merged.positions:
