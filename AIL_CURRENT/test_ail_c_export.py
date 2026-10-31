@@ -26,15 +26,13 @@ import typing
 import unittest
 from pathlib import Path
 
-from ail_testenv import ASAN_DETECT_LEAKS, WINDOWS
+from ail_testenv import ASAN_DETECT_LEAKS, WINDOWS, runnable_which
 
 ROOT = Path(__file__).resolve().parent
 EXAMPLE = ROOT / 'language_examples' / 'c_export'
 CLI = str(ROOT / 'ail_chatgpt.py')
 CC = os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc')
-RUSTC = shutil.which('rustc')
-if RUSTC and subprocess.run([RUSTC, '--version'], capture_output=True).returncode:
-    RUSTC = None                      # a rustup shim with no installed toolchain cannot compile
+RUSTC = runnable_which('rustc')
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(EXAMPLE))
 

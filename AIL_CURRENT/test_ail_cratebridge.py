@@ -22,11 +22,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 from test_ail_ffi import CC, compile_cli, run_cpython  # noqa: E402
+from ail_testenv import runnable_which  # noqa: E402
 
 BINDGEN = ROOT / "ail_bindgen.py"
-RUSTC = shutil.which("rustc")
-if RUSTC and subprocess.run([RUSTC, "--version"], capture_output=True).returncode:
-    RUSTC = None                      # a rustup shim with no installed toolchain cannot compile
+RUSTC = runnable_which("rustc")
 
 
 def have_header(name):

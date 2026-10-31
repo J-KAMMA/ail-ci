@@ -2469,6 +2469,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.attr_names = set()
         self.assigned_attrs = frozenset()  # every `obj.attr = ...` name in the program (see compile)
         self.module_names = set()
+        self.source_file = None    # AIL_SOURCE_FILE: the entry's `__file__`, bound at startup like CPython's import system
         self.global_var_kind = {}
         self.global_elem_kind = {}
         self.aug_targets = set()   # names a += b / -= / *= / ... rebinds (their class kind is never trusted)
@@ -2662,6 +2663,17 @@ class Compiler(boxclosure.ClosureMixin):
         _hoist_defaults(tree)
         _unbind_handler_names(tree)                                 # `except E as k` deletes k when the handler ends
         self.module_names = _scan_assigned_names(tree.body)
+        # CPython's import system binds `__file__` in the module namespace before the body runs; the
+        # entry module's path arrives through AIL_SOURCE_FILE (the path as invoked, made absolute
+        # without normalising -- CPython keeps "./p.py"'s dot). Installed only when the program
+        # mentions the name, so every other program's setup is unchanged.
+        source_file = os.environ.get('AIL_SOURCE_FILE')
+        if source_file and any(isinstance(n, ast.Name) and n.id == '__file__' for n in ast.walk(tree)):
+            if any(ord(ch) > 126 for ch in source_file):
+                raise Unsupported('a non-ASCII path for __file__ (%r) -- the general path\'s string '
+                                  'literals are ASCII-only' % source_file)
+            self.source_file = source_file
+            self.module_names.add('__file__')
         self.aug_targets = _aug_target_names(tree)
         for n in ast.walk(tree):
             if isinstance(n, ast.Global):
@@ -2934,6 +2946,10 @@ class Compiler(boxclosure.ClosureMixin):
         setup.append('    ail__class_attr_slots = g_slots_arr;\n')
         setup.append('    g_frame.slots = g_slots_arr; g_frame.n = %d; '
                      'g_frame.prev = cx->frames; cx->frames = &g_frame;\n' % max(ng, 1))
+        if self.source_file is not None:
+            setup.append('    g_slots_arr[%d] = ail_bi_str_from_utf8(cx, %s, %d);\n'
+                         % (self.global_slots['g:__file__'], c_str_literal(self.source_file),
+                            len(self.source_file)))
         for a in sorted(self.attr_names):
             setup.append('    g_attr_%s = ail_intern(cx, %s);\n' % (a, c_str_literal(a)))
         for cname in self.class_order:

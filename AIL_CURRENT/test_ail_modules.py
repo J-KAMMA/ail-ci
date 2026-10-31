@@ -33,7 +33,8 @@ G2 (the classes after `SingleFilePrograms`) adds, each compared with CPython 3.1
   shadows a modelled module (with a note), a directory that does not shadow one;
 * the named refusals (relative import without a package, missing module or name, ambiguous package,
   a submodule read before its import, star-import limits, writes that cannot be followed, imports in
-  functions, `__file__`, `importlib`, `__import__`).
+  functions, `importlib`, `__import__`; `__file__` itself is supported: an imported module's own
+  path, a namespace package's None, `del __file__` in an imported module and `m.__file__ = v` refused).
 """
 import json
 import os
@@ -1258,7 +1259,14 @@ class PackageRefusals(ModulesBase):
                       "pkg/b.py": "X = 1\n", "main.py": "import pkg.a\nprint(pkg.a.f())\n"}), "1\n")
 
     def test_module_file_attributes_and_dynamic_imports(self):
-        self.refused({"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__file__)\n"}, "not available")
+        # `__file__` is the implicit module-level binding: the entry's is the path as invoked, an
+        # imported module's its own absolute path, a namespace package's None (reex26)
+        self.same_as_cpython({"lib.py": "X = 1\nprint(__file__)\ndef where():\n    return __file__\n",
+                              "main.py": "import lib\nprint(lib.__file__)\nprint(lib.where())\nprint(__file__)\n"})
+        self.same_as_cpython({"pkg/a.py": "A = 1\n", "main.py": "import pkg\nimport pkg.a\nprint(pkg.__file__)\n"
+                                             "print(pkg.a.__file__)\n"})
+        self.refused({"lib.py": "del __file__\nX = 1\n", "main.py": "import lib\nprint(lib.X)\n"}, "__file__")
+        self.refused({"lib.py": "X = 1\n", "main.py": "import lib\nlib.__file__ = 'x'\nprint(lib.X)\n"}, "__file__")
         # the front end refuses these (exit 3) by name, with the same hint
         for source, needle in (("import importlib\nm = importlib.import_module('math')\nprint(m)\n", "importlib"),
                                ("m = __import__('math')\nprint(m)\n", "__import__")):

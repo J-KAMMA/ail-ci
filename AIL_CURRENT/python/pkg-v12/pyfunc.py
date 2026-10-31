@@ -34744,6 +34744,19 @@ def to_c(source, name=None, strict=True, info=None, entry=None, sig=None, librar
     _view = _dict_view_escape(source)
     if _view is not None:
         raise Unsupported(_view)
+    if '__file__' in source:
+        # The typed path has no module namespace at start-up, so an assignment `__file__ = ...` would
+        # shadow the implicit path a read before it sees in CPython (a silent difference, found by
+        # probe `assign_after.py`). The general path binds it exactly; refuse here so a default build
+        # falls back to it and a --strict build names the refusal.
+        try:
+            _uses_file = any(isinstance(n, ast.Name) and n.id == '__file__' for n in ast.walk(ast.parse(source)))
+        except SyntaxError:
+            _uses_file = False
+        if _uses_file:
+            raise Unsupported("__file__ is the module's path and the typed path does not bind it at start-up.\n"
+                              "  write instead: build without --strict (the general path binds __file__), or "
+                              "pass the path in as an argument")
     if os.environ.get('AIL_SURFACE') == 'python':
         import numidentity                       # `is` on numbers (DIFFERENCES C114, C115)
         _number_is = numidentity.refusal(source)

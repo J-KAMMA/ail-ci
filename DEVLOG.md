@@ -1,3 +1,29 @@
+## 2026-10-31 -- re-apply reex26: `__file__` is the implicit module-level binding (job-rbreex26-10312119)
+
+Re-applied the accepted `job-reex26-10300433` change on top of this integrated tree. The tree
+already had its own Rust probe (an inline `rustc --version` check); both fixes are kept by taking
+the branch's `ail_testenv.runnable_which`, which does the same probe with a timeout. Everything
+else applies unchanged: `__file__` is bound for the entry (the path as invoked, made absolute
+without normalising, through `AIL_SOURCE_FILE`) and for imported modules (their own absolute
+path; a namespace package is `None`); the typed path refuses every use by name; an import that
+binds the name, an imported module's `del __file__` or module-level `except ... as __file__`, and
+`m.__file__ = v` are refused by name; `compile` keeps its source as a `str` while
+`ail_native_build` resolves it through `Path(...)`, so `--json` and `--debug-dir` reports still
+name the absolute path. Added `test_ail_reex26.py`, registered through `AIL_CURRENT/tests.d/`.
+
+Re-checked on this tree: 20 entry probes in `/tmp/probes/reex26/` through `cmp.sh` (basic,
+fstring, routes through an argument/list item/dict value/attribute, assign before/after, augmented
+assignment, loop target, parameter, lambda argument, `except ... as`, closure, class body,
+`global`, delete-then-read, string ops and slices, aliasing, comprehensions, comparison/hash,
+format/repr, empty/negative indices) match CPython on both builds, and 31 module/path/refusal
+checks (imported module and package paths, namespace package `None`, module assignment order,
+`import lib as L`, star import, `./main.py` and `sub/../main.py`, a non-ASCII path, plus the named
+refusals) are all OK; the typed-only build refuses `__file__` by name. Tests:
+`test_ail_reex26`, `test_ail_modules`, `test_ail_python_syntax`, `test_ail_build_cache`,
+`test_ail_build_reports`, `test_ail_c_export`, `test_ail_cratebridge`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass (10 modules, `par_check -j 2`);
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
 
 Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this
@@ -447,6 +473,83 @@ big-int positions.  Targeted tests (final tree): `test_ail_rd1`, `test_ail_stric
 `test_ail_freestanding`, `test_ail_freestanding2`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass (11 modules, `par_check -j 2`, 429s);
 `update_manifest.py --check` passes.
+
+## 2026-10-29 -- reex26 fix: Rust tests skip when the toolchain cannot run (job-reex26-10300433)
+
+The full suite failed `test_ail_c_export` and `test_ail_cratebridge` on this runner with `rustup
+could not choose a version of rustc to run ... no default is configured`: `rustc` is the rustup
+shim on `PATH`, but `$HOME` is remapped to a rustup home with no toolchain, so `shutil.which` finds
+a binary that exits 1.  Both modules detected Rust with `which` alone, so they ran the test and
+failed instead of skipping.
+
+`ail_testenv.runnable_which(name)` returns the path only when `<tool> --version` exits 0; both
+modules use it for `RUSTC`.  Here the two Rust tests now skip (`test_ail_c_export` skipped=2,
+`test_ail_cratebridge` skipped=1); with a real toolchain
+(`RUSTUP_HOME=/home/runner/.rustup`) they still run and pass, so coverage is unchanged where Rust
+works.  `test_ail_reex26`, `test_ail_modules`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; `update_manifest.py --check` passes.
+
+## 2026-10-29 -- reex26 fix: build reports take the invoked source string (job-reex26-10300433)
+
+Review of the `__file__` change found that `compile --json` and `compile --debug-dir` crashed on
+every source: `compile` now holds its source as a `str` (it must keep the path as invoked), but
+`ail_native_build.prepare`/`invoke`/`emit` still called `args.source.is_file()`/`.resolve()`.
+`ail_native_build` now resolves through `Path(args.source)` for both the `compile` string and the
+other commands' `Path`, so the reports name the same absolute path as before.  Probes on both
+report modes match the base output again (`source_sha256`, `source`, `program.c`, exit 0, no
+traceback; `--json --debug-dir` also writes `ail_build.json`), `__file__` keeps its dot under
+`./p.py`, and `test_ail_build_reports` passes.
+
+## 2026-10-29 -- reex26: `__file__` is the implicit module-level binding (job-reex26-10300433)
+
+`__file__` was still the top blocker: `print(__file__)` was refused as an undefined name on both
+builds, where CPython 3.12 prints the script's path.  It is now bound the way CPython's import
+system binds it, in the general path only; the typed path refuses every use by name so the default
+build falls back instead of silently treating a later `__file__ = ...` as a module constant.
+
+The entry's value is the path as invoked, made absolute by prefixing the working directory and
+*without* normalising: `python3 ./p.py` sees `/dir/./p.py` and `/dir/a/../p.py` keeps its `..`, as
+CPython does.  `ail_chatgpt.py compile` now takes the source as a `str` (a `Path` dropped the dot),
+computes that text in `_invoked_absolute`, passes it as `AIL_SOURCE_FILE`, and includes it in the
+frontend cache key; `pyboxed2.Compiler` emits a setup store into the `g:__file__` slot only when the
+combined tree actually mentions the name, so unrelated programs' C is unchanged.  A non-ASCII path
+is refused by name on the general path (its string literals are ASCII-only).
+
+Imported modules get their own absolute path: `ail_modules.load` prepends `__file__ = <mod.path>`
+when the module mentions the name (otherwise `m.__file__` stays a constant), so a read before a
+user assignment sees the path and a later assignment, `del`, parameter, lambda argument, loop
+target or `except ... as` binding follows the ordinary merged-name rules.  A namespace package's
+`m.__file__` is `None`.  The three shapes the merged program cannot reproduce exactly are refused
+by name: an import that binds the name (`import m as __file__` / `from m import __file__`), a
+top-level `del __file__` in an imported module (CPython removes the attribute; we would raise
+`NameError`), a module-level (or `global`-declared) `except ... as __file__` in an imported module
+(CPython deletes the handler name at the end, so `m.__file__` is an `AttributeError`), and
+`m.__file__ = value` (module attributes are fixed at build time).  The entry's own `del __file__`
+and `except ... as __file__` match CPython and raise `NameError` on the later read.  A star import
+does not rebind the entry's name, `import lib as L` works, and `getattr(lib, '__file__')` /
+`globals()['__file__']` are already refused by name (module as a value / unknown builtin).
+
+Probes in `/tmp/probes/reex26/` on both builds via `cmp.sh`: `basic`, `flow` (argument, list item,
+dict value, attribute), `fstring`, `assign_before`, `assign_after`, `aug`, `loop_target`,
+`param_shadow`, `lambda_arg`, `except_as`, `closure`, `class_body`, `global_func`, `del_read`
+(exit 1 with the same stdout), `types`, `widths`, `empty`, `negative` (negative indices/slices and
+an out-of-range `IndexError`) and `aliasing` (aliases, tuple unpacking, a default argument, dict
+and list copies) -- 19 programs, every one matching CPython's stdout and exit status on both
+builds.  The path-as-invoked probes `./main.py` and `<dir>/../dot/main.py` match on both builds.
+Module probes `/tmp/probes/mods/m_func`, `m_pkg`, `m_assign` and `m_ns` match; `m_del`, `m_store`,
+`m_from` and `mhandler` (an imported module's `except ... as __file__`) are refused by name (exit 2,
+`write instead`), as are `import lib as __file__` and `from lib import X as __file__`.  The star
+import (`from lib import *`) and aliased module (`import lib as L`) probes match CPython on both
+builds, and the dynamic-access probes (`getattr(lib, '__file__')`, `globals()['__file__']`) are
+refused by name (module as a value / unknown builtin).  A non-ASCII entry path and the typed-only
+(`AIL_NO_GENERAL=1` / `--strict`) path are refused by name (exit 3).  During isolation
+`assign_after.py` printed `False`
+on the default build because the typed path swallowed the rebinding; the blanket typed-path
+refusal fixed it (it now matches on both).
+
+Tests: `test_ail_reex26` (new, 10 tests, both builds), `test_ail_modules`, `test_ail_python_syntax`,
+`test_ail_build_cache`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass;
+`tools/update_manifest.py --check` passes.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
