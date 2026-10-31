@@ -2384,6 +2384,9 @@ def _mix_overflow_fallback(csrc, mangled, overflow):
                   % (hit, overflow, jmp))
     csrc = csrc.replace(marker, marker + decl, 1)
     csrc = csrc.replace('ail_die("integer overflow")', hit + '()')
+    # int(<inf>) in a Python-syntax program dies with its own text (the "integer overflow" text is not catchable there)
+    # and is routed the same way: the boxed body raises CPython's OverflowError
+    csrc = csrc.replace('ail_die("cannot convert float infinity to integer")', hit + '()')
     return csrc + helper, state
 
 
