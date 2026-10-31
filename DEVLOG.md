@@ -37,6 +37,138 @@ Probes in `/tmp/probes` via `cmp.sh`: `fz201`, `minD`, `fz201_local`, `fz201_fun
 `fz201_argument_dict`, `fz201_call_result`, `fz201_negative`, `fz201_neg_exp_odd`,
 `fz201_float_exp`, `fz201_exp_neg`, `fz201_in_range`, `fz201_safe_base` match CPython on both
 builds.  Added `test_ail_fz201.py`.
+## 2026-10-29 -- pre442: an IntEnum member value int() rejects is refused at compile time (job-pre442-10300212)
+
+The pre411 review's first still-differing case (`p9`) is reproduced on this tree: `class
+E(IntEnum): A = "0x10"` is accepted by both builds and prints `class ok`, where CPython raises
+`ValueError: invalid literal for int() with base 10: '0x10'` while the class statement runs
+(enum.py `__set_name__` creates each member with `int(value)`).  The root divergence is the
+accepted class, not the later index error.  `enumlib.lower_class` now applies CPython's
+conversion to every literal `IntEnum` member value and refuses by name (`enum class E: IntEnum
+member A has the value '0x10', which int() rejects at class creation in CPython ...`) when it
+fails.  A tuple value is unpacked as CPython does (`("5", 10)` is `int("5", 10)`); non-literal
+values are left to the run time, and the pre-existing `.value` normalisation difference is
+unchanged.  Both builds refuse the same programs.
+
+Probes in `/tmp/probes/pre442` on both builds via `cmp.sh`: the p9 program and the class-only
+form, `bad_hex_prefix`, `bad_empty`, `bad_spaces`, `bad_decimal_str`, `bad_none`, `bad_tuple`,
+`bad_tuple3`, `bad_complex`, `bad_leading`, `bad_alias`, `bad_second_member` are refused by name;
+`ok_decimal_str`, `ok_float`, `ok_bool_bytes`, `ok_auto`, `ok_routes` (an alias, an argument, a
+list item, an attribute and a dict value) match CPython.  Remaining pre-existing and unchanged:
+`p10` (`A = 2.0 ** 63`) reaches the index and says `cannot fit 'E'` where CPython says `cannot
+fit 'int'`; `p12` (`xs[E.ONE] = 9` with a float member) still says `not E`; `p13` (`class B:
+Y = A.X`) still stops with `type object 'A' has no attribute 'X'`.  `p14` was not identified in
+the review text and is not reproduced.  Final-state tests: test_ail_pre442, test_ail_pre412,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (5 modules, 0 failed, 1
+skipped).  `tools/update_manifest.py` was run and `--check` passes; `tools/ci_shards.py
+--update` added the module and `--check` exits 0.
+## 2026-10-29 -- pre443: the rbpre385 recorded items do not differ on this tree (job-pre443-10300212)
+
+The task text named no concrete item; the review it was cut from is the last review of the public
+branch `job-rbpre385-10281859`, whose "Pre-existing" prose was dropped by the task export.  That
+review recorded two pre-existing items: (a) a list/attribute/dict-held Invert base for `**`
+(`take(64)` with `vals = [~2]`, `Config.base = ~2` or `settings = {"base": ~2}`) compiled on
+both builds and stopped with `integer overflow`, where CPython prints the bignum 3**64; and
+(b) the `r14` fold-budget diagnostic value `2**64` where the exact value is `3**64`.  The first
+review of the same job (`job-rbpre385-10281430`) had also listed five pre-existing items: a
+default argument (`power(2)` with `e=100`), a keyword `power(e=..., b=...)`, a routed augmented
+`b **= e`, a loop with a mutated exponent, and a class-attribute assignment (already a named
+"not in the subset" refusal).
+
+Reproduced all of them on both builds with `cmp.sh`.  None still differs: this tree compiles a
+`--syntax python` program with exact big ints (`biggate.ON`, `docs/design/BIGINT.md`), so the
+int64 power refusals (`refuse_variable_int_pow`, `refuse_int_pow_overflow`,
+`_check_int64_pow_constants`, `_check_constant_power`) are skipped for Python syntax and the
+run-time trap is replaced by a big int.  `vals[0] ** 64`, `Config.base ** 64`,
+`settings["base"] ** 64`, their `pow()` spellings and `(~2) ** 64` directly, by module
+assignment, as a default, as a class value and in an f-string all print CPython's
+3433683820292512484657849089281 on the general and default builds; the huge-exponent forms
+`(~2) ** (1 << 20)` exit 1 with CPython's own 4300-digit `ValueError` text.  The earlier five
+items match CPython too (`power(2)`, keyword and augmented forms, loop-mutated exponent) or are
+refused by name as before (a function with defaults used first-class, a method on an unknown
+static kind); none produces a wrong value or a run-time trap.
+
+Probes in `/tmp/probes/pre443` (66 programs, both builds via `cmp.sh`): `q01`-`q06` list,
+attribute and dict Invert base through `**`/`pow()`; `q10`-`q15` constant `(~2) ** 64` direct,
+module assignment, default, class body and f-string; `a01`-`a18` exponents 63/64/65, `(-3)`,
+parameter and loop exponents, list/attr/dict routes, enclosing arithmetic and the
+`1 << 20` huge-exponent forms; `b01`-`b06` annotated/`typing` spellings; `c01`-`c10` alias,
+tuple, nested list, instance attribute, `dict.get`, function argument, `pow` alias, class
+assignment, module tuple and negative exponent; `p_r04*`-`p_r17*` the earlier review's default,
+keyword, augmented, loop and class-attribute shapes.  All match CPython except the three named
+refusals above.  No code, test or DIFFERENCES change; `test_ail_pre443.py` is not added because
+there is no differing case to pin.  Final-state tests on this commit: test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  `tools/update_manifest.py` run and `--check`
+passes.
+## 2026-10-29 -- csv: QUOTE_NONNUMERIC fields that start with the escapechar (re-apply job-csv1)
+
+Re-applied accepted job csv1 on a tree that had already forced the new gh-113785 behaviour on every
+host.  `PreludeCsv.test_reader` failed on CI but not on the maintainer's 3.12.3: CI's setup-python
+installs the latest 3.12 (3.12.15 here).  CPython 3.12.6 made a QUOTE_NONNUMERIC field that begins
+with the escapechar numeric, so `list(csv.reader(['1\\.5,\\.5,.5'], escapechar='\\',
+quoting=csv.QUOTE_NONNUMERIC))` is `[[1.5, 0.5, 0.5]]`; 3.12.0-3.12.5 left those fields as strings.
+The prelude now follows the interpreter it runs under (the raw module checks `sys.version_info`;
+csvgen replaces that line with a literal for the compiler's CPython), so both the 3.12.3 sandbox
+and the 3.12.15 CI oracle match CPython.  `test_ail_cov2` pins the escaped-start cases (`1\\.5`,
+`\\.5`, `\\a"1...`, a quoted `"\\.5"`) as well as the random reader comparison; the direct test keeps
+both hosts' expected rows.
+
+The typed csvlib reader accepted QUOTE_NONNUMERIC but returned every cell as a str (and the
+default build could fail to compile such a program); it is now refused by name at compile time,
+and the general path (which converts the numbers) takes the program.  `tools/diff_ids.py` is not
+present on this tree; `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-28 -- cov22: untyped `json.load` from stdin (job-cov22-10290434)
+
+Built every program under `lab/corpus/programs` the way `lab/corpus/check.py` compiles them, on the
+default and general paths: 24 programs were refused on each build before this change; 7 of those
+are imports (the stdlib tasks' area), leaving 17. The most frequent non-import construct was the
+untyped JSON result: the typed path wants a declared type for `json.loads`, and the general path
+refused `json.load` itself. `glm-5.3-flash-free/t176` and `t184` read JSON that way.
+
+`genlib.py` now lowers exactly `json.load(sys.stdin)` to the existing `_ail_json_loads` piece with
+`sys.stdin.read()`, so the default build falls back to the general path and both builds return the
+boxed value CPython 3.12 returns. `json.load` of any other file (including a binary file, which
+CPython decodes), `json.load` used as a value and an aliased `sys` remain named compile-time
+refusals. After the change 23 programs are refused on each build (7 imports, 16 others); t184
+matches CPython on all three corpus inputs on both builds.
+
+Probes in `/tmp/probes/cov22` on both builds: `p_types`, `p_routes`, `p_json_alias` and
+`p_from_load` match CPython for objects, lists, int, negative int, float, 1e300, str, true, null,
+duplicate keys, empty input, invalid JSON and extra data (values routed directly, through an
+argument, a list item, an attribute and a dict value); `p_refuse_file`, `p_refuse_binary`,
+`p_refuse_filevar` and `p_refuse_sys_alias` are refused by name on both builds. Added
+`test_ail_cov22.py`, registered in `ail_check.MODULES` and `tools/ci_shards.json`, with the same
+CPython comparison on both builds and one refusal case. `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --update` adds the module and `--check` exits 0.
+## 2026-10-29 -- ctime1: one flat `ast.walk` for both front ends (job-ctime1-10300005)
+
+`ast.walk` was one of the most-called functions of a C generation run: every pass walks function
+bodies, and several walk the same body once per function per fixed-point round, paying two nested
+generators (`iter_child_nodes` -> `iter_fields` -> `getattr`/`isinstance` per field) per node.
+`python/pkg-v12/fastwalk.py` yields the identical breadth-first node sequence with one flat
+list-backed loop, and `install()` replaces `ast.walk` for the rest of the process, so
+`ail_chatgpt.py` and `pyc.py` reuse it from the 300+ existing `ast.walk` call sites in `pyfunc.py`
+and the other passes without touching any of them.  `AIL_FASTWALK=0` keeps the standard library's
+walk for A/B measurement.
+
+Measured with user+sys CPU time on this 4-core GitHub Actions runner (perf_event_paranoid is 4, so
+instruction counts are not available): whole-corpus `compile --syntax python` over 40 sampled
+programs with the on/off order balanced ABBA, default build 238.3 -> 233.9 s and
+`AIL_UNIFIED_FORCE=1` 348.3 -> 343.0 s, i.e. 1.8% / 1.5% end-to-end; the front end alone
+(`check`, all 219 programs, balanced) 287.0 -> 276.6 s, 3.6%.  `fastwalk.walk` itself is 1.49x
+faster than `ast.walk` on a 379-node corpus tree and 1.24-1.38x on whole compiler files, where it
+is memory-bound.
+
+Byte identity: all 219 programs in `lab/corpus/programs`, both builds (default and
+`AIL_UNIFIED_FORCE=1`), compiled with `--debug-dir` under `AIL_FASTWALK=1` and `=0`, gave the same
+exit status (195 built, 24 refused by name, identically) and byte-identical `program.c` (86,943,786
+bytes on the default build, 130,583,461 on the unified build): 438/438 comparisons match.  The
+three `FastWalk` tests in `test_ail_frontend_speed` assert the node sequence and the C identity.
+Ten probes in `/tmp/probes` (types, widths, empty, negative, aliasing, argument, list item,
+attribute, dict value, constructs) match CPython on both builds.
+
+`tools/update_manifest.py` refreshed the stale pins of `ail_chatgpt.py` and `pyfunc.py`;
+`--check` passes.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 

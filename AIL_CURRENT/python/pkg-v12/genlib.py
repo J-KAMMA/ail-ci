@@ -334,6 +334,21 @@ class _Renamer(ast.NodeTransformer):
         key = self._key(node.func)
         if key == 'functools.partial':
             return self._partial(node)
+        if key == 'json.load':
+            # json.load(sys.stdin) is json.loads(sys.stdin.read()): the general path has no file object to
+            # hand to a helper, and any other file argument stays refused by name (a binary file, which
+            # CPython decodes, would reach json.loads as bytes and raise TypeError instead).
+            source = node.args[0] if len(node.args) == 1 else None
+            if (len(node.args) == 1 and not node.keywords
+                    and isinstance(source, ast.Attribute) and source.attr == 'stdin'
+                    and isinstance(source.value, ast.Name) and source.value.id == 'sys'):
+                self.used.add('_ail_json_loads')
+                read = ast.Call(func=ast.Attribute(value=node.args[0], attr='read', ctx=ast.Load()),
+                                args=[], keywords=[])
+                return ast.copy_location(ast.Call(func=ast.Name(id='_ail_json_loads', ctx=ast.Load()),
+                                                  args=[read], keywords=[]), node)
+            raise Unsupported('json.load(f): only json.load(sys.stdin) is built on the general path; '
+                              'json.loads(f.read()) is the form for another file')
         if (key == 'itertools.zip_longest' and node.args and not node.keywords or key == 'itertools.zip_longest'
                 and len(node.keywords) == 1 and node.keywords[0].arg == 'fillvalue') and any(
                 isinstance(a, ast.Starred) for a in node.args):
