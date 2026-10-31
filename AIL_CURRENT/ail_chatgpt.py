@@ -1030,6 +1030,29 @@ def _mutated_parameters(fn):
     return names
 
 
+def _add_function_aliases(tree, module_counts, functions):
+    """Add module-level ``q = wrapper`` names to a function-name map.
+
+    The int()/float wrapper pass checks a call by the name it is written with.  A wrapper
+    reached through an alias variable (``q = power``) must be checked exactly like the
+    wrapper itself; a name stored more than once or a function definition of the same name
+    is left alone, so a rebound or shadowed alias stays ordinary code."""
+    changed = True
+    while changed:
+        changed = False
+        for statement in tree.body:
+            if not (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and isinstance(statement.value, ast.Name)):
+                continue
+            target, source = statement.targets[0].id, statement.value.id
+            if (source in functions and target not in functions
+                    and module_counts.get(target) == 1):
+                functions[target] = functions[source]
+                changed = True
+    return functions
+
+
 def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes,
                         constants=None):
     candidates = {}
@@ -1099,7 +1122,7 @@ def _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attribut
             if normalized != functions.get(name, {}):
                 functions[name] = normalized
                 changed = True
-    return functions
+    return _add_function_aliases(tree, module_counts, functions)
 
 
 def _all_bound_names(root):
