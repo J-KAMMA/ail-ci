@@ -68,6 +68,20 @@ when its own module code is marked, takes the whole program off unified (section
 whole, `demote (name, '*')`, and every caller of it). Python-syntax programs only (`AIL_SURFACE=python`).
 Big literals are string constants parsed once at start-up (general path, marked functions).
 
+Provable shifts and `int.from_bytes` (2026-10-31, `bigcap.amount_bounds` / `_shift_proven`). A `<<` whose amount is not a literal
+used to mark the function whatever the amount was. It is now let through (treated like a shift by a constant, which was never
+marked) only when the expression alone proves BOTH that the amount is in [0, 4096] and that the bit length of the operand plus the
+largest amount is at most 62. The amount is proven for a name stored once by an int literal (`SH = 22`), a name with one literal
+store and `+= literal` steps that are all inside `for .. in range(constants)` loops (a varint's `shift += 7` over `range(5)`: at
+most 35), a `for` target of such a range, `x & C`, `x % C` and sums of these; a parameter, a name declared global or nonlocal
+anywhere, a name stored by anything else (tuple target, `with`, walrus, comprehension, `del`), a `while` around the step, or a
+negative literal leaves it unproven. The operand is bounded by a literal, such a name, `x & C` (C >= 0), `x % C`, `len()`, `ord()`,
+a local assigned only such expressions (`v = int(w) & 3`), and + - * | ^ << >> // of those. `SH = 22; v << SH` with `v` a parsed
+number is NOT let through (the operand is unbounded). Likewise `int.from_bytes(b, ..)` is let through on the typed attempt only
+(`typed=True`; the general path's consumers keep the mark) for a bytes literal or a slice with constant non-negative bounds and no
+step covering at most 7 bytes (below 2**56: fits int64 signed or not, either order); `S[pos:]`, 8 and 9 byte slices stay marked.
+`AIL_BIGCAP_SHIFT=0` and `AIL_BIGCAP_FROM_BYTES=0` switch the two proofs off. Tests: `test_ail_biggate_shift.py`.
+
 ## 6. Unified unboxing: the option measured
 
 Option A (`AIL_UNIFIED_PROVEN=1`): an unboxed int local keeps int64 only where its range is proven (bounded range() index, len(),
