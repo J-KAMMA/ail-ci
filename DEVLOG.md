@@ -338,6 +338,34 @@ test_ail_corpus_findings3 (6 modules, 0 failed).  `tools/update_manifest.py` was
 `--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
 `tools/diff_ids.py` is not present on this tree.
 
+## 2026-10-29 -- re-apply pre429 on exact ints: the int64 round() stop stays catchable (job-rbpre429-10290923)
+
+Re-applying job-pre429-10281932 on today's tree, the general path's wide one-argument `round()`
+already matches CPython through the exact-int (BIGINT) arm: `round(1e20)` returns the full
+integer instead of stopping.  The accepted change is kept on the other side of that gate: when
+the big-int runtime is off (`AIL_BIGINT=off`), `ail_bi_round` raises the ordinary
+`OverflowError("integer overflow")` instead of the uncatchable AIL_LIMIT stop, so an active
+`try` catches it exactly as before.  The exact-int arm, `round(x, n)` and the typed path are
+unchanged.
+
+The int64 modes (default/general, each with and without IR) catch the wide value in `except
+OverflowError`, `except Exception` and a bare `except`, run an `except` clause's `finally`, and
+report `OverflowError: integer overflow` (exit 1) when a handler is active but does not match;
+an uncaught wide round stays exit 1 with "integer overflow" and no `AIL limit`.  In-range
+floats/int/bool and NaN/Infinity match CPython as before.  With exact ints the same programs
+print CPython's full integer, so both sides of the big-int gate are pinned.
+
+Probes in `/tmp/probes/pre429` through `cmp.sh`: `q01`-`q09` (caught/except variants, finally,
+in-range boundaries and widths, NaN/Inf, argument/list/attribute/dict/alias/dynamic routes,
+uncaught, constant and an empty iterable) all match CPython on both builds with exact ints.
+With `AIL_BIGINT=off`, `q04`, `q05` and `q09` still match CPython; `q01`-`q03` print the
+int64 catch text on both builds, and `q06`-`q08` stop exit 1 with
+`OverflowError: integer overflow` and no `AIL limit` (the declared int64 difference).  Added
+`AIL_CURRENT/test_ail_pre429.py` (8 tests, int64 four modes plus exact-int four modes) and
+registered it in `ail_check.MODULES` and `tools/ci_shards.json`; added DIFFERENCES row
+`C?-job-rbpre429-10290923-1`.  Final-state tests on the code commit: test_ail_pre429 (8),
+test_ail_fz2 (7), test_ail_pre54 (4), test_ail_pre104 (1), test_ail_safetynet (5),
+test_ail_files (18, one skipped) and test_ail_corpus_findings3 (2), all OK.
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
