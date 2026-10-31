@@ -210,6 +210,25 @@ IR_SHARES = ("list", "list_store", "list_loop")
 IR_SHARES_TYPED = ("field_read", "field_read_other_way")
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def ir_on():
     return os.environ.get("AIL_IR", "1").strip().lower() not in ("0", "off", "no", "false")   # the IR is the default
 
@@ -795,6 +814,7 @@ class FuzzFindings(unittest.TestCase):
                     self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout), ran.stderr)
 
     # ---- C16: the overflow value is exact and the handler/finally order is CPython's ----
+    @_exact_int
     def test_int_overflow_stop_runs_no_finally_block(self):
         for text, label in ((LIMIT_IN_TRY, 'try'), (LIMIT_IN_HANDLER, 'handler')):
             for mode, env in (('default', None), ('ir', {'AIL_IR': '1'})):

@@ -243,6 +243,25 @@ print(fl(Decimal("-0.5")), lg(Decimal(1000)), math.floor(7), math.ceil(2.5), mat
 '''
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def money_inputs():
     rnd = random.Random(11)
     out = ["0\n", "3\n19.99 0.005 x 1e2 -2.50 7\n", "20\n"]
@@ -461,6 +480,8 @@ class CompiledPrograms(unittest.TestCase):
             with self.subTest(env=env):
                 self.check("money", MONEY, money_inputs(), **env)
 
+    @_exact_int
+
     def test_math_functions_on_decimals_match_cpython(self):
         for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
             with self.subTest(env=env):
@@ -553,6 +574,25 @@ class UnchangedPrograms(unittest.TestCase):
             notes = []
             self.assertEqual(stdlib5.rewrite_text(text, notes), text)
             self.assertEqual(notes, [])
+
+
+import os as _os_exact_int
+
+_SAVED_EXACT_INT = None
+
+
+def setUpModule():
+    # these tests are about exact (arbitrary precision) ints: the opt-in mode (intmode.py, `--exact-int`)
+    global _SAVED_EXACT_INT
+    _SAVED_EXACT_INT = _os_exact_int.environ.get('AIL_EXACT_INT')
+    _os_exact_int.environ['AIL_EXACT_INT'] = '1'
+
+
+def tearDownModule():
+    if _SAVED_EXACT_INT is None:
+        _os_exact_int.environ.pop('AIL_EXACT_INT', None)
+    else:
+        _os_exact_int.environ['AIL_EXACT_INT'] = _SAVED_EXACT_INT
 
 
 if __name__ == "__main__":

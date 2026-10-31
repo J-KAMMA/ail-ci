@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """bigcap.py -- which functions are "big-int capable" (docs/design/BIGINT.md section 5).
 
+Only in the exact int mode (`compile --exact-int`, AIL_EXACT_INT=1; intmode.py): the default is int64 and nothing is marked.
+
 The typed path keeps C int64 and stops loudly on overflow ("integer overflow", exit 1); the general path has exact big ints.
 The default build keeps a function on the typed path only when it is unlikely to need a big int. A function is MARKED, and
 stays off the typed path (the whole program goes to the general path, and mixed mode makes no typed clone of the function),
@@ -1450,7 +1452,8 @@ def _lp_unproven_call(node, defined):
 def enabled():
     """The marking is for programs written in Python (AIL_SURFACE=python, set by ail_chatgpt for a Python-syntax entry): their
     int is Python's. A program written in the AIL syntax has the language's own int64 (catchable OverflowError, wrapping_*)."""
-    return os.environ.get('AIL_SURFACE') == 'python'
+    import intmode
+    return intmode.exact_python()
 
 
 def marked(tree, local=True, typed=False):

@@ -505,15 +505,27 @@ def pong(n):
 
 class Refusals(ModulesBase):
     def test_private_imports(self):
+        # MODSYS: a leading underscore is plain Python (it used to be refused by name)
         files = {"lib.py": "def f():\n    return 1\n\n\ndef _g():\n    return 2\n"}
-        self.refused({**files, "main.py": "from lib import _g\nprint(_g())\n"}, "private name")
-        self.refused({**files, "main.py": "import lib\nprint(lib._g())\n"}, "private name")
+        self.assertEqual(self.same_as_cpython({**files, "main.py": "from lib import _g\nprint(_g())\n"}, irs=("1",)),
+                         "2\n")
+        self.assertEqual(self.same_as_cpython({**files, "main.py": "import lib\nprint(lib._g())\n"}, irs=("1",)),
+                         "2\n")
 
     def test_imports_below_the_top_level(self):
-        self.refused({"lib.py": "print(1)\nX = 1\n", "main.py": "def f():\n    import lib\n    return lib.X\n\n\nprint(f())\n"},
-                     "function-level `import lib`", "lib.py:1")
+        # MODSYS: a module with an effect starts when the function runs (it used to be refused)
+        self.assertEqual(self.same_as_cpython(
+            {"lib.py": "print(1)\nX = 1\n", "main.py": "def f():\n    import lib\n    return lib.X\n\n\nprint(f())\n"},
+            irs=("1",)), "1\n1\n")
         self.assertEqual(self.same_as_cpython({"lib.py": "X = 1\n", "main.py": "def f():\n    import lib\n    return lib.X\n\n\nprint(f())\n"}), "1\n")
-        self.refused({"lib.py": "X = 1\n", "main.py": "if True:\n    import lib\nprint(lib.X)\n"}, "below the top level")
+        # a condition the build cannot decide keeps the refusal (a constant or platform test is decided, see MODSYS)
+        self.refused({"lib.py": "X = 1\n", "main.py": "import sys\nif len(sys.argv) > 5:\n    import lib\nprint(lib.X)\n"},
+                     "below the top level")
+        self.assertEqual(self.same_as_cpython(
+            {"lib.py": "print('lib')\nX = 1\n", "main.py": "import sys\nif len(sys.argv) > 5:\n    import lib\n    print(lib.X)\n"
+                                                           "print(1)\n"}, irs=("1",)), "1\n")
+        self.assertEqual(self.same_as_cpython({"lib.py": "X = 1\n", "main.py": "if True:\n    import lib\nprint(lib.X)\n"},
+                                              irs=("1",)), "1\n")
 
     def test_module_as_value_and_attribute_assignment(self):
         files = {"lib.py": "X = 1\n\n\ndef f():\n    return X\n"}
@@ -530,7 +542,6 @@ class Refusals(ModulesBase):
         self.refused({"lib.py": "X = 1\n", "lib.ail": "X = 2\n", "main.py": "import lib\nprint(lib.X)\n"}, "ambiguous")
         self.refused({"lib.ail": "fn f() -> int { return 1; }\n", "main.py": "import lib\nprint(lib.f())\n"},
                      "brace syntax")
-        self.refused({"main.py": "import main\nprint(1)\n"}, "entry file a second time")
 
     def test_class_name_defined_twice(self):
         """F2: two modules may define one class name (it was refused); test_ail_classnames compares the printed forms."""
@@ -1241,8 +1252,6 @@ class PackageRefusals(ModulesBase):
         self.refused({**pkg, "main.py": "import pkg.a\nfrom pkg import *\nprint(X)\n"}, "without __all__")
         self.refused({"lib.py": "__all__ = [name for name in 'ab']\nA = 1\n", "main.py": "from lib import *\n"},
                      "cannot read")
-        self.refused({"lib.py": "__all__ = ['_g']\n\n\ndef _g():\n    return 1\n", "main.py": "from lib import *\n"},
-                     "private name")
         self.refused({"lib.py": "__all__ = ['nothing']\n", "main.py": "from lib import *\n"}, "nothing")
 
     def test_module_attribute_writes_that_cannot_be_followed(self):
@@ -1258,7 +1267,10 @@ class PackageRefusals(ModulesBase):
                       "pkg/b.py": "X = 1\n", "main.py": "import pkg.a\nprint(pkg.a.f())\n"}), "1\n")
 
     def test_module_file_attributes_and_dynamic_imports(self):
-        self.refused({"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__file__)\n"}, "not available")
+        # MODSYS: `__file__` is the source path at build time; the other dunders are still refused by name
+        self.refused({"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__spec__)\n"}, "not available")
+        self.assertEqual(self.same_as_cpython({"lib.py": "X = 1\n", "main.py": "import lib\nprint(lib.__file__ == lib.__file__, "
+                                               "lib.__file__.endswith('lib.py'))\n"}, irs=("1",)), "True True\n")
         # the front end refuses these (exit 3) by name, with the same hint
         for source, needle in (("import importlib\nm = importlib.import_module('math')\nprint(m)\n", "importlib"),
                                ("m = __import__('math')\nprint(m)\n", "__import__")):

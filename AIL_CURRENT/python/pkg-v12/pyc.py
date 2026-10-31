@@ -42,6 +42,7 @@ CFLAGS_TUNE += ['-fopenmp-simd']
 import os as _os_flags
 CFLAGS_TUNE += _os_flags.environ.get('AIL_EXTRA_CFLAGS', '').split()
 import native_diagnostics
+import intmode
 import buildcache
 import cprune
 import shadowing
@@ -789,7 +790,7 @@ def _refuse_round_at_int64_boundary(source):
     A two-argument round() returns a float and is left alone; an int argument is exact already.
     With exact ints (BIGINT.md) abs/-/* -1 of that value is exact as in CPython, so nothing is refused.
     """
-    if os.environ.get('AIL_SURFACE') == 'python':
+    if intmode.exact_python():
         return
     try:
         tree = ast.parse(source)
@@ -1237,12 +1238,64 @@ def _python_defs_only_runs_nothing(source):
 _NOTHING_MAIN = '\nint main(void) { return 0; }\n'
 
 
+def _refuse_static_big_calls(source):
+    """Default (int64) mode: a call whose constant arguments make a big int is a static need, like a literal beyond int64
+    (pyfront.fold_int_constants): `math.factorial(25)`, `math.comb(100, 50)`, `int("123456789012345678901234567890")`.
+    Refused at compile time with the line and the flag; anything that depends on a run-time value is the run-time stop's."""
+    if not intmode.int64_python():
+        return
+    import bigcap
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return
+    defined = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    limit = 1 << 63
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or node.keywords:
+            continue
+        f = node.func
+        name = f.id if isinstance(f, ast.Name) else f.attr if isinstance(f, ast.Attribute) else None
+        if name in defined and not (name or '').startswith('_ail_math_'):     # (the prelude defines the rewritten math helpers)
+            continue
+        why = None
+        if name in ('_ail_math_factorial', '_ail_math_comb', '_ail_math_perm') or (
+                name in ('factorial', 'comb', 'perm') and (isinstance(f, ast.Name) or (
+                    isinstance(f.value, ast.Name) and f.value.id == 'math'))):
+            name = name.replace('_ail_math_', '')
+            values = [bigcap._const_int(a) for a in node.args]
+            if values and all(v is not None and 0 <= v <= 3000 for v in values):
+                import math
+                try:
+                    big = not -limit <= getattr(math, name)(*values) < limit
+                except (ValueError, TypeError):
+                    big = False
+                if big:
+                    why = 'math.%s() of constants makes a value beyond int64' % name
+        elif name == 'int' and isinstance(f, ast.Name) and len(node.args) == 1:
+            length = bigcap._const_str_len(node.args[0])
+            if length is not None and length > 18:
+                digits = node.args[0].value.strip().replace('_', '') if isinstance(node.args[0], ast.Constant) else None
+                try:
+                    big = digits is None or not -limit <= int(digits) < limit
+                except ValueError:
+                    big = False         # not a number: the run-time ValueError is the answer
+                if big:
+                    why = 'int() of a constant string of more than 18 digits makes a value beyond int64'
+        if why:
+            refusal = Unsupported('%s, and AIL ints are 64-bit by default (the program needs a big int here).\n  write instead: '
+                                  'keep the value inside int64, or %s' % (why, intmode.HINT))
+            refusal.source_line = getattr(node, 'lineno', None)
+            raise refusal
+
+
 def _build_unshadowed(source, out, strict, report, force_general):
     """Try the typed path with exact (tagged) ints, then the exact general path. When neither builds the program and the
     typed attempt was stopped by a tagged-int gate (not by another construct), the program was accepted before the big-int
     work: build it once more on the legacy int64 emitter, whose overflow is a loud stop (never a wrap-around). The
     hard big-int constructs (`_refuse_big_capable`) stay refused."""
     source = fold_int_constants(source)
+    _refuse_static_big_calls(source)
     source = _python_defs_only_runs_nothing(source)
     try:
         return _build_unshadowed_exact(source, out, strict, report, force_general)
@@ -1250,8 +1303,8 @@ def _build_unshadowed(source, out, strict, report, force_general):
         first_error = first
         if force_general or os.environ.get('AIL_NO_TINT_LEGACY') \
                 or not any(w in str(first) for w in _TINT_GATE_WORDS) \
-                or os.environ.get('AIL_SURFACE') != 'python':
-            raise
+                or os.environ.get('AIL_SURFACE') != 'python':     # (any Python-syntax program: the exact mode's gate words, and the
+            raise                                                  # int64 mode's own `_would_tint` refusal, ask for the legacy retry)
         if os.environ.get('AIL_NO_GENERAL') and not any(w in str(first) for w in _TINT_GATE_WORDS[:2]):
             # a typed-only build refuses by name a value that can leave int64 for an int64 slot (BIGINT.md B2):
             # that is the rule's answer, not a gap in the lowering

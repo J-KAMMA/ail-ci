@@ -286,6 +286,25 @@ main()
 '''
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def compile_run(directory, text, name, ir):
     source = Path(directory, name + ".ail")
     source.write_text(text)
@@ -311,6 +330,8 @@ class LossPathTests(unittest.TestCase):
 
     def test_if_add_counters_match_cpython(self):
         self.check_oracle(COUNTERS, "counters")
+
+    @_exact_int
 
     def test_if_add_still_traps_on_overflow(self):
         # (the legacy int64 emitter, AIL_IR=0, stops with an uncatchable `integer overflow` in a Python-syntax program

@@ -605,6 +605,25 @@ GOLDEN_SHA = {
 }
 
 
+def _exact_int(test):
+    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
+    import functools
+    import os
+
+    @functools.wraps(test)
+    def wrapper(*args, **kwargs):
+        saved = os.environ.get('AIL_EXACT_INT')
+        os.environ['AIL_EXACT_INT'] = '1'
+        try:
+            return test(*args, **kwargs)
+        finally:
+            if saved is None:
+                os.environ.pop('AIL_EXACT_INT', None)
+            else:
+                os.environ['AIL_EXACT_INT'] = saved
+    return wrapper
+
+
 def lowered_and_adapter(module, text):
     """The text `module` (ail_ffi_lower) lowers `text` to at GOLDEN_PATH, and the adapter C it writes."""
     with tempfile.TemporaryDirectory() as directory:
@@ -692,6 +711,8 @@ class CallbackTests(unittest.TestCase):
     def test_exception_in_the_third_call_and_other_callbacks(self):
         self.compare("third", THIRD, THIRD_OUT)
 
+    @_exact_int
+
     def test_unsigned_64_bit_and_range_checks(self):
         source = self.write("u64more.py", U64_MORE)
         cpy = run_cpython(self.dir, source)
@@ -737,6 +758,8 @@ class CallbackTests(unittest.TestCase):
                     self.assertNotIn("-", ran.stdout)                       # never a negative number for a value above int64
                     self.assertEqual(ran.returncode, 1, ran.stderr)
                     self.assertIn("integer overflow", ran.stderr)
+
+    @_exact_int
 
     def test_unsigned_64_bit_callbacks(self):
         """Exact in the builds with tagged ints; the legacy int64 emitter (the "typed" mode here) stops loudly instead
