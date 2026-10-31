@@ -381,22 +381,25 @@ def check_program(p, base, head, mem_kb, deadline):
 
 
 INT64_MIN, INT64_MAX = -(1 << 63), (1 << 63) - 1
-BIG_TOKEN = re.compile(r'-?\d{19,}')
+BIG_TOKEN = re.compile(r'-?\d{10,}')
+LARGE = 1 << 31
 
 
 def needs_big_int(text, c):
-    """Does the case itself involve an int outside int64: a number in the input or in what CPython printed?"""
+    """Does the case itself work with big numbers: an int of magnitude 2**31 or more in the input or in what CPython
+    printed? (A product or a shift of such values can leave int64 although the printed result does not; a case with small
+    numbers that stops is a real regression.)"""
     seen = text + c['out'].decode('utf-8', 'replace')
-    return any(not INT64_MIN <= int(m) <= INT64_MAX for m in BIG_TOKEN.findall(seen))
+    return any(abs(int(m)) >= LARGE for m in BIG_TOKEN.findall(seen))
 
 
 def int64_stop(rh, text, c):
     """Owner decision 2026-10-31: ints are 64-bit by default. A case that needs a big int may stop loudly with the named
     OverflowError (or its program be refused at compile time naming --exact-int); anything else that stops is a regression."""
+    if not rh['built']:
+        return '--exact-int' in rh['err'] or 'AIL_EXACT_INT' in rh['err']      # the source itself needs a big int
     if not needs_big_int(text, c):
         return False
-    if not rh['built']:
-        return '--exact-int' in rh['err'] or 'AIL_EXACT_INT' in rh['err']
     return rh['rc'] == 1 and rh['err'].startswith('OverflowError: integer overflow in ')
 
 

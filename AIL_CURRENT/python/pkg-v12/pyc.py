@@ -1180,8 +1180,8 @@ def _build_unshadowed(source, out, strict, report, force_general):
         first_error = first
         if force_general or os.environ.get('AIL_NO_TINT_LEGACY') \
                 or not any(w in str(first) for w in _TINT_GATE_WORDS) \
-                or not intmode.exact_python():
-            raise
+                or os.environ.get('AIL_SURFACE') != 'python':     # (any Python-syntax program: the exact mode's gate words, and the
+            raise                                                  # int64 mode's own `_would_tint` refusal, ask for the legacy retry)
         if os.environ.get('AIL_NO_GENERAL') and not any(w in str(first) for w in _TINT_GATE_WORDS[:2]):
             # a typed-only build refuses by name a value that can leave int64 for an int64 slot (BIGINT.md B2):
             # that is the rule's answer, not a gap in the lowering

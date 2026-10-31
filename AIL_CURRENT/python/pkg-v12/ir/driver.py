@@ -615,8 +615,9 @@ def _apply(P, args, kwargs, result, current):
                 and fn.name not in getattr(P, 'TINT_EXCLUDED', ()) and cname not in getattr(P, 'TINT_EXCLUDED', ()) \
                 and not getattr(P, 'TINT_DISABLED', False) and not os.environ.get('AIL_NO_GENERAL'):
             from pyfront import Unsupported
-            raise Unsupported('%s() has ints the local proof cannot bound and the IR cannot lower it, and the legacy emitter '
-                              'does not have Python\'s list semantics: %s' % (fn.name, reason))
+            raise Unsupported('%s() needs the tagged-int lowering, which does not cover it: %s (int64 mode: the general path '
+                              'is tried first, as in the exact mode; the legacy int64 emitter is the last resort)'
+                              % (fn.name, reason))
         if _needs_tint and (_tinted_sig or 'has kind (' not in str(reason) or _int_tuple_text) \
                 and not _call_result_proof \
                 and not fn.name.startswith(('_Ail', '_ail')) \
