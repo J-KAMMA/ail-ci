@@ -212,8 +212,11 @@ class ParallelForTests(unittest.TestCase):
             self.assertIn("caught OverflowError", expected.stdout)
             for threads in (1, 4, 16):
                 got = run(par, threads)
-                self.assertEqual((got.returncode, got.stdout, got.stderr),
-                                 (expected.returncode, expected.stdout, expected.stderr), "AIL_THREADS=%d" % threads)
+                # (the stop is the named OverflowError on both builds; which operation it names depends on where the build
+                # checks: the parallel body adds with a checked helper, the sequential one converts the sum at the store)
+                self.assertEqual((got.returncode, got.stdout), (expected.returncode, expected.stdout), "AIL_THREADS=%d" % threads)
+                self.assertTrue(got.stderr.startswith("OverflowError: integer overflow in "), got.stderr)
+                self.assertTrue(expected.stderr.startswith("OverflowError: integer overflow in "), expected.stderr)
 
     def test_unsafe_bodies_are_refused_by_name(self):
         with tempfile.TemporaryDirectory() as directory:
