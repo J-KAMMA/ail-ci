@@ -51,6 +51,16 @@ every deviation from the design. `test_ail_gpu_g1.py` (42 tests) compares marked
 the same binary under `AIL_GPU=0` and with the build without `--gpu`; covers empty and one-element lists, lists of different
 lengths, NaN/inf/-0.0/denormals, values at the int64 limits, division by zero and an IndexError inside the body, every
 refusal, and the unchanged-C proof.
+## 2026-10-31 -- cov19 suite fix: register through tests.d, not the module tuple (job-cov19-10311304)
+
+The integration of the accepted cov19 change merged the edited `MODULES` line into the new
+`LISTED_MODULES` group, leaving a duplicate copy of that group. `merge_modules` deduplicates it,
+so `MODULES[:len(LISTED_MODULES)] != LISTED_MODULES` and `test_ail_registry` failed. The kept
+cov19 behaviour and its test are unchanged; `test_ail_cov19` is now registered the way the
+integration tree expects, as `AIL_CURRENT/tests.d/test_ail_cov19.txt`, and the tuple is left
+alone. `test_ail_pre47` passes here and with the cov19 diff applied alone on the integration
+base; the candidate failure was bisected to the separate ex32 integration (`ac4836c`), whose
+`print(1<<63)` typed-path regression reproduces with the cov19 sort change reverted.
 
 ## 2026-10-26 -- pre272 follow-up: refresh full-C output pins (job-pre272-10262304)
 

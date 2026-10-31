@@ -63,6 +63,9 @@ ENUMS_INPLACE = ENUMS.replace(
 if 'AIL_D2_IADD' not in ENUMS_INPLACE:
     raise RuntimeError('dunderrt: no place for the in-place operators in ENUMS')
 
+# ail_dun_binop keeps 201 bytes per operand name: CPython caps "can only concatenate" and
+# "can't multiply" names at 200, and "unsupported operand" at 100 (binary_op_error) via
+# copies that keep its exact format string (classname.patch_error_names rewrites that text).
 FUNCS = '''
 /* ---- operator special methods on instances (dunderrt.py) ---- */
 static ail_ctx *ail__gcx;
@@ -124,7 +127,7 @@ __attribute__((noinline)) static ail_st ail_dun_binop(ail_ctx *cx, ail_obj *out,
     if (f) return f(cx, out, a, b);
     f = ail_dun2(b, rev);
     if (f) return f(cx, out, b, a);
-    char buf[240], na[80], nb[80];
+    char buf[400], na[201], nb[201], na100[101], nb100[101];
     ail__dun_tname(na, sizeof na, a); ail__dun_tname(nb, sizeof nb, b);
     if (op[0] == '+' && (a.tag == AIL_T_LIST || a.tag == AIL_T_TUPLE || a.tag == AIL_T_STR
                          || !strcmp(na, "collections.deque"))) {
@@ -147,7 +150,10 @@ __attribute__((noinline)) static ail_st ail_dun_binop(ail_ctx *cx, ail_obj *out,
             return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
         }
     }
-    snprintf(buf, sizeof buf, "unsupported operand type(s) for %s: '%s' and '%s'", op, na, nb);
+    /* CPython's binary_op_error prints each operand with '%.100s' */
+    snprintf(na100, sizeof na100, "%.100s", na);
+    snprintf(nb100, sizeof nb100, "%.100s", nb);
+    snprintf(buf, sizeof buf, "unsupported operand type(s) for %s: '%s' and '%s'", op, na100, nb100);
     return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
 }
 static inline int ail_obj_truthy(ail_obj x);
@@ -188,15 +194,46 @@ static inline ail_st ail_dun_contains(ail_ctx *cx, int *out, ail_obj c, ail_obj 
         if (ail_member_eq(e, item)) { *out = 1; AIL_FRAME_LEAVE(cx, fr); return AIL_OK; }
     }
 }
+/* __len__'s result as CPython's slot_sq_length takes it: an int (a bool counts), at least 0, and it must fit Py_ssize_t */
+static ail_st ail_dun_len_chk(ail_ctx *cx, ail_obj *out, ail_obj r) {
+    if (r.tag == AIL_T_INST) {                     /* PyNumber_AsSsize_t goes through __index__ */
+        ail_d1_fn xf = ail_dun1(r, AIL_D1_INDEX);
+        if (xf) { ail_obj q; ail_st st = xf(cx, &q, r); if (st != AIL_OK) return st; r = q; }
+    }
+    if (r.tag == AIL_T_INT || r.tag == AIL_T_BOOL) {
+        if (r.i < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "__len__() should return >= 0");
+        *out = ail_box_int(r.i); return AIL_OK;
+    }
+@@BIGLEN@@
+    { char buf[120]; snprintf(buf, sizeof buf, "'%s' object cannot be interpreted as an integer", ail__dun_tname_s(r)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+}
+/* the truth value of an instance, as bool(x) / `if x` take it: __bool__ (must return a bool), else __len__() != 0, else true;
+   whatever those raise is raised */
+static ail_st ail_dun_truth(ail_ctx *cx, int *out, ail_obj x) {
+    ail_d1_fn f = ail_dun1(x, AIL_D1_BOOL);
+    ail_obj r; ail_st st;
+    if (f) {
+        st = f(cx, &r, x); if (st != AIL_OK) return st;
+        if (r.tag != AIL_T_BOOL) { char buf[120]; snprintf(buf, sizeof buf, "__bool__ should return bool, returned %s", ail__dun_tname_s(r)); return ail_raise_c(cx, AIL_B_TYPEERROR, buf); }
+        *out = r.i != 0; return AIL_OK;
+    }
+    f = ail_dun1(x, AIL_D1_LEN);
+    if (!f) { *out = 1; return AIL_OK; }
+    st = f(cx, &r, x); if (st != AIL_OK) return st;
+    st = ail_dun_len_chk(cx, &r, r); if (st != AIL_OK) return st;
+    *out = r.i != 0; return AIL_OK;
+}
 __attribute__((noinline)) static int ail_dun_truthy(ail_obj x);
 static inline int ail_truthy_u(ail_obj x) { return __builtin_expect(x.tag == AIL_T_INST, 0) ? ail_dun_truthy(x) : ail_obj_truthy(x); }
+static inline int ail_main_finish(ail_ctx *cx, ail_st st);
+/* a truth test the emitter could not give an error exit (a comprehension condition, ...): an exception out of __bool__ /
+   __len__ ends the program the way an uncaught one does, never a silent "true" */
 __attribute__((noinline)) static int ail_dun_truthy(ail_obj x) {
-    ail_d1_fn f = ail_dun1(x, AIL_D1_BOOL);
-    ail_obj r;
-    if (!f) f = ail_dun1(x, AIL_D1_LEN);
-    if (!f || !ail__gcx) return 1;
-    if (f(ail__gcx, &r, x) != AIL_OK) return 1;
-    return ail_obj_truthy(r);
+    int v; ail_st st;
+    if (!ail__gcx) return 1;
+    st = ail_dun_truth(ail__gcx, &v, x);
+    if (st != AIL_OK) _Exit(ail_main_finish(ail__gcx, st));
+    return v;
 }
 __attribute__((noinline)) static int ail_dun_cmp_gt(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, ail_st *stp) {
     ail_d2_fn gf = ail_dun2(a, AIL_D2_GT);
@@ -599,7 +636,7 @@ def _edits(inplace=False):
                   '    if (x.tag == AIL_T_INST) { ail_d1_fn f = ail_dun1(x, AIL_D1_%s); if (f) return f(cx, out, x); }\n' % (fn, key)))
     # container protocol on an instance the emitter could not resolve
     e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "object of type \'%s\' has no len()"',
-              '        case AIL_T_INST: { ail_d1_fn f = ail_dun1(x, AIL_D1_LEN); if (f) return f(cx, out, x); }\n        /* fall through */\n'
+              '        case AIL_T_INST: { ail_d1_fn f = ail_dun1(x, AIL_D1_LEN); if (f) { ail_obj r; ail_st st = f(cx, &r, x); if (st != AIL_OK) return st; return ail_dun_len_chk(cx, out, r); } }\n        /* fall through */\n'
               '        default: { char buf[64]; snprintf(buf, sizeof buf, "object of type \'%s\' has no len()"'))
     e.append(('        default: { char buf[64]; snprintf(buf, sizeof buf, "argument of type \'%s\' is not iterable"',
               '        case AIL_T_INST: return ail_dun_contains(cx, out, c, item);\n'
@@ -637,7 +674,12 @@ def patch(text, inplace=False):
     anchor = 'static inline int ail_obj_eq_raw(ail_obj a, ail_obj b) {\n'
     if text.count(anchor) != 1:
         raise RuntimeError('dunderrt: no unique anchor for the helpers')
-    text = text.replace(anchor, FUNCS + HASH_FUNC + anchor, 1)
+    import biggate
+    big = ('    if (r.tag == AIL_T_BIG) {\n'
+           '        if (AIL_BIG(r)->sign < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "__len__() should return >= 0");\n'
+           '        return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot fit \'int\' into an index-sized integer");\n'
+           '    }') if biggate.ON else ''
+    text = text.replace(anchor, FUNCS.replace('@@BIGLEN@@', big) + HASH_FUNC + anchor, 1)
     # the conditions of the program's own code (if / while / and / or / ?:) ask the class of an instance
     mark = '/* ---- interned attribute-name ids ---- */'
     k = text.find(mark)

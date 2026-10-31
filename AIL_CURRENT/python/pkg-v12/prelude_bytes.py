@@ -19,6 +19,10 @@ class LookupError(Exception):
     pass
 
 
+class BufferError(Exception):
+    pass
+
+
 def _ail_b_raise():
     k = _ail_b_errkind()
     m = _ail_b_lasterr()
@@ -640,7 +644,13 @@ class bytearray:
         if isinstance(i, slice):
             if isinstance(v, int):
                 raise TypeError("can assign only bytes, buffers, or iterables of ints in range(0, 256)")
-            self._a[i] = _ail_b_ints(_ail_b_source(v, None, None))
+            ints = _ail_b_ints(_ail_b_source(v, None, None))
+            if i.step is not None and i.step != 1:
+                lo, hi, st = i.indices(len(self._a))
+                if len(range(lo, hi, st)) != len(ints):
+                    raise ValueError("attempt to assign bytes of size " + str(len(ints))
+                                     + " to extended slice of size " + str(len(range(lo, hi, st))))
+            self._a[i] = ints
             return
         if not isinstance(v, int):
             raise TypeError("'" + type(v).__name__ + "' object cannot be interpreted as an integer")
@@ -703,6 +713,9 @@ class bytearray:
     def __iadd__(self, other):
         if not isinstance(other, (bytes, bytearray)):
             raise TypeError("can't concat " + self._ail_concat_name(other) + " to bytearray")
+        if other is self and len(self._a) > 0:
+            # CPython holds a buffer export of `other` while it resizes `self`: `b += b` cannot grow b
+            raise BufferError("Existing exports of data: object cannot be re-sized")
         self._a.extend(_ail_b_ints(_ail_bs(other)))
         return self
 

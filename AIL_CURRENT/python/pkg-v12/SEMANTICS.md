@@ -9588,6 +9588,32 @@ frozenset, as CPython does. `==` on dicts compares keys and values (it always an
 `test_ail_sets_general.py` builds programs on the typed path, the default build (`AIL_IR=0`/`1`) and the general path and
 requires identical output, and compares the order-free results with CPython 3.12.
 
+## 241. `__len__` results, truth tests that raise, `b += b` on a bytearray, and stdin that is not UTF-8
+
+* `__len__` is taken the way CPython's `slot_sq_length` takes it, for `len(x)`, `bool(x)`, `not x`, `if x`, `while x`,
+  `a if x else b`, `and` / `or` and a comprehension's `if x` on the general path: the result goes through `__index__`, a bool counts as
+  0/1, a negative int (any size) is `ValueError: __len__() should return >= 0`, an int above sys.maxsize is `OverflowError: cannot fit
+  'int' into an index-sized integer`, and anything else is `TypeError: '<type>' object cannot be interpreted as an integer`.
+  `__bool__` must return a bool (`TypeError: __bool__ should return bool, returned <type>`). What `__len__` / `__bool__` raise inside a
+  truth test is raised there (the general path used to take the instance as true and drop the exception). A truth test in a spot the
+  emitter gives no error exit (a few internal helpers such as `min` / `max` keys) ends the program the way an uncaught exception does.
+  The typed path (a class with `__init__`) already checked the sign (`dunders.py`) and is unchanged.
+* `b += b` on a non-empty bytearray (and any alias of it) raises `BufferError: Existing exports of data: object cannot be re-sized`, as
+  CPython does; `b.extend(b)`, `b[len(b):] = b`, `b[:] = b`, `b *= 2` and `b += bytes(b)` succeed in CPython 3.12 and in AIL. An
+  extended-slice assignment of the wrong size names `bytes` (`attempt to assign bytes of size 3 to extended slice of size 2`). The typed
+  path refuses `+=` on a bytearray by name and `extend(b)` is safe there. `BufferError` is defined with the bytes prelude, so it is
+  a name only in programs that use `bytes` / `bytearray`.
+* Text that is not UTF-8 on stdin (`input()`, `sys.stdin.read()`, `readline()`, the integer readers) or in the command line. CPython's
+  default stdin error handler on Linux is `surrogateescape`: the program keeps going with lone surrogates (`'a\udcffb'`) and
+  `print` writes the original byte back. AIL's `str` cannot hold a lone surrogate (`chr(0xdcff)`, `'\udcff'` and
+  `.encode('utf-8', 'surrogateescape')` are refused), so this is a **documented difference**: the program stops, after its pending
+  output, with CPython's own strict-mode text on stderr and exit status 1, for example
+  `UnicodeDecodeError: 'utf-8' codec can't decode byte 0xff in position 1: invalid start byte` (also `bytes in position 3-4: invalid
+  continuation byte` and `unexpected end of data`), on the typed and the general path alike. It was `stdin is not valid UTF-8` (typed) or
+  `AIL internal error: stdin is not valid UTF-8` (general). The stop is not catchable. Positions count from the start of the text decoded
+  at once (the whole input for `read()`, the line for `input()` / `readline()`); CPython counts from the start of its read chunk, which is the
+  same for inputs under 8 KiB read from the start. `test_ail_silent_diffs3.py` compares with CPython run as `PYTHONIOENCODING=utf-8:strict`.
+
 ## Build switch: unboxed values on the general path (`AIL_UNIFIED`, default on since 2026-10-21)
 
 The general path infers int / float / bool variables, parameters and results (`unified.py`, docs/design/UNIFIED_IR.md)
