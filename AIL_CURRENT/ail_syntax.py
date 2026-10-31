@@ -3264,6 +3264,17 @@ def _sqllower():
     return _sqllower.module
 
 
+def _objectlib():
+    """python/pkg-v12/objectlib.py (`object()` sentinels and `isinstance(x, object)`, before every other pass)."""
+    if not hasattr(_objectlib, "module"):
+        here = str(Path(__file__).parent / "python" / "pkg-v12")
+        if here not in sys.path:
+            sys.path.insert(0, here)
+        import objectlib
+        _objectlib.module = objectlib
+    return _objectlib.module
+
+
 def _modtables():
     """python/pkg-v12/modtables.py (module-level tables with tuples in them, lowered before the tuple pass)."""
     if not hasattr(_modtables, "module"):
@@ -3404,6 +3415,97 @@ def _inline_type_aliases(source):
     return source
 
 
+def _bound_sites(tree):
+    """name -> number of places that bind it anywhere in the tree (any scope): assignments, deletions, parameters,
+    definitions, imports, `global` / `nonlocal` lines, except names, match captures."""
+    count = {}
+
+    def add(name, n=1):
+        count[name] = count.get(name, 0) + n
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            add(node.name)
+        elif isinstance(node, ast.arg):
+            add(node.arg)
+        elif isinstance(node, ast.alias):
+            add((node.asname or node.name).split('.')[0])
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            for name in node.names:
+                add(name, 2)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            add(node.name)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            add(node.rest)
+    return count
+
+
+def _inline_function_aliases(source):
+    """`bisect = bisect_right` at module level, where `bisect_right` is a module-level def and neither name is bound
+    anywhere else: both names are one function object in CPython, so every read of the alias becomes a read of the
+    def (a call then reaches a function with defaults, which a function value cannot) and the assignment becomes
+    `pass`. The alias is left alone when it is read at module level before its assignment runs, or when the def
+    has a decorator. Lines are kept; a program without such an alias is returned unchanged."""
+    if '=' not in source:
+        return source
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return source
+    defs = {n.name: n for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    if not defs:
+        return source
+    sites = _bound_sites(tree)
+    found = {}
+    for index, node in enumerate(tree.body):
+        if (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                and isinstance(node.value, ast.Name) and node.value.id in defs):
+            alias, target = node.targets[0].id, node.value.id
+            fn = defs[target]
+            if (sites.get(alias) == 1 and sites.get(target) == 1 and not fn.decorator_list
+                    and isinstance(fn, ast.FunctionDef) and tree.body.index(fn) < index):
+                found[alias] = (index, node, target)
+    if not found:
+        return source
+    # a read at module level (class bodies included, function bodies not) before the assignment: NameError in CPython
+    for alias, (index, node, target) in list(found.items()):
+        def early(n):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                return any(early(d) for d in (n.decorator_list if not isinstance(n, ast.Lambda) else []) +
+                           n.args.defaults + [k for k in n.args.kw_defaults if k is not None])
+            if isinstance(n, ast.Name) and n.id == alias:
+                return True
+            return any(early(c) for c in ast.iter_child_nodes(n))
+        if any(early(prev) for prev in tree.body[:index]):
+            del found[alias]
+    if not found:
+        return source
+    lines = source.splitlines(True)
+    starts = [0]
+    for line in lines:
+        starts.append(starts[-1] + len(line))
+
+    def offset(lineno, col):
+        return starts[lineno - 1] + len(lines[lineno - 1].encode('utf8')[:col].decode('utf8', 'replace'))
+    edits = []
+    stmts = {id(node): target for (index, node, target) in found.values()}
+    for node in tree.body:
+        if id(node) in stmts:
+            start = offset(node.lineno, node.col_offset)
+            end = offset(node.end_lineno, node.end_col_offset)
+            edits.append((start, end, 'pass' + '\n' * source[start:end].count('\n')))
+    inside = {id(y) for node in tree.body if id(node) in stmts for y in ast.walk(node)}
+    for x in ast.walk(tree):
+        if isinstance(x, ast.Name) and x.id in found and isinstance(x.ctx, ast.Load) and id(x) not in inside:
+            edits.append((offset(x.lineno, x.col_offset), offset(x.end_lineno, x.end_col_offset), found[x.id][2]))
+    for start, end, text in sorted(edits, reverse=True):
+        source = source[:start] + text + source[end:]
+    return source
+
+
 def ail_array_surface(source, notes=None):
     """`import ail_array` lowered onto native array loops (python/pkg-v12/ailarray.py); the source as written when the
     program does not import it or a use is not built (the refusal is added to `notes`)."""
@@ -3428,6 +3530,9 @@ def python_surface(source, notes=None, library=False):
                         'or list every lambda parameter as a plain positional one',
                         lineno=node.lineno, offset=node.col_offset + 1)
     source = _inline_type_aliases(source)
+    source = _inline_function_aliases(source)
+    if "object" in source:
+        source = _objectlib().rewrite(source, notes)
     if "raise" in source and " from " in source:
         source = _raisefrom().rewrite(source, notes)
     if "match" in source:
