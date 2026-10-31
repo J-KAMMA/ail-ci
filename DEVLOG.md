@@ -1,3 +1,25 @@
+## 2026-10-31 -- re-apply reex24: the definitions-only boundary and a usable rustc probe (job-rbreex24-10312118)
+
+Re-applied the accepted `job-reex24-10300433` change on this tree, whose diff no longer applies.
+The tree already carried an inline `rustc --version` probe in `test_ail_c_export` and
+`test_ail_cratebridge`; both sides' fixes are kept as the shared `ail_testenv.rustc()`, which does
+the same probe (and catches a failed spawn) before a test decides to use the toolchain. The new
+`test_ail_reex24` module is registered with `tests.d/test_ail_reex24.txt` (this tree uses the
+directory registry, so the `ail_check.MODULES` tuple is not edited); the two DIFFERENCES rows are
+re-keyed to this branch.
+
+`_python_runs_nothing` now checks each definition's header (literal defaults; annotations built
+from builtin names, literals, subscripts and `|` unions, including the python surface's
+`__ail_checked_*` and `_AilT_*` spellings) and imports, classes, literal module constants,
+docstrings and `pass` form the definitions-only shape (`_definitions_only_shape`); a decorator, a
+non-literal default or a non-builtin annotation runs code while CPython loads the module, so the
+module is refused by name ("runs code at load time") on both builds before entry-point selection
+instead of being built as a silent no-op or falling into the file-reading tool shape. Effect-free
+classes and imported modules still build as no-ops; top-level code still builds a program.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh` are listed in the report below; the targeted
+modules are run on the final commit.
+
 ## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
 
 Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this
@@ -447,6 +469,57 @@ big-int positions.  Targeted tests (final tree): `test_ail_rd1`, `test_ail_stric
 `test_ail_freestanding`, `test_ail_freestanding2`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass (11 modules, `par_check -j 2`, 429s);
 `update_manifest.py --check` passes.
+## 2026-10-29 -- reex24 review: imports and classes are part of the definitions-only shape (job-reex24-10300433)
+
+The review found two shapes that the narrower no-op boundary broke. `_python_definitions_only`
+rejected any import, so `from functools import cache` + `@cache def f(...)` fell through to the
+file-reading tool shape (`usage: tool FILE`, exit 2, where CPython exits 0) instead of the new
+refusal; and a class module with a `@property` method lost the no-op and the default build failed
+with an unrelated no-parameter refusal (rc 3). `_python_definitions_only` now uses
+`_definitions_only_shape` for the module top level (imports, defs, classes, literal constants,
+docstrings, `pass`) and `_refuse_python_load_effect` refuses an effectful def **or class** by name
+on both builds, before entry-point selection. Classes with effect-free bodies still build as
+no-ops, and top-level code still builds as a program.
+
+The refusal runs on the python-surface output, which rewrites a literal tuple default to its record
+constructor (`("x", -1)` -> `_AilT_s_i('x', -1)`) and a `tuple[...]` annotation to `_AilT_*`;
+`_literal_value` and `_effect_free_annotation` accept those surface-generated spellings exactly as
+they already accepted `__ail_checked_*`, so the effect-free `annotations` module keeps its no-op.
+
+Probes in `/tmp/probes` (both builds, `cmp.sh`): `p_math`, `p_integer_series`, `p_import_module`,
+`p_import_from_module`, `p_ann_builtin`, `p_docstring_only`, `p_constants`, `p_class_plain` and
+`p_top_print` match CPython (`p_top_print` still prints); `p_cache_bare`, `p_def_decorated_top`,
+`p_decorator_local`, `p_class_prop`, `p_class_body_call`, `p_ann_attribute`, `p_ann_user_name`,
+`p_default_nonliteral`, `p_default_subscript` and `p_default_dict_value` are refused by name on
+both builds. Added the import/class cases to `test_ail_reex24.py`.
+
+## 2026-10-29 -- reex24: pin the definitions-only no-op boundary; skip Rust tests without a usable rustc (job-reex24-10300433)
+
+`language_examples/math.ail` and `integer_series.ail` already built as no-op entries on this tree
+(`_python_runs_nothing` / `_python_defs_only_runs_nothing`), so the recorded refusal no longer
+reproduced; nothing was reverted into the old function/tool shape. The boundary of that fix was
+still open: a definitions-only Python-surface file whose `def` carried a decorator, a non-literal
+default or an annotation that is not built from builtin names, literals, subscripts and `|`
+unions (for example `def f(x=make())` or `def f(x: typing.Any)`) was silently built as a no-op,
+dropping code CPython runs while it loads the module. `_python_runs_nothing` now checks each
+definition's header, and such a file is refused by name ("runs code at load time") on both builds
+instead of exiting 0; `AIL_TOOL_MODE=1` still opts out. `_python_defs_only_runs_nothing` now adds
+the boxed path's trailing `pass` for effect-free literal-constant modules too.
+
+`test_ail_c_export` and `test_ail_cratebridge` took `shutil.which('rustc')`; under a task-local
+HOME the rustup proxy is found but every call exits 1 with no toolchain selected. Both use the new
+`ail_testenv.rustc()`, which probes `rustc --version` and returns None when it fails, so the Rust
+tests skip; a configured toolchain still runs them.
+
+Added `test_ail_reex24.py` (5 tests, both builds; registered in `ail_check.MODULES`) and the
+DIFFERENCES row below. Probes in `/tmp/probes/p_*.py` on both builds via `cmp.sh`:
+`p_mod_const`, `p_defs_only`, `p_ann_builtin`, `p_ann_nested`, `p_ann_const`, `p_default_literal`,
+`p_class_mod`, `p_mod_const_boxed`, `p_top_call` and `p_ann_name` (whose alias the surface resolves
+to `list`) match CPython; `p_decorator`, `p_default_call` and `p_ann_typing` are refused by name.
+Final
+tests: test_ail_reex24, test_ail_c_export, test_ail_cratebridge, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3, test_ail_pre170, test_ail_python_syntax and
+test_ail_modconst pass; `tools/update_manifest.py --check` passes.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 

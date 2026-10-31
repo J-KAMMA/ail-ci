@@ -26,15 +26,13 @@ import typing
 import unittest
 from pathlib import Path
 
-from ail_testenv import ASAN_DETECT_LEAKS, WINDOWS
+from ail_testenv import ASAN_DETECT_LEAKS, WINDOWS, rustc
 
 ROOT = Path(__file__).resolve().parent
 EXAMPLE = ROOT / 'language_examples' / 'c_export'
 CLI = str(ROOT / 'ail_chatgpt.py')
 CC = os.environ.get('PIPE_CC') or shutil.which('cc') or shutil.which('gcc')
-RUSTC = shutil.which('rustc')
-if RUSTC and subprocess.run([RUSTC, '--version'], capture_output=True).returncode:
-    RUSTC = None                      # a rustup shim with no installed toolchain cannot compile
+RUSTC = rustc()
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(EXAMPLE))
 
@@ -303,7 +301,7 @@ class ExportLibraryTests(unittest.TestCase):
             self.assertEqual(run.returncode, 0)
             self.assertEqual(run.stdout.decode('utf-8').splitlines()[:len(self.expected)], self.expected)
 
-    @unittest.skipUnless(RUSTC, 'rustc is not installed')
+    @unittest.skipUnless(RUSTC, 'a usable rustc is not installed')
     def test_rust_host_matches_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-rust-host-') as temporary:
             host = Path(temporary) / 'host_rs'

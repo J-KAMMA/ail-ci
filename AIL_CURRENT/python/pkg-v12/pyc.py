@@ -19,7 +19,7 @@ answers 6.
 Anything outside the subset is refused by name rather than mis-compiled. POSIX uses mmap for array
 input; Windows reads the same raw file into an owned buffer before calling the generated function.
 """
-import argparse, ast, json, os, pathlib, subprocess, sys
+import argparse, ast, builtins, json, os, pathlib, subprocess, sys
 
 from pipeline import PipelineError, compiler, ffi_link_args, link_flags, sqlite_link_args, extra_libs, opt_flags
 
@@ -619,6 +619,7 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
     if is_function(source):
         rewritten = _rewrite_script(source, force=False)
         if rewritten is None:
+            _refuse_python_load_effect(source)
             return func_to_c(source, name=name, strict=strict, info=info, external=external)
         # the rewritten text has lost its comments: keep the @dataclass markers for dunders.py
         import dunders
@@ -1202,10 +1203,83 @@ def _refuse_typed_big_store(source, force_general=False):
 _TINT_GATE_WORDS = ('tagged-int', 'tagged local', 'can need an int beyond int64')
 
 
+_BUILTIN_NAMES = frozenset(dir(builtins))
+
+
+def _literal_value(node):
+    """A literal, or the tuple record the python surface writes for a tuple literal in a default
+    (`_AilT_s_i('x', -1)`); its constructor only stores the arguments, so no user code runs."""
+    if (isinstance(node, ast.Call) and not node.keywords and isinstance(node.func, ast.Name)
+            and node.func.id.startswith('_AilT_')):
+        return all(_literal_value(arg) for arg in node.args)
+    try:
+        ast.literal_eval(node)
+    except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
+        return False
+    return True
+
+
+def _effect_free_annotation(node):
+    """An annotation CPython evaluates when it executes a definition, without running any code: a
+    literal, a builtin name, a subscript of those (`list[int]`, `dict[str, int]`) or a `|` union
+    (`int | None`). `ail_syntax.python_surface` rewrites a return contract to a `__ail_checked_*`
+    name and a `tuple[...]` to its `_AilT_*` record class; those spellings are the surface's own
+    builtins. An attribute (`typing.Any`) or a user name keeps today's behaviour."""
+    if node is None or isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.Name):
+        return (node.id in _BUILTIN_NAMES or node.id.startswith('__ail_checked_')
+                or node.id.startswith('_AilT_'))
+    if isinstance(node, ast.Tuple):
+        return all(_effect_free_annotation(item) for item in node.elts)
+    if isinstance(node, ast.Subscript):
+        return _effect_free_annotation(node.value) and _effect_free_annotation(node.slice)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
+        return _effect_free_annotation(node.left) and _effect_free_annotation(node.right)
+    return False
+
+
+def _effect_free_function(node):
+    """A def whose decorators, annotations and defaults run no code when CPython executes it. Its
+    body is untouched: nothing at module scope calls it, so it never runs."""
+    if node.decorator_list:
+        return False
+    args = node.args
+    annotations = [arg.annotation for arg in args.posonlyargs + args.args + args.kwonlyargs]
+    annotations += [getattr(args.vararg, 'annotation', None), getattr(args.kwarg, 'annotation', None)]
+    annotations.append(node.returns)
+    if not all(_effect_free_annotation(annotation) for annotation in annotations):
+        return False
+    defaults = list(args.defaults) + [default for default in args.kw_defaults if default is not None]
+    return all(_literal_value(default) for default in defaults)
+
+
+def _effect_free_node(node, constants):
+    """One statement of a module (or class) body that CPython executes without running code."""
+    if isinstance(node, (ast.Import, ast.ImportFrom, ast.Pass)):
+        return True
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+        return True
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return _effect_free_function(node)
+    if isinstance(node, ast.ClassDef):
+        if node.decorator_list:
+            return False
+        return all(_effect_free_node(child, True) for child in node.body)
+    if constants and isinstance(node, ast.Assign):
+        return all(isinstance(target, ast.Name) for target in node.targets) and _literal_value(node.value)
+    if constants and isinstance(node, ast.AnnAssign):
+        return (isinstance(node.target, ast.Name) and _effect_free_annotation(node.annotation)
+                and (node.value is None or _literal_value(node.value)))
+    return False
+
+
 def _python_runs_nothing(source, constants=False):
     """Whether a Python-syntax program (AIL_SURFACE=python) has a top level that only defines things
     (def, class, import, a docstring; with `constants`, also assignments of plain literals), so that
-    CPython prints nothing and exits 0. AIL_TOOL_MODE=1 opts out (library "tool" mode)."""
+    CPython prints nothing and exits 0. A decorator, a non-literal default or a non-builtin
+    annotation runs code at definition time and is not such a program. AIL_TOOL_MODE=1 opts out
+    (library "tool" mode)."""
     if os.environ.get('AIL_SURFACE') != 'python' or os.environ.get('AIL_TOOL_MODE'):
         return False
     try:
@@ -1214,19 +1288,7 @@ def _python_runs_nothing(source, constants=False):
         return False
     if not tree.body:
         return False
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom, ast.Pass)):
-            continue
-        if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
-            continue
-        if constants and isinstance(node, (ast.Assign, ast.AnnAssign)) and node.value is not None:
-            try:
-                ast.literal_eval(node.value)
-            except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
-                return False
-            continue
-        return False
-    return True
+    return all(_effect_free_node(node, constants) for node in tree.body)
 
 
 def _python_defs_only_runs_nothing(source):
@@ -1234,9 +1296,70 @@ def _python_defs_only_runs_nothing(source):
     exit 0. Left alone the build would treat the file as a library "tool" (the last def becomes the
     entry; a `usage: tool FILE` line, exit 2), so a trailing `pass` gives the module body one
     statement and the ordinary script `main` is built. ail/brace syntax keeps tool mode."""
-    if not _python_runs_nothing(source):
+    if not _python_runs_nothing(source, True):
         return source
     return source.rstrip('\n') + '\npass\n'
+
+
+def _definitions_only_shape(node):
+    """One top-level statement of a module that only defines things: a signature, pass, docstring,
+    import, def/class, or a literal module constant. Whether the definition runs code when CPython
+    executes it is `_effect_free_node`'s question, not this one."""
+    if isinstance(node, (ast.Import, ast.ImportFrom, ast.Pass,
+                         ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return True
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
+        return True
+    if isinstance(node, ast.Assign):
+        return all(isinstance(target, ast.Name) for target in node.targets) and _literal_value(node.value)
+    if isinstance(node, ast.AnnAssign):
+        return (isinstance(node.target, ast.Name) and _effect_free_annotation(node.annotation)
+                and (node.value is None or _literal_value(node.value)))
+    return False
+
+
+def _python_definitions_only(source):
+    """The tree of a Python-surface file whose top level is only definitions (imports, defs,
+    classes), literal module constants, docstrings and pass, or None. A top-level statement that
+    runs code the module shape does not model (a call, a non-literal assignment) is an ordinary
+    program: None."""
+    if os.environ.get('AIL_SURFACE') != 'python' or os.environ.get('AIL_TOOL_MODE'):
+        return None
+    try:
+        tree = ast.parse(source.strip())
+    except (SyntaxError, ValueError):
+        return None
+    if not tree.body or not all(_definitions_only_shape(node) for node in tree.body):
+        return None
+    return tree
+
+
+def _refuse_python_load_effect(source):
+    """Refuse a definitions-only Python module whose own def or class runs code while CPython loads
+    it. A decorator, a non-literal default or an annotation not built from builtin names would be
+    dropped by the no-op entry, so name the effect instead of silently losing it. This check runs
+    before entry-point selection, so such a module never falls through to the file-reading tool
+    shape (which would print `usage: tool FILE` and exit 2 where CPython exits 0)."""
+    tree = _python_definitions_only(source)
+    if tree is None:
+        return
+    effect = next((node for node in tree.body
+                   if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+                   and not _effect_free_node(node, True)), None)
+    if effect is None:
+        return
+    if isinstance(effect, ast.ClassDef):
+        what, why = 'class %s' % effect.name, 'a decorator or a statement in its body'
+    else:
+        what = 'definition %s()' % effect.name
+        why = 'a decorator, a non-constant annotation or a non-literal default'
+    refusal = Unsupported(
+        'a Python module whose %s runs code at load time (%s) is not run by the compiled entry; '
+        'the effect would be lost.\n'
+        '  write instead: run that code at module level, or use a literal default and an '
+        'annotation built from a builtin type' % (what, why))
+    refusal.source_line = effect.lineno
+    raise refusal
 
 
 _NOTHING_MAIN = '\nint main(void) { return 0; }\n'
@@ -1248,6 +1371,7 @@ def _build_unshadowed(source, out, strict, report, force_general):
     work: build it once more on the legacy int64 emitter, whose overflow is a loud stop (never a wrap-around). The
     hard big-int constructs (`_refuse_big_capable`) stay refused."""
     source = fold_int_constants(source)
+    _refuse_python_load_effect(source)
     source = _python_defs_only_runs_nothing(source)
     try:
         return _build_unshadowed_exact(source, out, strict, report, force_general)
