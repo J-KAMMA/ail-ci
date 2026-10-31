@@ -62,6 +62,11 @@ _entry('str_lower', (S,), (S,), 'ail_str_lower({A}, {0})', Effects(allocs=[ARENA
        parts=('STR', 'CASEMAP'), arena='s')
 _entry('str_upper', (S,), (S,), 'ail_str_upper({A}, {0})', Effects(allocs=[ARENA], raises=[DIE]),
        parts=('STR', 'CASEMAP'), arena='s')
+_entry('str_casefold', (S,), (S,), 'ail_str_casefold({A}, {0})', Effects(allocs=[ARENA], raises=[DIE]),
+       parts=('STR', 'CASEMAP', 'CASEFOLD'), arena='s')
+_entry('str_slice_step', (S, N, N, N), (S,), 'ail_str_slice_step({A}, {0}, {1}, {2}, {3}, {haslo}, {hashi})',
+       Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('STR', 'SLICEIDX', 'STRSTEP'), arena='s',
+       attrs=('haslo', 'hashi'))
 _entry('str_char_at', (S, N), (S,), 'ail_ir_char_at({0}, {1})', _PURE, parts=('STR', 'IRSTR'), pure=True)
 _entry('str_bytes', (S,), (N,), '({0}).n', _PURE, parts=('STR',), pure=True)
 for _p in ('isdigit', 'isalpha', 'isalnum', 'isspace', 'isupper', 'islower', 'isdecimal', 'isnumeric'):
