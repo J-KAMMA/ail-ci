@@ -1,12 +1,6 @@
-**Fix one pre-existing difference from CPython.** A reviewer of job `pre428` recorded these as already present before that job:
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_cmp_classname.
 
-1. Ordinary-instance class names >79 chars truncate at 79 instead of CPython's 100 (`u_longinst`, expected 244 / actual 202).
-2. Exception with an ordinary-instance operand still prints `'exception'` (`u_mixinst`, both builds equal to base).
-3. `//`, `%`, `/`, `**` messages omit operands; ordering prints `'exception'`.
-
-Default-build binary for a no-feature program is byte-identical to base; general-path C differs only in the intended runtime line.
-
-Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` on both builds). Fix that one cause, or refuse the construct by name at compile time. Add the case to a new `test_ail_pre440.py` and run only that module and `test_ail_safetynet`, then commit. If none of them still differs, change nothing and say so.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
@@ -15,7 +9,9 @@ Reproduce the first one that still differs on this tree (`bash ~/tools/cmp.sh` o
 - **Records:**
   - New DIFFERENCES rows use placeholder ids `C?-<your branch>-N`.
   - Add a DEVLOG entry at the top with today's date.
-  - Run `python3 tools/update_manifest.py`, then `--check`.
+  - Register a new test module: if `AIL_CURRENT/tests.d/` exists, add `AIL_CURRENT/tests.d/<module>.txt` containing the module
+    name and do NOT edit the tuple in `ail_check.py`; otherwise append it to the `MODULES` tuple.
+  - `git add` new files, run `python3 tools/update_manifest.py`, then `--check`. Do not hand-edit `MANIFEST.json` or `manifest.d/`.
 - **Required tests:** the targeted modules for what you touch, plus test_ail_safetynet, test_ail_files and test_ail_corpus_findings3. Run them on your final commit, not an earlier one.
 - **Mandatory self-check before you report.** A reviewer will repeat it, and past reports were wrong about half the time.
   1. Write probe programs in /tmp/probes/ for every behaviour you changed. Cover the boundaries your implementation implies, not only the example: types, widths, empty, negative, aliasing, values reaching the code through an argument, a list item, an attribute and a dict value, and both builds.
