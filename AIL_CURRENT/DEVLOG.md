@@ -1,3 +1,16 @@
+## 2026-10-31 -- ex19 follow-up: AIL_TOOL_MODE keeps the library tool entry
+
+The ex19 change that makes a definition-only Python source with a non-sequence first parameter run
+nothing (like CPython) also suppressed the entry point in `AIL_TOOL_MODE=1`, where the harness asks
+for the library "tool" entry. `test_ail_pre170`'s array-entry case (`def entry(xs)` with an unused
+first parameter) therefore compiled to a no-op `main` and printed nothing instead of `6 2 2 6`. Both
+suppression sites -- the typed path's `_main_for` and the v2 general path's array-entry selection in
+`pyboxed2.py` -- now leave the old auto-call in place when `AIL_TOOL_MODE` is set; the CPython-like
+no-entry behaviour stays for ordinary runs. `test_ail_ex19` and `test_ail_pre170` pass, and probes
+`/tmp/probes/p_defonly_{int,annot,str,float,constant,negative_default}.py`,
+`p_class_attrs.py` and `p_array_entry_non_tool.py` match CPython on both builds, while the tool-mode
+probe prints `6 2 2 6` on both.
+
 ## 2026-10-30 -- GPU stage G2: SPIR-V for the G1 kernels, and the Vulkan runtime that is opened at run time
 
 The kernel IR of G1 now has a device twin. `python/pkg-v12/gpu_spirv.py` (a SPIR-V writer of about 800 lines, no shaderc or

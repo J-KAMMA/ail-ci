@@ -636,12 +636,13 @@ def _main_for(info):
                           'show its return value.\n'
                           '  write instead: print the result inside the function (`print(total)`), '
                           'or give it a parameter')
-    if kinds[0] != 'array':
+    if kinds[0] != 'array' and not os.environ.get('AIL_TOOL_MODE'):
         # A Python-syntax file whose top level is only definitions (and module constants) is a
         # module: CPython runs no function when it is run directly.  The legacy function-program
         # shape reads its sequence from the file through the FIRST parameter; a first parameter
         # that is a scalar (or a str) cannot be that sequence, so this source has no entry point
         # at all and runs nothing.  This is the `math.ail` shape (a constant and `def sum_to(n)`).
+        # AIL_TOOL_MODE asks for the library "tool" entry instead and keeps the old call.
         return '\nint main(void) { return 0; }\n'
     extra = kinds[1:]
     if any(k != 'int' for k in extra):

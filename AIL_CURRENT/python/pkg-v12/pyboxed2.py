@@ -2789,7 +2789,9 @@ class Compiler(boxclosure.ClosureMixin):
             # program (`math.ail`'s `def sum_to(n)`): CPython runs no function when the file is run
             # directly, so call nothing.  No parameters keep the long-standing auto-call of a
             # zero-argument last function, and an unreadable signature keeps the old behaviour.
-            if kinds is None or not kinds or kinds[0][1] == 'array':
+            # AIL_TOOL_MODE asks for the library "tool" entry instead, where the last def is called
+            # whatever its first parameter looks like (test_ail_pre170's `entry(xs)`).
+            if os.environ.get('AIL_TOOL_MODE') or kinds is None or not kinds or kinds[0][1] == 'array':
                 array_entry = candidate
 
         main_ctx = Ctx('<module>')
