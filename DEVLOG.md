@@ -239,6 +239,69 @@ The pre415 review recorded as pre-existing, on both builds, the dead-mutation pr
 
 Probes in `/tmp/probes/pre424` on both builds via `cmp.sh`: `q01`-`q05` (module/local dead loop, dead if, dead else, after return) are refused by name; `q14` and `q15`/`q16` controls are the existing routed-power and `**kwargs`/class-store named refusals; `q06`-`q13` and `q17` (reachable mutations before the call, three local shadows, in-range routes, unrelated program) match CPython.  Added `AIL_CURRENT/test_ail_pre424.py` (2 tests, 15 refused programs and 9 matching programs, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
 
+## 2026-10-29 -- pre428 suite fix: class-name multiplication error travels with the dunder guard (job-pre428-10292000)
+
+On today's integration branch the multiplication type error exists in two runtime helpers: the
+hot fallback still had it, and a new cold `ail__mul_slow` helper (used by the big-int/unified
+build) had a copy of the same line.  Applying only the old cruntime hunk changed the hot copy
+and left the slow one naming the tag (`'exception'`), and the follow-up's dunder anchor then
+found no insertion point in the big-int build.  The class-name formatting is now part of the
+`dunderrt.py` edit that also inserts the `__mul__`/`__rmul__` guard, so whichever helper a build
+keeps gets both the guard and the object-to-name `%.100s` buffers; the cruntime line is back to
+its original text.  This applies unchanged to both the branch and the integration runtime.
+
+Probes in `/tmp/probes` on both builds through `cmp.sh`, on this branch and with only this change
+applied onto `origin/integ`: `p428_classes` (exception and ordinary instances, both orders,
+subclasses, mixed int/float/bool/None/str/list/dict), `p428_routes` (alias, argument, list item,
+attribute, dict value, return) and `p428_controls` (99/100/101/150-character class names,
+`__mul__`/`__rmul__`, in-range arithmetic) all match CPython.  Final-state tests on the branch:
+test_ail_pre428, test_ail_obj_refs, test_ail_safetynet, test_ail_unified,
+test_ail_virtual_dispatch; the same five pass on `origin/integ` plus this change.
+`tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-29 -- pre428 follow-up: make the dunderrt multiplication anchor independent of the error buffers (job-pre428-10291723)
+
+The review of the pre428 change reported that editing the general runtime's
+`char na[101], nb[101], buf[256];` declaration would leave `dunderrt.py` unable to find the
+insertion point for `__mul__`/`__rmul__` dispatch.  On this tree the anchor already matched the
+current declaration, but it was still tied to that exact line, so the same break would return
+on the next buffer edit.  The anchor is now the stable error-formatting line
+(`snprintf(buf, sizeof buf, "unsupported operand type(s) for *: '%s' and '%s'", na, nb);`), so
+the operand-name change and the dunder patch no longer depend on the declaration text; the
+guard is still inserted before the error is raised.  No behaviour changes: the generated
+message and the `__mul__`/`__rmul__` route are unchanged.
+
+Probes in `/tmp/probes/pre428fix` on both builds via `cmp.sh`: `p1_dunder` (mul/rmul and
+add/sub/floordiv/mod/truediv/pow dunders), `p2_err` (exception operands both orders and same
+class), `p3_routes` (argument, list item, dict value, attribute, return and alias),
+`p4_long` (99/100/101/150-character class names) all match CPython.  Final-state tests:
+test_ail_pre428, test_ail_unified, test_ail_fuzz20, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-28 -- pre428: multiplication names exception operands by their class (job-pre428-10281850)
+
+The pre416 review recorded as pre-existing on both builds that `E() * F()` printed
+`unsupported operand type(s) for *: 'exception' and 'exception'`, where CPython 3.12 names the
+classes (`'E' and 'F'`).  The general runtime's multiplication error used `ail_type_name` on the
+tags instead of the object-to-name helper, so class names (including ordinary instances) were
+lost.  It now formats each operand through `ail__tname_c` into its own 101-byte buffer with
+CPython's `%.100s` cap and a 256-byte message (calling the helper twice into one `snprintf`
+would alias its shared buffer).  The `dunderrt.py` anchor that inserts the `__mul__`/`__rmul__`
+dispatch before this error was updated to the new first line.
+
+Probes in `/tmp/probes/pre428` on both builds via `cmp.sh`: `p1_direct` (E/F, both orders,
+same class, subclass), `p2_routes` (alias, argument, list item, dict value, attribute, return),
+`p3_mixed` (int/float/bool/None/set/dict/str/list/tuple/bytes in both orders, including the
+already-matching `can't multiply sequence` path), `p4_long_99/100/101/150/300` (name cap),
+`p5_instances` (ordinary classes and subclass) and `p6_controls` (in-range operations,
+`__mul__`/`__rmul__`, caught error) all match CPython.  The baseline matrix
+`/tmp/probes/pre428_baseline/p0_pre_existing.py` now matches for `*`; its `//`, `%`, `/`, `**`
+and comparison lines are the review's remaining pre-existing items and still differ.
+
+Added `AIL_CURRENT/test_ail_pre428.py` (7 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  `tools/update_manifest.py` and `--check` pass;
+`tools/ci_shards.py --check` passes.  Final-state tests: test_ail_pre428, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3, plus test_ail_left1 (multiplication errors).
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
