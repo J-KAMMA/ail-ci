@@ -194,6 +194,56 @@ on both builds.  The unit test in `test_ail_cov19.py` also checks that the rewri
 raises for `sorted(d.items())` (it did on the base) and still rewrites a keyed list sort.
 `test_ail_cov19` (5 tests), `test_ail_sort_keys`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass on the final commit; `tools/update_manifest.py --check` passes.
+## 2026-10-31 -- ex32 follow-up: the print gate accepts only int64 constant expressions (job-ex32-10311304)
+
+The ex32 gate accepted every integer constant expression a print-only script could fold, including
+`print(1 << 63)`.  That expression is one past INT64_MAX, and on the legacy int64 emitter
+(`AIL_IR=0`) the typed path kept the shift and stopped with `integer overflow` at run time, so
+`test_ail_pre47`'s shift case no longer printed CPython's exact value.  `_print_scalar_constant`
+in `python/pkg-v12/pyc.py` now accepts a folded value only when it lies in the int64 range; a
+larger value keeps the general fallback, and on a typed-only build the existing big-int gate (or,
+for a constant shift it does not mark, the gate's own named print refusal) stops it.
+`test_ail_ex32.py` gained `test_out_of_int64_expressions_keep_the_general_fallback` (2**63,
+1<<63 and INT64_MIN-1: general/default match CPython, typed-only refused by name).
+
+This job also had to stop editing the shared `MODULES` tuple: the integration branch registers
+test modules by file (`AIL_CURRENT/tests.d/`) and the old one-line addition to the tuple applied
+to integ with conflict markers, which broke `test_ail_registry`.  `test_ail_ex32` is now
+registered by `AIL_CURRENT/tests.d/test_ail_ex32.txt` (inert on this older tree, discovered by
+the integration `ail_check.py`).  Reconstructed integ (`origin/integ` + the job diff applied with
+`git apply --3way`): test_ail_registry, test_ail_pre47 and test_ail_ex32 all pass; the code files
+apply cleanly and only DEVLOG/ci_shards conflict, as the workflow tolerates.
+
+Probes in `/tmp/probes/ex32fix_*` (18): int64 boundary cases (add, `1<<62`, `2**63-1`, `-(2**63)`),
+out-of-range (`2**63`, `1<<63`, `10**40`, `(2**70)//(2**5)`, `2**10000`), bool and `1+True`, float,
+text, list, and the argument/list-item/attribute/dict routes all match CPython on the general and
+default builds via `cmp.sh`.  On the typed-only build the in-range cases match, the out-of-range
+ones are refused by name, and bool/float/text/list keep the print refusal; `show(1 << 63)` still
+overflows there exactly as it does on the base (function mode, pre-existing).
+
+## 2026-10-29 -- ex32: a print-only integer constant expression on the typed path (job-ex32-10291111)
+
+`AIL_CURRENT/language_examples/hello.ail` (`print(40 + 2)`) was refused by the typed path with
+"a script that is only print(<expression>) needs general object semantics" although the argument
+is an int constant expression; the default build therefore took the general path.  The gate in
+`python/pkg-v12/pyc.py` now accepts a print argument that is a non-bool Constant or an integer
+constant expression proven by the same exact folder the big-int pass uses; an out-of-int64 result
+is left to the big-int check to name.  Bare bools, floats, text and containers keep the previous
+fallback, and the general path is unchanged.
+
+`hello.ail` now builds on the general, default and typed-only builds and prints `42` / exits 0 on
+all three, matching CPython.  Added `AIL_CURRENT/test_ail_ex32.py` (3 tests) and registered it in
+`ail_check.MODULES`; `test_ail_build_cache` now uses `print(True)` for its general-path-note case,
+since `print(40 + 2)` no longer takes that path.
+
+Probes in `/tmp/probes` (19) via `bash ~/tools/cmp.sh`: `p_ex32_add`, `negative`, `zero`, `sub`,
+`mul`, `floordiv`, `mod`, `shift`, `pow`, `int64`, `big`, `bool_leaf`, `bool_direct`, `float`,
+`str`, `list`, `sep`, `end` and `multi` match CPython on the general and default builds.  On the
+typed-only build the 14 int-expression probes including `hello` match; `bool_direct`, `float`,
+`str` and `list` keep the print refusal; `big` is refused by the big-int check.  Final-state
+tests: test_ail_ex32, test_ail_python_syntax, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 (5 modules, 0 failed).  `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
