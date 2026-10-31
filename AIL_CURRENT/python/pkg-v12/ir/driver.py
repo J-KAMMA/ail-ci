@@ -426,7 +426,7 @@ def _apply(P, args, kwargs, result, current):
         _params = dict(getattr(ctx, 'params', ()))
         _tint_names = {n for n in _names if n not in _proven and
                        (getattr(ctx, 'types', {}).get(n) == P.INT or _params.get(n) == P.INT)}
-        _proof = bigcap._lp_reason([fn], None, _d)
+        _proof = bigcap._lp_reason([fn], None, _d, prefer_int=True)
         # "an operand not proven int or float" is what an untyped GLOBAL (a module-level float the
         # function only reads) produces; it is not an int operation. Let that shape keep the
         # legacy typed emitter (a no-int program must not take the general path).
