@@ -162,3 +162,38 @@ jobs:
           spirv-val --version | head -1
           python3 AIL_CURRENT/test_ail_gpu_g1.py
           python3 AIL_CURRENT/test_ail_gpu_g2.py -v
+
+  wheel:
+    name: wheel
+    # Cheap (about 2 minutes): only on pull requests that touch packaging, the docs or the tutorial test. Builds the ail-lang
+    # wheel in a fresh venv, installs it, runs `ail run` on a hello world and a typed program, then every sample of
+    # docs/tutorial.md through the installed `ail` (tools/wheel_check.py). Nothing is uploaded or published.
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Did the pull request touch packaging or docs?
+        id: paths
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if git diff --name-only "$BASE_SHA...$HEAD_SHA" | grep -Eq '^(pyproject\.toml|packaging/|docs/|README\.md|LICENSE-|tools/wheel_check\.py|AIL_CURRENT/(ail_sdk|test_ail_tutorial)\.py)'; then
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "no packaging or docs change: nothing to do"
+          fi
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        if: ${{ steps.paths.outputs.run == 'true' }}
+        with:
+          python-version: '3.12'
+      - name: Build the wheel in a fresh venv and run the tutorial samples
+        if: ${{ steps.paths.outputs.run == 'true' }}
+        run: |
+          gcc --version | head -1
+          python3 tools/wheel_check.py

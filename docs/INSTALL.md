@@ -1,158 +1,169 @@
 # Installing AIL
 
 AIL compiles a subset of Python 3.12 to C and builds a small native executable with your C
-compiler. The compiler is the `AIL_CURRENT/` directory of this repository. There is no installer
-yet: you run it from a git checkout.
+compiler. You install it as the Python package `ail-lang`, which gives you the `ail` command.
 
-Checked on 2026-10-30 on Ubuntu 24.04 under WSL 2 (AMD Ryzen 7 8840U), Python 3.12.3,
-gcc 13.3.0. Other platforms are described below with what is and is not checked.
+> `ail-lang` is **not published on PyPI yet**. Until it is, install it from a checkout of this
+> repository (below). The commands are the same after publishing, minus the clone.
+
+Checked on 2026-10-31 on Ubuntu 24.04 under WSL 2 (Python 3.12.3, gcc 13.3.0): `pip wheel`, a
+fresh virtual environment, `pip install` of the wheel, then `ail run` of a hello world and of a
+typed program, and every sample of [the tutorial](tutorial.md). The macOS and native Windows
+steps below were not run by hand; CI covers a subset of the tests there (see "Platforms").
 
 ## Requirements
 
-- **Python 3.12.** AIL matches its output against CPython 3.12, so use 3.12 to compare
-  results. The compiler itself refuses to run on Python older than 3.10.
-- **A C compiler.** AIL uses `$PIPE_CC` if set, otherwise the first of `cc`, `clang`, `gcc` on
-  `PATH`. Builds are optimised with `-O2`.
-- **git**, to get the code.
+- **Python 3.10 or newer, 3.12 recommended.** AIL matches its output against CPython 3.12, so use
+  3.12 to compare results. The package has no Python dependencies.
+- **A C compiler** on `PATH`: AIL uses `$PIPE_CC` if set, otherwise the first of `cc`, `clang`,
+  `gcc`; failing those, a `zig cc` (`$AIL_ZIG`, `zig` on `PATH`, or the `ziglang` wheel from
+  `pip install "ail-lang[zig]"`, about 50 MB). `ail check` needs no C compiler.
+- **git**, to get the code until the package is published.
 
-No Python packages are needed.
+## Linux
 
-### Linux
-
-Install Python 3.12 and gcc from your distribution. On Ubuntu 24.04 both are in the default
-repositories:
+On Ubuntu 24.04 (the platform the full test suite runs on) everything is in the default
+repositories. `python3-venv` is a separate package there and is easy to miss:
 
 ```sh
-sudo apt install python3 gcc git
+sudo apt install python3 python3-venv python3-pip gcc git
+git clone https://github.com/J-KAMMA/ail-ci.git
+python3 -m venv ~/.venvs/ail
+~/.venvs/ail/bin/pip install ./ail-ci
+~/.venvs/ail/bin/ail doctor --check
 ```
 
-This is the platform the full test suite runs on (`ubuntu-24.04` on GitHub Actions). A
-representative subset of the tests also runs on Linux arm64.
+Put `~/.venvs/ail/bin` on your `PATH` (or `source ~/.venvs/ail/bin/activate`) to type just `ail`.
+On Fedora use `sudo dnf install python3 gcc git`. `pip install .` and `pip wheel .` both work;
+only a wheel is built (there is no sdist).
 
-### macOS
+First program:
 
-Install Python 3.12 and the Xcode Command Line Tools (`xcode-select --install`), which provide
-`cc` (Apple clang). The repository's `platforms` CI workflow runs a representative subset of the
-tests on macOS 14 (arm64) with `PIPE_CC` set to that `cc`; it does not run the full suite.
-`--static` is refused on macOS (Apple ships no static C library). This guide was not run on a Mac.
+```sh
+echo 'print("Hello, AIL!")' > hello.py
+ail run hello.py                  # compile to a temporary executable and run it
+ail build hello.py -o hello       # keep the executable
+./hello
+```
 
-### Windows
+A typed program, built so that it must stay on the fast path:
+
+```sh
+cat > fib.py <<'EOF'
+def fib(n: int) -> int:
+    a: int = 0
+    b: int = 1
+    for _ in range(n):
+        a, b = b, a + b
+    return a
+
+
+print(fib(50))
+EOF
+ail run --strict fib.py           # 12586269025
+```
+
+Continue with [the tutorial](tutorial.md).
+
+## macOS
+
+Install Python 3.12 (python.org or Homebrew: `brew install python@3.12`) and the Xcode Command
+Line Tools, which provide `cc` (Apple clang):
+
+```sh
+xcode-select --install
+git clone https://github.com/J-KAMMA/ail-ci.git
+python3 -m venv ~/.venvs/ail
+~/.venvs/ail/bin/pip install ./ail-ci
+~/.venvs/ail/bin/ail doctor --check
+```
+
+`--static` is refused on macOS (Apple ships no static C library). Libraries built with
+`ail build --lib` are `.dylib` files.
+
+## Windows
 
 Two options:
 
-- **WSL 2 (recommended).** Install an Ubuntu distribution, open its shell and follow the Linux
-  steps. This guide was checked this way.
-- **Native, with MinGW-w64.** The `platforms` CI workflow runs a representative subset of the tests
-  on `windows-latest` with Python 3.12 and the MSYS2 UCRT64 gcc
-  (`pacman -S mingw-w64-ucrt-x86_64-gcc`, with `C:\msys64\ucrt64\bin` on `PATH`) and
-  `PYTHONUTF8=1`. Use `python` or `py -3` in place of `python3`. This guide was not run on
-  native Windows.
+- **WSL 2 (recommended).** In an administrator PowerShell run `wsl --install -d Ubuntu-24.04`,
+  open the Ubuntu shell and follow the Linux steps there. Keep your files inside the Linux file
+  system (`~`), not under `/mnt/c`: it is much faster and avoids line-ending problems.
+- **Native, with MinGW-w64 or Zig.** Install Python 3.12 and a C compiler, then in PowerShell:
 
-## Get the code
+  ```powershell
+  winget install MSYS2.MSYS2                  # then, in the MSYS2 UCRT64 shell:
+  pacman -S mingw-w64-ucrt-x86_64-gcc
+  $env:Path = "C:\msys64\ucrt64\bin;$env:Path"
+  git clone https://github.com/J-KAMMA/ail-ci.git
+  py -3 -m venv $HOME\ail-venv
+  & $HOME\ail-venv\Scripts\pip install .\ail-ci
+  & $HOME\ail-venv\Scripts\ail doctor --check
+  ```
+
+  Alternatively `pip install ".\ail-ci[zig]"` brings a `zig cc` and needs no MinGW. Set
+  `PYTHONUTF8=1` for UTF-8 output. Native Windows is a supported CI target for a subset of the
+  tests, not the full suite.
+
+## Platforms
+
+| Platform | State |
+|---|---|
+| Linux x86-64 (Ubuntu 24.04) | full test suite in CI; this guide was run here |
+| Linux arm64 | representative subset in CI |
+| macOS 14 arm64 | representative subset in CI |
+| Windows (MinGW-w64, `windows-latest`) | representative subset in CI |
+
+## Without installing (from the checkout)
+
+The package only bundles the compiler sources, so you can also run them in place:
 
 ```sh
-git clone https://github.com/J-KAMMA/ail-ci.git ~/ail-ci
-cd ~/ail-ci
+python3 AIL_CURRENT/ail_chatgpt.py doctor --check
+python3 AIL_CURRENT/ail_chatgpt.py compile hello.py -o hello
 ```
 
-### pip install
-
-Not available. This repository has no `pyproject.toml` or `setup.py`, so pip cannot install it.
-Tried in a fresh venv on 2026-10-30:
-
-```text
-$ python3 -m venv /tmp/ailvenv
-$ /tmp/ailvenv/bin/python -m pip install --no-build-isolation /home/bluec/pub/wt-docs
-ERROR: Directory '/home/bluec/pub/wt-docs' is not installable. Neither 'setup.py' nor 'pyproject.toml' found.
-```
-
-(`/home/bluec/pub/wt-docs` was a checkout of this repository.) `ail-lang` is also not on PyPI
-yet. `AIL_CURRENT/LANGUAGE_QUICKSTART_JA.md` describes `pip install ail-lang` and an `ail`
-command; those belong to a package that has not been published, and they do not work from this
-checkout.
+(`compile` here is `ail build` in the installed command.) Use this when you work on the compiler
+itself; the test tools live in `tools/`.
 
 ## Check the setup
 
-From the checkout:
-
 ```sh
-python3 AIL_CURRENT/ail_chatgpt.py doctor
+ail doctor            # report only
+ail doctor --check    # also compiles and runs a small program
 ```
 
-It prints JSON. On the machine above:
-
-```text
-{
-  "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
-  "platform": "Linux-6.6.87.2-microsoft-standard-WSL2-x86_64-with-glibc2.39",
-  "python_supported": true,
-  "c_compiler": "/usr/bin/cc",
-  "c_compiler_configured": "/usr/bin/cc",
-  "c_compiler_available": true,
-  "source_root": "/home/bluec/pub/wt-docs/AIL_CURRENT",
-  "external_model_required_for_selftest": false
-}
-```
-
-`python_supported` and `c_compiler_available` must both be `true`. To also compile and run a
-small program, add `--check`; a working setup ends with:
-
-```text
-  "build_check": {
-    "status": "passed",
-    "phase": "run",
-    "message": "Representative SDK compile/runtime check passed"
-  }
-}
-```
-
-and exit status 0.
-
-## A first compile
-
-The compiler can be run from any directory. To keep commands short, define a shell function
-(bash or zsh; adjust the path if you cloned elsewhere):
-
-```sh
-ailc() { python3 ~/ail-ci/AIL_CURRENT/ail_chatgpt.py "$@"; }
-```
-
-Make a work directory and a program:
-
-```sh
-mkdir -p ~/ail-tutorial && cd ~/ail-tutorial
-echo 'print("Hello, AIL!")' > hello.py
-```
-
-Compile and run it:
-
-```text
-$ ailc compile hello.py -o hello
-{"output": "/home/bluec/ail-tutorial/hello", "bytes": 16192, "sha256": "bd9bd02b429a6b681aec9344bdc4a482ee3b369680f710f7601f688b7c460b49"}
-$ ./hello
-Hello, AIL!
-```
-
-On success `compile` prints one JSON line (output path, size in bytes, SHA-256); your path and
-hash will differ. Continue with [the tutorial](TUTORIAL.md).
+`doctor` prints JSON. `python_supported` and `c_compiler_available` must both be `true`, and
+with `--check` a working setup ends with `"build_check": {"status": "passed", ...}` and exit
+status 0. `ail cache stats|path|clear` manages the per-user build cache (`$AIL_CACHE`, else the
+platform cache directory).
 
 ## Troubleshooting
 
-- **`"c_compiler_available": false`** in `doctor`: no C compiler was found. Install `gcc`
-  (Linux, WSL, MinGW) or the Xcode Command Line Tools (macOS), or set `PIPE_CC` to a compiler.
-- **`"python_supported": false`**, or an error saying Python 3.10 or newer is required: run the
-  commands with a newer `python3`.
-- **`ail_chatgpt.py: error: output already exists`** (exit 2): `compile` never overwrites the
-  `-o` file. Delete it or choose another name.
+- **`The virtual environment was not created successfully ... ensurepip is not available`**
+  (Debian/Ubuntu): `sudo apt install python3-venv`. For pip itself: `sudo apt install python3-pip`.
+  `error: externally-managed-environment` means pip refuses to touch the system Python: use a
+  virtual environment as above (or `pipx install ./ail-ci`).
+- **`ail: no C compiler found`**, or `"c_compiler_available": false` in `doctor`: install `gcc`
+  (`sudo apt install gcc`, `sudo dnf install gcc`, MinGW), the Xcode Command Line Tools on macOS,
+  or `pip install "ail-lang[zig]"`; or set `PIPE_CC=/path/to/cc`. `PIPE_CC` must resolve on `PATH`.
+- **`ail: command not found`** after installing: the virtual environment's `bin` directory
+  (`Scripts` on Windows) is not on `PATH`; call it by full path or activate the environment.
+- **`"python_supported": false`**, or an error saying Python 3.10 or newer is required: use a
+  newer `python3`.
+- **`error: output already exists`** (exit 2): `ail build` never overwrites the `-o` file. Delete
+  it or choose another name.
 - **`not in the subset: ...`** (exit 3): the program uses something AIL does not build. The
   message names it and usually gives `file:line:col` and a `write instead:` line. See
-  [the tutorial](TUTORIAL.md#3-a-refusal).
+  [the tutorial](tutorial.md#a-refusal).
 - **`import of 'numpy' is not available`** (exit 2): only the standard library modules AIL
   implements, and your own modules, can be imported. Third-party packages cannot.
 - **`note: ... built on the general path (about 20x slower)`**: not an error. The program was
   built and behaves like CPython, but on the slower path. Add `--strict` to see why and how to
-  fix it.
-- **`check` says `no def found`** for a script with no function: `check` needs at least one
-  `def`. `compile` builds such a script normally.
-- **`hash mismatch: NAME`** from the test tools: a file pinned in `AIL_CURRENT/manifest.d/`
-  changed. Run `python3 tools/update_manifest.py`, then `python3 tools/update_manifest.py --check`.
+  fix it ([tutorial](tutorial.md#3-the-general-path-the-note-and---strict)).
+- **`build cache disabled (owned by another user ...)`**: the cache directory belongs to someone
+  else; set `AIL_CACHE` to a directory you own. Builds still work without the cache.
+- **`hash mismatch: NAME`** from the test tools (checkout only): a file pinned in
+  `AIL_CURRENT/manifest.d/` changed. Run `python3 tools/update_manifest.py`, then
+  `python3 tools/update_manifest.py --check`.
+- **pip says `Directory ... is not installable`**: you are in a directory without
+  `pyproject.toml`; install from the repository root (`pip install ./ail-ci`).
