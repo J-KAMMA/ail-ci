@@ -13,6 +13,30 @@ or any constant beyond int64, at a call of a stub declared in the same file is n
 and `write instead:` (it used to stop at run time, or, as in `-2**63 - 1`, wrap). bool and float arguments to an int
 parameter were already refused by name; pinned. Behaviour change: a program that passed `-1` as "all ones" to a `size_t`
 parameter now raises `OverflowError`, as CPython always did. Test: `test_ail_ffi_f3a.py`.
+## 2026-10-29 -- fz201 review fix: register the regression module in the suite
+
+The review found `test_ail_fz201` was not listed in `AIL_CURRENT/ail_check.py` `MODULES`, so
+`ci_shards`/`ail_check`/default `par_check` never ran it.  Added `'test_ail_fz201'` to `MODULES`
+and refreshed `MANIFEST.json` with `tools/update_manifest.py`; `--check` passes.
+
+## 2026-10-29 -- fz201: an int power beyond int64 was hidden by a later benign proof failure
+
+The daily fuzzer (seed 2075507942) found `assert v10 ** 3 == v10` with `v10 = 850360125720`:
+CPython raises AssertionError and the program prints `-60` and exits 0, while the IR build computed
+the power in int64 and stopped with `integer overflow` (exit 1).  The local proof already marked the
+power as possible beyond int64, but `bigcap._lp_reason` returned the FIRST failure it met; a later
+`abs(1.5)` only says the value's kind is unproven (a float abs can never need a big int) and hid the
+power.  `_lp_reason` now takes `prefer_int`, and the IR driver asks for it, so the program takes the
+exact general path (as it already did without the masking line).  The power stays exact through a
+local, an alias, a function-local value, an argument, a list item, an attribute, a dict value and a
+call result; a negative base, a negative exponent, a float exponent, an in-range power and the safe
+bases 0/1/-1 match CPython on both builds.
+
+Probes in `/tmp/probes` via `cmp.sh`: `fz201`, `minD`, `fz201_local`, `fz201_function_local`,
+`fz201_alias`, `fz201_argument`, `fz201_list_item`, `fz201_attribute`, `fz201_dict_value`,
+`fz201_argument_dict`, `fz201_call_result`, `fz201_negative`, `fz201_neg_exp_odd`,
+`fz201_float_exp`, `fz201_exp_neg`, `fz201_in_range`, `fz201_safe_base` match CPython on both
+builds.  Added `test_ail_fz201.py`.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
@@ -186,7 +210,98 @@ assignment and instance controls).  Final-state tests: test_ail_pre409,
 test_ail_pre419, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
 (5 modules, 0 failed).  `tools/update_manifest.py` was run and `--check` passes;
 `tools/ci_shards.py --update` added the module and `--check` exits 0.
+## 2026-10-29 -- pre424 follow-up: exact integers retire the routed-power refusal (job-pre424-10292334)
 
+On today's integ (`d68453f`) `test_ail_pre424` failed because integers are now exact bigints
+(ail-ci#198): the 14 programs the module expected to be refused for an out-of-int64 routed power
+compile and print CPython's exact integer instead, and the exact-int integration no longer carries
+`_check_int64_routed_power` at all.  The module now compares those routed/dead-mutation programs
+with CPython on both builds (exact outputs, including `2**100`, negative bases and exponents,
+bools and the safe 0/1/-1 bases); reachable-mutation, shadow and in-range programs still match, and
+the separate mixed star/keyword call is still refused by name (`a *argument in a call`).  Removed
+the obsolete 468-line routed-power pass from this branch so merging it cannot reintroduce an int64
+refusal that exact integers no longer need.
+
+Probes in `/tmp/probes/pre424new` on both builds via `cmp.sh`, on today's integ with these changes:
+p01 routes (tuple/list/alias/list item/class attribute/dict value/wrapper), p02 unreachable
+mutations (empty `for`, `if False`, dead `else`, after `return`), p03 boundaries (`2**62`..`2**64`,
+`-(2**63)`, `10**100`, negative bases/exponents, `0**0`, `1**1000000`, `(-1)**1000001`, `pow`), p04
+reachable mutations before the call, p05 argument/list-item/attribute/dict-value scalar routes and
+p06 module scalar/tuple/list shadows all match CPython.  Final-state tests on that composition:
+test_ail_pre424, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 454 s,
+0 failed; all three pre424 tests ran there).  On this int64-only branch the same four modules pass in
+317 s with the exact-output test skipped (the branch cannot print `2**100`); the other two pre424
+tests still run.  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-28 -- pre424: a routed power survives an unreachable container mutation (job-pre424-10281737)
+
+The pre415 review recorded as pre-existing, on both builds, the dead-mutation probes `p07_mut_in_empty_loop`, `p08_mut_in_false_if` and `p18_mut_in_dead_else`, where a constant power routed through a call stopped with `integer overflow` although the counter-example mutation could never run; `p03_class_mut` was already the named class-attribute-store refusal and `p12_mut_after_call` remains the pre-existing run-time trap.  The routed-power check used every `Name` use, including stores in unreachable code, as evidence that a list/dict might change, so it dropped the constant argument.  It now marks unreachable statements first and ignores dead uses when screening module and local containers, so the exact out-of-int64 result is refused by name (`int64 constant expression out of range ... through a call`) for an empty `for`, a literal-false `if`, the dead `else` of `if True` and statements after `return`.  The same pass binds starred call arguments (literal tuple/list, module/local name, alias, list item, class attribute, dict value, wrapper argument and mixed star/keyword), and a function-local shadow of a module constant no longer falls back to the stale module value.  Reachable mutation before the call (item, slice, alias, helper call, module store), in-range and int64-boundary powers, float/bool/negative exponents and safe bases 0/1/-1 still match CPython; a mutation after the call keeps the pre-existing trap.
+
+Probes in `/tmp/probes/pre424` on both builds via `cmp.sh`: `q01`-`q05` (module/local dead loop, dead if, dead else, after return) are refused by name; `q14` and `q15`/`q16` controls are the existing routed-power and `**kwargs`/class-store named refusals; `q06`-`q13` and `q17` (reachable mutations before the call, three local shadows, in-range routes, unrelated program) match CPython.  Added `AIL_CURRENT/test_ail_pre424.py` (2 tests, 15 refused programs and 9 matching programs, both builds) and registered it in `ail_check.MODULES` and `tools/ci_shards.json`.
+
+## 2026-10-29 -- pre428 suite fix: class-name multiplication error travels with the dunder guard (job-pre428-10292000)
+
+On today's integration branch the multiplication type error exists in two runtime helpers: the
+hot fallback still had it, and a new cold `ail__mul_slow` helper (used by the big-int/unified
+build) had a copy of the same line.  Applying only the old cruntime hunk changed the hot copy
+and left the slow one naming the tag (`'exception'`), and the follow-up's dunder anchor then
+found no insertion point in the big-int build.  The class-name formatting is now part of the
+`dunderrt.py` edit that also inserts the `__mul__`/`__rmul__` guard, so whichever helper a build
+keeps gets both the guard and the object-to-name `%.100s` buffers; the cruntime line is back to
+its original text.  This applies unchanged to both the branch and the integration runtime.
+
+Probes in `/tmp/probes` on both builds through `cmp.sh`, on this branch and with only this change
+applied onto `origin/integ`: `p428_classes` (exception and ordinary instances, both orders,
+subclasses, mixed int/float/bool/None/str/list/dict), `p428_routes` (alias, argument, list item,
+attribute, dict value, return) and `p428_controls` (99/100/101/150-character class names,
+`__mul__`/`__rmul__`, in-range arithmetic) all match CPython.  Final-state tests on the branch:
+test_ail_pre428, test_ail_obj_refs, test_ail_safetynet, test_ail_unified,
+test_ail_virtual_dispatch; the same five pass on `origin/integ` plus this change.
+`tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-29 -- pre428 follow-up: make the dunderrt multiplication anchor independent of the error buffers (job-pre428-10291723)
+
+The review of the pre428 change reported that editing the general runtime's
+`char na[101], nb[101], buf[256];` declaration would leave `dunderrt.py` unable to find the
+insertion point for `__mul__`/`__rmul__` dispatch.  On this tree the anchor already matched the
+current declaration, but it was still tied to that exact line, so the same break would return
+on the next buffer edit.  The anchor is now the stable error-formatting line
+(`snprintf(buf, sizeof buf, "unsupported operand type(s) for *: '%s' and '%s'", na, nb);`), so
+the operand-name change and the dunder patch no longer depend on the declaration text; the
+guard is still inserted before the error is raised.  No behaviour changes: the generated
+message and the `__mul__`/`__rmul__` route are unchanged.
+
+Probes in `/tmp/probes/pre428fix` on both builds via `cmp.sh`: `p1_dunder` (mul/rmul and
+add/sub/floordiv/mod/truediv/pow dunders), `p2_err` (exception operands both orders and same
+class), `p3_routes` (argument, list item, dict value, attribute, return and alias),
+`p4_long` (99/100/101/150-character class names) all match CPython.  Final-state tests:
+test_ail_pre428, test_ail_unified, test_ail_fuzz20, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-28 -- pre428: multiplication names exception operands by their class (job-pre428-10281850)
+
+The pre416 review recorded as pre-existing on both builds that `E() * F()` printed
+`unsupported operand type(s) for *: 'exception' and 'exception'`, where CPython 3.12 names the
+classes (`'E' and 'F'`).  The general runtime's multiplication error used `ail_type_name` on the
+tags instead of the object-to-name helper, so class names (including ordinary instances) were
+lost.  It now formats each operand through `ail__tname_c` into its own 101-byte buffer with
+CPython's `%.100s` cap and a 256-byte message (calling the helper twice into one `snprintf`
+would alias its shared buffer).  The `dunderrt.py` anchor that inserts the `__mul__`/`__rmul__`
+dispatch before this error was updated to the new first line.
+
+Probes in `/tmp/probes/pre428` on both builds via `cmp.sh`: `p1_direct` (E/F, both orders,
+same class, subclass), `p2_routes` (alias, argument, list item, dict value, attribute, return),
+`p3_mixed` (int/float/bool/None/set/dict/str/list/tuple/bytes in both orders, including the
+already-matching `can't multiply sequence` path), `p4_long_99/100/101/150/300` (name cap),
+`p5_instances` (ordinary classes and subclass) and `p6_controls` (in-range operations,
+`__mul__`/`__rmul__`, caught error) all match CPython.  The baseline matrix
+`/tmp/probes/pre428_baseline/p0_pre_existing.py` now matches for `*`; its `//`, `%`, `/`, `**`
+and comparison lines are the review's remaining pre-existing items and still differ.
+
+Added `AIL_CURRENT/test_ail_pre428.py` (7 tests, both builds) and registered it in
+`ail_check.MODULES` and `tools/ci_shards.json`.  `tools/update_manifest.py` and `--check` pass;
+`tools/ci_shards.py --check` passes.  Final-state tests: test_ail_pre428, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3, plus test_ail_left1 (multiplication errors).
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
 The pre402 review recorded, as pre-existing on both builds, the module-level `d = {"k": 1e300};
