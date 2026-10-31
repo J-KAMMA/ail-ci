@@ -15,7 +15,7 @@ Each layout is a set of files written to a temporary directory; the program buil
 """
 import unittest
 
-from test_ail_modules import ModulesBase
+from test_ail_modules import ModulesBase, compile_program, write
 
 
 
@@ -540,18 +540,19 @@ class FunctionLevelRefusals(ModulesBase):
     def refuse(self, name, *needles):
         return self.refused(LAYOUTS[name], *needles)
 
+    # MODSYS: the four layouts below were refused (a module with an effect runs when the function does, and a
+    # function that its own module calls while it starts); the module now starts when the import statement runs
     def test_module_with_an_effect_at_import_time(self):
-        # CPython prints "hello from lib" when a() first runs, after "start"; the merged program cannot
-        err = self.refuse("l2_impure", "main.py:2:5", "function-level `import lib`", "lib.py:1")
-        self.assertNotIn("Traceback", err)
+        # CPython prints "hello from lib" when a() first runs, after "start"
+        self.assertEqual(self.same_as_cpython(LAYOUTS["l2_impure"], irs=("1",)), "start\nhello from lib\n1\n")
 
     def test_function_called_while_its_module_starts(self):
-        self.refuse("l17_init_call", "a.py:5:10", "'f' is used while a is still starting")
-        self.refuse("l20_via_helper", "a.py:8:10", "'g' is used while a is still starting")
-        self.refuse("l19_init_class_call", "a.py:6:7", "'Base' is used while a is still starting")
+        for name in ("l17_init_call", "l20_via_helper", "l19_init_class_call"):
+            with self.subTest(name):
+                self.same_as_cpython(LAYOUTS[name], irs=("1",))
 
     def test_effect_in_a_module_the_imported_module_imports(self):
-        self.refuse("l13_trans", "main.py:2:5", "function-level `import x`", "y.py:1")
+        self.assertEqual(self.same_as_cpython(LAYOUTS["l13_trans"], irs=("1",)), "y runs\n1\n")
 
     def test_from_import_of_a_variable_that_changes(self):
         self.refuse("l3_mutable", "main.py:4:5", "`from st import n` inside a function", "st.n is a variable")
@@ -560,7 +561,8 @@ class FunctionLevelRefusals(ModulesBase):
         self.refuse("l4_class", "main.py:2:5", "below the top level", "inside a class body")
 
     def test_import_in_a_try_block(self):
-        self.refuse("l5_try", "main.py:3:9", "below the top level", "try block")
+        # MODSYS: the module is found, so the handler can never see the import
+        self.assertEqual(self.same_as_cpython(LAYOUTS["l5_try"], irs=("1",)), "1\n")
 
     def test_import_binding_a_builtin_name(self):
         self.refuse("l6_builtin", "main.py:2:5", "builtin name 'max'")
@@ -577,38 +579,48 @@ class FunctionLevelRefusals(ModulesBase):
 
     # a hoisted module that reads another module's state, or runs a decorator or a class hook, when it starts
     # (CPython: when the function first runs; probes 1-3 of the review printed 1, 10 and [] before)
+    # MODSYS: a module that reads other modules' state when it starts now starts when the function runs, so it reads
+    # the state CPython reads; only a definition that needs such a value when it is defined is refused (the line)
     def test_module_attribute_read_at_import_time(self):
-        self.refuse("l21_reads_module_attr", "main.py:3:5", "function-level `import lazy`", "lazy.py:2")
-        self.refuse("l26_pkg_attr_chain", "main.py:3:5", "function-level `import lazy`", "lazy.py:3")
+        self.assertEqual(self.same_as_cpython(LAYOUTS["l21_reads_module_attr"], irs=("1",)), "7\n")
+        self.refuse("l26_pkg_attr_chain", "main.py:3:5", "function-level `import lazy`", "(line 3)")
 
     def test_from_imported_variable_read_at_import_time(self):
-        self.refuse("l22_reads_from_import", "main.py:3:5", "function-level `import lazy`", "lazy.py:1")
+        self.assertEqual(self.same_as_cpython(LAYOUTS["l22_reads_from_import"], irs=("1",)), "30\n")
 
     def test_default_argument_reading_state(self):
-        self.refuse("l25_default_reads_state", "main.py:3:5", "lazy.py:2")
+        self.refuse("l25_default_reads_state", "main.py:3:5", "(line 2)")
 
     def test_decorator_with_an_effect(self):
-        self.refuse("l23_decorator_effect", "main.py:3:5", "function-level `import lazy`", "lazy.py:2")
-        self.refuse("l28_attr_decorator", "main.py:3:5", "lazy.py:2")
-        self.refuse("l29_shadowed_dataclass", "main.py:3:5", "lazy.py:2")
+        self.refuse("l23_decorator_effect", "main.py:3:5", "function-level `import lazy`", "(line 2)")
+        self.refuse("l28_attr_decorator", "main.py:3:5", "(line 2)")
+        self.refuse("l29_shadowed_dataclass", "main.py:3:5", "(line 2)")
 
     def test_class_hook_run_by_a_base(self):
-        self.refuse("l24_init_subclass", "main.py:3:5", "lazy.py:3")
+        self.refuse("l24_init_subclass", "main.py:3:5", "(line 3)")
+
 
 class RaisingAndStaleModuleBodies(ModulesBase):
-    """A module spliced in at its function-level import runs at the end of the importing module; CPython
-    runs it when the function does. Bodies that can raise, and `from m import v` of a changing v, are refused."""
+    """MODSYS: a module whose body can raise, or copies a changing `from m import v`, starts when the function
+    that imports it runs (CPython), not when the importing module ends."""
 
-    def test_raising_expressions_are_refused_by_file_and_line(self):
-        for name, line in (("l33_div_zero", 2), ("l34_index_error", 2), ("l35_name_error", 1), ("l36_type_error", 1),
-                           ("l37_int_bad", 1), ("l38_unhashable_key", 2), ("l39_big_pow", 1),
-                           ("l40_bad_comprehension", 1), ("l46_key_error", 2)):
+    def test_raising_expressions_start_when_the_function_runs(self):
+        # none of these programs calls the function, so CPython never runs the bad module
+        for name in ("l33_div_zero", "l34_index_error", "l36_type_error", "l37_int_bad", "l38_unhashable_key",
+                     "l39_big_pow", "l40_bad_comprehension", "l46_key_error"):
             with self.subTest(name):
-                self.refused(LAYOUTS[name], "main.py:2:5", "bad.py:%d" % line)
+                self.assertEqual(self.same_as_cpython(LAYOUTS[name], irs=("1",)), "ok\n")
 
-    def test_from_import_of_a_changing_variable_is_refused(self):
-        self.refused(LAYOUTS["l30_from_var_changes"], "main.py:6:5", "m.py:1", "from cfg import level")
-        self.refused(LAYOUTS["l31_from_var_transitive"], "main.py:3:5", "n.py:1", "from cfg import level")
+    def test_name_error_module_is_left_to_the_front_end(self):
+        # the module system now builds it; the front end refuses the undefined name by name
+        write(self.dir, LAYOUTS["l35_name_error"])
+        built, _ = compile_program(self.dir)
+        self.assertEqual(built.returncode, 3, built.stderr)
+        self.assertIn("undefined_name", built.stderr)
+
+    def test_from_import_of_a_changing_variable_reads_it_when_the_function_runs(self):
+        self.assertEqual(self.same_as_cpython(LAYOUTS["l30_from_var_changes"], irs=("1",)), "4\n")
+        self.assertEqual(self.same_as_cpython(LAYOUTS["l31_from_var_transitive"], irs=("1",)), "7\n")
 
     def test_from_import_of_an_unchanged_variable_still_builds(self):
         self.assertEqual(self.same_as_cpython(LAYOUTS["l32_from_const_ok"], irs=("1",)), "1\n")
