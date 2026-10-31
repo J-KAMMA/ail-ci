@@ -1308,7 +1308,7 @@ def _scope_constant_map(body, root, base, stores, bound, parameters, declared, p
 
 class _Int64CallChecker(ast.NodeVisitor):
     def __init__(self, known, passthrough, int_params, int_shadowed, attributes, program_bound,
-                 argument_containers=None):
+                 argument_containers=None, int_defaults=None):
         self.known = known
         self.passthrough = passthrough
         self.int_params = int_params
@@ -1316,6 +1316,7 @@ class _Int64CallChecker(ast.NodeVisitor):
         self.attributes = attributes
         self.program_bound = program_bound
         self.argument_containers = argument_containers or {}
+        self.int_defaults = int_defaults or {}
         self.shadow = []
         self.value_scopes = [known]
 
@@ -1355,15 +1356,18 @@ class _Int64CallChecker(ast.NodeVisitor):
             self._check_conversion(node, self._value(node.args[0]))
         if (isinstance(node.func, ast.Name) and node.func.id in self.int_params
                 and self._global_name(node.func.id)):
+            defaults = self.int_defaults.get(node.func.id, {})
             for name, (index, paths) in self.int_params[node.func.id].items():
                 argument = _bound_argument(node, name, index)
-                if argument is not None:
+                if argument is None:
+                    value = defaults.get(name, _UNKNOWN)
+                else:
                     value = self._value(argument)
                     if (value is _UNKNOWN and isinstance(argument, ast.Name)
                             and self._global_name(argument.id)):
                         value = self.argument_containers.get(argument.id, _UNKNOWN)
-                    for path in paths:
-                        self._check_conversion(node, _constant_path_value(value, path))
+                for path in paths:
+                    self._check_conversion(node, _constant_path_value(value, path))
         self.generic_visit(node)
 
     def _visit_outer_arguments(self, args):
@@ -1681,6 +1685,39 @@ def _call_argument_containers(tree, module_counts, global_names, parents, known)
     return values
 
 
+def _function_default_constants(tree, module_envs, known, module_counts, passthrough,
+                                attributes):
+    """Constant parameter defaults, evaluated with the names visible at the ``def``.
+
+    A default is evaluated once, when the definition runs, so a module container mutated by a
+    later statement still contributes the value it held at the definition; the final module
+    map would have dropped it.  Only unique top-level functions are recorded, matching the
+    call-site int() wrapper check that consumes this map.
+    """
+    scopes = {id(statement): local for statement, local in zip(tree.body, module_envs)}
+    defaults = {}
+    for fn in tree.body:
+        if (not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef))
+                or fn.decorator_list or module_counts.get(fn.name) != 1):
+            continue
+        local = scopes.get(id(fn), known)
+        args = fn.args
+        positional = [arg.arg for arg in (*args.posonlyargs, *args.args)]
+        nodes = dict(zip(positional[len(positional) - len(args.defaults):], args.defaults))
+        for arg, node in zip(args.kwonlyargs, args.kw_defaults):
+            if node is not None:
+                nodes[arg.arg] = node
+        values = {}
+        for name, node in nodes.items():
+            value = _constant_value(node, lambda item: local.get(item, _UNKNOWN),
+                                    lambda unused: True, passthrough, attributes)
+            if value is not _UNKNOWN:
+                values[name] = value
+        if values:
+            defaults[fn.name] = values
+    return defaults
+
+
 def _fold_float_int_text(text):
     """Rewrite `float(<an exact int constant outside int64>)` to a float literal.
 
@@ -1782,14 +1819,24 @@ def _check_int64_literals(tree):
     passthrough = _passthrough_functions(tree, module_counts)
     int_params = _wrapper_int_params(tree, int_shadowed, module_counts, passthrough, attributes,
                                      known)
+    int_defaults = _function_default_constants(tree, module_envs, known, module_counts,
+                                               passthrough, attributes)
     argument_containers = _call_argument_containers(tree, module_counts, global_names, parents,
                                                    known)
     _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
-                      program_bound, argument_containers).visit(tree)
+                      program_bound, argument_containers, int_defaults).visit(tree)
     module_checker = _Int64CallChecker(known, passthrough, int_params, int_shadowed, attributes,
-                                       program_bound, argument_containers)
+                                       program_bound, argument_containers, int_defaults)
     safe_calls = {'len', 'print', 'str', 'repr', 'int'} - program_bound
     for statement, local in zip(tree.body, module_envs):
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            module_checker.value_scopes = [local]
+            for decorator in statement.decorator_list:
+                module_checker.visit(decorator)
+            module_checker._visit_outer_arguments(statement.args)
+            if statement.returns is not None:
+                module_checker.visit(statement.returns)
+            continue
         if not _scope_simple_statement(statement):
             continue
         if (_scope_has_int_call(statement)
@@ -2726,6 +2773,86 @@ def _pow_alias_names(tree):
     return _pow_aliases(tree.body, {'pow'}, stores, parameters)
 
 
+def _pow_body_refused_by_pre273(body):
+    """Whether pyfront's pre273 rule refuses this wrapper body at its definition.
+
+    The gate mirrors that rule exactly: only a ``base ** exponent`` BinOp whose base folds
+    with ``pyfront.int_constant`` is refused there.  A base that only the wider
+    ``_const_fold_int`` folds (a ``~`` operand, or a bool leaf) is left to the call-site
+    checks, because nothing else refuses it."""
+    if not (isinstance(body, ast.BinOp) and isinstance(body.op, ast.Pow)):
+        return False
+    from pyfront import int_constant
+    base = int_constant(body.left)
+    return (base is not None and abs(base) >= 2
+            and -(1 << 63) <= base < (1 << 63)
+            and not _pow_exponent_is_constant(body.right))
+
+
+def _pow_wrapper_functions(tree, module_counts):
+    """Module functions whose body is exactly one returned power.
+
+    ``def power(b, e): return b ** e`` and its builtin spelling ``return pow(b, e)`` are
+    followed at their call sites just like a direct ``**``/``pow()``.  A wrapper with more
+    than one statement, a decorator, a rebound name or extra parameters is not folded."""
+    wrappers = {}
+    for fn in tree.body:
+        if (not isinstance(fn, ast.FunctionDef) or fn.decorator_list
+                or module_counts.get(fn.name) != 1 or fn.args.vararg is not None
+                or fn.args.kwarg is not None or len(fn.body) != 1
+                or not isinstance(fn.body[0], ast.Return) or fn.body[0].value is None):
+            continue
+        value = fn.body[0].value
+        if isinstance(value, ast.BinOp) and isinstance(value.op, ast.Pow):
+            base_node, exponent_node = value.left, value.right
+        elif (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                and value.func.id == 'pow' and not value.keywords
+                and len(value.args) == 2
+                and not any(isinstance(argument, ast.Starred) for argument in value.args)):
+            base_node, exponent_node = value.args
+        else:
+            continue
+        wrappers[fn.name] = (fn, base_node, exponent_node,
+                             _pow_body_refused_by_pre273(value))
+    return wrappers
+
+
+def _pow_parameter_indices(function):
+    positional = [argument.arg for argument in (*function.args.posonlyargs, *function.args.args)]
+    mapped = {name: index for index, name in enumerate(positional)}
+    mapped.update((argument.arg, None) for argument in function.args.kwonlyargs)
+    return mapped
+
+
+def _pow_wrapper_scope(body, initial, initial_aliases, stores, parameters, shadowed):
+    """Map call names in one scope to a module power wrapper, including ``q = power`` aliases.
+
+    ``shadowed`` is true inside a function: a name the function rebinds or takes as a
+    parameter no longer names the module function, while a single alias assignment adds a
+    new name.  At module scope the wrapper definitions themselves are the initial names."""
+    names = dict(initial)
+    aliases = set(initial_aliases)
+    if shadowed:
+        names = {name: target for name, target in names.items()
+                 if name not in parameters and stores.get(name, 0) == 0}
+        aliases = {name for name in aliases if name in names}
+    changed = True
+    while changed:
+        changed = False
+        for statement in body:
+            if not (isinstance(statement, ast.Assign) and len(statement.targets) == 1
+                    and isinstance(statement.targets[0], ast.Name)
+                    and isinstance(statement.value, ast.Name)):
+                continue
+            target, source = statement.targets[0].id, statement.value.id
+            if (source in names and target not in names
+                    and stores.get(target) == 1 and target not in parameters):
+                names[target] = names[source]
+                aliases.add(target)
+                changed = True
+    return names, aliases
+
+
 def _walk_module_scope(tree):
     """Nodes at module scope, not descending into functions, classes or lambdas."""
     stack = list(tree.body)
@@ -2845,7 +2972,7 @@ def _pow_parameter_bindings(tree, known):
 
 
 def _check_int64_pow_constants(tree, known):
-    """Refuse ``pow(base, exp)`` on constant ints whose exact result leaves int64, by name.
+    """Refuse ``pow(base, exp)``/``base ** exp`` on constant ints outside int64, by name.
 
     AIL ints are fixed width, so ``pow(2, 63)`` compiled and then stopped with ``integer
     overflow`` where CPython keeps the bignum.  The two-argument form is folded here (the
@@ -2856,22 +2983,25 @@ def _check_int64_pow_constants(tree, known):
     the run-time power can leave the range (the pre273 rule for ``**``).  The symmetric
     shape -- an exponent of at least 63 (2**63 already leaves int64) with a base computed
     at run time -- is refused as well, so a constant base that reaches the call through a
-    parameter, list item, attribute or dict value cannot stop with ``integer overflow``."""
+    parameter, list item, attribute or dict value cannot stop with ``integer overflow``.
+
+    A module-level wrapper whose body is exactly ``return b ** e`` or ``return pow(b, e)``
+    is followed at its call sites, including through an alias variable (``q = power``) and
+    an alias chain.  A wrapper reached through an alias whose operands are not statically
+    known is refused by name: its result can leave int64, which the fixed-width run time
+    would only report as ``integer overflow``.  Direct wrapper calls with run-time operands
+    keep their previous behaviour."""
     names = _pow_alias_names(tree)
     if not names:
         return
     bindings = _pow_parameter_bindings(tree, known)
+    module_stores = _binding_counts(tree.body)
+    wrappers = _pow_wrapper_functions(tree, module_stores)
+    module_names, module_aliases = _pow_wrapper_scope(
+        tree.body, {name: name for name in wrappers}, set(), module_stores, set(), False)
 
-    def check(node, scope_known, scope_names, scope_values):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
-                and node.func.id in scope_names):
-            return
-        if len(node.args) != 2 or node.keywords or any(
-                isinstance(argument, ast.Starred) for argument in node.args):
-            return
-        base_node, exponent_node = node.args
-        base = _pow_static_int(base_node, scope_known)
-        exponent = _pow_static_int(exponent_node, scope_known)
+    def refuse(node, base, exponent, exponent_node, computed_rule=False, dynamic_alias=False,
+               base_node=None, scope_known=None, scope_values=None):
         if base is not None and exponent is not None:
             if exponent < 0:
                 return
@@ -2884,7 +3014,20 @@ def _check_int64_pow_constants(tree, known):
                 error.source_column = node.col_offset
                 raise error
             return
-        if (base is not None and abs(base) >= 2 and _INT64_MIN <= base <= _INT64_MAX
+        if dynamic_alias:
+            if base is not None and base in (-1, 0, 1):
+                return
+            error = ValueError(
+                'an aliased integer power wrapper called with operands not known at compile '
+                'time can leave the signed 64-bit range of an AIL int, so it is refused by '
+                'name at compile time; CPython computes it exactly with an unbounded int. '
+                'Call the wrapper by its own name for the run-time behaviour, or write the '
+                'operands as constants')
+            error.source_line = node.lineno
+            error.source_column = node.col_offset
+            raise error
+        if (computed_rule and base is not None and abs(base) >= 2
+                and _INT64_MIN <= base <= _INT64_MAX
                 and not _pow_exponent_is_constant(exponent_node)):
             error = ValueError(
                 'pow() with the integer constant base %d and an exponent computed at run time '
@@ -2895,7 +3038,7 @@ def _check_int64_pow_constants(tree, known):
             error.source_line = node.lineno
             error.source_column = node.col_offset
             raise error
-        if (exponent is not None and exponent >= 63
+        if (scope_values is not None and exponent is not None and exponent >= 63
                 and _pow_base_is_runtime_int(base_node, scope_known, scope_values)):
             error = ValueError(
                 'pow() with the integer constant exponent %d and a base computed at run time '
@@ -2907,6 +3050,44 @@ def _check_int64_pow_constants(tree, known):
             error.source_column = node.col_offset
             raise error
 
+    def check_wrapper(node, descriptor, scope_known, aliased):
+        function, base_node, exponent_node, body_refused = descriptor
+        if body_refused:
+            # The wrapper body is already refused by the pre273 rule at its definition;
+            # keep that diagnostic instead of the call-site one.
+            return
+        mapped = _pow_parameter_indices(function)
+        local = {name: value for name, value in scope_known.items() if name not in mapped}
+        for parameter, index in mapped.items():
+            argument = _bound_argument(node, parameter, index)
+            if argument is None:
+                continue
+            value = _pow_static_int(argument, scope_known)
+            if value is not None:
+                local[parameter] = value
+        base = _pow_static_int(base_node, local)
+        exponent = _pow_static_int(exponent_node, local)
+        refuse(node, base, exponent, exponent_node, dynamic_alias=aliased)
+
+    def check(node, scope_known, scope_names, wrapper_names, wrapper_aliases, scope_values):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)):
+            return
+        name = node.func.id
+        if name in scope_names:
+            if len(node.args) != 2 or node.keywords or any(
+                    isinstance(argument, ast.Starred) for argument in node.args):
+                return
+            base_node, exponent_node = node.args
+            base = _pow_static_int(base_node, scope_known)
+            exponent = _pow_static_int(exponent_node, scope_known)
+            refuse(node, base, exponent, exponent_node, computed_rule=True,
+                   base_node=base_node, scope_known=scope_known, scope_values=scope_values)
+        elif name in wrapper_names:
+            if len(node.args) > 2 or any(keyword.arg is None for keyword in node.keywords):
+                return
+            check_wrapper(node, wrappers[wrapper_names[name]], scope_known,
+                          name in wrapper_aliases)
+
     functions = [node for node in ast.walk(tree)
                  if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
     function_nodes = set()
@@ -2914,7 +3095,7 @@ def _check_int64_pow_constants(tree, known):
         function_nodes.update(id(node) for node in _walk_own_scope(function))
     for node in ast.walk(tree):
         if id(node) not in function_nodes:
-            check(node, known, names, {})
+            check(node, known, names, module_names, module_aliases, {})
     for function in functions:
         local = _function_local_int_constants(function, known)
         ints, values = bindings.get(id(function), ({}, {}))
@@ -2927,10 +3108,12 @@ def _check_int64_pow_constants(tree, known):
             parameters.add(function.args.vararg.arg)
         if function.args.kwarg is not None:
             parameters.add(function.args.kwarg.arg)
-        scope_names = _pow_aliases(function.body, names,
-                                   _function_scope_stores(function), parameters)
+        stores = _function_scope_stores(function)
+        scope_names = _pow_aliases(function.body, names, stores, parameters)
+        wrapper_names, wrapper_aliases = _pow_wrapper_scope(
+            function.body, module_names, module_aliases, stores, parameters, True)
         for node in _walk_own_scope(function):
-            check(node, local, scope_names, values)
+            check(node, local, scope_names, wrapper_names, wrapper_aliases, values)
 
 
 def _static_aug_pow_int(node, known, values, attributes, passthrough, global_name):
