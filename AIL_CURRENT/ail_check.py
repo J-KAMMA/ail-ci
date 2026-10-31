@@ -110,6 +110,7 @@ LISTED_MODULES = (
     'test_ail_fuzz94',
     'test_ail_fz2',
     'test_ail_fz201',
+    'test_ail_pre429',
     'test_ail_pre101',
     'test_ail_pre126',
     'test_ail_pre125',
@@ -205,6 +206,7 @@ LISTED_MODULES = (
     'test_ail_pre281',
     'test_ail_pre265',
     'test_ail_pre267',
+    'test_ail_repre20',
     'test_ail_pre270',
     'test_ail_pre271',
     'test_ail_pre272',
@@ -250,6 +252,9 @@ LISTED_MODULES = (
     'test_ail_rdiff5',
     'test_ail_pre424',
     'test_ail_pre428',
+    'test_ail_pre425',
+    'test_ail_pre433',
+    'test_ail_rd1',
     'test_ail_pre328',
     'test_ail_pre345',
     'test_ail_pre353',
@@ -335,6 +340,7 @@ LISTED_MODULES = (
     'test_ail_gen_speed', 'test_ail_bigcap_split', 'test_ail_optint_exact', 'test_ail_ctime', 'test_ail_bound_builtin',
     'test_ail_py_typed_gaps',
     'test_ail_pre435', 'test_ail_pre430',
+    'test_ail_refuzz95',
 )
 
 

@@ -1,11 +1,12 @@
 """pre36: a non-BMP constant in chr() is refused by name on the general path.
 
-The general (boxed) path stores str as 16-bit units, so ail_bi_chr used to die with
-"AIL internal error: chr() non-BMP code point requires 32-bit strings" at run time.
-CPython returns a one-character str.  A constant argument in U+10000..U+10FFFF is
-now refused while compiling the general path, by name, instead of reaching that
-runtime fatal.  The default (typed) build still produces CPython's character, and
-BMP boundaries, negative arguments and arguments above U+10FFFF are unchanged.
+The general (boxed) path stores str as 16-bit units, so a non-BMP code point cannot be
+represented.  A constant argument in U+10000..U+10FFFF is refused while compiling the
+general path, by name ("chr() of the non-BMP code point U+... in the 16-bit v2 runtime");
+a value only known at run time now stops with the named limit "chr_non_bmp" instead of
+the old "AIL internal error: chr() non-BMP code point requires 32-bit strings".
+The default (typed) build still produces CPython's character, and BMP boundaries,
+negative arguments and arguments above U+10FFFF are unchanged.
 """
 import os
 import subprocess
@@ -54,7 +55,7 @@ class Pre36Tests(unittest.TestCase):
                 output = built.stdout + built.stderr
                 self.assertNotEqual(built.returncode, 0, output)
                 self.assertFalse(exe.exists(), output)
-                self.assertIn('non-BMP code point U+%04X' % code, output)
+                self.assertIn('chr() of the non-BMP code point U+%04X' % code, output)
                 self.assertNotIn('Traceback', output)
                 self.assertNotIn('AIL internal error', output)
 
@@ -67,7 +68,7 @@ class Pre36Tests(unittest.TestCase):
                 output = built.stdout + built.stderr
                 self.assertNotEqual(built.returncode, 0, output)
                 self.assertFalse(exe.exists(), output)
-                self.assertIn('non-BMP code point U+%04X' % code, output)
+                self.assertIn('chr() of the non-BMP code point U+%04X' % code, output)
                 self.assertNotIn('AIL internal error', output)
 
     def test_bmp_chr_boundaries_still_match_cpython(self):
