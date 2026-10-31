@@ -1,3 +1,14 @@
+## 2026-10-30 -- ail_array T3b: int64, bool_ and the helpers of the torch layer
+
+Stage T3b of TORCH_COMPAT.md (design: PR #261): `int64` and `bool_` arrays, `ta.wrapping_neg/abs/floordiv/sum/dot` and `wrapping_segment_sum` (tensor int overflow wraps in the
+torch layer; the default `+ - * // %` and `ta.sum` keep raising `OverflowError`), `ta.eq/ne/lt/le/gt/ge`, `ta.logical_*`, `ta.where`, `ta.any/all`, `ta.take`/`ta.put`
+(PyTorch's `x[idx]` text), `ta.gather_strided`/`ta.scatter_strided`, `ta.segment_sum/min/max/argmin/argmax`, the flat f32/f64 `ta.mm` in the 16-lane, 1024-block order and
+`ta.promote_types`/`ta.promote_scalar` (TYPED_ARRAY.md 3.9). int64 to f32/f16 rounds the exact integer once. The reference is checked against PyTorch 2.15.0+cpu outputs
+committed in `array_t3b_data/torch_oracle.json` (written by `tools/gen_torch_oracle_t3b.py`; CI never imports torch) and against independent implementations; the typed-path
+lowering (f64, int32, int64, bool_; 5.8) builds the same bytes in the default build, with `AIL_UNIFIED_FORCE=1` and typed-only, including values beyond int64. The 64-bit
+rules are written without an intermediate beyond int64 (32-bit limbs for the product, split sums). `ta.mm` and f32 stay reference only until T3. Tests:
+`test_ail_array_t3b.py`, `array_t3b_cases/`.
+
 ## 2026-10-30 -- ail_array: f64 expressions are fused in every build
 
 `a * b + a`, `a / b`, `abs`, `minimum`/`maximum`/`clip` chains (1 to 256 operations), `a += tree` and `ta.sum(tree)` / `ta.dot(x, tree)` are one

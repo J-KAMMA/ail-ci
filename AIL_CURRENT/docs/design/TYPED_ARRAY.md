@@ -15,7 +15,7 @@ a CPython 3.12.3 snippet in WSL (no AIL program was compiled); **[read, not run]
 
 ## 0. Words
 
-- *dtype*: one of the five element types `f64`, `f32`, `f16`, `int8`, `int32` (D1). Nothing else.
+- *dtype*: one of the seven element types `f64`, `f32`, `f16`, `int8`, `int32` (D1) and `int64`, `bool_` (T3b, 3.9). Nothing else.
 - *r_T(x)*: round the real number `x` to dtype `T`, round-to-nearest, ties to even, with gradual underflow
   (subnormals kept) and overflow to `+-inf` (section 3.1).
 - *element-wise op*: an op whose output element `i` depends only on input elements `i` (no order question).
@@ -39,7 +39,7 @@ a CPython 3.12.3 snippet in WSL (no AIL program was compiled); **[read, not run]
 
 - numpy compatibility (names, broadcasting rules, dtype promotion, views). GPU.md Q5 asks whether a numpy subset is
   wanted; this module is deliberately smaller and is not that subset (decision TA6: a numpy subset may come later).
-- dtypes beyond D1: `bf16`, `uint8`, `int16`, `int64`, `bool`, complex. Refused by name (section 8).
+- dtypes beyond D1 and T3b: `bf16`, `uint8`, `int16`, complex. Refused by name (section 8).
 - Shapes with more than two dimensions (decision TA5).
 - Automatic differentiation, training, a model format.
 
@@ -80,13 +80,14 @@ W = ta.zeros((64, 128), ta.f32); out = ta.matmul(x2d, W)     # 2-D from stage T6
 
 | group | names | notes |
 | --- | --- | --- |
-| dtypes | `ta.f64 ta.f32 ta.f16 ta.int8 ta.int32` | objects with `.name`, `.itemsize` (8, 4, 2, 1, 4); `repr` is the name |
+| dtypes | `ta.f64 ta.f32 ta.f16 ta.int8 ta.int32 ta.int64 ta.bool_` | objects with `.name`, `.itemsize` (8, 4, 2, 1, 4, 8, 1); `repr` is the name |
 | construction | `ta.array(values, dtype)`, `ta.zeros(shape, dtype)`, `ta.full(shape, value, dtype)`, `ta.arange(n, dtype)` (int dtypes), `ta.frombytes(data, dtype, shape=None)`, `a.copy()` | `values`: a list/tuple/iterable of int/float/bool, or a list of equal-length lists for 2-D; every value goes through the store rule (3.4) |
 | size | `len(a)` (rows for 2-D), `a.shape` (tuple), `a.dtype` | arrays have a **fixed length**: no `append`/`extend`/`pop`/`insert` (section 8) |
 | indexing | `a[i]`, `a[i] = x`, `A[i, j]`, `A[i, j] = x`, negative indices | `a[i]` returns a Python `float` (the element's exact value) or `int`; `IndexError: array index out of range` (`array.array`'s text **[verified]**) |
 | slicing | `a[i:j:k]` (1-D), `A[i]` (a row), `A[i:j]` (rows) | **a copy**, like `list` and `array.array`; no views (section 6.1). `a[i:j] = b` needs the same dtype and length (`ValueError` otherwise) |
 | element-wise | `+ - * /` (float dtypes), `+ - * // %` (int dtypes), unary `-`, `abs(a)`, `+= -= *= /= //= %=`, `ta.sqrt exp log tanh` (float), `ta.minimum ta.maximum ta.clip` | operands: two arrays of the same dtype and shape, or an array and a Python int/float/bool (3.6); 2-D adds a row broadcast `A + row` (T6) |
-| int extras | `ta.wrapping_add/sub/mul`, `ta.saturating_add/sub` | the only way to get wrap or saturation (3.3) |
+| int extras | `ta.wrapping_add/sub/mul`, `ta.saturating_add/sub`; T3b adds `ta.wrapping_neg/abs/floordiv`, `ta.wrapping_sum/dot` (int64), `ta.wrapping_segment_sum` | the only way to get wrap or saturation (3.3, 3.9) |
+| T3b helpers | `ta.eq ne lt le gt ge`, `ta.logical_and/or/xor/not`, `ta.where`, `ta.any/all`, `ta.take`, `ta.put`, `ta.gather_strided`, `ta.scatter_strided`, `ta.segment_sum/min/max/argmin/argmax`, `ta.mm`, `ta.promote_types`, `ta.promote_scalar` | what the torch layer calls (3.9); all in the reference, lowered for f64, int32, int64, bool_ except `mm` and the promotion helpers (5.8) |
 | reductions | `ta.sum(a, acc=None)`, `ta.dot(a, b, acc=None)`, `ta.min`, `ta.max`, `ta.argmin`, `ta.argmax` | float results are Python floats, int results exact Python ints (3.5) |
 | matrix | `ta.matmul(A, B, acc=None)`, `A @ B`, `ta.transpose(A)` (copy), `a.reshape(shape)` (copy) | T6; section 3.7 |
 | conversion | `a.tolist()`, `a.tobytes()`, `list(a)`, iteration, `a.astype(dtype, rounding='trunc', overflow='raise')` | `tobytes` is little-endian raw storage, NaN payloads included (3.1) |
@@ -232,6 +233,96 @@ and not numpy's pairwise sum; users who want Python's result call the builtin `s
 
 `ta.dot(row, col)` (blocked order) and a `1 x K` by `K x 1` `matmul` (sequential) are therefore different functions
 for floats (decision TA4: kept separate for now).
+
+### 3.9 int64, bool_ and the helpers of the torch layer (T3b, built 2026-10-30)
+
+Stage T3b of TORCH_COMPAT.md 8.1: what `ail_torch` needs below the tensor layer, with every result defined by the reference and
+every PyTorch behaviour the owner pinned (Level A: equal to this module; E/O/L/R classes against the pinned CPU oracle) checked
+against committed oracle outputs (`array_t3b_data/torch_oracle.json`, written by `tools/gen_torch_oracle_t3b.py` with torch 2.15.0+cpu,
+`ATEN_CPU_CAPABILITY=default`, one thread; CI never imports torch).
+
+**int64.** Everything of 3.3 with the 64-bit range: `+ - * // %`, unary `-` and `abs` raise `OverflowError` at the first index whose
+exact result is outside int64 (`int64 add overflow at index 3`; `min // -1` is `int64 floordiv overflow`), `ZeroDivisionError` for a
+zero divisor, in-place forms update the prefix. This is TA1 and stays the rule for direct `ta.*` use. PyTorch wraps (`tensor([2**63 -
+1]) + 1` is `-2**63`, `min // -1` is `min`, `abs(min)` is `min`, `sum` and `dot` wrap, `index_put_(accumulate=True)` wraps) **[verified
+2026-10-30, oracle file]**, and the owner decided (2026-10-30) that tensor int overflow wraps while `ta.*` keeps raising, so the
+torch layer calls the named forms: `ta.wrapping_add/sub/mul/neg/abs/floordiv` (two's complement; `floordiv` differs from `//` only for
+`min // -1`, a zero divisor still raises), `ta.wrapping_sum(a)` and `ta.wrapping_dot(a, b)` (int64 only, modulo 2^64; int8/int32 sums
+are exact and cannot leave int64), `ta.wrapping_segment_sum`, and `ta.put(..., accumulate=True, overflow='wrap')`. `ta.sum(a)` of
+int64 is the exact Python int and raises `OverflowError: int64 sum overflow` when it leaves int64 (the exact total, so the order
+does not matter); `ta.dot` of int64 is the exact sum of exact products with `int64 dot overflow` (reference only: the lowering
+refuses it, an exact int64 dot needs 128-bit sums; use `wrapping_dot`). The store rule is the one of int32: `int64 value out of
+range: 9223372036854775808`. int64 to float rounds the exact integer **once** (`astype(ta.f32)` of `2**62 + 2**38 + 1` is
+`2**62 + 2**39`; going through binary64 first would give `2**62`; PyTorch rounds once **[verified]**); float to int64 raises for
+NaN, infinity and values outside `[-2**63, 2**63)` (`int64 cast overflow at index 1`), or saturates, as for int32. PyTorch's own
+result for those inputs is the x86 "indefinite" `-2**63` **[verified]**; the torch layer decides what it does with them (a PyTorch
+difference to list in P1, not in this module).
+
+**bool_.** One byte, 0 or 1. The store rule takes a `bool` or an `int` (nonzero is `True`) and rejects a float
+(`'float' object cannot be interpreted as an integer`); `a[i]` is a Python `bool`; `repr` is `array([True, False], bool_)`;
+`frombytes` turns every nonzero byte into 1 so a bool_ array never holds another bit pattern. There is no arithmetic on bool_
+arrays: `+ - * // %`, unary `-`, `abs`, `wrapping_*`, `dot` and `sqrt` raise `TypeError` naming `a.astype(ta.int64)` and the logical
+functions. (PyTorch gives `bool + bool` = or, `bool * bool` = and, raises `NotImplementedError` for `bool - bool` and `-bool`, and
+promotes `bool + 1` to int64 and `bool + 1.5` to float32 **[verified]**: the torch layer applies `promote_types` first and calls
+`logical_or`/`logical_and` for the two bool cases.) Reductions: `ta.sum` is the exact count (an int, as PyTorch's int64),
+`min/max/argmin/argmax` work (`False < True`), `minimum/maximum` are and/or. `ta.any(a)` / `ta.all(a)` test `!= 0` for every dtype (NaN is
+true, `-0.0` false; the empty array gives `False` / `True`). `astype(ta.bool_)` is `!= 0` from every dtype; from bool_ to int and float it is
+0 or 1; `rounding=` and `overflow=` do not apply.
+
+**Comparisons and logic.** `ta.eq ne lt le gt ge(a, b)` give a bool_ array of the shape of `a`; `b` is an array of the same dtype or a
+Python number, which is **stored into a's dtype first** (3.6), so an f32 array compared with `0.1` compares with `r_f32(0.1)` and
+`16777217.0` becomes `16777216.0`, exactly what PyTorch does **[verified]**. IEEE: NaN is unequal to everything (`ne` is true), `-0.0
+== 0.0`. A float scalar against an int array and mixed dtypes raise the usual `TypeError`. `ta.logical_and/or/xor(a, b)` need bool_ arrays (or a
+bool scalar), `ta.logical_not(a)` too. `ta.where(mask, a, b)` takes a bool_ mask and arrays of one dtype, or one Python number stored to the other's dtype;
+a NaN scalar is canonical.
+
+**Moves.** All of them copy bytes or element values, so every bit is kept and the result is exact by construction.
+- `ta.take(a, idx)`: `idx` is an int array (int32 or int64), negative counts from the end; an index outside `[-n, n)` raises
+  `IndexError: index 5 is out of bounds for dimension 0 with size 3`, the text PyTorch gives for `x[idx]` **[verified]**.
+- `ta.put(a, idx, src, accumulate=False, overflow='raise')`: `a[idx[j]] = src[j]` in order (the last write to a position wins),
+  `src` an array of a's dtype and the length of `idx` or one number. The dtype and the length are checked first, then the writes
+  happen in order and a bad index raises (same text as `take`) with the elements before it already written, as `index_put_` leaves
+  them **[verified]**. `accumulate=True` adds: floats round per add, ints raise `OverflowError` or wrap (`overflow='wrap'`); duplicate
+  indices add in order. bool_ cannot accumulate.
+- `ta.gather_strided(a, offset, shape, strides)` returns a 1-D array of `prod(shape)` elements, element `(i0, i1, ...)` in C order being
+  `a[offset + i0*strides[0] + i1*strides[1] + ...]`. Strides count elements and may be zero (broadcast) or negative. `shape` is
+  a list or tuple of ints (empty: one element), `strides` the same length. Errors, in order: `ValueError: ail_array.gather_strided():
+  shape and strides differ in length (2 and 1)`, `... negative size -1 in shape`, then `IndexError: ail_array.gather_strided():
+  element 8 reads index 24, outside the array of 24 elements` for the first element (in C order) outside the array. This is
+  `torch.as_strided(...)` followed by a copy for every case PyTorch accepts **[verified on 12 cases]**.
+- `ta.scatter_strided(dst, offset, shape, strides, src)`: the same positions written from `src` (an array of dst's dtype with
+  `prod(shape)` elements, or one number); `ValueError: ail_array.scatter_strided(): src has 2 elements but the shape has 3`; every
+  position is checked before anything is written (`... element 2 writes index 24 ...`); a position named twice keeps the later element (the
+  torch layer detects overlap itself and raises PyTorch's text, TORCH_COMPAT 7.4).
+
+**Segmented reductions.** `ta.segment_sum/min/max/argmin/argmax(a, offsets)` reduce the segments `a[offsets[k]:offsets[k+1]]`;
+`offsets` is an int array that rises from `>= 0` to `<= len(a)` (`ValueError: ail_array.segment_sum(): offsets[2] = 4 is out of order
+or outside 0..10`; no offsets at all: `offsets needs at least one element`). The reduction along a tensor dimension is: gather with the dimension last,
+then one segment per row. Float sums use the order of 3.5 inside each segment and round to a's dtype (f16 accumulates in f32); an empty
+segment gives `+0.0` and the result equals `ta.sum(a[lo:hi])` bit for bit; the segment sum of the whole array equals `ta.sum(a)`. Int and bool_ sums are exact
+and come out as an **int64** array (PyTorch sums int8/int32/bool into int64) with `OverflowError: int64 segment_sum overflow at
+segment 3`; `ta.wrapping_segment_sum` wraps (PyTorch's behaviour). `min/max` follow 3.5 (NaN wins, `-0.0 < 0.0`) and raise `ValueError:
+ail_array.segment_max(): segment 1 is empty` (PyTorch has no max of an empty slice either); `argmin/argmax` return the in-segment index of the
+first extreme (the first NaN) as an int64 array. PyTorch differs only in the position of `-0.0`/`0.0` ties (`max([0.0, -0.0])` is `-0.` there,
+depends on the order), which the torch layer must not rely on.
+
+**Flat matrix product.** `ta.mm(a, b, m, k, n)` multiplies flat row-major f32 or f64 arrays (`m*k` and `k*n` elements) into a flat `m*n` array;
+element `(i, j)` is `ta.dot(a[i*k:(i+1)*k], b[j::n])` bit for bit, that is the order of 3.7 (16 lanes, blocks of 1024, `-0.0` start, 8-4-2-1,
+tree over blocks) for f32 with `r = r_f32`, and `K = 0` gives `+0.0`. It is the same rule the 2-D f64 `matmul` of stage T6
+defines, written on 1-D arrays because the torch layer keeps one flat storage per tensor and cuts strides itself (TORCH_COMPAT 7.1).
+Errors: `a has 3 elements, expected 4 (2 x 2)`, dtypes differ, `only f32 and f64 arrays are built, not int32`. Against PyTorch's CPU
+`sgemm` the result is class O: exactly equal when every partial sum is exact (the integer-valued test matrices) and within `2 * gamma_k * sum|a_ik b_kj|` otherwise **[verified on
+6 shapes, k up to 1025]**. When the 2-D `ta.matmul` of T6 reaches f32 it calls this order, so the two cannot differ.
+
+**Promotion (for the torch layer).** `ta.promote_types(a, b)` is `torch.promote_types` for the seven dtypes (bool < int < float, the wider
+one inside a category, any float beats any int: int64 with f16 is f16; the full 7 x 7 table is checked against the oracle), and
+`ta.promote_scalar(dtype, scalar, default_float=None)` the dtype of `tensor op python_scalar`: a bool scalar keeps the dtype, an int
+scalar turns bool into int64, a float scalar turns bool and ints into the default float (f32). The module itself still refuses mixed dtypes (3.6);
+these functions only tell the layer which `astype` to write.
+
+**What the module does not do.** `mm` for f16, int and 2-D arrays; N-d anything; the torch-side policy for float to int64 out of range;
+`bool` arithmetic. The lowering (5.8) covers f64, int32, int64 and bool_; f32, f16 and int8 wait for T3, so the f32 `mm` is reference only
+until then.
 
 ## 4. The reference implementation
 
@@ -402,6 +493,56 @@ that: loads widen, arithmetic is `double`, the store is `r_f32`. Lowering this l
 difference (one f32 rounding per op is not the same as binary64 then one rounding). The fast, f32-per-op form is the
 array expression `out = a * b + c`. The docs and the refusal hints point to it.
 
+### 5.8 int64, bool_ and the T3b helpers on the typed path (built 2026-10-30)
+
+Code: kinds `AL` (int64, `_AilTAL`, a list[int]) and `AO` (bool_, `_AilTAO`, a list[bool]) in `python/pkg-v12/ailarray.py`; the functions
+`_ail_tal_*`, `_ail_tao_*` and the families `_ail_ta{f,i,l,o}_{cmp,where,any,take,put,gstride,sstride,seg*}` in `prelude_ailarray.py`;
+tests `test_ail_array_t3b.py`, cases `array_t3b_cases/`. A program that uses only f64 and int32 gets the same text as before.
+
+How the 64-bit rules are written without ever leaving int64 (an intermediate beyond int64 would be a loud stop on the typed path, and a
+bigint on the general one): checked `+`/`-` test the sign and the headroom before adding (`y > 0 and x > HI - y`); `*` forms the low 64 bits from
+32-bit limbs (`_ail_tal_wmul`, every partial product below 2^63) and detects overflow with `r // y != x` after the two special cases `-1`
+(a product `r` that differs from `x * y` by a multiple of 2^64 can never satisfy `r // y == x` for `|y| >= 2`); the wrapping add and
+subtract use `(x - 2^63) + (y - 2^63)` for the overflowing sign; sums split every element into its high 32 bits (arithmetic shift) and its low 32 bits and add each
+in an int64 accumulator (exact for `n < 2^31`), then check the total as `q * 2^32 + r` (`q` in `[-2^31, 2^31)`), and the wrapping sum folds `q` modulo 2^32. float to int64 checks
+the range with float comparisons before `int()`. Every helper is compared with Python big ints on the boundary set and on random pairs
+(`PreludeHelpers`).
+
+Built: construction, indexing, slices, `len`, iteration, printing, `==`, `+ - * // %` and in-place forms with arrays and scalars, unary `-`/`abs`, all
+`wrapping_*`/`saturating_*`, `minimum/maximum/clip`, `sum`, `min/max/argmin/argmax`, `wrapping_sum/dot`, `astype` between f64, int32, int64 and
+bool_ (every rounding/overflow mode), the comparison, logic, `where`, `any/all`, `take`, `put` (with `accumulate`/`overflow`), `gather_strided`,
+`scatter_strided` and `segment_*` calls for the four dtypes. `shape` and `strides` must be tuple/list literals of ints or a `list[int]`; `offsets`
+and `idx` must be statically int32 or int64 arrays; `accumulate=` and `overflow=` literals. Refused by name: `ta.mm` (reference only until f32 exists, T3),
+`ta.dot` of int64 (use `wrapping_dot`), `ta.promote_types/promote_scalar` (dtypes are not values on the typed path), `accumulate=True` on bool_, an
+element-wise operator `<` etc. on arrays (use `ta.lt`). What stays a run-time error as in the reference: bool_ arithmetic, mixed dtypes, a float scalar against an int
+array, an empty `min`, offsets and indices out of range.
+
+Measured with `tools/icount.c` (instructions per repetition on 65,536 elements, user space, WSL, `-O2 -ffp-contract=off`, default build, typed path; the fill of
+the arrays subtracted by running the same program with zero repetitions). "C" is hand-written `-O2` with the same semantics (`__builtin_add_overflow` for the checked forms):
+
+| op, 65,536 int64 elements | AIL per element | C per element | AIL / C |
+| --- | --- | --- | --- |
+| `a + b` (checked) | 24.6 | 7.0 | 3.5 |
+| `a - b` (checked) | 24.6 | 7.0 | 3.5 |
+| `a * b` (checked, operands below 2^31) | 32.6 | 7.0 | 4.7 |
+| `ta.wrapping_add(a, b)` | 25.7 | 3.0 | 8.6 |
+| `ta.wrapping_mul(a, b)` (operands below 2^31) | 58.7 | 6.0 | 9.8 |
+| `ta.sum(a)` (exact, raises on overflow) | 27.7 | 8.0 | 3.5 |
+| `ta.wrapping_sum(a)` | 30.0 | 4.0 | 7.5 |
+| `ta.lt(a, b)` (a bool_ array) | 18.6 | 6.0 | 3.1 |
+| `ta.where(ta.lt(a, b), a, b)` | 35.2 | 9.0 | 3.9 |
+| `ta.take(a, idx)` | 32.7 | 11.0 | 3.0 |
+| `ta.gather_strided(a, 0, [256, 256], [1, 256])` | 82.8 | 6.0 | 13.7 |
+| `ta.segment_sum(a, offs)` (1024 segments of 64) | 43.7 | 8.1 | 5.4 |
+
+All outputs (the checksum each program prints) equal the C program's. A product with an operand of 2^31 or more takes the 32-bit limb route: the first
+measurement, before the small-operand test existed, put every `*` and `wrapping_mul` of these operands through it and gave 292.7 and 257.7 instructions
+per element. The same first measurement gave 40.7 (`+`), 58.7 (`sum`), 1144 (`ta.lt`), 940.5 (`take`) and 552 (`segment_sum`), before the add/sub/sum/take loops were
+specialised and before the programs stopped falling to the general path: a bool list read the checker did not accept as a bool, and a list field lent to a
+callee, each moved the whole program there (about 20x, and the build note says so).
+
+The instruction counts say what each form costs relative to C, not how fast it runs; `speed-claims` applies before anyone says it is faster.
+
 ## 6. Aliasing, layout and the FFI boundary
 
 ### 6.1 Sharing semantics
@@ -464,7 +605,7 @@ instead of refusing, because the program may catch it.
 
 | construct | message (shape) |
 | --- | --- |
-| a dtype outside D1 (`ta.bf16`, `ta.uint8`, `ta.int16`, `ta.int64`, `ta.bool_`) | `ail_array has f64, f32, f16, int8, int32; write instead: ta.int32 (or a list)` |
+| a dtype outside D1 and T3b (`ta.bf16`, `ta.uint8`, `ta.int16`) | `ail_array has f64, f32, f16, int8, int32, int64, bool_; write instead: ta.int32 (or a list)` |
 | `append`, `extend`, `insert`, `pop`, `remove`, `resize` | `ail_array arrays have a fixed length; write instead: ta.zeros(n) and index, or a list` |
 | views: `memoryview(a)`, the buffer protocol, `struct.pack_into(..., a, ...)` | `ail_array exposes bytes through a.tobytes() / ta.frombytes(); write instead: ...` |
 | element-wise comparisons `a < b`, boolean masks, fancy indexing `a[[0, 2]]`, `a[mask]` | `not built in ail_array; write instead: a loop, or ta.minimum/ta.maximum/ta.clip` (a later stage if needed) |
@@ -517,6 +658,7 @@ stages run as one sequential line (the "split core fixes" rule).
 | **T1** | `ail_array.py` reference, all five dtypes, 1-D API of section 2 except FFI and matmul; `test_ail_array_ref.py` | the self-test of 4.3 passes on CPython 3.12 within its CI budget; follows decisions TA1-TA3 | T0 |
 | **T2** | compiler: import pass, C runtime for **f64 and int32** 1-D, typed and general path, scalar loops (no SIMD work), errors, refusals of section 8 | differential tests of 9.2-9.3 and 9.7-9.9 pass in all build modes; size delta of a program using f64 arrays recorded | T1; IR core / typed path as today |
 | **T3** | **f32, f16, int8**, `astype`, canonical NaN, software f16 conversion, wrapping/saturating ops, `exp log tanh sqrt` | exhaustive f16 tests (9.4) and the edge sets pass; the `array('f')` refusal is lifted using the same f32 store rule (TA8) | T2 |
+| **T3b** (built 2026-10-30) | **int64 and bool_** (3.9): wrapping forms, comparisons, logic, `where`, `take`/`put`, strided gather/scatter, segmented reductions, flat f32/f64 `mm`, promotion helpers; typed-path lowering for f64, int32, int64, bool_ (5.8) | `test_ail_array_t3b.py`: reference equal to the PyTorch oracle outputs and to independent implementations; default and `AIL_UNIFIED_FORCE=1` builds equal to the reference byte for byte at the int64 boundaries, wrap vs raise, bool promotion, out-of-range gather/scatter texts, empty segments, specials; f32 `mm` is reference only until T3 | T2 (this branch is stacked on T2's fusion, #256); TORCH_COMPAT.md 3.2, 7.2, 8.1 |
 | **T4** | SIMD: vectorisable loops, int overflow flags with rescan, the 16-lane reductions, F16C in `x86-64-v3` | 9.6 neutrality passes; instruction counts (`tools/icount.c`) and RSS recorded per op family against the scalar T3 code and against C; no speed claim before that (`speed-claims`) | T3 |
 | **T5** | FFI: arrays as `ptr`/`cptr` arguments, zero copy in AIL and in the shim | 9.10 passes; borrowed-pointer rule documented in AIL_REFERENCE_MORE | T2; FFI F4 (#209: same files `ail_ffi.py`, `ail_ffi_lower.py`) merged first; F3 if u64 lengths are used |
 | **T6** | 2-D arrays, row broadcast, exact `matmul` (3.7) | CPython-equal on 3.7's cases incl. `K = 0`, int32 overflow, f16 exact sums; one MLP forward pass example matches the reference | T4 |
@@ -562,3 +704,5 @@ note; the decisions were questions Q1..Q8 of that draft.
 - **TA7 (was Q7). The name is `ail_array`**, a file beside the program for CPython, later in the `ail-lang` package.
 - **TA8 (was Q8). T3 lifts the `array('f')` refusal** with the same f32 store rule (storage only; arithmetic stays
   Python floats).
+- **TA9 (owner, 2026-10-30, TORCH_COMPAT.md 11). New dtypes `int64` and `bool_`, strided gather/scatter and segmented reductions (stage T3b).**
+  Tensor int overflow wraps in the torch layer while direct `ta.*` calls keep raising (TA1); the wrapping forms are the named functions of 3.9.

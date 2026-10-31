@@ -128,7 +128,7 @@ REFUSED = [
     ("f32", "import ail_array as ta\na = ta.zeros(3, ta.f32)\n", "stage T3"),
     ("f16", "import ail_array as ta\na = ta.array([1.0], ta.f16)\n", "stage T3"),
     ("int8", "import ail_array as ta\na = ta.zeros(3, ta.int8)\n", "stage T3"),
-    ("int64", "import ail_array as ta\na = ta.zeros(3, ta.int64)\n", "has f64, f32, f16, int8, int32"),
+    ("int16", "import ail_array as ta\na = ta.zeros(3, ta.int16)\n", "has f64, f32, f16, int8, int32"),
     ("bf16", "import ail_array as ta\na = ta.zeros(3, ta.bf16)\n", "has f64, f32, f16, int8, int32"),
     ("dtype not literal", "import ail_array as ta\ndt = ta.f64\na = ta.zeros(3, dt)\n", "write instead"),
     ("append", "import ail_array as ta\na = ta.zeros(3, ta.f64)\na.append(1.0)\n", "fixed length"),
