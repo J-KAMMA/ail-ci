@@ -44,11 +44,17 @@ def du_kib(path):
     return int(words[0]) if words else 0
 
 
+# These two programs need big ints by design (a `1 << 200` sentinel, a 64-bit modular LCG): since the int64 default (2026-10-31)
+# their ail-py build asks for the exact ints explicitly, so the comparison still measures them (on the general path).
+EXACT_INT_TASKS = ('rail_transfer', 'chain_relax')
+CURRENT_TASK = None
+
+
 def build_cmd(lang, src, out, strict=False):
     if lang in ('ail', 'ail-py'):
         cmd = [sys.executable, '-B', str(AIL), 'compile', str(src), '-o', str(out)]
         if lang == 'ail-py':
-            cmd[5:5] = ['--syntax', 'python']
+            cmd[5:5] = ['--syntax', 'python'] + (['--exact-int'] if CURRENT_TASK in EXACT_INT_TASKS else [])
         if strict:
             cmd.insert(5, '--strict')
         return cmd
@@ -301,6 +307,8 @@ def main():
     parser.add_argument('--jobs', type=int, default=3, help='parallel callgrind runs')
     args = parser.parse_args()
     langs = [l for l in args.langs.split(',') if l]
+    global CURRENT_TASK
+    CURRENT_TASK = args.task
     task_src = HERE / 'src' / args.task
     head = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], cwd=REPO, capture_output=True, text=True).stdout.strip()
     with tempfile.TemporaryDirectory(prefix='compare-' + args.task + '-') as tmp:
