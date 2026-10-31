@@ -205,6 +205,7 @@ LISTED_MODULES = (
     'test_ail_pre281',
     'test_ail_pre265',
     'test_ail_pre267',
+    'test_ail_repre20',
     'test_ail_pre270',
     'test_ail_pre271',
     'test_ail_pre272',
