@@ -27,7 +27,7 @@ TYPED = 'fn main()->int {\n    print("cache ok");\n    return 0;\n}\n'
 TYPED2 = 'fn main()->int {\n    print("cache changed");\n    return 0;\n}\n'
 # Two source texts that name one typed local differently; the generated C is identical.
 RENAMED_LOCAL = 'fn main()->int {\n    let %s: int = 1;\n    print(%s);\n    return 0;\n}\n'
-SCRIPT = 'print(40 + 2)\n'
+SCRIPT = 'print(True)\n'
 REAL_CC = shutil.which(os.environ.get('PIPE_CC') or 'gcc') or shutil.which('cc')
 
 

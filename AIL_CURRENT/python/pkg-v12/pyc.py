@@ -47,7 +47,9 @@ import buildcache
 import shadowing
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
-from pyfront import Unsupported, fold_int_constants, to_pipeline_c, _number_constant, refuse_field_method_call
+from pyfront import (Unsupported, fold_int_constants, to_pipeline_c, _number_constant,
+                     _int_const_value, _IntConstTooLarge, _INT64_MIN, _INT64_MAX,
+                     refuse_field_method_call)
 import pyfunc
 import gpu
 from pyfunc import to_c as func_to_c
@@ -540,6 +542,27 @@ def to_c(source, strict=True, name='run', info=None, external=None):
         unbound.SCRIPT.clear()
 
 
+def _print_scalar_constant(node):
+    """A print() argument the typed script path can print without general object semantics.
+
+    A non-bool Constant is already safe.  An integer constant expression (`40 + 2`, as in
+    language_examples/hello.ail) is proven by the same exact folder the big-int pass uses, so the
+    value is a plain int.  It is accepted only when that value fits int64: the typed path has no
+    big ints, so an out-of-range expression would keep the arithmetic and stop with `integer
+    overflow` at run time (AIL_IR=0) instead of printing CPython's exact value.  Such an argument
+    keeps the general fallback; on a typed-only build the big-int gate names it instead.  A bare
+    bool stays out because the typed path erases its object identity to int, which is why this
+    gate exists.
+    """
+    if isinstance(node, ast.Constant):
+        return not isinstance(node.value, bool)
+    try:
+        value = _int_const_value(node)
+    except _IntConstTooLarge:
+        return False
+    return value is not None and _INT64_MIN <= value <= _INT64_MAX
+
+
 def _to_c(source, strict=True, name='run', info=None, external=None):
     """The C for any of three shapes, under one name, so the same `main` serves all of them: one
     expression over `xs` (pipeline mode, unchanged), one or more `def`s (function mode, unchanged
@@ -554,7 +577,7 @@ def _to_c(source, strict=True, name='run', info=None, external=None):
         call = tree.body[0].value
         if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
                 and call.func.id == 'print'
-                and any(not isinstance(arg, ast.Constant) or isinstance(arg.value, bool)
+                and any(not _print_scalar_constant(arg)
                         for arg in call.args + [kw.value for kw in call.keywords])):
             # Typed bools erase their object identity to int; print must retain it.
             # Nonliteral arguments use the existing object-semantics fallback.
@@ -663,6 +686,22 @@ def _has_main_entry(source):
     except SyntaxError:
         return False
     return any(isinstance(n, ast.FunctionDef) and n.name == 'main' for n in tree.body)
+
+
+def _module_constant_source(source):
+    """True for a source whose whole top level is definitions plus at least one module
+    constant, with no `main` and no executable statement. CPython runs such a file's module
+    body (the constants have no effect) and exits 0, so there is no array-entry tool to
+    synthesize; the general path already builds it as a no-op module body."""
+    if _has_main_entry(source):
+        return False
+    try:
+        tree = ast.parse(source.strip())
+    except SyntaxError:
+        return False
+    if not any(isinstance(n, (ast.Assign, ast.AnnAssign)) for n in tree.body):
+        return False
+    return _rewrite_script(source, force=False) is None
 
 
 def _general_failure(typed, use_typed, failure):
@@ -1403,7 +1442,12 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     # (call it, ignore the C-level return -- there is none -- and exit 0), the same one a program
     # that calls `print()`/`assert` already takes, whether or not THIS entry happens to print
     # anything itself.
-    main = (_NOTHING_MAIN if _python_runs_nothing(source, True) else
+    # A definitions-plus-constants source runs nothing under CPython, so it gets a no-op `main`.
+    # `_python_runs_nothing` covers the python surface; `_module_constant_source` names the same
+    # rule for a definitions-only source with a module constant, while AIL_TOOL_MODE still asks
+    # for the library tool entry instead.
+    main = (_NOTHING_MAIN if _python_runs_nothing(source, True)
+            or (not os.environ.get('AIL_TOOL_MODE') and _module_constant_source(source)) else
             _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
     c.write_text(body + main, encoding='utf-8')
     native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
