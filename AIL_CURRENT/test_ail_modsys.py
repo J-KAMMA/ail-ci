@@ -262,6 +262,12 @@ class LazyStart(ModulesBase):
                        "print(run())\n"}, irs=ONE)
         self.assertEqual(out, "go\nlib starts\n(8, 3, 10)\n")
 
+    def test_function_level_import_of_a_module_the_front_end_wants_at_the_top(self):
+        out = self.same_as_cpython({
+            "lib.py": "def leaf(p):\n    import pathlib\n    return pathlib.Path(p).name\n",
+            "main.py": "import lib\n\nprint(lib.leaf('a/b/c.txt'))\n"}, irs=ONE)
+        self.assertEqual(out, "c.txt\n")
+
     def test_constants_set_by_a_literal_unpacking(self):
         out = self.same_as_cpython({
             "lib.py": "print('lib starts')\nA, B = 'int', 'float'\n\n\ndef kind(x, k=A):\n    return k + str(x) + B\n",

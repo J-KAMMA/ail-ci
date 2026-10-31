@@ -1018,9 +1018,60 @@ class Program:
                             if isinstance(x, ast.Name) and x.id == name:
                                 x.id = new
 
+    # standard modules that the front end's source passes rewrite and only accept imported at the top of the file
+    TOP_ONLY = frozenset(('pathlib', 'hashlib', 'hmac', 'secrets', 'base64', 'sqlite3', 'urllib'))
+
+    def hoist_std_imports(self, mod):
+        """`import pathlib` / `from hashlib import sha256` inside a function of a merged program: the front end wants
+        these at the top of the file, and importing a standard module has no effect that depends on when it runs, so
+        the import moves to the top of the module (a name that the module also assigns is left alone)."""
+        found, stores = [], None
+
+        def walk(stmts, in_function):
+            for st in stmts:
+                if in_function and isinstance(st, (ast.Import, ast.ImportFrom)) and not self.is_local_import(st):
+                    names = [st.module or ''] if isinstance(st, ast.ImportFrom) and not st.level else (
+                        [a.name for a in st.names] if isinstance(st, ast.Import) else [])
+                    if names and all(n.split('.')[0] in self.TOP_ONLY for n in names):
+                        found.append(st)
+                inner = in_function or isinstance(st, (ast.FunctionDef, ast.AsyncFunctionDef))
+                for field in ('body', 'orelse', 'finalbody'):
+                    if isinstance(getattr(st, field, None), list):
+                        walk(getattr(st, field), inner)
+                for sub_node in list(getattr(st, 'handlers', None) or ()) + list(getattr(st, 'cases', None) or ()):
+                    walk(sub_node.body, inner)
+        walk(mod.tree.body, False)
+        if not found:
+            return
+        stores = set(_scan_scope(mod.tree.body)[0])
+        for x in ast.walk(mod.tree):
+            if isinstance(x, ast.Global):
+                stores.update(x.names)
+        body = mod.tree.body
+        at = 0
+        while at < len(body) and (isinstance(body[at], (ast.Import, ast.ImportFrom)) or at == 0 and isinstance(
+                body[at], ast.Expr) and isinstance(body[at].value, ast.Constant) and isinstance(body[at].value.value, str)):
+            at += 1
+        seen, add = set(), []
+        for st in found:
+            bound = [(a.asname or a.name.split('.')[0]) for a in st.names]
+            if any(b in stores for b in bound):
+                continue
+            key = ast.dump(st)
+            clone = copy.deepcopy(st)
+            ast.copy_location(clone, st)
+            st.__class__ = ast.Pass
+            st.__dict__.clear()
+            ast.copy_location(st, clone)
+            if key not in seen:
+                seen.add(key)
+                add.append(clone)
+        body[at:at] = add
+
     def lift_lazy(self, mod):
         self.resolve_guarded(mod)
         self.hoist_try_imports(mod)
+        self.hoist_std_imports(mod)
         self.split_conflicting_imports(mod)
         self.rename_conflicting_function_imports(mod)
         """A local import inside a function is moved to the module's top level: a synthetic copy goes
