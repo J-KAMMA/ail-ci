@@ -5961,12 +5961,16 @@ static __attribute__((noinline)) int64_t ail_bytes_rfind_octet_portable(const un
     return -1;
 }
 #if (defined(__x86_64__) || defined(__i386__)) && defined(__GNUC__)
-#include <immintrin.h>
+/* GCC vector extensions plus the one builtin instead of <immintrin.h>: that header costs about 0.3 s of cc1 in every build that
+   pastes the runtime (it declares every x86 intrinsic).  Same instructions as _mm256_cmpeq_epi8 / _mm256_movemask_epi8. */
+typedef char ail_v32qi __attribute__((vector_size(32)));
+typedef char ail_v32qi_u __attribute__((vector_size(32), aligned(1), may_alias));
 static __attribute__((target("avx2"), noinline)) int64_t ail_bytes_rfind_octet_avx2(const unsigned char *p, int64_t n, unsigned char byte) {
-    __m256i target = _mm256_set1_epi8((char)byte);
+    const char b = (char)byte;
+    const ail_v32qi target = {b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b, b};
     while (n >= 32) {
-        __m256i word = _mm256_loadu_si256((const __m256i *)(p + n - 32));
-        uint32_t mask = (uint32_t)_mm256_movemask_epi8(_mm256_cmpeq_epi8(word, target));
+        ail_v32qi word = *(const ail_v32qi_u *)(p + n - 32);
+        uint32_t mask = (uint32_t)__builtin_ia32_pmovmskb256((ail_v32qi)(word == target));
         n -= 32;
         if (mask) return n + 31 - __builtin_clz((unsigned int)mask);
     }
