@@ -33,7 +33,7 @@ METRICS = [
     ('binary_bytes', 'Binary size (KiB, as built)', lambda v: '%.0f' % (v / 1024)),
     ('compile_s', 'Compile time (s, median of 3 cold builds)', lambda v: '%.2f' % v),
     ('build_disk_kib', 'Build disk (MiB, fresh build dir with its caches)', lambda v: '%.2f' % (v / 1024)),
-    ('wall_ms', 'Wall time (ms, best of the timed runs; shared runner, indicative only)', lambda v: '%.0f' % v),
+    ('wall_ms', 'Wall time (ms, median of 5 timed runs of the perf input)', lambda v: '%.0f' % v),
 ]
 
 
@@ -110,6 +110,61 @@ def status_table(tasks):
     return lines
 
 
+def cases_table(tasks):
+    head = ['task'] + [NAMES[l] for l in LANGS]
+    lines = ['### Correctness: public + hidden cases matching the CPython reference (passed/total)', '',
+             '| ' + ' | '.join(head) + ' |', '|' + '---|' * len(head)]
+    for t in tasks:
+        row = [t['task']]
+        for l in LANGS:
+            r = t['results'].get(l)
+            if r is None or not r.get('build_ok'):
+                row.append('build failed' if r else 'not run')
+            elif 'cases_public' not in r:
+                row.append('-')
+            else:
+                p, h = r['cases_public'], r['cases_hidden']
+                row.append('%d/%d%s' % (p[0] + h[0], p[1] + h[1], '' if p[0] + h[0] == p[1] + h[1] else ' **FAIL**'))
+        lines.append('| ' + ' | '.join(row) + ' |')
+    return lines
+
+
+def scorecard(tasks, lang):
+    """Per task and metric: W if the AIL column beats the best other language (and its output matched), L if not."""
+    keys = [m[0] for m in METRICS]
+    short = {'instructions': 'instr', 'rss_kib': 'RSS', 'binary_bytes': 'binary', 'compile_s': 'compile', 'build_disk_kib': 'disk',
+             'wall_ms': 'wall'}
+    head = ['task', 'path', 'cases'] + [short[k] for k in keys]
+    lines = ['### Scorecard: %s vs the best other language per column (W = lower than every other, L = not)' % NAMES[lang], '',
+             '| ' + ' | '.join(head) + ' |', '|' + '---|' * len(head)]
+    wins = {k: [0, 0] for k in keys}
+    losses = []
+    for t in tasks:
+        r = t['results'].get(lang) or {}
+        failed = r.get('cases_failed') or []
+        cases = 'n/a'
+        if 'cases_public' in r:
+            p, h = r['cases_public'], r['cases_hidden']
+            cases = '%d/%d' % (p[0] + h[0], p[1] + h[1])
+        row = [t['task'], r.get('path', '-'), cases + (' FAIL' if failed else '')]
+        for k in keys:
+            mine = usable(r, k)
+            best = min((v for v in (usable(t['results'].get(o), k) for o in OTHERS) if v is not None), default=None)
+            if mine is None or best is None:
+                row.append('-')
+                continue
+            wins[k][1] += 1
+            if mine < best:
+                wins[k][0] += 1
+                row.append('W %.2fx' % (mine / best))
+            else:
+                row.append('L %.2fx' % (mine / best))
+                losses.append('%s %s %.2fx' % (t['task'], short[k], mine / best))
+        lines.append('| ' + ' | '.join(row) + ' |')
+    lines.append('| **wins** | | | ' + ' | '.join('**%d/%d**' % tuple(wins[k]) for k in keys) + ' |')
+    return lines, dict(wins={k: wins[k] for k in keys}, losses=losses)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('root')
@@ -128,7 +183,12 @@ def main():
            'Ratios are AIL / best other language for that row (below 1.00: AIL is better, all metrics are lower-is-better). '
            'Best-other covers C, Rust, Go, Nim and Python, and only programs whose output matched.', '']
     summary = {}
-    out += status_table(tasks) + ['']
+    out += status_table(tasks) + [''] + cases_table(tasks) + ['']
+    scores = {}
+    for l in AIL:
+        lines, scores[l] = scorecard(tasks, l)
+        out += lines + ['']
+        out += ['Where %s loses: %s' % (NAMES[l], '; '.join(scores[l]['losses']) or 'nowhere'), '']
     for key, title, fmt in METRICS:
         lines, g = table(tasks, key, title, fmt)
         summary[key] = g
@@ -142,10 +202,12 @@ def main():
             '- Build disk: `du -sk` of that fresh directory after the first build (binary, caches, leftovers), minus the empty scaffold.',
             '- AIL path: `compile --strict` accepting the program means typed; otherwise the default build used the general path (the reason is quoted).',
             '- Instructions: `perf_event_open` (tools/icount.c) when the runner exposes the counter, otherwise valgrind callgrind Ir. User space only.',
+            '- Correctness: every public and hidden case of the task (gen.py) is run in every language; stdout and exit code must equal the CPython reference.py output.',
+            '- Wall time: median of 5 runs of the perf input (2-3 when one run takes more than 15 s). Same runner for every language.',
             '- Peak RSS: `/usr/bin/time -v` Maximum resident set size, median of the timed runs.']
     print('\n'.join(out))
     if args.json:
-        Path(args.json).write_text(json.dumps(dict(tasks=tasks, geomean_ratio_vs_best_other=summary), indent=1) + '\n', encoding='utf8')
+        Path(args.json).write_text(json.dumps(dict(tasks=tasks, geomean_ratio_vs_best_other=summary, scorecard=scores), indent=1) + '\n', encoding='utf8')
 
 
 if __name__ == '__main__':
