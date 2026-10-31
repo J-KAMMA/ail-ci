@@ -240,6 +240,7 @@ LISTED_MODULES = (
     'test_ail_pre417',
     'test_ail_pre419',
     'test_ail_pre423',
+    'test_ail_pre442',
     'test_ail_rdiff1',
     'test_ail_rdiff2',
     'test_ail_rdiff3',
