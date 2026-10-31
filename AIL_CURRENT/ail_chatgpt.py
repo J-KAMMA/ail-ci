@@ -5095,6 +5095,18 @@ def _source_check(args):
     print(json.dumps(report, ensure_ascii=False))
     return status
 
+def _compiler_python():
+    """The interpreter command that runs the compiler's own code (pkg-v12/pyc.py) in a child process.
+
+    The compiler is about 180k lines of Python. Without cached bytecode every build compiles all of it again, which
+    costs 2-4 s of a 2-8 s build. So the child may write __pycache__ next to the sources (Python skips the write
+    when the directory is read-only, and a pip install ships the bytecode). PYTHONDONTWRITEBYTECODE=1 keeps the old
+    behaviour (-B) for a caller that wants a source tree it never touches."""
+    if os.environ.get('PYTHONDONTWRITEBYTECODE'):
+        return [sys.executable, '-B']
+    return [sys.executable]
+
+
 def _surface_env(args, source, env=None):
     """The environment for a compiler run: `AIL_SURFACE=python` for a def-syntax entry, which makes
     the compiler refuse list/dict/set sharing it would otherwise copy (pkg-v12/aliasrefuse.py)."""
@@ -5619,7 +5631,7 @@ def main(argv=None):
         with tempfile.TemporaryDirectory(prefix='ail-module-') as directory:
             prepared, target = Path(directory) / ('module.c' if is_c else 'module.py'), Path(directory) / 'module.o'
             prepared.write_text(text, encoding='utf8')
-            command = [sys.executable, '-B', str(ROOT/'python/pkg-v12/pyc.py'),
+            command = [*_compiler_python(), str(ROOT/'python/pkg-v12/pyc.py'),
                        '--file', str(source if is_c else prepared), str(target), '--strict']
             command += ['--compile-c', str(args.interface.resolve())] if is_c else ['--compile-object']
             if args.c_api_name is not None:
@@ -5787,7 +5799,7 @@ def main(argv=None):
             build_source = Path(tmp) / 'combined.ail'
             build_source.write_text(source_text, encoding='utf-8')
             strict = _strict_requested(args)
-            command = [sys.executable, '-B', str(ROOT/'python/pkg-v12/pyc.py'),
+            command = [*_compiler_python(), str(ROOT/'python/pkg-v12/pyc.py'),
                        '--file', str(build_source), str(target), '--strict']
             for object_path in [*objects, *ffi_objects]:
                 command += ['--object', str(object_path.resolve())]
