@@ -4,7 +4,7 @@ name: platforms
 # MinGW-w64 UCRT gcc), macOS arm64 (Apple clang) and Linux arm64 (gcc). Each job runs a share of the
 # representative set of test modules listed in lab/platforms/config.json; what a platform skips, and
 # why, is in the same file and is printed in each job's summary. A manual run can pass `all` to run
-# every module of ail_check.MODULES instead (long: use it for a rare full check).
+# every module of ail_check.MODULES (the listed tuple plus tests.d/) instead (long: use it for a rare full check).
 on:
   workflow_dispatch:
     inputs:

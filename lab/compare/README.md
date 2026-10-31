@@ -12,3 +12,9 @@ Language comparison: AIL against C, Rust, Go, Nim and CPython on ten programs, m
 
 Smoke check, any languages that are installed: `python3 lab/compare/run_task.py --task chain_relax --smoke --out /tmp/r.json`
 (`--langs ail,c,python` limits it; `--smoke` uses a tiny public example instead of the perf input and times one run).
+
+Compile-time note: the AIL compiler is Python, so a build also pays for loading it. `run_task.py` does not set
+`PYTHONDONTWRITEBYTECODE` for the builds: the compiler's own bytecode is written beside its sources by the first (strict probe)
+build, as a pip install ships it, and the timed cold builds (fresh `AIL_CACHE` and `TMPDIR`) reuse it. For the number without
+bytecode run `PYTHONDONTWRITEBYTECODE=1 python3 tools/compile_phases.py <source>`; that tool also splits a build into the Python
+front end and the gcc phases.
