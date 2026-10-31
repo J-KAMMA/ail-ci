@@ -332,7 +332,7 @@ class ExactUnsignedTests(unittest.TestCase):
     def test_a_value_above_int64_is_a_loud_stop_on_the_legacy_emitter_never_a_negative_number(self):
         run = self.loud_stop("legacy_top", STUBS + "\ndef main():\n    print(1)\n    print(topu())\n    print(2)\n\nmain()\n")
         self.assertEqual((run.returncode, run.stdout), (1, "1\n"))
-        self.assertEqual(run.stderr.strip(), "integer overflow")
+        self.assertTrue(run.stderr.strip().startswith("OverflowError: integer overflow in "), run.stderr)
         run = self.loud_stop("legacy_try", STUBS + '''
 def main():
     print(1)

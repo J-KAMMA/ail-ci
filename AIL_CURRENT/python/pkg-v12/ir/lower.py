@@ -263,7 +263,8 @@ class Lowering(TextLowering):
         ret_kind = ctx.ret
         # B2b: the tagged-small-int view of this function.  A parameter or result the local proof cannot
         # bound is an `ail_tint`; the entry keeps its plain int64 result (converted at each return).
-        _tint_on = os.environ.get('AIL_SURFACE') == 'python' and not getattr(P, 'TINT_DISABLED', False)
+        import intmode as _intmode
+        _tint_on = _intmode.exact_python() and not getattr(P, 'TINT_DISABLED', False)
         self.tint_on = _tint_on
         self.tint_sig = getattr(P, 'TINT_SIGS', {}).get(fn.name, ((), 0)) if _tint_on else ((), 0)
         if self.cname == 'run':
@@ -2741,7 +2742,7 @@ class Lowering(TextLowering):
             raise NotS0('call of a non-name')
         f = node.func.id
         if f == '_ail_int2' and len(node.args) == 2 and not node.keywords \
-                and os.environ.get('AIL_SURFACE') == 'python':
+                and __import__('intmode').exact_python():
             return self.int_text(node.args[0], node.args[1])
         if f in ctx.funcs and f not in self.places and f not in self.params:
             return self.user_call(f, node, statement)
@@ -2818,7 +2819,7 @@ class Lowering(TextLowering):
             return self.coerce(v, I.F64)
         if f == 'int' and len(args) == 1:
             v = self.expr(args[0])
-            if v.type in (I.STRV, BYTES) and os.environ.get('AIL_SURFACE') == 'python':
+            if v.type in (I.STRV, BYTES) and __import__('intmode').exact_python():
                 return self.rt('tint_from_str' if v.type == I.STRV else 'tint_from_bytes', [v])
             if v.type == I.STRV:
                 return self.rt('str_to_int', [v])
@@ -2860,7 +2861,7 @@ class Lowering(TextLowering):
     def int_text(self, text, base):
         """`int(text)` / `int(text, base)` with a str or bytes first argument, on the Python
         surface: a value beyond int64 is a big int, so this is the tagged-int parse."""
-        if os.environ.get('AIL_SURFACE') != 'python':
+        if not __import__('intmode').exact_python():
             raise NotS0('int() of text and a base')
         v = self.expr(text)
         if v.type not in (I.STRV, BYTES):

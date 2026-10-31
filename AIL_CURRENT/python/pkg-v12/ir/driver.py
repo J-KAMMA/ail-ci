@@ -372,7 +372,8 @@ def _apply(P, args, kwargs, result, current):
     bound = inspect.signature(P._one_function_numeric_impl).bind(*args, **kwargs).arguments
     fn, cname = bound['fn'], bound['cname']
     recursive = bool(bound.get('recursive', False))
-    _py = os.environ.get('AIL_SURFACE') == 'python'
+    import intmode
+    _py = intmode.exact_python()
     # A mixed-mode clone with the tagged lowering turned OFF is explicitly asking for the legacy
     # int64 emitter (pymix's own selection probe, and `_setup_mix`'s retry after a tagged attempt
     # the IR cannot lower): the checks below are conditions for *tagged* lowering, not for the

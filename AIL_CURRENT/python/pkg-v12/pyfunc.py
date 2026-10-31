@@ -31,6 +31,7 @@ import os
 import re
 import ast
 import copy
+import intmode
 import json
 import textwrap
 import callable_types
@@ -796,7 +797,7 @@ def fold_maxsplit_constant(node):
     if value is _MAXSPLIT_NOT_CONST:
         return None
     if value is _MAXSPLIT_TOO_BIG or not _I64_MIN <= value <= _I64_MAX:
-        if os.environ.get('AIL_SURFACE') == 'python':
+        if intmode.exact_python():
             return None               # exact ints (BIGINT.md): evaluated at run time (OverflowError there, as CPython)
         refusal = Unsupported(
             'the str.split()/rsplit() maxsplit constant does not fit in a 64-bit signed '
@@ -915,7 +916,7 @@ def fold_int_constant(node):
     if value is _CONST_INT_NOT or isinstance(value, bool):
         return None                      # a bool result keeps its own printing (True/False)
     if value is _CONST_INT_BIG or not _I64_MIN <= value <= _I64_MAX:
-        if os.environ.get('AIL_SURFACE') == 'python':
+        if intmode.exact_python():
             # exact ints (BIGINT.md): the value beyond int64 is an ordinary big int of the tagged lowering / the
             # general path, not a program to refuse; the expression is left to be evaluated
             return None
@@ -13056,7 +13057,7 @@ def _numeric_to_int(value, ctx):
             + ('if (_ail_number_input != _ail_number_input) ail_raise_msg(AIL_EXC_VALUE, "cannot convert float NaN to integer"); '
                'if (__builtin_isinf(_ail_number_input)) ail_die("cannot convert float infinity to integer"); ' if exctext.ACTIVE
                else 'if (_ail_number_input != _ail_number_input) ail_raise_named(AIL_EXC_VALUE); ') +
-            'ail_die("integer overflow"); } (int64_t)_ail_number_input; })') % value
+            'ail_die("OverflowError: integer overflow in int(float) (ints are 64-bit; --exact-int gives exact ints)"); } (int64_t)_ail_number_input; })') % value
 def _numeric_expression_needed(node, ctx):
     if isinstance(node, ast.BinOp) and not (_etype(node.left, ctx) in NUM and _etype(node.right, ctx) in NUM):
         return False  # [0] * n, "ab" * n, xs + ys: a sequence operand is not a numeric binding
@@ -13504,7 +13505,7 @@ def _expr(node, ctx):
                 'A negative INT64_MIN spelling is handled by the unary branch; a positive '
                 '9223372036854775808 remains out of range'
                 % node.value)
-            if os.environ.get('AIL_SURFACE') != 'python':
+            if not intmode.exact_python():
                 refusal.source_location_kind = 'source'
             raise refusal
         return _c_int_literal(node.value)
@@ -26185,7 +26186,7 @@ def _for_inner_impl(node, ctx, ind):
             counter, _ = ctx.temp(INT)
             prefix += '%s%s = %s;\n' % (pad, counter, _field_receiver(start, ctx))
             update += (', (%s < %s(%s) ? (%s == INT64_MAX ? '
-                       '(ail_die("integer overflow"), 0) : ++%s) : 0)' % (index, _olist_helper(kind, 'len'), receiver, counter, counter))
+                       '(ail_die("OverflowError: integer overflow in enumerate() (ints are 64-bit; --exact-int gives exact ints)"), 0) : ++%s) : 0)' % (index, _olist_helper(kind, 'len'), receiver, counter, counter))
             bind_number = '%s    %s = %s;\n' % (pad, number, counter)
         head = '%sfor (%s = %s; %s; %s) {\n' % (pad, index, initial, condition, update)
         element_c = '(%s *)%s(%s, %s)' % (_ref_ctype(_olist_element_kind(kind), ctx), _olist_helper(kind, 'get'),
@@ -35442,7 +35443,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     _defined.module_ints = _bigcap.module_int_consts(_MODCONSTS)
     _tint_sigs = {}
     _call_result_names = set()
-    _python_surface = os.environ.get('AIL_SURFACE') == 'python'
+    _python_surface = intmode.exact_python()     # tagged ints are the exact mode's (intmode.py)
     _ir_on = os.environ.get('AIL_IR', '1').strip().lower() not in ('0', 'off', 'no', 'false')
     # A module int variable can be an `ail_tint` static (exact Python ints) only when every function
     # that touches it can be lowered by the IR. A class method or constructor stays on the legacy

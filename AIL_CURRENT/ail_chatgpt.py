@@ -5426,6 +5426,10 @@ def main(argv=None):
     compile_cmd.add_argument('--strict', action='store_true',
         help='build on the typed path or refuse, listing every blocker with a rewrite (also AIL_STRICT=1); '
              'with --json the blockers are printed as ail.strict/1 JSON')
+    compile_cmd.add_argument('--exact-int', action='store_true',
+        help='exact (arbitrary precision) ints as in CPython; the default is 64-bit ints that stop with an OverflowError-style '
+             'message on overflow, and a program whose source needs a big int is refused at compile time (also AIL_EXACT_INT=1; '
+             'the exact path is the general path, about 20x slower)')
     compile_cmd.add_argument('--static', action='store_true',
         help='link the C library statically (larger binary that runs on any Linux); default is dynamic')
     compile_cmd.add_argument('--gpu', action='store_true',
@@ -5484,6 +5488,8 @@ def main(argv=None):
         os.environ['AIL_NO_CACHE'] = '1'
     if getattr(args, 'gpu', False):
         os.environ['AIL_GPU_BUILD'] = '1'
+    if getattr(args, 'exact_int', False):
+        os.environ['AIL_EXACT_INT'] = '1'
     if getattr(args, 'static', False):
         if sys.platform == 'darwin' and not getattr(args, 'target', None):
             parser.error('--static is not supported on macOS: Apple ships no static C library, so the '
@@ -5831,6 +5837,7 @@ def main(argv=None):
                         hashlib.sha256(Path(str(object_path) + '.json').read_bytes()).hexdigest()
                         if Path(str(object_path) + '.json').is_file() else '-')],
                     environment.get('AIL_SURFACE', ''), environment.get('AIL_NO_GENERAL', ''),
+                    'exact' if str(environment.get('AIL_EXACT_INT', '')).strip().lower() in ('1', 'on', 'yes', 'true') else 'int64',
                     *(['classes', environment['AIL_CLASS_NAMES']] if environment.get('AIL_CLASS_NAMES') else []),
                     *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
                     *(['link', ffi_env['AIL_FFI_LINK']] if link else []),

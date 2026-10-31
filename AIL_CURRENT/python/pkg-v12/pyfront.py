@@ -51,20 +51,20 @@ HELPERS = {
               '    return (r != 0 && ((r < 0) != (b < 0))) ? r + b : r;\n}\n'),
     'pydiv': ('static int64_t pydiv(int64_t a, int64_t b) {\n'
               '    if (b == 0) ail_die("integer division by zero");\n'
-              '    if (b == -1) { if (a == INT64_MIN) ail_die("integer overflow"); return -a; }\n'
+              '    if (b == -1) { if (a == INT64_MIN) ail_die("OverflowError: integer overflow in // (ints are 64-bit; --exact-int gives exact ints)"); return -a; }\n'
               '    int64_t q = a / b, r = a % b;\n'
               '    return (r != 0 && ((r < 0) != (b < 0))) ? q - 1 : q;\n}\n'),
     'ck_add': ('static int64_t ck_add(int64_t a, int64_t b) {\n'
-               '    int64_t r; if (__builtin_add_overflow(a, b, &r)) ail_die("integer overflow");\n'
+               '    int64_t r; if (__builtin_add_overflow(a, b, &r)) ail_die("OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)");\n'
                '    return r;\n}\n'),
     'ck_sub': ('static int64_t ck_sub(int64_t a, int64_t b) {\n'
-               '    int64_t r; if (__builtin_sub_overflow(a, b, &r)) ail_die("integer overflow");\n'
+               '    int64_t r; if (__builtin_sub_overflow(a, b, &r)) ail_die("OverflowError: integer overflow in - (ints are 64-bit; --exact-int gives exact ints)");\n'
                '    return r;\n}\n'),
     'ck_mul': ('static int64_t ck_mul(int64_t a, int64_t b) {\n'
-               '    int64_t r; if (__builtin_mul_overflow(a, b, &r)) ail_die("integer overflow");\n'
+               '    int64_t r; if (__builtin_mul_overflow(a, b, &r)) ail_die("OverflowError: integer overflow in * (ints are 64-bit; --exact-int gives exact ints)");\n'
                '    return r;\n}\n'),
     'ck_neg': ('static int64_t ck_neg(int64_t a) {\n'
-               '    if (a == INT64_MIN) ail_die("integer overflow");\n    return -a;\n}\n'),
+               '    if (a == INT64_MIN) ail_die("OverflowError: integer overflow in unary - or abs() (ints are 64-bit; --exact-int gives exact ints)");\n    return -a;\n}\n'),
     # Shifts. Python's `<<` widens without limit and its `>>` is an arithmetic shift of an
     # unbounded integer, so BOTH need a guard that C's own operators do not give:
     #   * a negative count is a ValueError in Python and UNDEFINED in C;
@@ -87,10 +87,10 @@ HELPERS = {
                '    if (b < 0) ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE,\n'
                '        (const uint8_t *)"negative shift count",\n'
                '        (int64_t)sizeof "negative shift count" - 1, 1));\n'
-               '    if (b >= 64) { if (a != 0) ail_die("integer overflow"); return 0; }\n'
+               '    if (b >= 64) { if (a != 0) ail_die("OverflowError: integer overflow in << (ints are 64-bit; --exact-int gives exact ints)"); return 0; }\n'
                '    uint64_t lim = (uint64_t)1 << (63 - b);\n'
                '    uint64_t mag = (a >= 0) ? (uint64_t)a : (uint64_t)(-(a + 1));\n'
-               '    if (mag >= lim) ail_die("integer overflow");\n'
+               '    if (mag >= lim) ail_die("OverflowError: integer overflow in << (ints are 64-bit; --exact-int gives exact ints)");\n'
                '    return (int64_t)((uint64_t)a << b);\n}\n'),
     # `x << k` with a literal 0 <= k < 64: the same exact test as ck_shl, as a round trip. The shift
     # lost nothing exactly when shifting the result back gives `a` again; that is a compare and a
@@ -99,7 +99,7 @@ HELPERS = {
     # hash computation.
     'ck_shlk': ('static inline __attribute__((always_inline)) int64_t ck_shlk(int64_t a, int s) {\n'
                 '    int64_t r = (int64_t)((uint64_t)a << s);\n'
-                '    if (__builtin_expect((r >> s) != a, 0)) ail_die("integer overflow");\n'
+                '    if (__builtin_expect((r >> s) != a, 0)) ail_die("OverflowError: integer overflow in << (ints are 64-bit; --exact-int gives exact ints)");\n'
                 '    return r;\n}\n'),
     'ck_shr': ('static int64_t ck_shr(int64_t a, int64_t b) {\n'
                '    if (b < 0) ail_raise_value_adopt(ail_exception_new(AIL_EXC_VALUE,\n'
@@ -179,7 +179,9 @@ def fold_int_constants(source):
     """
     # exact ints (BIGINT.md): a constant outside int64 is left as written and computed exactly, not refused;
     # INT64_MIN is folded only from an out-of-int64 intermediate (`-(2**63)`)
-    exact = os.environ.get('AIL_SURFACE') == 'python'
+    import intmode
+    exact = intmode.exact_python()
+    int64_py = intmode.int64_python()     # default Python-syntax mode: int64, a static big int is refused here
     try:
         tree = ast.parse(source)
     except SyntaxError:
@@ -229,7 +231,16 @@ def fold_int_constants(source):
             'a constant integer expression overflows int64: its exact value is outside the '
             'signed 64-bit range and does not fit in a 64-bit signed integer (CPython computes '
             "it exactly because its int is unbounded, while this language's int is int64, "
-            'SEMANTICS section 1)')
+            'SEMANTICS section 1)' + (
+                '.\n  write instead: keep the value inside int64, or ' + intmode.HINT if int64_py else ''))
+        refusal.source_line = getattr(node, 'lineno', None)
+        raise refusal
+
+    def refuse_literal(node):
+        refusal = Unsupported(
+            'the integer literal %d does not fit in a 64-bit signed integer, and AIL ints are 64-bit by default '
+            '(the program needs a big int here).\n  write instead: keep the value inside int64, or %s'
+            % (node.value, intmode.HINT))
         refusal.source_line = getattr(node, 'lineno', None)
         raise refusal
 
@@ -249,6 +260,9 @@ def fold_int_constants(source):
         return node in call.args[1:2]
 
     def visit(node, parent=None, grandparent=None):
+        if int64_py and isinstance(node, ast.Constant) and type(node.value) is int \
+                and not _INT64_MIN <= node.value <= _INT64_MAX:
+            refuse_literal(node)
         if isinstance(node, ast.JoinedStr):
             # An f-string's source text is observable in a debug field (`f"{expr=}"`), so leave
             # its expressions exactly as written; the emitters' own constant folders still run.

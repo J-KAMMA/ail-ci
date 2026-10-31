@@ -359,7 +359,7 @@ class ProgramTests(unittest.TestCase):
             for k in cases:
                 expected = cpython_run(tmp, 'uncaught', UNCAUGHT, (k,))
                 status, stdout, stderr = results[k]
-                if k == cases[-1] and status == 1 and last_line(stderr) == 'integer overflow':
+                if k == cases[-1] and status == 1 and last_line(stderr).startswith('OverflowError: integer overflow in '):
                     self.assertEqual(stdout, 'start %d\n' % k)
                     continue
                 self.assertEqual((status, stdout), expected[:2], k)
@@ -476,7 +476,7 @@ class ProgramTests(unittest.TestCase):
                         if name == 'uncaught':             # the last case is a big int: CPython, not the legacy build
                             with tempfile.TemporaryDirectory() as tmp:
                                 expected = cpython_run(tmp, name, source, args_list[k])
-                            if k == len(args_list) - 1 and status == 1 and last_line(stderr) == 'integer overflow':
+                            if k == len(args_list) - 1 and status == 1 and last_line(stderr).startswith('OverflowError: integer overflow in '):
                                 continue                # (the item product stops loudly: see the uncaught test)
                             self.assertEqual((status, stdout), expected[:2], (name, tag, k))
                         elif name != 'fieldshare':         # (sharing: the legacy build copies; S3b's tests cover it)

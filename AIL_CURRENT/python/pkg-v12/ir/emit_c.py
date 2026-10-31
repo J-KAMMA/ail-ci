@@ -714,7 +714,7 @@ class Emitter(TextEmitter):
             else:
                 inner = 'if (%(x)s != %(x)s) ail_raise_named(AIL_EXC_VALUE); '
             self.line(depth, ('if (!(%(x)s >= -9223372036854775808.0 && %(x)s < 9223372036854775808.0)) { '
-                              + inner + 'ail_die("integer overflow"); }') % {'x': o[0]})
+                              + inner + 'ail_die("OverflowError: integer overflow in int(float) (ints are 64-bit; --exact-int gives exact ints)"); }') % {'x': o[0]})
             return self.assign_new(depth, ins.result, '(int64_t)%s' % o[0])
         if op == 'load':
             return self.assign_new(depth, ins.result, o[0])

@@ -266,7 +266,7 @@ class ProgramTests(unittest.TestCase):
                     # CPython prints; the legacy build prints the bare message)
                     named = re.sub(r'(?m)^[A-Za-z]+Error: ', '', runs[tag][2])
                     bare = runs[tag][:2] + (named,)
-                    if last_line(runs['legacy'][2]) == 'integer overflow':
+                    if last_line(runs['legacy'][2]).startswith('OverflowError: integer overflow in '):
                         # the int64 legacy build stops where Python has big integers; the tagged build is exact
                         expected = cpython_run(tmp, name, source, args)
                         self.assertEqual(runs[tag][:2], expected[:2], '%s %s args=%s' % (name, tag, args))

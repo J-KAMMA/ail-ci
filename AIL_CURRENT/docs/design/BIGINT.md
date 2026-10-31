@@ -1,5 +1,12 @@
 # Big integers (branch `bigint`, 2026-10-21)
 
+> **2026-10-31, owner decision: the exact ints below are now OPT-IN.** The default is int64: an operation that leaves int64 stops
+> the program (exit 1) with `OverflowError: integer overflow in <op> (ints are 64-bit; --exact-int gives exact ints)`, on the typed
+> path and the general path alike, and a program whose source needs a big int statically (an int literal outside int64, a constant
+> expression such as `1 << 200`) is refused at compile time, naming the line and the flag. `compile --exact-int` or `AIL_EXACT_INT=1`
+> restores everything described in this note (section 15 says how the switch is wired). Nothing in the default mode goes to the
+> general path for an int-width reason any more.
+
 Python `int` is arbitrary precision; AIL's was int64 with a stop ("integer overflow", exit 1; DIFFERENCES A1). This note
 is the design of the replacement. Oracle: CPython 3.12.
 
@@ -192,3 +199,33 @@ Measured (`tools/icount.c`, default build, medium input of `lab/compare/tasks/<t
 compared with CPython): berth_sim 78.80M -> 69.85M, echo_pack 814.1M -> 802.3M, ledger_bin 14.57M -> 13.91M,
 rail_transfer 1140.4M -> 1039.9M, chain_relax 1369.8M -> 1320.7M; term_rank and ticket_audit (no marks) unchanged.
 Tests: `test_ail_bigcap_split.py`.
+
+## 15. Default int64, exact ints opt-in (2026-10-31)
+
+`intmode.py` is the one switch. `exact()` is `AIL_EXACT_INT` in (1, on, yes, true); the CLI flag `compile --exact-int` sets that
+variable, and the build cache key includes it. `exact_python()` (Python-syntax program AND exact) replaces the old test
+`AIL_SURFACE == 'python'` wherever it meant "ints are Python's": `bigcap.enabled()` (so `marked()` is empty and no function is
+big-int capable), the tagged-int lowering (`pyfunc` `_python_surface`, `ir/driver.py`, `ir/lower.py`: tagged parameters and results,
+`int(text)` as a tagged parse, `int(text, base)`), the constant folder (`pyfront.fold_int_constants`, `pyfunc` constant abs/pow/
+maxsplit refusals), `pyc._refuse_round_at_int64_boundary` and the `_tint_legacy` retry. A Python-syntax program in the default mode
+therefore takes exactly the route the AIL brace syntax always took: the typed IR or the legacy emitter with their checked int64
+operators, and the general path only for a reason that has nothing to do with ints (a construct the typed path does not build).
+
+* **Typed path.** Every `+ - *`, unary `-`/`abs`, `//`, `<<` (and `**`, `int(text)`, `int(float)`, `round`, `enumerate`) is a checked
+  helper that ends in `ail_die("OverflowError: integer overflow in <op> ...")`; it was already there for the AIL syntax and for the
+  "unmarked" functions of the exact mode, so nothing new is emitted. `except OverflowError` catches it when the program names that
+  class (the old `OVERFLOWEXC` splice, now matching the text by prefix). `math.factorial/comb/perm/prod/lcm`, `sum`, `int.from_bytes` of
+  more than 8 bytes, list/dict item updates and so on go through the same helpers (the boundary matrix of `test_ail_int64_default.py`).
+* **General path.** `pyboxed2.build` forces `AIL_BIGINT=off` (the runtime without `AIL_T_BIG`, which is the whole pre-bigint runtime) and
+  `biggate.resolve(all_pieces=True)` keeps every `/*P:name<*/` piece on its old side: a program that calls `divmod` or `pow` has no
+  "creator" to make the gate choose the big world, so the pieces cannot be left to reachability there. The stop is the hit-limit
+  `int_overflow`, printed as `OverflowError: <detail> (ints are 64-bit; ...)`; the details name the operation like the typed helpers do.
+* **Static need.** `fold_int_constants` refuses an int literal outside int64 and a constant expression whose value is outside int64
+  (`1 << 200`, `2 ** 64`, `10 ** 30`), with the source line and the flag. A constant expression with a big intermediate and an int64
+  result (`(1 << 64) - (1 << 64) + 5`) is folded to the result, as before.
+* **Not changed.** The exact mode (bigcap marks, tagged ints, the big general path, size gate, unified exact plan) is untouched and
+  is what `--exact-int` runs; the old tests set the variable (`setUpModule`).
+* **Known edges of the int64 rule** (each stops with the message, CPython has a number): an intermediate beyond int64 whose final
+  result fits (`-a // b` at `a = INT64_MIN`), `math.gcd(INT64_MIN, x)` and `math.ceil(-2.0**63)`, `int(text, base)` in a hot loop
+  (the IR has no checked int64 parse for it, so the function stays on the legacy emitter).
+

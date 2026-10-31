@@ -42,6 +42,7 @@ CFLAGS_TUNE += ['-fopenmp-simd']
 import os as _os_flags
 CFLAGS_TUNE += _os_flags.environ.get('AIL_EXTRA_CFLAGS', '').split()
 import native_diagnostics
+import intmode
 import buildcache
 import shadowing
 import fastwalk
@@ -710,7 +711,7 @@ def _refuse_round_at_int64_boundary(source):
     A two-argument round() returns a float and is left alone; an int argument is exact already.
     With exact ints (BIGINT.md) abs/-/* -1 of that value is exact as in CPython, so nothing is refused.
     """
-    if os.environ.get('AIL_SURFACE') == 'python':
+    if intmode.exact_python():
         return
     try:
         tree = ast.parse(source)
@@ -1127,7 +1128,7 @@ def _build_unshadowed(source, out, strict, report, force_general):
         first_error = first
         if force_general or os.environ.get('AIL_NO_TINT_LEGACY') \
                 or not any(w in str(first) for w in _TINT_GATE_WORDS) \
-                or os.environ.get('AIL_SURFACE') != 'python':
+                or not intmode.exact_python():
             raise
         if os.environ.get('AIL_NO_GENERAL') and not any(w in str(first) for w in _TINT_GATE_WORDS[:2]):
             # a typed-only build refuses by name a value that can leave int64 for an int64 slot (BIGINT.md B2):
