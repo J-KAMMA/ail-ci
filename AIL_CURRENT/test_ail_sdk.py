@@ -812,7 +812,7 @@ fn main()->int {let g=[[1,2,3]];write_stdout_bytes(str(reduce(g[choose()])).enco
         # The exported compiler must carry every python/pkg-v12 module that a shipped .py file imports
         # (jsonrt.py once imported unconditionally by cruntime.py was missing from a copied subset).
         import ast
-        manifest = json.loads((support.ROOT / 'MANIFEST.json').read_text(encoding='utf8'))
+        manifest = __import__('ail_manifest').load(support.ROOT)
         shipped = set(manifest['sdk_files'])
         package = support.ROOT / 'python/pkg-v12'
         modules = {path.stem for path in package.glob('*.py')}

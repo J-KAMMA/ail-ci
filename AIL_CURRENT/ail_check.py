@@ -10,14 +10,16 @@ import subprocess
 import sys
 import unittest
 
+import ail_manifest
+
 ROOT = Path(__file__).resolve().parent
-MODULES = (
-    'test_ail_sdk', 'test_ail_sdk_environment', 'test_ail_packaging', 'test_ail_platforms', 'test_ail_fuzz_findings', 'test_ail_corpus_findings', 'test_ail_corpus_findings2', 'test_ail_spec_fixes', 'test_ail_quirks', 'test_ail_doctor', 'test_ail_integer_codec', 'test_ail_bytearray_decimal', 'test_ail_modconst', 'test_ail_sets_general',
+LISTED_MODULES = (
+    'test_ail_sdk', 'test_ail_sdk_environment', 'test_ail_packaging', 'test_ail_platforms', 'test_ail_fuzz_findings', 'test_ail_corpus_findings', 'test_ail_corpus_findings2', 'test_ail_covtop1','test_ail_spec_fixes', 'test_ail_quirks', 'test_ail_doctor', 'test_ail_integer_codec', 'test_ail_bytearray_decimal', 'test_ail_modconst', 'test_ail_sets_general',
     'test_ail_handle_lists', 'test_ail_filesystem_mutation', 'test_ail_stdout_mixed',
     'test_ail_stdout_mixed_resources', 'test_ail_tcp_poll', 'test_ail_tcp_poll_resources',
     'test_ail_tcp_json_lines_poll_resources', 'test_ail_csv_writer', 'test_ail_csv_reference', 'test_ail_monotonic',
     'test_ail_tcp_json_deadlines', 'test_ail_csv_rewrite_stream',
-    'test_ail_csv_rewrite_stream_resources', 'test_ail_source_check', 'test_ail_type_details', 'test_ail_argument_type_details', 'test_ail_owned_type_details', 'test_ail_owned_type_repair', 'test_ail_list_expression_extend', 'test_ail_string_field_mutation', 'test_ail_float_argument_widening', 'test_ail_check_repair_context', 'test_ail_exception_context', 'test_ail_exception_values_core', 'test_ail_exception_aggregate_objects', 'test_ail_exception_values_app', 'test_ail_empty_blocks', 'test_ail_source_edit', 'test_ail_edit_check_report', 'test_ail_batch_edit', 'test_ail_try_locals', 'test_ail_str_iter_fast', 'test_ail_builder_locals', 'test_ail_scan_spec_modes', 'test_ail_local_count_repeat', 'test_ail_field_index_inplace', 'test_ail_overflow_error', 'test_ail_struct_list_inplace', 'test_ail_borrowed_owner', 'test_ail_memory_shapes', 'test_ail_bytearray_loops', 'test_ail_refusal_hints', 'test_ail_optional_structs', 'test_ail_stdin_read_until', 'test_ail_for_bytes_expr', 'test_ail_numeric_loops', 'test_ail_frontend_speed', 'test_ail_instruction_gap', 'test_ail_span_cache', 'test_ail_field_views', 'test_ail_parallel_for', 'test_ail_numeric_loop_arena', 'test_ail_source_context', 'test_ail_api_contracts', 'test_ail_builtin_api', 'test_ail_builtin_contracts', 'test_ail_api_profiles', 'test_ail_scalar_list_mutations', 'test_ail_numeric_bindings', 'test_ail_numeric_binding_boundaries', 'test_ail_numeric_profiles', 'test_ail_numeric_profiles_native', 'test_ail_record_initializers', 'test_ail_builtin_maps', 'test_ail_builtin_syntax_forms', 'test_ail_str_find_alias', 'test_ail_str_rfind', 'test_ail_str_predicates', 'test_ail_sort_keys', 'test_ail_build_reports', 'test_ail_native_diagnostics', 'test_ail_c_keyword_functions', 'test_ail_libc_names', 'test_ail_builtin_shadowing', 'test_ail_c_api_exception_values', 'test_c_api_bridge', 'test_ail_context_imports', 'test_ail_edit_dependencies', 'test_ail_ordinary_join_return', 'test_ail_owned_join_take', 'test_ail_string_repeat_fusion', 'test_ail_typed_locals', 'test_ail_bytes_list_fields', 'test_ail_grid_return', 'test_ail_grid_calls', 'test_ail_pool_iter_capture', 'test_ail_pool_row_arguments', 'test_ail_argv_slices', 'test_ail_cli_args', 'test_integer_row_stream', 'test_json_pointer_batch', 'test_json_pointer_scan', 'test_json_query_cli', 'test_json_query_file', 'test_json_document_library', 'test_json_kv', 'test_json_kv_tcp', 'test_csv_column_stats_cli', 'test_csv_column_stats_value', 'test_csv_column_stats_stream', 'test_csv_group_scan', 'test_ail_reference_examples', 'test_ail_dict_upsert', 'test_ail_field_str_append', 'test_ail_list_ops', 'test_ail_check', 'test_ail_dict_delete', 'test_ail_ctor_move', 'test_ail_int_dict_set', 'test_ail_arg_borrow', 'test_ail_stdin_list_batch', 'test_ail_heapq_bisect', 'test_ail_short_style_traps', 'test_ail_text_lines', 'test_ail_swap_rebinding', 'test_ail_nested_lists', 'test_ail_field_store_cost', 'test_ail_lang_gaps', 'test_ail_text_views', 'test_ail_slow_patterns', 'test_ail_python_syntax', 'test_ail_element_views', 'test_ail_range_checks', 'test_ail_hot_ops', 'test_ail_ir_s0', 'test_ail_ir_s1', 'test_ail_ir_s2', 'test_ail_ir_s3', 'test_ail_ir_s3b', 'test_ail_stdlib_batch1', 'test_ail_re', 'test_ail_collections', 'test_ail_ir_s4a', 'test_ail_tuples', 'test_ail_stdlib_batch3', 'test_ail_json_fast', 'test_ail_ir_rulex', 'test_ail_ir_s4c1', 'test_ail_fallback_note', 'test_ail_refusal_messages', 'test_ail_ir_s3c1', 'test_ail_ir_s3c2', 'test_ail_ir_s3c3', 'test_ail_ir_s3d1', 'test_ail_modules', 'test_ail_loss_paths', 'test_ail_stdlib_batch4', 'test_ail_try_hoist', 'test_ail_rep5_idioms', 'test_ail_files', 'test_ail_ffi', 'test_ail_lib_modules', 'test_ail_zlib', 'test_ail_http', 'test_ail_subprocess', 'test_ail_clock', 'test_ail_build_cache', 'test_ail_ir_f1', 'test_ail_field_pop', 'test_ail_int_sort', 'test_ail_obj_refs', 'test_ail_bytearray_refs', 'test_ail_borrowed_elements', 'test_ail_str_comprehension_move', 'test_ail_ir_specsel', 'test_ail_pathlib', 'test_ail_sqlite', 'test_ail_ir_cover', 'test_ail_excfix', 'test_ail_exc_str', 'test_ail_globals', 'test_ail_threads', 'test_ail_virtual_dispatch', 'test_ail_typed_inherit', 'test_ail_boolfield', 'test_ail_stdlib5', 'test_ail_dunders', 'test_ail_silent5', 'test_ail_silent6', 'test_ail_typed_blockers', 'test_ail_genlib', 'test_ail_crypto', 'test_ail_typedreach1', 'test_ail_typedreach2',
+    'test_ail_csv_rewrite_stream_resources', 'test_ail_source_check', 'test_ail_type_details', 'test_ail_argument_type_details', 'test_ail_owned_type_details', 'test_ail_owned_type_repair', 'test_ail_list_expression_extend', 'test_ail_string_field_mutation', 'test_ail_float_argument_widening', 'test_ail_check_repair_context', 'test_ail_exception_context', 'test_ail_exception_values_core', 'test_ail_exception_aggregate_objects', 'test_ail_exception_values_app', 'test_ail_empty_blocks', 'test_ail_source_edit', 'test_ail_edit_check_report', 'test_ail_batch_edit', 'test_ail_try_locals', 'test_ail_str_iter_fast', 'test_ail_builder_locals', 'test_ail_scan_spec_modes', 'test_ail_local_count_repeat', 'test_ail_field_index_inplace', 'test_ail_overflow_error', 'test_ail_struct_list_inplace', 'test_ail_borrowed_owner', 'test_ail_memory_shapes', 'test_ail_bytearray_loops', 'test_ail_refusal_hints', 'test_ail_optional_structs', 'test_ail_stdin_read_until', 'test_ail_for_bytes_expr', 'test_ail_numeric_loops', 'test_ail_frontend_speed', 'test_ail_instruction_gap', 'test_ail_span_cache', 'test_ail_field_views', 'test_ail_parallel_for', 'test_ail_numeric_loop_arena', 'test_ail_source_context', 'test_ail_api_contracts', 'test_ail_builtin_api', 'test_ail_builtin_contracts', 'test_ail_api_profiles', 'test_ail_scalar_list_mutations', 'test_ail_numeric_bindings', 'test_ail_numeric_binding_boundaries', 'test_ail_numeric_profiles', 'test_ail_numeric_profiles_native', 'test_ail_record_initializers', 'test_ail_builtin_maps', 'test_ail_builtin_syntax_forms', 'test_ail_str_find_alias', 'test_ail_str_rfind', 'test_ail_str_predicates', 'test_ail_sort_keys', 'test_ail_build_reports', 'test_ail_native_diagnostics', 'test_ail_c_keyword_functions', 'test_ail_libc_names', 'test_ail_builtin_shadowing', 'test_ail_c_api_exception_values', 'test_c_api_bridge', 'test_ail_context_imports', 'test_ail_edit_dependencies', 'test_ail_ordinary_join_return', 'test_ail_owned_join_take', 'test_ail_string_repeat_fusion', 'test_ail_typed_locals', 'test_ail_bytes_list_fields', 'test_ail_grid_return', 'test_ail_grid_calls', 'test_ail_pool_iter_capture', 'test_ail_pool_row_arguments', 'test_ail_argv_slices', 'test_ail_cli_args', 'test_integer_row_stream', 'test_json_pointer_batch', 'test_json_pointer_scan', 'test_json_query_cli', 'test_json_query_file', 'test_json_document_library', 'test_json_kv', 'test_json_kv_tcp', 'test_csv_column_stats_cli', 'test_csv_column_stats_value', 'test_csv_column_stats_stream', 'test_csv_group_scan', 'test_ail_reference_examples', 'test_ail_dict_upsert', 'test_ail_field_str_append', 'test_ail_list_ops', 'test_ail_check', 'test_ail_dict_delete', 'test_ail_ctor_move', 'test_ail_int_dict_set', 'test_ail_arg_borrow', 'test_ail_stdin_list_batch', 'test_ail_heapq_bisect', 'test_ail_short_style_traps', 'test_ail_text_lines', 'test_ail_swap_rebinding', 'test_ail_nested_lists', 'test_ail_field_store_cost', 'test_ail_lang_gaps', 'test_ail_text_views', 'test_ail_slow_patterns', 'test_ail_python_syntax', 'test_ail_element_views', 'test_ail_range_checks', 'test_ail_hot_ops', 'test_ail_ir_s0', 'test_ail_ir_s1', 'test_ail_ir_s2', 'test_ail_ir_s3', 'test_ail_ir_s3b', 'test_ail_stdlib_batch1', 'test_ail_re', 'test_ail_collections', 'test_ail_ir_s4a', 'test_ail_tuples', 'test_ail_stdlib_batch3', 'test_ail_json_fast', 'test_ail_ir_rulex', 'test_ail_ir_s4c1', 'test_ail_fallback_note', 'test_ail_refusal_messages', 'test_ail_ir_s3c1', 'test_ail_ir_s3c2', 'test_ail_ir_s3c3', 'test_ail_ir_s3d1', 'test_ail_modules', 'test_ail_loss_paths', 'test_ail_stdlib_batch4', 'test_ail_try_hoist', 'test_ail_rep5_idioms', 'test_ail_files', 'test_ail_ffi', 'test_ail_ffi_handles', 'test_ail_lib_modules', 'test_ail_zlib', 'test_ail_http', 'test_ail_subprocess', 'test_ail_clock', 'test_ail_build_cache', 'test_ail_ir_f1', 'test_ail_field_pop', 'test_ail_int_sort', 'test_ail_obj_refs', 'test_ail_bytearray_refs', 'test_ail_borrowed_elements', 'test_ail_str_comprehension_move', 'test_ail_ir_specsel', 'test_ail_pathlib', 'test_ail_sqlite', 'test_ail_ir_cover', 'test_ail_excfix', 'test_ail_exc_str', 'test_ail_globals', 'test_ail_threads', 'test_ail_virtual_dispatch', 'test_ail_typed_inherit', 'test_ail_boolfield', 'test_ail_stdlib5', 'test_ail_dunders', 'test_ail_silent5', 'test_ail_silent6', 'test_ail_typed_blockers', 'test_ail_genlib', 'test_ail_crypto',
     'test_ail_nested_functions', 'test_ail_match', 'test_ail_raise_from', 'test_ail_optional_locals',
     'test_ail_safetynet',
     'test_ail_pre48',
@@ -38,7 +40,7 @@ MODULES = (
     'test_ail_lsp', 'test_ail_project', 'test_ail_debug', 'test_ail_debug_lines', 'test_ail_debug_flush',
     'test_ail_typed_blockers2',
     'test_ail_c_export',
-    'test_ail_unified',
+    'test_ail_unified', 'test_ail_gen_speed',
     'test_ail_ir_gridbounds',
     'test_ail_bugs7',
     'test_ail_unbound',
@@ -256,6 +258,7 @@ MODULES = (
     'test_ail_pre395',
     'test_ail_pre364',
     'test_ail_ffi_parallel',
+    'test_ail_ffi_objfold',
     'test_ail_pre370',
     'test_ail_pre375',
     'test_ail_pre380',
@@ -285,7 +288,7 @@ MODULES = (
     'test_ail_pre227',
     'test_ail_pre246',
     'test_ail_pre254',
-    'test_ail_bigint', 'test_ail_tint',
+    'test_ail_bigint', 'test_ail_tint', 'test_ail_piece_stubs',
     'test_ail_pre346',
     'test_ail_pre378',
     'test_ail_pre26', 'test_ail_hostile_input', 'test_ail_pre29', 'test_ail_pre44', 'test_ail_pre27', 'test_ail_pre36', 'test_ail_pre213', 'test_ail_pre279', 'test_ail_pre283', 'test_ail_pre285', 'test_ail_pre298', 'test_ail_pre296', 'test_ail_pre201', 'test_ail_pre204', 'test_ail_pre273', 'test_ail_fuzz42', 'test_ail_pre263', 'test_ail_pre269',
@@ -315,15 +318,57 @@ MODULES = (
     'test_ail_fuzz81',
     'test_ail_qtest3',
     'test_ail_fz1',
-    'test_ail_covtop1', 'test_ail_ffi_handles', 'test_ail_classnames',
-    'test_ail_ffi_objfold', 'test_ail_stdtop1', 'test_ail_stdtop2', 'test_ail_stdtop3', 'test_ail_stdtop4', 'test_ail_gpu_g1',
-    'test_ail_piece_stubs', 'test_ail_ffi_f3a',
-    'test_ail_exc_nobind', 'test_ail_cargo', 'test_ail_fz196', 'test_ail_pre409', 'test_ail_pre427', 'test_ail_pre432', 'test_ail_array_ref', 'test_ail_array_t2',
-    'test_ail_cmp_classname',
+    'test_ail_classnames',
+    'test_ail_stdtop1', 'test_ail_stdtop2', 'test_ail_stdtop3', 'test_ail_stdtop4',
+    'test_ail_gpu_g1',
+    'test_ail_ffi_f3a',
+    'test_ail_exc_nobind', 'test_ail_cargo', 'test_ail_fz196', 'test_ail_pre409', 'test_ail_pre427', 'test_ail_pre432',
     'test_ail_gpu_g2',
     'test_ail_ffi_f3b',
+    'test_ail_bigcap_split',
+    'test_ail_optint_exact',
+    'test_ail_ctime',
+    'test_ail_bound_builtin',
 )
 
+
+# Test modules are registered by adding one file AIL_CURRENT/tests.d/<module>.txt (its first non-comment
+# line is the module name); that edits no shared line, so two pull requests that each add a test do not
+# conflict.  LISTED_MODULES (above) still works.  MODULES is the union: the listed modules in their order,
+# then the tests.d modules sorted by name, each name once.
+TESTS_DIR = 'tests.d'
+
+
+def discover_modules(root=ROOT):
+    directory = Path(root) / TESTS_DIR
+    return sorted(p.stem for p in directory.glob('*.txt')) if directory.is_dir() else []
+
+
+def merge_modules(listed, discovered):
+    return tuple(dict.fromkeys([*listed, *discovered]))
+
+
+def registry_problems(root, modules=None):
+    """Messages for tests.d files that are not exactly one valid registration (empty when fine)."""
+    problems = []
+    directory = Path(root) / TESTS_DIR
+    for path in sorted(directory.glob('*')) if directory.is_dir() else []:
+        if path.name.startswith('.'):
+            continue
+        name = path.stem
+        if path.suffix != '.txt' or not name.startswith('test_') or not all(c.isalnum() and c.isascii() or c == '_' for c in name):
+            problems.append(f'{TESTS_DIR}/{path.name}: not a test_<name>.txt registration')
+            continue
+        lines = [ln.strip() for ln in path.read_text(encoding='utf-8').splitlines()]
+        lines = [ln for ln in lines if ln and not ln.startswith('#')]
+        if lines != [name]:
+            problems.append(f'{TESTS_DIR}/{path.name}: must name exactly the module {name!r}, found {lines!r}')
+        elif not (Path(root) / f'{name}.py').is_file():
+            problems.append(f'{TESTS_DIR}/{path.name}: {name}.py does not exist')
+    return problems
+
+
+MODULES = merge_modules(LISTED_MODULES, discover_modules())
 
 SUPPORT = (
     'ail_check.py', 'test_ail_struct_lifetimes.py', 'test_ail_text_find_search.py', 'test_ail_float64_codec.py', 'test_ail_callable_owned_results.py', 'test_ail_callable_values.py', 'test_ail_finally.py', 'language_examples/numeric_pipeline_allocator.c', 'test_ail_binary_cursor_cli.py', 'test_csv_column_stats_bytes_value_candidate.py', 'test_csv_column_stats_stream_candidate.py', 'test_csv_column_stats_bytes_candidate.py', 'test_csv_column_stats_skip_candidate.py', 'test_ail_c_objects.py', 'test_ail_exception_resources.py',
@@ -341,12 +386,16 @@ def preflight(root):
     compiler = os.environ.get('PIPE_CC', '')
     if compiler and not shutil.which(compiler):
         raise ValueError(f'PIPE_CC does not resolve: {compiler}')
-    manifest = json.loads((root / 'MANIFEST.json').read_text(encoding='utf-8'))
+    manifest = ail_manifest.load(root)
     selected = manifest.get('sdk_files')
     pins = manifest.get('sha256')
     if not isinstance(selected, list) or not selected or not isinstance(pins, dict):
         raise ValueError('MANIFEST requires sdk_files and sha256')
-    for name in dict.fromkeys(selected + list(SUPPORT) + [f'{module}.py' for module in MODULES]):
+    problems = registry_problems(root)
+    if problems:
+        raise ValueError('invalid test registration: ' + '; '.join(problems))
+    registrations = [f'{TESTS_DIR}/{p.name}' for p in sorted((root / TESTS_DIR).glob('*.txt'))] if (root / TESTS_DIR).is_dir() else []
+    for name in dict.fromkeys(selected + list(SUPPORT) + [f'{module}.py' for module in MODULES] + registrations):
         if not isinstance(name, str):
             raise ValueError('invalid manifest path')
         path = (root / name).resolve()

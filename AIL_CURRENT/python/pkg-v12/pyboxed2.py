@@ -2542,6 +2542,8 @@ class Compiler(boxclosure.ClosureMixin):
                     if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Name):
                         inst_fields.add(st.target.id)
         self.inst_field_names = frozenset(inst_fields)
+        import boundbuiltin
+        boundbuiltin.rewrite_tree(tree, Unsupported)    # `f = frozenset(xs).__contains__`, `add = s.add`, `j = ",".join`
         # A bound method taken as a value (`Box(acc.add)`) is not modelled: the stored value would
         # fail at run time when called.  With one in the program, a field call stays refused.
         method_names = {m.name for c in ast.walk(tree) if isinstance(c, ast.ClassDef)
@@ -2714,12 +2716,15 @@ class Compiler(boxclosure.ClosureMixin):
         # call site is compiled (`_emit_function` below is where `_call_user_function` runs).
         self._setup_mix(source, mix_tree)
         # The size gate uses only local proofs (BIGINT.md rules 2-4): no call-site, field or container scan.
-        _marks = bigcap.marked(mix_tree, local=False)
+        # In exact mode (unified.exact_enabled) only module code that can itself make a big int keeps every int boxed:
+        # a marked function called from it returns its big ints boxed.
+        _mark_fn = bigcap.own_marked if unified.exact_enabled() else bigcap.marked
+        _marks = _mark_fn(mix_tree, local=False)
         _prelude = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
         if '<module>' in _marks and _prelude:
             _own = copy.copy(mix_tree)
             _own.body = [n for n in mix_tree.body if getattr(n, 'name', None) not in _prelude]
-            _marks = bigcap.marked(_own, local=False)
+            _marks = _mark_fn(_own, local=False)
         if unified.enabled() and ('<program>', '*') not in self.u_demote and not unified.nan_capable(mix_tree) \
                 and '<module>' not in _marks:     # the module code can need a big int: every int stays boxed
             self.uplan = unified.analyze(self, tree, self.u_demote)
@@ -5477,11 +5482,9 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(v, float):
             if v != v or v in (float('inf'), float('-inf')):
                 raise Unsupported('a nan/inf float literal')
-            # a float box is a heap object: it goes to a slot at once, so a neighbouring allocation (the
-            # next element of `(1.5, 0.5)`, a call argument) cannot collect it before it is used (C84)
-            t = ctx.tmp()
-            ctx.emit('%s = ail_box_float(cx, %r);' % (t, v))
-            return t
+            # a literal is one immortal static box per site (AIL_FCONST): nothing is allocated, and nothing can collect it
+            # while a neighbouring allocation runs (C84)
+            return 'AIL_FCONST(%r)' % v
         if isinstance(v, str):
             if any(0xd800 <= ord(c) <= 0xdfff for c in v):
                 raise Unsupported('a surrogate string literal')
@@ -12978,7 +12981,10 @@ def _build(source, report, allow_mix=True):
         import safetyrt
         body = safetyrt.patch_sortprim(body)
         body = safetyrt.patch_tuples(body)
-    if compiler.uplan is not None and not compiler.threads and os.environ.get('AIL_UNIFIED_POOL'):
+    if unified.enabled() and not compiler.threads \
+            and os.environ.get('AIL_UNIFIED_POOL', '').strip().lower() not in ('0', 'off', 'no', 'false'):
+        # the size-class pool under the collector: on for every thread-free general-path program unless AIL_UNIFIED=0 (the
+        # all-boxed build as before) or AIL_UNIFIED_POOL=0; it does not need the type plan
         import safetyrt
         body = safetyrt.patch_gcpool(body)
     body = classname.patch_runtime(body)     # F2: a class of an imported module prints with its module

@@ -11253,6 +11253,11 @@ static inline ail_obj ail_box_float(ail_ctx *cx, double v) {
     ail_obj r; r.tag = AIL_T_FLOAT; r.o = (ail_gcobj *)b; return r;
 }
 static inline double ail_float_val(ail_obj x) { return ((ail_floatbox *)x.o)->v; }
+/* a float literal of the program text: one static box per site, immortal (mark bit set, in no collector list), so
+   evaluating the literal allocates nothing and is never collected. A float is immutable, so sharing the box between
+   evaluations of one site is CPython's own behaviour (one constant object per code object). */
+#define AIL_FCONST(v) ({ static ail_floatbox ail__k = {{AIL_K_FLOATBOX, 1, 0, 0, 0, 0}, (v)}; \
+                         ail_obj ail__r; ail__r.tag = AIL_T_FLOAT; ail__r.o = &ail__k.hdr; ail__r; })
 
 /* ===================================================================================
    ail_vecobj (list/tuple backing) and ail_raise_c/ail_hit_limit are needed BY
@@ -28698,6 +28703,15 @@ def _host_unprintable_rows():
     import os
     import re
     import unicodedata
+    try:
+        # the table shipped for this Unicode database: a clean AIL_CACHE has no on-disk copy yet
+        import unprintable_data
+        flat = unprintable_data.ROWS.get(unicodedata.unidata_version)
+        if flat is not None and sys.implementation.name == 'cpython':
+            _HOST_ROWS = ''.join('    {%d, %d},\n' % (flat[i], flat[i + 1]) for i in range(0, len(flat), 2))
+            return _HOST_ROWS
+    except ImportError:
+        pass
     cache = None
     try:
         import buildcache
