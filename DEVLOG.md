@@ -1,3 +1,25 @@
+## 2026-10-31 -- pre440 suite fix: keep the operand-type text the classname pass matches (job-pre440-10311403)
+
+Integrating the pre440 operand-name caps with the accepted `classname.patch_error_names` pass made
+`test_ail_cmp_classname` print `unsupported operand type(s) for **:` where CPython prints
+`** or pow():` (4 failures: the `operands_and_calls` and `with_dunders` programs, default and
+forced general path).  That pass rewrites the exact runtime text
+`"unsupported operand type(s) for %s: '%s' and '%s'"`; pre440 had changed the format string to
+`'%.100s' and '%.100s'`, so the rewrite no longer matched.
+
+`ail_dun_binop` now keeps its original format string and truncates each operand name to CPython's
+100-character `binary_op_error` cap in 101-byte copies (`na100`/`nb100`).  `can only concatenate`
+and `can't multiply sequence` keep the 201-byte names (CPython's 200 cap).  The C-text pin in
+`test_ail_pre440.py` follows the new declaration.  With the classname pass applied on top the
+merged tree passes `test_ail_cmp_classname` and `test_ail_pre440`.
+
+Probes (`/tmp/probes`, both builds via `cmp.sh`): `p1_widths_routes` (99/100/101/120/250-character
+names for `+`, through an argument, alias, list item, attribute and dict value),
+`p2_concat_widths` (120/199/200/201/250 for str/list/tuple concatenation on either side),
+`p3_multiply_widths` (120/200/201/250 for sequence repeat), `p4_other_ops` (`-`, `*`, `/`, `//`,
+`%`, bitwise, shifts, divmod with 101- and 120-character names) all match CPython on both builds.
+`p5_pow` differs only in CPython's `** or pow()` suffix, identically on the base and unchanged.
+
 ## 2026-10-29 -- pre428 review: operand class names in operator TypeErrors (job-pre440-10300211)
 
 The pre428 review recorded as pre-existing that an ordinary-instance class name longer than 79

@@ -198,13 +198,13 @@ print(Box)
                 built, _ = build(directory, 'noclass_' + tag, no_class, general, debug)
                 self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                 text = (debug / 'program.c').read_text(encoding='utf-8')
-                self.assertNotIn('char buf[400], na[201], nb[201];', text)
+                self.assertNotIn('char buf[400], na[201], nb[201], na100[101], nb100[101];', text)
 
                 debug = Path(directory) / ('withclass_' + tag)
                 built, _ = build(directory, 'withclass_' + tag, with_class, general, debug)
                 self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
                 text = (debug / 'program.c').read_text(encoding='utf-8')
-                self.assertEqual(text.count('char buf[400], na[201], nb[201];'), 1)
+                self.assertEqual(text.count('char buf[400], na[201], nb[201], na100[101], nb100[101];'), 1)
 
 
 if __name__ == '__main__':
