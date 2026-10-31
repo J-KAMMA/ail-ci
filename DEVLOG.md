@@ -495,6 +495,48 @@ test_ail_pre430, test_ail_pre364, test_ail_pre367, test_ail_pre299, test_ail_pre
 test_ail_pre160, test_ail_pre273, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3 (10 modules, 0 failed).  `tools/update_manifest.py` was run and
 `--check` passes; `tools/ci_shards.py --update` added the module and `--check` exits 0.
+## 2026-10-29 -- pre435 test follows the exact-bigint default (job-pre435-10292335)
+
+`test_ail_pre435` expected `int()` of a default holding `1e300` to be refused at compile time,
+which was the int64 behavior of this base.  Integers are now exact bigints by default
+(ail-ci#198), and on that compiler all 23 formerly-refused programs print CPython's exact
+integer, so the int64 refusal fix is no longer needed there; this branch keeps it for the
+legacy int64 compiler.  The module now selects its expectation from the compiler: when
+`python/pkg-v12/bigint_core.py` is present the out-of-int64 group must match CPython exactly,
+and on the legacy compiler it keeps the named-refusal check.  The 16 in-range programs still
+match CPython on both.
+
+Probes `/tmp/probes435` (39 programs: list, tuple, dict, alias, negative index, keyword-only,
+container default, attribute, module constant, wrapper call, string/bytes and both float
+boundaries) match CPython on both builds of today's `origin/integ`; on this legacy base the
+23 out-of-range probes are refused by name on both builds and the 16 in-range probes match.
+`test_ail_pre435` passes here (legacy path, 1 skip) and on an `origin/integ` worktree (bigint
+path, 1 skip).  `tools/update_manifest.py` was run and `--check` passes.
+
+## 2026-10-28 -- pre435: a default argument captured before a container mutation (job-pre435-10282045)
+
+The pre393 review recorded as pre-existing that a default parameter expression reading a
+module container was checked against the container's final value, after a later mutation had
+dropped it: `M = [1e300]; def f(x=M[0]): return int(x); M[0] = 1; print(f())` stopped with
+`integer overflow` on both builds where CPython prints the exact big integer, and the same
+held for `D["k"]`.  A default is evaluated once when the definition runs, so the int64 check
+now evaluates each top-level definition's parameter defaults with the names visible at that
+`def`, and the call-site int() wrapper check uses the default when a call omits the argument.
+A conversion written directly in a default is checked at the definition as well.  The value is
+refused by name on both builds (`int() of a float outside int64: ... (CPython makes a big
+integer)`, or `int64 constant expression out of range` for text/bytes) through a list, tuple,
+dict, alias, negative index, keyword-only parameter, container default, attribute, module
+constant and wrapper call, for floats at and beyond both int64 boundaries and for strings and
+bytes.  In-range defaults (including the minimum boundary and an empty container), a mutation
+before the definition, an explicit argument overriding the default, a dynamic default and an
+unused function match CPython.
+
+Probes in `/tmp/probes/pre435` (41 programs, both builds via `cmp.sh`): 23 out-of-range
+programs are refused by name, 16 in-range programs match CPython, and 2 already-named refusals
+(a first-class function with defaults and a class-attribute assignment) remain refused by name.
+`test_ail_pre435.py` pins the refusals and matches; `test_ail_pre417`, `test_ail_pre370`,
+`test_ail_pre358`, `test_ail_pre359` and `test_ail_pre340` also pass.  `tools/update_manifest.py`
+was run and `--check` passes; `tools/ci_shards.py --update` registered the new module.
 
 ## 2026-10-28 -- pre417: a module-level container read before a later mutation is refused (job-pre417-10281339)
 
