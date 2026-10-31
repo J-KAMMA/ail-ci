@@ -468,7 +468,9 @@ class ProgramTests(unittest.TestCase):
         # shares as Python does)
         import unittest.mock
         with unittest.mock.patch.dict(os.environ, {'AIL_NO_GENERAL': '1'}):
-            results, built = self.check('stay', STAY, ['main'], stay=['share', 'hand_over', 'resize_while_iterating'],
+            # (`hand_over` hands an owned list of str to a function that takes a list[str]: lent read-only, it is lowered
+            # since typed-reach batch 2)
+            results, built = self.check('stay', STAY, ['main', 'hand_over'], stay=['share', 'resize_while_iterating'],
                                         cpython=False)
         self.assertIn('list', built.fallback['ir']['share'])
         with tempfile.TemporaryDirectory() as tmp:
@@ -496,6 +498,10 @@ class ProgramTests(unittest.TestCase):
                 results = {}
                 for tag, env in (('legacy', {'AIL_IR': '0'}), ('ir', {'AIL_IR': 'verify'}),
                                  ('ir-checked', {'AIL_IR': 'verify', 'AIL_IR_EXC': 'checked'})):
+                    if name == 'stay':
+                        # (the typed path alone: in the default build the program goes to the general path with a typed
+                        # clone of `hand_over` in a separate object, which this hand-made link line does not have)
+                        env = dict(env, AIL_NO_GENERAL='1')
                     built, _, _ = compile_program(tmp, name, source, tag, env, debug=True)
                     self.assertEqual(built.returncode, 0, built.stderr)
                     san = Path(tmp, name + '.' + tag + '.san')
