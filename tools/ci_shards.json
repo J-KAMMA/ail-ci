@@ -541,6 +541,7 @@
   "test_ail_sqlite": 225.7,
   "test_ail_stdin_list_batch": 23.6,
   "test_ail_stdin_read_until": 3.7,
+  "test_ail_stdlib21": 10.0,
   "test_ail_stdlib5": 539.6,
   "test_ail_stdlib_batch1": 40.5,
   "test_ail_stdlib_batch3": 380.4,
@@ -1009,6 +1010,7 @@
    "test_ail_pre41",
    "test_ail_raise_from",
    "test_ail_source_edit",
+   "test_ail_stdlib21",
    "test_ail_str_iter_fast",
    "test_ail_struct_list_inplace"
   ],

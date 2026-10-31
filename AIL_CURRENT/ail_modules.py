@@ -292,6 +292,8 @@ class Program:
         top = '.' not in fullname
         portions = []
         for d in dirs:
+            if Path(d).resolve() == BUNDLED_DIR and fullname == 'unicodedata':
+                continue    # stdlib5/stdtop lowers unicodedata on every build; the bundled copy must not shadow it
             inits = [p for p in (d / leaf / '__init__.py', d / leaf / '__init__.ail') if p.is_file()]
             files = [p for p in (d / (leaf + '.py'), d / (leaf + '.ail')) if p.is_file()]
             if inits:

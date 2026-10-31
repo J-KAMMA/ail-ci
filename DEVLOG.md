@@ -1,3 +1,35 @@
+## 2026-10-31 -- stdlib21 re-applied: unicodedata.category and textwrap.shorten (job-rbstdlib21-10312155)
+
+Re-applied the accepted `job-stdlib21-10290508` change, whose diff no longer applies because this
+integrated tree already models `unicodedata.category` through the general-path prelude
+(`python/pkg-v12/stdtop.py` + `prelude_unicodedata.py`, with `unidata_version`, pinned by
+`test_ail_stdtop2.py`). Both fixes are kept: that pass remains the owner of the import on both
+builds, and the accepted generated `stdlib/unicodedata.py` (from `tools/gen_unicodedata.py`, CPython
+3.12's Unicode 15.0 General_Category data, 4007 runs) is retained as the bundled reference without
+shadowing the prelude; `ail_modules.spec` skips it so the two do not compete. Its refusal hint now
+carries the accepted `has no top-level name '<name>'` wording after the tree's
+`unicodedata.<name> is not supported; write instead: ...` prefix, so both test suites pass unchanged.
+`name`, `normalize` and the rest stay named compile-time refusals.
+`textwrap.shorten(text, width)` is lowered to `_ail_tw_shorten`, CPython 3.12's default TextWrapper
+with `max_lines=1` (collapsed whitespace, hyphen/em-dash chunking, `_handle_long_word` and the
+` [...]` placeholder); the width is required, and `placeholder=` and the other TextWrapper options
+stay named refusals.
+
+Conflicts resolved by keeping both fixes: the core reference already carried `bytes` in the optional
+type list and the `match CPython` wording, so only the accepted wording trims needed for its
+3500-char cap were taken alongside the new `unicodedata.category` module entry; the MORE index was
+regenerated with `tools/ref_index.py`; the test module is registered through `tests.d/` (this tree
+uses it) rather than the `ail_check.py` tuple, and `tools/ci_shards.json` carries both new entries.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `uc_basic` (values, empty/long strings and
+non-str types) and `uc_routes` match CPython; `uc_refuse` is refused by name;
+`tw_shorten_basic`, `tw_shorten_routes`, `tw_shorten_ws`, `tw_shorten_types` and `tw_shorten_fuzz`
+match CPython on both builds, and `tw_shorten_nonstr` / `tw_shorten_bytes` match CPython's exact
+error text; `tw_shorten_refuse_onearg` and `tw_shorten_refuse_placeholder` are refused by name.
+Final-state tests: test_ail_stdlib21, test_ail_stdtop2, test_ail_reference_examples, test_ail_files,
+test_ail_safetynet, test_ail_corpus_findings3 and test_ail_modules (all pass);
+`tools/update_manifest.py --check` passes.
+
 ## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
 
 Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this

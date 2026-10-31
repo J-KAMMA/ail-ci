@@ -446,8 +446,9 @@ UD_HINT = ('use the str methods (isalpha, isdigit, isspace, isupper, islower, is
 
 
 def run_unicodedata(tree, text):
-    lower_module(tree, text, 'unicodedata', {'category': '_ail_ud_category'}, lambda name: UD_HINT, 'unicodedata', (),
-                 constants={'unidata_version': '15.0.0'})
+    lower_module(tree, text, 'unicodedata', {'category': '_ail_ud_category'},
+                 lambda name: UD_HINT + '; the bundled module has no top-level name %r' % name,
+                 'unicodedata', (), constants={'unidata_version': '15.0.0'})
 
 
 IP_HINTS = {
