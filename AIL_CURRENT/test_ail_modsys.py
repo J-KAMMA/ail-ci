@@ -247,6 +247,34 @@ class LazyStart(ModulesBase):
                        "print(pick(True))\nprint(pick(False))\nprint(pick(True))\n"}, irs=ONE)
         self.assertEqual(out, "a starts\n(11, 'a')\nb starts\n(20, 'b')\n(11, 'a')\n")
 
+    def test_function_level_from_import_of_a_name_the_module_body_assigns_twice(self):
+        out = self.same_as_cpython({
+            "lib.py": "print('lib starts')\nLIMIT = 1\nLIMIT = LIMIT + 4\nNAMES = ['a']\nNAMES = NAMES + ['b']\n",
+            "main.py": "def run():\n    from lib import LIMIT, NAMES\n    return LIMIT, NAMES\n\n\nprint('go')\nprint(run())\n"},
+            irs=ONE)
+        self.assertEqual(out, "go\nlib starts\n(5, ['a', 'b'])\n")
+
+    def test_constants_that_definitions_read_are_placed_with_the_definitions(self):
+        out = self.same_as_cpython({
+            "lib.py": "print('lib starts')\nSCALE = 3\nNAMES = ['a', 'b']\nCOUNT = len(NAMES)\nTOTAL = sum(range(5))\n\n\n"
+                      "def scaled(x, k=SCALE):\n    return x * k + COUNT\n\n\nclass Box:\n    size = SCALE\n",
+            "main.py": "def run():\n    import lib\n    return lib.scaled(2), lib.Box.size, lib.TOTAL\n\n\nprint('go')\n"
+                       "print(run())\n"}, irs=ONE)
+        self.assertEqual(out, "go\nlib starts\n(8, 3, 10)\n")
+
+    def test_constants_set_by_a_literal_unpacking(self):
+        out = self.same_as_cpython({
+            "lib.py": "print('lib starts')\nA, B = 'int', 'float'\n\n\ndef kind(x, k=A):\n    return k + str(x) + B\n",
+            "main.py": "def run():\n    import lib\n    return lib.kind(1)\n\n\nprint(run())\n"}, irs=ONE)
+        self.assertEqual(out, "lib starts\nint1float\n")
+
+    def test_module_body_with_a_builtin_call_that_takes_keywords(self):
+        out = self.same_as_cpython({
+            "lib.py": "NUMS = sorted([3, 1, 2], reverse=True)\nTOP = max([4, 9, 2], default=0)\n\n\ndef first():\n"
+                      "    return NUMS[0] + TOP\n",
+            "main.py": "def run():\n    import lib\n    return lib.NUMS, lib.first()\n\n\nprint(run())\n"}, irs=ONE)
+        self.assertEqual(out, "([3, 2, 1], 12)\n")
+
     def test_module_value_from_a_getter_is_refused(self):
         self.refused({"lib.py": "K = 5\n", "helper.py": "def L():\n    import lib\n    return lib\n",
                       "main.py": "import helper\nm = helper.L()\nprint(m.K)\n"},

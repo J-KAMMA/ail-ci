@@ -152,6 +152,7 @@ class Mod:
         self.lazy_slot = {}             # id(synthetic top-level import) -> the `pass` standing in its function
         self.force_init = set()         # ids of synthetic imports whose module must start when the function runs
         self.init_name = None           # name of the function that runs this module's body (lazy start), if any
+        self.hoisted = set()            # ids of the constant assignments placed with the definitions (lazy start)
 
 
 class Imp:
@@ -1291,9 +1292,9 @@ class Program:
             raise _Unfoldable()
         return value
 
-    def fold_apply(self, node, func, *args):
+    def fold_apply(self, node, func, /, *args, **kwargs):
         try:
-            return self.fold_check(func(*args))
+            return self.fold_check(func(*args, **kwargs))
         except (_Unfoldable, _Raises):
             raise
         except Exception:
@@ -1671,11 +1672,19 @@ class Program:
             if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
                 return None
             if isinstance(node, ast.Assign):
-                bad = self.impure_expr(mod, node.value, env) or next(
-                    (t for t in node.targets if not isinstance(t, ast.Name)), None)
+                bad = self.impure_expr(mod, node.value, env)
                 if bad is None:
                     for t in node.targets:
-                        assign(t, node.value, node, env)
+                        if not isinstance(t, ast.Name) and not self.literal_unpack(t, node.value):
+                            bad = t
+                            break
+                if bad is None:
+                    for t in node.targets:
+                        if isinstance(t, ast.Name):
+                            assign(t, node.value, node, env)
+                        else:                   # `A, B = 1, 2`
+                            for e, v in zip(t.elts, node.value.elts):
+                                assign(e, v, node, env)
                 return bad
             if isinstance(node, ast.AnnAssign):
                 bad = (self.impure_expr(mod, node.value, env)
@@ -1717,44 +1726,66 @@ class Program:
         mod.pure_cache = got
         return got
 
+    @staticmethod
+    def literal_unpack(target, value):
+        """`A, B = x, y`: names on the left, a literal of the same length on the right."""
+        return (isinstance(target, (ast.Tuple, ast.List)) and all(isinstance(e, ast.Name) for e in target.elts)
+                and isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts)
+                and not any(isinstance(e, ast.Starred) for e in value.elts))
+
     def init_split(self, mod, where, orig):
         """For a module that a function starts when it runs (see `merge_program`): the top-level statements that go
         into the start function. Definitions (def, class) and imports are placed where the module is spliced in;
         every other statement goes into a function that runs when the import statement runs. A definition is
         refused when its decorators, defaults, bases or class body would need a value the module only computes
         when it runs (or do something)."""
-        probe_body, rest = [], []
-        for index, node in enumerate(mod.tree.body):
-            if id(node) in mod.lazy:
-                continue
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
-                probe_body.append(node)
-            elif not (index == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant)
-                      and isinstance(node.value.value, str)):
-                rest.append(node)
-        probe = copy.copy(mod)
-        probe.tree = ast.Module(body=probe_body, type_ignores=[])
-        probe.pure_cache = False
-        probe.lazy = {}
-        probe.imps = dict(mod.imps)
-        for node in probe_body:
-            imp = mod.imps.get(id(node))
-            if isinstance(node, ast.ImportFrom) and imp is not None and imp.local:
-                # `from m import x` of a variable that changes copies it when the module starts (a statement of the
-                # start function, see `snapshots`); a definition that reads the copy is caught by `reads_state`
-                twin = copy.copy(imp)
-                twin.binds = [(k, ('copied',) if e[0] == 'member' else e) for k, e in imp.binds]
-                probe.imps[id(node)] = twin
-        bad = self.impure(probe)
-        if bad is not None:
-            self.refuse(where, orig, "function-level `%s`: %s defines %s at import time (line %d), which uses a value "
-                        "the module only computes when it runs, or does something when it is defined; the "
-                        "compiler hoists definitions out of the code that a function-level import starts.\n"
-                        "  write instead: move the import to the top of the file, or keep %s to definitions "
-                        "whose decorators, defaults and bases are constants"
-                        % (ast.unparse(orig), mod.path.name, ast.unparse(bad).split('\n')[0][:50],
-                           getattr(bad, 'lineno', 1), mod.path.name))
-        return rest
+        order = [n for n in mod.tree.body if id(n) not in mod.lazy]
+        definitions = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)
+        # a name that the module body assigns once, to an expression that does nothing and cannot raise, and that no
+        # function writes later, is a constant: definitions may read it, so it is placed with them
+        def constant_names(n):
+            if not isinstance(n, ast.Assign) or len(n.targets) != 1:
+                return None
+            t = n.targets[0]
+            if isinstance(t, ast.Name):
+                return [t.id]
+            return [e.id for e in t.elts] if self.literal_unpack(t, n.value) else None
+        hoisted = {id(n) for n in order if constant_names(n) is not None
+                   and all(mod.kinds.get(x) == 'var' and not self.runtime_written(mod, x) for x in constant_names(n))}
+        while True:
+            probe_body = [n for n in order if isinstance(n, definitions) or id(n) in hoisted]
+            probe = copy.copy(mod)
+            probe.tree = ast.Module(body=probe_body, type_ignores=[])
+            probe.pure_cache = False
+            probe.lazy = {}
+            probe.imps = dict(mod.imps)
+            for node in probe_body:
+                imp = mod.imps.get(id(node))
+                if isinstance(node, ast.ImportFrom) and imp is not None and imp.local:
+                    # `from m import x` of a variable that changes copies it when the module starts (a statement of
+                    # the start function, see `snapshots`); a definition that reads the copy is caught by `reads_state`
+                    twin = copy.copy(imp)
+                    twin.binds = [(k, ('copied',) if e[0] == 'member' else e) for k, e in imp.binds]
+                    probe.imps[id(node)] = twin
+            bad = self.impure(probe)
+            if bad is None:
+                break
+            line = getattr(bad, 'lineno', -1)
+            culprit = next((n for n in order if id(n) in hoisted and n.lineno <= line <= (n.end_lineno or n.lineno)),
+                           None)
+            if culprit is None:
+                self.refuse(where, orig, "function-level `%s`: %s defines %s at import time (line %d), which uses a "
+                            "value the module only computes when it runs, or does something when it is defined; the "
+                            "compiler hoists definitions out of the code that a function-level import starts.\n"
+                            "  write instead: move the import to the top of the file, or keep %s to definitions "
+                            "whose decorators, defaults and bases are constants"
+                            % (ast.unparse(orig), mod.path.name, ast.unparse(bad).split('\n')[0][:50], line,
+                               mod.path.name))
+            hoisted.discard(id(culprit))
+        mod.hoisted = hoisted
+        return [n for n in order if not isinstance(n, definitions) and id(n) not in hoisted
+                and not (n is mod.tree.body[0] and isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
+                         and isinstance(n.value.value, str))]
 
     def missing(self, mod, node, name):
         self.refuse(mod, node, "no module named %r: the search path (%s) has no such file or directory.\n"
@@ -2082,14 +2113,25 @@ class Program:
             if entry[0] == 'mod':
                 return ('module', entry[1])
             inner = self.resolve(entry[1], entry[2], depth + 1, True)
-            if inner[0] == 'var' and self.mutable(inner[1], inner[2]):
-                return ('var', mod, name)
-            return inner
+            if inner[0] == 'var' and self.mutable(inner[1], inner[2]) and not (
+                    name in mod.lazy_only and not self.runtime_written(inner[1], inner[2])):
+                return ('var', mod, name)       # a function-level import of a name that only the module body sets
+            return inner                        # reads the variable itself: its value is settled when the function runs
         if name in mod.std:
             return ('std', mod.std[name])
         if name in mod.kinds:
             return ('var', mod, name)
         return ('none',)
+
+    def runtime_written(self, owner, key):
+        """The variable `owner.key` is written after the module body has run: by a function that says `global`, or
+        by `m.key = v` somewhere. (A name that the module body assigns more than once is settled when it ends.)"""
+        if (owner, key) in self.ext:
+            return True
+        names = getattr(owner, 'global_names', None)
+        if names is None:
+            names = owner.global_names = {n for g in ast.walk(owner.tree) if isinstance(g, ast.Global) for n in g.names}
+        return key in names
 
     def merged_name(self, owner, key):
         return owner.merged[key] if key in owner.merged else owner.snaps[key]
@@ -2134,7 +2176,7 @@ class Program:
                     if entry[0] != 'member':
                         continue
                     inner = self.resolve(entry[1], entry[2], 0, True)
-                    if inner[0] == 'var' and self.mutable(inner[1], inner[2]):
+                    if inner[0] == 'var' and self.runtime_written(inner[1], inner[2]):
                         self.refuse(mod, orig, "`from %s import %s` inside a function: %s.%s is a variable that "
                                     "changes while the program runs, and CPython copies its value when the "
                                     "function runs, which the merged program cannot do.\n"
@@ -2647,7 +2689,8 @@ def merge_program(entry_path, entry_text, read=None):
         return None                    # the caller's own parse reports it
     if not any(isinstance(node, (ast.Import, ast.ImportFrom)) and program.is_local_import(node)
                or isinstance(node, ast.Name) and node.id in ('__file__', '__package__')
-               or isinstance(node, ast.Try) and any(isinstance(s, (ast.Import, ast.ImportFrom)) for s in node.body)
+               or isinstance(node, ast.Try) and any(isinstance(x, (ast.Import, ast.ImportFrom))
+                                                    for b in node.body for x in ast.walk(b))
                for node in ast.walk(tree)):
         return None
     entry = Mod('__main__', program.entry_path, tree, True)
@@ -2850,7 +2893,8 @@ def merge_program(entry_path, entry_text, read=None):
             elif index == 0 and isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) \
                     and isinstance(node.value.value, str):
                 continue                                          # module docstring
-            elif init_mode and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            elif init_mode and not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) \
+                    and id(node) not in mod.hoisted:
                 rewrite(mod, node, init_body, True)
             else:
                 rewrite(mod, node)
