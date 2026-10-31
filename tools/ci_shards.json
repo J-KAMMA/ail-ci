@@ -539,6 +539,7 @@
   "test_ail_sqlite": 225.7,
   "test_ail_stdin_list_batch": 23.6,
   "test_ail_stdin_read_until": 3.7,
+  "test_ail_stdlib1": 10.0,
   "test_ail_stdlib5": 539.6,
   "test_ail_stdlib_batch1": 40.5,
   "test_ail_stdlib_batch3": 380.4,
@@ -1217,6 +1218,7 @@
    "test_ail_refusal_messages",
    "test_ail_sets_general",
    "test_ail_source_edit",
+   "test_ail_stdlib1",
    "test_ail_stdlib5",
    "test_ail_virtual_dispatch"
   ],

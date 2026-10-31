@@ -1,3 +1,33 @@
+## 2026-10-31 -- stdlib1 re-applied: textwrap.shorten / indent and string.capwords (job-rbstdlib1-10312120)
+
+Re-applied the accepted `job-stdlib1-10292333` change (base `1b0444b`, fetched anonymously
+from J-KAMMA/ail-ci), whose diff no longer applies to this tree. `ail_syntax.py` and
+`ail_testenv.py` applied verbatim: `_ail_tw_wrap_more` (the max_lines / placeholder path) now
+backs `_ail_tw_wrap`, and the new `_ail_tw_shorten`, `_ail_tw_indent` and
+`_ail_string_capwords` helpers are wired through `_MATH_DEPS`, `_SMALL_MODULES`, `_SMALL_NOTE`
+and `small_call`, so `textwrap.shorten(text, width)` (positional or keyword), `textwrap.indent`
+and `string.capwords` build; `TextWrapper`, `shorten(..., placeholder=...)`, a duplicate width
+and `string.Template` stay named compile-time refusals. `ail_testenv.rustc_path()` replaces the
+two tests' inline rustc-shim probes; both sides' fix is kept (the helper runs the same
+`rustc --version` probe, now with a timeout and exception handling).
+
+The conflicts were the shared-line records. This tree registers test modules through
+`AIL_CURRENT/tests.d/`, so `test_ail_stdlib1` is registered by the new
+`AIL_CURRENT/tests.d/test_ail_stdlib1.txt` instead of editing the `ail_check.MODULES` tuple (the
+incoming hunk), and `ail_check.py` is unchanged. `tools/ci_shards.json` keeps its current
+(reordered) shard layout and gains the weight 10.0 plus the shard entry. `tools/diff_ids.py` is
+not present on this tree, so it was not run; `tools/update_manifest.py` was run and `--check`
+passes.
+
+Probes in `/tmp/probes` on both builds (`bash ~/tools/cmp.sh`): `p_shorten`, `p_shorten_kw`,
+`p_shorten_types` (width 0 / -1 / 4 / 5 / 6, bytes and None text, long word), `p_indent`,
+`p_indent_route`, `p_indent_types`, `p_capwords`, `p_capwords_route`, `p_capwords_types` and
+the wrap/fill control `p_control` all match CPython 3.12 on the general and default builds;
+`p_refuse_shorten` (placeholder), `p_refuse_shorten_dup` (duplicate width) and
+`p_refuse_template` are refused by name on both builds. Tests on the final state:
+test_ail_stdlib1 (5), test_ail_c_export + test_ail_cratebridge (28), and test_ail_safetynet +
+test_ail_files + test_ail_corpus_findings3 + test_ail_pre346 (30, 1 skipped), all OK.
+
 ## 2026-10-30 -- ex13 re-applied: a definitions-plus-constants Python source runs as a no-op (job-rbex13-10301052)
 
 Re-applied the accepted `job-ex13-10290432` change, whose diff no longer applies because this
