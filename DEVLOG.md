@@ -1,3 +1,32 @@
+## 2026-10-31 -- rbpre420 follow-up: keep the no-class C for list/tuple index errors (job-rbpre420-10312035)
+
+The pre421 C-identity check failed after the pre420 re-apply.  Making the v2 runtime's
+list/tuple getitem text class-aware unconditionally changed the generated C of every
+general-path program that writes no class.  The runtime text is restored to the base
+`ail_type_name(key.tag)` form, and `pyboxed2._INDEX_ERROR_CLASS_EDITS` again carries the read
+rewrite next to the two write rewrites; all three are applied only when `source_has_class` is
+set (a class statement in the program's own source, before the preludes inject theirs).  A
+class-bearing program still names the class for a read, a store and a deletion, capped at
+CPython's 200 characters; a no-class program emits C byte-identical to base.
+`test_ail_pre420` is unchanged and still passes.
+
+Final-state tests: test_ail_pre420 (1), test_ail_pre421 (2), test_ail_safetynet (5),
+test_ail_files (18, 1 skipped) and test_ail_corpus_findings3 (2) all pass.  Probes in
+`/tmp/probes`, both builds via `cmp.sh`: `pre420_routes.py` (instance, subclass and exception
+keys; argument, alias, list item, attribute and dict value routes; list and tuple; empty,
+negative and valid indexes; `__index__`; bytes/bytearray/float/str/None/bool keys; store and
+deletion), `pre420_long.py` (class names of 1/32/33/200/201/210 characters),
+`pre420_noclass.py` (float/str/None/bool keys, empty and negative indexes, valid
+store/delete) and `pre420_uncaught.py` (exit status) all match CPython.  A no-class
+`--debug-dir` build has `ail_type_name(key.tag)` once and none of the class-name `tnbuf`
+writes; a class-bearing one has the three class-name writes the pre421 check expects.
+
+`test_ail_pre366` is not in this tree or on origin/integ.  Its branch version (fetched from
+origin/job-pre366-10280649) fails the same 28 refusal subtests here and on the untouched HEAD
+tree, because this snapshot lacks the aliased power/int wrapper refusals it tests; its 14
+matching subtests pass on both.  That failure is unrelated to this change.
+`tools/update_manifest.py` was run and `--check` passes.
+
 ## 2026-10-29 -- re-apply pre420: a list/tuple index error names the instance's class (job-rbpre420-10290915)
 
 Re-applied the accepted pre420 change on this tree. The pre411 review recorded as pre-existing,
