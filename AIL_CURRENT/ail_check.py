@@ -23,6 +23,7 @@ LISTED_MODULES = (
     'test_ail_nested_functions', 'test_ail_match', 'test_ail_raise_from', 'test_ail_optional_locals',
     'test_ail_ex13',
     'test_ail_safetynet',
+    'test_ail_cprune',
     'test_ail_pre48',
     'test_ail_pre7',
     'test_ail_pre1',

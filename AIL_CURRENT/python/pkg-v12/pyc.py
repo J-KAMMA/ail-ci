@@ -43,6 +43,7 @@ import os as _os_flags
 CFLAGS_TUNE += _os_flags.environ.get('AIL_EXTRA_CFLAGS', '').split()
 import native_diagnostics
 import buildcache
+import cprune
 import shadowing
 import fastwalk
 fastwalk.install()      # the same ast.walk in half the time, for every pass of this run
@@ -1212,6 +1213,17 @@ def _build_unshadowed_exact(source, out, strict, report, force_general):
             return _build_unshadowed_inner(source, out, strict, report, force_general, local_proof=False)
 
 
+def _write_unit(path, text, regions):
+    """Write the C unit gcc compiles. native_diagnostics (--debug-dir) records the whole emitted unit;
+    gcc then gets it without the static runtime the program never names (cprune.py: same object code,
+    same line numbers, so a diagnostic still points at the recorded copy)."""
+    path.write_text(text, encoding='utf-8')
+    native_diagnostics.generated(path, regions)
+    pruned = cprune.prune(text)
+    if pruned != text:
+        path.write_text(pruned, encoding='utf-8')
+
+
 def _build_unshadowed_inner(source, out, strict, report, force_general, local_proof=True, legacy_int=False):
     out = pathlib.Path(out)
     c = out.with_suffix('.c')
@@ -1285,8 +1297,7 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             # Unchanged from before BRIEF_mixed_mode.md: one file, one compile, one link -- the
             # overwhelming majority of general-path programs (no wired mixed-mode candidate) take
             # exactly this path, byte-for-byte, so nothing about their build can regress.
-            c.write_text(boxed_c, encoding='utf-8')
-            native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
+            _write_unit(c, boxed_c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
             # -fno-asynchronous-unwind-tables: GCC 16/MinGW-w64 emitted
             # corrupt per-instruction unwind info for one very large
             # generated function (compound literals + statement
@@ -1343,8 +1354,7 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
                           'the C compiler rejected this (general path):\n%s'))
 
             def _write(step):
-                step[0].write_text(step[1], encoding='utf-8')
-                native_diagnostics.generated(step[0], info.get('c_source_regions', info.get('c_units', (None, []))[1]))
+                _write_unit(step[0], step[1], info.get('c_source_regions', info.get('c_units', (None, []))[1]))
 
             def _fail(step, r):
                 raise _general_failure(_typed_e, typed_main, PipelineError(step[3] % r.stderr[-800:]))
@@ -1396,8 +1406,7 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
     main = (_NOTHING_MAIN if _python_runs_nothing(source, True)
             or (not os.environ.get('AIL_TOOL_MODE') and _module_constant_source(source)) else
             _io_main_for(info) if (info.get('io') or info.get('ret') == NORET) else _main_for(info))
-    c.write_text(body + main, encoding='utf-8')
-    native_diagnostics.generated(c, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
+    _write_unit(c, body + main, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
     r = _cc([compiler(), *opt_flags(), *CFLAGS_TUNE, '-fno-asynchronous-unwind-tables', *link_flags(), '-o', str(out), str(c)]
                        + (['-fno-strict-aliasing'] if info.get('inherit') else [])   # TYPED_INHERITANCE.md section 2
                        + (['-lm'] if info.get('libm') else [])
