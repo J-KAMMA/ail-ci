@@ -1446,7 +1446,10 @@ class Unified(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             cs = {}
             for mode, env in (('plain', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '0'}),
+                              # the plan of BIGINT.md section 6 (a marked function boxed whole); section 14's exact
+                              # mode unboxes the bounded part of these marked functions (test_ail_bigcap_split)
                               ('unified', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '1', 'AIL_BIGINT': 'off',
+                                           'AIL_UNIFIED_EXACT': '0',
                                            'AIL_UNIFIED_STATS': str(Path(d, 'stats.jsonl'))})):
                 source = Path(d, 'p_%s.py' % mode)
                 source.write_text(text, encoding='utf-8')
@@ -1503,7 +1506,8 @@ class Unified(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             cs = {}
             for mode, env in (('plain', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '0'}),
-                              ('unified', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '1'})):
+                              ('unified', {'AIL_UNIFIED_FORCE': '1', 'AIL_UNIFIED': '1',
+                                           'AIL_UNIFIED_EXACT': '0'})):     # section 6's plan (see test_u5)
                 source = Path(d, 'p_%s.py' % mode)
                 source.write_text(text, encoding='utf-8')
                 envs = dict(os.environ)
