@@ -81,6 +81,7 @@ class Build:
         environ = dict(os.environ)
         for key in ('AIL_GPU', 'AIL_GPU_TRACE'):
             environ.pop(key, None)
+        environ['AIL_GPU'] = 'emu'          # G1 is about the emulation; the default (auto, GPU.md 6.4) runs the original loop
         environ.update(env)
         r = subprocess.run([str(self.exe)], input=stdin, capture_output=True, text=True, env=environ, timeout=120)
         return r.stdout, r.returncode, r.stderr
