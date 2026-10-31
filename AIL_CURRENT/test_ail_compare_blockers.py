@@ -293,6 +293,24 @@ main()
 '''
         self.agree(source, ['7 3', '0 5', '3 -4'])
 
+    def test_t5_loop_def_with_a_default_bound_to_the_loop_variable_is_not_hoisted(self):
+        source = '''import sys
+
+
+def main():
+    n = int(sys.stdin.buffer.read().split()[0])
+    out = []
+    for i in range(n):
+        def g(z, i=i):
+            return z * 10 + i
+        out.append(g(i % 3))
+    print(out)
+
+
+main()
+'''
+        self.agree(source, ['4', '0'], strict=False)
+
     def test_t6_def_in_loop_returning_a_tuple(self):
         source = '''import sys
 

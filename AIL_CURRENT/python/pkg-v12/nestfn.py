@@ -122,8 +122,10 @@ def _hoist_pure_loop_defs(source, tree):
                                       ast.Yield, ast.YieldFrom, ast.Await))
                        and n is not inner for n in ast.walk(inner)):
                     continue
-                if inner.args.vararg or inner.args.kwarg or inner.args.kwonlyargs or inner.args.posonlyargs:
-                    continue
+                if (inner.args.vararg or inner.args.kwarg or inner.args.kwonlyargs or inner.args.posonlyargs
+                        or inner.args.defaults or inner.returns is not None
+                        or any(a.annotation is not None for a in inner.args.args)):
+                    continue                      # defaults and annotations are evaluated where the def runs
                 free, own, nonlocal_names = _free_names(inner)
                 if nonlocal_names or any(f in outer_bound and f not in module_names for f in free):
                     continue
