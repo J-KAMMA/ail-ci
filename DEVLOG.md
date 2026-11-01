@@ -36,6 +36,23 @@ runs the tool, asserts its pin carries `s`, re-checks clean, and runs the packag
 on the copy. Probes under `/tmp/probes` also covered `.py`/`.h`/`.c`, a nested pkg-v12 module, stdlib,
 non-compiler files left untouched, an existing `f` flag kept, and a pinned compiler source with `s`
 removed reported by `--check`.
+## 2026-11-01 -- stdlib graphlib: TopologicalSorter on the general path, twelve lab programs (job-std_graphlib-11020038)
+
+Added `graphlib.TopologicalSorter` and `graphlib.CycleError` to the general-path library lowering
+(`python/pkg-v12/genlib.py` and `prelude_genlib.py`). The constructor (`graph=` keyword included),
+`add`, `prepare`, `get_ready`, `is_active`, `bool`, `done(*nodes)` and `static_order` follow CPython
+3.12's node states, insertion order, ready batches and `CycleError` args / message / cycle list; the
+`ValueError` texts for every misuse match too. All twelve realistic programs in
+`lab/stdlib/graphlib/` build in the default mode (all on the general path, the typed path still
+refuses `import graphlib`) and match CPython's stdout and exit status on `AIL_IR=0` and `AIL_IR=1`;
+the initial build had 0 of 12, all refused with `graphlib.TopologicalSorter (not yet published in
+NAMES_library.json)`. `AIL_CURRENT/test_ail_std_graphlib.py` is registered by
+`tests.d/test_ail_std_graphlib.txt`. Probes in `/tmp/probes/g_*.py` cover empty, single, duplicate
+and negative/tuple nodes, values through an argument / list item / attribute / dict value, module and
+from imports and aliases, multiple `done` arguments, generator partial iteration, self-loops,
+multiple cycles, a 20-case cycle matrix and all error paths on both `cmp.sh` builds. The ten
+`lab/compare` `main.ail` builds keep byte-identical `program.c`, as do the `main.py` builds that
+built before.
 
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
