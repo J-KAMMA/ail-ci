@@ -14830,11 +14830,8 @@ static inline double ail__as_dbl_ck(ail_ctx *cx, ail_obj x) {
     return x.tag == AIL_T_FLOAT ? ail_float_val(x) : (double)x.i;
 }
 /*B|*/
+static inline ail_st ail__math_double(ail_ctx *cx, double *out, ail_obj x) { (void)cx; *out = ail__as_double(x); return AIL_OK; }
 static inline double ail__as_dbl_ck(ail_ctx *cx, ail_obj x) { (void)cx; return ail__as_double(x); }
-/*B>*/
-/*B<*/
-/*B|*/
-static inline ail_st ail__math_double(ail_ctx *cx, double *out, ail_obj x) { (void)cx; *out = x.tag == AIL_T_FLOAT ? ail_float_val(x) : (double)x.i; return AIL_OK; }
 /*B>*/
 /* Convert an int (possibly BIG) or float to double, with CPython's OverflowError for an int
    beyond the double range.  A macro so the conversion's status is propagated by the caller. */

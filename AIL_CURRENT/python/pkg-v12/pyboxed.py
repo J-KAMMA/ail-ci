@@ -2930,4 +2930,4 @@ def build(source, report):
     compiler = Compiler()
     body = compiler.compile(source)
     report['boxed'] = list(compiler.boxed_names)
-    return '#define _GNU_SOURCE\n#include <stdint.h>\n#include <stdio.h>\n' + cruntime.emit(['OBJ']) + '\n' + body
+    return '#define _GNU_SOURCE\n#include <stdint.h>\n#include <stdio.h>\n#include <stdlib.h>\n' + cruntime.emit(['OBJ']) + '\n' + body

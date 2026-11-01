@@ -55,6 +55,11 @@ def compiler():
     raise PipelineError('no C compiler found on PATH; set $PIPE_CC')
 
 
+# Every C the compiler itself generated is built with these as errors: a runtime piece that is referenced but not emitted
+# would otherwise be an implicit declaration (an `int` return, a silently wrong double or pointer) that only warns.
+STRICT_DECL_FLAGS = ['-Werror=implicit-function-declaration', '-Werror=implicit-int', '-Werror=incompatible-pointer-types']
+
+
 def opt_flags():
     """The optimisation flags of a build: -O2, or -g -O0 under AIL_DEBUG=1 (`ail build --debug`, so gdb steps
     through the source lines the `#line` directives point at)."""
@@ -276,7 +281,7 @@ def shared_object(src, prefix='p', extra=()):
         with tempfile.TemporaryDirectory() as tmp:
             c = pathlib.Path(tmp) / 'a.c'
             c.write_text(src, encoding='utf-8')
-            r = subprocess.run([compiler(), '-O2', '-ffp-contract=off', '-shared', '-fPIC', '-o', str(so), str(c)]
+            r = subprocess.run([compiler(), '-O2', '-ffp-contract=off', *STRICT_DECL_FLAGS, '-shared', '-fPIC', '-o', str(so), str(c)]
                                + list(extra), capture_output=True, text=True)
             if r.returncode:
                 raise PipelineError('the C compiler rejected this:\n%s\n%s' % (r.stderr[-600:], src))
