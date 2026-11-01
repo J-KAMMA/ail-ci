@@ -1,3 +1,73 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode-go/deepseek-v4.1-flash]
+**Review of `44c847b..HEAD` (b9b1cbc + 0ac1f32)**
+
+The change really does: add a bundled `AIL_CURRENT/stdlib/shlex.py` (split/quote/join plus the lexer, with POSIX `None` EOF, `__next__`, and `infile`/`error_leader` sentinels), 12 lab programs, RESULTS, and `test_ail_std_shlex`. The report describes this accurately.
+
+**Verified**
+- 12/12 `lab/stdlib/shlex` programs match CPython stdout/exit on both builds.
+- Worker probes (`/tmp/probes/shlex_fix_*`, 4) all match on both builds.
+- My probes `p1b_infile`, `p2_iter`, `p4b_punct`, unicode/`wordchars` in `p7` match on both builds.
+- `test_ail_std_shlex` + `test_ail_safetynet` pass; `test_ail_files` + `test_ail_corpus_findings3` pass (4/4).
+- `tools/update_manifest.py --check` exits 0.
+- Generated `program.c` for all 10 `lab/compare/src/*/main.ail` is byte-identical to base.
+- No compiler/runtime changes, so speed is not affected.
+- Report claim "removed DIFFERENCES row" is verified (row added then removed).
+- Pre-existing: `iter(user_obj) is user_obj` is `False` on both HEAD and base; lab iteration still matches.
+
+**Defects found (all caused by the new module; base refuses the import)**
+
+1. `shlex.split(None)` — `AIL_CURRENT/stdlib/shlex.py:343` passes `None` into the lexer.
+   ```python
+   import shlex
+   try: print(shlex.split(None))
+   except ValueError as e: print("value", e)
+   except TypeError as e: print("type", e)
+   ```
+   Expected CPython: `value s argument must not be None`
+   Actual: `type object of type 'NoneType' has no len()`
+   (Realistic: `shlex.split(config.get("cmd"))` with a missing key.)
+
+2. `shlex.quote(None)` — line 40 tests `s == ""`, not truthiness.
+   ```python
+   import shlex
+   print(repr(shlex.quote(None)))
+   ```
+   Expected: `"''"`; actual: `TypeError ... NoneType has no len()`. Same for `shlex.join([None])`.
+
+3. `lex.source` is `""`, not CPython's `None` — line 118.
+   ```python
+   import shlex
+   lex = shlex.shlex("x", "f.sh", True)
+   print("none" if lex.source is None else "not-none", repr(lex.source))
+   ```
+   Expected: `none None`; actual: `not-none ''`.
+
+Minor, not counted: `debug` mode omits CPython's `push_source`/`pop_source` lines and prints `raw token=''` where CPython prints `raw token=EOF` (`p9_debug`); the `pop_source` line contains a CPython stream address, so exact parity may not be practical.
+
+**Unverified:** no full-suite run (by instruction); `lex.instream` is a string rather than a file object (documented limitation, not probed as a defect).
+
+VERDICT: FIX
+[cost $0.0315, opencode tokens {"total": 1352798, "input": 58103, "output": 7637, "reasoning": 24082, "cache.write": 0, "cache.read": 1262976}]
+    tool time: bash 12.2 min
+        233s bash   cd /home/runner/work/_temp/w2/AIL_CURRENT && timeout 1200 python3 ../tools/par_check.py -j 2 test_ail_files te
+        172s bash   cd /home/runner/work/_temp/w2/AIL_CURRENT && timeout 900 python3 ../tools/par_check.py -j 2 test_ail_std_shlex
+        109s bash   cd /home/runner/work/_temp/w2 && for f in lab/stdlib/shlex/*.py; do printf '%s ' "$(basename $f)"; bash ~/tool
+         61s bash   cd /home/runner/work/_temp/w2 && rm -rf /tmp/ccmp && mkdir -p /tmp/ccmp && ok=0; bad=0; for t in $(ls lab/comp
+         39s bash   cd /tmp/probes && for p in shlex_fix_eof_posix shlex_fix_eof_nonposix shlex_fix_next shlex_fix_leader; do echo
+         32s bash   cd /tmp/rprobes && for p in p1_infile p2_iter p3_quote p4_punct p5_misc; do echo "===== $p"; bash ~/tools/cmp.
+         24s bash   cd /tmp/rprobes && cat > p1b_infile.py <<'PY' import shlex  def show(tag, lex):     print(tag, repr(lex.infile
+         17s bash   cd /tmp/rprobes && cat > p9_debug.py <<'PY' import shlex  def main():     lex = shlex.shlex("a b", "f.sh", Tru
+
+
+--- ORIGINAL TASK ---
 **Coverage: make real programs that use the CPython stdlib module `shlex` build and print exactly what CPython prints.**
 
 1. Write 12 small realistic programs, each 15–60 lines, that use `shlex` the way typical code does: its most common functions and classes, the common argument forms and keyword arguments, and its edge cases (empty inputs, errors that the program catches). Put them in lab/stdlib/shlex/.
