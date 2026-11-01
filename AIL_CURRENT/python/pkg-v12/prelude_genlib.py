@@ -2569,6 +2569,11 @@ class _ail_difflib_Differ:
 
 
 def _ail_difflib_IS_LINE_JUNK(line):
+    name = type(line).__name__
+    if name in ('bytes', 'bytearray', 'memoryview'):
+        raise TypeError('cannot use a string pattern on a bytes-like object')
+    if not isinstance(line, str):
+        raise TypeError('expected string or bytes-like object, got ' + repr(name))
     s = line.strip()
     return s == '' or s == '#'
 
@@ -2681,8 +2686,15 @@ def _ail_difflib_check_types(a, b, fromfile, tofile, fromfiledate, tofiledate, l
             raise TypeError('all arguments must be str, not: ' + repr(arg))
 
 
+class _AilDifflibMissing:
+    pass
+
+
+_AIL_DIFFLIB_MISSING = _AilDifflibMissing()
+
+
 def _ail_difflib_bytes_or(value, default):
-    if value is None:
+    if value is _AIL_DIFFLIB_MISSING:
         return _ail_mkb(default)
     return value
 
@@ -2705,24 +2717,27 @@ def _ail_difflib_diff_bytes_args(a, b, fromfile, tofile, fromfiledate, tofiledat
             _ail_difflib_decode_bytes(_ail_difflib_bytes_or(lineterm, '\n')))
 
 
-def _ail_difflib_diff_bytes(dfunc, a, b, fromfile=None, tofile=None, fromfiledate=None, tofiledate=None,
-                            n=3, lineterm=None):
+def _ail_difflib_diff_bytes(dfunc, a, b, fromfile=_AIL_DIFFLIB_MISSING, tofile=_AIL_DIFFLIB_MISSING,
+                            fromfiledate=_AIL_DIFFLIB_MISSING, tofiledate=_AIL_DIFFLIB_MISSING,
+                            n=3, lineterm=_AIL_DIFFLIB_MISSING):
     a, b, fromfile, tofile, fromfiledate, tofiledate, lineterm = _ail_difflib_diff_bytes_args(
         a, b, fromfile, tofile, fromfiledate, tofiledate, lineterm)
     for line in dfunc(a, b, fromfile, tofile, fromfiledate, tofiledate, n, lineterm):
         yield _ail_str_encode(line, 'latin-1')
 
 
-def _ail_difflib_diff_bytes_unified(a, b, fromfile=None, tofile=None, fromfiledate=None, tofiledate=None,
-                                    n=3, lineterm=None):
+def _ail_difflib_diff_bytes_unified(a, b, fromfile=_AIL_DIFFLIB_MISSING, tofile=_AIL_DIFFLIB_MISSING,
+                                    fromfiledate=_AIL_DIFFLIB_MISSING, tofiledate=_AIL_DIFFLIB_MISSING,
+                                    n=3, lineterm=_AIL_DIFFLIB_MISSING):
     a, b, fromfile, tofile, fromfiledate, tofiledate, lineterm = _ail_difflib_diff_bytes_args(
         a, b, fromfile, tofile, fromfiledate, tofiledate, lineterm)
     for line in _ail_difflib_unified_diff(a, b, fromfile, tofile, fromfiledate, tofiledate, n, lineterm):
         yield _ail_str_encode(line, 'latin-1')
 
 
-def _ail_difflib_diff_bytes_context(a, b, fromfile=None, tofile=None, fromfiledate=None, tofiledate=None,
-                                    n=3, lineterm=None):
+def _ail_difflib_diff_bytes_context(a, b, fromfile=_AIL_DIFFLIB_MISSING, tofile=_AIL_DIFFLIB_MISSING,
+                                    fromfiledate=_AIL_DIFFLIB_MISSING, tofiledate=_AIL_DIFFLIB_MISSING,
+                                    n=3, lineterm=_AIL_DIFFLIB_MISSING):
     a, b, fromfile, tofile, fromfiledate, tofiledate, lineterm = _ail_difflib_diff_bytes_args(
         a, b, fromfile, tofile, fromfiledate, tofiledate, lineterm)
     for line in _ail_difflib_context_diff(a, b, fromfile, tofile, fromfiledate, tofiledate, n, lineterm):

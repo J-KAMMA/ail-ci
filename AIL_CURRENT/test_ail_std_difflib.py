@@ -10,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 
@@ -28,6 +29,69 @@ PASSING = [
     "10_seq_grouped.py",
     "11_diff_bytes.py",
 ]
+
+EDGE_TYPES_PROGRAM = textwrap.dedent("""
+    import difflib
+
+
+    def main():
+        a = [b"a\\n"]
+        b = [b"b\\n"]
+        for label in ["fromfile", "tofile", "fromfiledate", "tofiledate", "lineterm"]:
+            try:
+                if label == "fromfile":
+                    out = list(difflib.diff_bytes(difflib.unified_diff, a, b, fromfile=None))
+                elif label == "tofile":
+                    out = list(difflib.diff_bytes(difflib.unified_diff, a, b, tofile=None))
+                elif label == "fromfiledate":
+                    out = list(difflib.diff_bytes(difflib.unified_diff, a, b, fromfiledate=None))
+                elif label == "tofiledate":
+                    out = list(difflib.diff_bytes(difflib.unified_diff, a, b, tofiledate=None))
+                else:
+                    out = list(difflib.diff_bytes(difflib.unified_diff, a, b, lineterm=None))
+            except TypeError as err:
+                print("u", label, str(err))
+            else:
+                print("u", label, "NO ERROR", len(out))
+        for label in ["fromfile", "tofile", "lineterm"]:
+            try:
+                if label == "fromfile":
+                    out = list(difflib.diff_bytes(difflib.context_diff, a, b, fromfile=None))
+                elif label == "tofile":
+                    out = list(difflib.diff_bytes(difflib.context_diff, a, b, tofile=None))
+                else:
+                    out = list(difflib.diff_bytes(difflib.context_diff, a, b, lineterm=None))
+            except TypeError as err:
+                print("c", label, str(err))
+            else:
+                print("c", label, "NO ERROR", len(out))
+        for label in ["int", "none", "list", "float", "dict", "bytes", "bytearray"]:
+            try:
+                if label == "int":
+                    out = difflib.IS_LINE_JUNK(5)
+                elif label == "none":
+                    out = difflib.IS_LINE_JUNK(None)
+                elif label == "list":
+                    out = difflib.IS_LINE_JUNK([])
+                elif label == "float":
+                    out = difflib.IS_LINE_JUNK(1.5)
+                elif label == "dict":
+                    out = difflib.IS_LINE_JUNK({})
+                elif label == "bytes":
+                    out = difflib.IS_LINE_JUNK(b"a")
+                else:
+                    out = difflib.IS_LINE_JUNK(bytearray(b"a"))
+            except TypeError as err:
+                print("junk", label, str(err))
+            else:
+                print("junk", label, out)
+        print("junk-valid", difflib.IS_LINE_JUNK(" # \\n"), difflib.IS_LINE_JUNK("x\\n"))
+        print("defaults", list(difflib.diff_bytes(difflib.unified_diff, a, b)))
+        print("empty", list(difflib.diff_bytes(difflib.unified_diff, a, b, fromfile=b"", tofile=b"", lineterm=b"\\n")))
+
+
+    main()
+    """)
 
 
 @unittest.skipUnless(PROGRAMS.is_dir(), "lab/stdlib/difflib is not part of this tree")
@@ -67,6 +131,33 @@ class StdlibDifflibTests(unittest.TestCase):
                         if x != y:
                             self.fail("%s line %d: CPython %r, AIL %r" % (name, index + 1, x[:300], y[:300]))
                 self.assertEqual(got.stdout, want.stdout)
+
+    def test_argument_type_errors(self):
+        with tempfile.TemporaryDirectory(prefix="ail-difflib-edge-") as tmp:
+            work = Path(tmp)
+            source = work / "edge_types.py"
+            source.write_text(EDGE_TYPES_PROGRAM, encoding="utf-8")
+            exe = work / "edge_types.exe"
+
+            want = subprocess.run([sys.executable, str(source)], cwd=work, capture_output=True, timeout=300)
+            self.assertEqual(want.returncode, 0, want.stderr.decode("utf-8", "replace"))
+
+            env = dict(os.environ, AIL_NO_CACHE="1")
+            env.pop("AIL_NO_GENERAL", None)
+            built = subprocess.run(
+                [sys.executable, "-B", CLI, "compile", source.name, "--syntax", "python", "-o", exe.name],
+                cwd=work,
+                capture_output=True,
+                text=True,
+                timeout=900,
+                env=env,
+            )
+            self.assertEqual(built.returncode, 0, built.stderr[-4000:])
+            self.assertIn("general path", built.stderr)
+
+            got = subprocess.run([str(exe)], cwd=work, capture_output=True, timeout=300)
+            self.assertEqual(got.returncode, want.returncode, got.stderr.decode("utf-8", "replace"))
+            self.assertEqual(got.stdout, want.stdout)
 
 
 if __name__ == "__main__":

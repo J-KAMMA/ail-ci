@@ -1,3 +1,30 @@
+## 2026-11-01 -- stdlib coverage: `difflib` review follow-up (job-std_difflib-11011614)
+
+Fixed the two review defects in the general-path `difflib` support.
+
+`diff_bytes` used `None` as the "argument omitted" sentinel, so an explicit `None` silently took
+the default instead of raising CPython's `TypeError: all arguments must be bytes, not NoneType
+(None)`. The five metadata / `lineterm` arguments now default to a private sentinel
+(`_AIL_DIFFLIB_MISSING`, a class instance; `object()` is not a known general-path builtin) and only
+the sentinel is replaced by `b''` / `b'\n'`, so explicit `None` reaches `decode()` and raises.
+This covers both `diff_bytes(difflib.unified_diff, ...)` / `diff_bytes(difflib.context_diff, ...)`
+rewrites and the generic path.
+
+`IS_LINE_JUNK` called `.strip()` directly, so an `int`, `None` or list raised `AttributeError` and
+`bytes` returned `False`. It now reproduces the `re` pattern's errors: bytes, bytearray and
+memoryview values raise `cannot use a string pattern on a bytes-like object`, and any other
+non-`str` raises `expected string or bytes-like object, got '<type>'`. The check uses
+`type(line).__name__` rather than referencing `bytes`/`bytearray`, because a program without the
+bytes prelude does not know those type names at compile time.
+
+Added `test_argument_type_errors` to `test_ail_std_difflib.py` covering explicit `None` for the
+five arguments (both diff functions), the `b''` / omitted defaults, and the junk predicate on
+int, None, list, float, dict, bytes and bytearray. Probes `/tmp/probes/dif_fix_db_none.py`,
+`dif_fix_db_types.py`, `dif_fix_linejunk.py` and `dif_fix_charjunk.py` also cover `None` reaching
+the arguments through a parameter, local alias, list item, attribute and dict value; all match
+CPython on both the general and default builds. Re-ran `test_ail_std_difflib`, `test_ail_genlib`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`, and refreshed the manifest.
+
 ## 2026-11-01 -- stdlib coverage: `difflib` (job-std_difflib-11011614)
 
 Added `difflib` to the general-path prelude (`python/pkg-v12/prelude_genlib.py`, selected by
