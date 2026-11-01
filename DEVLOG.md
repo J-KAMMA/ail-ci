@@ -1,3 +1,20 @@
+## 2026-11-01 -- stdlib/json lab: 12 realistic programs, 10 build (job-std_json-11011754)
+
+Added `lab/stdlib/json/` with twelve 15-60 line Python programs that use `json` the way normal
+code does: `loads` / `dumps` / `load` / `dump`, `JSONDecodeError` fields, `object_hook` /
+`parse_float` / `object_pairs_hook`, `indent`, `sort_keys`, `separators`, `ensure_ascii`,
+`allow_nan`, `cls=` with a `JSONEncoder` subclass, typed nested containers, non-ASCII text and
+malformed inputs caught in `try` blocks. The default build (`compile X.py --syntax python`)
+gives 10 built (2 typed, 8 general) and 2 named refusals, so the 9/12 target was met without a
+compiler, runtime or prelude change. Both refused programs are recorded in
+`lab/stdlib/json/RESULTS.md` as follow-ups: `json.dumps(..., cls=JSONEncoder)` and
+`json.dump` / `json.load` on a file object (plus a module-level list of dicts).
+
+Added `AIL_CURRENT/test_ail_std_json.py` (registered through `tests.d/test_ail_std_json.txt`),
+which builds the ten passing programs in the default mode, runs each next to CPython in a fresh
+directory and compares stdout and exit code. Refreshed the manifest; ran
+`test_ail_std_json`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
