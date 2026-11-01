@@ -1,3 +1,13 @@
+## 2026-11-01 -- shlex review 1 fixes (job-std_shlex-11011956)
+
+Fixed the three defects from review 1. `split(None)` now raises CPython's
+`ValueError: s argument must not be None` (it previously reached `len(None)` and raised
+`TypeError`); `quote` tests truthiness (`if not s`) so `quote(None)`, `quote(0)` and
+`join([None])` return `"''"` as CPython does; and the lexer's `source` attribute is `None`
+instead of `""`. Probes cover `split(None)`, `quote(None)`/`quote(0)`/falsy values,
+`join([None])`, and `source` with and without `infile` on both builds. No compiler or runtime
+source changed; `test_ail_std_shlex` still builds and matches all twelve programs.
+
 ## 2026-11-01 -- shlex review fixes (job-std_shlex-11011615)
 
 Review follow-up on the `shlex` coverage change. POSIX `get_token()`, `read_token()`, `eof` and

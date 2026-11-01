@@ -37,7 +37,7 @@ def _find_unsafe(s) -> int:
 
 def quote(s: str) -> str:
     """Return a shell-escaped version of the string *s*."""
-    if s == "":
+    if not s:
         return "''"
     if _find_unsafe(s) < 0:
         return s
@@ -115,7 +115,7 @@ class shlex:
         self.stack_pos: list[int] = []
         self.stack_file: list[str | None] = []
         self.stack_line: list[int] = []
-        self.source = ""
+        self.source = None
         self.punctuation_chars = _punctuation(punctuation_chars)
 
     def _read_char(self) -> str:
@@ -342,6 +342,8 @@ class shlex:
 
 def split(s: str, comments=False, posix=True) -> list[str]:
     """Split the string *s* using shell-like syntax."""
+    if s is None:
+        raise ValueError("s argument must not be None")
     lex = shlex(s, "", posix, False)
     lex.whitespace_split = True
     if not comments:
