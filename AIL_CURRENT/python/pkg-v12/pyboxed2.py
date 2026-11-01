@@ -690,10 +690,43 @@ static inline ail_st ail__bisect_key(ail_ctx *cx, ail_obj *out, ail_obj key, ail
     ail_funcobj *f = (ail_funcobj *)key.o;
     return f->fn(cx, out, item, f->cells);
 }
+static inline int ail__bisect_is_seq(ail_ctx *cx, ail_obj a) {
+    /* CPython's _bisect asks for sq_item before the loop even when hi= is given: a mapping
+       is "is not a sequence", a set or a __len__-only instance "does not support indexing".
+       A Counter is dict-shaped but indexable (CPython's PySequence_Size accepts it), so it
+       stays a sequence; a plain dict and defaultdict do not. */
+    switch (a.tag) {
+        case AIL_T_STR: case AIL_T_LIST: case AIL_T_TUPLE: case AIL_T_RANGE: return 1;
+        case AIL_T_DICT: return ((ail_gcobj *)a.o)->flags == 1;   /* Counter */
+        case AIL_T_INST: case AIL_T_EXC: {
+            int64_t nid = ail_intern(cx, "__getitem__");
+            for (ail_obj k = ((ail_instobj *)a.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+                ail_classobj *kc = (ail_classobj *)k.o;
+                for (int64_t i = 0; i < kc->n; i++) if (kc->attrs[i].name_id == nid) return 1;
+                for (int64_t i = kc->ca_n - 1; i >= 0; i--) if (kc->ca[i].name_id == nid) return 1;
+            }
+            return 0;
+        }
+        default: return 0;
+    }
+}
+static inline ail_st ail__bisect_seq_chk(ail_ctx *cx, ail_obj a) {
+    if (ail__bisect_is_seq(cx, a)) return AIL_OK;
+    char buf[160];
+    if (a.tag == AIL_T_DICT) snprintf(buf, sizeof buf, "%s is not a sequence", ail__tname_c(a));
+    else snprintf(buf, sizeof buf, "'%s' object does not support indexing", ail__tname_c(a));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
 static inline ail_st ail__bisect_len(ail_ctx *cx, int64_t *out, ail_obj a) {
     /* CPython's _bisect accepts any sequence, so every sequence type the runtime knows must
        answer len(): range/bytes/bytearray/deque are not vector-backed and the old manual
-       list/tuple/str switch raised the wrong TypeError for them. */
+       list/tuple/str switch raised the wrong TypeError for them. A plain dict is rejected
+       by PySequence_Size itself, before sq_item is looked up. */
+    if (a.tag == AIL_T_DICT && ((ail_gcobj *)a.o)->flags != 1) {   /* not a Counter */
+        char buf[128];
+        snprintf(buf, sizeof buf, "%s is not a sequence", ail__tname_c(a));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
     ail_obj n;
     ail_st st = ail_op_len(cx, &n, a);
     if (st != AIL_OK) return st;
@@ -716,10 +749,16 @@ static inline ail_st ail_bisect_left_key(ail_ctx *cx, int64_t *out, ail_obj a, a
                                          int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
     int64_t l = has_lo ? lo : 0;
     if (l < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "lo must be non-negative");
-    int64_t n, h;
-    ail_st st = ail__bisect_len(cx, &n, a);
+    int64_t h;
+    ail_st st;
+    if (!has_hi || hi == -1) {
+        int64_t n;
+        st = ail__bisect_len(cx, &n, a);
+        if (st != AIL_OK) return st;
+        h = n;
+    } else h = hi;
+    st = ail__bisect_seq_chk(cx, a);
     if (st != AIL_OK) return st;
-    h = (!has_hi || hi == -1) ? n : hi;
     while (l < h) {
         int64_t mid = (l + h) / 2, c;
         ail_obj item, k;
@@ -739,10 +778,16 @@ static inline ail_st ail_bisect_right_key(ail_ctx *cx, int64_t *out, ail_obj a, 
                                           int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
     int64_t l = has_lo ? lo : 0;
     if (l < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "lo must be non-negative");
-    int64_t n, h;
-    ail_st st = ail__bisect_len(cx, &n, a);
+    int64_t h;
+    ail_st st;
+    if (!has_hi || hi == -1) {
+        int64_t n;
+        st = ail__bisect_len(cx, &n, a);
+        if (st != AIL_OK) return st;
+        h = n;
+    } else h = hi;
+    st = ail__bisect_seq_chk(cx, a);
     if (st != AIL_OK) return st;
-    h = (!has_hi || hi == -1) ? n : hi;
     while (l < h) {
         int64_t mid = (l + h) / 2, c;
         ail_obj item, k;

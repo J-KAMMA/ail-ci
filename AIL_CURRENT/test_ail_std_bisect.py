@@ -147,6 +147,61 @@ main()
 '''
 
 
+NON_SEQUENCE_KEY_PROGRAM = r'''import bisect
+
+
+class NoGet:
+    def __init__(self):
+        self.n = 0
+
+    def __len__(self):
+        return self.n
+
+
+class GetOnly:
+    def __init__(self):
+        self.n = 0
+
+    def __getitem__(self, i):
+        return i
+
+
+def ident(v):
+    return v
+
+
+def main():
+    for a in ({}, {0: 10, 1: 20, 2: 30}, set(), frozenset()):
+        try:
+            print("l", bisect.bisect_left(a, 1, key=ident))
+        except TypeError as e:
+            print("l TypeError", e)
+        try:
+            print("r", bisect.bisect_right(a, 1, key=ident))
+        except TypeError as e:
+            print("r TypeError", e)
+    o = NoGet()
+    try:
+        print(bisect.bisect_left(o, 1, key=ident))
+    except TypeError as e:
+        print("lenonly TypeError", e)
+    try:
+        print(bisect.bisect_right(o, 1, 0, 0, key=ident))
+    except TypeError as e:
+        print("lenonly hi TypeError", e)
+    g = GetOnly()
+    print(bisect.bisect_left(g, 1, 0, 0, key=ident))
+    print(bisect.bisect_right(g, 1, 0, 0, key=ident))
+    try:
+        print(bisect.bisect_left(g, 1, key=ident))
+    except TypeError as e:
+        print("getonly TypeError", e)
+
+
+main()
+'''
+
+
 def build_and_run(directory, source):
     local = Path(directory) / source.name
     shutil.copyfile(source, local)
@@ -200,6 +255,12 @@ class StdlibBisect(unittest.TestCase):
             source = Path(directory) / "range_bytes_key.py"
             source.write_text(RANGE_BYTES_KEY_PROGRAM, encoding="utf-8")
             self.check(source, "range_bytes_key")
+
+    def test_key_rejects_non_sequences(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "non_sequence_key.py"
+            source.write_text(NON_SEQUENCE_KEY_PROGRAM, encoding="utf-8")
+            self.check(source, "non_sequence_key")
 
 
 if __name__ == "__main__":

@@ -1,3 +1,21 @@
+## 2026-11-01 -- std_bisect review 2: key= must reject non-sequences (job-std_bisect-11012338)
+
+The reviewer found that `BISECTKEY_C`'s `ail__bisect_len` used `ail_op_len`, which accepts
+mappings and sets: `bisect_left({}, 1, key=ident)` returned 0 where CPython raises
+`TypeError: dict is not a sequence`, and `set()` / a `__len__`-only instance returned 0
+instead of `'set' object does not support indexing` / `'NoGet' object does not support
+indexing`. The keyed search now mirrors CPython's `_bisect`: `PySequence_Size` semantics
+first when `hi` is defaulted (a non-Counter dict is rejected there), then a sequence check
+before the loop even when `hi` is supplied, so a `__getitem__`-only instance with `hi=0`
+still returns 0 while a `__len__`-only instance is rejected. Counters stay indexable;
+plain dicts and defaultdicts are refused with CPython's text.
+
+Probes `/tmp/rprobes/v_dict_empty.py`, `v_dict_full.py`, `v_lenonly.py`,
+`v_getonly_hi.py`, `v_range.py`, `v_bytes.py`, `v_custom.py` and `v_deque.py` match CPython
+on both the general and default builds. `test_ail_std_bisect` gained
+`test_key_rejects_non_sequences`. Final-state tests: test_ail_std_bisect,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
+
 ## 2026-11-01 -- std_bisect review: key= on a str/tuple sequence crashed (job-std_bisect-11011433)
 
 The review found that `bisect_left("abcd", "b", key=str)` segfaulted: `key=` forces the
