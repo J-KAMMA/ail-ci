@@ -1,3 +1,13 @@
+## 2026-11-01 -- stdlib copy: third review fix (job-std_copy-11012212)
+
+The `set` / `frozenset` deep copier now keeps CPython's original `__reduce_ex__` element list and the
+deep-copied list as two distinct objects: the copied list is memoised under the id of the original, and the
+original is what the keep-alive list holds. Previously one list served both roles, so mutating the memo's
+copied list through the documented `memo` argument also changed the kept-alive original
+(`rv_memo_alias`: `nested 3` instead of CPython's `nested 2`). `test_ail_std_copy` now prints the same
+aliasing check (`frozen alias 2`), and the review probes for memo counts, values and mutation match CPython on
+both builds.
+
 ## 2026-11-01 -- stdlib copy: second review fixes (job-std_copy-11011617)
 
 `copy.copy` / `copy.deepcopy` now refuse two more copies-by-name instead of producing a wrong object. A class

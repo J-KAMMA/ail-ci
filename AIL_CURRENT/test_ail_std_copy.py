@@ -47,6 +47,21 @@ def main() -> None:
     frozen_memo = {}
     dc(frozenset({1, 2}), frozen_memo)
     print("frozen memo", len(frozen_memo))
+    alias_lists = []
+    for value in frozen_memo.values():
+        if type(value).__name__ == "list":
+            alias_lists.append(value)
+    for value in alias_lists:
+        only_ints = True
+        for entry in value:
+            if type(entry).__name__ != "int":
+                only_ints = False
+        if only_ints:
+            value.append(9)
+    for value in alias_lists:
+        for entry in value:
+            if type(entry).__name__ == "list":
+                print("frozen alias", len(entry))
     set_memo = {}
     dc({1, 2}, set_memo)
     print("set memo", len(set_memo))

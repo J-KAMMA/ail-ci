@@ -2393,34 +2393,38 @@ static ail_st ail2c_deep_new(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj memo,
         case AIL_T_SET: case AIL_T_FROZENSET: {
             ail_setobj *m = AIL_SETOBJ(x);
             /* CPython deep-copies set / frozenset through __reduce_ex__, whose argument is a temporary
-               list: the deep copy of that list is memoised (and keep-alive'd) before the set is built,
-               so an explicit memo observes three entries, not two. */
-            AIL_FRAME_ENTER(cx, fr, 5);
+               list of the original elements.  deepcopy() then builds a second, copied list, memoises the
+               copy under the id of the original list, and keep-alive's the original.  The two lists must
+               stay distinct: mutating the copied list through an explicit memo must not change the
+               kept-alive original. */
+            AIL_FRAME_ENTER(cx, fr, 6);
             fr.slots[0] = memo;
-            fr.slots[1] = ail_list_new(cx);
-            fr.slots[2] = ail_box_int((int64_t)(intptr_t)fr.slots[1].o);
-            ail_st st = ail_dict_set(cx, fr.slots[0], fr.slots[2], fr.slots[1]);
+            fr.slots[1] = ail_list_new(cx);   /* the original reduce list, kept alive */
+            fr.slots[2] = ail_list_new(cx);   /* its deep copy, the memo value */
+            fr.slots[3] = ail_box_int((int64_t)(intptr_t)fr.slots[1].o);
+            ail_st st = ail_dict_set(cx, fr.slots[0], fr.slots[3], fr.slots[2]);
             if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
             int64_t pos = 0;
             ail_setentry *e;
             while (ail_setx_next(m, &pos, &e)) {
-                st = ail2c_deep(cx, &fr.slots[3], e->key, fr.slots[0]);
+                ail_list_append(cx, fr.slots[1], e->key);
+                st = ail2c_deep(cx, &fr.slots[4], e->key, fr.slots[0]);
                 if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-                ail_list_append(cx, fr.slots[1], fr.slots[3]);
+                ail_list_append(cx, fr.slots[2], fr.slots[4]);
             }
             st = ail2c_keep(cx, fr.slots[1], fr.slots[0]);
             if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-            fr.slots[4] = ail_setx_new(cx, x.tag == AIL_T_FROZENSET);
-            ail_vecobj *w = (ail_vecobj *)fr.slots[1].o;
+            fr.slots[5] = ail_setx_new(cx, x.tag == AIL_T_FROZENSET);
+            ail_vecobj *w = (ail_vecobj *)fr.slots[2].o;
             for (int64_t i = 0; i < w->n; i++) {
-                st = ail_setx_add_key(cx, AIL_SETOBJ(fr.slots[4]), w->p[i]);
+                st = ail_setx_add_key(cx, AIL_SETOBJ(fr.slots[5]), w->p[i]);
                 if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
             }
-            st = ail_dict_set(cx, fr.slots[0], key, fr.slots[4]);
+            st = ail_dict_set(cx, fr.slots[0], key, fr.slots[5]);
             if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
             st = ail2c_keep(cx, x, fr.slots[0]);
             if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-            *out = fr.slots[4];
+            *out = fr.slots[5];
             AIL_FRAME_LEAVE(cx, fr);
             return AIL_OK;
         }
