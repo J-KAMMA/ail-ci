@@ -35,8 +35,10 @@ by name: `initial_indent`, `subsequent_indent`, `expand_tabs`, `replace_whitespa
 `max_lines` and `placeholder`.  `textwrap.TextWrapper` is built as a class with those attributes,
 `wrap` / `fill`, and mutable fields; `from textwrap import TextWrapper` works.  The helper follows
 CPython 3.12's chunking, long-word / hyphen breaking, sentence spacing and max-lines placeholder
-logic.  When the same `width` is given both positionally and by keyword the call is still refused
-by name, as before.
+logic.  `max_lines` and `placeholder` are keyword-only, as in CPython 3.12: passing either
+positionally is refused by name (`_ail_TextWrapper() called with too many positional arguments`)
+rather than accepted.  When the same `width` is given both positionally and by keyword the call is
+still refused by name, as before.
 
 The 12 programs are registered in `AIL_CURRENT/test_ail_std_textwrap.py`; that test runs CPython as
 the oracle and compares stdout and exit status on the default and general builds.

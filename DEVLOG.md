@@ -1,3 +1,15 @@
+## 2026-11-01 -- stdlib textwrap review: max_lines and placeholder are keyword-only (job-std_textwrap-11011435)
+
+The review found that `_ail_TextWrapper.__init__` accepted `max_lines` and `placeholder` positionally,
+where CPython 3.12 makes them keyword-only.  The helper signature now has `*` before those two
+parameters, so `textwrap.TextWrapper(8, "", "", True, True, False, True, True, True, 8, 2)` and the
+twelve-positional form are refused by name (`_ail_TextWrapper() called with too many positional
+arguments`) instead of printing wrapped text, while exactly ten positional arguments and the keyword
+forms keep working.  Probes `p_kwonly`, `p_kw_pos11`, `p_kw_pos12`, `p_kw_boundary` and
+`p_kw_alias` cover the boundary, both keyword forms, mutation, and values through a list item, an
+attribute and a dict value; all match CPython or are refused by name on the default and general
+builds.  The twelve lab programs and their outputs are unchanged.
+
 ## 2026-11-01 -- stdlib textwrap: common options and the TextWrapper class (job-std_textwrap-11011435)
 
 Added twelve realistic `textwrap` programs under `lab/stdlib/textwrap/` and recorded their results in

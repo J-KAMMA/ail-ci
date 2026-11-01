@@ -1244,7 +1244,7 @@ _MATH_HELPERS['tw_class'] = (
     '                 fix_sentence_endings: bool = False,\n'
     '                 break_long_words: bool = True, drop_whitespace: bool = True,\n'
     '                 break_on_hyphens: bool = True, tabsize: int = 8,\n'
-    '                 max_lines=None, placeholder: str = " [...]") -> None:\n'
+    '                 *, max_lines=None, placeholder: str = " [...]") -> None:\n'
     '        self.width = width\n'
     '        self.initial_indent = initial_indent\n'
     '        self.subsequent_indent = subsequent_indent\n'
