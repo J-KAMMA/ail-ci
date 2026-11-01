@@ -2,10 +2,12 @@
 
 The pre-existing difference recorded after job pre87: a generator expression whose body
 raises was materialised eagerly on the general path.  CPython creates the generator object
-and runs the body only at ``next()``, so a ``try`` around the consumption catches the error;
-the eager lowering raised before the handler was live and the program exited 1 with empty
-stdout.  The general path now refuses the construct by name, the same name the typed path
-already uses, for a saved generator whose body can raise one of the catchable traps.
+and runs the body only at ``next()``, so a ``try`` around the consumption catches the error.
+A saved generator expression is now lowered to a real generator function on the general path
+(pyboxed2), so the body runs lazily and the exception reaches the caller's handler.  The
+default build routes such a program to that path; a constructor of a class defined by the
+program keeps the existing by-name refusal, where moving the call into the generator changed
+the general path's class resolution.
 
 Immediate consumers (``sum``/``any``/``all``/``list``/``tuple``/``for``/``*``) and tuple
 unpacking still use the existing eager lowering; the controls below keep matching CPython.
@@ -384,7 +386,6 @@ class Pre116Tests(unittest.TestCase):
     def same(self, slug, text):
         with tempfile.TemporaryDirectory(prefix='ail-pre116-') as directory:
             (want, want_rc), err = _cpython(directory, slug, text)
-            self.assertEqual(want_rc, 0, err)
             for general in (True, False):
                 built, exe = _build(directory, '%s_%s' % (slug, 'g' if general else 'd'), text, general)
                 output = built.stdout + built.stderr
@@ -393,11 +394,11 @@ class Pre116Tests(unittest.TestCase):
                 self.assertEqual((got.stdout.replace(b'\r\n', b'\n'), got.returncode), (want, want_rc),
                                  '%s (general=%s)\n%s' % (slug, general, got.stderr.decode('utf-8', 'replace')[-2000:]))
 
-    def test_lazy_raising_is_refused(self):
-        self.refused('lazy_raising', LAZY_RAISING)
+    def test_lazy_raising_matches(self):
+        self.same('lazy_raising', LAZY_RAISING)
 
-    def test_lazy_raising_edges(self):
-        self.refused('lazy_raising_edges', LAZY_RAISING_EDGES)
+    def test_lazy_raising_edges_match(self):
+        self.same('lazy_raising_edges', LAZY_RAISING_EDGES)
 
     def test_consumed_in_place_matches(self):
         self.same('consumed_control', CONSUMED_CONTROL)
@@ -415,10 +416,12 @@ class Pre116Tests(unittest.TestCase):
         self.refused('unsafe_binop_ctor', UNSAFE_BINOP_CTOR)
         self.refused('inherited_raising_ctor', INHERITED_RAISING_CTOR)
 
-    def test_rebound_constructor_and_next_are_refused(self):
+    def test_rebound_constructor_is_refused(self):
         self.refused('rebound_class', REBOUND_CLASS)
-        self.refused('shadowed_next', SHADOWED_NEXT)
         self.refused('deleted_class', DELETED_CLASS)
+
+    def test_shadowed_next_matches(self):
+        self.same('shadowed_next', SHADOWED_NEXT)
 
     def test_other_unsafe_constructor_shapes_are_refused(self):
         self.refused('slotted_ctor', SLOTTED_CTOR)

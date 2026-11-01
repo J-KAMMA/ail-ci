@@ -729,6 +729,53 @@ def _module_constant_source(source):
     return _rewrite_script(source, force=False) is None
 
 
+_GENEXP_EAGER_CALLS = frozenset({
+    'list', 'tuple', 'set', 'frozenset', 'dict', 'sorted', 'sum', 'min', 'max', 'any', 'all',
+    'next', 'bytes', 'bytearray', 'Counter', 'array',
+})
+_GENEXP_EAGER_METHODS = frozenset({'join', 'extend', 'update', 'array'})
+
+
+def _saved_genexp_source(source):
+    """True when `source` has a generator expression used as a value (not consumed in place).
+
+    The typed path has no generator values; pyboxed2 turns such an expression into a module-level
+    generator function (a real lazy generator).  Routing the program there directly keeps the
+    typed path's by-name refusal out of a build that the general path handles, and when the
+    general path cannot finish the reason it reports is its own (the construct is not the blocker).
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    parents = {}
+    for par in ast.walk(tree):
+        for child in ast.iter_child_nodes(par):
+            parents[child] = par
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.GeneratorExp):
+            continue
+        par = parents.get(node)
+        if isinstance(par, (ast.For, ast.AsyncFor)) and par.iter is node:
+            continue
+        if isinstance(par, ast.comprehension) and par.iter is node:
+            continue
+        if isinstance(par, ast.Starred):
+            continue
+        if isinstance(par, (ast.Assign, ast.AnnAssign)):
+            target = par.targets[0] if isinstance(par, ast.Assign) and len(par.targets) == 1 else getattr(par, 'target', None)
+            if isinstance(target, (ast.Tuple, ast.List)):
+                continue
+        if isinstance(par, ast.Call) and node in par.args:
+            f = par.func
+            if isinstance(f, ast.Name) and f.id in _GENEXP_EAGER_CALLS:
+                continue
+            if isinstance(f, ast.Attribute) and f.attr in _GENEXP_EAGER_METHODS:
+                continue
+        return True
+    return False
+
+
 def _general_failure(typed, use_typed, failure):
     """The exception to report when the general (boxed) path cannot build a program the typed
     path refused. For a program with a `main` entry that is the TYPED refusal: it names the
@@ -1419,7 +1466,10 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
         info['_tint_legacy'] = True
     if native_diagnostics.enabled():
         info['_want_source_regions'] = True
+    route_general = not legacy_int and _saved_genexp_source(source)
     try:
+        if route_general:
+            raise Unsupported('a generator expression saved as a value (the general path builds it lazily)')
         if not force_general and not legacy_int and _is_whole_program(source):
             # B2b: an unproven int local is an `ail_tint` on the typed path, so only the hard
             # big-int constructs (a literal beyond int64, `**`, a variable shift, factorial/comb/perm)
@@ -1470,7 +1520,7 @@ def _build_unshadowed_inner(source, out, strict, report, force_general, local_pr
             import pyboxed as _boxed_impl
         else:
             import pyboxed2 as _boxed_impl
-        typed_main = not force_general and _has_main_entry(source)
+        typed_main = not force_general and not route_general and _has_main_entry(source)
         boxed_report = {}
         try:
             boxed_c = (_boxed_impl.build(source, boxed_report, allow_mix=False) if force_general

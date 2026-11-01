@@ -913,6 +913,91 @@ Added `AIL_CURRENT/test_ail_std_bisect.py` (12 programs plus a key-call/insort p
 its `AIL_CURRENT/tests.d/test_ail_std_bisect.txt` registration. `tools/update_manifest.py`
 was run and `--check` passes. Final-state tests: test_ail_std_bisect, test_ail_heapq_bisect,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+## 2026-11-01 -- stdlib2 review 2: loop-iteration and default-argument captures (job-stdlib2-11020039)
+
+The second review found two capture-timing holes left in `_lazy_genexp_functions`. A name bound by
+a loop target (or assigned in a loop body) before the generator was accepted, but the next
+iteration changes CPython's cell, so the by-value capture showed the first value. `_loop_rebinds`
+now refuses a capture when a loop between the generator and its enclosing function binds that name
+in the part that repeats. A generator in a default argument or annotation was analysed as if it
+were in the function body, so a parameter of the same name shadowed the real enclosing cell and the
+value was snapshot at the wrong time. The signature's `def` is no longer added to the enclosing
+scope chain; the default/annotation is evaluated in the enclosing scope, at the `def` statement,
+and a parameter of that `def` is not a capture. A module-global name stays a global read, so a
+global rebound after the `def` is read at consumption time.
+
+Probes in `/tmp/probes` (both `cmp.sh` builds): `p_loop_after`, `p_while_after`,
+`p_loop_two_targets`, `p_nested_loop_outer` and `p_default_stale` are now refused by name;
+`p_loop_before`, `p_default_safe`, `p_default_param`, `p_default_collide_global`,
+`p_default_global_safe` and `p_default_local_only` match CPython. The nine census modules still
+reach the same next blockers on both builds, and the generated C of the ten `lab/compare` tasks is
+byte-identical to `HEAD` on both builds (seven build, three refuse as before). Added the loop,
+default-argument and safe-default cases to `test_ail_stdlib_reach.py`.
+
+## 2026-11-01 -- stdlib2 review fixes: unsafe captures of a saved generator expression (job-stdlib2-11011233)
+
+The reviewer found three new acceptances where `_lazy_genexp_functions` passed a captured local by
+value but CPython reads the cell when the body runs: a store on the same source line, a `nonlocal`
+store in a nested function, and a possibly-unbound local. A capture is now accepted only when it is
+a parameter or a definitely-bound preceding assignment and nothing binds it at or after the
+generator's position; a binding in a conditional branch is not trusted, and a nested `nonlocal`
+declaration, `del`, walrus in another comprehension, or later store refuses by name. `nestfn` also
+leaves an enclosing function as written when the nested-function environment would be created
+after a saved generator or lambda that reads a shared name (the environment used to be made too
+late for that lazy read); the compilers then refuse it by name instead of passing the old value.
+Safe captures (a parameter, a plain local before creation, a nested function that only reads)
+still build and match CPython.
+
+The census is unchanged: the 14 modules that built still build, and the nine generator-expression
+modules still move to the same next blockers (rechecked both builds). Generated C of the seven
+building `lab/compare` tasks is byte-identical to `fc01930` on both builds; the three refusing
+tasks keep rc 3. Probes in `/tmp/probes` (both builds, `cmp.sh`): `p_same_line`, `p_nonlocal`,
+`p_unbound`, `p_delete`, `p_arg_rebind`, `p_list_rebind`, `p_attr_rebind`, `p_dict_rebind`,
+`p_walrus_other`, `p_outer_rebind`, `p_nested_nonlocal_deep`, `p_while_rebind`,
+`p_nonlocal_container` are refused by name; `p_same_line_before`, `p_param`, `p_local_safe`,
+`p_nested_read`, `p_loop_before`, `p_global_late`, `p_mutate_alias`, `p_empty`,
+`p_default_capture`, `p_nonlocal_after`, `p_nonlocal_append`, `p_lambda_nonlocal` match CPython.
+Added those cases to `test_ail_stdlib_reach.py`.
+
+## 2026-11-01 -- stdlib2: saved generator expressions; stdlib reach census (job-stdlib2-11011233)
+
+Built `import X; print("ok")` for the 176 top-level pure-Python modules of the installed CPython
+3.12.3 (`find_spec(...).origin` ending in `.py`; packages copied with their directory) on the
+default and forced-general builds. The census is in `AIL_CURRENT/docs/design/STDLIB_REACH.md`,
+with every module, both builds and the first refusal message. Before the change each build built
+14 and refused 162; the most common first reason on both was `a generator expression used as a
+value` (9 modules: `_weakrefset`, `calendar`, `dataclasses`, `glob`, `socketserver`, `statistics`,
+`tabnanny`, `tomllib`, `zoneinfo`).
+
+`pyboxed2._lazy_genexp_functions` now rewrites a saved generator expression whose body can raise
+into a module-level generator function using the existing general-path generator runtime
+(`safetyrt.GEN`): the outermost iterable is evaluated at the call, the body and its exceptions run
+at `next()`, the enclosing function's free names are passed as arguments and module globals stay
+global. `pyc._saved_genexp_source` routes such a program directly to the general path, so the
+typed path's old by-name refusal is not reported when the general path later fails. A body that
+cannot raise keeps the old eager list lowering, which is why the generated C of the ten
+`lab/compare` tasks did not change. A class-body or nested generator, a walrus, a captured local
+rebound after creation, and a call of a program-defined class constructor inside one stay refused
+by name (the last one because moving the call into the generated function changed class
+resolution for rebound and `__slots__` classes).
+
+After the change the generator-expression reason is 0 on both builds; the nine modules are now
+refused at their next blockers, so the total is still 14 build / 162 refuse. Probes in
+`/tmp/probes/gv` on both builds (`cmp.sh`): `p_basic` (empty, negative, one-shot, aliased
+generator), `p_routes` (argument, list item, attribute, dict value, function return), `p_raise`
+(exception at `next()`, outer iterator order), `p_nested` (two for-clauses and an if),
+`p_capture_mut` (captured list mutation after creation), `p_types` (int/float/bool/str elements
+and `join`) match CPython; `p_capture` (a captured local rebound after creation) is refused by
+name. `p_lazy` (the pre116 raising case) matches. Added `AIL_CURRENT/test_ail_stdlib_reach.py`
+and registered it through `AIL_CURRENT/tests.d/test_ail_stdlib_reach.txt`; updated
+`test_ail_pre116.py` and `test_ail_pre211.py` for the new lazy behaviour (their class-constructor
+refusals are unchanged). The pre-existing worktree change to `ail_modules.py`'s
+`fallback_defines` (already-bound names and names only read in skipped branches) is included.
+
+Final-state tests with `-j 2`: test_ail_stdlib_reach, test_ail_pre116, test_ail_pre211,
+test_ail_modsys, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`python3 tools/update_manifest.py` and `--check` pass; `tools/ci_shards.py --update` places the
+new module once.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
