@@ -2,6 +2,10 @@
 # prelude_array.py -- `array.array` for the integer and double typecodes as Python source (smalllib5.py injects it).
 # 'b' 'B' 'h' 'H' 'i' 'I' 'l' 'L' 'q' 'Q' (ints in the C range of the type) and 'd'. The elements are held in a list.
 
+# pyboxed2.py and dunderrt.py recognise the real array prelude by this marker (a program may define its own class
+# named _AilArray; that must not borrow array.array's error names or suppress its comparison dispatch).
+_AIL_ARRAY_PRELUDE = True
+
 
 def _ail_arr_size(tc: str) -> int:
     if tc == "b" or tc == "B":

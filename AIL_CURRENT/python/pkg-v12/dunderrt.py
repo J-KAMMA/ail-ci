@@ -248,8 +248,7 @@ __attribute__((noinline)) static int ail_dun_cmp_gt(ail_ctx *cx, int64_t *out, a
 }
 __attribute__((noinline)) static int ail_dun_cmp_rev(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b, ail_st *stp) {
     (void)a;
-    char cb[80]; ail__dun_tname(cb, sizeof cb, b);
-    if (!strcmp(cb, "_AilArray")) return 0;   /* array's comparisons return NotImplemented; the generic error names the original operator and order */
+@@ARRAY_CMP_SKIP@@
     for (ail_obj k = ((ail_instobj *)b.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
         ail_classobj *kc = (ail_classobj *)k.o;
         ail_obj r;
@@ -684,7 +683,7 @@ def _edits(inplace=False, ordering=False):
     return e
 
 
-def patch(text, inplace=False, ordering=False):
+def patch(text, inplace=False, ordering=False, array_prelude=False):
     """The generated C with the operator-method dispatch added to the general-path runtime."""
     for old, new in _edits(inplace, ordering):
         if old == new:
@@ -704,7 +703,11 @@ def patch(text, inplace=False, ordering=False):
            '        if (AIL_BIG(r)->sign < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "__len__() should return >= 0");\n'
            '        return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot fit \'int\' into an index-sized integer");\n'
            '    }') if biggate.ON else ''
-    text = text.replace(anchor, FUNCS.replace('@@BIGLEN@@', big) + HASH_FUNC + anchor, 1)
+    array_skip = ('    char cb[80]; ail__dun_tname(cb, sizeof cb, b);\n'
+                  '    if (!strcmp(cb, "_AilArray")) return 0;   /* array\'s comparisons return NotImplemented; the '
+                  'generic error names the original operator and order */\n') if array_prelude else ''
+    funcs = FUNCS.replace('@@ARRAY_CMP_SKIP@@', array_skip).replace('@@BIGLEN@@', big)
+    text = text.replace(anchor, funcs + HASH_FUNC + anchor, 1)
     # the conditions of the program's own code (if / while / and / or / ?:) ask the class of an instance
     mark = '/* ---- interned attribute-name ids ---- */'
     k = text.find(mark)

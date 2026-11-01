@@ -1,3 +1,19 @@
+## 2026-11-01 -- array review 2: gate array detection on the real prelude (job-std_array-11020204)
+
+The second review found that `pyboxed2.py` and `dunderrt.py` recognised `array.array` by the bare
+class name `_AilArray`, so an unrelated program defining its own `class _AilArray` inherited the
+array's multiply-error names and lost its comparison dispatch. `prelude_array.py` now sets an
+`_AIL_ARRAY_PRELUDE` marker; the compiler detects that marker and applies the `bytes`/`bytearray`
+multiply-name replacement, the op-aware ordering dispatch, the `array.array` type name and the
+reflected-comparison skip only for real array programs. A user class named `_AilArray` now keeps
+the base behaviour (`p_namecollide2` matches CPython on both `cmp.sh` builds; `p_namecollide` is
+identical to `/tmp/base`, which also differs from CPython in that pre-existing dispatch case).
+
+Re-ran `/tmp/rprobes` (`p_cmp`, `p_cmp2`, `p_kweval*`, `p_mul`, `p_mul2`, `p_namecollide`,
+`p_namecollide2`, `p_plain`, `p_plainclass`, `p_refl`, `p_tname`): all match CPython or match
+`/tmp/base`, except the pre-existing differences the review lists. Nine required test modules pass
+and `tools/update_manifest.py --check` is clean.
+
 ## 2026-11-01 -- array review follow-up: keyword arguments evaluate, reflected ordering names the operator (job-std_array-11020204)
 
 The review of `16dc414` found three regressions in the new array prelude. `array(...)` with a keyword
