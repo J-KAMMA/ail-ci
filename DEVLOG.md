@@ -1,3 +1,23 @@
+## 2026-11-01 -- `statistics` lab: quantiles, covariance/correlation and weighted fmean (job-std_statistics-11011523)
+
+Added the `statistics` lab (`lab/stdlib/statistics/`, 12 programs) and its results: before the fixes 7 of 12
+built (5 typed, 2 general), 5 were refused. The typed lowering in `python/pkg-v12/statlib.py` and the runtime
+helpers in `python/pkg-v12/strt.py` now cover `quantiles` (`n=`, `method=`), `covariance`,
+`correlation(method="linear")` and `fmean(..., weights=...)` (keyword and second positional form), with
+CPython's error texts and precedence, so 10 of 12 build (8 typed, 2 general) and all 10 match CPython's stdout
+and exit code. The covariance/correlation product sum follows `math.sumprod` (Dekker two-product split plus
+`fsum`), so ordinary cases such as the `216.15` sample match instead of losing the last bit.
+`linear_regression` (named-tuple result, `proportional=`) and `NormalDist` stay named refusals and are the two
+recorded follow-ups; `correlation(..., method="ranked")` is also still a named refusal. The general path does
+not publish the new names, so a forced general build refuses them by name while the default build uses the
+typed path.
+
+`test_ail_std_statistics` (registered in `tests.d/`) compiles and compares the 10 passing programs with
+CPython; the named-refusal tests in `test_ail_stdlib_batch4` / `test_ail_genlib` were moved to
+`linear_regression`. Targeted run on the final tree: `test_ail_std_statistics`, `test_ail_stdlib_batch4`,
+`test_ail_genlib`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 6 modules, 0 failed.
+Generated C for the 10 `lab/compare/src/*/main.ail` tasks is byte-identical to the base commit.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use

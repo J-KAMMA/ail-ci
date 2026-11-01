@@ -1,8 +1,11 @@
 """`statistics` over lists of int, lowered onto the functions of strt.py (library batch 4).
 
-mean, fmean, median, median_low, median_high, mode, multimode, pvariance, variance, pstdev, stdev: the same
-numbers CPython gives (strt.py is compared with the statistics module by the test suite on generated data),
-StatisticsError is spelt ValueError (it is a subclass of it).
+mean, fmean, median, median_low, median_high, mode, multimode, pvariance, variance, pstdev, stdev,
+quantiles, covariance and correlation: the same numbers CPython gives (strt.py is compared with the statistics
+module by the test suite on generated data), StatisticsError is spelt ValueError (it is a subclass of it).
+fmean takes the weights= keyword (and the optional second positional argument) over lists of int or float.
+quantiles takes n= and method= ("exclusive" and "inclusive"); covariance and correlation take two lists, and
+correlation takes method="linear" (the "ranked" method is not built).
 
 Typing: the language has no int-or-float value. mean, median, variance and pvariance of ints are an int when
 the answer is whole and a float when it is not, so a call is built only where the difference cannot be seen:
@@ -25,7 +28,7 @@ import stdlib4
 from iterlower import _name, _call
 
 FUNCTIONS = ('mean', 'fmean', 'median', 'median_low', 'median_high', 'mode', 'multimode', 'pvariance', 'variance',
-             'pstdev', 'stdev')
+             'pstdev', 'stdev', 'quantiles', 'covariance', 'correlation')
 MIXED = ('mean', 'median', 'pvariance', 'variance')
 ELEMENT = ('median_low', 'median_high', 'mode')
 FLOAT_SPEC = set('feEgG%')
@@ -231,6 +234,12 @@ class Stat:
 
     def lower(self, call, env, scope):
         name = self.resolve(call.func)
+        if name == 'quantiles':
+            return self.lower_quantiles(call, env)
+        if name in ('covariance', 'correlation'):
+            return self.lower_pair(call, name, env)
+        if name == 'fmean' and (call.keywords or len(call.args) == 2):
+            return self.lower_fmean(call, env)
         if call.keywords:
             refuse(call, 'statistics.%s with keyword arguments (mu=, xbar=, weights=...) is not built' % name)
         if len(call.args) != 1:
@@ -266,6 +275,94 @@ class Stat:
             return self.call(name, data)
         # mean, median, variance, pvariance of ints: an int or a float, by the data
         return self.mixed(call, name, data, env, scope)
+
+    def keyword(self, call, allowed):
+        """The keyword arguments of `call`, with every name not in `allowed` refused."""
+        found = {}
+        for kw in call.keywords:
+            if kw.arg is None or kw.arg not in allowed:
+                refuse(call, 'statistics.%s does not take the keyword argument %s here' % (
+                    self.resolve(call.func), kw.arg if kw.arg is not None else '**'))
+            found[kw.arg] = kw.value
+        return found
+
+    def lower_fmean(self, call, env):
+        kwargs = self.keyword(call, ('weights',))
+        if len(call.args) < 1 or len(call.args) > 2:
+            refuse(call, 'statistics.fmean takes the data and an optional weights argument here')
+        if len(call.args) == 2 and 'weights' in kwargs:
+            refuse(call, 'statistics.fmean was given weights twice')
+        data = call.args[0]
+        weights = kwargs.get('weights')
+        if weights is None and len(call.args) == 2:
+            weights = call.args[1]
+        if weights is None or (isinstance(weights, ast.Constant) and weights.value is None):
+            return self.lower_fmean_plain(call, data, env)
+        kinds = []
+        for node in (data, weights):
+            elem = self.list_elem(node, env)
+            if elem is None:
+                refuse(call, 'statistics.fmean with weights: the element type of the data is not known here; '
+                       'annotate the lists (xs: list[int] = ...) or build them with a comprehension of '
+                       'int(...) / float(...)')
+            if elem not in ('int', 'float'):
+                refuse(call, 'statistics.fmean with weights of strings is not defined')
+            kinds.append(elem)
+        left = data if kinds[0] == 'float' else self.call('to_floats', data)
+        right = weights if kinds[1] == 'float' else self.call('to_floats', weights)
+        return self.call('fmean_weights', left, right)
+
+    def lower_fmean_plain(self, call, data, env):
+        elem = self.list_elem(data, env)
+        if elem is None:
+            refuse(call, 'statistics.fmean: the element type of the data is not known here; annotate the list '
+                   '(xs: list[int] = ...) or build it with a comprehension of int(...) / float(...)')
+        if elem == 'float':
+            return self.call('fsum_floats_mean', data)
+        if elem == 'int':
+            return self.call('fmean', data)
+        refuse(call, 'statistics.fmean of strings is not defined')
+
+    def lower_quantiles(self, call, env):
+        if len(call.args) != 1:
+            refuse(call, 'statistics.quantiles takes the data as its one positional argument here (n= and method= are keywords)')
+        kwargs = self.keyword(call, ('n', 'method'))
+        data = call.args[0]
+        elem = self.list_elem(data, env)
+        if elem is None:
+            refuse(call, 'statistics.quantiles: the element type of the data is not known here; annotate the list '
+                   '(xs: list[int] = ...) or build it with a comprehension of int(...) / float(...)')
+        n = kwargs.get('n', ast.Constant(value=4))
+        method = kwargs.get('method', ast.Constant(value='exclusive'))
+        if elem == 'int':
+            return self.call('quantiles_int', data, n, method)
+        if elem == 'float':
+            return self.call('quantiles_f', data, n, method)
+        refuse(call, 'statistics.quantiles of strings is not defined')
+
+    def lower_pair(self, call, name, env):
+        allowed = ('method',) if name == 'correlation' else ()
+        kwargs = self.keyword(call, allowed)
+        if len(call.args) != 2:
+            refuse(call, 'statistics.%s takes two data lists here' % name)
+        left, right = call.args
+        kinds = []
+        for data in (left, right):
+            elem = self.list_elem(data, env)
+            if elem is None:
+                refuse(call, 'statistics.%s: the element type of the data is not known here; annotate the lists '
+                       '(xs: list[int] = ...) or build them with a comprehension of int(...) / float(...)' % name)
+            if elem not in ('int', 'float'):
+                refuse(call, 'statistics.%s of strings is not defined' % name)
+            kinds.append(elem)
+        args = [left if kinds[0] == 'float' else self.call('to_floats', left),
+                right if kinds[1] == 'float' else self.call('to_floats', right)]
+        if name == 'covariance':
+            return self.call('covariance_f', *args)
+        method = kwargs.get('method', ast.Constant(value='linear'))
+        if isinstance(method, ast.Constant) and method.value == 'ranked':
+            refuse(call, "statistics.correlation(..., method='ranked') is not built; method='linear' is")
+        return self.call('correlation_f', *args, method)
 
     def mixed(self, call, name, data, env, scope):
         kind = self.context(call)
@@ -398,7 +495,8 @@ def rewrite(tree, inject):
         if found is not None and found[0] == 'statistics' and not (
                 isinstance(each, ast.Name) and not isinstance(each.ctx, ast.Load)):
             refuse(each, 'statistics.%s used here is not built (mean, fmean, median, median_low, median_high, '
-                   'mode, multimode, pvariance, variance, pstdev, stdev are, over a list of int)' % found[1])
+                   'mode, multimode, pvariance, variance, pstdev, stdev, quantiles, covariance, correlation are, '
+                   'over a list of int)' % found[1])
     if stat.used:
         inject(tree, stat.out)
     return True

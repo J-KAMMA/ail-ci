@@ -520,3 +520,138 @@ def stdev_float(xs: list[int], sample: bool) -> float:
         if n < 1:
             raise ValueError("pstdev requires at least one data point")
     return sqrt_of_frac(var_num(xs, sample), var_den(xs, sample))
+
+
+# -- quantiles, covariance and correlation (library batch 4)
+def to_floats(xs: list[int]) -> list[float]:
+    out: list[float] = []
+    for x in xs:
+        out.append(float(x))
+    return out
+
+
+def quantiles_int(xs: list[int], n: int, method: str) -> list[float]:
+    if n < 1:
+        raise ValueError("n must be at least 1")
+    d = sorted_ints(xs)
+    ld = len(d)
+    if ld < 2:
+        raise ValueError("must have at least two data points")
+    if method != "inclusive" and method != "exclusive":
+        raise ValueError("Unknown method: '" + method + "'")
+    out: list[float] = []
+    if method == "inclusive":
+        m = ld - 1
+        for i in range(1, n):
+            j = i * m // n
+            delta = i * m - j * n
+            out.append((d[j] * (n - delta) + d[j + 1] * delta) / n)
+        return out
+    m = ld + 1
+    for i in range(1, n):
+        j = i * m // n
+        if j < 1:
+            j = 1
+        if j > ld - 1:
+            j = ld - 1
+        delta = i * m - j * n
+        out.append((d[j - 1] * (n - delta) + d[j] * delta) / n)
+    return out
+
+
+def quantiles_f(xs: list[float], n: int, method: str) -> list[float]:
+    if n < 1:
+        raise ValueError("n must be at least 1")
+    d = sorted_floats(xs)
+    ld = len(d)
+    if ld < 2:
+        raise ValueError("must have at least two data points")
+    if method != "inclusive" and method != "exclusive":
+        raise ValueError("Unknown method: '" + method + "'")
+    out: list[float] = []
+    if method == "inclusive":
+        m = ld - 1
+        for i in range(1, n):
+            j = i * m // n
+            delta = i * m - j * n
+            out.append((d[j] * (n - delta) + d[j + 1] * delta) / n)
+        return out
+    m = ld + 1
+    for i in range(1, n):
+        j = i * m // n
+        if j < 1:
+            j = 1
+        if j > ld - 1:
+            j = ld - 1
+        delta = i * m - j * n
+        out.append((d[j - 1] * (n - delta) + d[j] * delta) / n)
+    return out
+
+
+def sumprod_floats(xs: list[float], ys: list[float]) -> float:
+    """math.sumprod over floats: every product is split into its rounded value and its exact
+    error (Dekker's two-product), and the pieces are summed once with fsum."""
+    parts: list[float] = []
+    split = 134217729.0
+    for i in range(len(xs)):
+        a = xs[i]
+        b = ys[i]
+        p = a * b
+        ca = split * a
+        ahi = ca - (ca - a)
+        alo = a - ahi
+        cb = split * b
+        bhi = cb - (cb - b)
+        blo = b - bhi
+        err = ((ahi * bhi - p) + ahi * blo + alo * bhi) + alo * blo
+        parts.append(p)
+        parts.append(err)
+    return fsum_floats(parts)
+
+
+def covariance_f(xs: list[float], ys: list[float]) -> float:
+    n = len(xs)
+    if len(ys) != n:
+        raise ValueError("covariance requires that both inputs have same number of data points")
+    if n < 2:
+        raise ValueError("covariance requires at least two data points")
+    xbar = fsum_floats(xs) / n
+    ybar = fsum_floats(ys) / n
+    dx: list[float] = []
+    dy: list[float] = []
+    for i in range(n):
+        dx.append(xs[i] - xbar)
+        dy.append(ys[i] - ybar)
+    return sumprod_floats(dx, dy) / (n - 1)
+
+
+def correlation_f(xs: list[float], ys: list[float], method: str) -> float:
+    n = len(xs)
+    if len(ys) != n:
+        raise ValueError("correlation requires that both inputs have same number of data points")
+    if n < 2:
+        raise ValueError("correlation requires at least two data points")
+    if method != "linear":
+        raise ValueError("Unknown method: '" + method + "'")
+    xbar = fsum_floats(xs) / n
+    ybar = fsum_floats(ys) / n
+    dx: list[float] = []
+    dy: list[float] = []
+    for i in range(n):
+        dx.append(xs[i] - xbar)
+        dy.append(ys[i] - ybar)
+    sxy = sumprod_floats(dx, dy)
+    sxx = sumprod_floats(dx, dx)
+    syy = sumprod_floats(dy, dy)
+    if sxx * syy == 0.0:
+        raise ValueError("at least one of the inputs is constant")
+    return sxy / (sxx * syy) ** 0.5
+
+
+def fmean_weights(xs: list[float], ws: list[float]) -> float:
+    if len(xs) != len(ws):
+        raise ValueError("data and weights must be the same length")
+    den = fsum_floats(ws)
+    if den == 0.0:
+        raise ValueError("sum of weights must be non-zero")
+    return sumprod_floats(xs, ws) / den

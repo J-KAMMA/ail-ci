@@ -999,7 +999,7 @@ class G3Refusals(unittest.TestCase):
             ("from datetime import date\nprint(date.today())\n", "datetime.date.today is not built"),
             ("import datetime\nprint(datetime.timezone.utc)\n", "datetime.timezone"),
             ("import json\nprint(json.dumps({}, cls=object))\n", "keyword argument cls is not built"),
-            ("import statistics\nprint(statistics.quantiles([1, 2, 3, 4]))\n", "statistics.quantiles"),
+            ("import statistics\nprint(statistics.linear_regression([1, 2, 3, 4], [2, 4, 6, 8]))\n", "statistics.linear_regression"),
             ("import json\nprint(json.load(open('x')))\n", "json.load"),
             ("import itertools\nprint(list(itertools.product([1], foo=2)))\n", "product() with a keyword argument other than repeat"),
             ("from functools import partial\nprint(partial(print, 1)())\n", "functools.partial() of anything but a def or lambda"),
