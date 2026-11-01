@@ -205,15 +205,8 @@ class Pre211Tests(unittest.TestCase):
     def test_method_call_sites(self):
         self.check('method_call_sites', PROGRAM)
 
-    def test_generator_expression_refused_by_name(self):
-        with tempfile.TemporaryDirectory(prefix='ail-pre211-') as directory:
-            for general in (True, False):
-                tag = 'g' if general else 'd'
-                built, _ = _build(directory, 'genexp_' + tag, GENEXP, general)
-                text = built.stdout + built.stderr
-                self.assertNotEqual(built.returncode, 0, 'general=%s accepted it' % general)
-                self.assertIn('generator expression used as a value', text,
-                              'general=%s\n%s' % (general, text[-2000:]))
+    def test_generator_expression_matches(self):
+        self.check('genexp', GENEXP)
 
 
 if __name__ == '__main__':

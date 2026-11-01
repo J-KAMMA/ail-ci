@@ -630,6 +630,15 @@ class _Outer:
         prog = self.prog
         info = self.info
         ref = set(self.ref)
+        # A generator expression or lambda made before the environment exists would keep a direct
+        # read of a shared name; a later `nonlocal` write updates only the environment, so the lazy
+        # body would see the old value.  Leave the function as written: the compilers then refuse
+        # that lazy read by name instead of building it with the wrong value.
+        for stmt in self.rest[:self.P]:
+            for n in ast.walk(stmt):
+                if isinstance(n, (ast.GeneratorExp, ast.Lambda)) \
+                        and any(m.id in ref for m in _scoped_names([n], set())):
+                    raise _Skip()
         # 1. the calls and callbacks
         for scope, call in self.calls:
             callee = call.func.id

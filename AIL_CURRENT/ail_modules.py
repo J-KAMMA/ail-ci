@@ -746,17 +746,89 @@ class Program:
                 return {a.asname or a.name.split('.')[0] for a in stmt.names}
             return {a.asname or a.name for a in stmt.names if a.name != '*'}
 
-        def fallback_defines(stmt, handler):
+        def bindings_in(stmt, out):
+            """Add the names `stmt` binds in the scope that contains it (not in nested functions or classes)."""
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                out.add(stmt.name)
+                return
+            if isinstance(stmt, ast.Assign):
+                targets = stmt.targets
+            elif isinstance(stmt, (ast.AnnAssign, ast.AugAssign, ast.For, ast.AsyncFor)):
+                targets = [stmt.target]
+            else:
+                targets = []
+            if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+                for alias in stmt.names:
+                    if alias.name == '*':
+                        continue
+                    out.add(alias.asname or (alias.name if isinstance(stmt, ast.ImportFrom)
+                                             else alias.name.split('.')[0]))
+            for target in targets:
+                for name in ast.walk(target):
+                    if isinstance(name, ast.Name) and isinstance(name.ctx, (ast.Store, ast.Del)):
+                        out.add(name.id)
+            for field in ('body', 'orelse', 'finalbody'):
+                for sub in getattr(stmt, field, ()) or ():
+                    bindings_in(sub, out)
+            for sub in list(getattr(stmt, 'handlers', ()) or ()) + list(getattr(stmt, 'cases', ()) or ()):
+                for child in sub.body:
+                    bindings_in(child, out)
+
+        def module_bindings_before(node):
+            """Names the module scope binds before `node`, when `node` is a top-level statement."""
+            out = set()
+            for stmt in mod.tree.body:
+                if stmt is node:
+                    break
+                bindings_in(stmt, out)
+            return out
+
+        def loads_outside(skipped, names):
+            """The names loaded outside the nodes in `skipped` (the branches that the failing import skips)."""
+            found = set()
+
+            def visit(node):
+                if id(node) in skipped:
+                    return
+                if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in names:
+                    found.add(node.id)
+                for child in ast.iter_child_nodes(node):
+                    visit(child)
+
+            visit(mod.tree)
+            return found
+
+        def fallback_defines(stmt, handler, node):
             """A C accelerator that is taken as absent needs a handler that defines what the import would have bound."""
             if not self.accel_failure:
                 return
             missing = needed(stmt) - set(_scan_scope(handler.body)[0])
-            if missing:
-                self.refuse(mod, stmt, "import of the CPython C module %r guarded by `except ImportError`: this compiler "
-                            "does not provide it, and the handler does not define %s, so there is no Python fallback.\n"
-                            "  write instead: define %s in the handler, or import it without `try:`"
-                            % (stmt.module if isinstance(stmt, ast.ImportFrom) else stmt.names[0].name,
-                               ', '.join(sorted(missing)), ', '.join(sorted(missing))))
+            if not missing:
+                return
+            # The C module is taken as absent, but the name may already be bound by the pure-Python
+            # implementation earlier in the module, or the only uses may be in the branches that the
+            # failure itself skips: the success branch (`else`) and the rest of the `try` body.
+            missing -= module_bindings_before(node)
+            skipped = {id(stmt)}
+            body = node.body
+            for index, entry in enumerate(body):
+                if entry is stmt:
+                    skipped.update(id(rest) for rest in body[index:])
+                    break
+            skipped.update(id(entry) for entry in node.orelse)
+            if not missing:
+                return
+            if not loads_outside(set(), missing):
+                # Nothing reads the name at all: keep the conservative refusal, because the module may
+                # hide an unrelated compile error behind it.
+                pass
+            elif not loads_outside(skipped, missing):
+                return
+            self.refuse(mod, stmt, "import of the CPython C module %r guarded by `except ImportError`: this compiler "
+                        "does not provide it, and the handler does not define %s, so there is no Python fallback.\n"
+                        "  write instead: define %s in the handler, or import it without `try:`"
+                        % (stmt.module if isinstance(stmt, ast.ImportFrom) else stmt.names[0].name,
+                           ', '.join(sorted(missing)), ', '.join(sorted(missing))))
 
         def handlers_without_import_errors(handlers):
             kept = []
@@ -786,7 +858,7 @@ class Program:
                     stmt = node.body[i]
                     for h in node.handlers:
                         if self.handler_catches(h, text.startswith('No module named')):
-                            fallback_defines(stmt, h)
+                            fallback_defines(stmt, h, node)
                             # the statements before the import run; then (no exception) the handler's body
                             body = list(h.body)
                             if h.name:
@@ -837,7 +909,7 @@ class Program:
             stmt, text = failed
             for h in node.handlers:
                 if self.handler_catches(h, text.startswith('No module named')):
-                    fallback_defines(stmt, h)
+                    fallback_defines(stmt, h, node)
                     body = list(h.body)
                     if h.name:
                         error = ast.Call(ast.Name('ImportError', ast.Load()), [ast.Constant(text)], [])
