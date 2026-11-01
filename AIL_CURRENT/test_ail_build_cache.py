@@ -46,7 +46,8 @@ class CacheBase(unittest.TestCase):
         self.cc = self.wrapper('cc.sh', '')
         self.env = {key: value for key, value in os.environ.items()
                     if not key.startswith('AIL_') and key != 'PIPE_CC'}
-        self.env.update(AIL_CACHE=str(self.cache), PIPE_CC=str(self.cc), CC_LOG=str(self.log), PYTHONUTF8='1')
+        self.env.update(AIL_CACHE=str(self.cache), PIPE_CC=str(self.cc), CC_LOG=str(self.log), PYTHONUTF8='1',
+                        PYTHONDONTWRITEBYTECODE='1')
 
     def wrapper(self, name, comment):
         path = self.root / name

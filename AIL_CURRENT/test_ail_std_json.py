@@ -51,7 +51,7 @@ class StdJsonPrograms(unittest.TestCase):
                 (build / (name + ".py")).write_text(text, encoding="utf-8")
                 (oracle_dir / (name + ".py")).write_text(text, encoding="utf-8")
                 exe = build / name
-                env = dict(os.environ)
+                env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
                 for key in ("AIL_NO_GENERAL", "AIL_STRICT", "AIL_UNIFIED_FORCE", "AIL_IR"):
                     env.pop(key, None)
                 built = subprocess.run(
