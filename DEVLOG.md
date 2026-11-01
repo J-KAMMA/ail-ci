@@ -1,3 +1,43 @@
+## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
+
+Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
+`min(4, cpu_count)` workers; `AIL_FE_JOBS=N` chooses N (1 forces serial), and Windows, `--debug`,
+native-report builds and separate-link-unit/object builds stay serial. Each worker compiles one
+function (and its clones) with `_one_function_legacy`; the parent replays the generated-name
+requests (`_handled_name`, borrowed-callback pairs, `ail_unwind_`, `_ail_finally_release_`,
+`_ail_frame_cells`) in serial function order, merges each class's `sort_specs`/`heap_specs` in that
+order, substitutes placeholders before IR lowering, then applies the IR and aliasing checks
+serially. Probe-only name requests are discarded, matching the probe's copied cleanup set.
+
+`jobs=1` C is unchanged from the base commit on the first 200 `lab/corpus/programs` files (modulo a
+refusal's traceback path). `jobs=4` C is byte-identical to `jobs=1` for the 10 `lab/compare/src`
+tasks, the same 200 corpus programs under `PYTHONHASHSEED=0/3/5/random`, and probes covering
+try/finally cleanup names, struct sort/heap specializations, clone variants and user functions
+named like generated helpers. `docs/design/alias_study/trans` is not present in this tree, so that
+part of the acceptance set could not be run.
+
+Median of 3 `--no-cache` builds and peak RSS, `AIL_FE_JOBS=1` vs `4` (front/back end and C compile):
+
+| task | serial | parallel | speedup | RSS serial -> parallel |
+| --- | --- | --- | --- | --- |
+| berth_sim | 6.52s / 79.0MiB | 6.50s / 78.9MiB | 1.00x | 79.0 -> 78.9MiB |
+| chain_relax | 1.50s / 48.6MiB | 1.48s / 48.6MiB | 1.01x | 48.6 -> 48.6MiB |
+| echo_pack | 2.28s / 44.9MiB | 2.26s / 44.5MiB | 1.01x | 44.9 -> 44.5MiB |
+| ledger_bin | 2.57s / 67.4MiB | 2.60s / 67.4MiB | 0.99x | 67.4 -> 67.4MiB |
+| rail_transfer | 1.87s / 64.1MiB | 1.86s / 64.2MiB | 1.01x | 64.1 -> 64.2MiB |
+| scar_life | 1.68s / 55.3MiB | 1.75s / 55.4MiB | 0.96x | 55.3 -> 55.4MiB |
+| tally_lang | 2.85s / 70.0MiB | 2.65s / 69.8MiB | 1.08x | 70.0 -> 69.8MiB |
+| term_rank | 2.42s / 76.5MiB | 2.40s / 76.5MiB | 1.01x | 76.5 -> 76.5MiB |
+| ticket_audit | 4.01s / 105.3MiB | 4.14s / 105.4MiB | 0.97x | 105.3 -> 105.4MiB |
+| tree_fold | 3.85s / 78.9MiB | 4.21s / 79.0MiB | 0.91x | 78.9 -> 79.0MiB |
+
+The C compiler dominates these builds; the front-end share is small and the parent-side serial IR
+pass plus result transfer can outweigh it on medium programs. Added
+`AIL_CURRENT/test_ail_fe_jobs.py` (registered through `tests.d/test_ail_fe_jobs.txt`, shard entry
+updated), ran `test_ail_fe_jobs`, `test_ail_build_cache`, `test_ail_server`,
+`test_ail_safetynet`, `test_ail_exception_resources`, `test_ail_sort_keys`,
+`test_ail_heapq_bisect` and `test_ail_try_locals`, and refreshed the manifest.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
