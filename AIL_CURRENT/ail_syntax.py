@@ -1618,6 +1618,8 @@ _STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
     'ascii_lowercase', 'ascii_uppercase', 'ascii_letters', 'digits', 'hexdigits', 'octdigits', 'punctuation',
     'whitespace', 'printable')}
 _STRING_CLASSES = {'Template': '_AilStringTemplate'}
+_NON_TEMPLATE_TYPES = {'int', 'float', 'str', 'bool', 'bytes', 'bytearray', 'list', 'dict', 'set', 'tuple',
+                       'frozenset', 'object'}
 _TIME_CLOCKS = {'perf_counter': '_ail_perf_counter', 'monotonic': '_ail_perf_counter',
                 'perf_counter_ns': '_ail_perf_counter_ns', 'monotonic_ns': '_ail_perf_counter_ns',
                 'time': '_ail_time', 'time_ns': '_ail_time_ns'}
@@ -1795,7 +1797,8 @@ class _SurfaceExpr(ast.NodeTransformer):
         node.args = [self.visit(arg) for arg in node.args]
         if (path is None and surface.template_used and isinstance(node.func, ast.Attribute)
                 and node.func.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers')
-                and node.func.attr not in surface.user_methods):
+                and node.func.attr not in surface.user_methods
+                and surface.receiver_kind(node.func.value) != 'other'):
             node.func.value = self.visit(node.func.value)
         for item in node.keywords:
             item.value = self.visit(item.value)
@@ -1843,7 +1846,8 @@ class _SurfaceExpr(ast.NodeTransformer):
             new = surface.value(node, path)
             return node if new is None else self.replaced(new, node)
         if (surface.template_used and node.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers')
-                and node.attr not in surface.user_methods):
+                and node.attr not in surface.user_methods
+                and surface.receiver_kind(node.value) == 'template'):
             raise SyntaxErrorAIL(
                 'not in the subset: string.Template.%s used as a value (a bound method is not built)\n'
                 '  write instead: call it directly (t.%s(...)); a Template built with '
@@ -1931,6 +1935,8 @@ class _Surface:
         self.void = set()
         self.re_on = False             # `import re` seen
         self.template_used = False     # the program builds a string.Template: its methods are lowered
+        self.template_bindings = {}    # local name -> the values assigned to it (for the Template receiver test)
+        self.name_kind = {}            # local name -> 'template' / 'other' (never a Template)
         self.re_patterns = {}          # NAME -> (library index) for NAME = re.compile(literal)
         self.re_nodes = set()          # those assignment statements
         self.def_names = {node.name for node in ast.walk(self.tree)
@@ -2071,6 +2077,52 @@ class _Surface:
                     self.alias_nodes.add(node)
         self.template_used = any(self.path(node) == 'string.Template' for node in ast.walk(self.tree)
                                  if isinstance(node, (ast.Attribute, ast.Name)))
+        self.template_bindings = {}
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        self.template_bindings.setdefault(target.id, []).append(node.value)
+            elif isinstance(node, ast.AnnAssign) and node.value is not None and isinstance(node.target, ast.Name):
+                self.template_bindings.setdefault(node.target.id, []).append(node.value)
+            elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                self.template_bindings.setdefault(node.target.id, []).append(node.value)
+        self.name_kind = {}
+        for name in self.template_bindings:
+            self.kind_of_name(name, set())
+
+    def kind_of_name(self, name, seen):
+        """'template' / 'other' (a value that is never a Template) / None (not told) for a local name."""
+        if name in self.name_kind:
+            return self.name_kind[name]
+        if name in self.classes or name in self.def_names or name in _NON_TEMPLATE_TYPES:
+            return 'other'
+        if name in seen or name not in self.template_bindings:
+            return None
+        kinds = {self.kind_of_value(value, seen | {name}) for value in self.template_bindings[name]}
+        kind = 'template' if kinds == {'template'} else 'other' if kinds == {'other'} else None
+        self.name_kind[name] = kind
+        return kind
+
+    def kind_of_value(self, node, seen):
+        if isinstance(node, ast.Call):
+            if self.path(node.func) == 'string.Template':
+                return 'template'
+            if isinstance(node.func, ast.Name) and (node.func.id in self.classes
+                                                    or node.func.id in _NON_TEMPLATE_TYPES):
+                return 'other'
+            return None
+        if isinstance(node, ast.Name):
+            return self.kind_of_name(node.id, seen)
+        if isinstance(node, (ast.Constant, ast.List, ast.Dict, ast.Set, ast.Tuple)):
+            return 'other'
+        return None
+
+    def receiver_kind(self, node):
+        """Whether the receiver of a method call is known to be a string.Template, known not to be one, or not told."""
+        if isinstance(node, (ast.Call, ast.Name, ast.Constant, ast.List, ast.Dict, ast.Set, ast.Tuple)):
+            return self.kind_of_value(node, set())
+        return None
 
     # -- expressions --------------------------------------------------------------------------
     def rewritten(self, node, boolean=False):
@@ -2492,7 +2544,8 @@ class _Surface:
         func = node.func
         if path is None and self.template_used and isinstance(func, ast.Attribute) \
                 and func.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers') \
-                and func.attr not in self.user_methods:
+                and func.attr not in self.user_methods \
+                and self.receiver_kind(func.value) != 'other':
             return self.template_method(node, func.attr)
         if (isinstance(func, ast.Name) and func.id in ('max', 'min') and func.id not in self.names
                 and func.id not in self.def_names and len(node.args) >= 2 and not node.keywords

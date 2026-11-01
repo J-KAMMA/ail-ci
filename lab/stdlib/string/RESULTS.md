@@ -56,6 +56,12 @@ the default build falls back to the general path for those programs.
   different class repr; call it directly instead.
 - Reading one of the four Template methods as a value (a bound method) is refused by name at
   build time instead of compiling to a run-time `AttributeError`; see the follow-up below.
+- The Template method lowering is restricted to receivers that are not known to be something else.
+  An unrelated `.is_valid` / `.substitute` attribute on a dataclass field, an instance attribute or
+  a class attribute is an ordinary attribute read/call again, so a Template elsewhere in the program
+  no longer hijacks it.  The two remaining collisions (a `setattr`-installed method on a class
+  without `__init__`, and a class attribute holding a lambda) are named compile-time refusals, not
+  run-time crashes.
 - `test_ail_stdlib1.py`'s old "string template is refused" case now checks `string.Formatter`
   instead.
 
@@ -88,3 +94,11 @@ bound_method.py:4:5: not in the subset: string.Template.substitute used as a val
 `getattr(t, "substitute")` used as a value is likewise refused by name
 (`not in the subset: getattr() of the method substitute as a value (getattr(obj, "substitute")(...)
 is built)`).  Building real bound methods is a compiler/runtime feature larger than this task.
+
+### Template method name on an unrelated class
+
+A program that uses a Template and also has an unrelated class attribute named `is_valid` or
+`substitute` that the general path cannot model is refused by name rather than crashing.  For example
+`setattr(b, "is_valid", check)` on a class without `__init__` and `is_valid = lambda self: "BOX"`
+both stop at build time with `not in the subset: ...`; the Template lowering itself no longer sends
+those calls to the Template helper.

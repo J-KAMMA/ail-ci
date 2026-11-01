@@ -102,6 +102,52 @@ g = getattr(t, "get_identifiers")
 print(g())
 """
 
+OTHER_RECEIVERS = r"""import string
+from dataclasses import dataclass
+
+@dataclass
+class Flags:
+    is_valid: bool = True
+
+class Box:
+    def __init__(self):
+        self.substitute = "S"
+
+def main():
+    t = string.Template("$x")
+    print(t.substitute(x=1))
+    f = Flags()
+    print(f.is_valid)
+    b = Box()
+    print(b.substitute)
+    b.is_valid = True
+    print(b.is_valid)
+main()
+"""
+
+COLLISION_REFUSED = [
+    r"""import string
+class Box: pass
+def check(): return "BOX"
+def main():
+    t = string.Template("$x")
+    print(t.substitute(x=1))
+    b = Box(); setattr(b, "is_valid", check)
+    print(b.is_valid())
+main()
+""",
+    r"""import string
+class Box:
+    is_valid = lambda self: "BOX"
+def main():
+    t = string.Template("$x")
+    print(t.substitute(x=1))
+    b = Box()
+    print(b.is_valid())
+main()
+""",
+]
+
 
 def compile_python(directory, source, name, **env):
     exe = Path(directory, name)
@@ -156,6 +202,22 @@ class StringPrograms(unittest.TestCase):
                     self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
                     self.assertIn("not in the subset", built.stdout + built.stderr)
                     self.assertIn("as a value", built.stdout + built.stderr)
+                    self.assertFalse(exe.exists())
+
+    def test_template_method_names_on_other_receivers(self):
+        for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
+            with self.subTest(env=env):
+                self.compare_text("other_receivers", OTHER_RECEIVERS, **env)
+
+    def test_template_method_name_collisions_are_refused_by_name(self):
+        for text in COLLISION_REFUSED:
+            for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
+                with self.subTest(env=env), tempfile.TemporaryDirectory() as directory:
+                    source = Path(directory, "collision.py")
+                    source.write_text(text, encoding="utf-8")
+                    built, exe = compile_python(directory, source, "collision", **env)
+                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
+                    self.assertIn("not in the subset", built.stdout + built.stderr)
                     self.assertFalse(exe.exists())
 
     def test_formatter_is_refused_by_name(self):

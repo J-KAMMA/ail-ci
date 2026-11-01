@@ -1,3 +1,21 @@
+## 2026-11-01 -- std_string review 2: Template method names only on Template receivers
+
+The review found that `_Surface.call` lowered every `.substitute` / `.safe_substitute` / `.is_valid` /
+`.get_identifiers` call once any `string.Template` appeared, so an unrelated `b.is_valid()` was sent to
+the Template helper and crashed with `AttributeError: 'Box' object has no attribute 'template'`.
+`_Surface` now records the values bound to each local name (`kind_of_name` / `kind_of_value` /
+`receiver_kind`): a receiver known never to be a Template (a user-class instance or a builtin value,
+e.g. `b = Box()`) is left as an ordinary method call, and only a receiver not known to be non-Template
+is lowered (or, as a bound method value, refused by name).  Unrelated dataclass fields, instance
+attributes and class attributes named `is_valid` / `substitute` (`p7_dataclass_flag`, `p3_collision`,
+`p3_collision2`) now build and match CPython on both paths.  The two collision probes that the general
+path still cannot model (`p8_setattr`, a `setattr`-installed method on a class without `__init__`, and
+`p9_lambda_method`, a class attribute holding a lambda) are now named compile-time refusals instead of
+run-time crashes.  `test_ail_std_string.py` gained
+`test_template_method_names_on_other_receivers` and
+`test_template_method_name_collisions_are_refused_by_name`.  Final-state tests: test_ail_std_string,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed).
+
 ## 2026-11-01 -- std_string review: Template method values and the bytes-template message
 
 The review found two defects in the `string.Template` lowering.  A method read as a value
