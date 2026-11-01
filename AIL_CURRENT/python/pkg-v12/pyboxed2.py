@@ -2600,6 +2600,10 @@ class Compiler(boxclosure.ClosureMixin):
                     '(`dataclasses.fields()` is not built either)' % node.attr)
                 refusal.source_line = getattr(node, 'lineno', None)
                 raise refusal
+        if _lazy_genexp_functions(tree):
+            # The synthetic generator functions cross the typed/boxed mixed-mode boundary as a
+            # value, where an exception raised at next() does not reach the caller's handler.
+            self.allow_mix = False
         self._nested_ok_info = _nested_genexp_info(tree)
         for gen in ast.walk(tree):
             if isinstance(gen, ast.GeneratorExp) and id(gen) not in any_all_genargs and \
@@ -12896,6 +12900,217 @@ def _genexp_can_raise(node, user_functions, safe_classes, real_next):
                 else:
                     return True
     return False
+
+
+def _genexp_bound_names(node):
+    """Names a generator expression binds in its own scope: its for-targets and walrus targets."""
+    out = {n.id for g in node.generators for n in ast.walk(g.target) if isinstance(n, ast.Name)}
+    for n in ast.walk(node):
+        if isinstance(n, ast.NamedExpr) and isinstance(n.target, ast.Name):
+            out.add(n.target.id)
+    return out
+
+
+def _scope_bound_names(nodes):
+    """Names bound in one scope (a function body or the module body), not in a nested def,
+    class, lambda or comprehension (those have a scope of their own)."""
+    out = set()
+
+    def visit(n):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            out.add(n.name)
+            return
+        if isinstance(n, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            return
+        if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
+            out.add(n.id)
+        elif isinstance(n, (ast.Import, ast.ImportFrom)):
+            for a in n.names:
+                if a.name != '*':
+                    out.add(a.asname or (a.name if isinstance(n, ast.ImportFrom) else a.name.split('.')[0]))
+            return
+        elif isinstance(n, ast.ExceptHandler) and n.name:
+            out.add(n.name)
+        elif isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+            out.add(n.name)
+        elif isinstance(n, ast.MatchMapping) and n.rest:
+            out.add(n.rest)
+        for child in ast.iter_child_nodes(n):
+            visit(child)
+
+    for n in nodes:
+        visit(n)
+    return out
+
+
+def _function_locals(fn):
+    params = {a.arg for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs}
+    for extra in (fn.args.vararg, fn.args.kwarg):
+        if extra is not None:
+            params.add(extra.arg)
+    return params | _scope_bound_names(fn.body)
+
+
+def _module_bound_names(tree):
+    out = _scope_bound_names(tree.body)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Global):
+            out.update(n.names)
+    return out
+
+
+def _genexp_loop(node, iter_name):
+    """The for/if nest of a generator expression, ending in `yield <elt>`."""
+    def at(i):
+        if i == len(node.generators):
+            return [ast.Expr(ast.Yield(copy.deepcopy(node.elt)))]
+        g = node.generators[i]
+        inner = at(i + 1)
+        for cond in reversed(g.ifs):
+            inner = [ast.If(test=copy.deepcopy(cond), body=inner, orelse=[])]
+        source = ast.Name(id=iter_name, ctx=ast.Load()) if i == 0 else copy.deepcopy(g.iter)
+        return [ast.For(target=copy.deepcopy(g.target), iter=source, body=inner, orelse=[])]
+    return at(0)
+
+
+def _lazy_genexp_functions(tree):
+    """Rewrite a generator expression saved as a value into a module-level generator function.
+
+    The general path used to materialise such a generator eagerly (a list), and refused it when
+    its body could raise because the exception then happened at creation instead of at next().
+    Here each saved generator becomes a real generator (safetyrt.GEN, the same class a generator
+    function uses): the outermost iterable is evaluated at the call, as CPython does, and the body
+    runs only when it is consumed.  Names of the enclosing function that the body reads are passed
+    as arguments (their current value, as a closure would see them); module globals stay globals.
+    A shape whose free names can still be rebound after creation, a nested generator expression,
+    a class-body generator, a walrus inside it, or a call of a program-defined class constructor
+    is refused by name.
+    """
+    parents = {}
+    for par in ast.walk(tree):
+        for child in ast.iter_child_nodes(par):
+            parents[child] = par
+    module_bound = _module_bound_names(tree)
+    class_names = {n.name for n in ast.walk(tree) if isinstance(n, ast.ClassDef)}
+    import builtins as _builtins
+    builtin_names = frozenset(dir(_builtins))
+    # Only the expressions the old eager lowering had to refuse (a body that can raise) are
+    # rewritten.  A body that cannot raise keeps the eager list lowering, so its C is unchanged.
+    user_functions = {n.name for n in ast.walk(tree)
+                      if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    counts = _bound_names(tree)
+    mutated = _mutated_class_names(tree)
+    safe_classes = {}
+    for cls in ast.walk(tree):
+        if isinstance(cls, ast.ClassDef) and counts.get(cls.name) == 1 and cls.name not in mutated:
+            arity = _class_ctor_arity(cls)
+            if arity is not None:
+                safe_classes[cls.name] = arity
+    real_next = counts.get('next', 0) == 0
+    replacements = {}
+    functions = []
+
+    for node in list(ast.walk(tree)):
+        if not isinstance(node, ast.GeneratorExp) or _genexp_consumed_in_place(node, parents):
+            continue
+        if any(n is not node and isinstance(n, ast.GeneratorExp) for n in ast.walk(node)):
+            continue
+        if any(isinstance(n, ast.NamedExpr) for n in ast.walk(node)):
+            continue
+        chain = []
+        p = parents.get(node)
+        class_body = False
+        while p is not None and not isinstance(p, ast.Module):
+            if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                chain.append(p)
+            elif isinstance(p, ast.ClassDef):
+                # Only a generator evaluated directly in the class body (before any def) is left
+                # alone; one inside a method has the method as its enclosing scope.
+                class_body = not chain
+                break
+            p = parents.get(p)
+        if class_body:
+            continue
+        bound = _genexp_bound_names(node)
+        body_roots = [node.elt]
+        for i, g in enumerate(node.generators):
+            if i:
+                body_roots.append(g.iter)
+            body_roots.extend(g.ifs)
+        # A call of a class defined in this program keeps the old path: moving it into the
+        # synthetic generator changes how the general path resolves the class (a rebound or
+        # __slots__ class must keep its existing by-name refusal).
+        if any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in class_names
+               for root in body_roots for n in ast.walk(root)):
+            continue
+        loaded = {n.id for root in body_roots for n in ast.walk(root)
+                  if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)} - bound
+        local_sets = [(fn, _function_locals(fn)) for fn in chain]
+        captures = []
+        for name in sorted(loaded):
+            owner = next((fn for fn, locals_ in local_sets if name in locals_), None)
+            if owner is not None:
+                # A name the enclosing function rebinds after the generator is made would be
+                # read from a different cell in CPython; keep the by-name refusal for that.
+                if any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, (ast.Store, ast.Del))
+                       and (getattr(n, 'lineno', 0) or 0) > (node.end_lineno or node.lineno)
+                       for n in ast.walk(owner)):
+                    refusal = Unsupported(
+                        'a generator expression saved as a value reads the local %r, which the '
+                        'enclosing function binds again after the generator is made; CPython reads '
+                        'the new value when the body runs, and this compiler would pass the old one.\n'
+                        '  write instead: pass the value in at consumption time, or build a list '
+                        'comprehension instead of a generator expression' % name)
+                    refusal.source_line = getattr(node, 'lineno', None)
+                    raise refusal
+                captures.append(name)
+            elif name not in module_bound and name not in builtin_names:
+                # Not defined anywhere: CPython raises NameError when the body runs, not at
+                # creation, so leave it as a global read in the generated function.
+                pass
+        if not _genexp_can_raise(node, user_functions, safe_classes, real_next):
+            continue
+
+        serial = len(functions) + 1
+        fname = '_ail_genexp_%d' % serial
+        while fname in module_bound:
+            serial += 1
+            fname = '_ail_genexp_%d' % serial
+        itername = '_ail_genexp_iter_%d' % serial
+        params = captures + [itername]
+        body = _genexp_loop(node, itername)
+        fn = ast.FunctionDef(
+            name=fname,
+            args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=p) for p in params], vararg=None,
+                               kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
+            body=body, decorator_list=[], returns=None, type_comment=None, type_params=[])
+        call = ast.Call(func=ast.Name(id=fname, ctx=ast.Load()),
+                        args=[ast.Name(id=c, ctx=ast.Load()) for c in captures]
+                             + [copy.deepcopy(node.generators[0].iter)],
+                        keywords=[])
+        ast.copy_location(fn, node)
+        ast.copy_location(call, node)
+        ast.fix_missing_locations(fn)
+        ast.fix_missing_locations(call)
+        functions.append(fn)
+        replacements[id(node)] = call
+
+    if not replacements:
+        return False
+    class _Swap(ast.NodeTransformer):
+        def visit_GeneratorExp(self, n):
+            got = replacements.get(id(n))
+            return got if got is not None else self.generic_visit(n)
+    _Swap().visit(tree)
+    at = 0
+    if tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant) \
+            and isinstance(tree.body[0].value.value, str):
+        at = 1
+    while at < len(tree.body) and isinstance(tree.body[at], ast.ImportFrom) \
+            and getattr(tree.body[at], 'module', None) == '__future__':
+        at += 1
+    tree.body[at:at] = functions
+    return True
 
 
 def _lazy_raising_genexp(tree):

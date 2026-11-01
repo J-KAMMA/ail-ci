@@ -1,3 +1,43 @@
+## 2026-11-01 -- stdlib2: saved generator expressions; stdlib reach census (job-stdlib2-11011233)
+
+Built `import X; print("ok")` for the 176 top-level pure-Python modules of the installed CPython
+3.12.3 (`find_spec(...).origin` ending in `.py`; packages copied with their directory) on the
+default and forced-general builds. The census is in `AIL_CURRENT/docs/design/STDLIB_REACH.md`,
+with every module, both builds and the first refusal message. Before the change each build built
+14 and refused 162; the most common first reason on both was `a generator expression used as a
+value` (9 modules: `_weakrefset`, `calendar`, `dataclasses`, `glob`, `socketserver`, `statistics`,
+`tabnanny`, `tomllib`, `zoneinfo`).
+
+`pyboxed2._lazy_genexp_functions` now rewrites a saved generator expression whose body can raise
+into a module-level generator function using the existing general-path generator runtime
+(`safetyrt.GEN`): the outermost iterable is evaluated at the call, the body and its exceptions run
+at `next()`, the enclosing function's free names are passed as arguments and module globals stay
+global. `pyc._saved_genexp_source` routes such a program directly to the general path, so the
+typed path's old by-name refusal is not reported when the general path later fails. A body that
+cannot raise keeps the old eager list lowering, which is why the generated C of the ten
+`lab/compare` tasks did not change. A class-body or nested generator, a walrus, a captured local
+rebound after creation, and a call of a program-defined class constructor inside one stay refused
+by name (the last one because moving the call into the generated function changed class
+resolution for rebound and `__slots__` classes).
+
+After the change the generator-expression reason is 0 on both builds; the nine modules are now
+refused at their next blockers, so the total is still 14 build / 162 refuse. Probes in
+`/tmp/probes/gv` on both builds (`cmp.sh`): `p_basic` (empty, negative, one-shot, aliased
+generator), `p_routes` (argument, list item, attribute, dict value, function return), `p_raise`
+(exception at `next()`, outer iterator order), `p_nested` (two for-clauses and an if),
+`p_capture_mut` (captured list mutation after creation), `p_types` (int/float/bool/str elements
+and `join`) match CPython; `p_capture` (a captured local rebound after creation) is refused by
+name. `p_lazy` (the pre116 raising case) matches. Added `AIL_CURRENT/test_ail_stdlib_reach.py`
+and registered it through `AIL_CURRENT/tests.d/test_ail_stdlib_reach.txt`; updated
+`test_ail_pre116.py` and `test_ail_pre211.py` for the new lazy behaviour (their class-constructor
+refusals are unchanged). The pre-existing worktree change to `ail_modules.py`'s
+`fallback_defines` (already-bound names and names only read in skipped branches) is included.
+
+Final-state tests with `-j 2`: test_ail_stdlib_reach, test_ail_pre116, test_ail_pre211,
+test_ail_modsys, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+`python3 tools/update_manifest.py` and `--check` pass; `tools/ci_shards.py --update` places the
+new module once.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
