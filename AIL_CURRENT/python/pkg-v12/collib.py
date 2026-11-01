@@ -937,8 +937,18 @@ class Rewriter:
         if t is ast.List:
             for x in e.elts:
                 tx = self.infer(x, env)
-                if tx in SCALARS or (isinstance(tx, tuple) and tx[0] in ('list', 'tuple', 'tup')):
+                if tx in SCALARS or (isinstance(tx, tuple) and tx[0] in ('list', 'tuple', 'tup', 'dict')):
                     return ('list', tx)
+            return None
+        if t is ast.Dict:
+            if not e.keys or any(k is None for k in e.keys):
+                return None
+            ks = [self.infer(k, env) for k in e.keys]
+            vs = [self.infer(v, env) for v in e.values]
+            if all(k == ks[0] and (k in SCALARS or is_tup(k)) for k in ks) \
+                    and all(v == vs[0] and (v in SCALARS or (isinstance(v, tuple) and v[0] in ('list', 'set', 'tup', 'dict')))
+                            for v in vs):
+                return ('dict', ks[0], vs[0])
             return None
         if t is ast.Tuple:
             ts = [self.infer(x, env) for x in e.elts]
@@ -957,6 +967,15 @@ class Rewriter:
             tx = self.infer(e.elt, inner)
             if okel(tx):
                 return ('set' if t is ast.SetComp else 'list', tx)
+            return None
+        if t is ast.DictComp:
+            inner = dict(env)
+            for g in e.generators:
+                self.bind(g.target, g.iter, inner)
+            k = self.infer(e.key, inner)
+            v = self.infer(e.value, inner)
+            if (k in SCALARS or is_tup(k)) and (v in SCALARS or (isinstance(v, tuple) and v[0] in ('list', 'set', 'tup', 'dict'))):
+                return ('dict', k, v)
             return None
         if t is ast.Subscript:
             base = self.infer(e.value, env)
@@ -1085,6 +1104,11 @@ class Rewriter:
                 if base[0] == 'dict':
                     if m == 'get' and len(args) == 2:
                         return base[2]
+                    if m in ('keys', 'values'):
+                        return ('list', base[1] if m == 'keys' else base[2])
+                    if m == 'items' and (base[1] in SCALARS or is_tup(base[1])) \
+                            and (base[2] in SCALARS or is_tup(base[2])):
+                        return ('list', ('tup', (base[1], base[2])))
                 if base[0] == 'obj':
                     return None
         return None
@@ -1283,7 +1307,7 @@ class Rewriter:
                 continue
             name = node.targets[0].id if isinstance(node, ast.Assign) else node.target.id
             inner = t[1] if isinstance(t, tuple) and t[0] in ('list', 'set') else t
-            if is_tup(inner):
+            if is_tup(inner) or (isinstance(t, tuple) and t[0] == 'dict'):
                 self.consts[name] = t
         # analysis to a fixpoint (a Dict[K, List[T]] parameter is a defaultdict(list) once one is built)
         for _ in range(3):
@@ -1326,7 +1350,7 @@ class Rewriter:
                 for st in ast.walk(item):
                     if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Attribute) \
                             and isinstance(st.target.value, ast.Name) and st.target.value.id == 'self':
-                        fields[st.target.id] = self.ann_type(st.annotation)
+                        fields[st.target.attr] = self.ann_type(st.annotation)
                     if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Attribute) \
                             and isinstance(st.targets[0].value, ast.Name) and st.targets[0].value.id == 'self':
                         if self.mentions_collection(st.value):
@@ -2119,7 +2143,7 @@ class Scope:
         """A mapping argument, including a dict display or an unannotated name bound to one."""
         if (isinstance(t, C) and t.kind in ('ctr', 'dds', 'od')) or (isinstance(t, tuple) and t[0] == 'dict'):
             return True
-        if isinstance(arg, ast.Dict):
+        if isinstance(arg, (ast.Dict, ast.DictComp)):
             return True
         if isinstance(arg, ast.Name) and arg.id not in self.params:
             found = False
@@ -2142,7 +2166,13 @@ class Scope:
             r.refuse(st, 'Counter.subtract takes one iterable or mapping')
         arg = call.args[0]
         t = r.infer(arg, self.env)
+        if isinstance(t, tuple) and t[0] == 'obj' and t[1] == 'ChainMap':
+            return self.subtract_chainmap(st, recv, arg)
         if self.mapping_arg(arg, t):
+            if isinstance(t, C) and t.kind in ('dds', 'od') and t.V != 'int':
+                r.refuse(st, 'Counter.subtract(mapping) needs int values')
+            if isinstance(t, tuple) and t[0] == 'dict' and t[2] != 'int':
+                r.refuse(st, 'Counter.subtract(mapping) needs int values')
             if isinstance(arg, ast.Dict) and not arg.keys:
                 return self.put_stmt(st, 'pass')
             if isinstance(arg, ast.Name):
@@ -2155,6 +2185,8 @@ class Scope:
             new = ast.Expr(value=ast.Call(func=ast.Name(id=helper, ctx=ast.Load()),
                                           args=[recv, src], keywords=[]))
             return self.put_stmt(st, head + ast.unparse(new))
+        if not self.iterable_arg(arg, t):
+            return
         helper = r.ctr(c.K, 'subtract_iter', T_CTR_SUBTRACT_ITER)
         if is_tup(c.K) and isinstance(arg, ast.List) and not arg.elts:
             return self.put_stmt(st, 'pass')
@@ -2168,6 +2200,33 @@ class Scope:
         it = self.iter_expr(arg)
         new = ast.Expr(value=ast.Call(func=ast.Name(id=helper, ctx=ast.Load()), args=[recv, it], keywords=[]))
         self.put_stmt(st, ast.unparse(new))
+
+    def iterable_arg(self, arg, t):
+        """True when the argument is certainly not a mapping; an unknown one is left to the general path,
+        whose Counter.subtract dispatches on the runtime type (a dict subtracts values, anything else keys)."""
+        if isinstance(t, C):
+            return t.kind == 'dq'
+        if t == 'str':
+            return True
+        if isinstance(t, tuple) and t[0] in ('list', 'set', 'iter', 'range', 'tup', 'tuple'):
+            return True
+        if isinstance(arg, (ast.List, ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.Set, ast.Tuple)):
+            return True
+        return isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+
+    def subtract_chainmap(self, st, recv, arg):
+        """`c.subtract(cm)` with a ChainMap: subtract the value of every item, as CPython's Mapping branch does."""
+        r = self.r
+        if isinstance(recv, ast.Name):
+            target, head = recv.id, ''
+        else:
+            target = r.new_name('c')
+            head = '%s = %s' % (target, ast.unparse(recv)) + chr(10) + ' ' * st.col_offset
+        key, val = r.new_name('k'), r.new_name('v')
+        text = ('for %s, %s in %s.items():' % (key, val, ast.unparse(arg)) + chr(10)
+                + ' ' * (st.col_offset + 4)
+                + '%s[%s] = %s.get(%s, 0) - %s' % (target, key, target, key, val))
+        self.put_stmt(st, head + text)
 
     def iter_expr(self, node):
         """An iterable expression, a bare collection read as its snapshot / keys."""

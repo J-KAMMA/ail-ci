@@ -55,8 +55,10 @@ class StdCollectionsPrograms(unittest.TestCase):
                 self.assertEqual(ran.returncode, python.returncode, name)
 
     def test_counter_subtract_mapping_forms(self):
-        source_text = '''from collections import Counter
+        source_text = '''from collections import Counter, ChainMap
 from typing import Dict
+
+G = {"a": 2}
 
 
 class Holder:
@@ -80,6 +82,19 @@ def main() -> int:
     u = {(1, 2): 1}
     t.subtract(u)
     print(sorted(t.items()))
+    e = Counter("aab")
+    e.subtract({k: 2 for k in ["a", "b"]})
+    print(sorted(e.items()))
+    for m in [{"a": 2}]:
+        e.subtract(m)
+    print(sorted(e.items()))
+    e.subtract(G)
+    print(sorted(e.items()))
+    e.subtract(ChainMap({"a": 2}, {"b": 3}))
+    print(sorted(e.items()))
+    q: Counter[tuple[int, int]] = Counter({(1, 1): 0, (1, 2): 5, (2, 2): 0})
+    q.subtract({(k, k): 2 for k in [1, 2]})
+    print(sorted(q.items()))
     return 0
 
 

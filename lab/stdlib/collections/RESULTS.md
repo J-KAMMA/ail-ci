@@ -50,10 +50,13 @@ Result: **9 of 12 build and match CPython**.  3 are refused by name (follow-ups 
 1. `Counter.subtract` (the blocker shared by `counter_edges`): `python/pkg-v12/collib.py` lowers
    `c.subtract(iterable)` / `c.subtract(mapping)` to typed helpers, and
    `python/pkg-v12/pyboxed2.py` adds the general-path runtime pair (`ail__counter_subtract`,
-   `ail__counter_subtract_map`).  The mapping form also handles a dict display, an unannotated
-   name bound to a dict, and a mapping reached through an attribute, a list item or a dict value;
-   the typed helper walks `other.keys()` (a tuple-keyed table has no `__iter__`), and the general
-   path reads the `ks` / `vs` / `live` rows of a tuple-keyed table before subtracting.
+   `ail__counter_subtract_map`).  The mapping form handles a dict display or comprehension, a
+   module-level dict, an unannotated name bound to a dict, a loop variable over dicts, and a mapping
+   reached through an attribute, a list item or a dict value; `ChainMap` subtracts every item's value
+   through `items()`.  The typed helper walks `other.keys()` (a tuple-keyed table has no `__iter__`),
+   and the general path reads the `ks` / `vs` / `live` rows of a tuple-keyed table before subtracting.
+   A mapping whose value type is not int is refused by name, and an argument whose type cannot be
+   told is left to the general path, which dispatches on the runtime type.
 
 2. `Counter(mapping)` where the mapping has tuple keys (the blocker for `coordinate_freq`, and the
    reason the others could not use tuple-keyed inventory data): the tuple pass makes such a mapping a

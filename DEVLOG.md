@@ -1,3 +1,21 @@
+## 2026-11-01 -- std_collections review 2: subtract of every mapping form and ChainMap
+
+The review found that `Counter.subtract` still treated a dict comprehension, a loop variable over
+dicts, a module-level dict and a tuple-keyed dict comprehension as iterables (subtracting one per
+key), and that `Counter.subtract(ChainMap(...))` iterated the ChainMap's keys.  `collib.py` now
+infers plain dicts and dict comprehensions (including tuple keys and dict values), keeps module-level
+dict constants in the type environment, propagates a plain dict's `keys()` / `values()` / `items()`
+types, and lowers a ChainMap argument to a loop over `items()`.  An argument whose type cannot be
+told is left to the general path, whose `Counter.subtract` dispatches on the runtime type; a mapping
+with non-int values is refused by name.
+
+Probes `r3`, `r7`, `r9`, `r10`, `r15` from the review plus `p02`-`p25` cover dict comprehensions,
+loop variables, module dicts, ChainMap (empty, duplicate keys, tuple keys), list items, nested dict
+values, function arguments/returns, self-alias, empty/negative/float mappings, plain iterables, and
+an unbuildable `new_child()` ChainMap (refused by name); all buildable probes match CPython on both
+builds.  `test_ail_std_collections.test_counter_subtract_mapping_forms` now covers the new forms.
+Generated C of `term_rank` (the only compare task importing collections) is byte-identical.
+
 ## 2026-11-01 -- std_collections review: Counter.subtract mapping values for literals, names and tuple-keyed tables
 
 The review found that `Counter.subtract({"a": 2})` and `d = {"a": 2}; c.subtract(d)` subtracted
