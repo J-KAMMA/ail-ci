@@ -55,8 +55,10 @@ TypedDict / NewType / cast boundary program and checks that the three follow-ups
     `X = TypedDict("X", {...})` form (including `total=False` and keyword fields) become plain dicts; every
     use of the declared name is read as `dict`, and the declaration is dropped.  A constructor call with only
     `**data` is lowered to `dict(data)`, the copy CPython's `TypedDict(**data)` makes.
-  * `X = NewType("X", Base)` is lowered to `Base`: every use of `X` is read as the base type, the declaration
-    is dropped, and calls such as `UserId(7)` become `int(7)`.
+  * `X = NewType("X", Base)` keeps CPython's call: `UserId(7)` returns the argument `7` itself (identity), a
+    call with another arity or with a keyword raises `TypeError`, and an alias of `X` stays callable. A use of
+    `X` that is not a call reads as an identity function, not CPython's NewType object; the base (including a
+    chain whose base is another NewType) is checked but not evaluated, and the declaration is dropped.
   * `cast(T, value)` becomes `value` (CPython's cast has no run-time effect).
   Only these three names are taken out of `from typing import ...`; every other typing name is left for the
   ordinary annotation handling.

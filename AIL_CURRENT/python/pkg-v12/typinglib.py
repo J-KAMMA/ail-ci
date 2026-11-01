@@ -3,15 +3,16 @@
 * `TypedDict` class and functional declarations become plain dicts: every use of the declared name is read as
   `dict`, the declaration itself is dropped.  A TypedDict is a dict at run time in CPython, and the fields are not
   checked, so a literal, `Movie(title=...)`, `Movie(**data)`, item access and `len` keep CPython's behaviour.
-* `NewType("Name", Base)` is `Base` at run time: every use of the declared name is read as the base type, and the
-  declaration is dropped.  The programs keep the calls (`UserId(7)`), which become `int(7)`.
+* `NewType("Name", Base)` keeps CPython's call behaviour: `Name(v)` is `v` itself (not `Base(v)`), and a call
+  with another arity or with any keyword raises `TypeError` as `NewType.__call__` does.  A use of the name that is
+  not a direct call reads as an identity function of one argument (so an alias keeps working); the base, including
+  a chain whose base is another NewType, is checked but not evaluated, and the declaration itself is dropped.
 * `cast(T, value)` returns `value`; the type expression is not evaluated (it has no run-time effect in CPython).
 
 Only the names in HANDLED are taken out of `from typing import ...`; the other typing names stay for the ordinary
 annotation handling.  `import typing` is left in place (an unused one is harmless).
 """
 import ast
-import copy
 
 import stdlib5
 from stdlib4 import refuse
@@ -47,12 +48,35 @@ def _new_type_base(call, binder):
 
 
 class _Fix(ast.NodeTransformer):
-    def __init__(self, binder, typed_dicts, new_types):
+    def __init__(self, binder, typed_dicts, new_types, ident, bad):
         self.binder = binder
         self.typed_dicts = typed_dicts
         self.new_types = new_types
+        self.ident = ident
+        self.bad = bad
+        self.ident_used = False
+        self.bad_used = False
 
     def visit_Call(self, node):
+        is_new_type = isinstance(node.func, ast.Name) and node.func.id in self.new_types
+        if is_new_type:
+            node.args = [self.visit(a) for a in node.args]
+            for keyword in node.keywords:
+                keyword.value = self.visit(keyword.value)
+            if not node.keywords and len(node.args) == 1 and not isinstance(node.args[0], ast.Starred):
+                return ast.copy_location(node.args[0], node)
+            if not node.keywords and len(node.args) == 1:
+                self.ident_used = True
+                func = ast.Name(id=self.ident, ctx=ast.Load())
+            else:
+                self.bad_used = True
+                func = ast.Name(id=self.bad, ctx=ast.Load())
+                positional = ast.List(elts=node.args, ctx=ast.Load())
+                keys = [ast.Constant(value=k.arg) if k.arg is not None else None for k in node.keywords]
+                values = [k.value for k in node.keywords]
+                return ast.copy_location(ast.Call(
+                    func=func, args=[positional, ast.Dict(keys=keys, values=values)], keywords=[]), node)
+            return ast.copy_location(ast.Call(func=func, args=node.args, keywords=[]), node)
         is_cast = self.binder.attr(node.func) == 'cast'
         is_typed_dict = isinstance(node.func, ast.Name) and node.func.id in self.typed_dicts
         self.generic_visit(node)
@@ -71,8 +95,54 @@ class _Fix(ast.NodeTransformer):
             if node.id in self.typed_dicts:
                 return ast.copy_location(ast.Name(id='dict', ctx=ast.Load()), node)
             if node.id in self.new_types:
-                return ast.copy_location(copy.deepcopy(self.new_types[node.id]), node)
+                self.ident_used = True
+                return ast.copy_location(ast.Name(id=self.ident, ctx=ast.Load()), node)
         return node
+
+
+def _resolve(new_types):
+    """Each NewType base with a NewType base replaced by that NewType's own (already resolved) base."""
+    def resolve(name, seen):
+        base = new_types[name]
+        if isinstance(base, ast.Name) and base.id in new_types:
+            if base.id in seen:
+                refuse(base, 'NewType %s has a cyclic base' % name)
+            return resolve(base.id, seen | {name})
+        return base
+    return {name: resolve(name, {name}) for name in new_types}
+
+
+def _fresh(tree, stem):
+    used = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    used |= {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    name = stem
+    n = 0
+    while name in used:
+        n += 1
+        name = '%s_%d' % (stem, n)
+    return name
+
+
+def _defs(ident, bad, ident_used, bad_used):
+    out = []
+    if ident_used:
+        out.append(ast.parse('def %s(obj):\n    return obj\n' % ident, mode='exec').body[0])
+    if bad_used:
+        out.append(ast.parse('def %s(positional, keywords):\n'
+                             '    raise TypeError("NewType() takes exactly one positional argument")\n'
+                             % bad, mode='exec').body[0])
+    return out
+
+
+def _insert_helpers(tree, nodes):
+    body = tree.body
+    i = 0
+    if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) and \
+            isinstance(body[0].value.value, str):
+        i = 1
+    while i < len(body) and isinstance(body[i], ast.ImportFrom) and body[i].module == '__future__':
+        i += 1
+    body[i:i] = nodes
 
 
 def run(tree, text):
@@ -105,4 +175,9 @@ def run(tree, text):
                 continue
         body.append(stmt)
     tree.body = body
-    tree.body = [_Fix(binder, typed_dicts, new_types).visit(stmt) for stmt in tree.body]
+    new_types = _resolve(new_types)
+    ident = _fresh(tree, '_ail_newtype_identity')
+    bad = _fresh(tree, '_ail_newtype_bad_call')
+    fix = _Fix(binder, typed_dicts, new_types, ident, bad)
+    tree.body = [fix.visit(stmt) for stmt in tree.body]
+    _insert_helpers(tree, _defs(ident, bad, fix.ident_used, fix.bad_used))

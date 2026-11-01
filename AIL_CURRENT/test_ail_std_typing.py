@@ -47,6 +47,18 @@ class Partial(TypedDict, total=False):
 Movie = TypedDict("Movie", {"title": str})
 UserId = NewType("UserId", int)
 Name = NewType("Name", str)
+AdminId = NewType("AdminId", UserId)
+
+
+class Token:
+    def __init__(self, raw: str) -> None:
+        self.raw = raw
+
+    def show(self) -> str:
+        return self.raw
+
+
+TokenId = NewType("TokenId", Token)
 
 
 def add(uid: UserId, n: int) -> UserId:
@@ -66,6 +78,20 @@ def main() -> None:
     print(add(u, 3), UserId(1) + UserId(2))
     n = Name("ada")
     print(n.upper(), len(Name("bob")), n.strip())
+    t = Token("abc")
+    marked = TokenId(t)
+    print(marked is t, marked.show())
+    alias = UserId
+    print(alias(11))
+    print(AdminId(7), type(AdminId(True)).__name__)
+    try:
+        UserId()
+    except TypeError:
+        print("missing")
+    try:
+        UserId(obj=5)
+    except TypeError:
+        print("keyword")
     val = cast(str, "7")
     print(val + "!")
     print(cast(int, 3) * 2)

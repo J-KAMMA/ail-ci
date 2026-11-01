@@ -1,3 +1,16 @@
+## 2026-11-01 -- typing review fixes: NewType identity, arity, chained base (job-std_typing-11012337)
+
+Review follow-up on `3e1d988`. A NewType call is now identity: `UserId(v)` returns `v` itself instead of
+`int(v)` (or `Token(v)`), so a class value keeps its identity, `UserId(True)` stays a bool and `UserId(3.9)` stays
+a float. A wrong arity or any keyword is routed to a helper that raises `TypeError`, so `UserId()` and
+`UserId(obj=5)` stay catchable errors instead of `int()` returning 0. A use that is not a call reads as an
+identity function, so an alias of a NewType stays callable; a chain whose base is another NewType is accepted, and
+the base is no longer evaluated as part of the declaration. The lab programs and the `test_ail_std_typing`
+boundary case now cover a class NewType (`TokenId(t) is t`), zero-argument and keyword calls, an alias and a
+chained NewType. Probes `/tmp/probes/pn_newtype_class.py`, `pn_newtype_values2.py`, `pn_newtype_chain.py`,
+`pn_newtype_arity.py`, `pn_newtype_places.py`, `pn_errors_exact.py`, plus the reviewer's `/tmp/rprobes/pn_*`, match
+CPython on both `cmp.sh` builds (or are refused by name where introspection/unsupported class bases are involved).
+
 ## 2026-11-01 -- typing runtime names: TypedDict, NewType, cast (job-std_typing-11012337)
 
 `typing` was missing from the stdlib-5 gate in `ail_syntax.python_surface`, so a program whose only library
