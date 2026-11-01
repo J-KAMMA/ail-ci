@@ -853,7 +853,8 @@ main()
         self.refused(head + "    xs: list[float] = [1.5, 2.5]\n    print(statistics.stdev(xs))\n\n\nmain()\n",
                      "exact fractions over floats")
         self.refused(head + "    xs = [x for x in range(3)]\n    print(statistics.mean(xs, 1))\n\n\nmain()\n", "one argument")
-        self.refused(head + "    print(statistics.quantiles([1, 2, 3]))\n\n\nmain()\n", "statistics.quantiles")
+        self.refused(head + "    print(statistics.linear_regression([1, 2, 3], [1, 2, 3]))\n\n\nmain()\n",
+                     "statistics.linear_regression")
 
     # -- x in (constants) -----------------------------------------------------------------------------------------
     def test_membership_in_a_display_of_constants(self):
