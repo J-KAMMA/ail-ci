@@ -67,8 +67,12 @@ base as a field). The two class-test programs are now typed:
   `True` / `False`.
 * `isinstance(x, (C, int, ...))` with at least one class of the hierarchy now reaches the existing
   class-id test; builtin targets that cannot match a class instance are false, and `object` is true
-  (including for `None`, which is an instance of `object`).
+  (including for `None`, which is an instance of `object`) wherever it appears in the tuple, even
+  after a class that already matches the value.
   The receiver keeps its existing requirement: a name or an attribute.
+* A parameter or local that shadows a class or builtin type name is a value, not that class; the
+  fold sees the shadow and refuses `issubclass` by name rather than printing an answer that
+  CPython raises `TypeError` for. A user-defined `issubclass` (a `def`) is likewise not folded.
 
 The general path still refuses `issubclass` by name (`the name 'issubclass' is not a known
 function/class/builtin`) and refuses `isinstance(..., (C, object))` by name; the default build is

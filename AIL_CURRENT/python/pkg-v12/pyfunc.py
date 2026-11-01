@@ -16624,16 +16624,23 @@ def _mixed_class_isinstance(node, ctx):
 
 def _static_issubclass(node, ctx):
     """True or False when `issubclass(C, D)` (or a tuple of Ds) is settled when the program is built:
-    C and every D a class of this program or a builtin type name. None otherwise."""
+    C and every D a class of this program or a builtin type name. None otherwise. A local or
+    parameter that shadows one of those names is a value, not the class or builtin, so it is not
+    folded (CPython raises TypeError there)."""
     if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
             and node.func.id == 'issubclass' and len(node.args) == 2 and not node.keywords
             and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))):
+        return None
+    local = getattr(ctx, 'local_bindings', ())
+    if node.func.id in local:
         return None
     left, spec = node.args
     if not isinstance(left, ast.Name):
         return None
     names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
     if not names or not all(isinstance(n, ast.Name) for n in names):
+        return None
+    if left.id in local or any(n.id in local for n in names):
         return None
     if left.id in ctx.classes:
         if not all(n.id in ctx.classes or _builtin_type_name(n.id, ctx) for n in names):
@@ -16786,13 +16793,13 @@ def _isinstance_value(node, ctx):
         raise Unsupported('isinstance(%s, ...): bind the value to a name first' % ast.unparse(value))
     targets = [n.id for n in (spec.elts if isinstance(spec, ast.Tuple) else [spec])]
     static = kind[1]
+    pointer = _null_test_pointer(value, ctx)
+    if 'object' in targets:
+        # Every class instance, and None, is an object: an object target settles the whole tuple,
+        # wherever it appears in it.
+        return '((void)(%s), (int64_t)1)' % pointer
     tests = []
-    always = False
     for t in targets:
-        if t == 'object':
-            always = True                # every class instance, and None, is an object
-            tests = None
-            break
         if t in _class_chain(static) or t == static:
             tests = None                 # always an instance (unless None)
             break
@@ -16800,10 +16807,7 @@ def _isinstance_value(node, ctx):
             lo, hi = ctx.classes[t].cid, ctx.classes[t].cid_hi
             tests.append('(uint64_t)(((ail_obj_header *)_ail_io)->drop - %dU) <= %dU' % (lo, hi - lo)
                          if hi > lo else '((ail_obj_header *)_ail_io)->drop == %d' % lo)
-    pointer = _null_test_pointer(value, ctx)
     nullable = static in _NULLABLE
-    if always:
-        return '((void)(%s), (int64_t)1)' % pointer
     if tests is None:
         return '(int64_t)((%s) != 0)' % pointer if nullable else '((void)(%s), (int64_t)1)' % pointer
     if not tests:

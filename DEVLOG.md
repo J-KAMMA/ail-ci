@@ -1,3 +1,20 @@
+## 2026-11-01 -- cls1 review: `object` is unconditional and shadowed names are not folded (job-cls1-11020605)
+
+Two defects from the review of the typed class-test folding. First, `_isinstance_value` broke out
+of the target loop when a class matched before `object`, so `isinstance(x, (A, object))` with
+`x: A | None` printed `False` for `None` (CPython prints `True`). An `object` target now settles
+the tuple before any class test, wherever it appears, including self and ancestor targets. Second,
+`_static_issubclass` folded a class or builtin name that a parameter or local shadows
+(`def f(A: int): print(issubclass(B, A))`, a local `A = 7`, or a shadowed left operand). It now returns
+"unknown" for a shadowed call name or operand, so the typed path refuses `issubclass` by name as
+the general path does; CPython raises `TypeError` there, so this is a named refusal, not a silent
+answer. Added `test_object_settles_the_tuple_before_a_matching_class` and
+`test_shadowed_issubclass_operands_are_not_folded` (4 cases) to
+`AIL_CURRENT/test_ail_class_reach.py`, and noted both boundaries in
+`docs/design/CLASS_REACH.md`. Probes `/tmp/probes/objancestor.py`, `objorder.py`,
+`objshadow_cls.py`, `objshadow_local.py`, `objshadow_left.py`, `objshadow_builtin.py`: default
+build matches CPython where the general path is refused by name, or is refused by name itself.
+
 ## 2026-11-01 -- cls1 review: `None` is an instance of `object` (job-cls1-11011231)
 
 The review found that a nullable class value (`x: A | None`) tested with a tuple containing

@@ -193,6 +193,105 @@ def main() -> None:
 main()
 '''
 
+OBJECT_ANCESTOR = '''class A:
+    def __init__(self, x: int) -> None:
+        self.x = x
+
+
+class B(A):
+    pass
+
+
+def f(x: A | None) -> None:
+    print(isinstance(x, (A, object)), isinstance(x, (object, A)), isinstance(x, (B, object)))
+
+
+def g(x: B | None) -> None:
+    print(isinstance(x, (B, object)), isinstance(x, (object, B)), isinstance(x, (A, object)))
+
+
+def main() -> None:
+    f(None)
+    f(A(1))
+    g(None)
+    g(B(2))
+
+
+main()
+'''
+
+SHADOW_TARGET_PARAM = '''class A:
+    def __init__(self, x: int) -> None:
+        self.x = x
+
+
+class B(A):
+    pass
+
+
+def f(A: int) -> None:
+    print(issubclass(B, A))
+
+
+def main() -> None:
+    f(1)
+
+
+main()
+'''
+
+SHADOW_TARGET_LOCAL = '''class A:
+    def __init__(self, x: int) -> None:
+        self.x = x
+
+
+class B(A):
+    pass
+
+
+def f() -> None:
+    A = 7
+    print(issubclass(B, A))
+
+
+def main() -> None:
+    f()
+
+
+main()
+'''
+
+SHADOW_LEFT_PARAM = '''class A:
+    def __init__(self, x: int) -> None:
+        self.x = x
+
+
+class B(A):
+    pass
+
+
+def f(A: int) -> None:
+    print(issubclass(A, object))
+
+
+def main() -> None:
+    f(1)
+
+
+main()
+'''
+
+SHADOW_TARGET_BUILTIN = '''def f(int: int) -> None:
+    print(issubclass(bool, int))
+
+
+def main() -> None:
+    f(1)
+
+
+main()
+'''
+
 
 def run_cpython(directory, text, name):
     source = Path(directory, name + '.py')
@@ -280,6 +379,29 @@ class ClassReachTests(unittest.TestCase):
             self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
             out = run_exe(exe)
             self.assertEqual((out.returncode, out.stdout), (0, ref.stdout))
+
+    def test_object_settles_the_tuple_before_a_matching_class(self):
+        # object is unconditional wherever it appears: self, ancestor and order in the tuple do not matter.
+        with tempfile.TemporaryDirectory(prefix='ail-clsreach-') as d:
+            ref = run_cpython(d, OBJECT_ANCESTOR, 'object_ancestor_cp')
+            self.assertEqual(ref.returncode, 0, ref.stderr)
+            res, exe = build(d, OBJECT_ANCESTOR, 'object_ancestor', True)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            out = run_exe(exe)
+            self.assertEqual((out.returncode, out.stdout), (0, ref.stdout))
+
+    def test_shadowed_issubclass_operands_are_not_folded(self):
+        # A parameter or local that shadows a class/builtin name is a value; CPython raises TypeError.
+        # The typed path refuses by name rather than folding the class the name would otherwise mean.
+        for name, text in (('target_param', SHADOW_TARGET_PARAM),
+                           ('target_local', SHADOW_TARGET_LOCAL),
+                           ('left_param', SHADOW_LEFT_PARAM),
+                           ('target_builtin', SHADOW_TARGET_BUILTIN)):
+            with self.subTest(case=name), tempfile.TemporaryDirectory(prefix='ail-clsreach-') as d:
+                res, exe = build(d, text, 'shadow_' + name, True)
+                self.assertNotEqual(res.returncode, 0)
+                self.assertIn('issubclass', res.stdout + res.stderr)
+                self.assertFalse(exe.exists())
 
     def test_user_issubclass_is_not_folded(self):
         self.three_way(SHADOW, 'shadow')
