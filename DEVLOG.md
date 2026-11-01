@@ -132,6 +132,32 @@ they need an aware time, a named tuple, and a `struct_time`, so they are follow-
 so the generated C of the ten lab/compare tasks is unchanged. `test_ail_std_datetime.py` (registered in
 `AIL_CURRENT/tests.d/`) compiles the nine passing programs and compares them with CPython, and locks the three
 named refusals. Probes in `/tmp/probes/dt_*.py` match CPython on both builds.
+## 2026-11-01 -- fractions review: round() keyword evaluation order (job-std_fractions-11011614)
+
+Review follow-up: the general path's `round(number=, ndigits=)` lowering bound `number` before
+`ndigits` regardless of source order, so `round(ndigits=dig(), number=num())` called `num()` first
+while CPython evaluates keywords left-to-right. `_b_round` now lowers positional arguments and then
+keyword values in `kwargs` insertion order, and `test_ail_std_fractions` compares both orders plus a
+mixed positional/keyword call with side effects. Probes in `/tmp/probes` (`round_eval_order`,
+`round_eval_values`, `round_eval_fraction`) match CPython on both builds; the ten `lab/compare`
+sources keep byte-identical codegen against `dafa966`; `test_ail_std_fractions`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.
+
+## 2026-11-01 -- fractions: 12 real programs build, 3 general-path bugs fixed (job-std_fractions-11011614)
+
+`lab/stdlib/fractions/` now has twelve 15-60 line programs exercising `Fraction` arithmetic,
+construction, keywords, rounding, `limit_denominator`, `as_integer_ratio`, sorting/hashing/dict
+keys, caught errors and stdin. All twelve build in the default mode and match CPython 3.12 stdout
+and exit code; all use the general path because the typed path refuses the Fraction dunders. The
+first build had 11 built and `keyword_forms.py` refused, and two of the built programs printed
+different bytes. Three fixes: the prelude's division-by-zero message formatted the numerator
+instead of the denominator (`Fraction(200, 0)` for `Fraction(1, 0)`); the general `round()` builtin
+now takes `number=` / `ndigits=` in either order (a missing `number` and duplicate or unknown
+keywords are refused by name instead of being misread); and a generated tuple-key dict table with a bound `KeyError`
+handler now keeps the key as `args[0]`, so `str(exc)` is `(9, 9)` rather than `'(9, 9)'`. The
+tuple-key change is conditional on a bound handler, so generated C without one is unchanged.
+`test_ail_std_fractions.py` compares all twelve against CPython (empty and mixed stdin for
+`unit_convert.py`).
 
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 

@@ -571,7 +571,7 @@ def _ail_fr_div(a, b):
     nb = b.numerator
     db = b.denominator
     if nb == 0:
-        raise ZeroDivisionError("Fraction(%s, 0)" % da)
+        raise ZeroDivisionError("Fraction(%s, 0)" % db)
     g1 = _ail_fr_gcd(na, nb)
     if g1 > 1:
         na = na // g1
