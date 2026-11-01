@@ -73,9 +73,13 @@ The first build of these programs had 6 matching, 1 built with different stdout 
   on the general path (`not in the subset: B() called without a required argument x`), never a
   silently constructed object.
 * `python/pkg-v12/smalllib5.py`: `abc.get_cache_token()` returns CPython's own starting token,
-  read from a fresh interpreter of the same build at compile time (a positive `int` that stays
-  constant for the supported subset, because `register()`/`update_abstractmethods()` -- the only
-  operations that invalidate it -- are refused by name).
+  read from a fresh interpreter of the same build at compile time. That is exact for a program
+  that imports `abc` alone (plus `__future__`): `register()`/`update_abstractmethods()` are
+  refused by name, and a program with no other import has no other module that registers ABCs.
+  Importing `numbers`, `decimal`, `fractions`, `statistics` or any other module moves the
+  counter, so a call in such a program is a named compile refusal
+  (`abc.get_cache_token: the token is exact only when the program imports no module besides abc
+  ...`), never a wrong constant.
 
 ## Follow-ups
 

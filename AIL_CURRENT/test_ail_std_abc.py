@@ -141,6 +141,18 @@ token = abc.get_cache_token()
 print("token", token)
 print("positive", token > 0)
 ''',
+    # An aliased import and a __future__ import do not move the counter, so the exact value
+    # is still available.
+    "cache_future": '''\
+from __future__ import annotations
+
+import abc as a
+
+
+token = a.get_cache_token()
+print("token", token)
+print("positive", token > 0)
+''',
 }
 
 # A concrete subclass inheriting an ABC guard must not swallow its own constructor binding
@@ -171,6 +183,15 @@ try:
 except TypeError as exc:
     print("blocked", str(exc))
 ''', "called without a required argument"),
+    # Importing a module that registers ABCs moves CPython's cache token, so the token is a
+    # named compile refusal rather than a wrong constant.
+    "cache_token_other_import": ('''\
+import abc
+first = abc.get_cache_token()
+import numbers
+second = abc.get_cache_token()
+print(first, second, first == second)
+''', "abc.get_cache_token: the token is exact only when the program imports no module besides abc"),
 }
 
 

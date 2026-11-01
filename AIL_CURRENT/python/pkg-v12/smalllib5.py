@@ -34,7 +34,7 @@ def run(tree, text, mods):
     if 'calendar' in mods:
         run_calendar(tree, text)
     if 'abc' in mods:
-        run_abc(tree, text)
+        run_abc(tree, text, mods)
     if 'array' in mods:
         run_array(tree, text)
     if 'io' in mods:
@@ -133,7 +133,7 @@ def run_calendar(tree, text):
 
 
 # ---------------------------------------------------------------------------------------------------------------
-def run_abc(tree, text):
+def run_abc(tree, text, mods):
     b = stdlib5.take_imports(tree, 'abc', {'ABC', 'ABCMeta', 'abstractmethod', 'abstractclassmethod',
                                            'abstractstaticmethod', 'abstractproperty', 'get_cache_token'},
                              unknown='ABC, ABCMeta, abstractmethod, abstractclassmethod, abstractstaticmethod, '
@@ -317,10 +317,12 @@ def run_abc(tree, text):
         cls.body.append(marker)
 
     used_token = [False]
+    token_calls = []
 
     def fix(node):
         if isinstance(node, ast.Call) and b.attr(node.func) == 'get_cache_token' and not node.args and not node.keywords:
             used_token[0] = True
+            token_calls.append(node)
             return stdlib5.call(stdlib5.name('_ail_abc_cache_token'), [])
         return None
     tree.body = [stdlib5.Replace(fix).visit(s) for s in tree.body]
@@ -354,7 +356,32 @@ def run_abc(tree, text):
     if used_token[0]:
         # CPython's cache token is the interpreter's own ABC counter: constant until
         # register()/update_abstractmethods() invalidate a cache, both of which this pass
-        # refuses. A fresh interpreter of the same build gives that starting value exactly.
+        # refuses. Importing a module that registers ABCs (numbers, decimal, fractions,
+        # statistics, ...) also moves it, and this build cannot know which modules a fresh
+        # interpreter has already loaded, so only a program that imports `abc` alone gets the
+        # exact value. Anything else is a named refusal, never a wrong constant.
+        other = None
+        for module in sorted(mods):
+            if module not in ('abc', '__future__'):
+                other = module
+                break
+        if other is None:
+            for each in ast.walk(tree):
+                if isinstance(each, ast.Import):
+                    for alias in each.names:
+                        if alias.name.split('.')[0] != 'abc':
+                            other = alias.name
+                elif isinstance(each, ast.ImportFrom):
+                    module = (each.module or '').split('.')[0]
+                    if each.level or (module and module not in ('abc', '__future__')):
+                        other = each.module or '.'
+                if other is not None:
+                    break
+        if other is not None:
+            refuse(token_calls[0], 'abc.get_cache_token: the token is exact only when the program imports no '
+                   'module besides abc, because importing %s can register ABCs and change the interpreter '
+                   "counter; import abc alone or do not call get_cache_token" % other)
+        # A fresh interpreter of the same build gives that starting value exactly.
         import subprocess
         import sys
         token = None

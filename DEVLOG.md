@@ -1,3 +1,15 @@
+## 2026-11-01 -- abc review 3: cache token vs earlier imports (job-std_abc-11020347)
+
+Fixed the third review's cache-token defect. `abc.get_cache_token()` was computed from a fresh
+interpreter that only imported `abc`, so a program that imported `numbers`, `decimal`, `fractions`
+or `statistics` (all of which register ABCs and bump CPython's counter) got the wrong constant.
+The pass now allows the exact value only when the program's original imports are `abc` (and
+`__future__`); any other import turns the call into a named compile refusal that names the
+offending module, so there is never a silent difference. `cache_token.py` still builds and matches
+exactly, and the token probes (`token_order`, `token_numbers`, `token_fractions`, `token_decimal`,
+`token_statistics`) are now refused by name on both builds. `test_ail_std_abc` gains an aliased /
+`__future__` exact-value case and a named-refusal regression for an earlier `import numbers`.
+
 ## 2026-11-01 -- abc review 2: concrete guards, cache token, ABCMeta subclasses (job-std_abc-11020347)
 
 Fixed the second review's three defects. A guard is now recognised as the called class's OWN guard
