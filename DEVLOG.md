@@ -1,3 +1,31 @@
+## 2026-11-01 -- prog1: hot functions of eight real programs on the typed path (job-prog1-11020210)
+
+Profiled the eight lab programs and made their hot functions compile typed where the
+existing subset allows it, without editing the programs. Four compiler changes in
+`python/pkg-v12/pyfunc.py`:
+
+- `_etype` types `xs[a:b]` of a named `list[int]`/`list[float]` as that list, so
+  `nums = nums[:n]` is a list store, not an int store (t459).
+- `_set_literal` accepts a direct `range(...)` source (g06_012).
+- `_for_enumerate_start` walks a plain `str` one code point at a time and counts code
+  points, with the start evaluated once (t308).
+- tuple assignment builds `q, r = divmod(a, b)` from `pydiv`/`pymod` (or
+  `ail_ffloormod` for floats), evaluating each operand once (g14_022).
+
+`t370`, `g06_012`, `t308` and `t459` now build whole-program typed; `g14_022.format_cents`
+and `g17_004.scale` compile typed in isolation. `t414` (mutable `list[str]` parameter),
+`g14_022.main` (`itertools.groupby` callback), `g17_004.main` (`functools.partial`) and
+`g06_032` (generic class methods / nested-list storage) remain named follow-ups; the
+exact first refusals and profiles are in `lab/progfix/prog1.md`.
+
+Added `AIL_CURRENT/test_ail_prog1.py`, registered through
+`tests.d/test_ail_prog1.txt`. Probes `/tmp/probes/p_slice_edges.py`,
+`p_setrange_edges.py`, `p_enum_str_edges.py`, `p_divmod_edges.py`,
+`p_divmod_zero.py` and `p_g14_format.py` match CPython on both builds (`divmod(1, 0)`
+stops loudly). The generated `program.c` of all 17 building `lab/compare` sources
+(`main.ail` and `main.py` across the ten tasks) is byte-identical to the pre-change
+tree; `scar_life`, `tally_lang` and `tree_fold` refuse both trees alike.
+
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object

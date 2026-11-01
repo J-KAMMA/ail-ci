@@ -1714,6 +1714,15 @@ def _etype(node, ctx):
             # row's own bytes field so `out = out + row[0]` types correctly before a line of C is
             # written, exactly the way it already must for a bytes list element.
             return BYTES
+        if (isinstance(node.slice, ast.Slice) and isinstance(node.value, ast.Name)
+                and node.value.id not in ctx.tstride
+                and node.value.id not in (ctx.nlist, ctx.handles, ctx.blist, ctx.strlist,
+                                          ctx.srowtypes)
+                and ctx.type_of(node.value.id) in (LIST, FLIST)):
+            # `xs[a:b]` is a list, not an element. The generic name branch just below answered
+            # INT for every subscript, so an annotated `xs: list[int]` reassigned from its own
+            # slice (`xs = xs[:n]`) was checked as "assigning int" and refused.
+            return ctx.type_of(node.value.id)
         if isinstance(node.value, ast.Name) and ctx.type_of(node.value.id) in ('array', LIST, DICT):
             return INT
         return INT
@@ -12526,7 +12535,12 @@ def _set_literal(node, ctx, kind):
                 items = _slist_arg_c(source, ctx)
                 return '({ for (int64_t _i = 0; _i < %s.n; _i++) ail_sset_add(&%s, %s.p[_i]); 0; })' % (items, temporary, items)
         else:
-            if _etype(source, ctx) not in (LIST, 'array', RANGE) and not _is_map_expr(source, ctx):
+            direct_range = (isinstance(source, ast.Call) and isinstance(source.func, ast.Name)
+                            and source.func.id == 'range'
+                            and source.func.id not in ctx.funcs
+                            and source.func.id not in ctx.classes)
+            if (_etype(source, ctx) not in (LIST, 'array', RANGE)
+                    and not direct_range and not _is_map_expr(source, ctx)):
                 raise Unsupported('set[int] is built from a list of int')
             def render():
                 lo, n, element, pre = _iter_plan(source, ctx)
@@ -20758,6 +20772,38 @@ def _stmt_inner(node, ctx, ind):
                 names = [ctx.declare(e.id) for e in t.elts]
                 return out + ''.join('%s%s = %s;\n' % (pad, c, m)
                                      for c, m in zip(names, vals))
+            if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id == 'divmod'
+                    and node.value.func.id not in getattr(ctx, 'funcs', {})
+                    and node.value.func.id not in getattr(ctx, 'classes', {})
+                    and len(node.value.args) == 2 and not node.value.keywords
+                    and len(t.elts) == 2 and all(isinstance(e, ast.Name) for e in t.elts)):
+                # `q, r = divmod(a, b)` -- the one place `divmod` is built. Both operands are
+                # evaluated once, left to right, into private temps, then the same floor-division
+                # and modulo helpers `a // b` and `a % b` already use: CPython's signs, and the
+                # same loud overflow rule (`pydiv`/`pymod`). A float operand makes both results
+                # float, exactly as CPython's divmod does.
+                left, right = node.value.args
+                lkind, rkind = _etype(left, ctx), _etype(right, ctx)
+                if lkind not in NUM or rkind not in NUM:
+                    raise Unsupported('divmod() needs two numbers')
+                kind = FLT if FLT in (lkind, rkind) else INT
+                lc, rc = _expr(left, ctx), _expr(right, ctx)
+                lt, _ = ctx.temp(lkind)
+                rt, _ = ctx.temp(rkind)
+                pre = _flush(ctx, pad)
+                pre += '%s%s = %s;\n' % (pad, lt, lc)
+                pre += '%s%s = %s;\n' % (pad, rt, rc)
+                if kind == FLT:
+                    ctx.parts.add('FFLOORMOD')
+                    vals = ['ail_ffloormod((double)(%s), (double)(%s), 0)' % (lt, rt),
+                            'ail_ffloormod((double)(%s), (double)(%s), 1)' % (lt, rt)]
+                else:
+                    ctx.floor.update(('pydiv', 'pymod'))
+                    vals = ['pydiv(%s, %s)' % (lt, rt), 'pymod(%s, %s)' % (lt, rt)]
+                names = [ctx.declare(e.id, kind) for e in t.elts]
+                return pre + ''.join('%s%s = %s;\n' % (pad, name, value)
+                                     for name, value in zip(names, vals))
             if not isinstance(node.value, ast.Tuple) or len(node.value.elts) != len(t.elts):
                 raise Unsupported('tuple assignment from %s; the right-hand side has to be a '
                                   'literal tuple of the same length, or a NAME already bound to a '
@@ -25973,12 +26019,51 @@ def _for_enumerate_start(node, it, ctx, ind):
         kind = INT
     elif isinstance(source, ast.Name) and _is_flist_name(source, ctx) and source.id not in ctx.tstride:
         kind = FLT
+    elif _is_str_expr(source, ctx):
+        kind = STR
     else:
         raise Unsupported('enumerate() with a start over something other than a named list of int, '
                           'float or str')
     if _etype(start, ctx) != INT or _is_handle_producing(start, ctx):
         raise Unsupported('enumerate() needs an int start')
     iname, vname = (e.id for e in node.target.elts)
+    if _is_str_expr(source, ctx) and not _is_slist_expr(source, ctx):
+        # `for i, c in enumerate(s, start)` over a plain str: the same one-code-point walk the
+        # plain `for c in s` branch uses, with the position counted in code points (not bytes).
+        # The start is evaluated after the iterable, once; the counter is private, so rebinding
+        # `i` in the body cannot change the next index.
+        sval = _str_value(source, ctx)
+        ctx.parts.add('STR')
+        stmp, _ = ctx.temp(STR)
+        pre = _flush(ctx, pad)
+        pre += '%s%s = %s;\n' % (pad, stmp, sval)
+        first, _ = ctx.temp(INT)
+        pre += _flush(ctx, pad)
+        pre += '%s%s = %s;\n' % (pad, first, _map_inline(lambda: _expr(start, ctx), ctx))
+        counter, _ = ctx.temp(INT)
+        i = ctx.declare(iname, INT)
+        v = ctx.declare(vname, STR)
+        _use(ctx.need, 'ck_add')
+        if ctx.rebound is not None and vname not in ctx.rebound:
+            ctx.onecp.add(vname)
+        idx, _ = ctx.temp(INT)
+        byte0 = '%s_b0' % idx
+        pre += '%s%s = 0;\n' % (pad, counter)
+        pre += '%s{\n%s    const uint8_t *%s_p = %s.p; const int64_t %s_n = %s.n;\n' % (
+            pad, pad, idx, stmp, idx, stmp)
+        head = ('%s    for (int64_t %s_k = 0, %s_w = 0; %s_k < %s_n; %s_k += %s_w) {\n'
+                '%s        const uint8_t %s = %s_p[%s_k];\n'
+                '%s        %s_w = %s < 0x80 ? 1 : ail__utf8_w(%s, %s_n - %s_k);\n'
+                '%s        %s = ck_add(%s, %s);\n'
+                '%s        %s = ck_add(%s, 1);\n'
+                '%s        %s = (ail_str){%s_p + %s_k, %s_w, %s < 0x80};\n') % (
+            pad, idx, idx, idx, idx, idx, idx,
+            pad, byte0, idx, idx,
+            pad, idx, byte0, byte0, idx, idx,
+            pad, i, first, counter,
+            pad, counter, counter,
+            pad, v, idx, idx, idx, byte0)
+        return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n' + pad + '}\n'
     if kind == STR:
         base = _slist_arg_c(source, ctx)
         ctx.parts.add('SLIST')
