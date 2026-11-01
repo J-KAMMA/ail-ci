@@ -1,31 +1,40 @@
-"""Resident compile server, opt-in with AIL_SERVER=1.  POSIX with SO_PEERCRED (Linux) only; everywhere else, and whenever
-anything goes wrong before a build starts, `ail_chatgpt.py compile|check` runs the normal way.
+"""Resident compile server, on by default on POSIX with SO_PEERCRED (Linux); AIL_SERVER=0 turns it off.  Windows, and
+everywhere else, and whenever anything goes wrong before or during a build, `ail_chatgpt.py compile|check` runs the
+normal way.
 
 Why: a build pays about 0.25 s to import the compiler (the CLI front end, then the `pyc.py` child).  A server imports it
 once.  Every request is a fork of that template process, so no state leaks between builds and a crash kills one build.
 
     client (ail_chatgpt.py, at the very top)         server (python ail_server.py serve SOCKET IDLE_SECONDS)
     ------------------------------------------       ---------------------------------------------------------
-    connect, or start a server and connect           template: imported ail_chatgpt, pyc, ... once
+    connect, or start a server in the background     template: imported ail_chatgpt, pyc, ... once
     send argv, cwd, env, umask, rlimits + fds 0,1,2   per connection fork M (own session; checks SO_PEERCRED uid)
-    wait; forward SIGINT/SIGTERM/SIGHUP/SIGQUIT       M forks A (own process group): ail_chatgpt.main(argv) with the
-    exit like the build did (also death by signal)    client's fds, cwd, env, umask; M relays signals to A's group,
-                                                      kills the group when the client goes away, reports A's status
-                                                      A runs `python pyc.py ...` as a fork B running pyc.main, with the
-                                                      same capture, env and timeout as subprocess.run gave it
+    wait for "accepted"; send "go"; then wait          M answers "accepted", waits for the client's "go", then forks A
+                                                      (own process group): ail_chatgpt.main(argv) with the client's
+    forward SIGINT/SIGTERM/SIGHUP/SIGQUIT             fds, cwd, env, umask; M relays signals to A's group and kills
+    exit like the build did (also death by signal)    the group when the client goes away.  A reports its own status
+                                                      and is the one that survives M; M repeats the status if A died by
+                                                      a signal.  A runs `python pyc.py ...` as a fork B running
+                                                      pyc.main, with the same capture, env and timeout as
+                                                      subprocess.run gave it.
+
+The first build has no server yet: it starts one in the background (a starter child holds the lock until the socket is
+ready) and compiles in-process exactly as it did without a server.  Later builds connect to it.  If the server is missing,
+takes more than two seconds to answer the start of a request, or dies, the client compiles in-process without a note.
 
 The socket lives in a private per-user directory (0700, owned by the user, checked) and its name carries a hash of what the
-template process froze at import: the interpreter, every compiler source file, the environment variables the compiler reads
-while it is imported (IMPORT_ENV), PYTHON*/LANG/LC_* and the memory limits.  Another value of any of them means another
-server; an old one exits after AIL_SERVER_IDLE seconds (default 600) without a request.  The server refuses a request
-whose hash differs from its own (the client then builds the normal way), so a source file that changed between the
-client's check and the fork is never served stale.
+template process froze at import: the interpreter, every compiler source file (including pkg-v12), the environment
+variables the compiler reads while it is imported (IMPORT_ENV), PYTHON*/LANG/LC_* and the memory limits.  Another value of
+any of them means another server; an old one exits after AIL_SERVER_IDLE seconds (default 600) without a request.  The
+server refuses a request whose hash differs from its own (the client then builds the normal way), so a source file that
+changed between the client's check and the fork is never served stale.  Everything else in the request environment (AIL_*
+knobs, --exact-int, flags) is applied per request, never frozen at the server's start.
 
-Environment: AIL_SERVER=1 turns the client on; AIL_SERVER_IDLE=seconds; AIL_SERVER_DIR=directory (tests)."""
+Environment: AIL_SERVER=0 turns the client off; AIL_SERVER_IDLE=seconds; AIL_SERVER_DIR=directory (tests)."""
 import os
 import sys
 
-PROTOCOL = 1
+PROTOCOL = 2
 SERVED_COMMANDS = ('compile', 'check')
 # Environment variables read while the compiler is imported (module level).  test_ail_server.py imports the compiler with
 # a recording os.environ and fails when a module reads one that is not named here.
@@ -34,8 +43,10 @@ IMPORT_ENV = ('AIL_EXIT_MERGE_MIN', 'AIL_EXTRA_CFLAGS', 'AIL_FASTWALK', 'AIL_G7_
 LIMITS = ('RLIMIT_AS', 'RLIMIT_DATA', 'RLIMIT_STACK', 'RLIMIT_NOFILE', 'RLIMIT_CPU', 'RLIMIT_FSIZE', 'RLIMIT_CORE')
 KEYED_LIMITS = ('RLIMIT_AS', 'RLIMIT_DATA', 'RLIMIT_STACK', 'RLIMIT_NOFILE')   # fixed when the template is made
 FORWARD = ('SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT')
-START_WAIT = 30.0           # seconds a client waits for a server it started
-ACK_WAIT = 10.0             # seconds from sending a request to the server's "started" answer
+START_WAIT = 30.0           # seconds a starter waits for the server it starts
+LOCK_WAIT = 2.0             # seconds a later client waits for a starter before it builds in-process
+ACK_WAIT = 2.0              # seconds from sending a request to the server's "accepted" answer
+COMMIT = b'G\n'              # client: the server may start the build (it kills it if this connection is lost)
 
 
 # ----------------------------------------------------------------------------------------------- identity
@@ -126,6 +137,12 @@ def supported():
     return os.name == 'posix' and hasattr(socket, 'AF_UNIX') and hasattr(socket, 'SO_PEERCRED') and hasattr(socket, 'send_fds')
 
 
+def enabled(env=None):
+    """The resident server is the default; only an explicit AIL_SERVER=0 (or off/false/no) turns it off."""
+    value = (os.environ if env is None else env).get('AIL_SERVER', '')
+    return supported() and value.strip().lower() not in ('0', 'off', 'false', 'no')
+
+
 # ----------------------------------------------------------------------------------------------- client
 
 def _connect(path):
@@ -142,12 +159,17 @@ def _connect(path):
         raise
 
 
+def _lock_path(path):
+    """One starter lock per user, in the runtime directory beside the sockets, never one per repository."""
+    return os.path.join(os.path.dirname(path), 'start.lock')
+
+
 def _start(path, root, flags):
     """Start a server (once, whatever the number of clients that want one), then connect."""
     import fcntl
     import subprocess
     import time
-    with open(path + '.lock', 'a+') as lock:
+    with open(_lock_path(path), 'a+') as lock:
         deadline = time.monotonic() + START_WAIT
         while True:
             try:
@@ -180,14 +202,61 @@ def _start(path, root, flags):
         raise OSError('compile server did not start')
 
 
+def _lock_is_busy(path):
+    """Is a starter already bringing a server up?  The lock is released as soon as its socket answers."""
+    import fcntl
+    with open(_lock_path(path), 'a+') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        return False
+
+
+def _start_background(path, root, flags):
+    """First build: let a detached starter hold the lock until the socket is ready, and compile in-process meanwhile."""
+    import subprocess
+    try:
+        subprocess.Popen([sys.executable, *flags, os.path.join(root, 'ail_server.py'), 'start', path, root],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd='/',
+                         close_fds=True, start_new_session=True)
+    except OSError:
+        pass
+
+
+def _connect_or_start(path, root, flags):
+    """A connected socket, or None when this build should run in-process."""
+    import time
+    try:
+        return _connect(path)
+    except OSError:
+        pass
+    try:
+        busy = _lock_is_busy(path)
+    except OSError:
+        return None
+    if busy:                      # a starter is already working: wait at most two seconds for its socket
+        deadline = time.monotonic() + LOCK_WAIT
+        while time.monotonic() < deadline:
+            try:
+                return _connect(path)
+            except OSError:
+                time.sleep(0.02)
+        return None
+    _start_background(path, root, flags)
+    return None
+
+
 def client(argv):
     """Run `ail_chatgpt.py ARGV` on the server and return its exit code, or None when the caller should run it itself."""
-    if os.environ.get('AIL_SERVER') != '1' or not argv or argv[0] not in SERVED_COMMANDS or not supported():
+    if not enabled() or not argv or argv[0] not in SERVED_COMMANDS:
         return None
     import json
     import array
     import socket
     root = os.path.dirname(os.path.realpath(__file__))
+    sock = None
     try:
         for descriptor in (0, 1, 2):
             os.fstat(descriptor)
@@ -196,20 +265,28 @@ def client(argv):
         key = identity(root, env, limits)
         path = os.path.join(runtime_directory(), 'ail-%s.sock' % key)
         flags = ['-X', 'utf8'] if sys.flags.utf8_mode else []
-        try:
-            sock = _connect(path)
-        except OSError:
-            sock = _start(path, root, flags)
+        sock = _connect_or_start(path, root, flags)
+        if sock is None:
+            return None
         request = json.dumps({'v': PROTOCOL, 'key': key, 'argv': list(argv), 'cwd': os.getcwd(), 'env': env,
                               'umask': _umask(), 'limits': limits}).encode('ascii')
         framed = len(request).to_bytes(4, 'big') + request
-        sent = sock.sendmsg([framed], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [0, 1, 2]))])
-        sock.sendall(framed[sent:])
+        sock.sendall(framed)                    # no fds yet: a server that never answers must not hold our pipes open
         sock.settimeout(ACK_WAIT)
-        if _line(sock, bytearray()) != b'S':
+        if _line(sock, bytearray()) != b'A':
             sock.close()
             return None
+        # The server has not forked a worker yet: saying "go" (with our fds) commits this build to it, so no fallback is
+        # safe after this point.  If this fails, the server never got the "go" and will not start a worker.
+        sent = sock.sendmsg([COMMIT], [(socket.SOL_SOCKET, socket.SCM_RIGHTS, array.array('i', [0, 1, 2]))])
+        if sent < len(COMMIT):
+            sock.sendall(COMMIT[sent:])
     except (OSError, ValueError, TypeError, UnicodeError, OverflowError):
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
         return None
     return _wait(sock)
 
@@ -266,8 +343,7 @@ def _wait(sock):
     for number, handler in saved.items():
         signal.signal(number, handler)
     if answer is None:
-        sys.stderr.write('ail: the compile server stopped during the build\n')
-        return 1
+        return None                    # the server died: build in-process, without a note
     if 'sig' in answer:
         number = answer['sig']
         try:
@@ -362,8 +438,9 @@ class Template:
             return 1
         return 0
 
-    def finish(self, status):
+    def finish(self, status, answer=None):
         import atexit
+        import json
         import signal
         try:
             atexit._run_exitfuncs()
@@ -373,14 +450,21 @@ class Template:
             status = status if status else 120
         if self.counter is not None:
             self.counter()
+        code = 130 if status == 'sigint' else status & 255 if isinstance(status, int) else 1
+        if answer is not None:
+            # A reports its own result as well as M: if M (the supervisor) is killed during the build, the client still
+            # gets an answer from the process that actually built the output instead of racing it with a fallback.
+            try:
+                answer.sendall(json.dumps({'sig': signal.SIGINT} if status == 'sigint' else {'rc': code}).encode() + b'\n')
+            except OSError:
+                pass
         if status == 'sigint':
             signal.signal(signal.SIGINT, signal.SIG_DFL)
             os.kill(os.getpid(), signal.SIGINT)
-            status = 130
-        os._exit(status & 255 if isinstance(status, int) else 1)
+        os._exit(code)
 
     # -- worker A: ail_chatgpt.main for the client ----------------------------------------------------
-    def serve_request(self, request, fds):
+    def serve_request(self, request, fds, answer=None):
         import resource
         import signal
         os.umask(request['umask'])
@@ -394,7 +478,7 @@ class Template:
         self.counter = _instruction_counter(request['env'].get('AIL_SERVER_ICOUNT'))
         sys.argv = [self.script] + request['argv']
         self.install_run()
-        self.finish(self.run_main(self.ail_call, dict(self.ail.__dict__, __name__='__main__')))
+        self.finish(self.run_main(self.ail_call, dict(self.ail.__dict__, __name__='__main__')), answer)
 
     def install_run(self):
         import subprocess
@@ -512,7 +596,9 @@ def _status(code):
 
 
 def _supervise(template, conn):
-    """Process M: read the request, start worker A, relay signals, report A's end, kill A when the client goes away."""
+    """Process M: read the request, wait for the client's go, start worker A, relay signals, report A's end, kill A when
+    the client goes away.  A keeps the connection too: if M dies, the client still gets A's own answer instead of a
+    fallback that would race with A writing the same output."""
     import json
     import select
     import signal
@@ -523,8 +609,8 @@ def _supervise(template, conn):
     try:
         if _peer_uid(conn) != os.getuid():
             os._exit(1)
-        data, fds, _, _ = socket.recv_fds(conn, 1 << 16, 8)
-        if len(fds) != 3 or len(data) < 4:
+        data = conn.recv(1 << 16)
+        if len(data) < 4:
             os._exit(1)
         size = int.from_bytes(data[:4], 'big')
         data = bytearray(data[4:])
@@ -540,12 +626,33 @@ def _supervise(template, conn):
     except BaseException:
         os._exit(1)
     conn.settimeout(None)
+    try:
+        # "accepted" before any fork and before any fd arrives: a client that times out here closes the connection, and
+        # the missing "go" means no worker ever writes output for that request and no client pipe is held open.
+        conn.sendall(b'A\n')
+    except OSError:
+        os._exit(0)
+    conn.settimeout(START_WAIT)
+    fds = []
+    try:
+        data, fds, _, _ = socket.recv_fds(conn, 64, 8)
+        if len(fds) != 3 or _line(conn, bytearray(data)) != b'G':
+            for descriptor in fds:
+                os.close(descriptor)
+            os._exit(0)
+    except OSError:
+        for descriptor in fds:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        os._exit(0)
+    conn.settimeout(None)
     pid = os.fork()
     if pid == 0:
         try:
             os.setpgid(0, 0)
-            conn.close()
-            template.serve_request(request, fds)
+            template.serve_request(request, fds, conn)
         finally:
             os._exit(1)
     try:
@@ -554,7 +661,6 @@ def _supervise(template, conn):
         pass
     for descriptor in fds:
         os.close(descriptor)
-    conn.sendall(b'S\n')
     watch = os.pidfd_open(pid) if hasattr(os, 'pidfd_open') else None
     buffer = bytearray()
     try:
@@ -659,3 +765,8 @@ def serve(path, idle, root):
 if __name__ == '__main__':
     if len(sys.argv) == 4 and sys.argv[1] == "serve":
         serve(sys.argv[2], float(sys.argv[3]), os.path.dirname(os.path.realpath(__file__)))
+    elif len(sys.argv) == 4 and sys.argv[1] == "start":
+        try:
+            _start(sys.argv[2], sys.argv[3], ['-X', 'utf8'] if sys.flags.utf8_mode else [])
+        except BaseException:
+            pass

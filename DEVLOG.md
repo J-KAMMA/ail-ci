@@ -137,6 +137,43 @@ Added `test_ail_int64_edges` (7 tests) for values only known at run time: power 
 -2**63, 0**0, negative exponents, 0/1/-1 bases, wide 2**63/-2**64/10**19, and round just inside
 and just outside int64 (nan/inf kept), on the typed default, its IR arm, the forced general path
 and exact mode. Registered through `tests.d/test_ail_int64_edges.txt`.
+## 2026-11-01 -- resident compile server on by default, started in the background (job-srvdef1-11011011)
+
+The resident compile server (`AIL_CURRENT/ail_server.py`) is now the default on POSIX with
+`SO_PEERCRED`; only an explicit `AIL_SERVER=0` (or `off`/`false`/`no`) turns it off, and Windows
+keeps it off. `ail_chatgpt.py` takes the same default at its entry. The first build no longer waits
+for a server: a detached starter holds one per-user lock (`<runtime dir>/start.lock`; the runtime
+directory is mode 0700, never inside a repository), starts the server, and the first build compiles
+in-process as before. Later builds connect to the warm server. A build that finds a starter already
+running waits at most 2 s for its socket; a server that takes more than 2 s to answer the start of a
+request, is unreachable, or dies during a build falls back to the in-process path with no extra
+output. The server still exits after `AIL_SERVER_IDLE` seconds (default 600). The identity hash
+covers the whole compiler tree including `python/pkg-v12`, so a source change means a new server.
+Request argv, cwd, umask and the full environment are applied per request: `--exact-int`,
+`AIL_EXACT_INT=1` and the other `AIL_*` knobs are never frozen from the server's start.
+
+Acceptance: built the 10 `lab/compare/src` tasks, the first 100 `lab/corpus/programs` files, and
+`--exact-int` builds of `rail_transfer` and `chain_relax` with the server and with
+`AIL_SERVER=0` (112 builds): return code, concatenated generated C sha256 and executable sha256
+all identical. `rail_transfer`/`chain_relax` exact-int C and exe also match for
+`PYTHONHASHSEED=0..5`. Median of 5 warm vs 5 in-process builds: `chain_relax` without the build
+cache 2.293 s vs 3.047 s; a hello program without the cache 0.368 s vs 0.481 s (with a warm build
+cache the compile itself is already cached: 0.275 s vs 0.282 s).
+
+Probes in `/tmp/probes` (`bash ~/tools/cmp.sh`, default server and `AIL_SERVER=0`):
+`p_srv_arith` (int64 boundaries, negative/zero, pow/mul/mod/div, values through a function),
+`p_srv_routes` (argument, list item, attribute, dict value, aliasing, empty slice/reverse),
+`p_srv_edges` (bool/zero/negative, int64 bounds, empty string, negative indices, dict get/default)
+and `p_srv_functions` (clamps, a counter object, composed arithmetic) all match CPython on both
+builds. The exact-int probe `p_srv_exact` reaches big values through an argument, a list, an
+attribute and a dict; with `PYTHONHASHSEED=1` its generated C and exe sha256 are identical with and
+without the server and its stdout matches CPython.
+
+Tests on the final commit: `test_ail_server`, `test_ail_build_cache`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` with the server on, and `test_ail_build_cache` and
+`test_ail_safetynet` with `AIL_SERVER=0`; all passed with `-j 2`. `tools/update_manifest.py` was run
+and `--check` passed. No new DIFFERENCES rows. The test modules were already registered through
+`AIL_CURRENT/tests.d/`; no `ail_check.py` tuple change.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
