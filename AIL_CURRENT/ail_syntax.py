@@ -2805,11 +2805,16 @@ class _Surface:
         order_on = isinstance(options.get('order'), ast.Constant) and options['order'].value is True
         frozen = any(isinstance(options.get(k), ast.Constant) and options[k].value is True
                      for k in ('frozen', 'unsafe_hash'))
+        frozen_option = isinstance(options.get('frozen'), ast.Constant) and options['frozen'].value is True
         for option, value in options.items():
             enabled = not (isinstance(value, ast.Constant) and not value.value)
             if option == 'init' and not enabled:
                 self.note(node, f'@dataclass({option}={ast.unparse(value)}) is not built; @dataclass '
                           'with annotated fields is, as the __init__ it generates')
+                return
+            if option == 'slots' and enabled:
+                self.note(node, '@dataclass(slots=True) is not built; a slotted instance refuses an '
+                          'unknown attribute, which the compiler does not model')
                 return
         if any(isinstance(each, ast.FunctionDef) and each.name == '__init__' for each in node.body):
             return
@@ -2855,6 +2860,10 @@ class _Surface:
             elif value is not None:
                 default = ast.unparse(self.rewritten(value)[0])
             fields.append((statement, statement.target.id, ast.unparse(annotation), default))
+        if frozen_option and not fields:
+            self.note(node, '@dataclass(frozen=True) without an annotated field is not built; a frozen '
+                      'instance refuses every attribute write, which the compiler does not model')
+            return
         start = self.offset(decorator.lineno, decorator.col_offset)
         at = start - 1
         while at >= 0 and self.data[at:at + 1] in (b' ', b'\t'):
@@ -2868,6 +2877,7 @@ class _Surface:
         # ` norepr` for repr=False (the marker is written all the same: the general path's generated __eq__ reads it)
         marker = '# ail:dataclass' + (' noeq' if eq_off else '') + (' frozen' if frozen else '') + (' norepr' if repr_off else '') + (
             ' nocmp=' + ','.join(sorted(uncompared)) if uncompared else '')
+        marker_at = at
         self.edits.append((at, self.offset(decorator.end_lineno, decorator.end_col_offset), marker, False))
         # a dataclass that extends another one: its fields come after the base's (a field of the same
         # name keeps the base's position)
@@ -2972,7 +2982,7 @@ class _Surface:
             extra += ' hide=' + ','.join(name for name, _, _, shown, _ in merged if shown)
         if extra:
             for index, (start, end, text, flag) in enumerate(self.edits):
-                if text == marker and start == at:
+                if text == marker and start == marker_at:
                     self.edits[index] = (start, end, marker + extra, flag)
 
     def ann_assign(self, node, function, owner):

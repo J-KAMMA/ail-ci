@@ -1,3 +1,18 @@
+## 2026-11-01 -- dataclass review fixes: marker extras, frozen and slots refusals (job-std_abc-11020728)
+
+Fixed the reviewer's three dataclass-lowering defects. A no-field dataclass (docstring- or
+method-only) keeps the decorator offset for the final marker-extra edit, so inherited
+`field(init=False)` and `field(repr=False)` fields stay in the marker's `fields=` / `hide=`
+lists and repr / equality match CPython. Empty `@dataclass(frozen=True)` and every
+`@dataclass(slots=True)` class are now named compile-time refusals instead of silently building
+without the frozen / slots attribute semantics (`FrozenInstanceError`, `AttributeError`); the
+surface note names the missing model and `pyboxed2` keeps its named raw-`@dataclass` refusal.
+Probes in `/tmp/rprobes/dc_{initfalse_method,hide_method,initfalse_doc,hide_doc,frozen,frozen2,
+slots,slots_field}.py` match CPython or are refused by name on both builds; the other
+`dc_*` probes still match. `test_ail_genlib`, `test_ail_quirks`, `test_ail_std_abc`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass; the manifest is
+updated.
+
 ## 2026-11-01 -- dataclass without its own fields (suite fix, job-std_abc-11020728)
 
 The previous suite fix made `pyboxed2` refuse a raw `@dataclass` (the general path never saw the
