@@ -412,10 +412,11 @@ class ClosureMixin:
                     try:
                         r = self._call_class(cname, [_PreC(x) for x in slots], {}, ctx)
                         ctx.emit('%s = %s;' % (t, r))
-                    except Unsupported as exc:
-                        if 'still being compiled' not in str(exc):
-                            # an arity/binding refusal for a concrete class is not a runtime
-                            # "takes other arguments": let it stay a named compile refusal.
+                    except Unsupported:
+                        if guard is not None and not own_guard:
+                            # A concrete subclass that merely inherited an ABC guard: its own
+                            # constructor binding errors must not become the generic runtime
+                            # "takes other arguments" (that silently accepted a wrong call before).
                             raise
                         del ctx.lines[mark:]
                         ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes other arguments"); goto %s;'
