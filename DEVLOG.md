@@ -1,3 +1,21 @@
+## 2026-11-01 -- CPython `numbers` ABCs on the general path (job-std_numbers-11020026)
+
+Added `numbers` as a library batch-5 module: `prelude_numbers.py` supplies Number, Complex,
+Real, Rational and Integral as plain classes in CPython's inheritance order, and `numberslib.py`
+lowers `isinstance` / `issubclass` / `register` onto that hierarchy. bool and int classify as
+Integral, float as Real, complex as Complex, Fraction as Rational and Decimal as Number; classes
+defined in the program are classified through their bases and through `register` (both the call
+and decorator forms). `lab/stdlib/numbers/` has 12 ordinary programs; 11 build on the default
+(general) path and match CPython 3.12 stdout and exit code, while the complex-literal program is
+a named follow-up (`a constant of type complex`). The unmodelled ABCMeta abstract-method check,
+a dynamic class value in `issubclass`, and registering a class that already has a non-numbers
+base are recorded in `lab/stdlib/numbers/RESULTS.md`.
+
+Added `AIL_CURRENT/test_ail_std_numbers.py` (registered through `tests.d/test_ail_std_numbers.txt`).
+Probes `/tmp/probes/num_*.py` cover every classification kind, aliases and from-imports, tuples,
+register/decorator registration, subclass inheritance, values through arguments, list items,
+attributes and dict values, empty/negative values and caught errors on both `cmp.sh` builds.
+
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
