@@ -297,6 +297,7 @@ _BUILTIN_KWARGS = {
     'enumerate': {'start'},
     'sum': {'start'},
     'int': {'base'},  # 'x' itself is positional-only in CPython
+    'round': {'number', 'ndigits'},
     'zip': {'strict'},
     'dict': None,  # arbitrary: keyword arguments ARE dict entries
 }
@@ -9763,11 +9764,22 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     def _b_round(self, args, kwargs, ctx):
-        if not args or len(args) > 2 or kwargs:
+        pos = list(args)
+        if len(pos) > 2 or (kwargs and set(kwargs) - {'number', 'ndigits'}):
             raise Unsupported('round() with other than (number[, ndigits])')
-        v = self.expr(args[0], ctx)
-        has_n = len(args) == 2
-        n = self.expr(args[1], ctx) if has_n else 'ail_box_none()'
+        if 'number' in kwargs:
+            if pos:
+                raise Unsupported('round() got multiple values for argument number')
+            pos.append(kwargs['number'])
+        if not pos:
+            raise Unsupported('round() missing required argument number')
+        if 'ndigits' in kwargs:
+            if len(pos) > 1:
+                raise Unsupported('round() got multiple values for argument ndigits')
+            pos.append(kwargs['ndigits'])
+        v = self.expr(pos[0], ctx)
+        has_n = len(pos) == 2
+        n = self.expr(pos[1], ctx) if has_n else 'ail_box_none()'
         t = ctx.tmp()
         ctx.emit('st = ail_bi_round(cx, &%s, %s, %d, %s);' % (t, v, has_n, n))
         ctx.check()

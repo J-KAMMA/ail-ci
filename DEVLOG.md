@@ -1,3 +1,19 @@
+## 2026-11-01 -- fractions: 12 real programs build, 3 general-path bugs fixed (job-std_fractions-11011614)
+
+`lab/stdlib/fractions/` now has twelve 15-60 line programs exercising `Fraction` arithmetic,
+construction, keywords, rounding, `limit_denominator`, `as_integer_ratio`, sorting/hashing/dict
+keys, caught errors and stdin. All twelve build in the default mode and match CPython 3.12 stdout
+and exit code; all use the general path because the typed path refuses the Fraction dunders. The
+first build had 11 built and `keyword_forms.py` refused, and two of the built programs printed
+different bytes. Three fixes: the prelude's division-by-zero message formatted the numerator
+instead of the denominator (`Fraction(200, 0)` for `Fraction(1, 0)`); the general `round()` builtin
+now takes `number=` / `ndigits=` in either order (a missing `number` and duplicate or unknown
+keywords are refused by name instead of being misread); and a generated tuple-key dict table with a bound `KeyError`
+handler now keeps the key as `args[0]`, so `str(exc)` is `(9, 9)` rather than `'(9, 9)'`. The
+tuple-key change is conditional on a bound handler, so generated C without one is unchanged.
+`test_ail_std_fractions.py` compares all twelve against CPython (empty and mixed stdin for
+`unit_convert.py`).
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
