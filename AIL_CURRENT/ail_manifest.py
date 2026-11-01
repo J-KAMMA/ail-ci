@@ -101,8 +101,21 @@ def write_pins(root, pins):
             path.unlink()
 
 
+def _compiler_source(root, name):
+    """A pinned compiler source that exists in `root` (test_ail_packaging requires every one in the SDK)."""
+    if '__pycache__' in name.split('/') or not name.endswith(('.py', '.h', '.c')):
+        return False
+    if name.startswith('python/pkg-v12/') or (name.startswith('stdlib/') and name.count('/') == 1):
+        return (root / name).is_file()
+    return False
+
+
 def load(root):
-    """The manifest dictionary: MANIFEST.json with the shard pins merged into sha256/files/sdk_files."""
+    """The manifest dictionary: MANIFEST.json with the shard pins merged into sha256/files/sdk_files.
+
+    A pinned compiler source is always selected: an integration refresh once wrote the pin of a new
+    compiler module without its `s` flag, so the SDK left it out while the packaging test still required it.
+    """
     root = Path(root)
     manifest = json.loads((root / 'MANIFEST.json').read_text(encoding='utf-8'))
     if not (root / SHARD_DIR).is_dir():
@@ -110,7 +123,9 @@ def load(root):
     pins = read_pins(root)
     manifest['sha256'] = {**manifest.get('sha256', {}), **{name: sha for name, (sha, _) in pins.items()}}
     manifest['files'] = {**manifest.get('files', {}), **{name: sha for name, (sha, f) in pins.items() if 'f' in f}}
-    manifest['sdk_files'] = sorted(set(manifest.get('sdk_files', [])) | {name for name, (_, f) in pins.items() if 's' in f})
+    selected = {name for name, (_, f) in pins.items() if 's' in f}
+    selected |= {name for name in pins if name not in selected and _compiler_source(root, name)}
+    manifest['sdk_files'] = sorted(set(manifest.get('sdk_files', [])) | selected)
     return manifest
 
 

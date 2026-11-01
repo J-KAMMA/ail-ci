@@ -1,3 +1,17 @@
+## 2026-11-01 -- packaging: a pinned compiler source is always in the SDK (job-rbfailfast-11011832)
+
+The integration of rbfailfast (cand-1101180129 / a72a4db) refreshed the pin of `python/pkg-v12/walkmemo.py`
+without its `s` flag, so `sdk_files` left the new module out while `test_ail_packaging` still required every
+pinned compiler file: `test_every_compiler_file_is_selected` failed with `['python/pkg-v12/walkmemo.py']`.
+The earlier branch fix (0fa5abc) only edited the shard line, and that edit is not part of the integration
+refresh, so `ail_manifest.load` now selects every pinned `.py`/`.h`/`.c` under `python/pkg-v12/` (including
+`ir/`) and every top-level `stdlib/` source that exists in the tree. Other pinned files, absent pins and
+nested `stdlib/` stay out. On this branch every such file already carries `s`, so the wheel is unchanged.
+`test_ail_packaging` passes on the integration tree a72a4db with only this file and its pin copied in (17/17)
+and on this branch; the targeted modules plus test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
+all pass. Probes: `p_manifest` (flag/subdir/absent boundaries) and `p_plain`, `p_walk_small` (both builds match
+CPython; `p_walk` is refused by name for int64 overflow on both builds, as before).
+
 ## 2026-11-01 -- py-failfast re-applied: memoized marks and refusals (job-rbfailfast-11011235)
 
 Re-applied PR #299 (`py-failfast`) on the tree that already has int64-by-default (#284) and the module system
