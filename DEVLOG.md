@@ -1,3 +1,39 @@
+## 2026-11-01 -- kwargs review: positional-only names in `**kwargs`, mapping protocol, exception calls and binder errors (job-kwargs1-11011232)
+
+The review of the `**mapping` cut found four wrong results. (1) A keyword naming a positional-only
+parameter with `**kwargs` present (`def f(x, /, **kw); f(1, **{"x": 2})`) raised instead of putting
+the key into `kw`; positional-only names now never fill a parameter from a keyword and, when there
+is no `**kwargs`, all such names are reported together. (2) An exception class with no `__init__`
+silently dropped a `**` mapping (`MyError(**{"a": 1})`); the call now expands it and raises
+`MyError() takes no keyword arguments` when anything is left, while an empty mapping still builds.
+(3) A non-dict mapping (`keys()` plus `__getitem__`) was rejected; the general path now follows the
+mapping protocol through a program class (directly or by run-time class dispatch) and reports
+CPython's non-mapping / non-subscriptable errors otherwise. (4) The run-time `TypeError` text and
+precedence now match CPython: missing positional names are aggregated with `and` / Oxford commas,
+surplus positionals use `takes N` or `takes from L to H` including the implicit receiver, an
+unknown keyword is reported before a missing one, and keyword/keyword duplicates carry the
+`__main__.` qualname (`__main__.f()`, `__main__.C.m()`, `__main__.C()`), while a keyword that
+duplicates a positional argument says `got multiple values for argument 'a'` with no qualname.
+
+Probes in `/tmp/probes/` with `cmp.sh` on both builds: `kw_fix_posonly` (mapping names, multiple
+positional-only names, `**kw` capture, missing-name error), `kw_fix_exc` (empty/non-empty
+`**`, inherited `__init__`, duplicate and non-mapping), `kw_fix_mapping` (mapping through an
+argument, list item, attribute and dict value; non-string key, missing key, non-mapping, keys
+without `__getitem__`), `kw_fix_more` (multiple mappings, empty mapping, duplicate across
+mappings and against an explicit keyword, mutable dict argument), `kw_fix_order` (exception and
+mapping call evaluation order) and `kw_fix_msgs` (missing/surplus/unknown/duplicate/positional-only/
+keyword-only/method/constructor/exception messages). All match CPython 3.12 on stdout and exit
+code; the 25-probe map is still 20 OK / 5 refused. The ten `lab/compare` tasks keep byte-identical
+generated C against `/tmp/base` for both `.py` and `.ail` (five `.py` sources refuse identically;
+with `--exact-int` all buildable sources are identical too).
+
+`test_ail_kwargs_reach.py` gained `test_posonly_in_star_star`, `test_custom_mapping`,
+`test_exception_without_init` and `test_error_messages_and_precedence`; the error cases now compare
+CPython's last stderr line as well as stdout and exit code. Final-state tests: test_ail_kwargs_reach,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3, test_ail_typedreach1,
+test_ail_c_keyword_functions, test_ail_callable_values, test_ail_py_typed_gaps, test_ail_exc_str and
+test_ail_exception_values_core (all pass).
+
 ## 2026-11-01 -- kwargs reach: `**mapping` calls and required keyword-only parameters (job-kwargs1-11011232)
 
 Measured 25 keyword-argument probes (`docs/design/KWARGS_REACH.md`, probes in `/tmp/kwmeasure/p/`):

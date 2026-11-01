@@ -54,17 +54,22 @@ Only the general path (`python/pkg-v12/pyboxed2.py`) changed; the typed path sti
   optional `kwseq` (the keywords in source order, with `None` for each `**`).  Without it the
   old code path is unchanged.
 * `_bind_args_dynamic` builds a runtime dict in source order, expands each `**` mapping into it
-  (dict-tag check, string-key check, duplicate check), then binds positional parameters,
-  defaults, required keyword-only parameters, `*args` and `**kwargs` with CPython's rules.
-  Missing, unexpected, duplicate, non-string, non-mapping and surplus-positional cases raise
-  `TypeError` at the call, so a `try/except TypeError` sees them.
+  (a dict directly, or an object with `keys`/`__getitem__`; string-key and duplicate checks),
+  then binds positional parameters, defaults, required keyword-only parameters, `*args` and
+  `**kwargs` with CPython's rules. Missing, unexpected, duplicate, non-string, non-mapping and
+  surplus-positional cases raise `TypeError` at the call, so a `try/except TypeError` sees them.
+  Messages and precedence match CPython: missing positional names are aggregated, `takes N` vs
+  `takes from L to H` counts the implicit receiver, unexpected beats missing, and keyword/keyword
+  duplicates carry the `__main__.` qualname. A positional-only name in a keyword goes into
+  `**kwargs` when the callee has one; without one, all such names are reported together.
 * Required keyword-only parameters are now registered (the old check required a default for
   every keyword-only parameter).  A static call that omits one is still refused by name; a
   `**` call raises `TypeError` at run time.
 
 Deliberately still refused by name: `**` to a builtin or to a function value, `**` to a
 property / setter / virtual dispatch (a subclass may override it), and a call with both
-`*args` and `**`.
+`*args` and `**`. An exception class with no `__init__` expands the mapping and raises
+`Name() takes no keyword arguments` for a non-empty one.
 
 ## Boundaries checked
 
@@ -72,11 +77,15 @@ Direct, literal, mixed positional, multiple `**`, keyword before/after `**`, emp
 forwarding through `**kwargs`, values read from a parameter / list item / attribute / dict
 item, aliasing, defaults and mutable defaults, required keyword-only, methods and
 constructors, evaluation order, duplicate across mappings and against an explicit keyword,
-non-string key, non-mapping, positional-only passed by name, duplicate positional/keyword,
-missing, unknown and surplus positional.  Each matches CPython on stdout and exit code.
+non-string key, non-mapping, a non-dict mapping (`keys()`/`__getitem__`, including through a
+parameter, list item, attribute and dict value), exception classes with and without `__init__`,
+positional-only passed by name (with and without `**kwargs`), duplicate positional/keyword,
+missing, unknown and surplus positional.  Each matches CPython on stdout, exit code and the
+printed message; the error probes compare the last stderr line.
 
 ## No change for programs without `**`
 
 The new branch is taken only when `kw.arg is None` is present.  For the ten `lab/compare`
 tasks the generated C is byte-identical before and after this change, for both the `.py` and
-`.ail` sources (the three `.py` sources that do not build refuse identically in both trees).
+`.ail` sources (the five `.py` sources that do not build without `--exact-int` refuse identically
+in both trees; with `--exact-int`, every source that builds is identical too).

@@ -232,6 +232,176 @@ main()
 ''',
 }
 
+POSONLY = '''def f(x: int, /, **kw: int) -> None:
+    print(x, kw)
+
+def g(x: int, /, y: int, **kw: int) -> None:
+    print(x, y, kw)
+
+def h(x: int, /) -> None:
+    print(x)
+
+def main():
+    f(1, **{"x": 2})
+    f(1, **{"x": 2, "z": 3})
+    g(1, **{"x": 2, "y": 3})
+    g(1, y=3, **{"x": 2})
+    try:
+        h(1, **{"x": 2})
+    except TypeError as e:
+        print("h-name", e)
+    try:
+        g(**{"x": 1, "y": 2})
+    except TypeError as e:
+        print("g-mult", e)
+
+main()
+'''
+
+CUSTOM_MAPPING = '''class M:
+    def __init__(self, d):
+        self.d = d
+
+    def keys(self):
+        return list(self.d.keys())
+
+    def __getitem__(self, k):
+        return self.d[k]
+
+class Bad:
+    def keys(self):
+        return ["a"]
+
+def f(a: int, b: int = 2, **kw: int) -> None:
+    print(a, b, kw)
+
+def g(a: int) -> None:
+    print(a)
+
+def via(m) -> None:
+    f(**m)
+
+def main():
+    f(**M({"a": 1, "b": 3}))
+    f(4, **M({"b": 5, "z": 6}))
+    via(M({"a": 7}))
+    ms = [M({"a": 8, "b": 9})]
+    f(**ms[0])
+    box = M({"a": 10})
+    f(**box)
+    d = {"m": M({"a": 11, "b": 12})}
+    f(**d["m"])
+    g(**M({"a": 13}))
+    for bad in (M({1: 2}), M({"b": 2}), 5):
+        try:
+            g(**bad)
+        except TypeError as e:
+            print(type(e).__name__, e)
+    try:
+        g(**Bad())
+    except TypeError as e:
+        print(type(e).__name__, e)
+
+main()
+'''
+
+EXCEPTION_NO_INIT = '''class MyError(Exception):
+    pass
+
+class WithInit(Exception):
+    def __init__(self, a: int, b: int = 2) -> None:
+        super().__init__(a, b)
+
+def empty():
+    return MyError(**{}).args
+
+def one():
+    return MyError(**{"a": 1}).args
+
+def withinit():
+    return WithInit(**{"a": 1}).args
+
+def withinit_missing():
+    return WithInit(**{}).args
+
+def withinit_dup():
+    return WithInit(**{"a": 1}, **{"a": 2}).args
+
+def nonmap():
+    return MyError(**3).args
+
+def main():
+    for label, fn in (("empty", empty), ("one", one), ("withinit", withinit),
+                      ("missing", withinit_missing), ("dup", withinit_dup),
+                      ("nonmap", nonmap)):
+        try:
+            print(label, fn())
+        except TypeError as e:
+            print(label, type(e).__name__, e)
+
+main()
+'''
+
+ERROR_MESSAGES = '''def f0(a: int, b: int, c: int) -> None:
+    pass
+
+def f1(a: int, b: int = 1) -> None:
+    pass
+
+def f2(a: int, b: int) -> None:
+    pass
+
+def fp(a: int, b: int, /) -> None:
+    pass
+
+def fpg(a: int, /, b: int, **kw: int) -> None:
+    print("ok", a, b, kw)
+
+def fk2(a: int, *, k: int, l: int) -> None:
+    pass
+
+class C:
+    def m(self, a: int, b: int = 1) -> None:
+        pass
+
+class D:
+    def __init__(self, a: int, b: int = 1) -> None:
+        pass
+
+class E(Exception):
+    pass
+
+def show(label: str, fn) -> None:
+    try:
+        print(label, fn())
+    except Exception as e:
+        print(label, type(e).__name__, e)
+
+def main():
+    show("missing3", lambda: f0(**{}))
+    show("missing2", lambda: f0(1, **{}))
+    show("surplus-default", lambda: f1(1, 2, 3, **{}))
+    show("surplus-plain", lambda: f2(1, 2, 3, **{}))
+    show("unknown-beats-missing", lambda: f2(1, **{"c": 2}))
+    show("dup-across", lambda: f2(**{"a": 1}, **{"a": 2}))
+    show("dup-explicit", lambda: f2(1, **{"a": 2}))
+    show("posonly-multi", lambda: fp(**{"a": 1, "b": 2}))
+    show("posonly-kwarg", lambda: fpg(1, **{"a": 2}))
+    show("kwonly-missing2", lambda: fk2(1, **{}))
+    show("method-missing", lambda: C().m(**{}))
+    show("method-surplus", lambda: C().m(1, 2, 3, **{}))
+    show("method-dup-kw", lambda: C().m(**{"a": 1}, **{"a": 2}))
+    show("init-missing", lambda: D(**{}))
+    show("init-surplus", lambda: D(1, 2, 3, **{}))
+    show("init-dup-kw", lambda: D(**{"a": 1}, **{"a": 2}))
+    show("exc-dup-kw", lambda: E(**{"a": 1}, **{"a": 2}))
+    show("nonmap", lambda: f2(**5))
+    show("empty-ok", lambda: f2(1, 2, **{}))
+
+main()
+'''
+
+
 REFUSALS = {
     'star_and_starstar': '''def f(a: int, b: int = 2) -> int:
     return a * 10 + b
@@ -286,7 +456,7 @@ class KwargsReach(unittest.TestCase):
     def tearDownClass(cls):
         shutil.rmtree(cls.tmp, ignore_errors=True)
 
-    def build_and_compare(self, text, name, general=True):
+    def build_and_compare(self, text, name, general=True, stderr=False):
         res, exe, c_text = compile_prog(self.tmp, text, name, general)
         self.assertEqual(res.returncode, 0, name + ': ' + res.stderr[-1500:])
         want = run_cpython(self.tmp, text, name)
@@ -295,6 +465,10 @@ class KwargsReach(unittest.TestCase):
         self.assertEqual(got.returncode, want.returncode, name)
         if want.returncode != 0:
             self.assertTrue(got.stderr.strip(), name)
+            if stderr:
+                want_last = [ln for ln in want.stderr.splitlines() if ln.strip()][-1]
+                got_last = [ln for ln in got.stderr.splitlines() if ln.strip()][-1]
+                self.assertEqual(got_last, want_last, name)
         return res, c_text, want
 
     def test_keyword_calls(self):
@@ -310,8 +484,20 @@ class KwargsReach(unittest.TestCase):
     def test_star_star_errors(self):
         for name, text in ERRORS.items():
             with self.subTest(name=name):
-                _, _, want = self.build_and_compare(text, name)
+                _, _, want = self.build_and_compare(text, name, stderr=True)
                 self.assertNotEqual(want.returncode, 0, name)
+
+    def test_posonly_in_star_star(self):
+        self.build_and_compare(POSONLY, 'posonly')
+
+    def test_custom_mapping(self):
+        self.build_and_compare(CUSTOM_MAPPING, 'custom_mapping')
+
+    def test_exception_without_init(self):
+        self.build_and_compare(EXCEPTION_NO_INIT, 'exception_no_init', stderr=True)
+
+    def test_error_messages_and_precedence(self):
+        self.build_and_compare(ERROR_MESSAGES, 'error_messages', stderr=True)
 
     def test_refused_by_name(self):
         for name, text in REFUSALS.items():

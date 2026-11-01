@@ -7246,62 +7246,22 @@ class Compiler(boxclosure.ClosureMixin):
         vararg = info.get('vararg')
         kwarg = info.get('kwarg')
         posonly = [p for p in info.get('posonly', ()) if p in params]
-        qn = (info['owner_class'] + '.' + fname) if info.get('is_method') and info.get('owner_class') else fname
+        posonly_set = set(posonly)
+        node = info.get('node')
+        is_init_call = (info.get('is_method') and info.get('owner_class') == fname
+                        and node is not None and node.name == '__init__' and fname in self.classes)
+        if is_init_call:
+            disp, qual = fname + '.__init__', '__main__.' + fname
+        elif info.get('is_method') and info.get('owner_class'):
+            disp = info['owner_class'] + '.' + (node.name if node is not None else fname)
+            qual = '__main__.' + disp
+        else:
+            disp = node.name if node is not None else fname
+            qual = '__main__.' + disp
         err = ctx.cur_err_target()
         ctx.uses_st = True
         pos = [self.expr(a, ctx) for a in args]
-        kw = ctx.tmp()
-        ctx.emit('%s = ail_dict_new(cx);' % kw)
-        for kwname, kwnode in kwseq:
-            if kwname is not None:
-                v = self.expr(kwnode, ctx)
-                key = self._str_lit_slot(kwname, ctx)
-                has = ctx.new_cvar('kh')
-                ctx.emit('int %s;' % has)
-                ctx.emit('st = ail_dict_contains(cx, &%s, %s, %s);' % (has, kw, key))
-                ctx.check()
-                ctx.emit('if (%s) {' % has)
-                ctx.indent += 1
-                pref = self._str_lit_slot('%s() got multiple values for keyword argument ' % qn, ctx)
-                rp, msg = ctx.tmp(), ctx.tmp()
-                ctx.emit('%s = ail_obj_repr(cx, %s);' % (rp, key))
-                ctx.emit('%s = ail_str_cat(cx, %s, %s);' % (msg, pref, rp))
-                ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_TYPEERROR], %s); goto %s;' % (msg, err))
-                ctx.indent -= 1
-                ctx.emit('}')
-                ctx.emit('st = ail_dict_set(cx, %s, %s, %s);' % (kw, key, v))
-                ctx.check()
-                continue
-            ev = self.expr(kwnode, ctx)
-            ctx.emit('if (%s.tag != AIL_T_DICT) { st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s; }'
-                     % (ev, c_str_literal('argument after ** must be a mapping'), err))
-            items, n, i = ctx.tmp(), ctx.new_cvar('kn'), ctx.new_cvar('ki')
-            pair, key, kval, has = ctx.tmp(), ctx.tmp(), ctx.tmp(), ctx.new_cvar('kh')
-            ctx.emit('%s = ail_dict_items(cx, %s);' % (items, ev))
-            ctx.emit('int64_t %s = ((ail_vecobj *)(%s).o)->n;' % (n, items))
-            ctx.emit('for (int64_t %s = 0; %s < %s; %s++) {' % (i, i, n, i))
-            ctx.indent += 1
-            ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[%s];' % (pair, items, i))
-            ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[0];' % (key, pair))
-            ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[1];' % (kval, pair))
-            ctx.emit('if (%s.tag != AIL_T_STR) { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
-                     '"keywords must be strings"); goto %s; }' % (key, err))
-            ctx.emit('int %s;' % has)
-            ctx.emit('st = ail_dict_contains(cx, &%s, %s, %s);' % (has, kw, key))
-            ctx.check()
-            ctx.emit('if (%s) {' % has)
-            ctx.indent += 1
-            pref = self._str_lit_slot('%s() got multiple values for keyword argument ' % qn, ctx)
-            rp, msg = ctx.tmp(), ctx.tmp()
-            ctx.emit('%s = ail_obj_repr(cx, %s);' % (rp, key))
-            ctx.emit('%s = ail_str_cat(cx, %s, %s);' % (msg, pref, rp))
-            ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_TYPEERROR], %s); goto %s;' % (msg, err))
-            ctx.indent -= 1
-            ctx.emit('}')
-            ctx.emit('st = ail_dict_set(cx, %s, %s, %s);' % (kw, key, kval))
-            ctx.check()
-            ctx.indent -= 1
-            ctx.emit('}')
+        kw = self._expand_kwseq(kwseq, qual, ctx, err)
         kslot = {p: self._str_lit_slot(p, ctx) for p in params + kwonly}
 
         def has_key(p):
@@ -7324,19 +7284,96 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('}')
             return h, v
 
-        for p in posonly:
-            h = has_key(p)
-            ctx.emit('if (%s) { st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s; }'
-                     % (h, c_str_literal("%s() got some positional-only arguments passed as keyword "
-                                         "arguments: '%s'" % (qn, p)), err))
+        # CPython checks the positional-only names first, before any other keyword problem.
+        if posonly and not kwarg:
+            pairs = [(p, has_key(p)) for p in posonly]
+            self._emit_posonly_names(disp, pairs, ctx, err)
+
+        # Then walk the keywords in insertion order: a keyword that fills an already supplied
+        # positional parameter is a duplicate, and the first unknown keyword is the unexpected one.
+        # Keyword/keyword duplicates were caught while the runtime dict was built.
+        if len(pos) > 0 or not kwarg:
+            keys, n, i = ctx.tmp(), ctx.new_cvar('kn'), ctx.new_cvar('ki')
+            key = ctx.tmp()
+            ctx.emit('%s = ail_dict_keys(cx, %s);' % (keys, kw))
+            ctx.emit('int64_t %s = ((ail_vecobj *)(%s).o)->n;' % (n, keys))
+            ctx.emit('for (int64_t %s = 0; %s < %s; %s++) {' % (i, i, n, i))
+            ctx.indent += 1
+            ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[%s];' % (key, keys, i))
+            if posonly:
+                ctx.emit('if (%s) continue;' % ' || '.join(
+                    'ail_obj_eq_raw(%s, %s)' % (key, kslot[p]) for p in posonly))
+            for index, p in enumerate(params[:len(pos)]):
+                if p in posonly_set:
+                    continue
+                ctx.emit('if (ail_obj_eq_raw(%s, %s)) {' % (key, kslot[p]))
+                ctx.indent += 1
+                ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
+                         % (c_str_literal("%s() got multiple values for argument '%s'" % (disp, p)), err))
+                ctx.indent -= 1
+                ctx.emit('}')
+            if not kwarg:
+                known = ['ail_obj_eq_raw(%s, %s)' % (key, kslot[p])
+                         for p in params if p not in posonly_set] + \
+                        ['ail_obj_eq_raw(%s, %s)' % (key, kslot[p]) for p in kwonly]
+                ctx.emit('if (!(%s)) {' % (' || '.join(known) if known else '0'))
+                ctx.indent += 1
+                pref = self._str_lit_slot('%s() got an unexpected keyword argument ' % disp, ctx)
+                rp, msg = ctx.tmp(), ctx.tmp()
+                ctx.emit('%s = ail_obj_repr(cx, %s);' % (rp, key))
+                ctx.emit('%s = ail_str_cat(cx, %s, %s);' % (msg, pref, rp))
+                ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_TYPEERROR], %s); goto %s;' % (msg, err))
+                ctx.indent -= 1
+                ctx.emit('}')
+            ctx.indent -= 1
+            ctx.emit('}')
+
+        # Missing positional arguments are reported together, before a surplus positional argument
+        # and before missing keyword-only arguments, as CPython's binder does.
+        miss_pairs = []
+        for index, p in enumerate(params):
+            if p in info['defaults'] or index < len(pos):
+                continue
+            if p in posonly_set:
+                miss_pairs.append((p, '1'))
+            else:
+                miss_pairs.append((p, '!%s' % has_key(p)))
+        self._emit_missing_names(disp, 'positional', miss_pairs, ctx, err)
+
+        extra = pos[len(params):]
+        if vararg:
+            t = ctx.tmp()
+            if extra:
+                arr = ctx.new_cvar('va')
+                ctx.emit('ail_obj %s[%d] = { %s };' % (arr, len(extra), ', '.join(extra)))
+                ctx.emit('%s = ail_tuple_new(cx, %s, %d);' % (t, arr, len(extra)))
+            else:
+                ctx.emit('%s = ail_tuple_new(cx, NULL, 0);' % t)
+        elif extra:
+            off = 1 if strip_self else 0
+            nreq = len([p for p in params if p not in info['defaults']])
+            maxp, given = len(params) + off, len(pos) + off
+            if nreq == len(params):
+                takes = '%d positional argument%s' % (maxp, '' if maxp == 1 else 's')
+            else:
+                takes = 'from %d to %d positional arguments' % (nreq + off, maxp)
+            ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
+                     % (c_str_literal('%s() takes %s but %d %s given'
+                                      % (disp, takes, given, 'was' if given == 1 else 'were')), err))
+
+        miss_kw = []
+        for p in kwonly:
+            if p not in info['kw_defaults']:
+                miss_kw.append((p, '!%s' % has_key(p)))
+        self._emit_missing_names(disp, 'keyword-only', miss_kw, ctx, err)
+
         out = []
         for index, p in enumerate(params):
             o = ctx.tmp()
             if index < len(pos):
-                h = has_key(p)
-                ctx.emit('if (%s) { st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s; }'
-                         % (h, c_str_literal("%s() got multiple values for argument '%s'" % (qn, p)), err))
                 ctx.emit('%s = %s;' % (o, pos[index]))
+            elif p in posonly_set:
+                ctx.emit('%s = ail_box_none();' % o)
             else:
                 h, v = take(p)
                 ctx.emit('if (%s) {' % h)
@@ -7349,26 +7386,12 @@ class Compiler(boxclosure.ClosureMixin):
                     ctx.emit('%s = %s;' % (o, self.expr(info['defaults'][p], ctx)))
                 else:
                     ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
-                             % (c_str_literal("%s() missing 1 required positional argument: '%s'" % (qn, p)), err))
+                             % (c_str_literal("%s() missing 1 required positional argument: '%s'" % (disp, p)), err))
                 ctx.indent -= 1
                 ctx.emit('}')
             out.append(o)
-        extra = pos[len(params):]
         if vararg:
-            t = ctx.tmp()
-            if extra:
-                arr = ctx.new_cvar('va')
-                ctx.emit('ail_obj %s[%d] = { %s };' % (arr, len(extra), ', '.join(extra)))
-                ctx.emit('%s = ail_tuple_new(cx, %s, %d);' % (t, arr, len(extra)))
-            else:
-                ctx.emit('%s = ail_tuple_new(cx, NULL, 0);' % t)
             out.append(t)
-        elif extra:
-            was = 'was' if len(pos) == 1 else 'were'
-            ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
-                     % (c_str_literal('%s() takes %d positional argument%s but %d %s given'
-                                      % (qn, len(params), '' if len(params) == 1 else 's',
-                                         len(pos), was)), err))
         for p in kwonly:
             o = ctx.tmp()
             h, v = take(p)
@@ -7382,7 +7405,7 @@ class Compiler(boxclosure.ClosureMixin):
                 ctx.emit('%s = %s;' % (o, self.expr(info['kw_defaults'][p], ctx)))
             else:
                 ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
-                         % (c_str_literal("%s() missing 1 required keyword-only argument: '%s'" % (qn, p)), err))
+                         % (c_str_literal("%s() missing 1 required keyword-only argument: '%s'" % (disp, p)), err))
             ctx.indent -= 1
             ctx.emit('}')
             out.append(o)
@@ -7394,7 +7417,7 @@ class Compiler(boxclosure.ClosureMixin):
             keys, key = ctx.tmp(), ctx.tmp()
             ctx.emit('%s = ail_dict_keys(cx, %s);' % (keys, kw))
             ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[0];' % (key, keys))
-            pref = self._str_lit_slot('%s() got an unexpected keyword argument ' % qn, ctx)
+            pref = self._str_lit_slot('%s() got an unexpected keyword argument ' % disp, ctx)
             rp, msg = ctx.tmp(), ctx.tmp()
             ctx.emit('%s = ail_obj_repr(cx, %s);' % (rp, key))
             ctx.emit('%s = ail_str_cat(cx, %s, %s);' % (msg, pref, rp))
@@ -7402,6 +7425,211 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.indent -= 1
             ctx.emit('}')
         return out
+
+    def _expand_kwseq(self, kwseq, qual, ctx, err):
+        """Build the call's keyword dict in source order; each `**` mapping is expanded at run
+        time (a dict directly, or an object with `keys`/`__getitem__`)."""
+        kw = ctx.tmp()
+        ctx.emit('%s = ail_dict_new(cx);' % kw)
+        for kwname, kwnode in kwseq:
+            if kwname is not None:
+                v = self.expr(kwnode, ctx)
+                key = self._str_lit_slot(kwname, ctx)
+                self._emit_kw_add(kw, key, v, qual, ctx, err)
+            else:
+                ev = self.expr(kwnode, ctx)
+                self._emit_kw_expand(kw, ev, kwnode, qual, ctx, err)
+        return kw
+
+    def _emit_kw_add(self, kw, key, val, qual, ctx, err):
+        """Add one keyword to the runtime dict, rejecting a duplicate keyword the way CPython's
+        call site does (`__main__.f() got multiple values for keyword argument 'x'`)."""
+        has = ctx.new_cvar('kh')
+        ctx.emit('int %s;' % has)
+        ctx.emit('st = ail_dict_contains(cx, &%s, %s, %s);' % (has, kw, key))
+        ctx.check()
+        ctx.emit('if (%s) {' % has)
+        ctx.indent += 1
+        pref = self._str_lit_slot('%s() got multiple values for keyword argument ' % qual, ctx)
+        rp, msg = ctx.tmp(), ctx.tmp()
+        ctx.emit('%s = ail_obj_repr(cx, %s);' % (rp, key))
+        ctx.emit('%s = ail_str_cat(cx, %s, %s);' % (msg, pref, rp))
+        ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_TYPEERROR], %s); goto %s;' % (msg, err))
+        ctx.indent -= 1
+        ctx.emit('}')
+        ctx.emit('st = ail_dict_set(cx, %s, %s, %s);' % (kw, key, val))
+        ctx.check()
+
+    def _emit_kw_expand(self, kw, ev, kwnode, qual, ctx, err):
+        """Expand one `**ev`: a dict directly, otherwise the mapping protocol (`keys()` then
+        `__getitem__`), as CPython's `**` does."""
+        ctx.emit('if (%s.tag == AIL_T_DICT) {' % ev)
+        ctx.indent += 1
+        items, n, i = ctx.tmp(), ctx.new_cvar('kn'), ctx.new_cvar('ki')
+        pair, key, kval = ctx.tmp(), ctx.tmp(), ctx.tmp()
+        ctx.emit('%s = ail_dict_items(cx, %s);' % (items, ev))
+        ctx.emit('int64_t %s = ((ail_vecobj *)(%s).o)->n;' % (n, items))
+        ctx.emit('for (int64_t %s = 0; %s < %s; %s++) {' % (i, i, n, i))
+        ctx.indent += 1
+        ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[%s];' % (pair, items, i))
+        ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[0];' % (key, pair))
+        ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[1];' % (kval, pair))
+        ctx.emit('if (%s.tag != AIL_T_STR) { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
+                 '"keywords must be strings"); goto %s; }' % (key, err))
+        self._emit_kw_add(kw, key, kval, qual, ctx, err)
+        ctx.indent -= 1
+        ctx.emit('}')
+        ctx.indent -= 1
+        ctx.emit('} else {')
+        ctx.indent += 1
+        self._emit_kw_expand_mapping(kw, ev, kwnode, qual, ctx, err)
+        ctx.indent -= 1
+        ctx.emit('}')
+
+    def _emit_kw_expand_mapping(self, kw, ev, kwnode, qual, ctx, err):
+        cname = self._inst_class(kwnode, ctx)
+        if cname is not None:
+            if self._resolve_method(cname, 'keys') is None:
+                self._emit_nonmapping_error(ev, qual, ctx, err)
+                return
+            if self._resolve_method(cname, '__getitem__') is None:
+                ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
+                         % (c_str_literal("'%s' object is not subscriptable" % cname), err))
+                return
+            keys = self._emit_user_method_c(cname, 'keys', ev, [], ctx)
+            self._emit_expand_keys_iter(kw, ev, cname, keys, qual, ctx, err)
+            return
+        owners = [c for c in self.class_order if self._resolve_method(c, 'keys') is not None]
+        if not owners or not any(self._resolve_method(c, '__getitem__') is not None for c in self.class_order):
+            self._emit_nonmapping_error(ev, qual, ctx, err)
+            return
+        ctx.emit('if (%s) {' % self._method_owners_check(ev, 'keys'))
+        ctx.indent += 1
+        keys_node = ast.Call(func=ast.Attribute(value=_PreC(ev), attr='keys', ctx=ast.Load()),
+                             args=[], keywords=[])
+        keys = self.expr(keys_node, ctx)
+        self._emit_expand_keys_iter(kw, ev, None, keys, qual, ctx, err)
+        ctx.indent -= 1
+        ctx.emit('} else {')
+        ctx.indent += 1
+        self._emit_nonmapping_error(ev, qual, ctx, err)
+        ctx.indent -= 1
+        ctx.emit('}')
+
+    def _emit_expand_keys_iter(self, kw, ev, cname, keys, qual, ctx, err):
+        it, key = ctx.tmp(), ctx.tmp()
+        ctx.emit('st = ail_iter(cx, &%s, %s);' % (it, keys))
+        ctx.check()
+        ctx.emit('for (;;) {')
+        ctx.indent += 1
+        ctx.emit('st = ail_it_next(cx, &%s, %s);' % (key, it))
+        ctx.emit('if (st == AIL_STOP) { st = AIL_OK; break; }')
+        ctx.check()
+        ctx.emit('if (%s.tag != AIL_T_STR) { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
+                 '"keywords must be strings"); goto %s; }' % (key, err))
+        if cname is not None:
+            val = self._emit_user_method_c(cname, '__getitem__', ev, [key], ctx)
+        else:
+            item_node = ast.Call(func=ast.Attribute(value=_PreC(ev), attr='__getitem__',
+                                                    ctx=ast.Load()),
+                                 args=[_PreC(key)], keywords=[])
+            val = self.expr(item_node, ctx)
+        self._emit_kw_add(kw, key, val, qual, ctx, err)
+        ctx.indent -= 1
+        ctx.emit('}')
+
+    def _emit_user_method_c(self, cname, attr, recv_c, argcs, ctx):
+        info = self._resolve_method(cname, attr)
+        plan = self._virtual_plan(cname, lambda c: self._resolve_method(c, attr))
+
+        def mkargs(i):
+            return ([] if i.get('is_static') else [self._self_arg(i, recv_c)]) + argcs
+        if plan[1]:
+            return self._emit_virtual(plan, recv_c, mkargs, ctx, attr)
+        t = ctx.tmp()
+        ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in mkargs(info))))
+        ctx.check()
+        return t
+
+    def _emit_nonmapping_error(self, ev, qual, ctx, err):
+        eb = ctx.new_cvar('nm')
+        ctx.emit('char %s[256];' % eb)
+        ctx.emit('snprintf(%s, sizeof %s, "%%s() argument after ** must be a mapping, not %%s", %s, ail__tname_c(%s));'
+                 % (eb, eb, c_str_literal(qual), ev))
+        ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;' % (eb, err))
+        ctx.uses_st = True
+
+    def _emit_missing_names(self, disp, noun, pairs, ctx, err):
+        if not pairs:
+            return
+        flags = []
+        for name, cond in pairs:
+            f = ctx.new_cvar('mf')
+            ctx.emit('int %s = %s;' % (f, cond))
+            flags.append(f)
+        total = sum(len(name) + 5 for name, _ in pairs) + 1
+        mb, mn, ms, mo = (ctx.new_cvar('mb'), ctx.new_cvar('mnc'), ctx.new_cvar('mns'),
+                          ctx.new_cvar('mno'))
+        ctx.emit('int %s = 0;' % mn)
+        for f in flags:
+            ctx.emit('if (%s) %s++;' % (f, mn))
+        ctx.emit('if (%s) {' % mn)
+        ctx.indent += 1
+        ctx.emit('char %s[%d]; size_t %s = 0; int %s = 0;' % (mb, total, mo, ms))
+        for f, (name, _) in zip(flags, pairs):
+            ctx.emit('if (%s) {' % f)
+            ctx.indent += 1
+            ctx.emit('if (%s == 0) %s += snprintf(%s + %s, sizeof %s - %s, "\'%%s\'", %s);'
+                     % (ms, mo, mb, mo, mb, mo, c_str_literal(name)))
+            ctx.emit('else if (%s == 2) %s += snprintf(%s + %s, sizeof %s - %s, " and \'%%s\'", %s);'
+                     % (mn, mo, mb, mo, mb, mo, c_str_literal(name)))
+            ctx.emit('else if (%s - %s == 1) %s += snprintf(%s + %s, sizeof %s - %s, ", and \'%%s\'", %s);'
+                     % (mn, ms, mo, mb, mo, mb, mo, c_str_literal(name)))
+            ctx.emit('else %s += snprintf(%s + %s, sizeof %s - %s, ", \'%%s\'", %s);'
+                     % (mo, mb, mo, mb, mo, c_str_literal(name)))
+            ctx.emit('%s++;' % ms)
+            ctx.indent -= 1
+            ctx.emit('}')
+        eb = ctx.new_cvar('eb')
+        ctx.emit('char %s[%d];' % (eb, total + 256))
+        ctx.emit('snprintf(%s, sizeof %s, "%%s() missing %%d required %s argument%%s: %%s", %s, %s, %s == 1 ? "" : "s", %s);'
+                 % (eb, eb, noun, c_str_literal(disp), mn, mn, mb))
+        ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;' % (eb, err))
+        ctx.indent -= 1
+        ctx.emit('}')
+
+    def _emit_posonly_names(self, disp, pairs, ctx, err):
+        flags = []
+        for name, cond in pairs:
+            f = ctx.new_cvar('pf')
+            ctx.emit('int %s = %s;' % (f, cond))
+            flags.append(f)
+        total = sum(len(name) + 3 for name, _ in pairs) + 1
+        mb, mn, ms, mo = (ctx.new_cvar('pb'), ctx.new_cvar('pnc'), ctx.new_cvar('pns'),
+                          ctx.new_cvar('pno'))
+        ctx.emit('int %s = 0;' % mn)
+        for f in flags:
+            ctx.emit('if (%s) %s++;' % (f, mn))
+        ctx.emit('if (%s) {' % mn)
+        ctx.indent += 1
+        ctx.emit('char %s[%d]; size_t %s = 0; int %s = 0;' % (mb, total, mo, ms))
+        for f, (name, _) in zip(flags, pairs):
+            ctx.emit('if (%s) {' % f)
+            ctx.indent += 1
+            ctx.emit('if (%s == 0) %s += snprintf(%s + %s, sizeof %s - %s, "%%s", %s);'
+                     % (ms, mo, mb, mo, mb, mo, c_str_literal(name)))
+            ctx.emit('else %s += snprintf(%s + %s, sizeof %s - %s, ", %%s", %s);'
+                     % (mo, mb, mo, mb, mo, c_str_literal(name)))
+            ctx.emit('%s++;' % ms)
+            ctx.indent -= 1
+            ctx.emit('}')
+        eb = ctx.new_cvar('eb')
+        ctx.emit('char %s[%d];' % (eb, total + 256))
+        ctx.emit('snprintf(%s, sizeof %s, "%%s() got some positional-only arguments passed as keyword arguments: \'%%s\'", %s, %s);'
+                 % (eb, eb, c_str_literal(disp), mb))
+        ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;' % (eb, err))
+        ctx.indent -= 1
+        ctx.emit('}')
 
     # ---------------------------------------------------------------------------------------
     # BRIEF_mixed_mode.md integration: which of `pymix.analyze`'s own candidates this emitter
@@ -7858,9 +8086,15 @@ class Compiler(boxclosure.ClosureMixin):
             argcs = self._bind_args(name, info, args, kwargs, ctx, kwseq)
             positional = argcs[:len(args)]
         else:
-            if kwargs:
-                raise Unsupported('%s() takes no keyword arguments' % name)
             argcs = positional = [self.expr(a, ctx) for a in args]
+            if kwseq is not None:
+                err = ctx.cur_err_target()
+                ctx.uses_st = True
+                kw = self._expand_kwseq(kwseq, '__main__.' + name, ctx, err)
+                ctx.emit('if (ail_dict_len(%s) != 0) { st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s; }'
+                         % (kw, c_str_literal('%s() takes no keyword arguments' % name), err))
+            elif kwargs:
+                raise Unsupported('%s() takes no keyword arguments' % name)
         tup = ctx.tmp()
         if positional:
             arr = ctx.new_cvar('ea')
