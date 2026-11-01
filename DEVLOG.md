@@ -1,3 +1,36 @@
+## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
+
+The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
+printed `nan` and `f'{nan:+08.2f}'` lost both the sign and its zero-padding position, where CPython
+prints `+nan` / `+0000nan`. The general `ail_obj_format` NaN arm now builds the word `nan`, applies
+the sign flag through `ail__apply_sign`, then pads. `ail__pad` also treats a leading space as a
+sign for `=` zero padding, so `' 08.2f'` gives CPython's ` 0000nan` instead of the previous
+`0000 nan`. Probes `p_min_sign`, `p_nansign`, `p_nansign_widths` and `p_nansign_upper` cover both
+NaN signs, `+`/space, widths 0..9, zero/`=`/fill/alignment, the f-string, `format()` and `%` forms,
+infinity and `-0.0`, through an argument, a list item, an attribute and a dict value; all match
+CPython on the default and general builds. `test_ail_fz208` gained a `test_explicit_sign_flags`
+case (4 cases, 4 modes).
+
+## 2026-10-31 -- fz208: a fixed-point float field never prints a NaN's sign (job-fz208-11010638)
+
+The daily fuzzer (seed 2075719067) found `NAN` vs `-NAN`. `1e308 * 10 % 0.75` is a negative
+NaN under glibc; `ail_fmt_spec_float` and both general-path `ail_obj_format` implementations passed
+that double to `snprintf("%.*f")`, which writes it as `-nan`, while CPython never shows a NaN's sign.
+They now pad the literal word `nan` directly (width, fill, alignment and zero padding unchanged);
+the other float types already went through formatters that suppress the sign.
+
+Minimal probe in `/tmp/probes/p_min.py` (two lines, `n = 1e308 * 10 % 0.75; print(f'{n:.0f}')`)
+and probes `p_nanfmt.py`, `p_nanfmt_args.py`, `p_nanfmt_bound.py`: positive/negative NaN literals,
+overflowed modulo and subtraction, the value through an argument/list item/attribute/dict value,
+`f`, `F`, `E`, `G`, `%`, `#`, width, `<`/`^`, zero padding, `%.Nf`, infinity and `-0.0`; all
+match CPython on the default and general builds and with AIL_IR=0/1. The original fuzzer program
+now agrees through its NaN lines; it still stops later with the separate pre-existing int64
+overflow in `-` (`h0`/`h2`), not this cause.
+
+Added `AIL_CURRENT/test_ail_fz208.py` (3 cases, 4 modes) and registered it through
+`AIL_CURRENT/tests.d/test_ail_fz208.txt`. Final-state tests: test_ail_fz208, test_ail_fuzz46,
+test_ail_pre132, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-31 -- stdlib31 re-applied: textwrap.shorten keeps this tree's wrap_more lowering (job-rbstdlib31-11010226)
 
 Re-applied the accepted `job-stdlib31-10290951` change. This integrated tree already builds
