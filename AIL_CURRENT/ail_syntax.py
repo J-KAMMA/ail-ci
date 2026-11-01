@@ -7,6 +7,7 @@ import importlib.util
 import keyword
 import math
 import operator
+import os
 from pathlib import Path
 import re
 import sys
@@ -1024,13 +1025,42 @@ _MATH_HELPERS = {
         x = y
 ''',
     'gcd': '''def _ail_math_gcd(a: int, b: int) -> int:
-    x = abs(a)
-    y = abs(b)
-    while y != 0:
-        t = x % y
-        x = y
-        y = t
-    return x
+    m = -9223372036854775807 - 1
+    if a == m and (b == 0 or b == a):
+        raise OverflowError("integer overflow in math.gcd() (ints are 64-bit; --exact-int gives exact ints)")
+    if b == m and (a == 0 or a == b):
+        raise OverflowError("integer overflow in math.gcd() (ints are 64-bit; --exact-int gives exact ints)")
+    while b != 0:
+        t = a % b
+        a = b
+        b = t
+    if a < 0:
+        a = -a
+    return a
+''',
+    'ceil': '''def _ail_math_ceil(x):
+    y = x + 0
+    if isinstance(y, float):
+        lo = -9223372036854775807 - 1
+        hi = 9223372036854775807
+        if y - y == 0 and (y > hi or y < lo):
+            raise OverflowError("integer overflow in math.ceil() (ints are 64-bit; --exact-int gives exact ints)")
+    i = int(y)
+    if i < y:
+        return i + 1
+    return i
+''',
+    'floor': '''def _ail_math_floor(x):
+    y = x + 0
+    if isinstance(y, float):
+        lo = -9223372036854775807 - 1
+        hi = 9223372036854775807
+        if y - y == 0 and (y > hi or y < lo):
+            raise OverflowError("integer overflow in math.floor() (ints are 64-bit; --exact-int gives exact ints)")
+    i = int(y)
+    if i > y:
+        return i - 1
+    return i
 '''}
 
 
@@ -1163,11 +1193,46 @@ _MATH_HELPERS['lcm'] = (
     'def _ail_math_lcm(a: int, b: int) -> int:\n'
     '    if a == 0 or b == 0:\n'
     '        return 0\n'
-    '    return abs(a // _ail_math_gcd(a, b) * b)\n')
+    '    m = -9223372036854775807 - 1\n'
+    '    if a == m or b == m:\n'
+    '        raise OverflowError("integer overflow in math.lcm() (ints are 64-bit; --exact-int gives exact ints)")\n'
+    '    r = a // _ail_math_gcd(a, b) * b\n'
+    '    if r < 0:\n'
+    '        r = -r\n'
+    '    return r\n')
 
 # math.fsum (CPython's Shewchuk partials, its non-finite bookkeeping and its final rounding step),
 # math.prod of ints, and textwrap.wrap / fill / dedent for the default options (CPython's own chunking:
 # expandtabs(8), its whitespace/em-dash/hyphen word split and _handle_long_word's hyphen break).
+# The int64 helper bodies above stop at INT64_MIN where CPython (and --exact-int) would
+# return a big int. The exact mode keeps the same helpers' old arbitrary-precision bodies.
+_MATH_HELPERS_EXACT = {
+    'gcd': '''def _ail_math_gcd(a: int, b: int) -> int:
+    while b != 0:
+        t = a % b
+        a = b
+        b = t
+    return abs(a)
+''',
+    'ceil': '''def _ail_math_ceil(x: float) -> int:
+    i = int(x)
+    if i < x:
+        return i + 1
+    return i
+''',
+    'floor': '''def _ail_math_floor(x: float) -> int:
+    i = int(x)
+    if i > x:
+        return i - 1
+    return i
+''',
+    'lcm': '''def _ail_math_lcm(a: int, b: int) -> int:
+    if a == 0 or b == 0:
+        return 0
+    return abs(a // _ail_math_gcd(a, b) * b)
+''',
+}
+
 _MATH_HELPERS['fsum'] = (
     'def _ail_math_fsum(xs: list[float]) -> float:\n'
     '    partials = [0.0] * (len(xs) + 1)\n'
@@ -1846,7 +1911,9 @@ class _Surface:
             floor = start
         text = data.decode('utf8')
         if self.helpers:
-            text = text.rstrip('\n') + '\n\n\n' + '\n\n'.join(_MATH_HELPERS[name] for name in self.helpers)
+            exact = os.environ.get('AIL_EXACT_INT', '').strip().lower() in ('1', 'on', 'yes', 'true')
+            table = _MATH_HELPERS_EXACT if exact else _MATH_HELPERS
+            text = text.rstrip('\n') + '\n\n\n' + '\n\n'.join(table.get(name, _MATH_HELPERS[name]) for name in self.helpers)
         if self.dc_val:
             kinds = ''.join(f'    if isinstance(v, {name}):\n        return v._ail_asdict()\n'
                             for name in sorted(self.dataclasses))
@@ -2536,9 +2603,18 @@ class _Surface:
 
     def math_call(self, node, name):
         args = node.args
+        exact = os.environ.get('AIL_EXACT_INT', '').strip().lower() in ('1', 'on', 'yes', 'true')
         if not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args):
             helper = None
-            if name in ('sqrt', 'isqrt') and len(args) == 1 or name == 'gcd' and len(args) == 2:
+            if exact and name in ('ceil', 'floor') and len(args) == 1:
+                pass                               # the exact path keeps CPython's direct int(float) conversion
+            elif name in ('ceil', 'floor') and len(args) == 1:
+                # An int constant keeps the old direct int(x // 1) lowering; a float constant and
+                # every other argument take the helper, whose own check names the function.
+                arg = args[0]
+                if not (isinstance(arg, ast.Constant) and isinstance(arg.value, int)):
+                    helper = name
+            elif name in ('sqrt', 'isqrt') and len(args) == 1 or name == 'gcd' and len(args) == 2:
                 helper = name
             elif len(args) == 1 and (name in _MATH_ONE or name in _MATH_PREDICATES
                                      or name in ('degrees', 'radians', 'factorial')):

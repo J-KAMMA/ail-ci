@@ -643,6 +643,16 @@ class Builder:
         n = f.id
         if n.startswith('_ail_math_'):
             fn = n[len('_ail_math_'):]
+            if fn in ('floor', 'ceil', 'trunc'):
+                # The typed surface lowers a non-constant math.floor/ceil (and math.trunc) to this helper, whose int64
+                # check is the kernel's own range flag; lower it exactly like the math.floor/ceil/trunc surface call.
+                if len(node.args) != 1:
+                    raise self.fail(node, 'math.%s() takes one argument' % fn)
+                a = self.ex(node.args[0], frame)
+                self.num(node, a[1], 'the argument')
+                if a[1] in ('i', 'b'):
+                    return self.as_(a, 'i')
+                return ('cvt', 'i', fn, a)
             if fn in _FLOAT_MATH_G5:
                 raise self.fail(node, _FLOAT_MATH_G5[fn], 'drop the marker, or wait for stage G5')
             raise self.fail(node, 'math.%s has no exact GPU form (CPython uses the C library\'s result)' % fn,
