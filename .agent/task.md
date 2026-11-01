@@ -1,3 +1,48 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode-go/deepseek-v4.1-flash]
+**Change (one line).** `3cf0d72`+`b9ccb5e` add base16/base32/`encodebytes`/`decodebytes` and `altchars=`/runtime `validate=` lowering to `hashlower.py`, implement them plus a `ValueError`-subclass `Error` in `hash_prelude.py`, add 12 lab programs and `test_ail_std_base64`; this is broader than the report's "fixed five defects", but consistent with the two commits.
+
+**Probes (both builds, `bash ~/tools/cmp.sh ... $PWD`).**
+- `r_alt.py`, `r_altstr.py`, `r_alt2.py` (altchars lengths 0/1/2/3/4, bytes/str/bytearray, constant/dynamic, decode+encode): match, incl. `AssertionError: b'?'` / `"'-'"` and dynamic-str encode `TypeError`.
+- `r_b32.py`, `r_b32b.py` (enc 0–11, 30 padded/unpadded/bad-padding/lowercase/invalid tokens × casefold, bytearray): match.
+- `r_b64alt.py` (7 altchars incl. `++`, `//`, NUL; validate true/false with whitespace): match.
+- `r_bytes.py` (encodebytes lengths 0,1,2,55,56,57,58,113,114,115; multi-line decode; bytearray; str errors): match.
+- `r_routes.py`, `r_types2.py`, `r_kw.py`, `r_badtypes.py`, `r_b16.py`: two mismatches below.
+- Compare tasks: generated C byte-identical on HEAD/base for the 5 that build plainly; the other 5 refuse identically on both.
+
+**Tests.** `test_ail_std_base64`, `test_ail_crypto`, `test_ail_safetynet` on HEAD: 3 modules, 0 failed, 421s. `update_manifest.py --check`: exit 0.
+
+**Claims.** altchars assert (both decode paths, constant str) — verified. Dynamic-str encode TypeError — verified. `decodebytes` str/non-bytes TypeError text — verified. `b32decode(bytearray)` — verified. Encoder TypeError texts (str/int) — verified. `update_manifest --check` — verified. Their 19 `rprobes` + 5 `fix_*` rerun, `test_ail_files`, `test_ail_corpus_findings3`, and “chunked_stream is general” — unverified (not rerun/inspected). Speed — not checked (no hot-path change).
+
+**Pre-existing.** None found; both defects are in code added by this change.
+
+**Defects.**
+1. `base64.b16decode` skips its input type check for non-bytes/non-str (`/tmp/rprobes/r_b16.py`, `r_badtypes.py`, both builds). `base64.b16decode(123)` expected `te argument should be a bytes-like object or ASCII string, not 'int'`; actual `te object of type 'int' has no len()`. Same for `None`. Cause: `_ail_hl_b16d_dyn` omits `_ail_hl_need_bytes(data, 3)` that `_ail_hl_b32d_dyn` has.
+2. `base64.b64encode(b"\xfb\xff", altchars=[1, 2])` silently returns `b'\x01\x028='` (`/tmp/rprobes/r_badtypes.py`, both builds). CPython expected `te a bytes-like object is required, not 'list'` (assert passes, then `bytes.maketrans` rejects the list). Cause: `_ail_hl_alt_bytes`/`_ail_hl_alt_enc_dyn` check only length, never that altchars is bytes-like, so an invalid altchars is used as character codes.
+
+VERDICT: FIX
+1. Add the bytes-like check to `_ail_hl_b16d_dyn` (probe `/tmp/rprobes/r_b16.py`, `base64.b16decode(123)` expected `argument should be a bytes-like object or ASCII string, not 'int'`, actual `object of type 'int' has no len()`).
+2. Reject non-bytes-like `altchars` after the length assert (probe `/tmp/rprobes/r_badtypes.py`, `base64.b64encode(b"\xfb\xff", altchars=[1, 2])` expected `TypeError: a bytes-like object is required, not 'list'`, actual `b'\x01\x028='`).
+[cost $0.0346, opencode tokens {"total": 2334414, "input": 39566, "output": 9073, "reasoning": 27343, "cache.write": 0, "cache.read": 2258432}]
+    tool time: bash 18.8 min, write 0.0 min, edit 0.0 min
+        441s bash   cd /home/runner/work/_temp/w2 && rm -rf /tmp/cmpgc && mkdir -p /tmp/cmpgc/src /tmp/cmpgc/head /tmp/cmpgc/base 
+        240s bash   sleep 240; ps -p $(cat /tmp/rev_par.pid) -o pid,etime; wc -l /tmp/rev_par.log; tail -20 /tmp/rev_par.log; date
+        175s bash   cd /tmp/rprobes && for p in r_alt r_altstr r_b16 r_b32 r_bytes r_routes; do echo "##### $p"; timeout 300 bash 
+         82s bash   cd /tmp/rprobes && for p in r_alt r_b16 r_routes; do echo "##### $p"; timeout 300 bash ~/tools/cmp.sh /tmp/rpr
+         53s bash   cd /tmp/rprobes && for p in r_b32b r_b64alt; do echo "##### $p"; timeout 400 bash ~/tools/cmp.sh /tmp/rprobes/
+         40s bash   cd /tmp/rprobes && timeout 300 bash ~/tools/cmp.sh /tmp/rprobes/r_types2.py /home/runner/work/_temp/w2 2>&1 | 
+         36s bash   cd /tmp/rprobes && timeout 300 bash ~/tools/cmp.sh /tmp/rprobes/r_alt2.py /home/runner/work/_temp/w2 2>&1 | gr
+         35s bash   cd /tmp/rprobes && timeout 300 bash ~/tools/cmp.sh /tmp/rprobes/r_badtypes.py /home/runner/work/_temp/w2 2>&1 
+
+
+--- ORIGINAL TASK ---
 **Coverage: make real programs that use the CPython stdlib module `base64` build and print exactly what CPython prints.**
 
 1. Write 12 small realistic programs, each 15–60 lines, that use `base64` the way typical code does: its most common functions and classes, the common argument forms and keyword arguments, and its edge cases (empty inputs, errors that the program catches). Put them in lab/stdlib/base64/.
