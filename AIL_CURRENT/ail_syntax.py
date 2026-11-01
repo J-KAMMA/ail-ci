@@ -2253,16 +2253,25 @@ class _Surface:
         if node.keywords or any(isinstance(arg, ast.Starred) for arg in node.args):
             return None
 
+        def bind(body):
+            # (lambda _ail_m: body)(receiver): the receiver is evaluated once, as CPython does, and each
+            # element of the tuple reads the bound match
+            return ast.Call(func=ast.Lambda(
+                args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_ail_m')], vararg=None,
+                                   kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]), body=body),
+                args=[copy.deepcopy(func.value)], keywords=[])
+
         def group_arg(arg):
+            match = ast.Name(id='_ail_m', ctx=ast.Load())
             if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
-                start = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='startn', ctx=ast.Load()),
+                start = ast.Call(func=ast.Attribute(value=copy.deepcopy(match), attr='startn', ctx=ast.Load()),
                                  args=[copy.deepcopy(arg)], keywords=[])
-                get = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='groupn', ctx=ast.Load()),
+                get = ast.Call(func=ast.Attribute(value=copy.deepcopy(match), attr='groupn', ctx=ast.Load()),
                                args=[copy.deepcopy(arg)], keywords=[])
             else:
-                start = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='start', ctx=ast.Load()),
+                start = ast.Call(func=ast.Attribute(value=copy.deepcopy(match), attr='start', ctx=ast.Load()),
                                  args=[copy.deepcopy(arg)], keywords=[])
-                get = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='group', ctx=ast.Load()),
+                get = ast.Call(func=ast.Attribute(value=copy.deepcopy(match), attr='group', ctx=ast.Load()),
                                args=[copy.deepcopy(arg)], keywords=[])
             return ast.IfExp(test=ast.Compare(left=start, ops=[ast.GtE()],
                                               comparators=[ast.Constant(value=0)]),
@@ -2273,11 +2282,12 @@ class _Surface:
                 and not isinstance(arg.value, bool) for arg in node.args):
             arg = node.args[0] if node.args else ast.Constant(value=0)
             attr = 'n' if isinstance(arg.value, str) else ''
-            start = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='start' + attr, ctx=ast.Load()),
+            match = ast.Name(id='_ail_m', ctx=ast.Load())
+            start = ast.Call(func=ast.Attribute(value=copy.deepcopy(match), attr='start' + attr, ctx=ast.Load()),
                              args=[copy.deepcopy(arg)], keywords=[])
-            end = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='end' + attr, ctx=ast.Load()),
+            end = ast.Call(func=ast.Attribute(value=copy.deepcopy(match), attr='end' + attr, ctx=ast.Load()),
                            args=[copy.deepcopy(arg)], keywords=[])
-            return ast.Tuple(elts=[start, end], ctx=ast.Load())
+            return bind(ast.Tuple(elts=[start, end], ctx=ast.Load()))
         if name in ('group', 'start', 'end'):
             if not node.args:
                 return ast.Call(func=func, args=[ast.Constant(value=0)], keywords=[])
@@ -2288,7 +2298,7 @@ class _Surface:
             if name == 'group' and len(node.args) > 1 and all(
                     isinstance(arg, ast.Constant) and isinstance(arg.value, (int, str))
                     and not isinstance(arg.value, bool) for arg in node.args):
-                return ast.Tuple(elts=[group_arg(arg) for arg in node.args], ctx=ast.Load())
+                return bind(ast.Tuple(elts=[group_arg(arg) for arg in node.args], ctx=ast.Load()))
             if name == 'group' and len(node.args) > 1:
                 self.keep.add('re')
                 self.note(node, 'm.group(a, b) returns a tuple, which is not built; call m.group(i) once per group')

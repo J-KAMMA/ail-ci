@@ -1,3 +1,21 @@
+## 2026-11-01 -- std_re review: match tuple receiver evaluated once, manifest pins (job-std_re-11011833)
+
+Review follow-up.  `m.span(...)` and `m.group(a, b)` lowered to a tuple of `start`/`end`/`group` calls on a
+copy of the receiver, so a receiver with side effects (`get().group(1, 2)`, `get().span()`) was evaluated
+once per tuple element: CPython says one call, the old lowering said four and two.  The tuple is now the
+body of an immediately-invoked lambda with the receiver bound as its argument, so the receiver is
+evaluated exactly once; each element still returns `None` for a group that did not take part.
+
+Also refreshed the manifest shards: `test_ail_std_re.py` and `tests.d/test_ail_std_re.txt` were not pinned
+on the previous commit, so `python3 tools/update_manifest.py --check` exited 1.  It now exits 0.
+
+Probes in `/tmp/probes` (review's side-effect program plus `span(i)`, `span(name)`, mixed `group(0, 1, 2)` /
+`group("x", 2)`, receiver through a call / list item / attribute / dict value / function argument, empty
+subject, unmatched group, `None` receiver, negative constant refused by name, and findall/split/subn) all
+match CPython 3.12 stdout and exit code on `AIL_IR=0` and `AIL_IR=1`.  All 10 `lab/compare/src` C files
+stay byte-identical to base.  Tests on the final commit: test_ail_std_re, test_ail_re, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-11-01 -- std_re: findall tuples, split groups, subn templates and match tuple values (job-std_re-11011833)
 
 Added 12 real `re` programs in `lab/stdlib/re/` (log parsing, validation, templating, CSV fields,
