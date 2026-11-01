@@ -6489,7 +6489,7 @@ class Compiler(boxclosure.ClosureMixin):
         first = True
         for c in owners:
             info = self.classes[c]['methods'][node.attr]
-            blockers = [d for d in self.class_order if d != c and self._is_subclass_of(d, c)
+            blockers = [d for d in self.class_order if self._is_subclass_of(d, c)
                         and self._class_defines_plain_attr(d, node.attr, include_methods=False)]
             ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c, blockers)))
             first = False
@@ -11651,7 +11651,7 @@ class Compiler(boxclosure.ClosureMixin):
                 # AttributeError, as CPython does, instead of silently shadowing the property.
                 first = True
                 for c in special:
-                    blockers = [d for d in self.class_order if d != c and self._is_subclass_of(d, c)
+                    blockers = [d for d in self.class_order if self._is_subclass_of(d, c)
                                 and self._class_defines_plain_attr(d, target.attr)]
                     ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c, blockers)))
                     first = False

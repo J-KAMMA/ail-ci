@@ -509,6 +509,24 @@ print(Fraction(2, 1) ** 100)
                 self.assertEqual(made.returncode, 0, made.stderr)
                 self.assertEqual(run(exe, ''), (0, want, ''))
 
+    def test_class_attribute_after_property_shadows_it(self):
+        text = ('class A:\n'
+                '    @property\n'
+                '    def x(self):\n'
+                '        return 1\n'
+                '    x = 0\n'
+                'a = A()\n'
+                'print(a.x)\n'
+                'a.x = 5\n'
+                'print(a.x)\n'
+                'print(A.x)\n')
+        want = '0\n5\n0\n'
+        for mode in ('default', 'force'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                made, exe = build(tmp, text, 'propowner', mode)
+                self.assertEqual(made.returncode, 0, made.stderr)
+                self.assertEqual(run(exe, ''), (0, want, ''))
+
     def test_exact_mode_hands_back_exact_ints(self):
         text = ('from decimal import Decimal\n'
                 'from fractions import Fraction\n'

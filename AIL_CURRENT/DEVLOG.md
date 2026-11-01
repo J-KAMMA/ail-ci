@@ -1,3 +1,15 @@
+## 2026-11-01 -- Decimal and Fraction compute exactly in every int mode; property stores stop by name (job decexact2)
+
+The Decimal/Fraction prelude now runs its internal arithmetic at exact depth in the default int64 mode too, using the existing
+per-function exact-int machinery, so `Decimal(1)/Decimal(3)`, `sqrt`, `getcontext().prec = 50`, `Decimal("1e30") + 1` and
+`Decimal(2) ** 100` match CPython without `--exact-int`; every successful prelude return leaves through `ail_exact_visible`,
+so an early return cannot leak an exact value. Ints that leave the library (`int(d)`, `as_tuple()`, `Fraction.numerator`, ...)
+still follow the user mode and stop with the int64 overflow message when they do not fit. A store to a getter-only property
+raises `AttributeError: property 'x' of '<run-time class>' object has no setter` instead of silently creating an instance
+attribute; a plain class attribute (or method) bound after a property in the same class body, or in a subclass, shadows it for
+read and store as CPython does. `test_ail_int64_default.py` covers the same-class and subclass cases; probes
+`/tmp/probes/p_sameclass_*` match CPython on both builds.
+
 ## 2026-10-31 -- ints are 64-bit by default; exact big ints are opt-in
 
 Owner decision: "strongest" over "identical to CPython". A Python-syntax program now gets int64: an operation that leaves int64
