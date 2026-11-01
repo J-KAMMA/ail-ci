@@ -19,6 +19,11 @@ typedef struct { ail_gcobj hdr; int32_t sign; uint32_t n; ail_limb d[1]; } ail_b
 #define AIL_BIG(x) ((ail_bigobj *)(uintptr_t)(x).sv.off)
 typedef struct { int sign; size_t n; const ail_limb *d; ail_limb tmp[2]; } ail_bv;   /* a view; do not copy */
 static inline int ail__isint(uint8_t t) { return t == AIL_T_INT || t == AIL_T_BOOL || t == AIL_T_BIG; }
+/* The exact-int library preludes (Decimal/Fraction) enter this before their own arithmetic and leave it on every exit.  An
+   overflow promotes to a big int only while the depth is positive (or in --exact-int, where the generated main starts it at
+   one); the user's own code keeps the loud int64 stop. */
+static inline void ail_exact_enter(ail_ctx *cx) { cx->exact_depth++; }
+static inline void ail_exact_leave(ail_ctx *cx) { cx->exact_depth--; }
 /* Prototypes of the pieces biggate.py may leave out: the definitions below are conditional, and an
    unused caller (a math helper the program never names) must still see the right return type. */
 static AIL_BIGFN void ail_big_divmod(ail_ctx *cx, ail_obj *q, ail_obj *r, ail_obj a, ail_obj b);
@@ -377,22 +382,40 @@ static AIL_BIGFN ail_obj ail_int_to_str(ail_ctx *cx, ail_obj a) {
    `__builtin_*_overflow` test and, where it fires, TAIL-CALL one of these with the two int64 operands in registers: no frame, no
    struct copy and no code in the hot function beyond the call, exactly the shape of the stop that was there before. */
 #define AIL_BIGCOLD AIL_BIGFN
-static AIL_BIGCOLD ail_st ail__ov_add(ail_ctx *cx, ail_obj *out, int64_t a, int64_t b) { *out = ail_big_addsub(cx, ail_box_int(a), ail_box_int(b), 0); return AIL_OK; }
+static AIL_BIGCOLD ail_st ail__ov_add(ail_ctx *cx, ail_obj *out, int64_t a, int64_t b) {
+    if (cx->exact_depth <= 0) return ail_hit_limit(cx, "int_overflow", "integer overflow in +");
+    *out = ail_big_addsub(cx, ail_box_int(a), ail_box_int(b), 0); return AIL_OK;
+}
 /* The add overflow arm passes the wrapped result and the second operand, not both operands: the hot path can then add in
    place (one instruction fewer) instead of keeping the first operand live for the call. a is recovered exactly, modulo 2**64. */
 static AIL_BIGCOLD ail_st ail__ov_add1(ail_ctx *cx, ail_obj *out, int64_t b, int64_t r) {
     int64_t a = (int64_t)((uint64_t)r - (uint64_t)b);
     return ail__ov_add(cx, out, a, b);
 }
-static AIL_BIGCOLD ail_st ail__ov_sub(ail_ctx *cx, ail_obj *out, int64_t a, int64_t b) { *out = ail_big_addsub(cx, ail_box_int(a), ail_box_int(b), 1); return AIL_OK; }
-static AIL_BIGCOLD ail_st ail__ov_mul(ail_ctx *cx, ail_obj *out, int64_t a, int64_t b) { *out = ail_big_mul(cx, ail_box_int(a), ail_box_int(b)); return AIL_OK; }
-static AIL_BIGCOLD ail_st ail__ov_neg(ail_ctx *cx, ail_obj *out) { *out = ail_big_neg(cx, ail_box_int(INT64_MIN)); return AIL_OK; }
+static AIL_BIGCOLD ail_st ail__ov_sub(ail_ctx *cx, ail_obj *out, int64_t a, int64_t b) {
+    if (cx->exact_depth <= 0) return ail_hit_limit(cx, "int_overflow", "integer overflow in -");
+    *out = ail_big_addsub(cx, ail_box_int(a), ail_box_int(b), 1); return AIL_OK;
+}
+static AIL_BIGCOLD ail_st ail__ov_mul(ail_ctx *cx, ail_obj *out, int64_t a, int64_t b) {
+    if (cx->exact_depth <= 0) return ail_hit_limit(cx, "int_overflow", "integer overflow in *");
+    *out = ail_big_mul(cx, ail_box_int(a), ail_box_int(b)); return AIL_OK;
+}
+static AIL_BIGCOLD ail_st ail__ov_neg(ail_ctx *cx, ail_obj *out) {
+    if (cx->exact_depth <= 0) return ail_hit_limit(cx, "int_overflow", "integer overflow in unary - or abs()");
+    *out = ail_big_neg(cx, ail_box_int(INT64_MIN)); return AIL_OK;
+}
 /*P:div<*/
-static AIL_BIGCOLD ail_st ail__ov_floordiv(ail_ctx *cx, ail_obj *out) { *out = ail_big_neg(cx, ail_box_int(INT64_MIN)); return AIL_OK; }   /* INT64_MIN // -1 */
+static AIL_BIGCOLD ail_st ail__ov_floordiv(ail_ctx *cx, ail_obj *out) {
+    if (cx->exact_depth <= 0) return ail_hit_limit(cx, "int_overflow", "integer overflow in //");
+    *out = ail_big_neg(cx, ail_box_int(INT64_MIN)); return AIL_OK;
+}   /* INT64_MIN // -1 */
 /*P|*/
 /*P>*/
 /*P:shift<*/
-static AIL_BIGCOLD ail_st ail__ov_shl(ail_ctx *cx, ail_obj *out, int64_t a, int64_t n) { *out = ail_big_shl(cx, ail_box_int(a), n); return AIL_OK; }
+static AIL_BIGCOLD ail_st ail__ov_shl(ail_ctx *cx, ail_obj *out, int64_t a, int64_t n) {
+    if (cx->exact_depth <= 0) return ail_hit_limit(cx, "int_overflow", "integer overflow in <<");
+    *out = ail_big_shl(cx, ail_box_int(a), n); return AIL_OK;
+}
 /*P|*/
 /*P>*/
 static AIL_BIGCOLD ail_st ail__ov_pow(ail_ctx *cx, ail_obj *out, int64_t a, int64_t e);
@@ -482,7 +505,10 @@ static AIL_BIGFN ail_st ail__int_truediv(ail_ctx *cx, ail_obj *out, ail_obj a, a
 /*P>*/
 
 /*P:pow<*/
-static AIL_BIGCOLD ail_st ail__ov_pow(ail_ctx *cx, ail_obj *out, int64_t a, int64_t e) { return ail__int_pow(cx, out, ail_box_int(a), ail_box_int(e)); }
+static AIL_BIGCOLD ail_st ail__ov_pow(ail_ctx *cx, ail_obj *out, int64_t a, int64_t e) {
+    if (cx->exact_depth <= 0) return ail_hit_limit(cx, "int_overflow", "integer overflow in **");
+    return ail__int_pow(cx, out, ail_box_int(a), ail_box_int(e));
+}
 /*P|*/
 /*P>*/
 /*P:div<*/

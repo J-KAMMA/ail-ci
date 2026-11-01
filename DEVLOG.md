@@ -1,3 +1,21 @@
+## 2026-11-01 -- Decimal/Fraction prelude: exact ints inside, int64 for the program (job-decexact2-11011010)
+
+The default int64 mode made the Decimal prelude fail on its own `10 ** prec`: `Decimal(1) / Decimal(3)`,
+`Decimal("2").sqrt()`, `Decimal(2) ** 100`, a 50-digit division and `Decimal("1e30") + 1` all stopped
+with `integer overflow in **` unless `--exact-int` was given. The prelude functions and methods of
+Decimal and Fraction now run inside a per-function exact depth (`exact_depth`, entered/left in the
+generated C by `pyboxed2.py`), and `pyboxed2.build` keeps the big-int runtime for a program that uses
+either library. User code stays int64: its `+ - * // ** <<` still stop loudly, and an int the library
+hands back follows the user mode, so `int(Decimal("1e30"))` stops with `integer overflow in int()`.
+`test_ail_stdtop1.py` no longer sets `AIL_EXACT_INT` (its edge program uses an in-range guard for the
+`int(Decimal(...))` line; the `2 ** 100` argument became `Decimal(2) ** 100`), and
+`test_ail_int64_default.py` gained `DecimalLibrary` for both the acceptance values and the visible-int
+stop. Probes in `/tmp/probes`: `p_dec_accept`, `p_dec_ops`, `p_dec_args`, `p_dec_str2`, `p_dec_module`,
+`p_frac2`, `p_frac_basic` match CPython on both builds; `dec_int_big`, `dec_pow_int`, `frac_int_big`,
+`dec_user_int64`, `dec_user_parse`, `dec_exc_then_user` show the named int64 stops (and no exact-depth
+leak after a Decimal/Fraction exception). All ten `lab/compare` tasks build byte-identical C against
+HEAD for both `main.ail` and every `main.py` that builds; the others refuse identically.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`

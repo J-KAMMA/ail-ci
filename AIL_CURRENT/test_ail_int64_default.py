@@ -393,5 +393,51 @@ main()
             self.assertEqual(exact_made.returncode, 0, exact_made.stderr)
 
 
+class DecimalLibrary(unittest.TestCase):
+    """Decimal/Fraction compute with exact ints internally in the default int64 mode; an int they hand back to the
+    program follows the program's mode (int(d) beyond int64 stops loudly)."""
+
+    PROGRAM = '''from decimal import Decimal, getcontext
+from fractions import Fraction
+
+print(Decimal(1) / Decimal(3))
+print(Decimal("2").sqrt())
+print(Decimal("10.50") * Decimal("3"))
+print(Decimal(2) ** 100)
+getcontext().prec = 50
+print(Decimal(1) / Decimal(3))
+print(Decimal("1e30") + 1)
+print(Fraction(1, 3) + Fraction(1, 6))
+print(Fraction(2, 1) ** 100)
+'''
+    WANT = ('0.3333333333333333333333333333\n'
+            '1.414213562373095048801688724\n'
+            '31.50\n'
+            '1.267650600228229401496703205E+30\n'
+            '0.33333333333333333333333333333333333333333333333333\n'
+            '1000000000000000000000000000001\n'
+            '1/2\n'
+            '1267650600228229401496703205376\n')
+
+    def test_library_internals_are_exact_in_both_modes(self):
+        for mode in ('default', 'force', 'exact'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                made, exe = build(tmp, self.PROGRAM, 'dec', mode)
+                self.assertEqual(made.returncode, 0, made.stderr)
+                self.assertEqual(run(exe, ''), (0, self.WANT, ''))
+
+    def test_visible_int_beyond_int64_stops(self):
+        text = ('from decimal import Decimal\n'
+                'from fractions import Fraction\n'
+                'print(int(Decimal(2) ** 100))\n'
+                'print(int(Fraction(2) ** 100))\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            made, exe = build(tmp, text, 'deci')
+            self.assertEqual(made.returncode, 0, made.stderr)
+            code, out, err = run(exe, '')
+            self.assertEqual((code, out), (1, ''))
+            self.assertEqual(err, 'OverflowError: integer overflow in int()%s\n' % SUFFIX)
+
+
 if __name__ == '__main__':
     unittest.main()

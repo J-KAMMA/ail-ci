@@ -11244,6 +11244,7 @@ typedef struct ail_ctx {
     size_t stdin_line_cap;
 /*B<*/
     int big_toolong;     /* a str()/repr() of a big int over the 4300-digit limit: the next checking caller raises ValueError */
+    int exact_depth;     /* > 0 inside a library prelude that computes with exact ints (Decimal/Fraction), or in --exact-int */
 /*B|*/
 /*B>*/
 } ail_ctx;
@@ -14051,6 +14052,7 @@ static ail_st ail__asc_to_big(ail_ctx *cx, ail_obj *out, const char *t, int64_t 
         snprintf(msg, sizeof msg, "Exceeds the limit (%d digits) for integer string conversion: value has %zu digits; use sys.set_int_max_str_digits() to increase the limit", AIL_INT_MAX_STR_DIGITS, nd);
         return ail_raise_c(cx, AIL_B_VALUEERROR, msg);
     }
+    if (cx->exact_depth <= 0) { free(d); return ail_hit_limit(cx, "int_overflow", "integer overflow in int()"); }
     *out = ail_big_from_digits(cx, d, nd, (int)base, neg);
     free(d);
     return AIL_OK;
@@ -19009,6 +19011,7 @@ static inline ail_st ail_bi_int(ail_ctx *cx, ail_obj *out, ail_obj x, int has_ba
         if (!d) ail_die("out of memory");
         size_t nd = 0;
         for (int64_t q = i_digits; q < j; q++) { uint16_t c = ail_chr(s, q); if (c != '_') d[nd++] = (char)c; }
+        if (cx->exact_depth <= 0) { free(d); return ail_hit_limit(cx, "int_overflow", "integer overflow in int()"); }
         *out = ail_big_from_digits(cx, d, nd, (int)b, neg);
         free(d);
         return AIL_OK;
