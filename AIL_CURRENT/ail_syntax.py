@@ -2855,8 +2855,6 @@ class _Surface:
             elif value is not None:
                 default = ast.unparse(self.rewritten(value)[0])
             fields.append((statement, statement.target.id, ast.unparse(annotation), default))
-        if not fields:
-            return
         start = self.offset(decorator.lineno, decorator.col_offset)
         at = start - 1
         while at >= 0 and self.data[at:at + 1] in (b' ', b'\t'):
@@ -2904,9 +2902,15 @@ class _Surface:
             # the generated __init__ ends with the call dataclass makes (a base class's hook is inherited)
             body += '; self.__post_init__()'
             self.post_init.add(node.name)
-        init = f'def __init__(self, {parameters}): {body}'
+        init = f'def __init__(self{", " + parameters if parameters else ""}): {body}'
         wanted = self.dc_wanted()
-        pad = '\n' + ' ' * fields[0][0].col_offset
+        if fields:
+            body_col = fields[0][0].col_offset
+        elif node.body[0].lineno == node.lineno:
+            body_col = node.col_offset + 4
+        else:
+            body_col = node.body[0].col_offset
+        pad = '\n' + ' ' * body_col
         if order_on:
             # order=True: the four comparisons of the tuple of the compared fields (an instance of another class,
             # a subclass included, answers NotImplemented, so the comparison raises TypeError, as in CPython)
@@ -2927,10 +2931,33 @@ class _Surface:
             init += (f'{pad}def _ail_replace(self, kw):{inner}for k in kw:{inner}    if k not in {known}:'
                      f'{inner}        raise TypeError("{node.name}.__init__() got an unexpected keyword argument " + repr(k))'
                      f'{inner}return {node.name}({values})')
-        self.replace(fields[0][0], init, True)
-        for statement, *_ in fields[1:]:
-            self.replace(statement, '', True)  # a class body here holds methods only, not `pass`
-        self.consumed.update(statement for statement, *_ in fields)
+        if fields:
+            self.replace(fields[0][0], init, True)
+            for statement, *_ in fields[1:]:
+                self.replace(statement, '', True)  # a class body here holds methods only, not `pass`
+            self.consumed.update(statement for statement, *_ in fields)
+        else:
+            # No annotated field of its own: the fields (if any) come from a lowered dataclass base,
+            # and the class body holds only a docstring / `pass` / methods. Insert the generated
+            # methods after a leading docstring, replacing a `pass` when there is one.
+            items = list(node.body)
+            doc = None
+            if (isinstance(items[0], ast.Expr) and isinstance(items[0].value, ast.Constant)
+                    and isinstance(items[0].value.value, str)):
+                doc = items.pop(0)
+            indent = ' ' * body_col
+            same_line = node.body[0].lineno == node.lineno
+            pass_item = next((each for each in items if isinstance(each, ast.Pass)), None)
+            if pass_item is not None:
+                lead = '\n' + indent if pass_item.lineno == node.lineno else ''
+                self.replace(pass_item, lead + init, True)
+            elif items:
+                at = self.offset(items[0].lineno, items[0].col_offset)
+                lead = '\n' + indent if same_line else ''
+                self.edits.append((at, at, lead + init + '\n' + indent, False))
+            else:
+                at = self.offset(doc.end_lineno, doc.end_col_offset)
+                self.edits.append((at, at, '\n' + indent + init, False))
         self.dataclasses[node.name] = [(name, default) for name, _, default, _, skip in merged if not skip]
         self.dc_annotations[node.name] = [(name, annotation, shown) for name, annotation, _, shown, _ in merged]
         self.dc_initless[node.name] = {name for name, *_, skip in merged if skip}

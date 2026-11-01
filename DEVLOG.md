@@ -1,3 +1,19 @@
+## 2026-11-01 -- dataclass without its own fields (suite fix, job-std_abc-11020728)
+
+The previous suite fix made `pyboxed2` refuse a raw `@dataclass` (the general path never saw the
+`__init__`/`__eq__`/`__repr__` the surface pass generates), which fixed `test_ail_quirks` but also
+refused `@dataclass class Q(O): pass`, a no-field subclass of a lowered dataclass, and so broke
+`test_ail_genlib`. `ail_syntax.dataclass` now lowers a dataclass with no annotated field of its own:
+its fields are the ones inherited from a lowered dataclass base (none for an empty dataclass), the
+generated `__init__`/comparisons/`asdict`/`replace` are inserted after a leading docstring (replacing
+a `pass` when present), and the marker is still written, so `Q(1)` prints and compares exactly as
+CPython does. A dataclass with annotated fields, an explicit `__init__`, or an unsupported option
+still leaves the raw decorator for `pyboxed2`'s named refusal. Probes in `/tmp/probes/dc_*.py`
+cover empty / docstring-only / methods-only / one-line / frozen / `field(init=False)`-inheriting
+dataclasses and explicit-`__init__` refusal on both builds. `test_ail_genlib`, `test_ail_quirks`,
+`test_ail_std_abc`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and
+`test_ail_silent6.DataclassEqTests` pass; the manifest is updated.
+
 ## 2026-11-01 -- abc review 3: cache token vs earlier imports (job-std_abc-11020347)
 
 Fixed the third review's cache-token defect. `abc.get_cache_token()` was computed from a fresh
