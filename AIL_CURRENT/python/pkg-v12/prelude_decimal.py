@@ -49,6 +49,20 @@ def _dec_strip(s: str) -> str:
     return s[i:]
 
 
+_DEC_MAX = 9223372036854775807
+_DEC_MIN = -9223372036854775807 - 1
+
+
+def _dec_fits(d: str) -> bool:
+    # whether a normalized magnitude string fits in an int64
+    n = len(d)
+    if n < 19:
+        return True
+    if n > 19:
+        return False
+    return d <= "9223372036854775807"
+
+
 def _dec_parts(x):
     if isinstance(x, _DecInt):
         return x.neg, x.d
@@ -69,7 +83,80 @@ def _dec_make(neg: bool, d: str):
     x = _DecInt(0)
     x.neg = neg
     x.d = d
+    if _dec_fits(d):
+        x.small = True
+        if neg:
+            x.v = -int(d)
+        else:
+            x.v = int(d)
+    else:
+        x.small = False
+        x.v = 0
     return x
+
+
+def _dec_small(n: int):
+    # a _DecInt for an int64 n, with its native value kept for the fast paths
+    return _DecInt(n)
+
+
+def _dec_pair(a, b):
+    # (True, a, b) when both operands have a native int64 value, else (False, 0, 0)
+    if isinstance(a, _DecInt):
+        if not a.small:
+            return False, 0, 0
+        av = a.v
+    elif isinstance(a, int):
+        av = a
+    else:
+        return False, 0, 0
+    if isinstance(b, _DecInt):
+        if not b.small:
+            return False, 0, 0
+        bv = b.v
+    elif isinstance(b, int):
+        bv = b
+    else:
+        return False, 0, 0
+    return True, av, bv
+
+
+def _dec_add_small(a: int, b: int):
+    # a + b when it fits in int64, None otherwise (no wrapping)
+    if a >= 0:
+        if b >= 0:
+            if a <= _DEC_MAX - b:
+                return _dec_small(a + b)
+        else:
+            return _dec_small(a + b)
+    else:
+        if b >= 0:
+            return _dec_small(a + b)
+        if a >= _DEC_MIN - b:
+            return _dec_small(a + b)
+    return None
+
+
+def _dec_mul_small(a: int, b: int):
+    # a * b when it fits in int64, None otherwise (no wrapping)
+    if a == 0 or b == 0:
+        return _dec_small(0)
+    if a == _DEC_MIN or b == _DEC_MIN:
+        return None
+    if a > 0:
+        ma = a
+    else:
+        ma = -a
+    if b > 0:
+        mb = b
+    else:
+        mb = -b
+    if ma > _DEC_MAX // mb:
+        return None
+    p = ma * mb
+    if (a < 0) != (b < 0):
+        p = -p
+    return _dec_small(p)
 
 
 def _dec_cmp_mag(a: str, b: str) -> int:
@@ -197,16 +284,29 @@ class _DecInt:
     def __init__(self, value=0):
         self.neg = False
         self.d = "0"
+        self.small = True
+        self.v = 0
         if isinstance(value, _DecInt):
             self.neg = value.neg
             self.d = value.d
+            self.small = value.small
+            self.v = value.v
             return
         if isinstance(value, int):
-            s = str(value)
-        else:
-            s = value
-            if not isinstance(s, str):
-                s = str(s)
+            self.v = value
+            self.small = True
+            if value < 0:
+                self.neg = True
+                self.d = str(value)[1:]
+            else:
+                self.neg = False
+                self.d = str(value)
+            if self.d == "0":
+                self.neg = False
+            return
+        s = value
+        if not isinstance(s, str):
+            s = str(s)
         if s.startswith("-"):
             self.neg = True
             s = s[1:]
@@ -215,6 +315,15 @@ class _DecInt:
         self.d = _dec_strip(s)
         if self.d == "0":
             self.neg = False
+        if _dec_fits(self.d):
+            self.small = True
+            if self.neg:
+                self.v = -int(self.d)
+            else:
+                self.v = int(self.d)
+        else:
+            self.small = False
+            self.v = 0
 
     def __str__(self) -> str:
         if self.neg:
@@ -225,6 +334,8 @@ class _DecInt:
         return self.__str__()
 
     def __bool__(self) -> bool:
+        if self.small:
+            return self.v != 0
         return self.d != "0"
 
     def __int__(self) -> int:
@@ -234,17 +345,24 @@ class _DecInt:
         return hash(int(self.__str__()))
 
     def __neg__(self):
-        if self.d == "0":
-            return _dec_make(False, "0")
+        if self.small and self.v != _DEC_MIN:
+            return _dec_small(-self.v)
         return _dec_make(not self.neg, self.d)
 
     def __pos__(self):
         return self
 
     def __abs__(self):
+        if self.small and self.v != _DEC_MIN:
+            if self.v < 0:
+                return _dec_small(-self.v)
+            return self
         return _dec_make(False, self.d)
 
     def __eq__(self, other):
+        ok, a, b = _dec_pair(self, other)
+        if ok:
+            return a == b
         try:
             bn, bd = _dec_parts(other)
         except Exception:
@@ -255,22 +373,39 @@ class _DecInt:
         return not self.__eq__(other)
 
     def __lt__(self, other):
+        ok, a, b = _dec_pair(self, other)
+        if ok:
+            return a < b
         bn, bd = _dec_parts(other)
         return _dec_cmp_parts(self.neg, self.d, bn, bd) < 0
 
     def __le__(self, other):
+        ok, a, b = _dec_pair(self, other)
+        if ok:
+            return a <= b
         bn, bd = _dec_parts(other)
         return _dec_cmp_parts(self.neg, self.d, bn, bd) <= 0
 
     def __gt__(self, other):
+        ok, a, b = _dec_pair(self, other)
+        if ok:
+            return a > b
         bn, bd = _dec_parts(other)
         return _dec_cmp_parts(self.neg, self.d, bn, bd) > 0
 
     def __ge__(self, other):
+        ok, a, b = _dec_pair(self, other)
+        if ok:
+            return a >= b
         bn, bd = _dec_parts(other)
         return _dec_cmp_parts(self.neg, self.d, bn, bd) >= 0
 
     def __add__(self, other):
+        ok, a, b = _dec_pair(self, other)
+        if ok:
+            r = _dec_add_small(a, b)
+            if r is not None:
+                return r
         bn, bd = _dec_parts(other)
         if self.neg == bn:
             return _dec_make(self.neg, _dec_add_mag(self.d, bd))
@@ -285,14 +420,29 @@ class _DecInt:
         return self.__add__(other)
 
     def __sub__(self, other):
+        ok, a, b = _dec_pair(self, other)
+        if ok and b != _DEC_MIN:
+            r = _dec_add_small(a, -b)
+            if r is not None:
+                return r
         bn, bd = _dec_parts(other)
         return self.__add__(_dec_make(not bn if bd != "0" else False, bd))
 
     def __rsub__(self, other):
+        ok, a, b = _dec_pair(other, self)
+        if ok and b != _DEC_MIN:
+            r = _dec_add_small(a, -b)
+            if r is not None:
+                return r
         bn, bd = _dec_parts(other)
         return _dec_make(bn, bd).__sub__(self)
 
     def __mul__(self, other):
+        ok, a, b = _dec_pair(self, other)
+        if ok:
+            r = _dec_mul_small(a, b)
+            if r is not None:
+                return r
         bn, bd = _dec_parts(other)
         return _dec_make(self.neg != bn, _dec_mul_mag(self.d, bd))
 
@@ -300,6 +450,12 @@ class _DecInt:
         return self.__mul__(other)
 
     def __divmod__(self, other):
+        ok, a, b = _dec_pair(self, other)
+        if ok:
+            if b == 0:
+                raise ZeroDivisionError("division by zero")
+            if not (a == _DEC_MIN and b == -1):
+                return _dec_small(a // b), _dec_small(a % b)
         bn, bd = _dec_parts(other)
         if bd == "0":
             raise ZeroDivisionError("division by zero")
@@ -354,8 +510,11 @@ class _DecInt:
         return result
 
     def bit_length(self) -> int:
+        if self.small and self.v != _DEC_MIN:
+            if self.v < 0:
+                return (-self.v).bit_length()
+            return self.v.bit_length()
         return int(self.d).bit_length()
-
 
 
 class DecimalException(Exception):
@@ -469,6 +628,8 @@ def _ail_dec_coeff_abs(x):
 
 def _ail_dec_p10(k: int) -> int:
     if _AIL_DEC_BIG:
+        if k <= 18:
+            return _dec_small(10 ** k)
         return _DecInt("1" + "0" * k)
     return 10 ** k
 
@@ -477,6 +638,8 @@ def _ail_dec_nd(c: int) -> int:
     # the number of decimal digits of c >= 0 (1 for zero); no int <-> str conversion of a long number, which has a
     # 4300-digit limit in CPython and in the compiled runtime
     if _AIL_DEC_BIG:
+        if isinstance(c, _DecInt) and c.small:
+            return len(c.d)
         return len(str(c))
     if c < 1000000000000000000:
         return len(str(c))
@@ -493,6 +656,8 @@ def _ail_dec_nd(c: int) -> int:
 def _ail_dec_digs(c: int) -> str:
     # str(c) for c >= 0 in chunks of 1000 digits
     if _AIL_DEC_BIG:
+        if isinstance(c, _DecInt) and c.small:
+            return c.d
         return str(c)
     if c.bit_length() < 12000:
         return str(c)
@@ -519,16 +684,23 @@ def _ail_dec_tuple_digits(c: int) -> tuple:
 
 
 class _DecTuple:
-    # the DecimalTuple of CPython: three fields, tuple indexing / iteration and the same repr
+    # the DecimalTuple of CPython: three fields, the tuple protocol (indexing, slicing, iteration, unpacking,
+    # contains, count / index, concatenation, hashing) and the same repr
     def __init__(self, sign: int, digits: tuple, exponent):
         self.sign = sign
         self.digits = digits
         self.exponent = exponent
+        self._fields = ("sign", "digits", "exponent")
+
+    def _tup(self):
+        return (self.sign, self.digits, self.exponent)
 
     def __len__(self) -> int:
         return 3
 
-    def __getitem__(self, i: int):
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return self._tup()[i]
         if i < 0:
             i = i + 3
         if i == 0:
@@ -540,14 +712,44 @@ class _DecTuple:
         raise IndexError("tuple index out of range")
 
     def __iter__(self):
-        return [self.sign, self.digits, self.exponent]
+        return iter(self._tup())
+
+    def __contains__(self, x) -> bool:
+        return x in self._tup()
 
     def __eq__(self, other):
         if isinstance(other, _DecTuple):
-            return (self.sign, self.digits, self.exponent) == (other.sign, other.digits, other.exponent)
+            return self._tup() == other._tup()
         if isinstance(other, tuple):
-            return (self.sign, self.digits, self.exponent) == other
+            return self._tup() == other
         return False
+
+    def __ne__(self, other):
+        return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash(self._tup())
+
+    def __add__(self, other):
+        if isinstance(other, _DecTuple):
+            return self._tup() + other._tup()
+        if isinstance(other, tuple):
+            return self._tup() + other
+        return NotImplemented
+
+    def __radd__(self, other):
+        if isinstance(other, tuple):
+            return other + self._tup()
+        return NotImplemented
+
+    def count(self, x) -> int:
+        return self._tup().count(x)
+
+    def index(self, x) -> int:
+        return self._tup().index(x)
+
+    def __reversed__(self):
+        return reversed(self._tup())
 
     def __repr__(self) -> str:
         return "DecimalTuple(sign=%r, digits=%r, exponent=%r)" % (self.sign, self.digits, self.exponent)
@@ -1144,6 +1346,8 @@ def _ail_dec_digits(s: str, i: int) -> int:
 def _ail_dec_int(s: str) -> int:
     # the int of a string of decimal digit characters (ASCII or Unicode), in chunks of 1000 digits
     if _AIL_DEC_BIG:
+        if len(s) <= 19 and s.isascii():
+            return _DecInt(s)
         out = []
         for ch in s:
             d = _ail_dec_digit(ch)

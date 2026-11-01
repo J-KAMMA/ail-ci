@@ -1,3 +1,17 @@
+## 2026-11-01 -- `decimal` review fixes: tuple protocol and int64 coefficient fast path (job-std_decimal-11012337)
+
+Review follow-up on `2fafbd0`.  `Decimal.as_tuple` now returns a `DecimalTuple`-shaped object with the
+tuple protocol as well: slicing, `in`, `count` / `index`, `reversed`, concatenation, hashing and
+`_fields`, besides the existing fields, indexing, iteration, unpacking, equality and repr.  In the
+int64 default a Decimal coefficient still uses `_DecInt` for arbitrary precision, but a coefficient
+that fits in int64 now carries its native value and takes int64 add / subtract / multiply / divmod /
+comparison / power fast paths; it promotes to the string algorithms only when the operation would
+overflow, so nothing wraps.  This removes the slowdown the first version introduced (a 20k
+multiply+quantize loop went from 3.44 s to 0.14 s; 100k additions from about 1.0 s to 0.41 s).
+The 12 lab programs still build and match CPython, and the probes cover int64 boundary coefficients
+(`9223372036854775807`), additions / multiplications / divisions that cross the boundary, negative
+values, and as_tuple slicing.
+
 ## 2026-11-01 -- `decimal` lab: int64 coefficients and `as_tuple` (job-std_decimal-11012337)
 
 `lab/stdlib/decimal` now has 12 realistic programs; all build with the default command on the

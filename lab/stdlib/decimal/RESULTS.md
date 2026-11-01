@@ -29,11 +29,15 @@ the prelude through an argument, a list item, an attribute and a dict value on b
 
 - `Decimal.as_tuple` was refused by name.  It is now built, including the empty digit tuple of a NaN,
   `"F"` for infinity, `"n"` / `"N"` for quiet / signalling NaN, and a `DecimalTuple`-shaped result with
-  `.sign`, `.digits`, `.exponent`, tuple indexing, unpacking and CPython's `DecimalTuple(...)` repr.
-- The int64 default keeps Decimal coefficients arbitrary precision (a `_DecInt` string coefficient in
+  `.sign`, `.digits`, `.exponent`, `_fields`, tuple indexing, slicing, iteration, unpacking, containment,
+  `count` / `index`, concatenation, hashing and CPython's `DecimalTuple(...)` repr.
+- The int64 default keeps Decimal coefficients arbitrary precision (a `_DecInt` coefficient in
   `prelude_decimal.py`) while the program's own ints stay int64; construction from a float, arithmetic,
-  quantize, sqrt, format and `as_tuple` therefore work for coefficients wider than 64 bits.  An int
-  returned to the program still follows the normal int64 rule and stops loudly rather than wrapping.
+  quantize, sqrt, format and `as_tuple` therefore work for coefficients wider than 64 bits.  A coefficient
+  that fits in int64 now keeps its native value and uses the int64 fast paths, promoting to the string
+  algorithms exactly when the operation would overflow, so ordinary arithmetic does not pay the
+  arbitrary-precision cost.  An int returned to the program still follows the normal int64 rule and stops
+  loudly rather than wrapping.
 
 ## Follow-up
 
