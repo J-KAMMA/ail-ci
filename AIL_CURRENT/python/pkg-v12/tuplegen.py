@@ -314,6 +314,7 @@ class Gen:
     """The helper functions and classes a lowered program needs, each emitted once, on demand."""
     def __init__(self):
         self.out = {}          # name -> source text, in the order first needed
+        self.key_args = False   # a KeyError of a table helper keeps its key as args[0]
         self.building = set()
 
     def add(self, name, text):
@@ -670,6 +671,8 @@ class Table:
         return sub(text, T=self.cls, p=self.p, KA=self.KA, VA=self.VA or '', **kw)
 
     def keyrepr(self, x='k'):
+        if self.g.key_args:
+            return x
         k = deep(self.k)
         if k == INT or k == BOOL:
             return 'str(%s)' % x

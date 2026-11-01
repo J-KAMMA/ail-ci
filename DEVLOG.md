@@ -37,6 +37,123 @@ non-singleton set keeps CPython's per-process hash order.
 Added `AIL_CURRENT/test_ail_std_pprint.py` (registered through `tests.d/test_ail_std_pprint.txt`),
 ran `test_ail_std_pprint`, `test_ail_genlib`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3`, and refreshed the manifest.
+## 2026-11-01 -- stdlib csv review fixes (job-std_csv-11011522)
+
+Fixed the three review defects. `list(reader)` now takes the remaining rows in a helper whose
+`list[list[str]]` annotation the nested-list pass lowers to row objects, so a literal StringIO source
+(`list(csv.reader(io.StringIO("a,b\n")))`) builds on the default path instead of failing the C
+compile; the same fix also covers a module-level list-variable source. An open text file is refused
+by csvlib's list lowering, so the reader uses the general path and pulls one line at a time: a file
+overwritten before iteration and `f.tell()` before the first row now match CPython (the old eager
+`list(src)` read the whole file at reader construction). The general path's `_AilTextIO.__iter__` is
+now injected only when a csv reader consumes an open text file, so a plain file-only program's
+generated C is byte-identical to the base (probed). All 9 building lab programs still match CPython;
+3 remain refused by name. Probes in `/tmp/probes` cover literal/list-variable/stdin `list(reader)`, StringIO text through a
+literal, a run-time variable, an argument, a list item, an attribute and a dict value, file
+overwrite/`tell()`/empty/missing-final-newline sources through the same routes, plain-file C identity,
+and both builds. `test_ail_std_csv`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` and the csv/nested-list modules pass.
+
+## 2026-11-01 -- stdlib csv: 12 real programs (job-std_csv-11011522)
+
+Added `lab/stdlib/csv/` with 12 ordinary Python programs using csv; 9 build on the default
+`--syntax python` path and match CPython 3.12 stdout and exit code (all 9 on the general path), 3 are
+refused by name for `field_size_limit`, `register_dialect` and `Sniffer` (recorded in
+`lab/stdlib/csv/RESULTS.md`). Fixes: smalllib5's `io.StringIO` csv-source lowering now splits on
+`"\n"` only (literal text becomes a literal list, runtime text a comprehension), so a lone `"\r"`
+reaches the parser and raises CPython's `csv.Error`; `csvlib` refuses a direct `next(reader, None)`
+value use so the general path returns `None` instead of `[]`; the general path's `_AilTextIO` gains a
+generator `__iter__` (injected by filelower only on that path) so its csv reader can read an open text
+file, while `list(file)` in user code stays the existing `readlines(-1)` lowering. New
+`test_ail_std_csv.py` compares the 9 programs
+with CPython. Probes in `/tmp/probes` (newlines through literal/argument/list item/attribute/dict
+value, next None routes, file iteration, StringIO variables, writer quoting modes) match on both
+builds.
+## 2026-11-01 -- stdlib datetime: twelve realistic programs, nine build (job-std_datetime-11011757)
+
+`lab/stdlib/datetime/` now has twelve 15-60 line programs using the common `datetime` API: invoice due dates
+(`date.fromisoformat`, `timedelta`, `weekday`, `strftime`, caught `ValueError`), ISO log timestamps
+(`datetime.fromisoformat`, sorting, `replace`, `isoformat(timespec=...)`), sprint planning, age arithmetic,
+a `dict` keyed by `date`, timedelta arithmetic (`*`, `/`, `//`, `%`, `abs`, `total_seconds`, caught
+`OverflowError`), fixed-offset time zones (`timezone`, `astimezone`, `utcoffset`, `tzname`), `strptime`
+formats, `datetime.combine`, and date/time `replace`. Nine build and match CPython 3.12 stdout and exit code
+on the default and forced-general builds; two of them take the general path (a tuple assignment from a call,
+and a date as a dict key). Three stay refused by name: `time.fromisoformat`, `isocalendar()` and `timetuple()`;
+they need an aware time, a named tuple, and a `struct_time`, so they are follow-ups in
+`lab/stdlib/datetime/RESULTS.md` with the exact refusal text. No compiler, runtime or prelude code changed,
+so the generated C of the ten lab/compare tasks is unchanged. `test_ail_std_datetime.py` (registered in
+`AIL_CURRENT/tests.d/`) compiles the nine passing programs and compares them with CPython, and locks the three
+named refusals. Probes in `/tmp/probes/dt_*.py` match CPython on both builds.
+## 2026-11-01 -- fractions review: round() keyword evaluation order (job-std_fractions-11011614)
+
+Review follow-up: the general path's `round(number=, ndigits=)` lowering bound `number` before
+`ndigits` regardless of source order, so `round(ndigits=dig(), number=num())` called `num()` first
+while CPython evaluates keywords left-to-right. `_b_round` now lowers positional arguments and then
+keyword values in `kwargs` insertion order, and `test_ail_std_fractions` compares both orders plus a
+mixed positional/keyword call with side effects. Probes in `/tmp/probes` (`round_eval_order`,
+`round_eval_values`, `round_eval_fraction`) match CPython on both builds; the ten `lab/compare`
+sources keep byte-identical codegen against `dafa966`; `test_ail_std_fractions`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.
+
+## 2026-11-01 -- fractions: 12 real programs build, 3 general-path bugs fixed (job-std_fractions-11011614)
+
+`lab/stdlib/fractions/` now has twelve 15-60 line programs exercising `Fraction` arithmetic,
+construction, keywords, rounding, `limit_denominator`, `as_integer_ratio`, sorting/hashing/dict
+keys, caught errors and stdin. All twelve build in the default mode and match CPython 3.12 stdout
+and exit code; all use the general path because the typed path refuses the Fraction dunders. The
+first build had 11 built and `keyword_forms.py` refused, and two of the built programs printed
+different bytes. Three fixes: the prelude's division-by-zero message formatted the numerator
+instead of the denominator (`Fraction(200, 0)` for `Fraction(1, 0)`); the general `round()` builtin
+now takes `number=` / `ndigits=` in either order (a missing `number` and duplicate or unknown
+keywords are refused by name instead of being misread); and a generated tuple-key dict table with a bound `KeyError`
+handler now keeps the key as `args[0]`, so `str(exc)` is `(9, 9)` rather than `'(9, 9)'`. The
+tuple-key change is conditional on a bound handler, so generated C without one is unchanged.
+`test_ail_std_fractions.py` compares all twelve against CPython (empty and mixed stdin for
+`unit_convert.py`).
+## 2026-11-01 -- `statistics` second review fixes: scaled product sum, `repr` methods, longer lab program (job-std_statistics-11011831)
+
+Fixed the three defects from the second review. `strt.sumprod_floats` now uses CPython's TripleLength
+compensated sum of error-free products, with the Dekker split done on power-of-two-scaled operands, so
+`covariance([1e301, 2e301, 3e301], [1e-300, 2e-300, 4e-300])` is `15.0` and weighted `fmean` is
+`2.4285714285714285e+301` instead of `nan`; a genuinely overflowing product stops the compensated path
+and the rest is ordinary float multiplication and addition, matching CPython's `inf`/`nan`.
+The unknown-method messages in `quantiles_int`, `quantiles_f` and `correlation_f` use `repr`, so
+`method="a'b"` prints `Unknown method: "a'b"`. `lab/stdlib/statistics/11_geometric_harmonic.py` is now
+17 lines and still matches CPython. `RESULTS.md` and `DIFFERENCES.md` record the fixes; probes
+`k_split_overflow`, `j_float_overflow`, `c2_q_quote`, `l_corr_quote`, `p_method_literals` and
+`p_st_extremes` match CPython (the forced general path refuses these names by name).
+
+## 2026-11-01 -- `statistics` review fixes: computed correlation method and exact weighted fmean (job-std_statistics-11011523)
+
+Fixed the two review defects in the `statistics` work. `correlation(..., method=...)` now requires the
+literal `"linear"`; a computed method (including a variable holding `"ranked"` or `"linear"`) is refused
+by name at compile time instead of building into a runtime `ValueError`. Weighted `fmean` over two int
+lists no longer converts both lists to float first: the products are summed exactly in int64 (a product
+that leaves int64 stops loudly), the weight sum is still `fsum` of the weights as floats and is checked
+for zero first, and the final int / float division matches CPython's rounding. For example
+`fmean([2**53+1]*3, weights=[1, 1, 1])` is now `9007199254740994.0`. `test_ail_std_statistics` gained
+regressions for both; `RESULTS.md` and `DIFFERENCES.md` record the fixes and the remaining big-integer
+product-sum limitation.
+
+## 2026-11-01 -- `statistics` lab: quantiles, covariance/correlation and weighted fmean (job-std_statistics-11011523)
+
+Added the `statistics` lab (`lab/stdlib/statistics/`, 12 programs) and its results: before the fixes 7 of 12
+built (5 typed, 2 general), 5 were refused. The typed lowering in `python/pkg-v12/statlib.py` and the runtime
+helpers in `python/pkg-v12/strt.py` now cover `quantiles` (`n=`, `method=`), `covariance`,
+`correlation(method="linear")` and `fmean(..., weights=...)` (keyword and second positional form), with
+CPython's error texts and precedence, so 10 of 12 build (8 typed, 2 general) and all 10 match CPython's stdout
+and exit code. The covariance/correlation product sum follows `math.sumprod` (Dekker two-product split plus
+`fsum`), so ordinary cases such as the `216.15` sample match instead of losing the last bit.
+`linear_regression` (named-tuple result, `proportional=`) and `NormalDist` stay named refusals and are the two
+recorded follow-ups; `correlation(..., method="ranked")` is also still a named refusal. The general path does
+not publish the new names, so a forced general build refuses them by name while the default build uses the
+typed path.
+
+`test_ail_std_statistics` (registered in `tests.d/`) compiles and compares the 10 passing programs with
+CPython; the named-refusal tests in `test_ail_stdlib_batch4` / `test_ail_genlib` were moved to
+`linear_regression`. Targeted run on the final tree: `test_ail_std_statistics`, `test_ail_stdlib_batch4`,
+`test_ail_genlib`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 6 modules, 0 failed.
+Generated C for the 10 `lab/compare/src/*/main.ail` tasks is byte-identical to the base commit.
 
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
@@ -251,6 +368,31 @@ with `heapq.merge`, including infinite streams and a non-callable key. Final-sta
 `-j 2`: test_ail_std_heapq, test_ail_genlib, test_ail_heapq_bisect, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3, 0 failed. `tools/update_manifest.py` was run and
 `--check` passes; `tools/ci_shards.py --check` exits 0 and reports the new module as unassigned (it is still spread over the shards by name until the next `--update`).
+## 2026-11-01 -- packaging: a pinned compiler source is always in the SDK (job-rbfailfast-11011832)
+
+The integration of rbfailfast (cand-1101180129 / a72a4db) refreshed the pin of `python/pkg-v12/walkmemo.py`
+without its `s` flag, so `sdk_files` left the new module out while `test_ail_packaging` still required every
+pinned compiler file: `test_every_compiler_file_is_selected` failed with `['python/pkg-v12/walkmemo.py']`.
+The earlier branch fix (0fa5abc) only edited the shard line, and that edit is not part of the integration
+refresh, so `ail_manifest.load` now selects every pinned `.py`/`.h`/`.c` under `python/pkg-v12/` (including
+`ir/`) and every top-level `stdlib/` source that exists in the tree. Other pinned files, absent pins and
+nested `stdlib/` stay out. On this branch every such file already carries `s`, so the wheel is unchanged.
+`test_ail_packaging` passes on the integration tree a72a4db with only this file and its pin copied in (17/17)
+and on this branch; the targeted modules plus test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
+all pass. Probes: `p_manifest` (flag/subdir/absent boundaries) and `p_plain`, `p_walk_small` (both builds match
+CPython; `p_walk` is refused by name for int64 overflow on both builds, as before).
+
+## 2026-11-01 -- py-failfast re-applied: memoized marks and refusals (job-rbfailfast-11011235)
+
+Re-applied PR #299 (`py-failfast`) on the tree that already has int64-by-default (#284) and the module system
+(#307). `python/pkg-v12/walkmemo.py` memoizes `bigcap.marked`/`own_marked` by a digest of the tree content,
+`pymix.analyze` per source and environment, and the refusal of `pyboxed2.build` per source/mode/environment; the
+general path's `build()` is split into a memoizing wrapper and `_build_once`, keeping the int64 routing of #284.
+`AIL_NO_WALKMEMO=1` turns the tables off. `unified.analyze` and `pyboxed2`'s two mark sites now go through the
+tables. The merged refusal keeps its message and `_biggate_on`; a build with typed clones off reuses a refusal
+only when the first build wired none. New `test_ail_walkmemo.py`, registered through `tests.d/`. The accepted
+PR's CRLF conversion of `pyboxed2.py` was not kept (the file stays LF). `tools/diff_ids.py` is not present on this
+tree; `tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
