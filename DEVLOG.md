@@ -1,3 +1,16 @@
+## 2026-11-01 -- stdlib `struct`: `pack_into` accepts writable `array.array` buffers (job-std_struct-11020354)
+
+Fixed the review defect: `pack_into` (module and `Struct`) rejected `array.array` with
+`argument must be read-write bytes-like object, not _AilArray`, while CPython (and the base) accept any writable
+buffer. The writable check now accepts an AIL array as well as `bytearray`, still naming `None`, `bytes`, `str`,
+`list`, `tuple`, `dict` and user objects exactly as CPython does. Array writes are raw bytes: the buffer is
+converted to and from its native element bytes, so offsets are in bytes (an `array('i')` of 4 elements has a
+16-byte buffer), reads and writes can cross element boundaries, and every supported typecode (`b B h H i I l L q Q d`)
+matches CPython for both byte orders. Added a `pack_into_array` edge program to `test_ail_std_struct.py` covering
+all those typecodes, negative and unaligned offsets, and the argument/list-item/dict-value routes. Re-ran
+`test_ail_std_struct`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` (4/4 pass) and
+refreshed the manifest.
+
 ## 2026-11-01 -- stdlib `struct`: pack_into buffer type names (job-std_struct-11020025)
 
 Fixed the remaining review defect: `pack_into` (module and `Struct`) named the buffer type with the prelude's

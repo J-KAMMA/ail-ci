@@ -203,6 +203,51 @@ for buffer in [None, Foo(), Foo, 1, 1.0, True, 'x', b'0123', [], (), {},
         except Exception as exc:
             print('routes', type(exc).__name__, exc)
 """,
+    "pack_into_array": """import array
+import struct
+
+class Box:
+    def __init__(self, b):
+        self.b = b
+        self.items = [b]
+        self.table = {'k': b}
+
+def through_arg(b):
+    return b
+
+for tc in ['B', 'b', 'h', 'H', 'i', 'I', 'l', 'L', 'q', 'Q', 'd']:
+    for fmt in ['<i', '>i', '<h', '=q']:
+        a = array.array(tc, [0] * 4)
+        try:
+            struct.pack_into(fmt, a, 0, 0x01020304)
+            print(tc, fmt, list(a))
+        except Exception as exc:
+            print(tc, fmt, type(exc).__name__, exc)
+
+for off in [-40, -17, -16, -15, -8, -4, -1, 0, 1, 3, 12, 13, 16, 17]:
+    a = array.array('i', [0] * 4)
+    try:
+        struct.pack_into('<i', a, off, 7)
+        print('off', off, list(a))
+    except Exception as exc:
+        print('off', off, type(exc).__name__, exc)
+
+a = array.array('B', [0] * 8)
+struct.pack_into('<i', through_arg(a), 0, 7)
+struct.pack_into('<i', Box(a).items[0], 4, 8)
+struct.Struct('<i').pack_into(Box(a).table['k'], 0, 9)
+print('routes', list(a), a)
+
+a = array.array('b', [0] * 4)
+struct.pack_into('<i', a, 0, -1)
+print('signed', list(a))
+a = array.array('d', [0.0] * 2)
+struct.pack_into('<d', a, 0, 1.5)
+print('double', list(a))
+a = array.array('H', [0] * 4)
+struct.pack_into('>H', a, 1, 0x1234)
+print('unaligned', list(a))
+""",
     "negative_offsets": """import struct
 for offset in [-20, -11, -10, -5, -4, -1, 0, 6, 7]:
     try:

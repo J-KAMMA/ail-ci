@@ -698,6 +698,79 @@ def _ail_struct_is_buffer(data) -> bool:
     return isinstance(data, bytes) or isinstance(data, bytearray)
 
 
+def _ail_struct_is_array(buffer) -> bool:
+    return type(buffer).__name__ == "_AilArray"
+
+
+def _ail_struct_is_rw_buffer(buffer) -> bool:
+    return isinstance(buffer, bytearray) or _ail_struct_is_array(buffer)
+
+
+def _ail_struct_buffer_len(buffer) -> int:
+    if _ail_struct_is_array(buffer):
+        return len(buffer) * buffer.itemsize
+    return len(buffer)
+
+
+def _ail_struct_array_bytes(buffer) -> bytearray:
+    tc = buffer.typecode
+    size = buffer.itemsize
+    n = len(buffer)
+    out = bytearray(n * size)
+    p = 0
+    i = 0
+    if tc == "d":
+        while i < n:
+            _ail_struct_put_float(out, p, 8, buffer.data[i], "d", False)
+            p = p + 8
+            i = i + 1
+        return out
+    signed = tc == "b" or tc == "h" or tc == "i" or tc == "l" or tc == "q"
+    while i < n:
+        _ail_struct_put_int(out, p, size, buffer.data[i], signed, False, tc)
+        p = p + size
+        i = i + 1
+    return out
+
+
+def _ail_struct_array_set(buffer, raw) -> None:
+    tc = buffer.typecode
+    size = buffer.itemsize
+    n = len(buffer)
+    p = 0
+    i = 0
+    if tc == "d":
+        doubles = []
+        while i < n:
+            doubles.append(_ail_struct_get_float(raw, p, 8, "d", False))
+            p = p + 8
+            i = i + 1
+        buffer.data = doubles
+        return
+    signed = tc == "b" or tc == "h" or tc == "i" or tc == "l" or tc == "q"
+    ints = []
+    while i < n:
+        ints.append(_ail_struct_get_int(raw, p, size, signed, False))
+        p = p + size
+        i = i + 1
+    buffer.data = ints
+
+
+def _ail_struct_store(buffer, offset: int, packed) -> None:
+    if not _ail_struct_is_array(buffer):
+        k = 0
+        while k < len(packed):
+            buffer[offset + k] = packed[k]
+            k = k + 1
+        return
+    raw = _ail_struct_array_bytes(buffer)
+    k = 0
+    while k < len(packed):
+        raw[offset + k] = packed[k]
+        k = k + 1
+    _ail_struct_array_set(buffer, raw)
+
+
 def _ail_struct_pack_values(fmt, values) -> bytes:
     items, size = _ail_struct_parse(fmt)
     _ail_struct_set_big(items, _ail_struct_big_of(fmt))
@@ -775,26 +848,24 @@ def _ail_struct_unpack_from(fmt, data, offset: int = 0):
 def _ail_struct_pack_into_values(fmt, buffer, offset: int, values) -> None:
     items, size = _ail_struct_parse(fmt)
     _ail_struct_check_count(items, values, "pack_into")
-    if not isinstance(buffer, bytearray):
+    if not _ail_struct_is_rw_buffer(buffer):
         raise TypeError("argument must be read-write bytes-like object, not " + _ail_struct_rw_tname(buffer))
+    total = _ail_struct_buffer_len(buffer)
     if offset < 0:
         original = offset
-        offset = offset + len(buffer)
+        offset = offset + total
         if offset < 0:
-            raise error("offset " + str(original) + " out of range for " + str(len(buffer)) + "-byte buffer")
-        if offset + size > len(buffer):
+            raise error("offset " + str(original) + " out of range for " + str(total) + "-byte buffer")
+        if offset + size > total:
             raise error("no space to pack " + str(size) + " bytes at offset " + str(original))
-    elif offset + size > len(buffer):
+    elif offset + size > total:
         raise error("pack_into requires a buffer of at least " + str(offset + size)
                     + " bytes for packing " + str(size) + " bytes at offset " + str(offset)
-                    + " (actual buffer size is " + str(len(buffer)) + ")")
+                    + " (actual buffer size is " + str(total) + ")")
     _ail_struct_set_big(items, _ail_struct_big_of(fmt))
     _NATIVE_MODE[-1] = _ail_struct_native_of(fmt)
     packed = _ail_struct_pack_items(items, size, values, "pack_into")
-    k = 0
-    while k < size:
-        buffer[offset + k] = packed[k]
-        k = k + 1
+    _ail_struct_store(buffer, offset, packed)
 
 
 def _ail_struct_pack_into(*args):
@@ -848,26 +919,24 @@ class _AilStruct:
 
     def pack_into(self, buffer, offset: int, *values) -> None:
         _ail_struct_check_count(self._items, values, "pack_into")
-        if not isinstance(buffer, bytearray):
+        if not _ail_struct_is_rw_buffer(buffer):
             raise TypeError("argument must be read-write bytes-like object, not " + _ail_struct_rw_tname(buffer))
+        total = _ail_struct_buffer_len(buffer)
         if offset < 0:
             original = offset
-            offset = offset + len(buffer)
+            offset = offset + total
             if offset < 0:
-                raise error("offset " + str(original) + " out of range for " + str(len(buffer)) + "-byte buffer")
-            if offset + self.size > len(buffer):
+                raise error("offset " + str(original) + " out of range for " + str(total) + "-byte buffer")
+            if offset + self.size > total:
                 raise error("no space to pack " + str(self.size) + " bytes at offset " + str(original))
-        elif offset + self.size > len(buffer):
+        elif offset + self.size > total:
             raise error("pack_into requires a buffer of at least " + str(offset + self.size)
                                   + " bytes for packing " + str(self.size) + " bytes at offset " + str(offset)
-                                  + " (actual buffer size is " + str(len(buffer)) + ")")
+                                  + " (actual buffer size is " + str(total) + ")")
         _ail_struct_set_big(self._items, self._big)
         _NATIVE_MODE[-1] = self._native
         packed = _ail_struct_pack_items(self._items, self.size, values, "pack_into")
-        k = 0
-        while k < self.size:
-            buffer[offset + k] = packed[k]
-            k = k + 1
+        _ail_struct_store(buffer, offset, packed)
 
     def unpack_from(self, data, offset: int = 0):
         if not _ail_struct_is_buffer(data):
