@@ -1,3 +1,22 @@
+## 2026-11-01 -- std_base64 review fixes: altchars assert, decodebytes/encoder type errors, b32 bytearray (job-std_base64-11011521)
+
+Follow-up to the `std_base64` review. `b64encode`/`b64decode` now assert `len(altchars) == 2`
+with `repr(altchars)` (CPython's `AssertionError`), including a constant `str` altchars on the
+typed path, and a dynamic `str` altchars for `b64encode` raises CPython's bytes-like `TypeError`.
+`decodebytes` no longer accepts `str`: it raises `TypeError: expected bytes-like object, not str`
+(also for non-ASCII text). `b16encode`, `b32encode` and `encodebytes` check their input first and
+raise CPython's own messages (`a bytes-like object is required...`, `memoryview: ...`,
+`expected bytes-like object...`). `b32decode` converts a `bytearray` to bytes before indexing, so
+it returns the decoded value instead of reading the prelude's `_s`. The type-check helper keeps a
+real `TypeError` on the injected prelude, so the default build falls back to the general path for
+the exact text; `chunked_stream.py` is therefore general in `lab/stdlib/base64/RESULTS.md` now.
+
+Probes in `/tmp/probes/fix_*.py` (both builds) cover altchars lengths 0/1/2/3 as bytes,
+bytearray and str, direct/argument/list/attribute/dict values, decoder and encoder type errors,
+and `b32decode`/`b16decode` on bytearray. All match CPython or are refused by name. Required tests:
+`test_ail_std_base64`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
 ## 2026-11-01 -- std_base64: `base64` codecs, altchars and line wrapping (job-std_base64-11011521)
 
 Added `base64.b16encode` / `b16decode`, `b32encode` / `b32decode`, `encodebytes` / `decodebytes`,

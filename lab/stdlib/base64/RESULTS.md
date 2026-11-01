@@ -16,7 +16,7 @@ says why); `refused` means the build stopped.
 | `hex_codec.py` | general | prelude bytes parameter seen with a second type |
 | `base32_ids.py` | general | prelude bytes parameter seen with a second type |
 | `strict_validation.py` | general | `print()` of bytes is not built on the typed path |
-| `chunked_stream.py` | typed | chunked `b64encode`, `encodebytes` / `decodebytes` |
+| `chunked_stream.py` | general | `encodebytes` / `decodebytes` input type check |
 | `b85_vectors.py` | refused | follow-up, see below |
 | `legacy_stream_api.py` | refused | follow-up, see below |
 

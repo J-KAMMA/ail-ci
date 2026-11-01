@@ -569,11 +569,11 @@ class _Lowerer(ast.NodeTransformer):
             if not allow_str:
                 self.refuse(node, 'base64.b64encode(altchars=) takes bytes, not str')
             try:
-                return self.C(arg.value.encode('ascii'))
+                return self.fn('_ail_hl_alt_bytes', self.C(arg.value.encode('ascii')))
             except UnicodeEncodeError:
                 self.refuse(node, 'base64 altchars must contain only ASCII characters')
         if self.general:
-            return self.fn('_ail_hl_alt_dyn', arg)
+            return self.fn('_ail_hl_alt_dyn' if allow_str else '_ail_hl_alt_enc_dyn', arg)
         if _strish(arg, self.scope[-1]):
             if not allow_str:
                 self.refuse(node, 'base64.b64encode(altchars=) takes bytes, not str')
@@ -721,9 +721,10 @@ class _Lowerer(ast.NodeTransformer):
             if self.general:
                 parsed = _GeneralPrims().visit(parsed)
             if not self.general:                    # the typed path has no TypeError (A-row in DIFFERENCES)
-                for each in ast.walk(parsed):
-                    if isinstance(each, ast.Name) and each.id == 'TypeError':
-                        each.id = 'ValueError'
+                if not (isinstance(parsed, ast.FunctionDef) and parsed.name == '_ail_hl_typefail'):
+                    for each in ast.walk(parsed):
+                        if isinstance(each, ast.Name) and each.id == 'TypeError':
+                            each.id = 'ValueError'
             import filelower
             parsed = ast.parse(filelower._Lowerer.surface(ast.unparse(parsed)))      # what a user program gets (checked returns)
             for each in ast.walk(parsed):

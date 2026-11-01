@@ -264,9 +264,32 @@ def _ail_hl_b64_mode(urlsafe: int, validate: bool) -> int:
     return urlsafe
 
 
+def _ail_hl_typefail(data, kind: int) -> None:
+    name = type(data).__name__
+    if kind == 0:
+        raise TypeError("a bytes-like object is required, not '" + name + "'")
+    if kind == 1:
+        raise TypeError("memoryview: a bytes-like object is required, not '" + name + "'")
+    if kind == 3:
+        raise TypeError("argument should be a bytes-like object or ASCII string, not '" + name + "'")
+    raise TypeError("expected bytes-like object, not " + name)
+
+
+def _ail_hl_need_bytes(data, kind: int):
+    if isinstance(data, bytes) or isinstance(data, bytearray):
+        return data
+    _ail_hl_typefail(data, kind)
+    return data
+
+
+def _ail_hl_bs_in(data: bytes) -> bytes:
+    if isinstance(data, bytearray):
+        return bytes(data)
+    return data
+
+
 def _ail_hl_alt_bytes(data: bytes) -> bytes:
-    if len(data) != 2:
-        raise ValueError("altchars must be a bytes-like object of length 2")
+    assert len(data) == 2, repr(data)
     return data
 
 
@@ -279,6 +302,15 @@ def _ail_hl_alt_str(text: str) -> bytes:
 def _ail_hl_alt_dyn(data):
     if isinstance(data, str):
         return _ail_hl_alt_str(data)
+    _ail_hl_need_bytes(data, 3)
+    return _ail_hl_alt_bytes(data)
+
+
+def _ail_hl_alt_enc_dyn(data):
+    if isinstance(data, str):
+        if len(data) != 2:
+            raise AssertionError(repr(data))
+        raise TypeError("a bytes-like object is required, not 'str'")
     return _ail_hl_alt_bytes(data)
 
 
@@ -333,6 +365,7 @@ def _ail_hl_b16val(c: int, casefold: int) -> int:
 
 
 def _ail_hl_b16e(data: bytes) -> bytes:
+    data = _ail_hl_need_bytes(data, 0)
     out = bytearray()
     for c in data:
         hi = c >> 4
@@ -385,6 +418,7 @@ def _ail_hl_b32val(c: int) -> int:
 
 
 def _ail_hl_b32e(data: bytes) -> bytes:
+    data = _ail_hl_need_bytes(data, 1)
     alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
     out = bytearray()
     n = len(data)
@@ -423,6 +457,7 @@ def _ail_hl_b32e(data: bytes) -> bytes:
 
 
 def _ail_hl_b32d(data: bytes, casefold: int) -> bytes:
+    data = _ail_hl_bs_in(data)
     s = data
     if casefold != 0:
         up = bytearray()
@@ -477,10 +512,12 @@ def _ail_hl_b32d_str(text: str, casefold: int) -> bytes:
 def _ail_hl_b32d_dyn(data, casefold):
     if isinstance(data, str):
         return _ail_hl_b32d_str(data, casefold)
+    _ail_hl_need_bytes(data, 3)
     return _ail_hl_b32d(data, casefold)
 
 
 def _ail_hl_encodebytes(data: bytes) -> bytes:
+    data = _ail_hl_need_bytes(data, 2)
     out = bytearray()
     i = 0
     while i < len(data):
@@ -493,15 +530,18 @@ def _ail_hl_encodebytes(data: bytes) -> bytes:
 
 
 def _ail_hl_decodebytes(data: bytes) -> bytes:
+    data = _ail_hl_need_bytes(data, 2)
     return _ail_hl_b64d(data, 0)
 
 
 def _ail_hl_decodebytes_str(text: str) -> bytes:
-    return _ail_hl_b64d_str(text, 0)
+    _ail_hl_typefail(text, 2)
+    return _ail_hl_b64d(text.encode(), 0)
 
 
 def _ail_hl_decodebytes_dyn(data):
-    return _ail_hl_b64d_dyn(data, 0)
+    data = _ail_hl_need_bytes(data, 2)
+    return _ail_hl_b64d(data, 0)
 
 
 # ------------------------------------------------------------------------------------------ int <-> bytes
