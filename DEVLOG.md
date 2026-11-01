@@ -69,6 +69,21 @@ file, while `list(file)` in user code stays the existing `readlines(-1)` lowerin
 with CPython. Probes in `/tmp/probes` (newlines through literal/argument/list item/attribute/dict
 value, next None routes, file iteration, StringIO variables, writer quoting modes) match on both
 builds.
+## 2026-11-01 -- stdlib datetime: twelve realistic programs, nine build (job-std_datetime-11011757)
+
+`lab/stdlib/datetime/` now has twelve 15-60 line programs using the common `datetime` API: invoice due dates
+(`date.fromisoformat`, `timedelta`, `weekday`, `strftime`, caught `ValueError`), ISO log timestamps
+(`datetime.fromisoformat`, sorting, `replace`, `isoformat(timespec=...)`), sprint planning, age arithmetic,
+a `dict` keyed by `date`, timedelta arithmetic (`*`, `/`, `//`, `%`, `abs`, `total_seconds`, caught
+`OverflowError`), fixed-offset time zones (`timezone`, `astimezone`, `utcoffset`, `tzname`), `strptime`
+formats, `datetime.combine`, and date/time `replace`. Nine build and match CPython 3.12 stdout and exit code
+on the default and forced-general builds; two of them take the general path (a tuple assignment from a call,
+and a date as a dict key). Three stay refused by name: `time.fromisoformat`, `isocalendar()` and `timetuple()`;
+they need an aware time, a named tuple, and a `struct_time`, so they are follow-ups in
+`lab/stdlib/datetime/RESULTS.md` with the exact refusal text. No compiler, runtime or prelude code changed,
+so the generated C of the ten lab/compare tasks is unchanged. `test_ail_std_datetime.py` (registered in
+`AIL_CURRENT/tests.d/`) compiles the nine passing programs and compares them with CPython, and locks the three
+named refusals. Probes in `/tmp/probes/dt_*.py` match CPython on both builds.
 
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
