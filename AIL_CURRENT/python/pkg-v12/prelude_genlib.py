@@ -686,6 +686,125 @@ def _ail_batched(iterable, n):
         yield tuple(batch)
 
 
+def _ail_merge_lt(a, b):
+    # CPython's merge keeps [key, order * direction, ...] lists in a real heap and compares them with list
+    # comparison: the order field is only consulted after the keys compare equal (list comparison checks
+    # identity first, then ==), so a key that is neither == nor identical to another never uses the order.
+    if a[0] is b[0] or a[0] == b[0]:
+        return a[1] < b[1]
+    return a[0] < b[0]
+
+
+def _ail_merge_siftdown(heap, startpos, pos, reverse):
+    newitem = heap[pos]
+    while pos > startpos:
+        parentpos = (pos - 1) >> 1
+        parent = heap[parentpos]
+        if reverse:
+            move = _ail_merge_lt(parent, newitem)
+        else:
+            move = _ail_merge_lt(newitem, parent)
+        if move:
+            heap[pos] = parent
+            pos = parentpos
+            continue
+        break
+    heap[pos] = newitem
+
+
+def _ail_merge_siftup(heap, pos, reverse):
+    endpos = len(heap)
+    startpos = pos
+    newitem = heap[pos]
+    childpos = 2 * pos + 1
+    while childpos < endpos:
+        rightpos = childpos + 1
+        if reverse:
+            if rightpos < endpos and not _ail_merge_lt(heap[rightpos], heap[childpos]):
+                childpos = rightpos
+        else:
+            if rightpos < endpos and not _ail_merge_lt(heap[childpos], heap[rightpos]):
+                childpos = rightpos
+        heap[pos] = heap[childpos]
+        pos = childpos
+        childpos = 2 * pos + 1
+    heap[pos] = newitem
+    _ail_merge_siftdown(heap, startpos, pos, reverse)
+
+
+def _ail_merge_heapify(heap, reverse):
+    i = (len(heap) >> 1) - 1
+    while i >= 0:
+        _ail_merge_siftup(heap, i, reverse)
+        i = i - 1
+
+
+def _ail_merge_heapreplace(heap, item, reverse):
+    returnitem = heap[0]
+    heap[0] = item
+    _ail_merge_siftup(heap, 0, reverse)
+    return returnitem
+
+
+def _ail_merge_heappop(heap, reverse):
+    lastelt = heap.pop()
+    if len(heap) > 0:
+        returnitem = heap[0]
+        heap[0] = lastelt
+        _ail_merge_siftup(heap, 0, reverse)
+        return returnitem
+    return lastelt
+
+
+def _ail_merge(*iterables, key=None, reverse=False):
+    # The algorithm of CPython's Lib/heapq.py merge(), including its single-stream fast path: once only one
+    # stream remains its values are relayed without calling key again.
+    direction = 1
+    if reverse:
+        direction = -1
+    heads = []
+    order = 0
+    for it in iterables:
+        stream = iter(it)
+        try:
+            value = next(stream)
+        except StopIteration:
+            order = order + 1
+            continue
+        if key is None:
+            heads.append([value, order * direction, stream])
+        else:
+            heads.append([key(value), order * direction, value, stream])
+        order = order + 1
+    _ail_merge_heapify(heads, reverse)
+    while len(heads) > 1:
+        try:
+            while True:
+                entry = heads[0]
+                if key is None:
+                    yield entry[0]
+                    value = next(entry[2])
+                    entry[0] = value
+                else:
+                    yield entry[2]
+                    value = next(entry[3])
+                    entry[0] = key(value)
+                    entry[2] = value
+                _ail_merge_heapreplace(heads, entry, reverse)
+        except StopIteration:
+            _ail_merge_heappop(heads, reverse)
+    if len(heads) > 0:
+        entry = heads[0]
+        if key is None:
+            yield entry[0]
+            stream = entry[2]
+        else:
+            yield entry[2]
+            stream = entry[3]
+        for value in stream:
+            yield value
+
+
 # ------------------------------------------------------------------------------------------------ functools, math
 def _ail_isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
     if rel_tol < 0.0 or abs_tol < 0.0:

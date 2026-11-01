@@ -63,6 +63,7 @@ TABLE = {
     'datetime.date.fromordinal': '_ail_date_fromordinal',
     'datetime.datetime.fromisoformat': '_ail_datetime_fromisoformat',
     'datetime.datetime.strptime': '_ail_datetime_strptime',
+    'heapq.merge': '_ail_merge',
 }
 for _name in ('seed', 'random', 'randint', 'randrange', 'uniform', 'gauss', 'choice', 'shuffle',
               'sample', 'getrandbits', 'choices', 'expovariate', 'triangular'):
@@ -98,9 +99,10 @@ KEYWORDS = {
     'date': {'year', 'month', 'day'},
     'datetime': {'year', 'month', 'day', 'hour', 'minute', 'second', 'microsecond'},
     'timedelta': {'days', 'seconds', 'microseconds', 'milliseconds', 'minutes', 'hours', 'weeks'},
+    '_ail_merge': {'key', 'reverse'},
 }
 # the pieces that take *args: a call may pass `*rows`
-VARARGS = {'_ail_product', '_ail_chain', '_ail_islice'}
+VARARGS = {'_ail_product', '_ail_chain', '_ail_islice', '_ail_merge'}
 # attributes of these classes that are not built (a class method that reads the clock, tzinfo ...)
 NOT_BUILT = {
     'datetime.date': 'date.today(), date.fromtimestamp() and the class attributes min / max / resolution',

@@ -174,6 +174,43 @@ Tests on the final commit: `test_ail_server`, `test_ail_build_cache`, `test_ail_
 `test_ail_safetynet` with `AIL_SERVER=0`; all passed with `-j 2`. `tools/update_manifest.py` was run
 and `--check` passed. No new DIFFERENCES rows. The test modules were already registered through
 `AIL_CURRENT/tests.d/`; no `ail_check.py` tuple change.
+## 2026-11-01 -- stdlib heapq: review fixes for merge (job-std_heapq-11011434)
+
+The review found two defects in `_ail_merge`. It now follows CPython's `Lib/heapq.py` merge exactly:
+the heads are kept in a real heap (`_ail_merge_siftup` / `_ail_merge_siftdown` / `_ail_merge_heapify`
+/ `_ail_merge_heapreplace` / `_ail_merge_heappop`) with the list comparison of
+`[key, order * direction, ...]` entries (identity first, then `==`; the order field is consulted only
+for equal keys), and the single-stream fast path relays the remaining values without calling `key`
+again. This fixes the extra key calls / the `ValueError` that CPython never raises after one stream
+is left, and the heap order for `__lt__`-only objects and NaNs. `test_ail_genlib` now covers those
+cases in both directions; the reviewer probes `p_keyraise`, `p_keycalls`, `p_lt_only`, `p_nan`,
+`p_tie`, `p_mutate`, `p_routes` and a new `/tmp/probes/p_merge_edges` (empty/no streams, later key
+error, infinite and mutated streams, identical and distinct NaNs) match CPython on both builds.
+
+## 2026-11-01 -- stdlib heapq: merge on the general path, twelve lab programs (job-std_heapq-11011434)
+
+The new `lab/stdlib/heapq/` programs exercise heappush / heappop / heapify / heappushpop /
+heapreplace, nlargest / nsmallest with `key=`, and merge with `key=` / `reverse=`, plus empty heaps,
+caught IndexError, duplicate keys, classes and struct heaps. Nine built initially (one typed, eight
+general); `heapq.merge` was the shared blocker for the three refused programs. The general path now
+publishes `heapq.merge` through `genlib.py` and `prelude_genlib.py` (`_ail_merge`, with
+`_ail_merge_before` for CPython's key/order comparison): any number of streams, `key=`, `reverse=`,
+empty and infinite inputs, and the earlier stream first on equal keys in both directions. Eleven of
+twelve now build and match CPython 3.12 on stdout and exit status in both `AIL_IR` modes. The last,
+`merge_k_lists.py`, calls `heapq.merge(*rows)`; a starred call argument in general is a separate
+feature and is recorded in `lab/stdlib/heapq/RESULTS.md` with its exact refusal.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `hq_merge_basic` (empty, no streams, one
+stream, duplicates, forward/reverse, tuple keys, equal keys), `hq_merge_routes` (argument, list
+item, attribute, dict value, bound key, infinite `itertools.count` streams), `hq_merge_from`
+(`from heapq import merge` and an alias) and `hq_merge_custom` (class instances with `__lt__`, key
+and reverse); all match CPython. Added `AIL_CURRENT/test_ail_std_heapq.py` (11 lab programs, 2 IR
+modes, stdout and exit code against CPython) and registered it through
+`AIL_CURRENT/tests.d/test_ail_std_heapq.txt`; `test_ail_genlib` gained a 2500-case merge comparison
+with `heapq.merge`, including infinite streams and a non-callable key. Final-state tests with
+`-j 2`: test_ail_std_heapq, test_ail_genlib, test_ail_heapq_bisect, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3, 0 failed. `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --check` exits 0 and reports the new module as unassigned (it is still spread over the shards by name until the next `--update`).
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
