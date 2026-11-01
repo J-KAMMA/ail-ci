@@ -1,3 +1,23 @@
+## 2026-11-01 -- prog9: the hot functions of eight real programs on the typed path (job-prog9-11020731)
+
+Profiling with cProfile on CPython 3.12 put 80% of each program's own time in a small set:
+`t254.main`, `g09.lcs_length`, `t208`'s `tokenize` and `Parser` methods, `g23.find_extremes`,
+`g18.find_zero_sum_triples`, `g17.flatten` plus its lambdas, `t308.longest_common_substring` and
+`t216.main`. `t254`, `g09`, `g23` and `t308` were already whole-program typed. `t216.main` is now
+typed: `sorted(Counter[str])` copies the string table's keys into an `ail_slist` and sorts them, and
+`print(d)`/`repr(d)`/`f"{d}"` of a str-keyed int dict (annotated or not) build CPython's insertion-
+order dict repr from the same `ail_fmt_repr_str` the list repr uses, in a new `DICTTEXT` runtime
+block selected only by the program that asks for it. `t208`'s Optional `self.peek() in ('+', '-')`,
+Optional `while` test and `a, b = self.peek()` method row unpack now build too, but its `parse*`
+methods return `int | float`; an `int | float` return annotation is now refused by name instead of
+being inferred as `float` (which printed `3.0` where CPython prints `3`), so `t208` stays on the
+matching general path. The two remaining blockers are recorded in `lab/progfix/prog9.md`:
+`itertools.combinations` bound as a tuple value (`g18`) and recursive `list[Any]` + map/filter
+lambdas (`g17`). The generated C of the ten `lab/compare` tasks is byte-identical to `HEAD`; the
+new `test_ail_prog9.py` compares the six typed programs and the new constructs with CPython on both
+builds, and the `/tmp/probes` set (Optional `in`, Optional while, Method row, sorted str dict,
+dict text, unannotated dict, non-ASCII/negative/empty/alias routes) matches CPython.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten

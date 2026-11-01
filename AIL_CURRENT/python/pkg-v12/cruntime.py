@@ -30758,6 +30758,41 @@ ORDER.append('LISTTEXT')
 SOURCE['LISTTEXT'] = LISTTEXT
 REQUIRES['LISTTEXT'] = ['STR', 'FMT', 'STRREPR']
 
+# str() / repr() of a typed str-keyed int dict (SDICT) -- `print(d)`, `repr(d)`, f"{d}" -- CPython's dict
+# repr: the keys' reprs and values joined by ", " with ": " between, inside braces, in insertion order.
+# The keys' repr comes from the same `ail_fmt_repr_str` the list repr uses; the values are ints.
+DICTTEXT = r'''
+static const ail_str ail__dt_open = {(const uint8_t *)"{", 1, 1};
+static const ail_str ail__dt_sep = {(const uint8_t *)", ", 2, 1};
+static const ail_str ail__dt_colon = {(const uint8_t *)": ", 2, 1};
+static const ail_str ail__dt_close = {(const uint8_t *)"}", 1, 1};
+static ail_str ail_stab_text(ail_sarena *A, const ail_stab *T) {
+    ail_stab_dense(T);
+    int64_t n = T->n;
+    if (n < 0 || (uint64_t)n > ((uint64_t)SIZE_MAX / sizeof(ail_str) - 2) / 4) ail_die("out of memory");
+    ail_str *parts = (ail_str *)malloc(sizeof(ail_str) * (size_t)(4 * n + 2));
+    if (!parts) ail_die("out of memory");
+    int64_t k = 0;
+    parts[k++] = ail__dt_open;
+    for (int64_t i = 0; i < n; i++) {
+        if (i) parts[k++] = ail__dt_sep;
+        parts[k++] = ail_fmt_repr_str(A, T->order[i]);
+        parts[k++] = ail__dt_colon;
+        parts[k++] = ail_str_from_int(A, T->val[i]);
+    }
+    parts[k++] = ail__dt_close;
+    ail_str r = ail_str_catn(A, parts, k);
+    free(parts);
+    return r;
+}
+static ail_str ail_sdict_text(ail_sarena *A, const ail_sdict *T) {
+    return ail_stab_text(A, &T->table);
+}
+'''
+ORDER.insert(ORDER.index('LISTTEXT') + 1, 'DICTTEXT')
+SOURCE['DICTTEXT'] = DICTTEXT
+REQUIRES['DICTTEXT'] = ['SDICT', 'STR', 'FMT', 'STRREPR']
+
 # B2b: the tagged small int of the typed path.  It shares the bigint core (a malloc'd magnitude, no GC
 # on this runtime) and builds/decimalises text through the STR block.
 import tint_typed as _tint_typed

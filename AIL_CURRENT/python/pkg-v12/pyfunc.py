@@ -7014,7 +7014,9 @@ def _is_slist_expr(node, ctx):
                 and node.func.id not in ctx.funcs and node.func.id not in ctx.classes
                 and len(node.args) == 1):
             return (_is_slist_expr(node.args[0], ctx)
-                    or node.func.id == 'sorted' and _map_kind(node.args[0], ctx) == SSET)
+                    or node.func.id == 'sorted' and _map_kind(node.args[0], ctx) == SSET
+                    or node.func.id == 'sorted' and isinstance(node.args[0], ast.Name)
+                    and ctx.type_of(node.args[0].id) == SDICT)
         if isinstance(node.func, ast.Attribute):
             method = _class_method_name(node, ctx)
             if method:
@@ -8724,6 +8726,18 @@ def _list_text(val, kind, ctx):
     return 'ail_list_text_%s(&%s, %s, %s)' % (suffix, ctx.sarena(), p, n)
 
 
+def _dict_text(val, ctx):
+    """The C str for str(d) / repr(d) of a typed dict[str, int]: CPython's dict repr, in
+    insertion order, keys quoted by `_repr_conv`'s own str repr and values decimal
+    (cruntime.py's DICTTEXT)."""
+    ctx.parts.update(('STR', 'FMT', 'STRREPR', 'SDICT', 'DICTTEXT'))
+    ctx.needs_sarena = True
+    if _map_kind(val, ctx) == SDICT:
+        return 'ail_sdict_text(&%s, %s)' % (ctx.sarena(), _map_pointer(val, ctx, SDICT))
+    # an unannotated dict keyed by str: its representation is a bare ail_stab (see _mark_str_containers)
+    return 'ail_stab_text(&%s, &%s)' % (ctx.sarena(), ctx.cname(val.id))
+
+
 def _repr_conv(val, kind, ctx):
     """The C str for `{val!r}`: repr() of a str (quotes, escapes), and for an int or float, which
     repr and str spell the same, the default conversion."""
@@ -8754,6 +8768,11 @@ def _fstring_field(fv, ctx):
         return '(%s = %s, ail__bytes_repr(&%s, %s.p, %s.n))' % (cell, _bytes_value(val, ctx), ctx.sarena(), cell, cell)
     if fv.format_spec is None and _list_text_ok(val, kind, ctx):
         return _list_text(val, kind, ctx)
+    if fv.format_spec is None and fv.conversion in (-1, 114, 115) and (
+            _map_kind(val, ctx) == SDICT
+            or isinstance(val, ast.Name) and val.id in ctx.skeys
+            and ctx.type_of(val.id) == DICT):
+        return _dict_text(val, ctx)
     if kind not in (INT, FLT, STR):
         raise Unsupported('an f-string field of type %s; only an int, float or str expression '
                           'is built inside {}' % kind)
@@ -9472,6 +9491,28 @@ def _class_method_name(node, ctx):
             if node.func.attr in cls.methods:
                 return cls.method_cname(node.func.attr)
     return None
+
+
+def _srow_return_bool_positions(call, ctx):
+    """Which fields of a method's small tuple return are annotated `bool` (SROW itself has only
+    int64/double/ail_str slots, so the annotation is the only place that fact survives). Used to
+    keep `a, b = p.pair()` printing True/False for a bool field."""
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
+        return frozenset()
+    try:
+        kind = _etype(call.func.value, ctx)
+    except Unsupported:
+        return frozenset()
+    if not (_is_obj_kind(kind) and kind[1] in ctx.classes):
+        return frozenset()
+    method = ctx.classes[kind[1]].methods.get(call.func.attr)
+    ann = method.returns if method is not None else None
+    if not (isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
+            and ann.value.id == 'tuple'):
+        return frozenset()
+    elts = ann.slice.elts if isinstance(ann.slice, ast.Tuple) else [ann.slice]
+    return frozenset(i for i, e in enumerate(elts)
+                     if isinstance(e, ast.Name) and e.id == 'bool')
 
 
 def _owned_method_name(node, ctx, ownership):
@@ -12041,6 +12082,27 @@ def _sorted_into_temp(node, ctx):
         c, _ = ctx.temp(SLIST)
         ctx.pre.append('ail_slist_clear(&%s);' % c)
         ctx.pre.append('for (int64_t _i = 0; _i < %s.n; _i++) ail_slist_push(&%s, %s.p[_i]);'
+                       % (src, c, src))
+        ctx.pre.append('ail_slist_sort(&%s);' % c)
+        if reverse:
+            ctx.pre.append('for (int64_t _i = 0, _j = %s.n - 1; _i < _j; _i++, _j--) '
+                           '{ ail_str _t = %s.p[_i]; %s.p[_i] = %s.p[_j]; %s.p[_j] = _t; }'
+                           % (c, c, c, c, c))
+        return c, None
+    if (isinstance(node.args[0], ast.Name)
+            and ctx.type_of(node.args[0].id) == SDICT):
+        # `sorted(counts)` where counts is a str-keyed dict (a Counter, a dict[str, int]): Python
+        # sorts the KEYS. The str table's `.order` array already holds the actual str values, so
+        # copy them into an ail_slist and qsort by `ail_str_cmp`, exactly the way sorted() of a
+        # list of str already does.
+        if key is not None:
+            raise Unsupported('key= is not supported for sorted() of a dict with str keys')
+        src = '(%s)->table' % _map_pointer(node.args[0], ctx, SDICT)
+        ctx.parts.add('SLIST')
+        c, _ = ctx.temp(SLIST)
+        ctx.pre.append('ail_slist_clear(&%s);' % c)
+        ctx.pre.append('ail_stab_dense(&%s);' % src)
+        ctx.pre.append('for (int64_t _i = 0; _i < %s.n; _i++) ail_slist_push(&%s, %s.order[_i]);'
                        % (src, c, src))
         ctx.pre.append('ail_slist_sort(&%s);' % c)
         if reverse:
@@ -19513,7 +19575,10 @@ def _return_srowtup(value, ctx, fkinds, pad):
             if not _is_str_expr(e, ctx):
                 raise Unsupported('row field %d is a str here but not on another return path'
                                   % i)
-            field_c.append('.s = %s' % _str_value(e, ctx))
+            # The callee's arena is freed at return: hand the caller an owned copy of the str
+            # field (the same `ail_str_return_owned` a plain str return uses), which the caller
+            # adopts into its own arena when it unpacks the row.
+            field_c.append('.s = ail_str_return_owned(%s)' % _str_value(e, ctx))
         else:
             et = _etype(e, ctx)
             if et not in NUM:
@@ -19525,7 +19590,7 @@ def _return_srowtup(value, ctx, fkinds, pad):
             field_c.append('.d = (double)(%s)' % _expr(e, ctx) if fk == FLT else
                            '.i = (int64_t)(%s)' % _expr(e, ctx))
     pre = _flush(ctx, pad)
-    ctx.parts.add('SROW')
+    ctx.parts.update(('SROW', 'STR', 'STRRET'))
     lit = '(ail_srow){.v = {%s}}' % ', '.join('{%s}' % v for v in field_c)
     return pre + '%sreturn %s;\n' % (pad, lit)
 
@@ -20605,9 +20670,46 @@ def _stmt_inner(node, ctx, ind):
                 out = '%s%s = %s;\n' % (pad, tmp, call_c)
                 names = [ctx.declare(e.id, fk) for e, fk in zip(t.elts, fkinds)]
                 for j, (nm, fk) in enumerate(zip(names, fkinds)):
-                    field = 's' if fk == STR else 'd' if fk == FLT else 'i'
-                    out += '%s%s = %s.v[%d].%s;\n' % (pad, nm, tmp, j, field)
-                ctx.parts.add('SROW')
+                    if fk == STR:
+                        ctx.needs_sarena = True
+                        out += '%s%s = ail_str_adopt(&%s, %s.v[%d].s);\n' % (
+                            pad, nm, ctx.sarena(), tmp, j)
+                    else:
+                        field = 'd' if fk == FLT else 'i'
+                        out += '%s%s = %s.v[%d].%s;\n' % (pad, nm, tmp, j, field)
+                ctx.parts.update(('SROW', 'STR', 'STRRET'))
+                return pre + out
+            if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Attribute)
+                    and (mangled := _class_method_name(node.value, ctx)) is not None
+                    and _is_srowtup_ret(ctx.funcs[mangled][1])):
+                # `a, b = p.pair()` -- the method counterpart of the `name, n = parse(line)` branch
+                # just above. A method returning a small per-field row is one `ail_srow` value, so
+                # it is called into the same short-lived temp and unpacked field by field.
+                fkinds = ctx.funcs[mangled][1][1]
+                if len(t.elts) != len(fkinds):
+                    raise Unsupported('%s() returns a %d-field row; unpacking it into %d names '
+                                      'would not match'
+                                      % (node.value.func.attr, len(fkinds), len(t.elts)))
+                call_c = _call_user_func(mangled,
+                                         _bind_method_args(mangled, node.value.func.attr,
+                                                           node.value.func.value, node.value, ctx), ctx)
+                pre = _flush(ctx, pad)
+                tmp, _ = ctx.temp(SROW)
+                out = '%s%s = %s;\n' % (pad, tmp, call_c)
+                names = [ctx.declare(e.id, fk) for e, fk in zip(t.elts, fkinds)]
+                bool_fields = _srow_return_bool_positions(node.value, ctx)
+                if bool_fields:
+                    ctx.bool_names = frozenset(set(ctx.bool_names) | {
+                        t.elts[j].id for j in bool_fields if j < len(t.elts)})
+                for j, (nm, fk) in enumerate(zip(names, fkinds)):
+                    if fk == STR:
+                        ctx.needs_sarena = True
+                        out += '%s%s = ail_str_adopt(&%s, %s.v[%d].s);\n' % (
+                            pad, nm, ctx.sarena(), tmp, j)
+                    else:
+                        field = 'd' if fk == FLT else 'i'
+                        out += '%s%s = %s.v[%d].%s;\n' % (pad, nm, tmp, j, field)
+                ctx.parts.update(('SROW', 'STR', 'STRRET'))
                 return pre + out
             if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
                     and node.value.func.id == 'map' and len(node.value.args) == 2
@@ -22687,6 +22789,9 @@ def _print_stmt(node, ctx, pad):
             writers.append(('str', stage(STR, 'ail_exc_text(%s, &%s)' % (_exception_value(a0, ctx), ctx.sarena()))))
         elif _list_text_ok(a0, t, ctx):
             writers.append(('str', stage(STR, _list_text(a0, t, ctx))))
+        elif (_map_kind(a0, ctx) == SDICT
+              or isinstance(a0, ast.Name) and a0.id in ctx.skeys and ctx.type_of(a0.id) == DICT):
+            writers.append(('str', stage(STR, _dict_text(a0, ctx))))
         else:
             raise Unsupported('print() given a %s, not a number or a str.\n'
                                '  write instead: print an element or a measurement (`print(xs[0])`, '
@@ -27667,6 +27772,11 @@ def _promote_floats(fn, ctx):
                                      # str one) to INT, fighting `_stmt`'s own, later, correct
                                      # per-field `ctx.declare` the identical way every other skip
                                      # in this loop already guards against.
+            if (isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Attribute)
+                    and (mangled := _class_method_name(n.value, ctx)) is not None
+                    and _is_srowtup_ret(ctx.funcs[mangled][1])):
+                continue            # `a, b = p.pair()` -- the method counterpart of the row-return
+                                     # skip just above: per-field `ctx.declare` settles the names.
             if (isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
                     and (n.value.func.id in ctx.classes
                          or (n.value.func.id in ctx.funcs
@@ -30811,6 +30921,17 @@ def _signatures(fns, entry_sig=None, classes=None, external=None):
     # `_caller_ctx_memo`): the rounds below ask the same question of most functions again and again.
     _CALLER_CTX_MEMO.clear()
     classes = classes if classes is not None else _TDict()   # tracked: an untracked {} shared with every ctx made them all bypass the query cache
+    for f in fns:
+        ann = f.returns
+        if (isinstance(ann, ast.BinOp) and isinstance(ann.op, ast.BitOr)
+                and {getattr(x, 'id', None) for x in (ann.left, ann.right)} == {INT, FLT}):
+            # A union of int and float has no single C representation here: treating it as float
+            # would print 3.0 where CPython prints 3. Refuse by name rather than answer differently
+            # (the general path keeps both kinds).
+            raise Unsupported('%s() returns `int | float`; a union of int and float is not built '
+                              '(its two C representations differ). Split it into an int function '
+                              'and a float function, or return float and convert the int result '
+                              'caller-side' % f.name)
     owned_str_fns = {f.name for f in fns if isinstance(f.returns, ast.Name)
                      and f.returns.id == '__ail_checked_str__'}
     external = external or {}
