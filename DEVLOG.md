@@ -1,3 +1,43 @@
+## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
+
+Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
+context and print `<Recursion on ... with id=N>` instead of segfaulting (the identity comes from a new
+`ppid` safetyrt fragment, so programs that do not use pprint keep their C). Long `bytes` and
+`bytearray` values wrap in CPython's four-byte chunks. `pprint`, `pformat`, `pp` and `PrettyPrinter`
+now have CPython 3.12's signatures, with `compact` / `sort_dicts` / `underscore_numbers` keyword-only,
+so extra positional arguments are refused by name rather than accepted.
+
+`lab/stdlib/pprint/p10_strings.py` gained the long-bytes cases; `test_ail_std_pprint` gained a
+recursive-container case (normalising only the process-specific `id=` number) and still passes all 12
+programs on the default and `AIL_IR=1` builds. Probes `/tmp/probes/pp_rec*.py`, `pp_bytes*.py`,
+`pp_arity_ok.py` and `pp_arity_bad_*.py` cover recursion through arguments / list items / dict values,
+aliasing, depth limits, empty and short bytes, narrow widths, invalid widths, and valid/invalid argument
+forms on both `cmp.sh` builds.
+
+## 2026-11-01 -- CPython `pprint` on the general path (job-std_pprint-11011616)
+
+Added `pprint` to the general-path library lowering (`python/pkg-v12/genlib.py` and
+`prelude_genlib.py`): `pprint`, `pformat`, `pp`, `saferepr`, `isreadable`, `isrecursive` and
+`PrettyPrinter`, with `stream`, `indent`, `width`, `depth`, `compact`, `sort_dicts` and
+`underscore_numbers`. The pieces follow CPython 3.12's `pprint.py` for dict / list / tuple / set /
+frozenset / str / int / float / bool / None, including compact wrapping, depth limits, sorted or
+insertion-order dicts, singleton tuples, empty containers and the `ValueError`s for `indent < 0`,
+`depth <= 0` and `width == 0`.
+
+All 12 programs in `lab/stdlib/pprint` build on the default (general) path and match CPython 3.12
+stdout and exit status, also with `AIL_IR=1`; the typed path still refuses `import pprint` by name.
+`lab/stdlib/pprint/RESULTS.md` records each result and first refusal. The probes in `/tmp/probes`
+(`pp_types`, `pp_sources`, `pp_stream`, `pp_errors`, `pp_numbers`, `pp_strings`,
+`pp_sets_deterministic`) match CPython on both `cmp.sh` builds; `pp_star_refused` is refused by name
+(`with the keyword argument **`). Known limits (documented in RESULTS.md): no dataclass /
+OrderedDict / Counter / defaultdict / ChainMap / deque / User* / mappingproxy / SimpleNamespace
+dispatch, no `id()`-based recursion text, no long `bytes` / `bytearray` wrapping, and a short
+non-singleton set keeps CPython's per-process hash order.
+
+Added `AIL_CURRENT/test_ail_std_pprint.py` (registered through `tests.d/test_ail_std_pprint.txt`),
+ran `test_ail_std_pprint`, `test_ail_genlib`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`, and refreshed the manifest.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
@@ -174,6 +214,43 @@ Tests on the final commit: `test_ail_server`, `test_ail_build_cache`, `test_ail_
 `test_ail_safetynet` with `AIL_SERVER=0`; all passed with `-j 2`. `tools/update_manifest.py` was run
 and `--check` passed. No new DIFFERENCES rows. The test modules were already registered through
 `AIL_CURRENT/tests.d/`; no `ail_check.py` tuple change.
+## 2026-11-01 -- stdlib heapq: review fixes for merge (job-std_heapq-11011434)
+
+The review found two defects in `_ail_merge`. It now follows CPython's `Lib/heapq.py` merge exactly:
+the heads are kept in a real heap (`_ail_merge_siftup` / `_ail_merge_siftdown` / `_ail_merge_heapify`
+/ `_ail_merge_heapreplace` / `_ail_merge_heappop`) with the list comparison of
+`[key, order * direction, ...]` entries (identity first, then `==`; the order field is consulted only
+for equal keys), and the single-stream fast path relays the remaining values without calling `key`
+again. This fixes the extra key calls / the `ValueError` that CPython never raises after one stream
+is left, and the heap order for `__lt__`-only objects and NaNs. `test_ail_genlib` now covers those
+cases in both directions; the reviewer probes `p_keyraise`, `p_keycalls`, `p_lt_only`, `p_nan`,
+`p_tie`, `p_mutate`, `p_routes` and a new `/tmp/probes/p_merge_edges` (empty/no streams, later key
+error, infinite and mutated streams, identical and distinct NaNs) match CPython on both builds.
+
+## 2026-11-01 -- stdlib heapq: merge on the general path, twelve lab programs (job-std_heapq-11011434)
+
+The new `lab/stdlib/heapq/` programs exercise heappush / heappop / heapify / heappushpop /
+heapreplace, nlargest / nsmallest with `key=`, and merge with `key=` / `reverse=`, plus empty heaps,
+caught IndexError, duplicate keys, classes and struct heaps. Nine built initially (one typed, eight
+general); `heapq.merge` was the shared blocker for the three refused programs. The general path now
+publishes `heapq.merge` through `genlib.py` and `prelude_genlib.py` (`_ail_merge`, with
+`_ail_merge_before` for CPython's key/order comparison): any number of streams, `key=`, `reverse=`,
+empty and infinite inputs, and the earlier stream first on equal keys in both directions. Eleven of
+twelve now build and match CPython 3.12 on stdout and exit status in both `AIL_IR` modes. The last,
+`merge_k_lists.py`, calls `heapq.merge(*rows)`; a starred call argument in general is a separate
+feature and is recorded in `lab/stdlib/heapq/RESULTS.md` with its exact refusal.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `hq_merge_basic` (empty, no streams, one
+stream, duplicates, forward/reverse, tuple keys, equal keys), `hq_merge_routes` (argument, list
+item, attribute, dict value, bound key, infinite `itertools.count` streams), `hq_merge_from`
+(`from heapq import merge` and an alias) and `hq_merge_custom` (class instances with `__lt__`, key
+and reverse); all match CPython. Added `AIL_CURRENT/test_ail_std_heapq.py` (11 lab programs, 2 IR
+modes, stdout and exit code against CPython) and registered it through
+`AIL_CURRENT/tests.d/test_ail_std_heapq.txt`; `test_ail_genlib` gained a 2500-case merge comparison
+with `heapq.merge`, including infinite streams and a non-callable key. Final-state tests with
+`-j 2`: test_ail_std_heapq, test_ail_genlib, test_ail_heapq_bisect, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3, 0 failed. `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --check` exits 0 and reports the new module as unassigned (it is still spread over the shards by name until the next `--update`).
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 

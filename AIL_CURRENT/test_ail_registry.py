@@ -182,6 +182,25 @@ class ThrowawayRepository(unittest.TestCase):
         self.tool()
         self.assertEqual(self.tool('--check').returncode, 0)
 
+    def test_a_regenerated_compiler_source_pin_keeps_the_sdk_flag(self):
+        name = 'python/pkg-v12/newmod.py'
+        module = self.src(name)
+        module.parent.mkdir(parents=True)
+        module.write_text('# new compiler module\n', encoding='utf-8')
+        git(self.repo, 'add', '-A')
+        self.assertEqual(self.tool().returncode, 0)
+        pins = ail_manifest.read_pins(self.src('.'))
+        self.assertEqual(pins[name][1], 's')
+        shard = self.src('manifest.d') / ail_manifest.shard_name(name)
+        # An integration merge that keeps the other side of the shard drops this new pin; the next
+        # update_manifest run must restore it as an SDK file (test_ail_packaging otherwise fails).
+        shard.write_text(''.join(line for line in shard.read_text(encoding='utf-8').splitlines(True)
+                                 if name not in line), encoding='utf-8')
+        self.assertEqual(self.tool().returncode, 0)
+        pins = ail_manifest.read_pins(self.src('.'))
+        self.assertEqual(pins[name][1], 's')
+        self.assertIn(name, ail_manifest.load(self.src('.'))['sdk_files'])
+
     def make_branch(self, branch, source, new_test):
         git(self.repo, 'checkout', '-q', '-b', branch, 'integ')
         self.src(source).write_text('line 1\nline 2\nline 3\n' + branch + '\n', encoding='utf-8')

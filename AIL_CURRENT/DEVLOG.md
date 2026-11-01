@@ -34,6 +34,29 @@ examples, the quick reference, the Numbers/FFI/Fraction/Decimal notes, A1/C171 a
 declared rows, and added the current row to `DIFFERENCES.md`. `test_ail_tutorial.py` now runs
 runtime-stop, static-refusal and exact-mode samples as well as the default ones. No compiler
 behaviour changed.
+## 2026-11-01 -- manifest merge: a regenerated compiler pin keeps its SDK flag
+
+`tools/update_manifest.py` recomputes pins after a manifest.d merge, but a new compiler source whose pin the kept
+side did not have was re-added without the `s` flag, so the wheel's `sdk_files` lost it and `test_ail_packaging`
+failed on the integration branch (`ccsplit.py` after the cc-split change). The tool now treats every `.py`/`.h`/`.c`
+under `python/pkg-v12/` or `stdlib/` as a compiler source: a missing pin is restored as an SDK pin (`s`), and every
+compiler source is pinned even when the kept side dropped it. `test_ail_registry` covers the dropped-pin merge, and
+`test_ail_packaging` passes after taking either side of the manifest.d conflict.
+
+## 2026-11-01 -- gcc time: one body per identical clone (default), parallel units and one exit cleanup (opt-in)
+
+The typed program's C (runtime, user prototypes, user functions) is one gcc run. OFF BY DEFAULT (they cost up to +0.4%
+run icount on some tasks): `AIL_CC_SPLIT=N` (N>=2) or `AIL_CC_JOBS=N` turn the split on, `AIL_EXIT_MERGE=1` the exit
+sharing. `python/pkg-v12/ccsplit.py` then cuts it into up to min(4, cores) units compiled in parallel and linked (`pyc._split_build`): the runtime and prototypes
+are in every unit, every `static` user function is in every unit, every other user function in exactly one (largest first
+onto the lightest unit; the plan depends on the text alone). Run-time state is defined once (`AIL_LINK_STATE` is the
+definition in the unit holding `main`, `extern` elsewhere; the object pool's file-scope statics get the same treatment).
+It is skipped when the movable user code is under 30000 characters, when one function holds more than 70% of it, on
+Windows, with `--debug`, `--static` and a native build report, and falls back to the one-unit build when a unit does not
+compile, link, or defines state twice (`nm` check). `AIL_CC_SPLIT_LOG=<file>` records the decision. The legacy `_rewrite_returns` shares one copy of the exit frees among the
+returns that lie outside every loop of a function with at least 8 free/release calls (`AIL_EXIT_MERGE=1`, `all` every
+return; merging returns inside loops, or in small hot functions, cost run time). A specialisation (`fmt__t0`) whose C is the
+base function's with only the name changed is emitted as a call to the base: ON by default (`AIL_NO_CLONE_DEDUPE=1` off); run icount unchanged on all 10 compare-lab tasks.
 
 ## 2026-10-31 -- ints are 64-bit by default; exact big ints are opt-in
 
