@@ -35678,6 +35678,14 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                      checked_arrays=bool(info is not None and info.get('_checked_arrays'))))
 
     _fe_jobs = _fe_job_count(len(_compile_fns), info)
+    if _fe_jobs > 1:
+        _fe_weights = []
+        for f in _compile_fns:
+            weight = _fe_weight(f)
+            _fe_weights.append(weight)
+            _fe_weights.extend([weight] * len(clones.get(f.name, {})))
+        if not _fe_worth_parallel(_fe_weights):
+            _fe_jobs = 1
     _fe_units = _fe_results = _fe_index = None
     if _fe_jobs > 1:
         _fe_base = {f.name: _caller_ctx(f, sigs, arity_seeds.get(f.name), classes,
@@ -36870,8 +36878,28 @@ def _fe_pair_name(ctx, base):
     return base
 
 
+def _fe_weight(fn):
+    """A cheap size estimate for scheduling and for deciding whether workers can pay for themselves."""
+    return sum(1 for _ in ast.walk(fn))
+
+
+def _fe_worth_parallel(weights):
+    """False when one function dominates the program or there is too little work to fork for.
+
+    A single function is compiled by a single worker, so its own body sets a hard floor on the
+    parallel wall time; when it is most of the program the pool only adds fork, transfer and
+    replay overhead. Measured on the lab/compare tasks (2026-11-01): 8% or more slower overall
+    on scar_life and no change on berth_sim/chain_relax/ledger_bin, while the multi-function
+    programs gained. The cut is conservative (60% of the node count) so balanced programs are
+    unaffected."""
+    total = sum(weights)
+    if len(weights) < 2 or total < 400:
+        return False
+    return max(weights) * 5 <= total * 3
+
+
 def _fe_job_count(nfns, info):
-    if os.name == 'nt' or nfns < 8:
+    if os.name == 'nt':
         return 1
     raw = os.environ.get('AIL_FE_JOBS')
     if raw is not None and raw.strip():
@@ -36880,6 +36908,8 @@ def _fe_job_count(nfns, info):
         except ValueError:
             return 1
     else:
+        if nfns < 8:
+            return 1
         jobs = min(4, os.cpu_count() or 1)
     if jobs <= 1:
         return 1
@@ -36915,7 +36945,7 @@ def _fe_make_unit(fn, args, kwargs, base_ctx, sigs):
         'fn_node': fn,
     }
     return {'f': fn, 'args': args, 'kwargs': kwargs, 'base_ctx': base_ctx,
-            'sigs': sigs, 'attach': attach}
+            'sigs': sigs, 'attach': attach, 'weight': _fe_weight(fn)}
 
 
 def _fe_reset_specs():
@@ -36997,8 +37027,16 @@ def _fe_run_units(units, jobs, classes, initial_symbols):
         try:
             import multiprocessing
             mp = multiprocessing.get_context('fork')
+            # Longest function first: a worker that picks up the program's largest body last would
+            # hold the whole parallel section for it after every other worker has gone idle. The
+            # result order is restored below, so the serial replay order is untouched.
+            order = sorted(range(len(units)),
+                           key=lambda index: (-units[index]['weight'], index))
+            ordered = [None] * len(units)
             with mp.Pool(processes=min(jobs, len(units))) as pool:
-                results = pool.map(_fe_worker, range(len(units)), chunksize=1)
+                for index, result in zip(order, pool.map(_fe_worker, order, chunksize=1)):
+                    ordered[index] = result
+            results = ordered
         except (OSError, ValueError, ImportError):
             return None
     finally:
