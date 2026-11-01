@@ -1,0 +1,39 @@
+# `copy` coverage: twelve real programs
+
+Build used for every program (from the repository root, 2026-11-01):
+
+```
+python3 AIL_CURRENT/ail_chatgpt.py compile lab/stdlib/copy/<program>.py --syntax python -o /tmp/<program>
+```
+
+CPython 3.12 is the oracle. Every program below built, and its stdout and exit code match CPython on the default
+build and with `AIL_UNIFIED_FORCE=1` (`test_ail_std_copy.py`). All twelve use the general path: the typed path does
+not model the `copy` module, so the default build falls back there and prints the note below.
+
+| program | result | first diagnostic (fallback note) |
+| --- | --- | --- |
+| p01_nested_config.py | general | `p01_nested_config.py:3:1: built on the general path ... because 'DEFAULTS' is a module-level dict that a function cannot read` |
+| p02_shallow_list.py | general | `p02_shallow_list.py:1:1: built on the general path ... because import of 'copy' is not available: this compiler builds only the modules it models (math, sys, collections, itertools, functools, heapq, bisect, re, json)` |
+| p03_dict_copy.py | general | same `import of 'copy' is not available` note at line 1 |
+| p04_shared_refs.py | general | same `import of 'copy' is not available` note at line 1 |
+| p05_cycle.py | general | same `import of 'copy' is not available` note at line 1 |
+| p06_shallow_object.py | general | same `import of 'copy' is not available` note at line 1 |
+| p07_deep_object.py | general | same `import of 'copy' is not available` note at line 1 |
+| p08_tuple_set.py | general | same `import of 'copy' is not available` note at line 1 |
+| p09_errors.py | general | same `import of 'copy' is not available` note at line 1 |
+| p10_memo.py | general | same `import of 'copy' is not available` note at line 1 |
+| p11_list_objects.py | general | same `import of 'copy' is not available` note at line 1 |
+| p12_deep_keys.py | general | same `import of 'copy' is not available` note at line 1 |
+
+Summary: 12 built / 12 compared, 0 refused. The compiler change is `copy.copy` and `copy.deepcopy` in
+`genlib.py` (names and keyword checking), `prelude_genlib.py` (CPython call signatures) and `safetyrt.py`
+(the boxed shallow/deep copier, memo and keep-alive lists).
+
+## Follow-ups (not needed by these programs)
+
+- Typed-path `copy`: the typed path has no model of `copy.copy` / `copy.deepcopy` over arbitrary object graphs;
+  every program here takes the general path instead. A typed implementation is a new feature, not a refusal.
+- Copy protocol: the general-path copier copies list/dict/tuple/set/frozenset/bytearray/bytes/atomic values and
+  plain instance attributes. A user class's `__copy__`, `__deepcopy__`, `__reduce__` / `__reduce_ex__` and
+  `copy.dispatch_table` entries are not called; supporting them needs method dispatch and `_reconstruct`
+  semantics (a new feature). None of the twelve programs rely on them.

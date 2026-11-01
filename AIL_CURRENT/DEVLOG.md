@@ -1,3 +1,24 @@
+## 2026-11-01 -- stdlib copy: `copy.copy` and `copy.deepcopy` on the general path (job-std_copy-11011617)
+
+The general path now publishes `copy.copy` and `copy.deepcopy` (`genlib.py` names with their keyword sets) and
+implements them in `prelude_genlib.py` + `safetyrt.py` (`COPY`). Shallow copy returns the value itself for the
+immutable kinds (int, float, bool, str, bytes, tuple, frozenset, None) and a fresh list/dict/set/bytearray/instance
+otherwise; deep copy uses a memo plus CPython's keep-alive list keyed by the memo's own id, so shared references
+stay shared, cycles terminate, tuple keys and tuple self-references follow CPython's identity rule, and an explicit
+`memo=` is reused across calls. The wrappers give CPython's `TypeError`/`AttributeError` texts for a missing or
+extra argument, a duplicate keyword, a bad keyword and a non-dict memo; keyword `x=` and `memo=` are accepted. The
+`_bound_names` pass no longer treats a class-body `def` name as a module binding, so a method named like an
+imported library name does not hide the import.
+
+Twelve programs in `lab/stdlib/copy/` cover nested configs, shallow lists/dicts, shared references, cycles,
+plain objects, tuples/sets/frozensets, caught errors, an explicit memo, object lists and tuple dict keys.
+All twelve are recorded in `lab/stdlib/copy/RESULTS.md`: 12/12 build (general path) and match CPython's stdout
+and exit code on the default build and with `AIL_UNIFIED_FORCE=1`. The generated C of all ten `lab/compare`
+tasks (`main.ail`, and `main.py` where it builds) is byte-identical to the base. `test_ail_std_copy.py`
+registers the programs and an edge-case program (immutable scalars, bytes/bytearray, empty containers, aliasing,
+cycles and memo errors) through `tests.d/`. Probes in `/tmp/probes/copy_*.py` compare both builds: types,
+containers, mutation, cycles, memo, caught errors, instances and dict keys/sets all match CPython.
+
 ## 2026-11-01 -- int64 constant census: refusals named, safe folds kept
 
 `docs/design/I64_CONSTANTS.md` records the first int64-constant refusal of all 34 modules in the compiler census and

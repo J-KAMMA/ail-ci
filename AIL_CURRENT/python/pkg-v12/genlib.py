@@ -24,6 +24,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 'module.attr[.attr]' -> the name in the prelude
 TABLE = {
+    'copy.copy': '_ail_copy_copy',
+    'copy.deepcopy': '_ail_copy_deepcopy',
     'json.dumps': '_ail_json_dumps',
     'json.loads': '_ail_json_loads',
     'json.JSONDecodeError': 'JSONDecodeError',
@@ -70,6 +72,8 @@ for _name in ('seed', 'random', 'randint', 'randrange', 'uniform', 'gauss', 'cho
 
 # names whose calls take only these keyword arguments (others are refused by name)
 KEYWORDS = {
+    '_ail_copy_copy': {'x'},
+    '_ail_copy_deepcopy': {'x', 'memo'},
     '_ail_json_dumps': {'skipkeys', 'ensure_ascii', 'check_circular', 'allow_nan', 'indent', 'separators',
                         'default', 'sort_keys'},
     '_ail_json_loads': {'object_hook', 'parse_float', 'parse_int', 'parse_constant', 'object_pairs_hook'},
@@ -154,11 +158,14 @@ MODULES = frozenset(k.split('.')[0] for k in TABLE) | {'functools'}
 def _bound_names(tree):
     """Every name the program itself binds (assignments, parameters, defs, classes, imports, loop and with targets)."""
     out = set()
+    in_class = {id(stmt) for c in ast.walk(tree) if isinstance(c, ast.ClassDef)
+                for stmt in c.body}
     for n in ast.walk(tree):
         if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
             out.add(n.id)
         elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            out.add(n.name)
+            if id(n) not in in_class:
+                out.add(n.name)
         elif isinstance(n, ast.arg):
             out.add(n.arg)
         elif isinstance(n, ast.ExceptHandler) and n.name:

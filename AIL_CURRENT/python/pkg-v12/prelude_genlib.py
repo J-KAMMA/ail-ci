@@ -2131,3 +2131,34 @@ def _ail_dt_format(v, spec):
         return v.strftime(spec)
     raise ValueError('Invalid format specifier')
 
+
+
+def _ail_copy_copy(*args, **kwargs):
+    if 'x' in kwargs:
+        if args:
+            raise TypeError("copy() got multiple values for argument 'x'")
+        args = (kwargs['x'],)
+    if len(args) == 0:
+        raise TypeError("copy() missing 1 required positional argument: 'x'")
+    if len(args) != 1:
+        raise TypeError('copy() takes 1 positional argument but %d were given' % len(args))
+    return _ail_copy_shallow_c(args[0])
+
+
+def _ail_copy_deepcopy(*args, **kwargs):
+    if 'x' in kwargs:
+        if args:
+            raise TypeError("deepcopy() got multiple values for argument 'x'")
+        args = (kwargs['x'],)
+    if 'memo' in kwargs:
+        if len(args) > 1:
+            raise TypeError("deepcopy() got multiple values for argument 'memo'")
+        if len(args) == 0:
+            raise TypeError("deepcopy() missing 1 required positional argument: 'x'")
+        args = (args[0], kwargs['memo'])
+    if len(args) == 0:
+        raise TypeError("deepcopy() missing 1 required positional argument: 'x'")
+    if len(args) > 3:
+        raise TypeError('deepcopy() takes from 1 to 3 positional arguments but %d were given' % len(args))
+    memo = args[1] if len(args) > 1 else None
+    return _ail_copy_deep_c(args[0], memo)

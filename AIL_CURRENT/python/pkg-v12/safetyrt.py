@@ -2158,12 +2158,256 @@ static inline int ail2u_palindrome(ail_obj s) {
 }
 '''
 
-FRAGMENTS = {'strpred': STRPRED2, 'slice': SLICE, 'bytes': BYTES, 'bytesfile': BYTESFILE, 'fmt': FMT, 'gen': GEN,
+
+COPY = r"""
+/* ---- copy.copy / copy.deepcopy (safetyrt.py COPY) ---- */
+static inline int ail2c_sameobj(ail_obj a, ail_obj b) {
+    if (a.tag != b.tag) return 0;
+    switch (a.tag) {
+        case AIL_T_UNBOUND: case AIL_T_NONE: return 1;
+        case AIL_T_BOOL: case AIL_T_INT: return a.i == b.i;
+        case AIL_T_FLOAT: return a.o == b.o;
+        case AIL_T_STR: return a.sv.backing == b.sv.backing && a.sv.off == b.sv.off && a.sv.len == b.sv.len;
+        default: return a.o == b.o;
+    }
+}
+static inline ail_st ail2c_shallow(ail_ctx *cx, ail_obj *out, ail_obj x) {
+    if (x.tag == AIL_T_INST) {
+        ail_instobj *ii = (ail_instobj *)x.o;
+        char cn[64];
+        ail_class_name_c(ii->cls, cn, sizeof cn);
+        if (strcmp(cn, "bytes") == 0) { *out = x; return AIL_OK; }
+        if (strcmp(cn, "bytearray") == 0) {
+            ail_obj r = ail_inst_new(cx, ii->cls);
+            AIL_FRAME_ENTER(cx, fr, 2);
+            fr.slots[0] = x; fr.slots[1] = r;
+            for (int64_t i = 0; i < ii->n; i++) {
+                int64_t nid = ii->attrs[i].name_id;
+                if (nid >= 0 && nid < cx->intern_n && strcmp(cx->intern_tab[nid], "_a") == 0
+                        && ii->attrs[i].val.tag == AIL_T_LIST) {
+                    ail_obj c;
+                    ail_st st = ail_copy_shallow(cx, &c, ii->attrs[i].val);
+                    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+                    ail_inst_setattr(cx, fr.slots[1], nid, c);
+                } else {
+                    ail_inst_setattr(cx, fr.slots[1], nid, ii->attrs[i].val);
+                }
+            }
+            *out = fr.slots[1];
+            AIL_FRAME_LEAVE(cx, fr);
+            return AIL_OK;
+        }
+    }
+    if (x.tag == AIL_T_EXC) {
+        ail_instobj *ii = (ail_instobj *)x.o;
+        ail_obj r = ail_inst_new(cx, ii->cls);
+        r.tag = AIL_T_EXC;
+        AIL_FRAME_ENTER(cx, fr, 2);
+        fr.slots[0] = x; fr.slots[1] = r;
+        for (int64_t i = 0; i < ii->n; i++)
+            ail_inst_setattr(cx, fr.slots[1], ii->attrs[i].name_id, ii->attrs[i].val);
+        *out = fr.slots[1];
+        AIL_FRAME_LEAVE(cx, fr);
+        return AIL_OK;
+    }
+    return ail_copy_shallow(cx, out, x);
+}
+static ail_st ail2c_deep(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj memo);
+static ail_st ail2c_keep(ail_ctx *cx, ail_obj x, ail_obj memo) {
+    AIL_FRAME_ENTER(cx, fr, 4);
+    fr.slots[0] = memo; fr.slots[1] = x;
+    fr.slots[2] = ail_box_int((int64_t)(intptr_t)memo.o);
+    ail_obj list;
+    ail_st st = ail_dict_get(cx, &list, fr.slots[0], fr.slots[2], ail_box_none());
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    if (list.tag == AIL_T_NONE) {
+        fr.slots[3] = ail_list_new(cx);
+        st = ail_dict_set(cx, fr.slots[0], fr.slots[2], fr.slots[3]);
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    } else {
+        fr.slots[3] = list;
+    }
+    ail_list_append(cx, fr.slots[3], fr.slots[1]);
+    AIL_FRAME_LEAVE(cx, fr);
+    return AIL_OK;
+}
+static ail_st ail2c_deep_new(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj memo, ail_obj key) {
+    switch (x.tag) {
+        case AIL_T_LIST: {
+            ail_vecobj *v = (ail_vecobj *)x.o;
+            ail_obj r = ail_list_new(cx);
+            ((ail_gcobj *)r.o)->flags = ((ail_gcobj *)x.o)->flags;
+            AIL_FRAME_ENTER(cx, fr, 3);
+            fr.slots[0] = memo; fr.slots[1] = key; fr.slots[2] = r;
+            ail_st st = ail_dict_set(cx, fr.slots[0], fr.slots[1], fr.slots[2]);
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            for (int64_t i = 0; i < v->n; i++) {
+                ail_obj c;
+                st = ail2c_deep(cx, &c, v->p[i], fr.slots[0]);
+                if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+                ail_list_append(cx, fr.slots[2], c);
+            }
+            st = ail2c_keep(cx, x, fr.slots[0]);
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            *out = fr.slots[2];
+            AIL_FRAME_LEAVE(cx, fr);
+            return AIL_OK;
+        }
+        case AIL_T_TUPLE: {
+            ail_vecobj *v = (ail_vecobj *)x.o;
+            ail_obj work = ail_list_new(cx);
+            AIL_FRAME_ENTER(cx, fr, 5);
+            fr.slots[0] = memo; fr.slots[1] = key; fr.slots[2] = work; fr.slots[3] = x;
+            int same = 1;
+            for (int64_t i = 0; i < v->n; i++) {
+                ail_obj c;
+                ail_st st = ail2c_deep(cx, &c, v->p[i], fr.slots[0]);
+                if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+                if (!ail2c_sameobj(c, v->p[i])) same = 0;
+                ail_list_append(cx, fr.slots[2], c);
+            }
+            ail_obj prior;
+            ail_st st = ail_dict_get(cx, &prior, fr.slots[0], fr.slots[1], ail_box_none());
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            if (prior.tag != AIL_T_NONE) {
+                *out = prior;
+                AIL_FRAME_LEAVE(cx, fr);
+                return AIL_OK;
+            }
+            if (same) fr.slots[4] = fr.slots[3];
+            else {
+                ail_vecobj *w = (ail_vecobj *)fr.slots[2].o;
+                fr.slots[4] = ail_tuple_new(cx, w->p, w->n);
+            }
+            if (!same) {
+                st = ail_dict_set(cx, fr.slots[0], fr.slots[1], fr.slots[4]);
+                if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+                st = ail2c_keep(cx, fr.slots[3], fr.slots[0]);
+                if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            }
+            *out = fr.slots[4];
+            AIL_FRAME_LEAVE(cx, fr);
+            return AIL_OK;
+        }
+        case AIL_T_DICT: {
+            ail_mapobj *m = (ail_mapobj *)x.o;
+            ail_obj r = ail_dict_new(cx);
+            ((ail_gcobj *)r.o)->flags = m->hdr.flags;
+            AIL_FRAME_ENTER(cx, fr, 5);
+            fr.slots[0] = memo; fr.slots[1] = key; fr.slots[2] = r;
+            ail_st st = ail_dict_set(cx, fr.slots[0], fr.slots[1], fr.slots[2]);
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            for (int64_t i = 0; i < m->n; i++) {
+                st = ail2c_deep(cx, &fr.slots[3], m->entries[i].key, fr.slots[0]);
+                if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+                st = ail2c_deep(cx, &fr.slots[4], m->entries[i].val, fr.slots[0]);
+                if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+                st = ail_dict_set(cx, fr.slots[2], fr.slots[3], fr.slots[4]);
+                if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            }
+            st = ail2c_keep(cx, x, fr.slots[0]);
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            *out = fr.slots[2];
+            AIL_FRAME_LEAVE(cx, fr);
+            return AIL_OK;
+        }
+        case AIL_T_SET: case AIL_T_FROZENSET: {
+            ail_setobj *m = AIL_SETOBJ(x);
+            ail_obj r = ail_setx_new(cx, x.tag == AIL_T_FROZENSET);
+            AIL_FRAME_ENTER(cx, fr, 4);
+            fr.slots[0] = memo; fr.slots[1] = key; fr.slots[2] = r;
+            ail_st st = ail_dict_set(cx, fr.slots[0], fr.slots[1], fr.slots[2]);
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            int64_t pos = 0;
+            ail_setentry *e;
+            while (ail_setx_next(m, &pos, &e)) {
+                st = ail2c_deep(cx, &fr.slots[3], e->key, fr.slots[0]);
+                if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+                st = ail_setx_add_key(cx, AIL_SETOBJ(fr.slots[2]), fr.slots[3]);
+                if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            }
+            st = ail2c_keep(cx, x, fr.slots[0]);
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            *out = fr.slots[2];
+            AIL_FRAME_LEAVE(cx, fr);
+            return AIL_OK;
+        }
+        case AIL_T_INST: case AIL_T_EXC: {
+            ail_instobj *ii = (ail_instobj *)x.o;
+            if (x.tag == AIL_T_INST) {
+                char cn[64];
+                ail_class_name_c(ii->cls, cn, sizeof cn);
+                if (strcmp(cn, "bytes") == 0) { *out = x; return AIL_OK; }
+            }
+            ail_obj r = ail_inst_new(cx, ii->cls);
+            if (x.tag == AIL_T_EXC) r.tag = AIL_T_EXC;
+            AIL_FRAME_ENTER(cx, fr, 4);
+            fr.slots[0] = memo; fr.slots[1] = key; fr.slots[2] = r;
+            ail_st st = ail_dict_set(cx, fr.slots[0], fr.slots[1], fr.slots[2]);
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            for (int64_t i = 0; i < ii->n; i++) {
+                st = ail2c_deep(cx, &fr.slots[3], ii->attrs[i].val, fr.slots[0]);
+                if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+                ail_inst_setattr(cx, fr.slots[2], ii->attrs[i].name_id, fr.slots[3]);
+            }
+            st = ail2c_keep(cx, x, fr.slots[0]);
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            *out = fr.slots[2];
+            AIL_FRAME_LEAVE(cx, fr);
+            return AIL_OK;
+        }
+        default:
+            *out = x;
+            return AIL_OK;
+    }
+}
+static ail_st ail2c_deep(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj memo) {
+    switch (x.tag) {
+        case AIL_T_LIST: case AIL_T_TUPLE: case AIL_T_DICT: case AIL_T_SET:
+        case AIL_T_FROZENSET: case AIL_T_INST: case AIL_T_EXC: {
+            AIL_FRAME_ENTER(cx, fr, 3);
+            fr.slots[0] = memo; fr.slots[1] = x;
+            fr.slots[2] = ail_box_int((int64_t)(intptr_t)x.o);
+            ail_obj found;
+            ail_st st = ail_dict_get(cx, &found, fr.slots[0], fr.slots[2], ail_box_none());
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            if (found.tag != AIL_T_NONE) {
+                *out = found;
+                AIL_FRAME_LEAVE(cx, fr);
+                return AIL_OK;
+            }
+            st = ail2c_deep_new(cx, out, fr.slots[1], fr.slots[0], fr.slots[2]);
+            AIL_FRAME_LEAVE(cx, fr);
+            return st;
+        }
+        default:
+            *out = x;
+            return AIL_OK;
+    }
+}
+static ail_st ail2c_deepcopy(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj memo) {
+    if (memo.tag == AIL_T_NONE) {
+        AIL_FRAME_ENTER(cx, fr, 2);
+        fr.slots[0] = x; fr.slots[1] = ail_dict_new(cx);
+        ail_st st = ail2c_deep(cx, out, fr.slots[0], fr.slots[1]);
+        AIL_FRAME_LEAVE(cx, fr);
+        return st;
+    }
+    if (memo.tag != AIL_T_DICT) {
+        char buf[96];
+        snprintf(buf, sizeof buf, "'%s' object has no attribute 'get'", ail_type_name(memo.tag));
+        return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
+    }
+    return ail2c_deep(cx, out, x, memo);
+}
+"""
+
+FRAGMENTS = {'copy': COPY, 'strpred': STRPRED2, 'slice': SLICE, 'bytes': BYTES, 'bytesfile': BYTESFILE, 'fmt': FMT, 'gen': GEN,
              'misc': MISC, 'ddict': DDICT, 'attr': ATTR, 'exc': EXC, 'hash': HASH, 'rng': randrt.RNG,
              'rng_u': randrt.RNG_U,      # rng_u: only under AIL_UNIFIED=1 (unified.py)
              'ba_u': BA_U, 'str_u': STR_U,
              'jsn': jsonbrt.JSN, 'sta': statbrt.STA, 'rex': rebrt.REX}
-ORDER = ['strpred', 'slice', 'bytes', 'bytesfile', 'fmt', 'gen', 'misc', 'ddict', 'attr', 'exc', 'hash', 'rng', 'rng_u', 'ba_u', 'str_u', 'jsn', 'sta', 'rex']
+ORDER = ['copy', 'strpred', 'slice', 'bytes', 'bytesfile', 'fmt', 'gen', 'misc', 'ddict', 'attr', 'exc', 'hash', 'rng', 'rng_u', 'ba_u', 'str_u', 'jsn', 'sta', 'rex']
 
 GEN_PRELUDE = '''
 class generator:
@@ -2605,6 +2849,8 @@ class slice:
 
 # name -> (C call, argument count, fragment): primitives the preludes call
 PRIMS = {
+    '_ail_copy_shallow_c': ('ail2c_shallow(cx, &{t}, {a0})', 1, 'copy'),
+    '_ail_copy_deep_c': ('ail2c_deepcopy(cx, &{t}, {a0}, {a1})', 2, 'copy'),
     '_ail_slice_indices': ('ail2s_indices(cx, &{t}, {a0}, {a1}, {a2}, {a3})', 4, 'slice'),
     '_ail_slice_get': ('ail2s_getslice(cx, &{t}, {a0}, {a1}, {a2}, {a3})', 4, 'slice'),
     '_ail_b_stdin': ('ail2b_stdin(cx, &{t}, {a0})', 1, 'bytes'),
