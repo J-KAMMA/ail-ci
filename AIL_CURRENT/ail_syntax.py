@@ -2123,8 +2123,14 @@ class _Surface:
             if module == 'string' and name in _STRING_CONSTANTS:
                 return ast.Constant(value=_STRING_CONSTANTS[name])
             if module == 'string' and name in _STRING_CLASSES:
-                self.helper('string_template')
-                return ast.Name(id=_STRING_CLASSES[name], ctx=ast.Load())
+                parent = self.parents.get(node)
+                if isinstance(parent, ast.Call) and parent.func is node:
+                    self.helper('string_template')
+                    return ast.Name(id=_STRING_CLASSES[name], ctx=ast.Load())
+                self.keep.add('string')
+                self.note(node, f'{path} used as a value is not built; call it directly '
+                          '(string.Template(text).substitute(...)) or use the result of the call')
+                return None
             self.keep.add(module)
             self.note(node, f'{path} used as a value is not built; ' + _SMALL_NOTE[module])
         elif path == 'sys.maxsize':

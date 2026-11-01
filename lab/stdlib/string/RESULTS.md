@@ -47,7 +47,9 @@ the default build falls back to the general path for those programs.
   built.  Missing keys raise `KeyError`, invalid placeholders raise CPython's
   `ValueError: Invalid placeholder in string: line L, col C`, and `safe_substitute` keeps invalid
   or missing placeholders as written.  Keyword substitution values override a positional mapping,
-  as CPython's `ChainMap` does.  A subclass of `string.Template` is still refused by name.
+  as CPython's `ChainMap` does.  A subclass of `string.Template` is still refused by name, and
+  using the `string.Template` class itself as a plain value (for example `print(string.Template)`)
+  is refused by name rather than printing a different class repr; call it directly instead.
 - `test_ail_stdlib1.py`'s old "string template is refused" case now checks `string.Formatter`
   instead.
 
