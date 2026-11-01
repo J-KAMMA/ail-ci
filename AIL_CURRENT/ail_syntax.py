@@ -2468,21 +2468,8 @@ class _Surface:
         plain = not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args)
         if plain and module == 'time' and name in _TIME_CLOCKS and not args:
             return ast.Call(func=ast.Name(id=_TIME_CLOCKS[name], ctx=ast.Load()), args=[], keywords=[])
-        if module == 'textwrap' and name in ('shorten', 'indent') \
-                and not any(isinstance(arg, ast.Starred) for arg in args):
-            if name == 'shorten':
-                width = None
-                if len(args) == 2 and not node.keywords:
-                    width = args[1]
-                elif len(args) == 1 and len(node.keywords) == 1 and node.keywords[0].arg == 'width':
-                    width = node.keywords[0].value
-                if width is not None:
-                    for each in (*_MATH_DEPS.get('tw_shorten', ()), 'tw_shorten'):
-                        if each not in self.helpers:
-                            self.helpers.append(each)
-                    return ast.Call(func=ast.Name(id='_ail_tw_shorten', ctx=ast.Load()),
-                                    args=[args[0], width], keywords=[])
-            if name == 'indent' and len(args) == 2 and not node.keywords:
+        if module == 'textwrap' and name == 'indent' and not any(isinstance(arg, ast.Starred) for arg in args):
+            if len(args) == 2 and not node.keywords:
                 if 'tw_indent' not in self.helpers:
                     self.helpers.append('tw_indent')
                 return ast.Call(func=ast.Name(id='_ail_tw_indent', ctx=ast.Load()),
@@ -2493,25 +2480,35 @@ class _Surface:
             sep = args[1] if len(args) == 2 else ast.Constant(value=None)
             return ast.Call(func=ast.Name(id='_ail_string_capwords', ctx=ast.Load()),
                             args=[args[0], sep], keywords=[])
-        if module == 'textwrap' and name in ('wrap', 'fill', 'dedent') and not any(
+        if module == 'textwrap' and name in ('wrap', 'fill', 'dedent', 'shorten') and not any(
                 isinstance(arg, ast.Starred) for arg in args):
             if name == 'dedent' and len(args) == 1 and not node.keywords:
                 self.helpers.append('tw_dedent') if 'tw_dedent' not in self.helpers else None
                 return ast.Call(func=ast.Name(id='_ail_tw_dedent', ctx=ast.Load()), args=args, keywords=[])
+            text = None
             width = None
-            if name != 'dedent' and 1 <= len(args) + len(node.keywords) <= 2 and len(args) >= 1:
-                if len(args) == 2 and not node.keywords:
-                    width = args[1]
-                elif len(args) == 1 and not node.keywords:
-                    width = ast.Constant(value=70)
-                elif len(args) == 1 and len(node.keywords) == 1 and node.keywords[0].arg == 'width':
-                    width = node.keywords[0].value
-            if width is not None:
-                for each in (('tw_wrap', 'tw_fill') if name == 'fill' else ('tw_wrap',)):
-                    for helper in (*_MATH_DEPS.get(each, ()), each):
-                        if helper not in self.helpers:
-                            self.helpers.append(helper)
-                return ast.Call(func=ast.Name(id='_ail_tw_' + name, ctx=ast.Load()), args=[args[0], width], keywords=[])
+            ok = len(args) <= 2
+            if ok and len(args) >= 1:
+                text = args[0]
+            if ok and len(args) == 2:
+                width = args[1]
+            for keyword in node.keywords:
+                if keyword.arg == 'text' and text is None:
+                    text = keyword.value
+                elif keyword.arg == 'width' and width is None:
+                    width = keyword.value
+                else:
+                    ok = False
+            if ok and name != 'shorten' and width is None and text is not None and not node.keywords:
+                width = ast.Constant(value=70)
+            if ok and text is not None and width is not None:
+                helper = 'tw_shorten' if name == 'shorten' else 'tw_wrap'
+                for each in (*_MATH_DEPS.get(helper, ()), helper):
+                    if each not in self.helpers:
+                        self.helpers.append(each)
+                if name == 'fill' and 'tw_fill' not in self.helpers:
+                    self.helpers.append('tw_fill')
+                return ast.Call(func=ast.Name(id='_ail_tw_' + name, ctx=ast.Load()), args=[text, width], keywords=[])
         if plain and module == 'os' and name == 'cpu_count' and not args:
             return ast.Call(func=ast.Name(id='_ail_cpu_count', ctx=ast.Load()), args=[], keywords=[])
         if plain and module == 'operator':

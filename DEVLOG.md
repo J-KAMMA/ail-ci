@@ -1,3 +1,85 @@
+## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
+
+The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
+printed `nan` and `f'{nan:+08.2f}'` lost both the sign and its zero-padding position, where CPython
+prints `+nan` / `+0000nan`. The general `ail_obj_format` NaN arm now builds the word `nan`, applies
+the sign flag through `ail__apply_sign`, then pads. `ail__pad` also treats a leading space as a
+sign for `=` zero padding, so `' 08.2f'` gives CPython's ` 0000nan` instead of the previous
+`0000 nan`. Probes `p_min_sign`, `p_nansign`, `p_nansign_widths` and `p_nansign_upper` cover both
+NaN signs, `+`/space, widths 0..9, zero/`=`/fill/alignment, the f-string, `format()` and `%` forms,
+infinity and `-0.0`, through an argument, a list item, an attribute and a dict value; all match
+CPython on the default and general builds. `test_ail_fz208` gained a `test_explicit_sign_flags`
+case (4 cases, 4 modes).
+
+## 2026-10-31 -- fz208: a fixed-point float field never prints a NaN's sign (job-fz208-11010638)
+
+The daily fuzzer (seed 2075719067) found `NAN` vs `-NAN`. `1e308 * 10 % 0.75` is a negative
+NaN under glibc; `ail_fmt_spec_float` and both general-path `ail_obj_format` implementations passed
+that double to `snprintf("%.*f")`, which writes it as `-nan`, while CPython never shows a NaN's sign.
+They now pad the literal word `nan` directly (width, fill, alignment and zero padding unchanged);
+the other float types already went through formatters that suppress the sign.
+
+Minimal probe in `/tmp/probes/p_min.py` (two lines, `n = 1e308 * 10 % 0.75; print(f'{n:.0f}')`)
+and probes `p_nanfmt.py`, `p_nanfmt_args.py`, `p_nanfmt_bound.py`: positive/negative NaN literals,
+overflowed modulo and subtraction, the value through an argument/list item/attribute/dict value,
+`f`, `F`, `E`, `G`, `%`, `#`, width, `<`/`^`, zero padding, `%.Nf`, infinity and `-0.0`; all
+match CPython on the default and general builds and with AIL_IR=0/1. The original fuzzer program
+now agrees through its NaN lines; it still stops later with the separate pre-existing int64
+overflow in `-` (`h0`/`h2`), not this cause.
+
+Added `AIL_CURRENT/test_ail_fz208.py` (3 cases, 4 modes) and registered it through
+`AIL_CURRENT/tests.d/test_ail_fz208.txt`. Final-state tests: test_ail_fz208, test_ail_fuzz46,
+test_ail_pre132, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
+## 2026-10-31 -- stdlib31 re-applied: textwrap.shorten keeps this tree's wrap_more lowering (job-rbstdlib31-11010226)
+
+Re-applied the accepted `job-stdlib31-10290951` change. This integrated tree already builds
+`textwrap.shorten`, `textwrap.indent` and `string.capwords` (stdlib1) by lowering `shorten` to
+`_ail_tw_shorten` -> `_ail_tw_wrap_more(collapsed, width, " [...]")`, so the accepted branch's new
+`_ail_tw_chunks` / second `_ail_tw_shorten` pair was not added; both sides' fix is the same
+`shorten` behaviour, and keeping the existing helper also keeps `indent` built.  The accepted
+branch's wider argument parsing is kept: `textwrap.shorten` / `wrap` / `fill` now accept the
+`text=` and `width=` keywords (and still refuse any other keyword or a duplicate width), instead
+of only positional width / `width=`.  `textwrap.indent` stays supported here, so the accepted
+test's indent-refusal subtest was replaced by an unsupported `wrap(initial_indent=...)` refusal
+and the shared program now also compares `textwrap.indent` with CPython.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `shorten_basic` (whitespace, long words,
+hyphens, tabs, em dashes, empty/padded/non-ASCII text and widths -5..70), `shorten_keyword`
+(`text=` / `width=` for shorten, wrap and fill), `shorten_routes` (argument, list item, tuple item,
+attribute, dict value and alias), `shorten_types` (int/None/list text, float/bool width) and
+`shorten_fuzz` (400 random texts), all match CPython; `shorten_refuse_placeholder`,
+`shorten_refuse_initial_indent`, `shorten_refuse_missing_width` and
+`shorten_refuse_duplicate_width` are refused by name on both builds.
+
+Added `AIL_CURRENT/test_ail_stdlib31.py`, registered through `AIL_CURRENT/tests.d/test_ail_stdlib31.txt`
+(this tree has `tests.d`, so the tuple in `ail_check.py` is unchanged), and added its weight and
+shard entry to `tools/ci_shards.json`.  `tools/diff_ids.py` is not present on this tree;
+`tools/update_manifest.py` was run and `--check` passes.  Final-state tests: test_ail_stdlib31,
+test_ail_stdlib1, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+## 2026-10-31 -- stdlib25 re-applied: textwrap.shorten coverage (job-rbstdlib25-11010244)
+
+Re-applied the accepted `job-stdlib25-11010103` change, whose diff no longer applies to this
+integrated tree. Its `textwrap.shorten` lowering is already present here through the newer
+`stdlib1` implementation (`_ail_tw_wrap_more` with the max-lines/placeholder path backs
+`_ail_tw_wrap` and `_ail_tw_shorten`), which also builds `textwrap.indent`; both sides' behaviour
+is therefore kept by leaving `ail_syntax.py` unchanged. The accepted coverage was added:
+`test_ail_stdlib25.py` and its `AIL_CURRENT/tests.d/test_ail_stdlib25.txt` registration (this
+tree's scheme, so the `ail_check.MODULES` tuple is untouched), plus one `DIFFERENCES.md` row.
+No compiler behaviour changed.
+
+Probes in `/tmp/probes/rbstdlib25` on both `cmp.sh` builds: `p_main` (widths 0, -1, 1, 4..12,
+20 and 70 over empty, whitespace-only, short, long, hyphenated and em-dash text), `p_routes`
+(values through an argument, a list item, an instance attribute, a dict value, a keyword and an
+expression, including widths 4/5/6 around the placeholder), `p_unicode` (multi-byte and CJK text,
+widths 1..20) and `p_types` (bytes/None/int text, float/str/bool widths, empty text with a
+too-narrow width) match CPython 3.12 on the default and general builds; `p_refuse` (a
+`placeholder=` argument) is refused by name on both builds. Final-state tests with `-j 2`:
+test_ail_stdlib25, test_ail_stdlib1, test_ail_pre360, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3, 0 failed. `tools/update_manifest.py` was run; `--check` passes.
+`tools/diff_ids.py` is not present on this tree, and `tools/ci_shards.py --check` is the shard
+check used here.
+
 ## 2026-10-31 -- fz205 re-applied: Rust bridge tests skip when rustc is only a shim (job-rbfz205-10311922)
 
 Re-applied the accepted `job-fz205-10300805` change. Its diff no longer applies because this
@@ -660,6 +742,29 @@ is the instance `KeyError` repr, whose address cannot match). A non-int `__index
 separate pre-existing cause, left unchanged. Final-state tests: test_ail_pre420,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3. `tools/diff_ids.py` is not
 present on this tree; `tools/update_manifest.py` was run and `--check` passes.
+## 2026-10-29 -- stdlib31: textwrap.shorten for the default options (job-stdlib31-10290951)
+
+A current compile of `lab/corpus/programs` and the Python files in `AIL_CURRENT/language_examples` leaves
+these import refusals: `unicodedata` 3, `decimal` 2, `textwrap` 1, `collections` 1 and `re` 1 (the last two
+are unsupported uses, not unmodelled modules).  `unicodedata` would need the full Unicode name, category and
+normalization database and `decimal` the decimal context/rounding machinery, so neither is a small module;
+the most-used one that lowers onto existing code is `textwrap`, whose only refused use was `shorten`.
+
+`textwrap.shorten(text, width)` now lowers to `_ail_tw_shorten`, which calls the new `_ail_tw_chunks`
+helper (a copy of `wrap`'s expandtabs / whitespace / em-dash / hyphen chunking rules) and CPython 3.12's
+`max_lines=1` truncation with the default `" [...]"` placeholder.  The text is collapsed first; width <= 0
+raises CPython's `invalid width` ValueError, width < 5 its `placeholder too large for max width`, and the
+`text=` / `width=` keywords are accepted.  Any other keyword (for example `placeholder=`) and any other
+textwrap function remain named compile-time refusals.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `shorten_basic` (whitespace, long words, hyphens,
+tabs, empty/padded text and widths 5..70), `shorten_keyword` (width= and text=), `shorten_errors` (width 0,
+-1 and 4), `shorten_routes` (argument, alias, list item, attribute and dict value), `shorten_fuzz` (600
+random texts over spaces, tabs, hyphens, em dashes, digits, punctuation and non-ASCII), all match CPython;
+`shorten_refuse`, `shorten_missing_width` and `shorten_indent_refuse` are refused by name.  The corpus
+program `deepseek-v4.1-flash-free/t116.py` matches CPython on both builds.  Added
+`AIL_CURRENT/test_ail_stdlib31.py`, registered in `ail_check.MODULES`.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a
