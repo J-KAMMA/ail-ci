@@ -16,6 +16,11 @@ tree_fold peak RSS fell by 157,168 KiB (153.4 MiB, 25.4%); the allocator's simul
 bytes fell by 230.0 MiB (33.4%).  Allocated bytes over the run fell from 3.77 GB to 3.10 GB and
 allocation calls from 3,786,368 to 3,786,111.  The source in `lab/compare/src` was not touched.
 
+The review-fix commit leaves tree_fold's generated C unchanged (its string spine comes from a
+comprehension, not an append loop).  Re-running the same command on it measured 475,820 and
+475,680 KiB; that is runner noise around the 460,992 KiB above, still 142-143 MiB below the
+618,160 KiB baseline, with all 55 public+hidden cases matching on the typed path.
+
 ## Measurement
 
 The allocation profile is an `LD_PRELOAD` counting allocator: it puts a 16-byte header in front of
@@ -82,8 +87,13 @@ All in `AIL_CURRENT/python/pkg-v12`; no task source changed.
 
 1. `cruntime.py`: new `ail_slist_reserve`, one exact `realloc` for a string list whose final length
    is known.  `pyfunc.py` emits it for a `list[str]` comprehension, and for an append loop whose
-   range is known and whose target was emptied immediately before it (also for `list[int]` and
-   `list[float]`); `ir/lower.py`/`ir/emit_c.py` add the same `list.reserve` operation to the IR.
+   `range` bounds are statically known integers (constants and some local ints; a parameter bound
+   is not recognised), whose target was emptied immediately
+   before it, and whose body appends unconditionally -- no `break`/`continue`/`return`/`raise`,
+   no `if`/loop/`try`/`with`/`assert`, and the append is a whole statement (also for `list[int]`
+   and `list[float]`); the reserve is capped at 2^22 elements so a range whose body leaves early
+   through an exception cannot force a huge allocation.  `ir/lower.py`/`ir/emit_c.py` add the
+   same `list.reserve` operation to the IR for comprehensions.
 2. `pyfunc.py` and `ir/lower.py`: a `list[str]` local is released at its last use, exactly like the
    numeric-list path.  This is what turns the old three simultaneous spines into one.
 

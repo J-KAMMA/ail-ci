@@ -20174,6 +20174,14 @@ def _emptied_name(stmt):
     return None
 
 
+_APPEND_LOOP_SKIPS = tuple(node for node in (
+    ast.Break, ast.Continue, ast.Return, ast.Raise, ast.Yield, ast.YieldFrom,
+    ast.If, ast.While, ast.For, ast.AsyncFor, ast.Try, getattr(ast, 'TryStar', None),
+    getattr(ast, 'Match', None), ast.With, ast.AsyncWith, ast.Assert,
+) if node is not None)
+_APPEND_LOOP_RESERVE_LIMIT = 1 << 22
+
+
 def _append_loop_reserve(previous, node, ctx, ind):
     if not previous or not isinstance(node, ast.For):
         return ''
@@ -20211,17 +20219,25 @@ def _append_loop_reserve(previous, node, ctx, ind):
         for n in ast.walk(stmt):
             if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 return ''
+            if isinstance(n, _APPEND_LOOP_SKIPS):
+                return ''
             if not (isinstance(n, ast.Name) and n.id in names):
                 continue
             attr = parents.get(n)
             call = parents.get(attr) if attr is not None else None
             if not (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
-                    and isinstance(call, ast.Call) and call.func is attr):
+                    and isinstance(call, ast.Call) and call.func is attr
+                    and isinstance(parents.get(call), ast.Expr)):
                 return ''
             appended.add(n.id)
     trip = hi if len(it.args) == 1 else '(%s) - (%s)' % (hi, lo)
+    limit = _APPEND_LOOP_RESERVE_LIMIT
+    if trip.isdigit() and int(trip) <= limit:
+        sized = trip
+    else:
+        sized = '(%s) < %d ? (%s) : %d' % (trip, limit, trip, limit)
     return ''.join('%sail_%s_reserve(&%s, %s);\n' % ('    ' * ind, ctx.types[name],
-                                                    ctx.cname(name), trip)
+                                                    ctx.cname(name), sized)
                    for name in names if name in appended)
 
 

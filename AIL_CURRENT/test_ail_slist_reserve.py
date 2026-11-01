@@ -66,6 +66,57 @@ def comp(n: int) -> list[str]:
     return xs
 
 
+def stopped() -> list[str]:
+    xs: list[str] = []
+    for i in range(100000000000000000):
+        xs.append("v")
+        break
+    return xs
+
+
+def stopped_local(n: int) -> list[str]:
+    xs: list[str] = []
+    m = n
+    for i in range(m):
+        xs.append("w")
+        break
+    return xs
+
+
+def early(n: int) -> list[str]:
+    xs: list[str] = []
+    for i in range(n):
+        if i == 2:
+            return xs
+        xs.append(str(i))
+    return xs
+
+
+def odd(n: int) -> list[str]:
+    xs: list[str] = []
+    for i in range(n):
+        if i % 2:
+            xs.append(str(i))
+    return xs
+
+
+def stopped_int(n: int) -> list[int]:
+    xs: list[int] = []
+    m = n
+    for i in range(m):
+        xs.append(i)
+        break
+    return xs
+
+
+def stopped_float() -> list[float]:
+    xs: list[float] = []
+    for i in range(100000000000000000):
+        xs.append(1.5)
+        break
+    return xs
+
+
 def main() -> int:
     for lo in range(-2, 3):
         for hi in range(-1, 4):
@@ -83,6 +134,15 @@ def main() -> int:
     print(both(a, b))
     c = relay(a)
     print("|".join(c) + "|" + "|".join(gen(0)) + "|" + "|".join(gen(1)))
+    print("|".join(stopped()))
+    print("|".join(stopped_local(2305843009213693952)))
+    for n in [0, 1, 2, 3, 9]:
+        print("e" + str(n) + ":" + "|".join(early(n)))
+        print("o" + str(n) + ":" + "|".join(odd(n)))
+    si = stopped_int(2305843009213693952)
+    print("i:" + "|".join(str(v) for v in si))
+    sf = stopped_float()
+    print("f:" + "|".join(str(v) for v in sf))
     return 0
 
 

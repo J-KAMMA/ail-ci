@@ -1,3 +1,17 @@
+## 2026-11-01 -- mem1 review: append-loop reserve only when the append is unconditional (job-mem1-11011013)
+
+The review found that the new append-loop reserve was sized to the whole `range()` trip count even
+when the body leaves early or skips the append, so `for i in range(10**17): xs.append("v"); break`
+emitted `ail_slist_reserve(&xs, 100000000000000000)` and died `out of memory`/`list too long` where
+CPython and the base build print `v` and exit 0. `_append_loop_reserve` now refuses any body with
+`break`/`continue`/`return`/`raise`/`yield`/`assert` or a nested `if`/loop/`try`/`match`/`with`,
+requires each append to be a whole expression statement, and caps the reserve at 2^22 elements so an
+early exception cannot force a huge allocation.  The earlier claim "range bounds are known" was
+also too broad: parameters are not recognised, only constants and local ints, and the design note
+now says so.  Added `stopped`, `stopped_local`, `early`, `odd`, `stopped_int` and `stopped_float`
+regression cases to `test_ail_slist_reserve`.  Probes p10 (local `m = n`, 2^61, break) and p11
+(literal `range(10**17)`, break) now print `v` and exit 0 on the default and general builds.
+
 ## 2026-11-01 -- tree_fold peak memory: reserve string-list spines and free them at last use (job-mem1-11011013)
 
 tree_fold's AIL build peaked at 603.7 MiB against Rust's 314.8 MiB.  An LD_PRELOAD counting
