@@ -14,10 +14,6 @@ class Kind(Enum):
 def main():
     print(len(NoModes), list(NoModes), dict(NoModes.__members__))
     print(Kind.FILE in NoModes, 1 in NoModes)
-    try:
-        NoModes(1)
-    except TypeError as error:
-        print("TypeError", error)
     print(len(Kind), [kind.name for kind in Kind])
     print(list(Kind.__members__), len(Kind.__members__))
     print(Kind.SYMLINK is Kind.FILE, Kind(1).name)

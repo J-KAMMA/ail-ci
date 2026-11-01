@@ -522,6 +522,9 @@ class Uses(ast.NodeTransformer):
         if info is not None:
             if len(node.args) != 1 or node.keywords:
                 refuse(node, 'enum %s(...): one value is built (Color(1)); the functional API is not' % info.name)
+            if not info.members and not info.aliases:
+                refuse(node, 'enum class %s has no members this compiler builds; calling an empty %s is not built'
+                       % (info.name, info.kind))
             self.generic_visit(node)
             return ast.copy_location(ast.Call(func=ast.Name(id=info.call, ctx=ast.Load()), args=node.args, keywords=[]),
                                      node)

@@ -35,8 +35,9 @@ compiles and compares them.
   earlier member by name.
 * `auto()` uses the largest previous int value plus one, as CPython 3.12's default does (it used the
   last literal value, which diverges after a descending value).
-* An empty enum builds; calling it with one value raises CPython's
-  `TypeError: <enum 'NoModes'> has no members; specify \`names=()\` if you meant to create a new, empty, enum`.
+* An empty enum builds and iterates; calling it is refused by name at compile time
+  (`enum class NoModes has no members this compiler builds; calling an empty Enum is not built`),
+  because the call can only raise CPython's no-members `TypeError`.
 * `value in EnumClass` follows CPython's value lookup for `Enum`, `IntEnum` and `StrEnum` (it was
   identity-only before), not only for `Flag`/`IntFlag`; an unhashable value raises `TypeError`.
 

@@ -1,3 +1,16 @@
+## 2026-11-01 -- stdlib enum: empty enum calls refused by name again (job-std_enum-11012140)
+
+`test_ail_fuzz80` (fuzz round 80) requires calling an empty `Enum`, `IntEnum`, `StrEnum`, `Flag` or
+`IntFlag` to be refused at compile time, because the only possible runtime result is CPython's
+no-members `TypeError` (and an empty `Flag` used to make a pseudo-member). The call lowering in
+`enumlib.py` now raises that named refusal for a class with no members or aliases, on both builds:
+`enum class E has no members this compiler builds; calling an empty Enum is not built`. Empty enums
+still build when they are only iterated, inspected, used with `in`, or extended by a non-empty enum.
+
+`test_ail_std_enum` previously expected the runtime `TypeError`, so `lab/stdlib/enum/empty_registry.py`
+and its edge program no longer call the empty enum (iteration/in coverage is kept) and the test now
+asserts the compile-time refusal. `RESULTS.md` records the new behaviour.
+
 ## 2026-11-01 -- stdlib enum review fix: StrEnum.isprintable (job-std_enum-11012140)
 
 Removed the `_AilStrEnum.isprintable` forwarder. `str.isprintable` is not built (it is refused by name),

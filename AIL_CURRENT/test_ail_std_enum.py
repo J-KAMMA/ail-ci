@@ -2,9 +2,10 @@
 
 The nine programs that build in the default mode under `lab/stdlib/enum` are compiled with the Python
 syntax and run; each must print CPython's stdout bytes and exit with its status.  A small edge program
-covers `auto()` after a descending value, `B = A` aliases, an unhashable `in` value and an empty enum.
-The other three programs there stay refused by name (a classmethod, an `__init__` on members, and the
-functional API), and `lab/stdlib/enum/RESULTS.md` records them as follow-ups.
+covers `auto()` after a descending value, `B = A` aliases and an unhashable `in` value; an empty enum
+still builds and iterates, while calling it is refused by name at compile time.  The other three
+programs there stay refused by name (a classmethod, an `__init__` on members, and the functional API),
+and `lab/stdlib/enum/RESULTS.md` records them as follow-ups.
 """
 import os
 import subprocess
@@ -38,9 +39,6 @@ class Code(Enum):
     GHOST = auto()
     SAME = MISSING
 
-class Empty(Enum):
-    pass
-
 def main():
     print([m.name for m in Code], list(Code.__members__))
     print(Code.GHOST.value, Code.SAME.name, Code.SAME is Code.MISSING)
@@ -54,12 +52,17 @@ def main():
         [1] in Code
     except TypeError as error:
         print("TypeError", error)
-    try:
-        Empty(1)
-    except TypeError as error:
-        print("TypeError", error)
 
 main()
+"""
+
+EMPTY_CALL = """\
+from enum import Enum
+
+class Empty(Enum):
+    pass
+
+print(Empty(1))
 """
 
 
@@ -98,6 +101,14 @@ class LabPrograms(unittest.TestCase):
 
     def test_edge_cases_match_cpython(self):
         self.check_program("enum_edges.py", EDGE_PROGRAM, "edge_")
+
+    def test_empty_enum_call_is_refused_by_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            built, source, exe = compile_python(directory, EMPTY_CALL, "empty_call")
+            self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
+            self.assertIn("has no members this compiler builds; calling an empty Enum is not built",
+                          built.stdout + built.stderr)
+            self.assertFalse(exe.exists())
 
 
 if __name__ == "__main__":
