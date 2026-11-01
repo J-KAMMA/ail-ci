@@ -3571,6 +3571,32 @@ def _dict_of_lists_kind(fn, values):
     return next(iter(found)) if len(found) == 1 else None
 
 
+def _truth_only_names(test):
+    """The Name nodes of a test that are read only for truth, where None and [] behave alike.
+    A name inside a comparison or any other value position is not included."""
+    if isinstance(test, ast.Name):
+        return {id(test)}
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        return _truth_only_names(test.operand)
+    if isinstance(test, ast.BoolOp):
+        names = set()
+        for value in test.values:
+            names |= _truth_only_names(value)
+        return names
+    return set()
+
+
+def _guarantees_truthy(test, target):
+    """Whether reaching the body of `test` guarantees that `target` was truthy."""
+    if isinstance(test, ast.Name):
+        return test.id == target
+    if isinstance(test, ast.BoolOp):
+        if isinstance(test.op, ast.And):
+            return any(_guarantees_truthy(value, target) for value in test.values)
+        return all(_guarantees_truthy(value, target) for value in test.values)
+    return False
+
+
 def lower_dict_of_lists(source):
     """`d = {}` used only as `d.setdefault(k, []).append(v)` / `x = d.get(k)` (x tested only for
     truth) becomes two typed locals: a key -> slot dict and a `list[list[T]]` of rows.  This is the
@@ -3598,19 +3624,21 @@ def lower_dict_of_lists(source):
             yield from ast.walk(stmt)
 
     def truth_tested(target, fn, ignored=None):
-        # `x = d.get(k)` may become `[]` for a missing key when every use of x is either the
-        # truth test itself or lies in the body of `if x:` (CPython would never reach those uses
-        # with None: an empty list and None are both falsy).
+        # `x = d.get(k)` may become `[]` for a missing key when every use of x is either a
+        # truth-only read in a test or lies in the body of a test that guarantees x truthy
+        # (CPython would never reach those uses with None: an empty list and None are both
+        # falsy).  A comparison such as `x == []` or `x is None` is not a truth test: it can
+        # tell None from [], so lowering must leave the source alone there.
         inside = set()
         guarded = set()
         for n in ast.walk(fn):
             if isinstance(n, ast.If):
-                inside.update(id(x) for x in ast.walk(n.test))
-                if isinstance(n.test, ast.Name) and n.test.id == target:
+                inside.update(_truth_only_names(n.test))
+                if _guarantees_truthy(n.test, target):
                     for stmt in n.body:
                         guarded.update(id(x) for x in ast.walk(stmt))
             elif isinstance(n, ast.While):
-                inside.update(id(x) for x in ast.walk(n.test))
+                inside.update(_truth_only_names(n.test))
         for n in own_nodes(fn.body):
             if isinstance(n, ast.Name) and n.id == target:
                 if id(n) == ignored:

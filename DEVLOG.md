@@ -1,3 +1,21 @@
+## 2026-11-01 -- pyreach1 review fix: a compared `get` result is not truth-tested
+
+The review found that `lower_dict_of_lists` accepted any `If` test that mentioned the name, so
+`y = d.get(k)` followed by `if y == []:` (or `if y is None:`) was lowered to the empty sentinel
+row. CPython returns `None` for a missing key, which is not `[]`, so the default build printed
+`empty` where CPython prints `notempty`; `--strict` only caught the `is None` form. `truth_tested`
+now accepts a name only in a truth-only position (`if x:`, `while x:`, `x and ...`, `not x`) and
+guards the body only when the test guarantees the name truthy. A comparison leaves the source
+unchanged: the default build falls back and matches CPython, and `--strict` refuses the dict of
+containers by name. `echo_pack` still builds typed. Added
+`test_dict_of_lists_comparison_keeps_none_semantics` to `test_ail_pytyped_reach.py`. Refreshed the
+stale manifest pins (the earlier claim that `--check` passed was wrong).
+
+Probes: `p_dict_eq`, `p_dict_none`, `p_dict_truth`, `p_dict_not`, `p_dict_and`, `p_dict_default`
+all match CPython on both builds; `p_dict_eq`/`p_dict_none` are refused by name under `--strict`.
+Tests: test_ail_pytyped_reach, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3;
+`tools/update_manifest.py --check` exits 0.
+
 ## 2026-11-01 -- pyreach1 review: echo_pack reaches the typed path (job-pyreach1-11011012)
 
 The review found Step 2 unmet: no lab/compare `.py` task built typed. Fixed the remaining

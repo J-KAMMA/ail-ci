@@ -99,6 +99,23 @@ class TypedReach(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr[-2000:])
             self.assertEqual(run(exe).stdout, '3 3 5\nnone\n')
 
+    def test_dict_of_lists_comparison_keeps_none_semantics(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pyreach-') as tmp:
+            source = Path(tmp) / 'dlist_cmp.py'
+            source.write_text(DICT_OF_LISTS_COMPARISON, encoding='utf8')
+            exe = Path(tmp) / 'dlist_cmp'
+            env = dict(os.environ, AIL_NO_CACHE='1')
+            env.pop('AIL_NO_GENERAL', None)
+            env.pop('AIL_STRICT', None)
+            result = subprocess.run([sys.executable, '-B', str(CLI), 'compile', str(source),
+                                     '--syntax', 'python', '-o', str(exe)],
+                                    capture_output=True, text=True, timeout=600, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr[-2000:])
+            expected = subprocess.run([sys.executable, str(source)], capture_output=True,
+                                      text=True, timeout=120).stdout
+            self.assertEqual(run(exe).stdout, expected)
+            self.assertEqual(expected, 'notempty\nnone\n')
+
     def test_unannotated_bytes_helper_owns_its_result(self):
         with tempfile.TemporaryDirectory(prefix='ail-pyreach-') as tmp:
             result, exe = build(tmp, 'owned_bytes', OWNED_BYTES)
@@ -159,6 +176,24 @@ DICT_OF_LISTS = '''def main():
         print("bad")
     else:
         print("none")
+
+
+main()
+'''
+
+DICT_OF_LISTS_COMPARISON = '''def main():
+    d = {}
+    d.setdefault("k", []).append(1)
+    y = d.get("miss")
+    if y == []:
+        print("empty")
+    else:
+        print("notempty")
+    z = d.get("miss")
+    if z is None:
+        print("none")
+    else:
+        print("notnone")
 
 
 main()

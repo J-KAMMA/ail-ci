@@ -55,8 +55,11 @@ bytearray passed to a sequence parameter. Three general front-end changes close 
    `d.setdefault(k, []).append(v)` and a truth-tested `x = d.get(k)` is lowered to the typed
    shape the compiler already has: a key -> slot dict plus `rows: list[list[T]]`. The slot
    dict is O(1); row 0 is a shared empty sentinel so a missing key stays a read-only empty
-   row. Any other use of `d`, a mutation of the fetched row, or a non-truth-tested `get`
-   leaves the source unchanged and the old by-name refusal intact.
+   row. Any other use of `d`, a mutation of the fetched row, or a `get` result read anywhere
+   other than a truth test (`if x:`, `while x:`, `x and ...`, `not x`) leaves the source
+   unchanged and the old by-name refusal intact. A comparison is not a truth test: `x == []`
+   and `x is None` can tell the `[]` sentinel from CPython's `None`, so they are left as
+   written (the default build falls back and matches CPython; `--strict` refuses by name).
 2. **Unannotated owned-bytes helpers.** A Python-surface helper whose every value return is
    `bytes(...)` and which cannot fall off its end now owns its result exactly like an explicit
    `-> bytes`, so `res = pack(data)` may cross a function boundary.
@@ -82,11 +85,12 @@ need dict-of-containers, module tables or slice/tuple work).
 Probes: `p_dlist3.py` (dict-of-lists through a list item, missing key, truth test),
 `p_owned_bytes2.py` (unannotated bytes helpers including empty), `p_ba_view.py` (bytearray,
 empty and non-empty), `p_loop_def.py` (loop-body nested def capturing an outer local),
-`p_groups_loop3.py` (str groups), `p_entry_re2.py` (entry after generated regex helpers), and
-the earlier `argv_starts`/`argv_re`/`optret3` cases. All match CPython on the default and
-general builds; `p_groups_optional.py` (a group that may be absent) is refused by name because
-the typed path has no None. `AIL_CURRENT/test_ail_pytyped_reach.py` pins the behaviour,
-including building `lab/compare/src/echo_pack/main.py` itself.
+`p_groups_loop3.py` (str groups), `p_entry_re2.py` (entry after generated regex helpers),
+`p_dict_eq.py`/`p_dict_none.py` (a `get` result compared with `[]` or `None`), and the earlier
+`argv_starts`/`argv_re`/`optret3` cases. All match CPython on the default and general builds;
+`p_groups_optional.py` (a group that may be absent) and the comparison probes in `--strict`
+are refused by name because the typed path has no None. `AIL_CURRENT/test_ail_pytyped_reach.py`
+pins the behaviour, including building `lab/compare/src/echo_pack/main.py` itself.
 
 The generated C for all ten `.ail` sources is byte-identical to the parent commit, and all ten
 `.ail` sources still build typed. Instruction counts could not be measured on this runner:
