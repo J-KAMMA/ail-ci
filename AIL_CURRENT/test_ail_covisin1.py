@@ -37,12 +37,15 @@ def _run(directory, name):
 
 
 class IsinstanceTypeForms(unittest.TestCase):
-    def compare(self, files, modes, main='p.py'):
+    def compare(self, files, modes, main='p.py', failure=False):
         with tempfile.TemporaryDirectory(prefix='covisin1_') as directory:
             for name, text in files.items():
                 Path(directory, name).write_text(text, encoding='utf-8')
             want = _run(directory, main)
-            self.assertEqual(want.returncode, 0, want.stderr)
+            if failure:
+                self.assertNotEqual(want.returncode, 0)
+            else:
+                self.assertEqual(want.returncode, 0, want.stderr)
             for mode in modes:
                 built, exe = _build(directory, main, mode)
                 self.assertEqual(built.returncode, 0,
@@ -65,6 +68,21 @@ class IsinstanceTypeForms(unittest.TestCase):
 
     def test_type_constants_keep_side_effects(self):
         self.compare({'p.py': SIDE_EFFECTS}, ('general',))
+
+    def test_module_alias_shadowed_by_parameter_and_local(self):
+        self.compare({'p.py': SCOPE_SHADOW}, ('general',))
+
+    def test_module_alias_in_nested_scopes(self):
+        self.compare({'p.py': NESTED_SCOPES}, ('general',))
+
+    def test_use_before_assignment_is_name_error(self):
+        self.compare({'p.py': ORDER_BEFORE}, ('general',), failure=True)
+
+    def test_function_defined_before_assignment_called_after(self):
+        self.compare({'p.py': ORDER_AFTER}, ('general',))
+
+    def test_builtin_tuple_shadowed_by_parameter(self):
+        self.compare({'p.py': BUILTIN_SHADOW}, ('general',))
 
 
 STATIC = r'''class A: pass
@@ -180,6 +198,93 @@ fs(shapes.Square())
 fi(1)
 fb(True)
 print(isinstance(shapes.Square(), shapes.Shape), isinstance(True, int), isinstance(1, bool))
+'''
+
+SCOPE_SHADOW = r'''class A: pass
+class B: pass
+K = A
+
+
+def f(K):
+    print(isinstance(A(), K), isinstance(B(), K))
+
+
+def g():
+    K = B
+    print(isinstance(A(), K), isinstance(B(), K))
+
+
+f(B)
+f(A)
+g()
+print(isinstance(A(), K), isinstance(B(), K))
+'''
+
+NESTED_SCOPES = r'''class A: pass
+class B: pass
+class C: pass
+K = A
+
+
+def outer(K):
+    def inner():
+        print("inner", isinstance(A(), K), isinstance(B(), K))
+    inner()
+
+
+def comp():
+    return [isinstance(A(), K) for K in (B, A)]
+
+
+class Body:
+    K = B
+    r = (isinstance(A(), K), isinstance(B(), K))
+
+
+outer(B)
+print("comp", comp())
+print("body", Body.r)
+print("module", isinstance(A(), K), isinstance(B(), K))
+'''
+
+ORDER_BEFORE = r'''class A: pass
+class B: pass
+
+
+def f(x):
+    print("f", isinstance(x, K))
+
+
+f(A())
+K = B
+f(A())
+'''
+
+ORDER_AFTER = r'''class A: pass
+class B: pass
+
+
+def f(x):
+    print(isinstance(x, K))
+
+
+K = B
+f(A())
+f(B())
+'''
+
+BUILTIN_SHADOW = r'''class A: pass
+class B: pass
+TYPES = (int, str)
+
+
+def f(TYPES):
+    print("f", isinstance(A(), TYPES), isinstance(B(), TYPES))
+
+
+f((A,))
+f((B,))
+print("module", isinstance(1, TYPES), isinstance("s", TYPES), isinstance(1.0, TYPES))
 '''
 
 if __name__ == '__main__':

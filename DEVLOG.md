@@ -1,3 +1,29 @@
+## 2026-11-01 -- covisin1 review: expand a type constant only where the name and the binding are the module's (job-covisin1-11011014)
+
+The review found three wrong answers from `tuplib._expand_isinstance_type_constants` inlining a
+module type constant without looking at lexical scope or execution order: a parameter/local
+shadowing the name (`K` was still replaced by the module value), and a use before the assignment
+(CPython raises `NameError`, the rewrite answered `False`).  The expansion now resolves the use to
+the module binding: it computes the scope chain (functions, lambdas, comprehensions, class bodies)
+and skips a name bound there; it expands only where the top-level assignment precedes the
+containing top-level statement (so a function defined above the assignment keeps the name and
+reaches CPython's global lookup/`NameError` at run time); and names with a second module binding, a
+`global` assignment or a walrus target are not treated as constants.  Values inside a constant are
+still resolved in module scope, because that is where the tuple was built.  An assignment is now
+dropped only when no unexpanded read of the module binding remains, not merely when no `Name` load
+remains, so a shadowing local no longer keeps an unbuildable builtin-type tuple around.
+
+Probes (`bash ~/tools/cmp.sh`, default + general) all match CPython: the review's `p7_shadowclass`,
+`p9_localshadow` and `p10_order` (exit 1, empty stdout), plus `p20_scopes` (nested function,
+comprehension target, class body), `p21_order_class`, `p22_order_before` (NameError), `p24_builtin_shadow`
+(local tuple of classes shadowing `TYPES = (int, str)`), `p25_nested_scope_tuple`, `p26_alias_chain`.
+`p23_builtin_order` (module use before a builtin-type tuple assignment) is refused by name, as on the
+base tree, never answered wrongly.  The previous fifteen probes still match.  All ten `lab/compare`
+AIL sources generate byte-identical C (10/10).  Added five scope/order regression tests to
+`test_ail_covisin1`.  Final-state tests: `test_ail_covisin1`, `test_ail_tuples`, `test_ail_modconst`,
+`test_ail_py_typed_gaps`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+(96 tests, OK; one platform skip).
+
 ## 2026-11-01 -- covisin1: isinstance() with a tuple, an attribute or a type constant (job-covisin1-11011014)
 
 The module census over `AIL_CURRENT/python/pkg-v12/*.py` (148 files, `fallback_census.py`) went from 9

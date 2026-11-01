@@ -372,6 +372,167 @@ _ISINSTANCE_TYPE_NAMES = frozenset((
     'int', 'float', 'str', 'bool', 'bytes', 'bytearray', 'list', 'tuple', 'dict',
     'set', 'frozenset', 'range', 'object'))
 
+_FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _collect_bindings(node, binds, globals_, nonlocals_, root=False):
+    """Every name bound in one lexical scope, not descending into a nested scope.
+
+    `root` is the node whose own binding must not count: a function's name binds in the enclosing
+    scope, and a comprehension's target binds in the comprehension, not the containing function.
+    """
+    if not root:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            binds.add(node.name)
+            return
+        if isinstance(node, ast.ClassDef):
+            binds.add(node.name)
+            return
+        if isinstance(node, ast.Lambda) or isinstance(node, _COMPREHENSIONS):
+            return
+    if isinstance(node, ast.Global):
+        globals_.update(node.names)
+        return
+    if isinstance(node, ast.Nonlocal):
+        nonlocals_.update(node.names)
+        return
+    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        binds.add(node.id)
+    elif isinstance(node, _FUNCS):
+        args = node.args
+        for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+            if arg is not None:
+                binds.add(arg.arg)
+    elif isinstance(node, ast.alias):
+        binds.add(node.asname or node.name.split('.')[0])
+    elif isinstance(node, ast.ExceptHandler) and node.name:
+        binds.add(node.name)
+    elif isinstance(node, ast.MatchAs) and node.name:
+        binds.add(node.name)
+    elif isinstance(node, ast.MatchStar) and node.name:
+        binds.add(node.name)
+    elif isinstance(node, ast.MatchMapping) and node.rest:
+        binds.add(node.rest)
+    for child in ast.iter_child_nodes(node):
+        _collect_bindings(child, binds, globals_, nonlocals_, False)
+
+
+def _scope(kind, node, root=False):
+    binds, globals_, nonlocals_ = set(), set(), set()
+    _collect_bindings(node, binds, globals_, nonlocals_, root)
+    return (kind, binds - globals_ - nonlocals_, globals_, nonlocals_)
+
+
+def _module_bindings(tree):
+    """The binding nodes of each name in module scope (not inside a def, class or comprehension)."""
+    out = {}
+
+    def add(name, node):
+        out.setdefault(name, []).append(node)
+
+    def walk(node, root=False):
+        if not root:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                add(node.name, node)
+                return
+            if isinstance(node, ast.ClassDef):
+                add(node.name, node)
+                return
+            if isinstance(node, ast.Lambda) or isinstance(node, _COMPREHENSIONS):
+                return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            add(node.id, node)
+        elif isinstance(node, ast.alias):
+            add(node.asname or node.name.split('.')[0], node)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            add(node.name, node)
+        elif isinstance(node, ast.MatchAs) and node.name:
+            add(node.name, node)
+        elif isinstance(node, ast.MatchStar) and node.name:
+            add(node.name, node)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            add(node.rest, node)
+        for child in ast.iter_child_nodes(node):
+            walk(child, False)
+
+    walk(tree, True)
+    return out
+
+
+def _shadowed(name, chain):
+    """Whether `name` in this scope chain denotes anything but the module binding."""
+    crossed_function = False
+    for kind, binds, globals_, nonlocals_ in reversed(chain):
+        if kind == 'module':
+            return False
+        if kind == 'comp':
+            if name in binds:
+                return True
+        elif kind == 'function':
+            if name in globals_:
+                return False
+            if name in nonlocals_ or name in binds:
+                return True
+            crossed_function = True
+        elif kind == 'class' and not crossed_function and name in binds:
+            return True
+    return False
+
+
+def _isinstance_uses(tree):
+    """Every isinstance() call with the scope chain and top-level statement index of its use."""
+    uses = []
+
+    def walk(node, chain, top_index):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'isinstance' and len(node.args) == 2 and not node.keywords):
+            uses.append((node, chain, top_index))
+        if isinstance(node, _FUNCS):
+            inner = chain + [_scope('function', node, True)]
+        elif isinstance(node, ast.ClassDef):
+            inner = chain + [_scope('class', node, True)]
+        elif isinstance(node, _COMPREHENSIONS):
+            binds = set()
+            for gen in node.generators:
+                _collect_bindings(gen.target, binds, set(), set(), False)
+            inner = chain + [('comp', binds, set(), set())]
+        else:
+            inner = chain
+        for child in ast.iter_child_nodes(node):
+            walk(child, inner, top_index)
+
+    module = ('module', set(), set(), set())
+    for index, stmt in enumerate(tree.body):
+        walk(stmt, [module], index)
+    return uses
+
+
+def _module_reads(tree):
+    """The scope chains of every name read in the program (a read of a module binding is one whose
+    chain does not shadow the name)."""
+    reads = {}
+
+    def walk(node, chain):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            reads.setdefault(node.id, []).append(chain)
+        if isinstance(node, _FUNCS):
+            inner = chain + [_scope('function', node, True)]
+        elif isinstance(node, ast.ClassDef):
+            inner = chain + [_scope('class', node, True)]
+        elif isinstance(node, _COMPREHENSIONS):
+            binds = set()
+            for gen in node.generators:
+                _collect_bindings(gen.target, binds, set(), set(), False)
+            inner = chain + [('comp', binds, set(), set())]
+        else:
+            inner = chain
+        for child in ast.iter_child_nodes(node):
+            walk(child, inner)
+
+    walk(tree, [('module', set(), set(), set())])
+    return reads
+
 
 def _expand_isinstance_type_constants(tree):
     """Replace a module-level constant used as isinstance()'s second argument with its value.
@@ -382,18 +543,40 @@ def _expand_isinstance_type_constants(tree):
     the constant from being mistaken for a numeric tuple, and leaves the ordinary type names
     for the typed and general paths to compile.  A type-tuple or alias assignment is dropped
     when no other read of the name remains; other module assignments are left untouched.
+
+    An expansion only replaces a use where the name really denotes that module constant: not
+    where a parameter, local, comprehension target or class-body binding shadows it, and not
+    where the use can run before the assignment (a function defined above it).  Every other
+    use keeps the name, so the runtime path sees the value CPython sees (or its NameError).
     """
     defs = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
     if 'isinstance' in defs:
         return False
-    constants = {}
-    for stmt in tree.body:
+    candidates = {}
+    for index, stmt in enumerate(tree.body):
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
-            name = stmt.targets[0].id
-            constants.setdefault(name, []).append(stmt.value)
+            name, target, value = stmt.targets[0].id, stmt.targets[0], stmt.value
         elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.value is not None:
-            constants.setdefault(stmt.target.id, []).append(stmt.value)
-    constants = {name: values[0] for name, values in constants.items() if len(values) == 1}
+            name, target, value = stmt.target.id, stmt.target, stmt.value
+        else:
+            continue
+        candidates.setdefault(name, []).append((index, target, value))
+    bindings = _module_bindings(tree)
+    forbidden = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Global):
+            forbidden.update(node.names)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            forbidden.add(node.target.id)
+    constants, where = {}, {}
+    for name, found in candidates.items():
+        if len(found) != 1 or name in forbidden:
+            continue
+        index, target, value = found[0]
+        if bindings.get(name) != [target]:
+            continue
+        constants[name] = value
+        where[name] = index
 
     def is_type(node, seen):
         if isinstance(node, ast.Name):
@@ -408,24 +591,37 @@ def _expand_isinstance_type_constants(tree):
             return bool(node.elts) and all(is_type(e, seen) for e in node.elts)
         return False
 
-    def expand(node, seen):
+    module_allowed = {name for name, value in constants.items() if is_type(value, frozenset())}
+
+    def expand_value(node, seen):
+        # Resolve inside a module constant with module scope, whatever a local at the use means.
         if isinstance(node, ast.Tuple):
             out = []
             for e in node.elts:
-                out.extend(expand(e, seen))
+                out.extend(expand_value(e, seen))
             return out
-        if isinstance(node, ast.Name) and node.id in constants and node.id not in seen:
-            return expand(constants[node.id], seen | {node.id})
+        if isinstance(node, ast.Name) and node.id in module_allowed and node.id not in seen:
+            return expand_value(constants[node.id], seen | {node.id})
         return [node]
 
     changed = False
-    for call in ast.walk(tree):
-        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
-                and call.func.id == 'isinstance' and len(call.args) == 2 and not call.keywords):
-            continue
+    for call, chain, index in _isinstance_uses(tree):
         spec = call.args[1]
-        expanded = expand(spec, frozenset())
-        if not expanded or not all(is_type(e, frozenset()) for e in expanded):
+        allowed = {name for name in module_allowed
+                   if where[name] < index and not _shadowed(name, chain)}
+
+        def expand_use(node):
+            if isinstance(node, ast.Tuple):
+                out = []
+                for e in node.elts:
+                    out.extend(expand_use(e))
+                return out
+            if isinstance(node, ast.Name) and node.id in allowed:
+                return expand_value(constants[node.id], frozenset((node.id,)))
+            return [node]
+
+        expanded = expand_use(spec)
+        if not expanded or not all(isinstance(e, (ast.Name, ast.Attribute)) for e in expanded):
             continue
         if len(expanded) == 1 and expanded[0] is spec:
             continue
@@ -438,7 +634,9 @@ def _expand_isinstance_type_constants(tree):
     # whose every use was replaced, repeating so a constant reached only through a dropped one
     # goes too.  Only a type tuple or alias is dropped: an unrelated unused module assignment can
     # still have a side effect (`X = print("hi")`) and must keep running.  The values themselves
-    # are left alone, so a constant that is also read elsewhere keeps its nesting.
+    # are left alone, so a constant that is also read elsewhere keeps its nesting.  A use left in
+    # place (shadowed, or able to run before the assignment) still counts as a read, so its
+    # assignment stays and a name that cannot be built here is refused by name instead.
     def target_of(stmt):
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
             return stmt.targets[0].id
@@ -448,15 +646,13 @@ def _expand_isinstance_type_constants(tree):
 
     droppable = {name for name, value in constants.items() if is_type(value, frozenset())}
     while True:
-        loads = {}
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
-                loads[node.id] = loads.get(node.id, 0) + 1
+        reads = _module_reads(tree)
         body = []
         dropped = False
         for stmt in tree.body:
             target = target_of(stmt)
-            if target in droppable and loads.get(target, 0) == 0:
+            if target in droppable and not any(not _shadowed(target, chain)
+                                               for chain in reads.get(target, ())):
                 dropped = True
                 continue
             body.append(stmt)
@@ -464,7 +660,6 @@ def _expand_isinstance_type_constants(tree):
         if not dropped:
             break
     return True
-
 
 def rewrite(source, notes=None):
     """The program with its tuples lowered; the source as written when no tuple use needs it (or when one is not
