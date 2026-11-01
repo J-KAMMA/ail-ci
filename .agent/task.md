@@ -1,15 +1,6 @@
-**Re-apply PR #301 (no-implicit-decl) on the current tree and fix its CI failures.** Fetch it anonymously: `git fetch https://github.com/J-KAMMA/ail-ci.git no-implicit-decl`. Its change is `git diff $(git merge-base FETCH_HEAD HEAD) FETCH_HEAD -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json'`. Apply it here and resolve conflicts by keeping both sides' fixes. integ has since merged #284 (int64 default, intmode.py), which changed how cruntime.py's `/*B<*/…/*B|*/…/*B>*/` big/non-big blocks are chosen.
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_pre246 test_ail_pre33.
 
-The PR has two parts:
-1. Define `ail__math_double` on the non-big side.
-2. Add `pipeline.STRICT_DECL_FLAGS` (`-Werror=implicit-function-declaration -Werror=implicit-int -Werror=incompatible-pointer-types`) to every compile of generated C.
-
-On the current tree, its test_ail_no_implicit_decl fails with `error: redefinition of 'ail__math_double'` in general-path C. Make `ail__math_double` defined exactly once in every runtime world: typed and general, default int64 and --exact-int. Keep the strict flags.
-
-Acceptance:
-- test_ail_no_implicit_decl, test_ail_int64_default and test_ail_safetynet pass.
-- The 10 lab/compare tasks build under both the default and --exact-int, with no compiler diagnostics.
-- Run `python3 tools/diff_ids.py` and `python3 tools/update_manifest.py`, then commit. Change nothing else.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
