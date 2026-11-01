@@ -175,6 +175,8 @@ def run_array(tree, text):
             return
 
     def fix(node):
+        if isinstance(node, ast.Call) and b.attr(node.func) == 'array' and node.keywords:
+            return ast.Call(func=stdlib5.name('_ail_arr_bad_kw'), args=[], keywords=[])
         if b.attr(node) == 'array':
             return stdlib5.name('_AilArray')
         return None

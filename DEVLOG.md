@@ -1,3 +1,24 @@
+## 2026-11-01 -- CPython `array` on the general path (job-std_array-11012214)
+
+`lab/stdlib/array` now has twelve realistic `array` programs. Initially 7 built (all on the general
+path) and 5 were refused; after the fixes 9 build and match CPython 3.12 stdout and exit status on
+both `AIL_IR=0` and `AIL_IR=1`. The blockers fixed were `array.index(x, start[, stop])` (blocking
+`inventory`) and `array.fromlist()` (blocking `matrix_rows`), plus CPython's slice behaviour,
+index/remove errors, comparison and in-place add/multiply messages, `extend` same-typecode errors,
+and `array(...)` keyword-argument refusal, all in `python/pkg-v12/prelude_array.py` and the call
+rewrite in `smalllib5.py`. Remaining refusals are recorded with their exact text in
+`lab/stdlib/array/RESULTS.md`: `'f'` (float32), `'u'` (unicode) and `tobytes`/`frombytes`/`buffer_info`
+need new storage features. No compiler C or runtime text changed, so the ten `lab/compare` programs
+keep their generated C.
+
+Added `AIL_CURRENT/test_ail_std_array.py` (registered through `tests.d/test_ail_std_array.txt`),
+which compares the nine passing programs with CPython on both IR modes. Probes in `/tmp/probes`
+(`arr_ctor`, `arr_ctor_kw`, `arr_methods`, `arr_slices`, `arr_slices_alias`, `arr_sources`,
+`arr_widths`, `arr_bounds`, `arr_cmp`, `arr_add_mul`, `arr_mut_errors`) match CPython on both
+`~/tools/cmp.sh` builds; the literal `'f'`/`'u'`/`tobytes` forms are refused by name. Also ran
+`test_ail_std_array`, `test_ail_array_ref`, `test_ail_array_t2`, `test_ail_stdlib5`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`, then refreshed the manifest.
+
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
