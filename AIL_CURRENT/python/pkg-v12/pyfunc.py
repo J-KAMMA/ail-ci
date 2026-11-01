@@ -30002,14 +30002,23 @@ CLONE_CAP = 4
 
 
 def _comp_element_kind(iter_node, ctx, scope):
-    """The element kind a comprehension's source yields, for the call-site claim of `_claim`."""
-    if isinstance(iter_node, ast.Name) and iter_node.id in scope:
-        return scope[iter_node.id]
-    if (_is_flist_call(iter_node, ctx) or isinstance(iter_node, ast.Name)
-            and (ctx.kind.get(iter_node.id) == FLIST or ctx.types.get(iter_node.id) == FLIST)):
-        return FLT
-    if _is_str_expr(iter_node, ctx):
+    """The element kind a comprehension's source yields, for the call-site claim of `_claim`.
+
+    Mirrors `_listcomp_kind`'s own element inference: a slice yields the element of the sequence
+    it wraps (`_iter_elem_is_str` and `_is_flist_name` both look through it), an enclosing
+    comprehension target is answered from this walk's own scope, and str-ness comes from
+    `_iter_elem_is_str` -- the same question `_iter_plan` asks -- rather than `_is_str_expr`,
+    which only recognises a str VALUE and so read a `list[str]` Name (or a slice of one) as int.
+    """
+    source = iter_node
+    while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
+        source = source.value
+    if isinstance(source, ast.Name) and source.id in scope:
+        return scope[source.id]
+    if _iter_elem_is_str(source, ctx):
         return STR
+    if _is_flist_call(source, ctx) or _is_flist_name(source, ctx):
+        return FLT
     return INT
 
 
@@ -30029,7 +30038,7 @@ def _comprehension_claims(fn, ctx):
             if node.id in scope:
                 claims[id(node)] = scope[node.id]
             return
-        if isinstance(node, (ast.ListComp, ast.SetComp, ast.GeneratorExp)):
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
             local = dict(scope)
             for g in node.generators:
                 walk(g.iter, local)                 # the source still sees an enclosing binding
@@ -30041,7 +30050,11 @@ def _comprehension_claims(fn, ctx):
                             local.pop(e.id, None)
                 for c in g.ifs:
                     walk(c, local)
-            walk(node.elt, local)
+            if isinstance(node, ast.DictComp):
+                walk(node.key, local)
+                walk(node.value, local)
+            else:
+                walk(node.elt, local)
             return
         for child in ast.iter_child_nodes(node):
             walk(child, scope)

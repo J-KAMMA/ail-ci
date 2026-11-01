@@ -241,5 +241,51 @@ class Int64Edges(unittest.TestCase):
         self.assertGreater(checked["beyond"], 20)
 
 
+COMPREHENSION_RUN = r"""import math
+
+
+def length(s: str) -> int:
+    return len(s)
+
+
+def floors(xs: list[float]) -> list[int]:
+    return [math.floor(x) for x in xs]
+
+
+def shorten(words: list[str]) -> list[int]:
+    return [length(w) for w in words]
+
+
+def tail(words: list[str]) -> list[int]:
+    return [length(w) for w in words[1:]]
+
+
+print(shorten(["a", "bb", "ccc"]))
+print(tail(["a", "bb", "ccc", "dddd"]))
+print(floors([1.9, -1.1, 2.0, -0.0]))
+print(shorten([]))
+"""
+
+
+class ComprehensionCallSiteKinds(unittest.TestCase):
+    def test_typed_path_keeps_each_comprehensions_element_kind(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = Path(tmp, "comp.py")
+            source.write_text(COMPREHENSION_RUN, encoding="utf-8")
+            want = subprocess.run([sys.executable, str(source)], capture_output=True, text=True,
+                                  timeout=120)
+            env = env_for("default")
+            env["AIL_NO_GENERAL"] = "1"
+            made = subprocess.run(
+                [sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", source.name,
+                 "--syntax", "python", "-o", "comp"],
+                cwd=tmp, capture_output=True, text=True, timeout=900, env=env)
+            self.assertEqual(made.returncode, 0, made.stderr[-2000:])
+            got = subprocess.run([str(Path(tmp, "comp"))], capture_output=True, text=True,
+                                 timeout=120)
+            self.assertEqual((got.returncode, got.stdout, got.stderr),
+                             (want.returncode, want.stdout, want.stderr))
+
+
 if __name__ == "__main__":
     unittest.main()

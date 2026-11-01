@@ -1,3 +1,28 @@
+## 2026-11-01 -- rbi64edge1 review follow-up: str-list comprehension call-site kind (job-rbi64edge1-11012213)
+
+The review of `cfab295` found that `_comp_element_kind` asked `_is_str_expr` for str-ness, but
+that helper only recognises a str VALUE, so a `list[str]` Name (or a slice of one) was read as int.
+On the typed-only path (`AIL_NO_GENERAL=1`) `[f(w) for w in words]` and `[f(w) for w in words[1:]]`
+were therefore refused as `'s' is annotated str ... caller also supplies int`, while the base tree
+compiled them. The element kind now comes from `_iter_elem_is_str` (the same question `_iter_plan`
+and `_listcomp_kind` ask), looking through a slice, with the float check kept as `_is_flist_call` /
+`_is_flist_name`; `_comprehension_claims` now also walks a `DictComp`'s key and value in its own
+scope. `test_ail_i64edge1` gains a typed-only case covering a `list[str]` name, a str-list slice,
+a `list[float]` floor comprehension and an empty list.
+
+Probes in `/tmp/probes`, compared with CPython on the typed-only, forced-general and default
+builds: `d1_slist_name`, `d2_slist_slice`, `d6_slist_literal`, `d7_flist_name`, `d8_flist_slice`,
+`d9_int_name`, `d10_shadow_reuse`, `e1_slist_local`, `e2_slist_local_slice`, `e5_slist_empty`,
+`e9_slist_arg_func`, `e10_int_and_str_same_comp`, `c1_float_param`, `c2_float_attr`,
+`c4_str_slice`, `c5_float_literal`, `c6_shadow_reuse`, `c13_slist_name_strparam` match on all
+three builds. Remaining typed-path refusals (`c3_str_dict`, `c7_dict_values_float`, `c8_two_gens`,
+`c9_nested_comp`, `c10_strkeys_floor`, `c11_strslice_floor`, `c12_strvalues_floor`,
+`c14_slist_name_ident`, `d3_slist_dict_values`, `d4_slist_dict_keys`, `d5_slist_set`,
+`e3_slist_genexp`, `e4_slist_setcomp`, `e6_str_dict_values_local`, `e7_dictcomp_key`,
+`e8_nested_gen_source`) are refusals on the base tree too; their forced-general and default
+builds still match CPython. Final-state tests: test_ail_i64edge1, test_ail_gpu_g1,
+test_ail_str_comprehension_move, test_ail_float_argument_widening, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
 ## 2026-11-01 -- i64edge1 suite fix: GPU floor/ceil helpers, comprehension call-site kinds (job-rbi64edge1-11012213)
 
 The i64edge change lowered a non-constant `math.floor` / `math.ceil` to `_ail_math_floor` /
