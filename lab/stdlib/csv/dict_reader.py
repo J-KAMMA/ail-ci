@@ -10,3 +10,13 @@ print("fields:", reader.fieldnames)
 given = csv.DictReader(io.StringIO("Alice,90\nBob,85\n"), fieldnames=["name", "score"])
 for row in given:
     print(row["name"], row["score"])
+
+extra = csv.DictReader(
+    io.StringIO("1,Alice,90,red\n2,Bob\n"),
+    fieldnames=["id", "name"],
+    restkey="more",
+    restval="?",
+)
+for row in extra:
+    print(row["id"], row["name"], row.get("more"), row.get("score", "?"))
+print("data lines:", reader.line_num)
