@@ -23,6 +23,7 @@ partial() is called (a def or lambda of the program with plain parameters), so i
 """
 import ast
 import datetime as D
+import heapq
 import itertools
 import json
 import math
@@ -197,6 +198,25 @@ class G1Prelude(unittest.TestCase):
             self.assertEqual(outcome(lambda: list(G._ail_batched(data, k))), outcome(lambda: list(itertools.batched(data, k))))
             self.assertEqual(list(G._ail_repeat(7, k)), list(itertools.repeat(7, k)))
         self.assertEqual(list(itertools.islice(G._ail_repeat("x"), 3)), ["x"] * 3)
+
+    def test_merge(self):
+        rng = random.Random(7)
+        for _ in range(2500):
+            streams = []
+            for _ in range(rng.randrange(0, 5)):
+                values = [rng.randrange(-4, 5) for _ in range(rng.randrange(0, 7))]
+                if rng.random() < 0.7:
+                    values.sort(reverse=rng.random() < 0.3)
+                streams.append(values)
+            reverse = rng.random() < 0.5
+            key = rng.choice([None, lambda v: (v % 3, -v), lambda v: -v])
+            self.assertEqual(list(G._ail_merge(*streams, key=key, reverse=reverse)),
+                             list(heapq.merge(*streams, key=key, reverse=reverse)), (streams, key, reverse))
+        self.assertEqual(list(G._ail_merge()), [])
+        self.assertEqual(list(itertools.islice(G._ail_merge(itertools.count(), itertools.count(0, 2)), 10)),
+                         list(itertools.islice(heapq.merge(itertools.count(), itertools.count(0, 2)), 10)))
+        self.assertEqual(outcome(lambda: list(G._ail_merge([1], key=1))),
+                         outcome(lambda: list(heapq.merge([1], key=1))))
 
     def test_isclose(self):
         rng = random.Random(4)

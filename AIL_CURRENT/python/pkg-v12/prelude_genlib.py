@@ -686,6 +686,57 @@ def _ail_batched(iterable, n):
         yield tuple(batch)
 
 
+def _ail_merge_before(a, b, reverse):
+    # heapq.merge orders by key, then by the input's position (CPython's order * direction), so an equal
+    # key from an earlier iterable comes first even when the merge is reversed.
+    if reverse:
+        if b[0] < a[0]:
+            return True
+        if a[0] < b[0]:
+            return False
+    else:
+        if a[0] < b[0]:
+            return True
+        if b[0] < a[0]:
+            return False
+    return a[1] < b[1]
+
+
+def _ail_merge(*iterables, key=None, reverse=False):
+    heads = []
+    order = 0
+    for it in iterables:
+        stream = iter(it)
+        try:
+            value = next(stream)
+        except StopIteration:
+            order = order + 1
+            continue
+        if key is None:
+            heads.append([value, order, value, stream])
+        else:
+            heads.append([key(value), order, value, stream])
+        order = order + 1
+    while len(heads) > 0:
+        best = 0
+        for i in range(1, len(heads)):
+            if _ail_merge_before(heads[i], heads[best], reverse):
+                best = i
+        entry = heads[best]
+        yield entry[2]
+        stream = entry[3]
+        try:
+            value = next(stream)
+        except StopIteration:
+            heads.pop(best)
+            continue
+        entry[2] = value
+        if key is None:
+            entry[0] = value
+        else:
+            entry[0] = key(value)
+
+
 # ------------------------------------------------------------------------------------------------ functools, math
 def _ail_isclose(a, b, rel_tol=1e-09, abs_tol=0.0):
     if rel_tol < 0.0 or abs_tol < 0.0:
