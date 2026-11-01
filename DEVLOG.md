@@ -1,3 +1,23 @@
+## 2026-11-01 -- stdlib `operator`: real programs and surface coverage (job-std_operator-11011752)
+
+Added 12 realistic programs under `lab/stdlib/operator/` and built each with the default
+`compile --syntax python`. At the start of the job 3/12 built; after this change 11/12 build and
+all 11 print CPython 3.12's stdout and exit code on the default and forced general builds. The
+remaining program (`sequence_concat.py`) is refused by name for `concat`, `length_hint`, `index`
+and the in-place `i*` family, recorded in `lab/stdlib/operator/RESULTS.md`.
+
+`ail_syntax.py` now lowers `itemgetter(k, j, ...)` (as a key or a value), `attrgetter("a", "b.c")`,
+`methodcaller("name", ...)`, `setitem` / `delitem` (small mutation helpers), `contains`,
+`countOf` / `indexOf` (element-by-element, CPython's sequence protocol rather than `str.count` /
+`str.index`), `truth`, `is_` and `is_not`. The no-argument `itemgetter()` / `attrgetter()` stay
+refused because CPython raises `TypeError`.
+
+Coverage: `test_ail_std_operator.py` (registered through `tests.d/`) builds the 11 programs with
+AIL_IR=0, AIL_IR=1 and through the general path and compares stdout and exit code with CPython;
+it also pins the `sequence_concat` refusal text. The generated C of the 10 `lab/compare/src`
+tasks (`main.ail` and the `main.py` variants that build) was captured before and after with
+`--debug-dir`; every `program.c` is byte-identical (none imports `operator`).
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use

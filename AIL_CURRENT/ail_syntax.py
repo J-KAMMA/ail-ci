@@ -1451,6 +1451,27 @@ _MATH_HELPERS['tw_indent'] = (
     '        else:\n'
     '            out.append(line)\n'
     '    return "".join(out)\n')
+_MATH_HELPERS['op_setitem'] = (
+    'def _ail_op_setitem(o, k, v):\n'
+    '    o[k] = v\n')
+_MATH_HELPERS['op_delitem'] = (
+    'def _ail_op_delitem(o, k):\n'
+    '    del o[k]\n')
+_MATH_HELPERS['op_countof'] = (
+    'def _ail_op_countof(seq, value):\n'
+    '    n = 0\n'
+    '    for item in seq:\n'
+    '        if item == value:\n'
+    '            n += 1\n'
+    '    return n\n')
+_MATH_HELPERS['op_indexof'] = (
+    'def _ail_op_indexof(seq, value):\n'
+    '    index = 0\n'
+    '    for item in seq:\n'
+    '        if item == value:\n'
+    '            return index\n'
+    '        index += 1\n'
+    '    raise ValueError("sequence.index(x): x not in sequence")\n')
 _MATH_HELPERS['string_capwords'] = (
     'def _ail_string_capwords(s, sep):\n'
     '    if sep and not isinstance(sep, str) and not isinstance(sep, bytes):\n'
@@ -1487,7 +1508,9 @@ _SMALL_MODULES = {
     'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
     'string': (*tuple(_STRING_CONSTANTS), 'capwords'),
     'os': ('cpu_count',),
-    'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem', 'itemgetter'),
+    'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem',
+                 'itemgetter', 'attrgetter', 'methodcaller', 'setitem', 'delitem', 'contains', 'countOf',
+                 'indexOf', 'truth', 'is_', 'is_not'),
 }
 _SMALL_NOTE = {
     'textwrap': 'textwrap.wrap(text[, width]), fill(text[, width]), dedent(text), shorten(text, width) and '
@@ -1499,7 +1522,8 @@ _SMALL_NOTE = {
               'digits, hexdigits, octdigits, punctuation, whitespace, printable) and capwords()',
     'os': 'os.cpu_count() is built; the rest of os (environ, path, ...) is not',
     'operator': 'operator.add/sub/mul/truediv/floordiv/mod/pow/and_/or_/xor/lshift/rshift, the comparisons, '
-                'neg/pos/invert/not_/abs/getitem called directly, and itemgetter(k) as a key= are built',
+                'neg/pos/invert/not_/abs/getitem/contains/countOf/indexOf/truth/is_/is_not called directly, '
+                'setitem/delitem, and itemgetter/attrgetter/methodcaller (as a key= or a value) are built',
 }
 _TYPING = {'List': 'list', 'Dict': 'dict', 'Set': 'set', 'Tuple': 'tuple', 'FrozenSet': 'frozenset'}
 _DROPPED = ('heapq', 'bisect', 'textwrap', 'typing', 'dataclasses', '__future__', 'time', 'string', 'os', 'operator', 're')
@@ -2511,6 +2535,11 @@ class _Surface:
                 return ast.Call(func=ast.Name(id='_ail_tw_' + name, ctx=ast.Load()), args=[text, width], keywords=[])
         if plain and module == 'os' and name == 'cpu_count' and not args:
             return ast.Call(func=ast.Name(id='_ail_cpu_count', ctx=ast.Load()), args=[], keywords=[])
+        if module == 'operator' and name == 'methodcaller' \
+                and not any(isinstance(arg, ast.Starred) for arg in args):
+            built = self.operator_methodcaller(node)
+            if built is not None:
+                return built
         if plain and module == 'operator':
             if name in _OPERATOR_BINARY and len(args) == 2:
                 return ast.BinOp(left=args[0], op=_OPERATOR_BINARY[name](), right=args[1])
@@ -2524,15 +2553,87 @@ class _Surface:
                 return ast.Call(func=ast.Name(id='abs', ctx=ast.Load()), args=args, keywords=[])
             if name == 'getitem' and len(args) == 2:
                 return ast.Subscript(value=args[0], slice=args[1], ctx=ast.Load())
-            if name == 'itemgetter' and len(args) == 1:
-                return ast.Lambda(
-                    args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_ail_item')], vararg=None,
-                                       kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]),
-                    body=ast.Subscript(value=ast.Name(id='_ail_item', ctx=ast.Load()), slice=args[0],
-                                       ctx=ast.Load()))
+            if name == 'itemgetter':
+                built = self.operator_itemgetter(args)
+                if built is not None:
+                    return built
+            if name == 'attrgetter':
+                built = self.operator_attrgetter(args)
+                if built is not None:
+                    return built
+            if name == 'setitem' and len(args) == 3:
+                self.helper('op_setitem')
+                return ast.Call(func=ast.Name(id='_ail_op_setitem', ctx=ast.Load()), args=args, keywords=[])
+            if name == 'delitem' and len(args) == 2:
+                self.helper('op_delitem')
+                return ast.Call(func=ast.Name(id='_ail_op_delitem', ctx=ast.Load()), args=args, keywords=[])
+            if name == 'contains' and len(args) == 2:
+                return ast.Compare(left=args[1], ops=[ast.In()], comparators=[args[0]])
+            if name == 'countOf' and len(args) == 2:
+                self.helper('op_countof')
+                return ast.Call(func=ast.Name(id='_ail_op_countof', ctx=ast.Load()),
+                                args=args, keywords=[])
+            if name == 'indexOf' and len(args) == 2:
+                self.helper('op_indexof')
+                return ast.Call(func=ast.Name(id='_ail_op_indexof', ctx=ast.Load()),
+                                args=args, keywords=[])
+            if name == 'truth' and len(args) == 1:
+                return ast.Call(func=ast.Name(id='bool', ctx=ast.Load()), args=args, keywords=[])
+            if name == 'is_' and len(args) == 2:
+                return ast.Compare(left=args[0], ops=[ast.Is()], comparators=[args[1]])
+            if name == 'is_not' and len(args) == 2:
+                return ast.Compare(left=args[0], ops=[ast.IsNot()], comparators=[args[1]])
         self.keep.add(module)
         self.note(node, f'{module}.{name}() with these arguments is not built; ' + _SMALL_NOTE[module])
         return None
+
+    def _operator_lambda(self, params, body):
+        return ast.Lambda(
+            args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=each) for each in params], vararg=None,
+                               kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]), body=body)
+
+    def operator_itemgetter(self, args):
+        """`itemgetter(k)` / `itemgetter(k, j)` as the one-argument lambda the key= lowering inlines."""
+        if not args:
+            return None
+        def at(index):
+            return ast.Subscript(value=ast.Name(id='_ail_item', ctx=ast.Load()), slice=index, ctx=ast.Load())
+        if len(args) == 1:
+            body = at(args[0])
+        else:
+            body = ast.Tuple(elts=[at(each) for each in args], ctx=ast.Load())
+        return self._operator_lambda(['_ail_item'], body)
+
+    def operator_attrgetter(self, args):
+        """`attrgetter('a')` / `attrgetter('a', 'b.c')` as a one-argument lambda (dotted names traverse)."""
+        if not args:
+            return None
+        parts = []
+        for arg in args:
+            if not (isinstance(arg, ast.Constant) and isinstance(arg.value, str)):
+                return None
+            node = ast.Name(id='_ail_attr', ctx=ast.Load())
+            for piece in arg.value.split('.'):
+                if not piece.isidentifier():
+                    return None
+                node = ast.Attribute(value=node, attr=piece, ctx=ast.Load())
+            parts.append(node)
+        if len(parts) == 1:
+            body = parts[0]
+        else:
+            body = ast.Tuple(elts=parts, ctx=ast.Load())
+        return self._operator_lambda(['_ail_attr'], body)
+
+    def operator_methodcaller(self, node):
+        """`methodcaller('strip')` / `methodcaller('replace', 'a', 'b')` as a one-argument lambda."""
+        args = node.args
+        if not args or not (isinstance(args[0], ast.Constant) and isinstance(args[0].value, str)
+                            and args[0].value.isidentifier()):
+            return None
+        call = ast.Call(func=ast.Attribute(value=ast.Name(id='_ail_mc', ctx=ast.Load()),
+                                           attr=args[0].value, ctx=ast.Load()),
+                        args=args[1:], keywords=node.keywords)
+        return self._operator_lambda(['_ail_mc'], call)
 
     def math_call(self, node, name):
         args = node.args
