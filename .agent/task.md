@@ -1,13 +1,6 @@
-**Re-apply PR #305 (cc-split) on the current tree and fix its three CI failures.** Fetch it anonymously: `git fetch https://github.com/J-KAMMA/ail-ci.git cc-split`. Its change is `git diff $(git merge-base FETCH_HEAD HEAD) FETCH_HEAD -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json'`; apply the same change here, resolving conflicts by keeping both sides' fixes (integ has since merged #284 int64-default and #307 module-system).
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_packaging.
 
-Defaults must stay as in the PR: clone dedupe on; split only with AIL_CC_SPLIT=N / AIL_CC_JOBS=N; exit merge only with AIL_EXIT_MERGE=1.
-
-Fix these CI failures of the PR:
-1. test_ail_server `test_import_time_environment_reads_are_all_keyed`: `AIL_EXIT_MERGE_MIN` is read at import time in pyfunc.py; add it to the keyed environment list the test expects (or read it lazily), whichever matches how the other AIL_* knobs are handled.
-2. test_ail_packaging `test_every_compiler_file_is_selected`: add `python/pkg-v12/ccsplit.py` to the wheel file selection.
-3. test_ail_sdk `test_sdk_files_cover_every_compiler_module_import`: register ccsplit.py in the SDK manifest like other modules (pyc.py imports it).
-
-Then run `python3 tools/diff_ids.py` and `python3 tools/update_manifest.py`, run test_ail_cc_split, test_ail_server, test_ail_packaging, test_ail_sdk, test_ail_safetynet, and commit. Check that the generated C of the 10 lab/compare tasks is byte-identical to the base except chain_relax's deduped fmt clones. Change nothing else.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
