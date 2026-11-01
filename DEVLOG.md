@@ -1,3 +1,37 @@
+## 2026-11-01 -- stdlib functools: 9 of 12 real programs build and match CPython (job-std_functools-11011436)
+
+Added `lab/stdlib/functools/` with twelve 20-40-line Python programs using `functools` the way ordinary
+code does: `reduce` (both forms and the empty error), `partial`, `lru_cache` / `cache` with
+`cache_info` / `cache_clear` / `maxsize` / `typed`, `cmp_to_key`, `total_ordering`, `partialmethod`,
+`wraps`, `singledispatch` and `cached_property`. Nine build on the general path and print exactly
+CPython 3.12's stdout with the same exit status on both the default and `AIL_UNIFIED_FORCE=1` builds;
+`RESULTS.md` records the three refusals (`wraps` / custom decorators, `singledispatch`'s overload
+spelling, `cached_property`) as out-of-scope follow-ups with their exact first error.
+
+Compiler work: (1) `reduce(f, [])` raises CPython's `TypeError` instead of `IndexError` in the typed
+tuple lowering and instead of `RuntimeError` in the stream lowering; (2) the general `@lru_cache` /
+`@cache` wrapper gained `cache_info` / `cache_clear` / `cache_parameters`, `CacheInfo` repr, hits /
+misses, `maxsize`, true LRU eviction, `typed=True` keys, the lone-int/str fast-path key and the
+unhashable-argument `TypeError`, and a program that reads them keeps typed mixed-mode clones off the
+wrapper; (3) general `cmp_to_key` is a prelude stable merge sort for `sorted`, `.sort`, `min` and
+`max` with a function or lambda comparator; (4) general `partialmethod` with keyword-bound arguments
+becomes an ordinary method and honours call-site overrides. Programs that use none of the new forms
+emit exactly the old C.
+
+Probes in `/tmp/probes/` (all match CPython on both builds through `bash ~/tools/cmp.sh`):
+`p_sf_reduce.py` (list/tuple/dict-values, empty, initializer, negative, values through a list item and
+a dict value), `p_sf_lru.py` (typed int/float/bool/str, untyped fast path, multi-argument keys,
+`maxsize=0`, LRU eviction through a hit, unbounded `cache`, `cache_parameters`, `CacheInfo` repr,
+list/dict/set unhashable errors), `p_sf_cmp.py` (named and lambda comparators, reverse, empty, one row,
+`list.sort`, `min`/`max` and their empty errors, values through a dict value), `p_sf_pmethod.py`
+(keyword-bound methods, call-site keyword overrides, values through a list item, a dict value and an
+argument). Generated C of the lab/compare tasks that build is byte-identical to `HEAD` (five plain,
+`chain_relax` and `rail_transfer` with `--exact-int`); `scar_life`, `tally_lang` and `tree_fold`
+already fail at `HEAD` with the same refusal text.
+
+Added `AIL_CURRENT/test_ail_std_functools.py` (9 programs x 2 builds) and registered it through
+`AIL_CURRENT/tests.d/test_ail_std_functools.txt`.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`

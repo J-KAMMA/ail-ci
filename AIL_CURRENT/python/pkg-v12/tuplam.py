@@ -428,7 +428,13 @@ class Lams:
                 self.env[tmp] = st
                 src = name(tmp)
             it = et
-            pre = [ast.Assign(targets=[ast.Name(id=acc, ctx=ast.Store())],
+            empty = ast.Compare(left=ast.Call(func=name('len'), args=[fresh_copy(src)], keywords=[]),
+                                ops=[ast.Eq()], comparators=[const(0)])
+            raise_empty = ast.Raise(exc=ast.Call(func=name('TypeError'),
+                                                 args=[const('reduce() of empty iterable with no initial value')],
+                                                 keywords=[]), cause=None)
+            pre = [ast.If(test=empty, body=[raise_empty], orelse=[]),
+                   ast.Assign(targets=[ast.Name(id=acc, ctx=ast.Store())],
                               value=ast.Subscript(value=fresh_copy(src), slice=const(0), ctx=ast.Load()), lineno=0)]
             loop_iter = ast.Subscript(value=fresh_copy(src), slice=ast.Slice(lower=const(1), upper=None, step=None),
                                       ctx=ast.Load())

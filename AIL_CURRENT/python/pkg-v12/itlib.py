@@ -1616,7 +1616,7 @@ class Streams:
             pre.append(assign(started, const(0)))
             loop_body = pull + [ast.If(test=is_first, body=[assign(acc, _name(x)), assign(started, const(1))],
                                        orelse=[assign(acc, combine)])]
-            tail = [ast.If(test=copy.deepcopy(is_first), body=[ast.Raise(exc=_call(_name("RuntimeError"), const(
+            tail = [ast.If(test=copy.deepcopy(is_first), body=[ast.Raise(exc=_call(_name("TypeError"), const(
                 'reduce() of empty iterable with no initial value')), cause=None)], orelse=[])]
         statements = pre + setup + [ast.While(test=const(True), body=loop_body, orelse=[])] + tail
         _locate(statements, call)

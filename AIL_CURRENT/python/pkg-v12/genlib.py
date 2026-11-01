@@ -178,6 +178,13 @@ def _simple(v):
     return isinstance(v, ast.Constant) or (isinstance(v, ast.Name) and isinstance(v.ctx, ast.Load))
 
 
+def _literal_default(v):
+    """A default expression that is safe to evaluate again when partial() is built: a literal or its sign."""
+    if isinstance(v, ast.UnaryOp) and isinstance(v.op, (ast.USub, ast.UAdd)):
+        v = v.operand
+    return isinstance(v, ast.Constant)
+
+
 def _dotted(node):
     parts = []
     while isinstance(node, ast.Attribute):
@@ -194,7 +201,7 @@ class _Renamer(ast.NodeTransformer):
     def __init__(self, aliases, names, defs):
         self.aliases = aliases     # local name -> module (import m [as a])
         self.names = names         # local name -> 'module.attr' (from m import attr [as b])
-        self.defs = defs           # top-level def name -> its parameter names (plain parameters only)
+        self.defs = defs           # top-level def name -> (parameter names, default expressions)
         self.used = set()
         self.partials = 0
         self.module_level = set()   # names bound at module level (set by rewrite)
@@ -262,41 +269,64 @@ class _Renamer(ast.NodeTransformer):
     def _partial(self, node):
         """functools.partial(f, a, b, k=v) of a def or lambda of the program, whose parameters are all plain: a closure
         built where partial() was called (the general path has no callable instances), `(lambda _b0: lambda _p0: f(_b0,
-        _p0))(a)`. As the function argument of map / filter / sorted(key=) ... with bound values that are constants or
-        names it is the plain lambda those calls take."""
+        _p0))(a)`. A parameter the function defaults may be left unbound too: the wrapper carries the same literal
+        default, so `partial(f, 1)(2)` still calls `f(1, 2)` and `partial(f, 1)(2, 3)` overrides it, as CPython does.
+        As the function argument of map / filter / sorted(key=) ... with bound values that are constants or names it is
+        the plain lambda those calls take."""
         if not node.args or any(isinstance(a, ast.Starred) for a in node.args) or any(k.arg is None for k in node.keywords):
             raise Unsupported('functools.partial() with no function or with *args / **kwargs is not built on the general path')
         fn = self.visit(node.args[0])
         if isinstance(fn, ast.Name) and fn.id in self.defs:
-            params = self.defs[fn.id]
-        elif isinstance(fn, ast.Lambda) and not (fn.args.vararg or fn.args.kwarg or fn.args.kwonlyargs or fn.args.defaults
+            params, defaults = self.defs[fn.id]
+        elif isinstance(fn, ast.Lambda) and not (fn.args.vararg or fn.args.kwarg or fn.args.kwonlyargs
                                                  or fn.args.posonlyargs):
             params = [a.arg for a in fn.args.args]
+            defaults = {p: d for p, d in zip(params[len(params) - len(fn.args.defaults):], fn.args.defaults)}
         else:
             raise Unsupported('functools.partial() of anything but a def or lambda of the program with plain parameters '
                               '(its number of parameters must be known; no callable instances on the general path)')
         bound = [self.visit(a) for a in node.args[1:]]
         kws = [(k.arg, self.visit(k.value)) for k in node.keywords]
-        if len(bound) + len(kws) > len(params):
+        if len(bound) > len(params):
             raise Unsupported('functools.partial() binds more arguments than the function has parameters')
-        if kws and [n for n, _ in kws] != params[len(params) - len(kws):]:
-            raise Unsupported('functools.partial() with keyword arguments is built only for the last parameters of the '
-                              'function, in order')
+        seen = set()
+        for name, _ in kws:
+            if name not in params:
+                raise Unsupported('functools.partial() has no parameter named %s' % name)
+            if name in seen:
+                raise Unsupported('functools.partial() binds %s more than once' % name)
+            seen.add(name)
+        if any(name in seen for name in params[:len(bound)]):
+            raise Unsupported('functools.partial() binds a parameter both by position and by keyword')
+        first_kw = min([params.index(name) for name in seen] or [len(params)])
+        free = params[len(bound):first_kw]
+        for name in params[first_kw:]:
+            if name not in seen and name not in defaults:
+                raise Unsupported('functools.partial() with keyword arguments leaves the required parameter %s after the '
+                                  'first keyword argument; bind it too' % name)
+        for name in free + [p for p in params[first_kw:] if p not in seen]:
+            if name in defaults and not _literal_default(defaults[name]):
+                raise Unsupported('functools.partial() needs a literal default for parameter %s' % name)
         self.partials += 1
         tag = self.partials
         bnames = ['_pb%d_%d' % (tag, i) for i in range(len(bound) + len(kws))]
-        rest = len(params) - len(bound) - len(kws)
-        pnames = ['_pa%d_%d' % (tag, i) for i in range(rest)]
+        pnames = ['_pa%d_%d' % (tag, i) for i in range(len(free))]
+        pdefaults = [copy.deepcopy(defaults[name]) for name in free if name in defaults]
 
-        def build(values, free):
+        def build(values, free_values):
+            keywords = [ast.keyword(arg=name, value=(ast.Name(id=bnames[len(bound) + i], ctx=ast.Load())
+                                                     if free_values else v))
+                        for i, (name, v) in enumerate(kws)]
+            keywords.extend(ast.keyword(arg=name, value=copy.deepcopy(defaults[name]))
+                            for name in params[first_kw:] if name not in seen)
             call = ast.Call(func=copy.deepcopy(fn),
-                            args=[ast.Name(id=v, ctx=ast.Load()) if free else v for v in values[:len(bound)]]
-                            + [ast.Name(id=n, ctx=ast.Load()) for n in pnames],
-                            keywords=[ast.keyword(arg=n, value=(ast.Name(id=bnames[len(bound) + i], ctx=ast.Load())
-                                                                 if free else v))
-                                      for i, (n, v) in enumerate(kws)])
+                            args=[ast.Name(id=v, ctx=ast.Load()) if free_values else v
+                                  for v in values[:len(bound)]]
+                            + [ast.Name(id=pname, ctx=ast.Load()) for pname in pnames],
+                            keywords=keywords)
             lam = ast.Lambda(args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=n) for n in pnames],
-                                                kwonlyargs=[], kw_defaults=[], defaults=[]), body=call)
+                                                kwonlyargs=[], kw_defaults=[],
+                                                defaults=[copy.deepcopy(d) for d in pdefaults]), body=call)
             return ast.fix_missing_locations(ast.copy_location(lam, node))
         values = bound + [v for _, v in kws]
         if not values:
@@ -330,10 +360,129 @@ class _Renamer(ast.NodeTransformer):
     _CLOSING_PIECES = {'itertools.takewhile': ('_ail_takewhile', 2), 'itertools.dropwhile': ('_ail_dropwhile', 2),
                        'functools.reduce': ('_ail_reduce', None)}
 
+    def visit_ClassDef(self, node):
+        methods = {item.name: item for item in node.body if isinstance(item, ast.FunctionDef)}
+        body = []
+        for st in node.body:
+            if (isinstance(st, ast.Assign) and len(st.targets) == 1
+                    and isinstance(st.targets[0], ast.Name) and isinstance(st.value, ast.Call)
+                    and self._key(st.value.func) == 'functools.partialmethod'):
+                target = st.value.args[0] if st.value.args else None
+                if not (isinstance(target, ast.Name) and target.id in methods):
+                    raise Unsupported('functools.partialmethod(...) needs the name of a method of the same class')
+                info = methods[target.id]
+                if any(isinstance(a, ast.Starred) for a in st.value.args[1:]) or any(
+                        k.arg is None for k in st.value.keywords):
+                    raise Unsupported('functools.partialmethod() with *args / **kwargs is not built on the general path')
+                if st.value.args[1:]:
+                    raise Unsupported('functools.partialmethod() with positional arguments is not built on the general path')
+                bound = [(k.arg, self.visit(k.value)) for k in st.value.keywords]
+                names = [a.arg for a in info.args.args]
+                extra = [k for k in bound if k[0] not in names]
+                if extra:
+                    raise Unsupported('functools.partialmethod() has no parameter named %s' % extra[0][0])
+                call_args = []
+                call_kws = []
+                pre = []
+                after_keyword = False
+                call = copy.deepcopy(info.args)
+                first_default = len(call.args) - len(call.defaults)
+                sentinel = '__AIL_PARTIALMETHOD_UNSET__'
+                for pname in names[1:]:
+                    match = [v for n, v in bound if n == pname]
+                    if match:
+                        idx = names.index(pname)
+                        if idx < first_default:
+                            raise Unsupported('functools.partialmethod() binding the required parameter %s '
+                                              'is not built on the general path' % pname)
+                        call.defaults[idx - first_default] = ast.Constant(value=sentinel)
+                        pre.append(ast.If(
+                            test=ast.Compare(left=ast.Name(id=pname, ctx=ast.Load()), ops=[ast.Eq()],
+                                             comparators=[ast.Constant(value=sentinel)]),
+                            body=[ast.Assign(targets=[ast.Name(id=pname, ctx=ast.Store())], value=match[0])],
+                            orelse=[]))
+                        call_kws.append(ast.keyword(arg=pname, value=ast.Name(id=pname, ctx=ast.Load())))
+                        after_keyword = True
+                    elif after_keyword:
+                        call_kws.append(ast.keyword(arg=pname, value=ast.Name(id=pname, ctx=ast.Load())))
+                    else:
+                        call_args.append(ast.Name(id=pname, ctx=ast.Load()))
+                pre.append(ast.Return(value=ast.Call(
+                    func=ast.Attribute(value=ast.Name(id='self', ctx=ast.Load()),
+                                       attr=target.id, ctx=ast.Load()),
+                    args=call_args, keywords=call_kws)))
+                fn = ast.FunctionDef(name=st.targets[0].id,
+                                     args=call,
+                                     body=pre,
+                                     decorator_list=[], returns=copy.deepcopy(info.returns),
+                                     type_comment=None)
+                ast.copy_location(fn, st)
+                ast.fix_missing_locations(fn)
+                body.append(fn)
+                continue
+            body.append(self.visit(st))
+        node.body = body
+        return node
+
+    def _cmp_func(self, value):
+        """The comparison function of a cmp_to_key(...) argument, or None."""
+        if not isinstance(value, ast.Call):
+            return None
+        key = self._key(value.func)
+        if key != 'functools.cmp_to_key':
+            return None
+        if len(value.args) != 1 or value.keywords:
+            raise Unsupported('functools.cmp_to_key(f) takes exactly one function')
+        return self.visit(value.args[0])
+
+    def _cmp_call(self, node, helper):
+        """sorted / min / max / .sort with key=cmp_to_key(f): call the prelude sort helper."""
+        if not (isinstance(node.func, ast.Name) and node.func.id in ('sorted', 'min', 'max')
+                and node.func.id not in self.defs and node.func.id not in self.module_level):
+            return None
+        keys = [k for k in node.keywords if k.arg == 'key']
+        if len(keys) != 1 or any(k.arg is None for k in node.keywords):
+            return None
+        func = self._cmp_func(keys[0].value)
+        if func is None:
+            return None
+        allowed = {'key', 'reverse'} if node.func.id == 'sorted' else {'key'}
+        if any(k.arg not in allowed for k in node.keywords) or len(node.args) != 1 \
+                or isinstance(node.args[0], ast.Starred):
+            raise Unsupported('%s(..., key=cmp_to_key(f)) takes one iterable and key= / reverse= only'
+                              % node.func.id)
+        args = [self.visit(node.args[0]), func]
+        if node.func.id == 'sorted':
+            reverse = next((self.visit(k.value) for k in node.keywords if k.arg == 'reverse'), None)
+            args.append(reverse if reverse is not None else ast.Constant(value=False))
+            name = '_ail_cmp_sorted'
+        else:
+            name = '_ail_cmp_' + node.func.id
+        self.used.add(name)
+        return ast.copy_location(ast.Call(func=ast.Name(id=name, ctx=ast.Load()), args=args, keywords=[]), node)
+
     def visit_Call(self, node):
         key = self._key(node.func)
         if key == 'functools.partial':
             return self._partial(node)
+        if isinstance(node.func, ast.Attribute) and node.func.attr == 'sort':
+            keys = [k for k in node.keywords if k.arg == 'key']
+            if len(keys) == 1:
+                func = self._cmp_func(keys[0].value)
+                if func is not None:
+                    others = [k for k in node.keywords if k.arg not in ('key', 'reverse')]
+                    if others or node.args:
+                        raise Unsupported('list.sort(key=cmp_to_key(f)) takes key= / reverse= only')
+                    reverse = next((self.visit(k.value) for k in node.keywords if k.arg == 'reverse'),
+                                   ast.Constant(value=False))
+                    self.used.add('_ail_cmp_sort_inplace')
+                    return ast.copy_location(ast.Call(
+                        func=ast.Name(id='_ail_cmp_sort_inplace', ctx=ast.Load()),
+                        args=[self.visit(node.func.value), func, reverse], keywords=[]), node)
+        for helper in ('_ail_cmp_sorted', '_ail_cmp_min', '_ail_cmp_max'):
+            got = self._cmp_call(node, helper)
+            if got is not None:
+                return got
         if key == 'json.load':
             # json.load(sys.stdin) is json.loads(sys.stdin.read()): the general path has no file object to
             # hand to a helper, and any other file argument stays refused by name (a binary file, which
@@ -490,8 +639,10 @@ def rewrite(tree):
     defs = {}
     for n in tree.body:
         if (isinstance(n, ast.FunctionDef) and not n.decorator_list and not (
-                n.args.vararg or n.args.kwarg or n.args.kwonlyargs or n.args.defaults or n.args.posonlyargs)):
-            defs[n.name] = [a.arg for a in n.args.args]
+                n.args.vararg or n.args.kwarg or n.args.kwonlyargs or n.args.posonlyargs)):
+            params = [a.arg for a in n.args.args]
+            defaults = {p: d for p, d in zip(params[len(params) - len(n.args.defaults):], n.args.defaults)}
+            defs[n.name] = (params, defaults)
     r = _Renamer(aliases, names, defs)
     r.module_level = _module_names(tree)
     tree.body = [r.visit(n) for n in tree.body]

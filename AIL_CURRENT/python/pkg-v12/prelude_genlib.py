@@ -614,6 +614,78 @@ def _ail_reduce_init(function, iterable, initial):
     return acc
 
 
+def _ail_cmp_sorted(xs, function, reverse):
+    a = list(xs)
+    n = len(a)
+    w = 1
+    while w < n:
+        b = []
+        lo = 0
+        while lo < n:
+            mid = lo + w
+            if mid > n:
+                mid = n
+            hi = lo + 2 * w
+            if hi > n:
+                hi = n
+            i = lo
+            j = mid
+            while i < mid and j < hi:
+                c = function(a[i], a[j])
+                if reverse:
+                    c = -c
+                if c <= 0:
+                    b.append(a[i])
+                    i = i + 1
+                else:
+                    b.append(a[j])
+                    j = j + 1
+            while i < mid:
+                b.append(a[i])
+                i = i + 1
+            while j < hi:
+                b.append(a[j])
+                j = j + 1
+            lo = lo + 2 * w
+        a = b
+        w = w * 2
+    return a
+
+
+def _ail_cmp_sort_inplace(xs, function, reverse):
+    ordered = _ail_cmp_sorted(xs, function, reverse)
+    i = 0
+    while i < len(ordered):
+        xs[i] = ordered[i]
+        i = i + 1
+
+
+def _ail_cmp_min(xs, function):
+    n = len(xs)
+    if n == 0:
+        raise ValueError('min() iterable argument is empty')
+    best = xs[0]
+    i = 1
+    while i < n:
+        if function(xs[i], best) < 0:
+            best = xs[i]
+        i = i + 1
+    return best
+
+
+def _ail_cmp_max(xs, function):
+    n = len(xs)
+    if n == 0:
+        raise ValueError('max() iterable argument is empty')
+    best = xs[0]
+    i = 1
+    while i < n:
+        if function(xs[i], best) > 0:
+            best = xs[i]
+        i = i + 1
+    return best
+
+
 def _ail_pairwise(iterable):
     prev = None
     first = True

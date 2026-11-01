@@ -2510,6 +2510,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.prelude_names = set() # functions and methods of the preludes added here (not the program's own)
         self.rt_needs = set()      # safetyrt.py fragments this program uses (none: the C it always had)
         self.lib_tuples = False    # genlib.py pieces are in the program: their tuples meet the tuple pass's records
+        self.lru_stats = {}        # cached function name -> module variables for cache_info/cache_clear
 
     # ------------------------------------------------------------------------------- entry point
     def compile(self, source):
@@ -2658,6 +2659,7 @@ class Compiler(boxclosure.ClosureMixin):
         self._add_with(tree)                                        # with / contextlib (withlib.py)
         self._add_format(tree)                                      # str.format / format_map (fmtlib.py)
         self._add_genlib(tree)                                      # json, itertools, functools ... (genlib.py)
+        self._prepare_lru_stats(tree)                               # .cache_info() / .cache_clear() on @lru_cache
         self._native_random(tree)                                   # random.Random's draws in C (randrt.py)
         self._native_re(tree)                                       # re's Pike VM and DFA in C (rebrt.py)
         self._add_safety_preludes(tree)
@@ -3540,6 +3542,62 @@ class Compiler(boxclosure.ClosureMixin):
         tree.body[imports:imports] = pre
         ast.fix_missing_locations(tree)
 
+    def _prepare_lru_stats(self, tree):
+        """Add the module variables and the result class a program needs to call .cache_info() / .cache_clear()
+        on an @lru_cache function. A program that calls neither keeps exactly its old C: no variable, no class."""
+        cached = {}
+        for fn in tree.body:
+            if not isinstance(fn, ast.FunctionDef):
+                continue
+            for dec in fn.decorator_list:
+                bare = dec.func if isinstance(dec, ast.Call) else dec
+                nm = bare.id if isinstance(bare, ast.Name) else bare.attr if isinstance(bare, ast.Attribute) else None
+                if nm in ('lru_cache', 'cache'):
+                    cached[fn.name] = nm
+                    break
+        if not cached:
+            return
+        used = {}
+        wants_info = False
+        for call in ast.walk(tree):
+            if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                    and isinstance(call.func.value, ast.Name)):
+                continue
+            name, attr = call.func.value.id, call.func.attr
+            if name in cached and attr in ('cache_info', 'cache_clear', 'cache_parameters'):
+                used[name] = attr
+                if attr == 'cache_info':
+                    wants_info = True
+        if not used:
+            return
+        for name in sorted(used):
+            stats = {'count': '_ail_lru_count_' + name, 'hits': '_ail_lru_hits_' + name,
+                     'misses': '_ail_lru_misses_' + name}
+            self.lru_stats[name] = stats
+        assigns = []
+        for name in sorted(used):
+            for key in ('count', 'hits', 'misses'):
+                target = ast.Name(id=self.lru_stats[name][key], ctx=ast.Store())
+                assigns.append(ast.Assign(targets=[target], value=ast.Constant(value=0)))
+        if wants_info and '_AilCacheInfo' not in {n.name for n in tree.body if isinstance(n, ast.ClassDef)}:
+            cls = ast.parse(
+                'class _AilCacheInfo:\n'
+                '    def __init__(self, hits, misses, maxsize, currsize):\n'
+                '        self.hits = hits\n'
+                '        self.misses = misses\n'
+                '        self.maxsize = maxsize\n'
+                '        self.currsize = currsize\n'
+                '    def __repr__(self):\n'
+                '        return (f"CacheInfo(hits={self.hits}, misses={self.misses}, "\n'
+                '                f"maxsize={self.maxsize}, currsize={self.currsize})")\n').body[0]
+            cls._ail_lru_stats = True
+            assigns.insert(0, cls)
+        at = 0
+        while at < len(tree.body) and isinstance(tree.body[at], (ast.Import, ast.ImportFrom)):
+            at += 1
+        tree.body[at:at] = assigns
+        ast.fix_missing_locations(tree)
+
     def _add_genlib(self, tree):
         """Library names of the general path (genlib.py): renamed to the Python-source pieces of prelude_genlib.py,
         which are added after the program's imports. A program that uses none of them is left as it is."""
@@ -3945,10 +4003,34 @@ class Compiler(boxclosure.ClosureMixin):
         cname = cname or ('pf_' + node.name)
         all_params = list(params) + list(kwonly) + ([vararg] if vararg else []) + \
             ([kwarg] if kwarg else [])
+        lru_maxsize, lru_typed = 128, False
+        if lru:
+            for dec in node.decorator_list:
+                bare = dec.func if isinstance(dec, ast.Call) else dec
+                nm = bare.id if isinstance(bare, ast.Name) else bare.attr if isinstance(bare, ast.Attribute) else None
+                if nm == 'cache':
+                    lru_maxsize = None
+                elif nm == 'lru_cache':
+                    lru_maxsize = 128
+                    if isinstance(dec, ast.Call):
+                        node_max = dec.args[0] if dec.args else next(
+                            (k.value for k in dec.keywords if k.arg == 'maxsize'), None)
+                        if node_max is None:
+                            lru_maxsize = 128
+                        elif isinstance(node_max, ast.Constant) and (
+                                node_max.value is None or type(node_max.value) is int):
+                            lru_maxsize = node_max.value
+                        else:
+                            lru_maxsize = 'unknown'
+                        for k in dec.keywords:
+                            if (k.arg == 'typed' and isinstance(k.value, ast.Constant)
+                                    and k.value.value is True):
+                                lru_typed = True
         info = {'node': node, 'params': params, 'posonly': posonly, 'kwonly': kwonly, 'vararg': vararg, 'kwarg': kwarg,
                'defaults': defaults, 'kw_defaults': kw_defaults, 'cname': cname,
                'is_method': is_method, 'is_static': is_static, 'owner_class': owner_class,
-               'lru_cache': lru, 'all_params': all_params,
+               'lru_cache': lru, 'lru_maxsize': lru_maxsize, 'lru_typed': lru_typed,
+               'all_params': all_params,
                'is_property': is_property, 'is_setter': is_setter, 'is_classmethod': is_classmethod,
                'generator': bool(self.generators and _own_yields(node))}
         if info['generator'] and lru:
@@ -4502,43 +4584,124 @@ class Compiler(boxclosure.ClosureMixin):
     def _emit_lru_wrapper(self, info):
         cname = info['cname']
         impl = cname + '_impl'
+        name = info['node'].name
         params = info['params']
         nargs = len(params)
-        maxn = 256
+        stats = self.lru_stats.get(name)
+        if stats is None:
+            maxn = 256
+            keys_slot0 = self.next_global_slot
+            self.next_global_slot += maxn
+            vals_slot0 = self.next_global_slot
+            self.next_global_slot += maxn
+            n_glob = self.next_global_slot
+            self.next_global_slot += 1  # count of live entries, stored as an INT in g_slots too
+            sig = ''.join(', ail_obj %s' % cid(p) for p in params)
+            lines = []
+            lines.append('    AIL_FRAME_ENTER(cx, f, 1);')
+            lines.append('    ail_st st = AIL_OK;')
+            if nargs:
+                lines.append('    ail_obj _items[%d] = { %s };' %
+                             (nargs, ', '.join(cid(p) for p in params)))
+                lines.append('    f.slots[0] = ail_tuple_new(cx, _items, %d);' % nargs)
+            else:
+                lines.append('    f.slots[0] = ail_tuple_new(cx, NULL, 0);')
+            lines.append('    int64_t _n = g_slots_arr[%d].tag == AIL_T_UNBOUND ? 0 : g_slots_arr[%d].i;'
+                         % (n_glob, n_glob))
+            lines.append('    for (int64_t _i = 0; _i < _n; _i++) '
+                         'if (ail_obj_eq_raw(g_slots_arr[%d + _i], f.slots[0])) '
+                         '{ *out = g_slots_arr[%d + _i]; AIL_FRAME_LEAVE(cx, f); return AIL_OK; }'
+                         % (keys_slot0, vals_slot0))
+            lines.append('    st = %s(cx, out%s); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, f); return st; }' %
+                         (impl, ''.join(', ' + cid(p) for p in params)))
+            lines.append('    _n = g_slots_arr[%d].tag == AIL_T_UNBOUND ? 0 : g_slots_arr[%d].i;'
+                         % (n_glob, n_glob))
+            lines.append('    if (_n < %d) { g_slots_arr[%d + _n] = f.slots[0]; g_slots_arr[%d + _n] = *out; '
+                         'g_slots_arr[%d] = ail_box_int(_n + 1); }' %
+                         (maxn, keys_slot0, vals_slot0, n_glob))
+            lines.append('    AIL_FRAME_LEAVE(cx, f);')
+            lines.append('    return AIL_OK;')
+            self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out%s);\n' % (cname, sig))
+            self.top_defs.append('static ail_st %s(ail_ctx *cx, ail_obj *out%s) {\n%s\n}\n\n' %
+                                 (cname, sig, '\n'.join(lines)))
+            return
+        maxsize = info.get('lru_maxsize', 128)
+        if maxsize is None or maxsize == 'unknown':
+            maxn = 16384
+        else:
+            maxn = max(0, int(maxsize))
+        n_glob = self._module_global_slot(stats['count'])
+        hits_glob = self._module_global_slot(stats['hits'])
+        misses_glob = self._module_global_slot(stats['misses'])
         keys_slot0 = self.next_global_slot
-        self.next_global_slot += maxn
+        self.next_global_slot += max(maxn, 1)
         vals_slot0 = self.next_global_slot
-        self.next_global_slot += maxn
-        n_glob = self.next_global_slot
-        self.next_global_slot += 1  # count of live entries, stored as an INT in g_slots too
+        self.next_global_slot += max(maxn, 1)
         sig = ''.join(', ail_obj %s' % cid(p) for p in params)
         lines = []
-        # The key tuple lives in frame slot 0 for the whole call: it is allocated here, the cached
-        # body then allocates (so a collection may run), and only afterwards is the key stored.
-        # A C local is not a GC root, so the old wrapper stored a freed tuple. The entry count is
-        # read again after the body, because recursion through the wrapper adds entries meanwhile
-        # (a count read before the call would overwrite those and shrink the cache).
         lines.append('    AIL_FRAME_ENTER(cx, f, 1);')
         lines.append('    ail_st st = AIL_OK;')
+        for pname in params:
+            for tag, tname in (('AIL_T_LIST', 'list'), ('AIL_T_DICT', 'dict'), ('AIL_T_SET', 'set')):
+                lines.append(
+                    '    if (%s.tag == %s) { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
+                    '"unhashable type: \'%s\'"); AIL_FRAME_LEAVE(cx, f); return st; }'
+                    % (cid(pname), tag, tname))
         if nargs:
-            lines.append('    ail_obj _items[%d] = { %s };' %
-                         (nargs, ', '.join(cid(p) for p in params)))
-            lines.append('    f.slots[0] = ail_tuple_new(cx, _items, %d);' % nargs)
+            if info.get('lru_typed'):
+                items = []
+                for p in params:
+                    items.append(cid(p))
+                    items.append('ail_box_int((int64_t)%s.tag)' % cid(p))
+                lines.append('    ail_obj _items[%d] = { %s };' % (2 * nargs, ', '.join(items)))
+                lines.append('    f.slots[0] = ail_tuple_new(cx, _items, %d);' % (2 * nargs))
+            elif nargs == 1:
+                # CPython's untyped cache has a fast path for a lone int / str argument: those keys
+                # are the value itself, so 1 does not collide with 1.0 / True, while 1.0 and True
+                # still do (they share the slow tuple key).
+                p = cid(params[0])
+                tag = '((int64_t)(%s.tag == AIL_T_INT ? 1 : (%s.tag == AIL_T_STR ? 2 : 0)))' % (p, p)
+                lines.append('    ail_obj _items[2] = { %s, ail_box_int(%s) };' % (p, tag))
+                lines.append('    f.slots[0] = ail_tuple_new(cx, _items, 2);')
+            else:
+                lines.append('    ail_obj _items[%d] = { %s };' %
+                             (nargs, ', '.join(cid(p) for p in params)))
+                lines.append('    f.slots[0] = ail_tuple_new(cx, _items, %d);' % nargs)
         else:
             lines.append('    f.slots[0] = ail_tuple_new(cx, NULL, 0);')
         lines.append('    int64_t _n = g_slots_arr[%d].tag == AIL_T_UNBOUND ? 0 : g_slots_arr[%d].i;'
                      % (n_glob, n_glob))
         lines.append('    for (int64_t _i = 0; _i < _n; _i++) '
-                     'if (ail_obj_eq_raw(g_slots_arr[%d + _i], f.slots[0])) '
-                     '{ *out = g_slots_arr[%d + _i]; AIL_FRAME_LEAVE(cx, f); return AIL_OK; }'
+                     'if (ail_obj_eq_raw(g_slots_arr[%d + _i], f.slots[0])) {'
+                     % keys_slot0)
+        lines.append('        ail_obj _hk = g_slots_arr[%d + _i]; ail_obj _hv = g_slots_arr[%d + _i];'
                      % (keys_slot0, vals_slot0))
+        lines.append('        for (int64_t _j = _i; _j + 1 < _n; _j++) { '
+                     'g_slots_arr[%d + _j] = g_slots_arr[%d + _j + 1]; '
+                     'g_slots_arr[%d + _j] = g_slots_arr[%d + _j + 1]; }'
+                     % (keys_slot0, keys_slot0, vals_slot0, vals_slot0))
+        lines.append('        g_slots_arr[%d + _n - 1] = _hk; g_slots_arr[%d + _n - 1] = _hv;'
+                     % (keys_slot0, vals_slot0))
+        lines.append('        g_slots_arr[%d] = ail_box_int((g_slots_arr[%d].tag == AIL_T_UNBOUND ? 0 : '
+                     'g_slots_arr[%d].i) + 1);' % (hits_glob, hits_glob, hits_glob))
+        lines.append('        *out = _hv; AIL_FRAME_LEAVE(cx, f); return AIL_OK; }')
+        lines.append('    g_slots_arr[%d] = ail_box_int((g_slots_arr[%d].tag == AIL_T_UNBOUND ? 0 : '
+                     'g_slots_arr[%d].i) + 1);' % (misses_glob, misses_glob, misses_glob))
         lines.append('    st = %s(cx, out%s); if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, f); return st; }' %
                      (impl, ''.join(', ' + cid(p) for p in params)))
         lines.append('    _n = g_slots_arr[%d].tag == AIL_T_UNBOUND ? 0 : g_slots_arr[%d].i;'
                      % (n_glob, n_glob))
-        lines.append('    if (_n < %d) { g_slots_arr[%d + _n] = f.slots[0]; g_slots_arr[%d + _n] = *out; '
-                     'g_slots_arr[%d] = ail_box_int(_n + 1); }' %
-                     (maxn, keys_slot0, vals_slot0, n_glob))
+        if maxn > 0:
+            lines.append('    if (_n < %d) { g_slots_arr[%d + _n] = f.slots[0]; g_slots_arr[%d + _n] = *out; '
+                         'g_slots_arr[%d] = ail_box_int(_n + 1); } else {'
+                         % (maxn, keys_slot0, vals_slot0, n_glob))
+            lines.append('        for (int64_t _j = 1; _j < %d; _j++) { '
+                         'g_slots_arr[%d + _j - 1] = g_slots_arr[%d + _j]; '
+                         'g_slots_arr[%d + _j - 1] = g_slots_arr[%d + _j]; }'
+                         % (maxn, keys_slot0, keys_slot0, vals_slot0, vals_slot0))
+            lines.append('        g_slots_arr[%d + %d - 1] = f.slots[0]; '
+                         'g_slots_arr[%d + %d - 1] = *out; }'
+                         % (keys_slot0, maxn, vals_slot0, maxn))
         lines.append('    AIL_FRAME_LEAVE(cx, f);')
         lines.append('    return AIL_OK;')
         self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out%s);\n' % (cname, sig))
@@ -7240,6 +7403,10 @@ class Compiler(boxclosure.ClosureMixin):
         (judges that want the general path with NO mixing at all, mirroring `AIL_NO_GENERAL`)."""
         if pymix is None or os.environ.get('AIL_NO_MIX') or not self.allow_mix:
             return
+        if self.lru_stats:
+            # a typed clone of an @lru_cache function runs its body without the wrapper's cache and
+            # counters, so a program that reads cache_info() must keep every call on the wrapper
+            return
         try:
             report = pymix.analyze(source)
         except Exception:
@@ -9789,6 +9956,30 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _call_attribute(self, f, args, kwargs, ctx):
         recv = f.value
+        if (isinstance(recv, ast.Name) and recv.id in self.lru_stats and not args and not kwargs
+                and f.attr in ('cache_info', 'cache_clear', 'cache_parameters')):
+            stats = self.lru_stats[recv.id]
+            info = self.functions[recv.id]
+            if f.attr == 'cache_info':
+                maxsize = info.get('lru_maxsize', 128)
+                if maxsize == 'unknown':
+                    maxsize = 128
+                return self._call_name('_AilCacheInfo', [
+                    ast.copy_location(ast.Name(id=stats['hits'], ctx=ast.Load()), f),
+                    ast.copy_location(ast.Name(id=stats['misses'], ctx=ast.Load()), f),
+                    ast.copy_location(ast.Constant(value=maxsize), f),
+                    ast.copy_location(ast.Name(id=stats['count'], ctx=ast.Load()), f)], {}, ctx)
+            if f.attr == 'cache_clear':
+                for key in ('count', 'hits', 'misses'):
+                    slot = self._module_global_slot(stats[key])
+                    ctx.emit('g_slots_arr[%d] = ail_box_int(0);' % slot)
+                return 'ail_box_none()'
+            maxsize = info.get('lru_maxsize', 128)
+            if maxsize == 'unknown':
+                maxsize = 128
+            d = ast.Dict(keys=[ast.Constant(value='maxsize'), ast.Constant(value='typed')],
+                         values=[ast.Constant(value=maxsize), ast.Constant(value=bool(info.get('lru_typed')))])
+            return self.expr(ast.copy_location(d, f), ctx)
         # sys.stdin.read() / .readline(): the only sys.stdin surface this emitter models
         # (B046/B047 -- glue in the preamble, see the module docstring's stdin note).
         if isinstance(recv, ast.Attribute) and isinstance(recv.value, ast.Name) and \
