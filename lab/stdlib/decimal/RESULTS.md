@@ -31,6 +31,10 @@ the prelude through an argument, a list item, an attribute and a dict value on b
   `"F"` for infinity, `"n"` / `"N"` for quiet / signalling NaN, and a `DecimalTuple`-shaped result with
   `.sign`, `.digits`, `.exponent`, `_fields`, tuple indexing, slicing, iteration, unpacking, containment,
   `count` / `index`, concatenation, hashing and CPython's `DecimalTuple(...)` repr.
+- `Decimal(d.as_tuple())` round-trips: `Decimal.__init__` accepts the `_DecTuple` result directly (and
+  still accepts a plain tuple or list), and `reversed(d.as_tuple())` returns the fields reversed.  Like
+  the namedtuple prelude, `_DecTuple` is a class rather than a tuple subclass, so
+  `isinstance(d.as_tuple(), tuple)` is `False`; the tuple protocol and the three fields are emulated.
 - The int64 default keeps Decimal coefficients arbitrary precision (a `_DecInt` coefficient in
   `prelude_decimal.py`) while the program's own ints stay int64; construction from a float, arithmetic,
   quantize, sqrt, format and `as_tuple` therefore work for coefficients wider than 64 bits.  A coefficient

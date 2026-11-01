@@ -1,3 +1,17 @@
+## 2026-11-01 -- `decimal` review fixes: as_tuple round-trip and `__reversed__` (job-std_decimal-11020505)
+
+Review follow-up on `96dee2d`.  `Decimal(d.as_tuple())` now builds: `Decimal.__init__` accepts the
+`_DecTuple` result (which already had len / indexing), so the common round-trip idiom returns the same
+value on both builds and in exact-int mode.  `reversed(d.as_tuple())` now works: the general path's
+`ail_iter_reversed` asks a class's `__reversed__` before the builtin kinds, and the hook is installed
+only for programs whose classes define it, so a program without `__reversed__` keeps its generated C.
+Probes `dec_roundtrip`, `dec_reversed`, `dec_reversed_user`, `dec_tuple_types`, `dec_routes` and
+`dec_rev_routes` match CPython on both `cmp.sh` builds; exact-int mode matches too, except
+`isinstance(d.as_tuple(), tuple)`, which stays `False` because `_DecTuple` is a class like the
+namedtuple prelude (the round-trip itself matches).  `test_ail_std_decimal`, `test_ail_stdtop1`,
+`test_ail_dunders`, `test_ail_bytearray_decimal`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.
+
 ## 2026-11-01 -- `decimal` review fixes: tuple protocol and int64 coefficient fast path (job-std_decimal-11012337)
 
 Review follow-up on `2fafbd0`.  `Decimal.as_tuple` now returns a `DecimalTuple`-shaped object with the

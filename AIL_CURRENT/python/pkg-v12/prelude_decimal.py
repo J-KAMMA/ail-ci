@@ -944,7 +944,7 @@ class Decimal:
             self._c = r.c
             self._e = r.e
             self._k = r.k
-        elif isinstance(value, tuple) or isinstance(value, list):
+        elif isinstance(value, tuple) or isinstance(value, list) or isinstance(value, _DecTuple):
             r = _ail_dec_from_tuple(value)
             self._s = r.s
             self._c = r.c

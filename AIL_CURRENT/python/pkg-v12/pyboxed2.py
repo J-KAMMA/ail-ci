@@ -2719,6 +2719,8 @@ class Compiler(boxclosure.ClosureMixin):
             any(name in cls['methods'] for name in ('__iadd__', '__isub__', '__imul__',
                                                     '__iand__', '__ior__', '__ixor__'))
             for cls in self.classes.values())
+        # a class defining __reversed__ makes the run time ask it (dunderrt.patch(reversed_=...))
+        self.dunder_reversed = any('__reversed__' in cls['methods'] for cls in self.classes.values())
 
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
@@ -2987,7 +2989,8 @@ class Compiler(boxclosure.ClosureMixin):
                              (self.global_slots['class:' + cname], itr['cname']))
             if self.dunder_ops:
                 setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
-                                              cls['methods'], lambda info: info['all_params']))
+                                              cls['methods'], lambda info: info['all_params'],
+                                              reversed_=self.dunder_reversed))
             if cls.get('dc'):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->dc = %d; '
                              '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
@@ -13044,7 +13047,8 @@ def _build(source, report, allow_mix=True):
         raise Unsupported('closures nested too deeply to settle their shared names')
     if compiler.dunder_ops:
         import dunderrt
-        body = dunderrt.patch(body, inplace=compiler.dunder_inplace)
+        body = dunderrt.patch(body, inplace=compiler.dunder_inplace,
+                              reversed_=compiler.dunder_reversed)
     if compiler.generators:
         import safetyrt
         body = safetyrt.patch_generators(body)
