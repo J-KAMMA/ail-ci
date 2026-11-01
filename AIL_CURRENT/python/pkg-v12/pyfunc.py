@@ -16162,7 +16162,14 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
             out.append(ctx.cname(arg.id))
             ctx.parts.add('FLIST')
         elif kind == BYTES:
-            if (dynamic is None and len(arg_nodes) == 1
+            if _etype(arg, ctx) == BYTEARRAY:
+                # `bytes(bytearray)` and a bare bytearray both pass a read-only bytes view of the
+                # buffer: the callee's parameter is bytes, so it cannot write through it.
+                ctx.parts.add('BYTEREADONLYARG')
+                receiver, _ = ctx.temp(BYTEARRAY)
+                capture = _obj_store(receiver, _bytearray_value(arg, ctx), BYTEARRAY, ctx)
+                out.append('({ %s; ail_bytearray_readonly_arg(&%s, %s); })' % (capture, ctx.barena(), receiver))
+            elif (dynamic is None and len(arg_nodes) == 1
                     and fname in getattr(ctx, 'readonly_bytes_consumers', ())
                     and _is_bytes_one_call(arg, ctx) and len(arg.args) == 1 and not arg.keywords
                     and all(BYTES not in getattr(ctx, attr, {}) for attr in ('kind', 'modconsts'))
@@ -30155,7 +30162,7 @@ def _claim(arg, ctx):
         k = _etype(arg, ctx)
     except Unsupported:
         return None
-    return k if k in (INT, FLT, BYTES, 'array') else None
+    return k if k in (INT, FLT, BYTES, BYTEARRAY, 'array') else None
 
 
 def _call_site_signature(args, callee_params, ctx):
@@ -30166,6 +30173,7 @@ def _call_site_signature(args, callee_params, ctx):
     for arg, (pname, _pk) in zip(args, callee_params):
         if callable_types.valid(_pk):
             continue  # The exact callback contract is checked at call lowering.
+        _bytearray_as_bytes = _pk in (BYTES, 'array')
         if _is_olist_kind(_pk) and isinstance(arg, ast.List):
             # The parameter supplies the element type, including for an empty literal.
             # _olist_value checks every element at lowering; the scalar _etype fallback
@@ -30174,6 +30182,10 @@ def _call_site_signature(args, callee_params, ctx):
         if _pk in SETS and _is_set_literal(arg):
             continue  # `set()` / `{1, 2}` take the typed set parameter's kind (`_map_pointer`).
         c = _claim(arg, ctx)
+        if _bytearray_as_bytes and c == BYTEARRAY:
+            # A bytearray argument is read as a bytes view for a parameter whose body wants a
+            # read-only sequence (or bytes): the call lowers through `ail_bytearray_readonly_arg`.
+            c = BYTES
         if c is not None:
             site[pname] = c
     return site
@@ -30694,6 +30706,46 @@ def _plan_clones(fns, sigs, arity_seeds, recursive, classes=None, owned_str_fns=
     return clones
 
 
+def _owned_unannotated_bytes_fns(fns):
+    """Python-syntax helpers whose every value return is `bytes(...)` and which never fall off the
+    end: their return value is owned by the caller exactly like an explicit `-> bytes` annotation
+    says.  The front end appends generated helpers after the script, so this must stay gated to the
+    Python surface: a brace-syntax function keeps its existing inferred-return ABI."""
+    if os.environ.get('AIL_SURFACE') != 'python':
+        return set()
+
+    def terminates(stmts):
+        if not stmts:
+            return False
+        last = stmts[-1]
+        if isinstance(last, (ast.Return, ast.Raise)):
+            return True
+        if isinstance(last, ast.If):
+            return terminates(last.body) and bool(last.orelse) and terminates(last.orelse)
+        if isinstance(last, ast.Try):
+            if last.finalbody and terminates(last.finalbody):
+                return True
+            body_ok = terminates(last.body) and all(terminates(h.body) for h in last.handlers)
+            return body_ok and (not last.orelse or terminates(last.orelse))
+        return False
+
+    out = set()
+    for f in fns:
+        if f.returns is not None or f.decorator_list or not terminates(f.body):
+            continue
+        if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda))
+               for st in f.body for n in ast.walk(st)):
+            continue
+        rets = [n for n in ast.walk(f) if isinstance(n, ast.Return)]
+        if not rets:
+            continue
+        if all(isinstance(r.value, ast.Call) and isinstance(r.value.func, ast.Name)
+               and r.value.func.id == 'bytes' and len(r.value.args) == 1 and not r.value.keywords
+               for r in rets):
+            out.add(f.name)
+    return out
+
+
 def _signatures(fns, entry_sig=None, classes=None, external=None):
     """Each function's parameter kinds and return type, settled together.
 
@@ -30748,6 +30800,7 @@ def _signatures(fns, entry_sig=None, classes=None, external=None):
     owned_str_fns.update(name for name, signature in external.items() if signature['owned_str'])
     owned_bytes_fns = {f.name for f in fns if isinstance(f.returns, ast.Name)
                        and f.returns.id == '__ail_checked_bytes__'}
+    owned_bytes_fns |= _owned_unannotated_bytes_fns(fns)
     owned_bytes_fns.update(name for name, signature in external.items() if signature['owned_bytes'])
     grid_fns = {f.name for f in fns
                if _is_grid_return_annotation(f.returns) or _infers_grid_return(f)}
@@ -32644,43 +32697,51 @@ def _closure_value_message(name, parent):
 
 
 def _collect_direct_nested_defs(outer):
-    """The `def`s that are direct statements of `outer`'s own body -- the only shape this file
-    lifts. Anything else that looks like a nested function -- inside a loop, inside an `if`,
-    inside another nested function -- is refused right here, by name, rather than silently falling
-    through to the bare-node-name refusal `_stmt` already had (which is exactly the failure mode
-    pkg-closure's task note names)."""
-    inners = [s for s in outer.body if isinstance(s, ast.FunctionDef)]
-    inner_ids = {id(s) for s in inners}
-
-    class _StrayScan(ast.NodeVisitor):
-        def __init__(self):
-            self.loop_depth = 0
-
-        def visit_For(self, node):
-            self.loop_depth += 1
-            self.generic_visit(node)
-            self.loop_depth -= 1
-
-        visit_While = visit_For
-
-        def visit_FunctionDef(self, node):
-            if id(node) in inner_ids:
-                return                    # a direct one; its OWN body is checked separately
-            if self.loop_depth > 0:
-                raise Unsupported(
-                    'a nested def inside a loop (%r) is not available: this lowering builds one '
-                    'shared C function for a nested def, not a fresh one per iteration; define it '
-                    'once, outside the loop' % node.name)
+    """The `def`s this file lifts: direct statements of `outer`'s own body, plus a `def` that is a
+    direct statement of a loop body.  The loop shape is safe because the lifted function is called
+    in place, with the current value of each captured local passed at the call site -- exactly the
+    late binding CPython gives the fresh function object each iteration.  Anything else that looks
+    like a nested function -- inside an `if`, inside another nested function, or deeper inside a
+    loop body -- is refused right here, by name, rather than silently falling through to the
+    bare-node-name refusal `_stmt` already had (which is exactly the failure mode pkg-closure's
+    task note names)."""
+    direct = [s for s in outer.body if isinstance(s, ast.FunctionDef)]
+    direct_ids = {id(s) for s in direct}
+    parents = {}
+    for parent in ast.walk(outer):
+        for field, value in ast.iter_fields(parent):
+            if isinstance(value, list):
+                for item in value:
+                    if isinstance(item, ast.AST):
+                        parents.setdefault(id(item), (parent, field))
+            elif isinstance(value, ast.AST):
+                parents.setdefault(id(value), (parent, field))
+    loop_inners, loop_ids = [], set()
+    for node in ast.walk(outer):
+        if not isinstance(node, ast.FunctionDef) or node is outer or id(node) in direct_ids:
+            continue
+        parent, field = parents.get(id(node), (None, None))
+        if isinstance(parent, (ast.For, ast.While)) and field in ('body', 'orelse'):
+            loop_inners.append(node)
+            loop_ids.add(id(node))
+            continue
+        ancestor, in_loop = parent, False
+        while ancestor is not None and ancestor is not outer:
+            if isinstance(ancestor, (ast.For, ast.While)):
+                in_loop = True
+                break
+            if isinstance(ancestor, ast.FunctionDef):
+                break
+            ancestor = parents.get(id(ancestor), (None, None))[0]
+        if in_loop:
             raise Unsupported(
-                'a nested def that is not a direct statement of its enclosing function (%r) is '
-                'not available' % node.name)
-
-    scanner = _StrayScan()
-    for stmt in outer.body:
-        if isinstance(stmt, ast.FunctionDef):
-            continue                      # a direct one; do not descend here (see visit_FunctionDef)
-        scanner.visit(stmt)
-    return inners
+                'a nested def inside a loop (%r) is not available: this lowering builds one '
+                'shared C function for a nested def, not a fresh one per iteration; define it '
+                'once, outside the loop, or as a direct statement of the loop body' % node.name)
+        raise Unsupported(
+            'a nested def that is not a direct statement of its enclosing function (%r) is '
+            'not available' % node.name)
+    return direct + loop_inners, loop_ids, parents
 
 
 def _lift_in_function(outer, counter, nested_captures):
@@ -32692,7 +32753,7 @@ def _lift_in_function(outer, counter, nested_captures):
     with the captured locals prepended. `nested_captures` is filled in as `{lifted_name:
     [captured_names]}`, for `_check_nested_captures` to consult once `_signatures` has settled
     every parameter's kind."""
-    inners = _collect_direct_nested_defs(outer)
+    inners, loop_ids, parents = _collect_direct_nested_defs(outer)
     if not inners:
         return []
     direct_names = {i.name for i in inners}
@@ -32818,6 +32879,12 @@ def _lift_in_function(outer, counter, nested_captures):
         nested_captures[new_name] = captured
         helpers.append(new_fn)
 
+    for inner in inners:
+        if id(inner) in loop_ids:
+            parent, field = parents[id(inner)]
+            siblings = getattr(parent, field)
+            siblings[next(i for i, item in enumerate(siblings) if item is inner)] = ast.copy_location(
+                ast.Pass(), inner)
     outer.body = [s for s in outer.body if id(s) not in inner_ids]
     return helpers
 
@@ -35020,6 +35087,28 @@ def _to_c_sorted(source, name=None, strict=True, info=None, entry=None, sig=None
     raise report if related else first
 
 
+def _script_entry(tree, names):
+    """The function a Python-syntax script calls at module level (the last such call), else None.
+
+    The Python front end appends generated helpers (re, math, textwrap, ...) after the script's own
+    final call, so `fns[-1]` is a helper rather than the entry for those programs.  This recovers
+    the real entry from the call the script itself makes, without moving any generated definition
+    or changing a source line."""
+    for node in reversed(tree.body):
+        if not isinstance(node, ast.Expr):
+            continue
+        for call in ast.walk(node.value):
+            if not isinstance(call, ast.Call):
+                continue
+            func = call.func
+            if isinstance(func, ast.Name) and func.id in names:
+                return func.id
+            if (isinstance(func, ast.Attribute) and isinstance(func.value, ast.Name)
+                    and func.value.id in names):
+                return func.value.id
+    return None
+
+
 def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, library=False, external=None, _sort_stage=0, _tint_exclude=(), _tint_retry=0):
     """C for every `def` in the source, with the last one as the entry point.
 
@@ -35215,6 +35304,14 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                     + cruntime.emit(parts) + _emit_module_consts(_MODCONSTS)
                     + (_class_c_decls(classes) if classes else ''))
         raise Unsupported('no def found')
+    if (entry is None and os.environ.get('AIL_SURFACE') == 'python'
+            and fns[-1].name.startswith('_ail_')):
+        # Generated helpers are appended after the script; put the function the script actually
+        # calls last again, where every entry-point use below expects it.
+        candidate = _script_entry(tree, {f.name for f in fns})
+        if candidate is not None and candidate != fns[-1].name:
+            by_name = {f.name: f for f in fns}
+            fns = [f for f in fns if f.name != candidate] + [by_name[candidate]]
     from module_object import native_kind
     external_exports = {name: {**spec,
                               'params': [(param, native_kind(kind)) for param, kind in spec['params']],
@@ -35327,6 +35424,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     owned_str_fns.update(key for key, signature in external_exports.items() if signature['owned_str'])
     owned_bytes_fns = {f.name for f in fns if isinstance(f.returns, ast.Name)
                        and f.returns.id == '__ail_checked_bytes__'}
+    owned_bytes_fns |= _owned_unannotated_bytes_fns(fns)
     internal_exact_bytes_fns = owned_bytes_fns - external_exports.keys()
     owned_bytes_fns.update(key for key, signature in external_exports.items() if signature['owned_bytes'])
     if not library and fns[-1].name in owned_bytes_fns:

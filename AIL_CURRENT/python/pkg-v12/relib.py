@@ -414,6 +414,32 @@ def _nullable(node):
     raise AssertionError(kind)
 
 
+def _mandatory_groups(node):
+    """The capturing groups that take part in EVERY successful match of this pattern.
+
+    A group is mandatory when no optional quantifier or alternative can skip it: it is the group
+    itself plus what its body always reaches, a sequence reaches every part, an alternative only
+    the groups every branch reaches, and a repeat reaches its body only when its lower bound is at
+    least one.  `m.groups()` can be lowered to `m.group(i)` only over this set (an absent group is
+    None in CPython, and the typed path has no None)."""
+    kind = node[0]
+    if kind == 'group':
+        return {node[1]} | _mandatory_groups(node[2])
+    if kind == 'ncgroup':
+        return _mandatory_groups(node[1])
+    if kind == 'seq':
+        out = set()
+        for part in node[1]:
+            out |= _mandatory_groups(part)
+        return out
+    if kind == 'alt':
+        branches = [_mandatory_groups(branch) for branch in node[1]]
+        return set.intersection(*branches) if branches else set()
+    if kind == 'rep':
+        return _mandatory_groups(node[1]) if node[2] >= 1 else set()
+    return set()
+
+
 # -- classes -----------------------------------------------------------------------------------
 def _escape_ascii(letter, c, ascii_mode):
     """Whether ASCII code point c is matched by \\d \\w \\s (or the negation) under the flags."""
@@ -477,6 +503,7 @@ class Program:
         self.pattern = pattern
         self.ngroups = parser.ngroups
         self.names = parser.names
+        self.mandatory_groups = _mandatory_groups(tree)
         self.ops, self.xs, self.ys = [], [], []
         self.classes = []                    # (neg, table, flat items)
         self.pending = []                    # lookaround bodies, placed after the main program

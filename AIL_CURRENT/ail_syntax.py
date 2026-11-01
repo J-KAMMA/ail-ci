@@ -1772,6 +1772,8 @@ class _Surface:
         self.void = set()
         self.re_on = False             # `import re` seen
         self.re_patterns = {}          # NAME -> (library index) for NAME = re.compile(literal)
+        self.match_patterns = {}       # NAME -> {library index} for NAME = PATTERN.match(...) / re.match(P, ...)
+        self.match_targets = {}        # (line, column) of the call -> NAME the assignment binds
         self.re_nodes = set()          # those assignment statements
         self.def_names = {node.name for node in ast.walk(self.tree)
                           if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
@@ -2033,8 +2035,22 @@ class _Surface:
             return node.target.id, node.value
         return None
 
+    def record_match(self, node, index):
+        """Remember `NAME = PATTERN.match(...)` / `NAME = re.match(P, ...)`: the patterns NAME can hold.
+        The node being rewritten is a copy, so the binding is looked up by its source position."""
+        name = self.match_targets.get((node.lineno, node.col_offset))
+        if name is not None:
+            self.match_patterns.setdefault(name, set()).add(index)
+
     def collect_re(self, stored):
         self.re_lib = _relib().Library()
+        for node in ast.walk(self.tree):
+            bound = self.re_bind(node)
+            if bound is None or not isinstance(bound[1], ast.Call):
+                continue
+            call = bound[1]
+            if bound[0] not in self.match_targets:
+                self.match_targets[(call.lineno, call.col_offset)] = bound[0]
         for node in ast.walk(self.tree):
             bound = self.re_bind(node)
             if bound is not None and stored[bound[0]] == 1:
@@ -2133,6 +2149,7 @@ class _Surface:
     def re_emit(self, node, name, index, given):
         """The call that stands for re.<name> on library pattern `index` with the non-pattern arguments `given`."""
         lib = self.re_lib
+        self.record_match(node, index)
         program = lib.programs[index]
         table = ast.Name(id=lib.table_name(index), ctx=ast.Load())
 
@@ -2442,6 +2459,31 @@ class _Surface:
         self.re_subst_now = {name: (match, number) for number, name in enumerate(names, 1)}
         return True
 
+    def re_groups_loop(self, node):
+        """`for part in m.groups():` when every pattern `m` can hold has the same groups and every
+        one of them always takes part: the iterable becomes `[m.group(1), ...]`.  A group that can
+        be absent is None in CPython, which this typed path has no value for, so that shape stays
+        as written and is refused by name."""
+        call = node.iter
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)
+                and call.func.attr == 'groups' and isinstance(call.func.value, ast.Name)
+                and not call.args and not call.keywords and isinstance(node.target, ast.Name)):
+            return False
+        receiver = call.func.value.id
+        indexes = self.match_patterns.get(receiver)
+        if not indexes:
+            return False
+        programs = [self.re_lib.programs[index] for index in indexes]
+        first = programs[0]
+        if any(program.ngroups != first.ngroups for program in programs):
+            return False
+        if any(program.mandatory_groups != set(range(1, program.ngroups + 1))
+               for program in programs):
+            return False
+        self.replace(call, '[%s]' % ', '.join('%s.group(%d)' % (receiver, index)
+                                             for index in range(1, first.ngroups + 1)))
+        return True
+
     def re_unpack(self, node):
         """`a, b = m.span()` / `a, b, c = m.groups()` as one assignment per element."""
         value = node.value
@@ -2694,6 +2736,9 @@ class _Surface:
             self.replace(node, 'pass', True)
         elif isinstance(node, ast.Assign) and self.re_on and self.re_unpack(node):
             pass
+        elif isinstance(node, ast.For) and self.re_on and self.re_groups_loop(node):
+            self.block(node.body, function, owner)
+            self.block(node.orelse, function, owner)
         elif isinstance(node, ast.For) and self.re_on and self.re_findall_loop(node, function):
             names = self.re_subst_now
             self.re_subst_now = None
@@ -3495,6 +3540,182 @@ def ail_array_surface(source, notes=None):
     return _ailarray().rewrite_text(source, notes)
 
 
+def _dict_of_lists_kind(fn, values):
+    """The element kind a lowered dict-of-lists row holds, from the appended values.  Only the
+    scalar kinds are built; anything ambiguous stays int (and is then refused by annotation if it
+    is not an int, never silently mistyped)."""
+    found = set()
+    assigned = {}
+    for node in ast.walk(fn):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
+            assigned.setdefault(node.targets[0].id, []).append(node.value)
+        elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+            assigned.setdefault(node.target.id, []).append(node.value)
+    for value in values:
+        if isinstance(value, ast.Constant) and type(value.value) in (int, float, str, bytes):
+            found.add(type(value.value).__name__)
+        elif isinstance(value, ast.UnaryOp) and isinstance(value.op, (ast.USub, ast.UAdd)):
+            found.add('int')
+        elif isinstance(value, ast.BinOp):
+            found.add('float' if isinstance(value.op, ast.Div) else 'int')
+        elif isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
+            found.add({'float': 'float', 'str': 'str', 'bytes': 'bytes'}.get(value.func.id, 'int'))
+        elif isinstance(value, ast.Name):
+            kinds = {_dict_of_lists_kind(fn, [v]) for v in assigned.get(value.id, ())}
+            kinds.discard(None)
+            found |= kinds or {'int'}
+            if not kinds:
+                found.add('int')
+        else:
+            found.add('int')
+    return next(iter(found)) if len(found) == 1 else None
+
+
+def lower_dict_of_lists(source):
+    """`d = {}` used only as `d.setdefault(k, []).append(v)` / `x = d.get(k)` (x tested only for
+    truth) becomes two typed locals: a key -> slot dict and a `list[list[T]]` of rows.  This is the
+    typed path's existing dict-of-int-lists shape (the same one `defaultdict(list)` lowers to),
+    without a new runtime kind; any other use of `d` leaves the source exactly as written."""
+    if 'setdefault' not in source or 'get' not in source:
+        return source
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return source
+    starts = _byte_offsets(source.encode('utf8'))
+    taken = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)}
+    taken |= {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.ClassDef))}
+    edits = []
+
+    def span(node):
+        return (starts[node.lineno - 1] + node.col_offset,
+                starts[node.end_lineno - 1] + node.end_col_offset)
+
+    def own_nodes(stmts):
+        for stmt in stmts:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                continue
+            yield from ast.walk(stmt)
+
+    def truth_tested(target, fn, ignored=None):
+        # `x = d.get(k)` may become `[]` for a missing key when every use of x is either the
+        # truth test itself or lies in the body of `if x:` (CPython would never reach those uses
+        # with None: an empty list and None are both falsy).
+        inside = set()
+        guarded = set()
+        for n in ast.walk(fn):
+            if isinstance(n, ast.If):
+                inside.update(id(x) for x in ast.walk(n.test))
+                if isinstance(n.test, ast.Name) and n.test.id == target:
+                    for stmt in n.body:
+                        guarded.update(id(x) for x in ast.walk(stmt))
+            elif isinstance(n, ast.While):
+                inside.update(id(x) for x in ast.walk(n.test))
+        for n in own_nodes(fn.body):
+            if isinstance(n, ast.Name) and n.id == target:
+                if id(n) == ignored:
+                    continue
+                if not isinstance(n.ctx, ast.Load):
+                    return False           # the row itself is replaced, not just read
+                if id(n) not in inside and id(n) not in guarded:
+                    return False
+        for n in own_nodes(fn.body):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                    and isinstance(n.func.value, ast.Name) and n.func.value.id == target
+                    and n.func.attr in ('append', 'extend', 'insert', 'pop', 'remove', 'clear',
+                                        'sort', 'reverse')):
+                return False                   # a mutation of the sentinel row would leak
+        return True
+
+    functions = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
+    for cls in [n for n in tree.body if isinstance(n, ast.ClassDef)]:
+        functions.extend(m for m in cls.body if isinstance(m, ast.FunctionDef))
+    for fn in functions:
+        inits = {}
+        for stmt in fn.body:
+            if (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                    and isinstance(stmt.targets[0], ast.Name) and isinstance(stmt.value, ast.Dict)
+                    and not stmt.value.keys):
+                inits.setdefault(stmt.targets[0].id, stmt)
+        if not inits:
+            continue
+        nodes = list(own_nodes(fn.body))
+        for name, init in inits.items():
+            allowed = {id(init.targets[0])}
+            setdefaults, gets = [], []
+            for n in nodes:
+                if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr == 'append'
+                        and len(n.args) == 1 and not n.keywords and isinstance(n.func.value, ast.Call)):
+                    chain = n.func.value
+                    if (isinstance(chain.func, ast.Attribute) and chain.func.attr == 'setdefault'
+                            and isinstance(chain.func.value, ast.Name) and chain.func.value.id == name
+                            and len(chain.args) == 2 and isinstance(chain.args[1], ast.List)
+                            and not chain.args[1].elts and not chain.keywords):
+                        setdefaults.append(n)
+                        allowed.update({id(chain.func.value), id(chain.func), id(chain), id(n.func), id(n)})
+            for n in nodes:
+                if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                        and isinstance(n.targets[0], ast.Name) and isinstance(n.value, ast.Call)):
+                    call = n.value
+                    if (isinstance(call.func, ast.Attribute) and call.func.attr == 'get'
+                            and isinstance(call.func.value, ast.Name) and call.func.value.id == name
+                            and not call.keywords and len(call.args) in (1, 2)
+                            and (len(call.args) == 1 or (isinstance(call.args[1], ast.List)
+                                                         and not call.args[1].elts))
+                            and truth_tested(n.targets[0].id, fn, id(n.targets[0]))):
+                        gets.append((n, call))
+                        allowed.update({id(call.func.value), id(call.func), id(call), id(n)})
+            if not setdefaults:
+                continue
+            if any(isinstance(n, ast.Name) and n.id == name and id(n) not in allowed for n in nodes):
+                continue
+            kinds = {_dict_of_lists_kind(fn, [n.args[0] for n in setdefaults])}
+            if len(kinds) != 1 or None in kinds:
+                continue
+            kind = kinds.pop()
+            vals = name + '__vals'
+            slot = name + '__slot'
+            while vals in taken:
+                vals += '_'
+            while slot in taken:
+                slot += '_'
+            taken.update((vals, slot))
+            a, b = span(init)
+            edits.append((a, b, '%s = {}; %s: list[list[%s]] = [[]]' % (name, vals, kind)))
+            keyname = name + '__key'
+            while keyname in taken:
+                keyname += '_'
+            taken.add(keyname)
+            for outer, chain in [(n, n.func.value) for n in setdefaults]:
+                key = ast.get_source_segment(source, chain.args[0]) or ast.unparse(chain.args[0])
+                value = ast.get_source_segment(source, outer.args[0]) or ast.unparse(outer.args[0])
+                pad = ' ' * outer.col_offset
+                a, b = span(outer)
+                edits.append((a, b,
+                              '%s = %s\n%s%s = %s.get(%s, -1)\n'
+                              '%sif %s < 0:\n%s    %s.append([])\n%s    %s = len(%s) - 1\n'
+                              '%s    %s[%s] = %s\n%s%s[%s].append(%s)'
+                              % (keyname, key, pad, slot, name, keyname, pad, slot,
+                                 pad, vals, pad, slot, vals, pad, name, keyname, slot,
+                                 pad, vals, slot, value)))
+            for stmt, call in gets:
+                key = ast.get_source_segment(source, call.args[0]) or ast.unparse(call.args[0])
+                target = stmt.targets[0].id
+                a, b = span(stmt)
+                edits.append((a, b, '%s = %s[%s.get(%s, 0)]' % (target, vals, name, key)))
+    if not edits:
+        return source
+    edits.sort(key=lambda edit: edit[0], reverse=True)
+    data = source.encode('utf8')
+    floor = len(data) + 1
+    for a, b, text in edits:
+        if b > floor:
+            return source
+        data = data[:a] + text.encode('utf8') + data[b:]
+        floor = a
+    return data.decode('utf8')
+
+
 def python_surface(source, notes=None, library=False):
     """Map the Python spellings above onto the compiler's own; `notes` collects (line, why) for
     the constructs left as written."""
@@ -3542,6 +3763,7 @@ def python_surface(source, notes=None, library=False):
     if "(" in source:
         source = _modtables().rewrite_text(source, library, notes)
     source = _tuplib().rewrite(source, notes)
+    source = lower_dict_of_lists(source)
     try:
         surface = _Surface(source)
     except (SyntaxError, ValueError):

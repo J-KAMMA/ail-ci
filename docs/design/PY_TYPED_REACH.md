@@ -42,15 +42,54 @@ Two front-end defects kept the None / Optional reason alive:
    possibly-None, so `res = pack(data)` beside `res = unpack(data)` refused to lower.
    `optlib._return_kinds` now infers those plain return kinds and `Lowerer.nonnull` uses them.
 
-Effect: echo_pack now gets past the None reason (next blocker: its dict of containers), and
-the typed-path helper conflicts in scar_life/term_rank disappeared. No lab task is fully
-typed yet: every task still has at least one blocker from rows 2-6 above. In particular
-`echo_pack`, the closest task, needs a bytes-keyed dict of int lists (`idx`).
+Effect: echo_pack gets past the None reason and the typed-path helper conflicts in
+scar_life/term_rank disappeared.
+
+## Review fix: echo_pack now builds typed
+
+The review correctly found that no lab task was fully typed yet. The remaining echo_pack
+blockers were the bytes-keyed dict of int lists (`idx`), one-argument `dict.get`, and a
+bytearray passed to a sequence parameter. Three general front-end changes close them:
+
+1. **A plain dict of lists.** A local `d = {}` whose only uses are
+   `d.setdefault(k, []).append(v)` and a truth-tested `x = d.get(k)` is lowered to the typed
+   shape the compiler already has: a key -> slot dict plus `rows: list[list[T]]`. The slot
+   dict is O(1); row 0 is a shared empty sentinel so a missing key stays a read-only empty
+   row. Any other use of `d`, a mutation of the fetched row, or a non-truth-tested `get`
+   leaves the source unchanged and the old by-name refusal intact.
+2. **Unannotated owned-bytes helpers.** A Python-surface helper whose every value return is
+   `bytes(...)` and which cannot fall off its end now owns its result exactly like an explicit
+   `-> bytes`, so `res = pack(data)` may cross a function boundary.
+3. **Bytearray as a read-only bytes view.** A bytearray argument to a bytes/sequence parameter
+   is passed through `ail_bytearray_readonly_arg`, and call-site inference claims bytes for an
+   unannotated sequence parameter when the caller supplies a bytearray.
+
+Two supporting fixes found while validating the other blockers: a nested `def` that is a
+direct statement of a loop body is lifted with its captured values (late binding preserved by
+passing them at each call), and `for part in m.groups()` is lowered to `m.group(i)` when every
+pattern the match can hold has the same groups and all of them always take part. Generated
+helpers appended after a script no longer hide the script's real entry point (`_script_entry`),
+which is what the old row 5 misreported as "entry returns checked bytes".
+
+Result: `echo_pack` builds with `--syntax python --strict` (exit 0), passes all 57 public +
+hidden cases plus the perf input against CPython, and reports `ail-py path: typed` in
+`lab/compare/run_task.py`. The other nine Python sources still have their row 2-6 blockers
+(chain_relax/rail_transfer need exact big ints; tally_lang executes generated code; the rest
+need dict-of-containers, module tables or slice/tuple work).
 
 ## Verification
 
-Probes (see the report): `argv_starts.py` (a str method on `sys.argv[1]`), `argv_re.py`
-(generated regex helper), `optret3.py` (unannotated helper assigned into an Optional local),
-`optbytes.py`, `optret2.py`, `nestedappend.py`, `dictbyteslist.py`. The first three build on
-the typed path and match CPython; the dict-of-containers probe still refuses by name.
-`AIL_CURRENT/test_ail_pytyped_reach.py` pins the two fixes.
+Probes: `p_dlist3.py` (dict-of-lists through a list item, missing key, truth test),
+`p_owned_bytes2.py` (unannotated bytes helpers including empty), `p_ba_view.py` (bytearray,
+empty and non-empty), `p_loop_def.py` (loop-body nested def capturing an outer local),
+`p_groups_loop3.py` (str groups), `p_entry_re2.py` (entry after generated regex helpers), and
+the earlier `argv_starts`/`argv_re`/`optret3` cases. All match CPython on the default and
+general builds; `p_groups_optional.py` (a group that may be absent) is refused by name because
+the typed path has no None. `AIL_CURRENT/test_ail_pytyped_reach.py` pins the behaviour,
+including building `lab/compare/src/echo_pack/main.py` itself.
+
+The generated C for all ten `.ail` sources is byte-identical to the parent commit, and all ten
+`.ail` sources still build typed. Instruction counts could not be measured on this runner:
+`perf_event_open` is denied (`perf_event_paranoid=4`) and valgrind is not installed, so
+`run_task.py --icount auto` reports `none`; wall time on the perf input was 1.06 s (`.ail`) vs
+4.88 s (`.ail-py`).

@@ -1,3 +1,26 @@
+## 2026-11-01 -- pyreach1 review: echo_pack reaches the typed path (job-pyreach1-11011012)
+
+The review found Step 2 unmet: no lab/compare `.py` task built typed. Fixed the remaining
+echo_pack blockers in the front end, without touching the lab sources. A local `d = {}` used
+only through `d.setdefault(k, []).append(v)` and a truth-tested `x = d.get(k)` is lowered to
+the typed key -> slot dict plus `list[list[T]]` rows (row 0 is an empty sentinel); unannotated
+Python-surface helpers whose every return is `bytes(...)` now own their result like `-> bytes`;
+and a bytearray argument to a bytes/sequence parameter is passed as a read-only bytes view.
+Also lift a nested `def` that is a direct statement of a loop body (captures passed at each
+call), lower `for part in m.groups()` when every group always takes part, and recover the real
+entry point when generated helpers are appended after the script (`_script_entry`).
+
+`echo_pack` now exits 0 with `--syntax python --strict`, `run_task.py --smoke` reports
+`ail-py path: typed`, and all 57 public/hidden cases plus the perf input match CPython. The
+other nine tasks keep their earlier blockers (big ints, exec, dict-of-containers, etc.). All
+ten `.ail` sources still build typed and their emitted C is byte-identical to HEAD. Probes:
+`p_dlist3`, `p_owned_bytes2`, `p_ba_view`, `p_loop_def`, `p_groups_loop3`, `p_entry_re2`, plus
+the earlier argv/optional probes; `p_groups_optional` is refused by name. icount could not be
+measured here (perf_event_open denied, no valgrind): wall 1.06 s vs 4.88 s on the perf input.
+Tests: test_ail_pytyped_reach, test_ail_re, test_ail_nested_functions, test_ail_collections,
+test_ail_optional_locals, test_ail_optional_structs, test_ail_safetynet, test_ail_files,
+test_ail_corpus_findings3, and `tools/update_manifest.py --check`.
+
 ## 2026-11-01 -- pyreach1: Python sources and the typed path (job-pyreach1-11011012)
 
 Built all ten `lab/compare/src/*/main.py` with `--syntax python --strict` (plus `--exact-int` for
