@@ -5,9 +5,11 @@ it to a real module-level generator function, so the body runs lazily (outer ite
 element and exception at next()), and the default build routes such a program there.  Every case
 below is compared with CPython 3.12 on the default and the forced-general build.  A generator
 inside a class body, a nested generator expression, a walrus inside one, a captured local that is
-rebound after creation (on the same line, through a nested function's `nonlocal` write, or by a
-later store), a captured local that may be unbound, and a constructor of a class defined by the
-program keep the by-name refusal.
+rebound after creation (on the same line, in a later loop iteration, through a nested function's
+`nonlocal` write, or by a later store), a captured local that may be unbound, and a constructor of
+a class defined by the program keep the by-name refusal.  A generator in a default argument or
+annotation reads the enclosing scope (a parameter of the `def` does not shadow it), and the
+module-global read is left for consumption time.
 """
 import os
 import subprocess
@@ -194,6 +196,87 @@ NESTED_READ = r'''def main():
 main()
 '''
 
+LOOP_AFTER = r'''def main():
+    gens = []
+    for x in [1, 2, 3]:
+        gens.append((10 // x for _ in [0]))
+    print([list(g) for g in gens])
+main()
+'''
+
+WHILE_AFTER = r'''def main():
+    gens = []
+    i = 0
+    while i < 2:
+        x = i + 1
+        gens.append((10 // x for _ in [0]))
+        i = i + 1
+    print([list(g) for g in gens])
+main()
+'''
+
+LOOP_TWO_TARGETS = r'''def main():
+    gens = []
+    for x, y in [(1, 2), (3, 4)]:
+        gens.append((10 // (x + y) for _ in [0]))
+    print([list(g) for g in gens])
+main()
+'''
+
+NESTED_LOOP = r'''def main():
+    gens = []
+    for i in [1, 2]:
+        x = i + 1
+        for j in [0]:
+            gens.append((10 // x for _ in [0]))
+    print([list(g) for g in gens])
+main()
+'''
+
+LOOP_BEFORE = r'''def main():
+    x = 2
+    gens = []
+    for i in [1, 2]:
+        gens.append((10 // x for _ in [0]))
+    print([list(g) for g in gens])
+main()
+'''
+
+DEFAULT_STALE = r'''def main():
+    x = 100
+    def f(x=1, g=(10 // x for _ in [0])):
+        return list(g)
+    x = 7
+    return f()
+print(main())
+'''
+
+DEFAULT_PARAM = r'''def make(x):
+    def f(x=1, g=(10 // x for _ in [0])):
+        return list(g)
+    return f()
+print(make(2))
+print(make(-3))
+'''
+
+DEFAULT_SAFE = r'''def main():
+    x = 5
+    def f(x=1, g=(10 // x for _ in [0])):
+        return list(g)
+    return f()
+print(main())
+'''
+
+DEFAULT_GLOBAL_REBOUND = r'''x = 100
+def main():
+    def f(x=1, g=(10 // x for _ in [0])):
+        return list(g)
+    global x
+    x = 7
+    return f()
+print(main())
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -266,6 +349,21 @@ class StdlibReachTests(unittest.TestCase):
         self.check('same_line_before', SAME_LINE_BEFORE)
         self.check('param_capture', PARAM_CAPTURE)
         self.check('nested_read', NESTED_READ)
+
+    def test_loop_rebound_capture_refused(self):
+        self.refused('loop_after', LOOP_AFTER)
+        self.refused('while_after', WHILE_AFTER)
+        self.refused('loop_two_targets', LOOP_TWO_TARGETS)
+        self.refused('nested_loop', NESTED_LOOP)
+
+    def test_loop_before_capture_matches(self):
+        self.check('loop_before', LOOP_BEFORE)
+
+    def test_default_argument_scope(self):
+        self.refused('default_stale', DEFAULT_STALE)
+        self.check('default_param', DEFAULT_PARAM)
+        self.check('default_safe', DEFAULT_SAFE)
+        self.check('default_global_rebound', DEFAULT_GLOBAL_REBOUND)
 
 
 if __name__ == '__main__':

@@ -13014,6 +13014,28 @@ def _definitely_binds(stmt, name):
     return False
 
 
+def _loop_rebinds(fn, name, node, parents):
+    """True if a loop between `node` and its enclosing function `fn` binds `name` in the part
+    that repeats.  CPython's cell then holds the value of the last iteration when the generator
+    body eventually reads it, while a by-value capture at creation holds the first one."""
+    child = node
+    p = parents.get(child)
+    while p is not None:
+        if isinstance(p, (ast.For, ast.AsyncFor, ast.While)) \
+                and child in getattr(p, 'body', []) and p is not fn:
+            if isinstance(p, (ast.For, ast.AsyncFor)):
+                names = _scope_bound_names([p.target] + list(p.body))
+            else:
+                names = _scope_bound_names(p.body)
+            if name in names:
+                return True
+        if p is fn:
+            break
+        child = p
+        p = parents.get(p)
+    return False
+
+
 def _definitely_bound(fn, name, node, parents):
     """True if `name` is certainly bound when `node` runs, so passing its value at creation is valid.
 
@@ -13122,11 +13144,21 @@ def _lazy_genexp_functions(tree):
             continue
         chain = []
         p = parents.get(node)
+        child = node
         class_body = False
         crossed_scope = False
+        made_at = node
         while p is not None and not isinstance(p, ast.Module):
             if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                chain.append(p)
+                if child is p.args or child is p.returns or child in p.decorator_list \
+                        or child in getattr(p, 'type_params', []):
+                    # A default value, annotation or decorator is evaluated in the enclosing
+                    # scope when the `def` statement runs, not in the function's own scope.  The
+                    # parameter names of this def are therefore not captures, and the value is
+                    # made at the def statement, not at the expression's own position.
+                    made_at = p
+                else:
+                    chain.append(p)
             elif isinstance(p, ast.ClassDef):
                 # Only a generator evaluated directly in the class body (before any def) is left
                 # alone; one inside a method has the method as its enclosing scope.
@@ -13136,6 +13168,7 @@ def _lazy_genexp_functions(tree):
                 # A lambda or comprehension has its own scope, so a name read here may be a
                 # variable of that scope, not of the enclosing function we can pass by value.
                 crossed_scope = True
+            child = p
             p = parents.get(p)
         if class_body or crossed_scope:
             continue
@@ -13172,10 +13205,12 @@ def _lazy_genexp_functions(tree):
                     reason = 'it is bound by an `except ... as` clause, which CPython unbinds when the handler exits'
                 elif any(isinstance(b, ast.Name) and isinstance(b.ctx, ast.Del) for _, b in bindings):
                     reason = 'the enclosing scope deletes it'
-                elif not _definitely_bound(owner, name, node, parents):
+                elif _loop_rebinds(owner, name, made_at, parents):
+                    reason = 'a loop binds it again on each iteration'
+                elif not _definitely_bound(owner, name, made_at, parents):
                     reason = 'it may be unbound when the generator is made'
                 else:
-                    pos = (getattr(node, 'lineno', 0) or 0, getattr(node, 'col_offset', 0) or 0)
+                    pos = (getattr(made_at, 'lineno', 0) or 0, getattr(made_at, 'col_offset', 0) or 0)
                     if any((getattr(b, 'lineno', 0) or 0, getattr(b, 'col_offset', 0) or 0) >= pos
                            for _, b in bindings):
                         reason = 'the enclosing function binds it again after the generator is made'

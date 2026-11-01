@@ -1,3 +1,24 @@
+## 2026-11-01 -- stdlib2 review 2: loop-iteration and default-argument captures (job-stdlib2-11020039)
+
+The second review found two capture-timing holes left in `_lazy_genexp_functions`. A name bound by
+a loop target (or assigned in a loop body) before the generator was accepted, but the next
+iteration changes CPython's cell, so the by-value capture showed the first value. `_loop_rebinds`
+now refuses a capture when a loop between the generator and its enclosing function binds that name
+in the part that repeats. A generator in a default argument or annotation was analysed as if it
+were in the function body, so a parameter of the same name shadowed the real enclosing cell and the
+value was snapshot at the wrong time. The signature's `def` is no longer added to the enclosing
+scope chain; the default/annotation is evaluated in the enclosing scope, at the `def` statement,
+and a parameter of that `def` is not a capture. A module-global name stays a global read, so a
+global rebound after the `def` is read at consumption time.
+
+Probes in `/tmp/probes` (both `cmp.sh` builds): `p_loop_after`, `p_while_after`,
+`p_loop_two_targets`, `p_nested_loop_outer` and `p_default_stale` are now refused by name;
+`p_loop_before`, `p_default_safe`, `p_default_param`, `p_default_collide_global`,
+`p_default_global_safe` and `p_default_local_only` match CPython. The nine census modules still
+reach the same next blockers on both builds, and the generated C of the ten `lab/compare` tasks is
+byte-identical to `HEAD` on both builds (seven build, three refuse as before). Added the loop,
+default-argument and safe-default cases to `test_ail_stdlib_reach.py`.
+
 ## 2026-11-01 -- stdlib2 review fixes: unsafe captures of a saved generator expression (job-stdlib2-11011233)
 
 The reviewer found three new acceptances where `_lazy_genexp_functions` passed a captured local by
