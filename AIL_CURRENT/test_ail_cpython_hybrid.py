@@ -139,6 +139,69 @@ class CPythonHybrid(unittest.TestCase):
             self.assertEqual(got.stdout, want.stdout)
             self.assertEqual(got.returncode, want.returncode)
 
+    def test_two_list_fallback(self):
+        text = '''
+def f(a: list[int], b: list[int]) -> int:
+    return 0
+
+print(f([1.5], [2]))
+print(f([1], [2.5]))
+print(f([1], [2]))
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'twolists', text)
+            self.assertIn('f', report['accelerated'])
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'twolists')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+
+    def test_accelerated_metadata(self):
+        text = '''
+def f(n: int) -> int:
+    return n + 1
+
+def g(n: int = 7) -> int:
+    return n * 2
+
+print(f.__annotations__)
+print(f.__defaults__)
+print(f.__code__.co_argcount, f.__code__.co_varnames)
+print(f(4), g(), g(4), g(n=5))
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'metadata', text)
+            self.assertIn('f', report['accelerated'])
+            self.assertIn('g', report['accelerated'])
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'metadata')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+
+    def test_file_and_sibling_import_survive_packaging(self):
+        text = '''
+import os
+import sys
+import helper_mod
+
+def f(n: int) -> int:
+    return n + 1
+
+print(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data.txt')).read().strip())
+print(helper_mod.VALUE)
+print(os.path.abspath(__file__))
+print(os.path.abspath(sys.argv[0]))
+print(f(1))
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            (Path(tmp) / 'helper_mod.py').write_text("VALUE = 'sibling-ok'\n", encoding='utf-8')
+            (Path(tmp) / 'data.txt').write_text('hello\n', encoding='utf-8')
+            src, out, report = self.build(tmp, 'paths', text)
+            want = run([sys.executable, str(src)], tmp)
+            got = run([str(out / 'paths')], tmp)
+            self.assertEqual(got.stdout, want.stdout)
+            self.assertEqual(got.returncode, want.returncode)
+
 
 if __name__ == '__main__':
     unittest.main()

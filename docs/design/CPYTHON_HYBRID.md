@@ -72,10 +72,14 @@ without asking the int64 ABI to carry `ail_tint` parameters.
 | result `str` | UTF-8 length + fill -> `PyUnicode_DecodeUTF8` | invalid UTF-8 -> fallback |
 
 The native function is exposed as a `METH_VARARGS` function. The generated Python module wraps it
-in a small closure. Any conversion failure, or the overflow flag set by the typed clone, raises a
-private `Fallback` exception; the closure catches it and calls the original Python function with the
-same positional arguments. Keyword arguments and wrong arity go straight to the original function,
-so CPython's own `TypeError` and defaults are preserved.
+in a closure generated with the original function's parameter layout. Any conversion failure, or the
+overflow flag set by the typed clone, raises a private `Fallback` exception; the closure catches it
+and calls the original Python function with the same values. Keyword arguments bind to the generated
+closure first (so CPython's own `TypeError`, positional-only rules and defaults still apply) and are
+then passed to the native call; a wrong arity or a `**kwargs` call falls back. The closure copies
+`__name__`, `__qualname__`, `__doc__`, `__module__`, `__dict__`, `__annotations__`, `__defaults__`
+and `__kwdefaults__`, and its `__code__.co_argcount`/`co_varnames` and `inspect.signature` match the
+original parameter list, so introspection sees the Python function.
 
 Measured per-call cost (Linux x86-64, CPython 3.12, `inc(n) = n + 1`, 2,000,000 calls, median of 5):
 
@@ -118,7 +122,10 @@ silently copied back.
 All native calls are surrounded by `Py_BEGIN_ALLOW_THREADS` / `Py_END_ALLOW_THREADS`. The arguments
 are converted (or copied) while the GIL is held; the typed C body runs with no Python object access
 and no GIL; the result is boxed after the GIL is reacquired. A fallback flag is read after
-reacquisition before returning to Python.
+reacquisition before returning to Python. In the hybrid's copy of each unit that flag is
+thread-local (`__thread`), and every list buffer is declared and initialised before any conversion
+loop, so concurrent calls and a fallback from a later argument cannot share state or free an
+uninitialised pointer.
 
 Typed parallel loops (`# ail: par`, typedpar) compile inside the same typed clone. The extension is
 compiled and linked with `-pthread`; if such a clone spawns native threads, they run while the
@@ -155,9 +162,13 @@ f = _ail_hybrid_make(_ail_hybrid_native.f, f)
 
 so later calls (including calls from other functions, which look the name up at call time) use the
 native path. If the extension is missing or cannot be imported, `_ail_hybrid_make` returns the
-original function and the program is a plain CPython run. The extension is built for the CPython
-that ran the build; at run time the launcher must find the same major/minor ABI (the normal CPython
-extension rules apply). The source file is never rewritten in place.
+original function and the program is a plain CPython run. The preamble makes the packaged copy look
+like the original module at run time: it sets `__file__` and, when run as the main program,
+`sys.argv[0]` to the original source path, and inserts the original source directory at the front of
+`sys.path`. `__file__`-relative data files and sibling imports therefore keep working even though the
+hybrid copy lives in `DIR`. The extension is built for the CPython that ran the build; at run time
+the launcher must find the same major/minor ABI (the normal CPython extension rules apply). The
+source file is never rewritten in place.
 
 The prototype does not switch automatically. A later step may make a refused standalone build fall
 back to this layout, but only as an explicit owner decision; the current command is opt-in.

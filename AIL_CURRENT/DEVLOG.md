@@ -1,3 +1,22 @@
+## 2026-11-01 -- CPython hybrid review fixes: fallback buffers, packaged paths, metadata (job-cpyhyb1-11011403)
+
+Fixed the three review defects in `ail build --cpython`. A fallback from the first of several list
+parameters no longer frees uninitialised buffers: every list buffer is declared as NULL before the
+conversion loops and the fallback label frees all of them (list[int] and list[float]). The packaged
+`prog.py` now sets `__file__` and `sys.argv[0]` to the original source and puts its directory first
+on `sys.path`, so `__file__`-relative data files and sibling imports work from the output directory.
+The accelerated wrapper is generated with the original parameter layout and copies annotations,
+defaults, kwdefaults, name/qualname/doc/module/dict, so `__code__.co_argcount`/`co_varnames` and
+`inspect.signature` match; keyword calls and default values still behave as CPython. The hybrid
+unit's overflow flag is now thread-local because native calls release the GIL; free-threaded CPython
+is still not claimed.
+
+Tests: `test_ail_cpython_hybrid` gained regression cases for two- and three-list fallbacks, metadata
+and `__file__`/sibling imports. Probes in `/tmp/probes/hyb_*` cover scalar int/float/bool/str
+boundaries, int64 and beyond, empty/negative lists, aliasing, mutation, kwargs/defaults, packaging
+and concurrent overflow calls; every hybrid run matched CPython. Default and general standalone
+paths are unchanged (the same probes still show the pre-existing standalone int64/metadata limits).
+
 ## 2026-11-01 -- CPython hybrid prototype: typed helpers in an extension, CPython for the rest (job-cpyhyb1-11011403)
 
 Added an explicit `ail build --cpython prog.py -o DIR` mode. The output is a normal CPython program

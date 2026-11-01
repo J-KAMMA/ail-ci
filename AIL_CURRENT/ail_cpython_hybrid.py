@@ -389,8 +389,17 @@ def _wrapper_source(module, items):
         out.append('    PyObject *o[%d];' % max(1, len(params)))
         out.append('    if (PyTuple_GET_SIZE(args) != %d) return ail_hybrid_fallback();' % len(params))
         bufs = []
-        for i, _ in enumerate(params):
+        for i, (p, kind) in enumerate(params):
             out.append('    o[%d] = PyTuple_GET_ITEM(args, %d);' % (i, i))
+            # Declare every list buffer before any conversion loop.  A later loop can `goto
+            # fallback` before its own declaration would have run; the label frees all of them,
+            # so each must already be a valid pointer (NULL frees are no-ops).
+            if kind == 'list[int]':
+                out.append('    int64_t *b%d = NULL;' % i)
+                bufs.append('b%d' % i)
+            elif kind == 'list[float]':
+                out.append('    double *b%d = NULL;' % i)
+                bufs.append('b%d' % i)
         call = []
         for i, (p, kind) in enumerate(params):
             o = 'o[%d]' % i
@@ -420,9 +429,8 @@ def _wrapper_source(module, items):
             elif kind == 'list[int]':
                 out.append('    if (!PyList_CheckExact(%s)) return ail_hybrid_fallback();' % o)
                 out.append('    Py_ssize_t n%d = PyList_GET_SIZE(%s);' % (i, o))
-                out.append('    int64_t *b%d = n%d ? (int64_t *)PyMem_Malloc((size_t)n%d * sizeof(int64_t)) : NULL;' % (i, i, i))
-                out.append('    if (n%d && !b%d) return PyErr_NoMemory();' % (i, i))
-                bufs.append('b%d' % i)
+                out.append('    b%d = n%d ? (int64_t *)PyMem_Malloc((size_t)n%d * sizeof(int64_t)) : NULL;' % (i, i, i))
+                out.append('    if (n%d && !b%d) goto fallback;' % (i, i))
                 out.append('    for (Py_ssize_t k%d = 0; k%d < n%d; k%d++) {' % (i, i, i, i))
                 out.append('        PyObject *e%d = PyList_GET_ITEM(%s, k%d);' % (i, o, i))
                 out.append('        if (!PyLong_CheckExact(e%d)) goto fallback;' % i)
@@ -436,9 +444,8 @@ def _wrapper_source(module, items):
             elif kind == 'list[float]':
                 out.append('    if (!PyList_CheckExact(%s)) return ail_hybrid_fallback();' % o)
                 out.append('    Py_ssize_t n%d = PyList_GET_SIZE(%s);' % (i, o))
-                out.append('    double *b%d = n%d ? (double *)PyMem_Malloc((size_t)n%d * sizeof(double)) : NULL;' % (i, i, i))
-                out.append('    if (n%d && !b%d) return PyErr_NoMemory();' % (i, i))
-                bufs.append('b%d' % i)
+                out.append('    b%d = n%d ? (double *)PyMem_Malloc((size_t)n%d * sizeof(double)) : NULL;' % (i, i, i))
+                out.append('    if (n%d && !b%d) goto fallback;' % (i, i))
                 out.append('    for (Py_ssize_t k%d = 0; k%d < n%d; k%d++) {' % (i, i, i, i))
                 out.append('        PyObject *e%d = PyList_GET_ITEM(%s, k%d);' % (i, o, i))
                 out.append('        if (!PyFloat_CheckExact(e%d)) goto fallback;' % i)
@@ -475,7 +482,7 @@ def _wrapper_source(module, items):
                 out.append('    PyMem_Free(%s);' % b)
             out.append('    return PyFloat_FromDouble(r);')
         else:
-            out.append('    extern int %s__mix_overflow;' % item['mangled'])
+            out.append('    extern __thread int %s__mix_overflow;' % item['mangled'])
             out.append('    int64_t r; int ovf;')
             out.append('    Py_BEGIN_ALLOW_THREADS')
             out.append('    r = %s(%s);' % (item['mangled'], cargs))
@@ -528,38 +535,99 @@ def _insertion_point(tree):
     return at
 
 
-def _preamble(module):
-    return (
+def _preamble(module, original_path):
+    _text = (
         '\n# --- AIL CPython hybrid (generated preamble) ---\n'
+        'import os as _ail_hybrid_os\n'
+        'import sys as _ail_hybrid_sys\n'
+        '_ail_hybrid_source = __AIL_SOURCE__\n'
+        '_ail_hybrid_source_dir = _ail_hybrid_os.path.dirname(_ail_hybrid_source)\n'
+        'if _ail_hybrid_source_dir and _ail_hybrid_source_dir not in _ail_hybrid_sys.path:\n'
+        '    _ail_hybrid_sys.path.insert(0, _ail_hybrid_source_dir)\n'
+        'if __name__ == "__main__" and _ail_hybrid_sys.argv:\n'
+        '    _ail_hybrid_sys.argv[0] = _ail_hybrid_source\n'
+        '__file__ = _ail_hybrid_source\n'
         'try:\n'
-        '    import %(m)s as _ail_hybrid_native\n'
+        '    import __AIL_MODULE__ as _ail_hybrid_native\n'
         'except Exception:\n'
         '    _ail_hybrid_native = None\n'
-        'def _ail_hybrid_make(_native, _original):\n'
-        '    def _ail_hybrid_call(*_args, **_kwargs):\n'
-        '        if _kwargs:\n'
-        '            return _original(*_args, **_kwargs)\n'
+        'def _ail_hybrid_invoke(_native, _original, _pos, _kw, _varargs, _varkw):\n'
+        '    if _native is not None and not _varkw:\n'
         '        try:\n'
-        '            return _native(*_args)\n'
+        '            return _native(*_pos, *_kw.values(), *_varargs)\n'
         '        except _ail_hybrid_native.Fallback:\n'
-        '            return _original(*_args)\n'
-        '    _ail_hybrid_call.__name__ = _original.__name__\n'
-        '    _ail_hybrid_call.__qualname__ = _original.__qualname__\n'
-        '    _ail_hybrid_call.__doc__ = _original.__doc__\n'
-        '    _ail_hybrid_call.__module__ = _original.__module__\n'
+        '            pass\n'
+        '    return _original(*_pos, *_varargs, **_kw, **_varkw)\n'
+        'def _ail_hybrid_make(_native, _original):\n'
+        '    if _native is None or _original is None:\n'
+        '        return _original\n'
         '    try:\n'
-        '        _ail_hybrid_call.__dict__.update(_original.__dict__)\n'
+        '        import inspect as _ail_hybrid_inspect\n'
+        '        _params = list(_ail_hybrid_inspect.signature(_original).parameters.values())\n'
+        '    except Exception:\n'
+        '        return _original\n'
+        '    _posonly, _pos, _kwonly = [], [], []\n'
+        '    _vararg = _varkw = None\n'
+        '    for _p in _params:\n'
+        '        if _p.kind == _ail_hybrid_inspect.Parameter.POSITIONAL_ONLY:\n'
+        '            _posonly.append(_p)\n'
+        '        elif _p.kind == _ail_hybrid_inspect.Parameter.POSITIONAL_OR_KEYWORD:\n'
+        '            _pos.append(_p)\n'
+        '        elif _p.kind == _ail_hybrid_inspect.Parameter.KEYWORD_ONLY:\n'
+        '            _kwonly.append(_p)\n'
+        '        elif _p.kind == _ail_hybrid_inspect.Parameter.VAR_POSITIONAL:\n'
+        '            _vararg = _p\n'
+        '        elif _p.kind == _ail_hybrid_inspect.Parameter.VAR_KEYWORD:\n'
+        '            _varkw = _p\n'
+        '    _decl = [p.name for p in _posonly]\n'
+        '    if _posonly:\n'
+        '        _decl.append("/")\n'
+        '    _decl.extend(p.name for p in _pos)\n'
+        '    if _vararg is not None:\n'
+        '        _decl.append("*" + _vararg.name)\n'
+        '    elif _kwonly:\n'
+        '        _decl.append("*")\n'
+        '    _decl.extend(p.name for p in _kwonly)\n'
+        '    if _varkw is not None:\n'
+        '        _decl.append("**" + _varkw.name)\n'
+        '    _posnames = [p.name for p in _posonly + _pos]\n'
+        '    if len(_posnames) == 1:\n'
+        '        _postuple = "(" + _posnames[0] + ",)"\n'
+        '    else:\n'
+        '        _postuple = "(" + ", ".join(_posnames) + ")"\n'
+        '    _kwtext = "{" + ", ".join("%r: %s" % (p.name, p.name) for p in _kwonly) + "}"\n'
+        '    _varkwtext = _varkw.name if _varkw is not None else "{}"\n'
+        '    _varargtext = _vararg.name if _vararg is not None else "()"\n'
+        '    _src = ("def _ail_hybrid_call(%s):\\n"\n'
+        '            "    return _ail_hybrid_invoke(_ail_hybrid_native_ref, _ail_hybrid_original_ref, %s, %s, %s, %s)\\n"\n'
+        '            % (", ".join(_decl), _postuple, _kwtext, _varargtext, _varkwtext))\n'
+        '    _namespace = {"_ail_hybrid_invoke": _ail_hybrid_invoke,\n'
+        '                  "_ail_hybrid_native_ref": _native,\n'
+        '                  "_ail_hybrid_original_ref": _original}\n'
+        '    exec(_src, _namespace)\n'
+        '    _call = _namespace["_ail_hybrid_call"]\n'
+        '    _call.__name__ = _original.__name__\n'
+        '    _call.__qualname__ = _original.__qualname__\n'
+        '    _call.__doc__ = _original.__doc__\n'
+        '    _call.__module__ = _original.__module__\n'
+        '    _call.__annotations__ = getattr(_original, "__annotations__", {})\n'
+        '    _call.__defaults__ = getattr(_original, "__defaults__", None)\n'
+        '    _call.__kwdefaults__ = getattr(_original, "__kwdefaults__", None)\n'
+        '    try:\n'
+        '        _call.__dict__.update(_original.__dict__)\n'
         '    except Exception:\n'
         '        pass\n'
-        '    return _ail_hybrid_call\n'
+        '    _call.__wrapped__ = _original\n'
+        '    return _call\n'
         'if _ail_hybrid_native is None:\n'
         '    def _ail_hybrid_make(_native, _original):\n'
         '        return _original\n'
         '# --- original program follows ---\n\n'
-    ) % {'m': module}
+    )
+    return _text.replace('__AIL_MODULE__', module).replace('__AIL_SOURCE__', repr(str(original_path)))
 
 
-def _hybrid_source(source, tree, module, names):
+def _hybrid_source(source, tree, module, names, original_path):
     """Original text plus a preamble and one rebinding after each accelerated top-level def."""
     lines = source.splitlines(keepends=True)
     if lines and not lines[-1].endswith('\n'):
@@ -567,7 +635,7 @@ def _hybrid_source(source, tree, module, names):
     funcs = _top_level_functions(tree)
     edits = []
     at = _insertion_point(tree)
-    edits.append((at, 0, _preamble(module)))
+    edits.append((at, 0, _preamble(module, original_path)))
     for name in names:
         fn = funcs.get(name)
         if fn is not None and getattr(fn, 'end_lineno', None):
@@ -592,6 +660,14 @@ def _compile(items, units, module, out_dir):
     objects = []
     for i, item in enumerate(items):
         csrc = next(u[2] for u in units if u[1] == item['name'])
+        # The mixed-mode overflow signal is a per-function global.  The hybrid releases the GIL
+        # around every native call, so two threads can otherwise reset/read each other's flag and
+        # a truncated int could escape.  Give the hybrid's copy of the unit a thread-local flag;
+        # the wrapper's matching `extern` below is thread-local too.
+        csrc = re.sub(r'(?m)^extern int (%s__mix_overflow);$' % re.escape(item['mangled']),
+                      r'extern __thread int \1;', csrc)
+        csrc = re.sub(r'(?m)^int (%s__mix_overflow) = 0;$' % re.escape(item['mangled']),
+                      r'__thread int \1 = 0;', csrc)
         cpath = out_dir / ('%s_unit%d.c' % (module, i))
         opath = out_dir / ('%s_unit%d.o' % (module, i))
         cpath.write_text(csrc, encoding='utf-8')
@@ -660,7 +736,7 @@ def build(source_path, output_dir):
 
     # Always keep an unmodified copy and a runnable hybrid copy.
     (output_dir / (stem + '.orig.py')).write_text(source, encoding='utf-8')
-    hybrid = _hybrid_source(source, tree, module, report['accelerated'])
+    hybrid = _hybrid_source(source, tree, module, report['accelerated'], source_path)
     (output_dir / (stem + '.py')).write_text(hybrid, encoding='utf-8')
     launcher = output_dir / stem
     launcher.write_text('#!/bin/sh\nexec "${AIL_PYTHON:-python3}" "$(dirname "$0")/%s.py" "$@"\n' % stem,
