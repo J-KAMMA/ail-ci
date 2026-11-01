@@ -1206,12 +1206,57 @@ _TINT_GATE_WORDS = ('tagged-int', 'tagged local', 'can need an int beyond int64'
 _BUILTIN_NAMES = frozenset(dir(builtins))
 
 
-def _literal_value(node):
-    """A literal, or the tuple record the python surface writes for a tuple literal in a default
-    (`_AilT_s_i('x', -1)`); its constructor only stores the arguments, so no user code runs."""
+def _is_tuple_record_class(node):
+    """Whether a module-level class is the tuple record the Python surface's tuple pass writes:
+    `class _AilT_<codes>: def __init__(self, f0, f1, ...): self.f0 = f0; ...` (an empty tuple has
+    `pass`). Its constructor only stores its arguments, so calling it with literals runs no user
+    code. A user def or class that happens to start with `_AilT_` is not one."""
+    if (not isinstance(node, ast.ClassDef) or not node.name.startswith('_AilT_')
+            or node.bases or node.keywords or node.decorator_list):
+        return False
+    if len(node.body) != 1 or not isinstance(node.body[0], ast.FunctionDef):
+        return False
+    init = node.body[0]
+    if init.name != '__init__' or init.decorator_list or init.returns is not None:
+        return False
+    args = init.args
+    if args.posonlyargs or args.vararg or args.kwarg or args.kwonlyargs or args.defaults:
+        return False
+    params = [arg.arg for arg in args.args]
+    if not params or params[0] != 'self':
+        return False
+    fields = params[1:]
+    for index, field in enumerate(fields):
+        if field not in ('f%d' % index, 'fb%d' % index):
+            return False
+    if not fields:
+        return len(init.body) == 1 and isinstance(init.body[0], ast.Pass)
+    if len(init.body) != len(fields):
+        return False
+    for stmt, field in zip(init.body, fields):
+        if not (isinstance(stmt, ast.Assign) and len(stmt.targets) == 1
+                and isinstance(stmt.targets[0], ast.Attribute)
+                and isinstance(stmt.targets[0].value, ast.Name)
+                and stmt.targets[0].value.id == 'self'
+                and stmt.targets[0].attr == field
+                and isinstance(stmt.value, ast.Name) and stmt.value.id == field):
+            return False
+    return True
+
+
+def _tuple_record_classes(tree):
+    """The module-level tuple-record classes the surface's tuple pass wrote for this source."""
+    return {node.name for node in tree.body if _is_tuple_record_class(node)}
+
+
+def _literal_value(node, records):
+    """A literal, or a call of a module-level tuple record the python surface writes for a tuple
+    literal in a default (`_AilT_s_i('x', -1)`) with literal arguments; its constructor only stores
+    the arguments, so no user code runs. `records` holds the classes `_is_tuple_record_class`
+    accepted, so a user def or class named `_AilT_*` is not taken for one."""
     if (isinstance(node, ast.Call) and not node.keywords and isinstance(node.func, ast.Name)
-            and node.func.id.startswith('_AilT_')):
-        return all(_literal_value(arg) for arg in node.args)
+            and node.func.id in records):
+        return all(_literal_value(arg, records) for arg in node.args)
     try:
         ast.literal_eval(node)
     except (ValueError, TypeError, SyntaxError, MemoryError, RecursionError):
@@ -1219,27 +1264,29 @@ def _literal_value(node):
     return True
 
 
-def _effect_free_annotation(node):
+def _effect_free_annotation(node, records):
     """An annotation CPython evaluates when it executes a definition, without running any code: a
     literal, a builtin name, a subscript of those (`list[int]`, `dict[str, int]`) or a `|` union
     (`int | None`). `ail_syntax.python_surface` rewrites a return contract to a `__ail_checked_*`
-    name and a `tuple[...]` to its `_AilT_*` record class; those spellings are the surface's own
-    builtins. An attribute (`typing.Any`) or a user name keeps today's behaviour."""
+    name and a `tuple[...]` to its `_AilT_*` record class; `records` holds those surface-written
+    classes. An attribute (`typing.Any`) or a user name keeps today's behaviour."""
     if node is None or isinstance(node, ast.Constant):
         return True
     if isinstance(node, ast.Name):
         return (node.id in _BUILTIN_NAMES or node.id.startswith('__ail_checked_')
-                or node.id.startswith('_AilT_'))
+                or node.id in records)
     if isinstance(node, ast.Tuple):
-        return all(_effect_free_annotation(item) for item in node.elts)
+        return all(_effect_free_annotation(item, records) for item in node.elts)
     if isinstance(node, ast.Subscript):
-        return _effect_free_annotation(node.value) and _effect_free_annotation(node.slice)
+        return (_effect_free_annotation(node.value, records)
+                and _effect_free_annotation(node.slice, records))
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.BitOr):
-        return _effect_free_annotation(node.left) and _effect_free_annotation(node.right)
+        return (_effect_free_annotation(node.left, records)
+                and _effect_free_annotation(node.right, records))
     return False
 
 
-def _effect_free_function(node):
+def _effect_free_function(node, records):
     """A def whose decorators, annotations and defaults run no code when CPython executes it. Its
     body is untouched: nothing at module scope calls it, so it never runs."""
     if node.decorator_list:
@@ -1248,29 +1295,31 @@ def _effect_free_function(node):
     annotations = [arg.annotation for arg in args.posonlyargs + args.args + args.kwonlyargs]
     annotations += [getattr(args.vararg, 'annotation', None), getattr(args.kwarg, 'annotation', None)]
     annotations.append(node.returns)
-    if not all(_effect_free_annotation(annotation) for annotation in annotations):
+    if not all(_effect_free_annotation(annotation, records) for annotation in annotations):
         return False
     defaults = list(args.defaults) + [default for default in args.kw_defaults if default is not None]
-    return all(_literal_value(default) for default in defaults)
+    return all(_literal_value(default, records) for default in defaults)
 
 
-def _effect_free_node(node, constants):
+def _effect_free_node(node, constants, records):
     """One statement of a module (or class) body that CPython executes without running code."""
     if isinstance(node, (ast.Import, ast.ImportFrom, ast.Pass)):
         return True
     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
         return True
     if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-        return _effect_free_function(node)
+        return _effect_free_function(node, records)
     if isinstance(node, ast.ClassDef):
         if node.decorator_list:
             return False
-        return all(_effect_free_node(child, True) for child in node.body)
+        return all(_effect_free_node(child, True, records) for child in node.body)
     if constants and isinstance(node, ast.Assign):
-        return all(isinstance(target, ast.Name) for target in node.targets) and _literal_value(node.value)
+        return (all(isinstance(target, ast.Name) for target in node.targets)
+                and _literal_value(node.value, records))
     if constants and isinstance(node, ast.AnnAssign):
-        return (isinstance(node.target, ast.Name) and _effect_free_annotation(node.annotation)
-                and (node.value is None or _literal_value(node.value)))
+        return (isinstance(node.target, ast.Name)
+                and _effect_free_annotation(node.annotation, records)
+                and (node.value is None or _literal_value(node.value, records)))
     return False
 
 
@@ -1288,7 +1337,8 @@ def _python_runs_nothing(source, constants=False):
         return False
     if not tree.body:
         return False
-    return all(_effect_free_node(node, constants) for node in tree.body)
+    records = _tuple_record_classes(tree)
+    return all(_effect_free_node(node, constants, records) for node in tree.body)
 
 
 def _python_defs_only_runs_nothing(source):
@@ -1301,7 +1351,7 @@ def _python_defs_only_runs_nothing(source):
     return source.rstrip('\n') + '\npass\n'
 
 
-def _definitions_only_shape(node):
+def _definitions_only_shape(node, records):
     """One top-level statement of a module that only defines things: a signature, pass, docstring,
     import, def/class, or a literal module constant. Whether the definition runs code when CPython
     executes it is `_effect_free_node`'s question, not this one."""
@@ -1311,10 +1361,12 @@ def _definitions_only_shape(node):
     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant) and isinstance(node.value.value, str):
         return True
     if isinstance(node, ast.Assign):
-        return all(isinstance(target, ast.Name) for target in node.targets) and _literal_value(node.value)
+        return (all(isinstance(target, ast.Name) for target in node.targets)
+                and _literal_value(node.value, records))
     if isinstance(node, ast.AnnAssign):
-        return (isinstance(node.target, ast.Name) and _effect_free_annotation(node.annotation)
-                and (node.value is None or _literal_value(node.value)))
+        return (isinstance(node.target, ast.Name)
+                and _effect_free_annotation(node.annotation, records)
+                and (node.value is None or _literal_value(node.value, records)))
     return False
 
 
@@ -1329,7 +1381,8 @@ def _python_definitions_only(source):
         tree = ast.parse(source.strip())
     except (SyntaxError, ValueError):
         return None
-    if not tree.body or not all(_definitions_only_shape(node) for node in tree.body):
+    records = _tuple_record_classes(tree)
+    if not tree.body or not all(_definitions_only_shape(node, records) for node in tree.body):
         return None
     return tree
 
@@ -1343,9 +1396,10 @@ def _refuse_python_load_effect(source):
     tree = _python_definitions_only(source)
     if tree is None:
         return
+    records = _tuple_record_classes(tree)
     effect = next((node for node in tree.body
                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
-                   and not _effect_free_node(node, True)), None)
+                   and not _effect_free_node(node, True, records)), None)
     if effect is None:
         return
     if isinstance(effect, ast.ClassDef):

@@ -94,6 +94,17 @@ print("top", helper(2))
 
 main()
 ''',
+    'ailt_user_names': '''def _AilT_i(n):
+    print("code-shaped", n)
+    return n
+
+def _AilT_evil(n):
+    print("evil", n)
+    return n
+
+A = _AilT_i(1)
+B = _AilT_evil(2)
+''',
     'imports': '''import os
 from functools import cache
 
@@ -219,7 +230,7 @@ class ModuleOnlyTests(unittest.TestCase):
             self.same_as_cpython(slug, MODULES[slug])
 
     def test_top_level_code_still_runs(self):
-        for slug in ('print_top', 'main_called'):
+        for slug in ('print_top', 'main_called', 'ailt_user_names'):
             source = MODULES[slug]
             with tempfile.TemporaryDirectory(prefix='ail-reex24-') as directory:
                 want, want_rc = _cpython(directory, slug, source)

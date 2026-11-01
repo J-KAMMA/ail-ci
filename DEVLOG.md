@@ -1,3 +1,13 @@
+## 2026-11-01 -- reex24: a user `_AilT_*` name is not a tuple record (job-rbreex24-11020723)
+
+`_literal_value` treated any call to a name starting with `_AilT_` as the surface's effect-free
+tuple record, so `def _AilT_evil(n): print(...)` plus `K = _AilT_evil(1)` was classified as a
+definitions-only module and the default build's no-op `main` dropped the call's output. The
+`_AilT_*` spelling is now accepted only for a module-level class with the tuple pass's own record
+shape (`__init__` that only stores `f0, f1, ...`), and `_effect_free_annotation` uses the same set.
+A user def or class with that name is no longer a literal, so the module is built as a program and
+both builds print what CPython prints. `test_ail_reex24` gains the `ailt_user_names` case.
+
 ## 2026-10-31 -- re-apply reex24: the definitions-only boundary and a usable rustc probe (job-rbreex24-10312118)
 
 Re-applied the accepted `job-reex24-10300433` change on this tree, whose diff no longer applies.
