@@ -197,9 +197,14 @@ KeyError 6
 
 ## Numbers: int, float, bool
 
-- `int` is 64-bit; overflow in `+ - * // << -x` raises `OverflowError`. `wrapping_add/sub/mul(a, b)`
-  wrap modulo 2**64 (hashes, PRNGs). `/` gives float; `//` and `%` floor like Python. `**`,
-  `& | ^ ~ << >>`. No big ints: limbs in a `list[int]`.
+- `int` is signed 64-bit; an operation that leaves it stops the program (exit 1, stdout flushed)
+  with `OverflowError: integer overflow in <op> (ints are 64-bit; --exact-int gives exact ints)`.
+  A source value that needs a big int statically (a literal, or a constant such as `10 ** 30`) is
+  refused at compile time, naming the line and the flag. `--exact-int` / `AIL_EXACT_INT=1` gives
+  CPython's exact big ints (about 20x slower). `wrapping_add/sub/mul(a, b)` wrap modulo 2**64
+  (hashes, PRNGs). `/` gives float; `//` and `%` floor like Python. `**`, `& | ^ ~ << >>`.
+  Without `--exact-int`, use limbs in a `list[int]` for wide arithmetic. `decimal.Decimal` is on
+  the general path and its integer work follows the same default: a result beyond int64 stops.
 - `int(str)`, `int(bytes)` (`ValueError` on bad text), `int(float)`, `float(str)`, `round(x)` (half
   to even, int), `round(x, n)`, `abs`, `max(a, b)`, `min(a, b)`, `sum/min/max/any/all(list)`.
   No `math` module: `x ** 0.5`. For text that may overflow: `parse_int64_decimal(s)` (Modules).
@@ -1011,18 +1016,18 @@ Lowered in the front end like batches 1 to 3 (stdlib4.py, csvlib.py, dtlib.py, s
 - `time`: `perf_counter() monotonic() time() time_ns() sleep(x) localtime([t]) gmtime([t]) strftime(fmt[, t]) mktime(t)`. The wall clock is a program input: `AIL_CLOCK=<seconds>[.<fraction>]` pins it for tests (every read returns that value, `sleep(x)` advances it without sleeping); local time is the OS time zone (`TZ` is respected). `localtime` and `gmtime` give an object with `tm_year tm_mon tm_mday tm_hour tm_min tm_sec tm_wday tm_yday tm_isdst tm_zone tm_gmtoff` only. Refused by name: `asctime ctime tzset altzone daylight timezone tzname struct_time(...)` and `strftime` of a tuple.
 - `statistics` on `list[int]`: `mean median median_low median_high mode multimode variance pvariance stdev pstdev`; `fmean`, `median`, `median_low`, `median_high`, `mode`, `multimode` also on `list[float]`. `StatisticsError` is `ValueError`. Mixed int/float results only where printed or used as floats.
 - Small forms: `int.bit_length()`, `int.bit_count()`, `max/min(..., default=)`, `max(d, key=d.get)` (and over a generator), `x in (constants)`, `itertools.product(x, repeat=n)` with a runtime `n`, unpacking a `tuple | None` after a None test.
-- Refused by name with a "write instead" hint: `decimal`, `unicodedata`, `string.Template`.
+- Refused by name with a "write instead" hint: `unicodedata`, `string.Template`.
 
 ### Library batch 5 (fractions, enum, namedtuple, random.Random, keyword, calendar, abc, array, io.StringIO)
 
 Lowered in the front end (stdlib5.py, enumlib.py, ntlib.py, randlib.py, smalllib5.py; the classes are Python source in `prelude_*.py`); a program that
 imports none of them is unchanged. They are classes with operator methods, so a program using them is built on the general path (several times
-slower than typed code), where operator methods dispatch on the run-time class (dunderrt.py). `int` is still 64 bits: a numerator beyond it is an `OverflowError`.
+slower than typed code), where operator methods dispatch on the run-time class (dunderrt.py). By default `int` is still 64 bits: a numerator beyond it stops with `OverflowError`; `--exact-int` keeps the exact parts.
 
 - `fractions.Fraction`: `Fraction(a, b)`, `Fraction("3/4")`, `Fraction("0.125")`, `Fraction(0.75)`, `Fraction(other)`; `+ - * / // % **` with ints, Fractions and
   floats (a float gives a float), `== < <= > >=`, `abs round(x[, n]) int float math.floor math.ceil`, `limit_denominator`, `numerator`, `denominator`,
   `is_integer`, `as_integer_ratio`, `Fraction.from_float`, `sum / min / max / sorted`, dict keys and set members. `str`/`repr` as CPython (`3/4`, `Fraction(3, 4)`).
-  Not built: `Fraction.from_decimal`, `format` specs, `divmod`, `decimal` (refused by name).
+  Not built: `Fraction.from_decimal`, `format` specs, `divmod`.
 - `enum`: `Enum`, `IntEnum`, `StrEnum`, `Flag`, `IntFlag`, `auto()`, `@unique`. Members print as `Color.RED`, repr `<Color.RED: 1>`; `Color(1)` (ValueError `1 is not a valid Color`),
   `Color["RED"]` (KeyError), `for c in Color`, `list(Color)`, `len(Color)`, `Color.__members__`, aliases, `.name`, `.value`, methods, members as dict keys and set
   members, `==` / `is`. An `IntEnum` member compares, adds and indexes like its value (`int(m)`, `m + 1`, `lst[m]`). `Flag` / `IntFlag` compose with `| & ^ ~ << >>`,
@@ -1107,11 +1112,13 @@ print(m, get_i32(e, 0))                              # 0.75 6
   ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; `c_mut_void_p` / `c_const_void_p` for a struct; fields are read and written at the C
   offsets with `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`.
 - `trust=True` for a prototype that names a struct (`struct tm *`, `sqlite3 *`): the header is included, its prototype is not compared.
-- Unsigned 64-bit values (`c_uint64 c_ulong c_ulonglong c_size_t`) are exact ints in `0 .. 2**64 - 1`, as under CPython: a result with the top bit set (a
-  hash, `SIZE_MAX`) is the big positive int, and an argument takes `2**63 .. 2**64 - 1` too (also as a literal at the call). Anything else is the shim's
-  `OverflowError("NAME: PARAM does not fit TYPE")`. In the legacy int64 build (`AIL_NO_GENERAL=1 AIL_IR=0`) a result above `2**63 - 1` is the loud stop `integer
-  overflow` (exit 1), never a negative number. `check="allones"` fails on the unsigned `(T)-1` (`(size_t)-1` is `18446744073709551615`); `check="minus1"`
-  and `"negative"` on an unsigned result can never fire and are refused at compile time (`write instead: check="allones"`).
+- Unsigned 64-bit values (`c_uint64 c_ulong c_ulonglong c_size_t`) take `0 .. 2**64 - 1` in C. An argument above `2**63 - 1` is
+  refused or stops at run time unless `--exact-int`, with `OverflowError: integer overflow in ... (ints are 64-bit; --exact-int gives
+  exact ints)` (exit 1); a literal at the call is this run-time stop. A result above `2**63 - 1` is the same loud stop (exit 1, never
+  a negative number). `--exact-int` gives exactly CPython's big positive int (a hash, `SIZE_MAX`), for arguments and results.
+  Anything else is the shim's `OverflowError("NAME: PARAM does not fit TYPE")`. `check="allones"` fails on the unsigned `(T)-1` (`(size_t)-1` is
+  `18446744073709551615`); `check="minus1"` and `"negative"` on an unsigned result can never fire and are refused at compile time
+  (`write instead: check="allones"`).
 - Callbacks (AIL functions called from C) are not supported.
 - Rust: export `#[no_mangle] pub extern "C"` functions from a `cdylib` / `staticlib` crate (`panic = "abort"`), generate a header with
   cbindgen, and `python3 AIL_CURRENT/ail_bindgen.py crate.h --lib ./libcrate.so --check fn=nonzero:ValueError` writes the stubs.
