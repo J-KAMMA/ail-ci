@@ -1,3 +1,15 @@
+## 2026-11-01 -- contextlib review fixes (job-std_contextlib-11011755)
+
+Fixed the two review defects.  `_ail_exc_is` now takes the program's `class Name(Base)` links, so a user
+exception such as `MyError(Exception)` or `MyKey(KeyError)` walks on into the builtin name hierarchy and
+`issubclass(exc_type, Exception)` / `issubclass(exc_type, LookupError)` are true instead of false.
+`ExitStack.close()` is now CPython's `__exit__(None, None, None)`: an earlier callback that raises is passed
+to the managers below it, a true `__exit__` suppresses it, and the error is not raised at the end.
+`exitstack_basic.py` now uses `callback` + `close` and `custom_manager.py` has user exceptions extending
+`Exception` and `KeyError`, so `test_ail_std_contextlib` covers both fixes.  Probes
+`/tmp/probes/p_user_exc_*.py`, `p_stack_close_*.py`, `p_callback_common.py`, `p_push_forms.py`,
+`p_chdir_return.py`, `p_stack_fields.py`, `p_stack_empty.py` and `p_noctx.py` match CPython on both builds.
+
 ## 2026-11-01 -- contextlib coverage: ExitStack, chdir and builtin exception hierarchy (job-std_contextlib-11011755)
 
 Added the twelve-program `lab/stdlib/contextlib` coverage set and its differential test.  Before the change

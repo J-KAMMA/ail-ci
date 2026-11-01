@@ -1,3 +1,11 @@
+class RecordError(KeyError):
+    pass
+
+
+class FatalError(Exception):
+    pass
+
+
 class Transaction:
     def __init__(self, name):
         self.name = name
@@ -14,8 +22,12 @@ class Transaction:
             print("commit", self.name, tb is None)
             return False
         print("rollback", self.name, exc_type.__name__, str(exc), tb is not None)
+        print("is exception", issubclass(exc_type, Exception))
         if exc_type is LookupError:
             print("lookup swallowed")
+            return True
+        if issubclass(exc_type, LookupError):
+            print("lookup swallowed", exc_type.__name__)
             return True
         if issubclass(exc_type, ArithmeticError):
             print("arithmetic swallowed")
@@ -42,6 +54,10 @@ def run(cm, label, mode):
                 raise AssertionError(label)
             if mode == "index":
                 raise IndexError(label)
+            if mode == "record":
+                raise RecordError(label)
+            if mode == "fatal":
+                raise FatalError(label)
         print("after", label)
     except Exception as e:
         print("caught", label, type(e).__name__, e)
@@ -55,6 +71,8 @@ run(Transaction("type"), "type", "type")
 
 holder = {"cm": Transaction("dict")}
 run(holder["cm"], "dict", "assert")
+run(Transaction("record"), "record", "record")
+run(Transaction("fatal"), "fatal", "fatal")
 
 items = [Transaction("list")]
 run(items[0], "list", "index")

@@ -158,12 +158,14 @@ _ail_exc_bases = {
 
 
 
-def _ail_exc_is(exc, name: str) -> bool:
+def _ail_exc_is(exc, name: str, user_bases: dict) -> bool:
     current = _ail_exc_name(exc)
     while current:
         if current == name:
             return True
-        if current in _ail_exc_bases:
+        if current in user_bases:
+            current = user_bases[current]
+        elif current in _ail_exc_bases:
             current = _ail_exc_bases[current]
         else:
             current = ""
@@ -260,30 +262,9 @@ class _AilExitStack:
         return new
 
     def close(self):
-        pending = None
-        while self.kinds:
-            kind = self.kinds.pop()
-            try:
-                if kind == 0:
-                    cm = self.managers.pop()
-                    cm.__exit__(None, None, None)
-                elif kind == 1:
-                    func = self.funcs.pop()
-                    arg1 = self.args1.pop()
-                    arg2 = self.args2.pop()
-                    if arg1 is _ail_missing:
-                        func()
-                    elif arg2 is _ail_missing:
-                        func(arg1)
-                    else:
-                        func(arg1, arg2)
-                else:
-                    func = self.funcs.pop()
-                    func(None, None, None)
-            except Exception as e:
-                pending = e
-        if pending is not None:
-            raise pending
+        # CPython's close() is __exit__(None, None, None): a callback that raises is passed to the managers below
+        # it, and a manager returning true suppresses it, instead of every manager seeing None.
+        self.__exit__(None, None, None)
 
 
 class _AilChdir:

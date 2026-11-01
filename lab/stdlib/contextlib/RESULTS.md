@@ -18,8 +18,8 @@ programs are refused by name and are the follow-up.
 | `contextmanager_basic.py` | `@contextmanager`, `try/finally`, `return`/`break`/`continue` | general, same | general, same |
 | `contextmanager_edges.py` | `@contextmanager` swallowing/replacing errors, `StopIteration`, empty yield | general, same | general, same |
 | `contextmanager_methods.py` | `@contextmanager` on a method, nested managers | general, same | general, same |
-| `custom_manager.py` | class `__enter__`/`__exit__`, `exc_type is/is in/issubclass`, `tb is None` | refused: `not in the subset: isinstance() against an unknown type ArithmeticError` | general, same stdout/exit |
-| `exitstack_basic.py` | `ExitStack`, `enter_context`, `push`, `closing`, `nullcontext`, body error | refused: `not in the subset: contextlib.ExitStack is not built: contextmanager, suppress, closing and nullcontext are built` | general, same stdout/exit |
+| `custom_manager.py` | class `__enter__`/`__exit__`, `exc_type is/is in/issubclass`, user exceptions extending `Exception`/`KeyError`, `tb is None` | refused: `not in the subset: isinstance() against an unknown type ArithmeticError` | general, same stdout/exit |
+| `exitstack_basic.py` | `ExitStack`, `enter_context`, `push`, `callback`, `close`, `closing`, `nullcontext`, body error | refused: `not in the subset: contextlib.ExitStack is not built: contextmanager, suppress, closing and nullcontext are built` | general, same stdout/exit |
 | `exitstack_nested.py` | nested/passed `ExitStack`, `pop_all`, LIFO close | refused: same `ExitStack` refusal | general, same stdout/exit |
 | `nullcontext_demo.py` | `nullcontext()`, positional and `enter_result=` value | general, same | general, same |
 | `suppress_errors.py` | `suppress()` / `suppress(A, B)`, nested, not-suppressed errors | general, same | general, same |
@@ -43,7 +43,12 @@ Before: 6 of 12 built.  After: 10 of 12 build, and every built program matches C
    `isinstance` for classes the boxed runtime has.  `ArithmeticError`, `LookupError` and `UnicodeError` are
    hierarchy names the runtime does not have; `prelude_bytes.py` also defines its own `UnicodeError` and
    `LookupError` classes, so `isinstance` against them was wrong.  Builtin exception names now go through
-   `_ail_exc_is` and a name hierarchy in `prelude_with.py`; user exception classes still use `isinstance`.
+   `_ail_exc_is` and a name hierarchy in `prelude_with.py`; a user class extends that hierarchy through the
+   `class Name(Base)` links of the program, so `MyError(Exception)` and `MyKey(KeyError)` reach `Exception` /
+   `LookupError` too, while a user class used as the target name still uses `isinstance`.
+4. **`ExitStack.close()` unwinding (review defect).** `close()` is now `__exit__(None, None, None)`, as in
+   CPython: an exception raised by a callback is passed to the managers below it and a manager returning true
+   suppresses it, instead of every manager seeing `None` and the callback error being raised at the end.
 
 ## Follow-up (out of scope here)
 

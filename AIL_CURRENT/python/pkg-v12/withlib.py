@@ -310,8 +310,8 @@ class ExitArgs(ast.NodeTransformer):
     `exc_type in (A, B)` compare the exception instance's class name (there are no class values here); `tb` may
     only be tested against None, since AIL has no traceback objects."""
 
-    def __init__(self, ty, ex, tb, classes):
-        self.ty, self.ex, self.tb, self.classes = ty, ex, tb, classes
+    def __init__(self, ty, ex, tb, classes, bases):
+        self.ty, self.ex, self.tb, self.classes, self.bases = ty, ex, tb, classes, bases
         self.uses_exc_is = False
 
     def isclass(self, node):
@@ -328,13 +328,23 @@ class ExitArgs(ast.NodeTransformer):
         return ast.BoolOp(op=ast.And(), values=[
             ast.Compare(left=N(self.ex), ops=[ast.IsNot()], comparators=[ast.Constant(value=None)]), test])
 
+    def user_base_map(self):
+        """The `class Name(Base)` links of the program, as a dict literal: a user exception class that extends a
+        builtin (MyError(Exception), MyKey(KeyError)) is not in the builtin name hierarchy, so _ail_exc_is needs
+        these links to reach the builtin ancestor."""
+        keys, values = [], []
+        for name in sorted(self.bases):
+            keys.append(ast.Constant(value=name))
+            values.append(ast.Constant(value=self.bases[name]))
+        return ast.Dict(keys=keys, values=values)
+
     def subclass_test(self, cls):
         # a builtin exception name always goes through the name hierarchy: prelude_bytes.py defines
         # UnicodeError / LookupError itself, and an `isinstance` against that class is not the builtin one.
         if cls.id in self.classes and cls.id not in BUILTIN_EXC:
             return call(N('isinstance'), [N(self.ex), cls])
         self.uses_exc_is = True
-        return call(N('_ail_exc_is'), [N(self.ex), ast.Constant(value=cls.id)])
+        return call(N('_ail_exc_is'), [N(self.ex), ast.Constant(value=cls.id), self.user_base_map()])
 
     def visit_Name(self, node):
         if node.id == self.tb and isinstance(node.ctx, ast.Load):
@@ -465,11 +475,15 @@ def rewrite(tree):
         new_body.extend(res if isinstance(res, list) else [res])
     tree.body = new_body
     classes = lower.classes
+    bases = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef) and len(node.bases) == 1 and isinstance(node.bases[0], ast.Name):
+            bases[node.name] = node.bases[0].id
     need_exc_is = False
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == '__exit__' and len(node.args.args) >= 4:
             ty, ex, tb = node.args.args[1].arg, node.args.args[2].arg, node.args.args[3].arg
-            walker = ExitArgs(ty, ex, tb, classes)
+            walker = ExitArgs(ty, ex, tb, classes, bases)
             node.body = [walker.visit(s) for s in node.body]
             need_exc_is = need_exc_is or walker.uses_exc_is
     stdlib5.leftover(tree, binder, 'contextmanager, suppress, closing, nullcontext, ExitStack and chdir are built')

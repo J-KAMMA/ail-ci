@@ -37,3 +37,28 @@ try:
         raise KeyError("body")
 except KeyError as e:
     print("body error", e)
+
+
+class Guard:
+    def __init__(self):
+        self.errors = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.errors.append(None if exc_type is None else exc_type.__name__)
+        print("guard", self.errors[-1])
+        return True
+
+
+def failing_cleanup():
+    raise ValueError("cleanup")
+
+
+guard = Guard()
+stack = ExitStack()
+stack.push(guard)
+stack.callback(failing_cleanup)
+stack.close()
+print("cleanup suppressed", guard.errors)
