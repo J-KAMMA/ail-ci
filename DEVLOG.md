@@ -1,3 +1,24 @@
+## 2026-11-01 -- std_string: `string` coverage: capwords keywords and Template (job-std_string-11011434)
+
+Added the 12-program `lab/stdlib/string/` coverage set and `RESULTS.md`.  Before the fix 6 built and
+6 were refused: `string.capwords(..., sep=...)` / `s=` (3), `string.Template` (2) and
+`string.Formatter` (1).  `ail_syntax.small_call` now takes the capwords keywords (still with the
+existing None / empty / non-str separator errors), and `string.Template` lowers to a small prelude
+object with `substitute`, `safe_substitute`, `is_valid`, `get_identifiers`, `template`, `$$` and
+`$name` / `${name}`; missing keys raise KeyError and invalid placeholders raise CPython's line/col
+ValueError.  Keyword values override a positional mapping like CPython's ChainMap.  A Template
+subclass stays refused by name.  `string.Formatter` remains the documented follow-up (exact refusal
+in RESULTS.md).  Final: 11/12 build (2 typed, 9 general, 1 refused) and all 11 match CPython on the
+default and forced-general paths.  Probes `/tmp/probes/string/p_const.py`,
+`p_capwords_edges.py`, `p_template.py`, `p_template_edges.py`, `p_template_values.py` and the
+refused `p_formatter.py` cover constants, keyword/runtime/empty/non-str separators, missing keys,
+safe substitution, invalid placeholders with newlines, mapping precedence, non-str templates, and
+values through arguments, a list item, a dict value and an attribute.  Added
+`AIL_CURRENT/test_ail_std_string.py` (registered through `tests.d/test_ail_std_string.txt`) and
+updated `test_ail_stdlib1.py`'s old Template-refusal case to Formatter.  Final-state tests:
+test_ail_std_string, test_ail_stdlib1, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`

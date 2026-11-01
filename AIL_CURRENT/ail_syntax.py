@@ -1465,6 +1465,137 @@ _MATH_HELPERS['string_capwords'] = (
     '    if sep:\n'
     '        return sep.join(out)\n'
     '    return " ".join(out)\n')
+_MATH_HELPERS['string_template'] = '''\
+def _ail_tpl_invalid(template, index):
+    lines = template[:index].splitlines(True)
+    if not lines:
+        line = 1
+        col = 1
+    else:
+        line = len(lines)
+        col = index - len("".join(lines[:-1]))
+    raise ValueError("Invalid placeholder in string: line %d, col %d" % (line, col))
+
+
+def _ail_tpl_text(obj):
+    text = obj.template
+    if not isinstance(text, str):
+        raise TypeError("expected string or bytes-like object, got '%s'" % type(text).__name__)
+    return text
+
+
+def _ail_tpl_parts(text, delim):
+    start = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"
+    chars = start + "0123456789"
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        j = text.find(delim, i)
+        if j < 0:
+            out.append((0, text[i:], text[i:], i))
+            break
+        if j > i:
+            out.append((0, text[i:j], text[i:j], i))
+        if j + 1 >= n:
+            out.append((2, "", delim, j + 1))
+            i = n
+            break
+        c = text[j + 1]
+        if c == delim:
+            out.append((0, delim, text[j:j + 2], j))
+            i = j + 2
+        elif c == "{":
+            k = text.find("}", j + 2)
+            if k < 0:
+                out.append((2, "", delim, j + 1))
+                i = j + 1
+            else:
+                name = text[j + 2:k]
+                good = bool(name) and name[0] in start
+                for ch in name[1:]:
+                    if ch not in chars:
+                        good = False
+                if good:
+                    out.append((1, name, text[j:k + 1], j))
+                    i = k + 1
+                else:
+                    out.append((2, "", delim, j + 1))
+                    i = j + 1
+        elif c in start:
+            k = j + 2
+            while k < n and text[k] in chars:
+                k += 1
+            out.append((1, text[j + 1:k], text[j:k], j))
+            i = k
+        else:
+            out.append((2, "", delim, j + 1))
+            i = j + 1
+    return out
+
+
+def _ail_tpl_lookup(mapping, kws, name):
+    if name in kws:
+        return kws[name]
+    return mapping[name]
+
+
+def _ail_tpl_substitute(obj, mapping, kws, has_mapping):
+    text = _ail_tpl_text(obj)
+    if not has_mapping:
+        mapping = kws
+    out = []
+    for kind, value, raw, pos in _ail_tpl_parts(text, obj.delimiter):
+        if kind == 0:
+            out.append(value)
+        elif kind == 1:
+            out.append(str(_ail_tpl_lookup(mapping, kws, value)))
+        else:
+            _ail_tpl_invalid(text, pos)
+    return "".join(out)
+
+
+def _ail_tpl_safe_substitute(obj, mapping, kws, has_mapping):
+    text = _ail_tpl_text(obj)
+    if not has_mapping:
+        mapping = kws
+    out = []
+    for kind, value, raw, pos in _ail_tpl_parts(text, obj.delimiter):
+        if kind == 0:
+            out.append(value)
+        elif kind == 1:
+            try:
+                out.append(str(_ail_tpl_lookup(mapping, kws, value)))
+            except KeyError:
+                out.append(raw)
+        else:
+            out.append(raw)
+    return "".join(out)
+
+
+def _ail_tpl_is_valid(obj):
+    text = _ail_tpl_text(obj)
+    for kind, value, raw, pos in _ail_tpl_parts(text, obj.delimiter):
+        if kind == 2:
+            return False
+    return True
+
+
+def _ail_tpl_get_identifiers(obj):
+    text = _ail_tpl_text(obj)
+    out = []
+    for kind, value, raw, pos in _ail_tpl_parts(text, obj.delimiter):
+        if kind == 1 and value not in out:
+            out.append(value)
+    return out
+
+
+class _AilStringTemplate:
+    delimiter = "$"
+
+    def __init__(self, template):
+        self.template = template
+'''
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',),
              'tw_wrap': ('tw_wrap_more',), 'tw_shorten': ('tw_wrap_more',)}
 import string as _string_module
@@ -1472,6 +1603,7 @@ import string as _string_module
 _STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
     'ascii_lowercase', 'ascii_uppercase', 'ascii_letters', 'digits', 'hexdigits', 'octdigits', 'punctuation',
     'whitespace', 'printable')}
+_STRING_CLASSES = {'Template': '_AilStringTemplate'}
 _TIME_CLOCKS = {'perf_counter': '_ail_perf_counter', 'monotonic': '_ail_perf_counter',
                 'perf_counter_ns': '_ail_perf_counter_ns', 'monotonic_ns': '_ail_perf_counter_ns',
                 'time': '_ail_time', 'time_ns': '_ail_time_ns'}
@@ -1485,7 +1617,7 @@ _OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv'
 _SMALL_MODULES = {
     'textwrap': ('wrap', 'fill', 'dedent', 'shorten', 'indent'),
     'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
-    'string': (*tuple(_STRING_CONSTANTS), 'capwords'),
+    'string': (*tuple(_STRING_CONSTANTS), *_STRING_CLASSES, 'capwords'),
     'os': ('cpu_count',),
     'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem', 'itemgetter'),
 }
@@ -1496,7 +1628,8 @@ _SMALL_NOTE = {
             'strftime() and mktime() are built (the wall clock is an input: AIL_CLOCK=<seconds> pins it); '
             'asctime, ctime, struct_time, tzset and the zone constants are not',
     'string': 'the string module is built as its constants (ascii_lowercase, ascii_uppercase, ascii_letters, '
-              'digits, hexdigits, octdigits, punctuation, whitespace, printable) and capwords()',
+              'digits, hexdigits, octdigits, punctuation, whitespace, printable), capwords() and the Template '
+              'class with substitute / safe_substitute / is_valid / get_identifiers',
     'os': 'os.cpu_count() is built; the rest of os (environ, path, ...) is not',
     'operator': 'operator.add/sub/mul/truediv/floordiv/mod/pow/and_/or_/xor/lshift/rshift, the comparisons, '
                 'neg/pos/invert/not_/abs/getitem called directly, and itemgetter(k) as a key= are built',
@@ -1646,6 +1779,10 @@ class _SurfaceExpr(ast.NodeTransformer):
                 and not isinstance(node.func.value, ast.Name)):
             node.func.value = self.visit(node.func.value)      # re.search(...).start(): the inner call too
         node.args = [self.visit(arg) for arg in node.args]
+        if (path is None and surface.template_used and isinstance(node.func, ast.Attribute)
+                and node.func.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers')
+                and node.func.attr not in surface.user_methods):
+            node.func.value = self.visit(node.func.value)
         for item in node.keywords:
             item.value = self.visit(item.value)
             if (item.arg == 'key' and isinstance(item.value, ast.Attribute) and item.value.attr == '__getitem__'
@@ -1771,6 +1908,7 @@ class _Surface:
         self.consumed = set()
         self.void = set()
         self.re_on = False             # `import re` seen
+        self.template_used = False     # the program builds a string.Template: its methods are lowered
         self.re_patterns = {}          # NAME -> (library index) for NAME = re.compile(literal)
         self.re_nodes = set()          # those assignment statements
         self.def_names = {node.name for node in ast.walk(self.tree)
@@ -1909,6 +2047,8 @@ class _Surface:
                     self.aliases[node.targets[0].id] = path
                     self.names[node.targets[0].id] = path
                     self.alias_nodes.add(node)
+        self.template_used = any(self.path(node) == 'string.Template' for node in ast.walk(self.tree)
+                                 if isinstance(node, (ast.Attribute, ast.Name)))
 
     # -- expressions --------------------------------------------------------------------------
     def rewritten(self, node, boolean=False):
@@ -1982,6 +2122,9 @@ class _Surface:
         elif module in _SMALL_MODULES and name:
             if module == 'string' and name in _STRING_CONSTANTS:
                 return ast.Constant(value=_STRING_CONSTANTS[name])
+            if module == 'string' and name in _STRING_CLASSES:
+                self.helper('string_template')
+                return ast.Name(id=_STRING_CLASSES[name], ctx=ast.Load())
             self.keep.add(module)
             self.note(node, f'{path} used as a value is not built; ' + _SMALL_NOTE[module])
         elif path == 'sys.maxsize':
@@ -2319,6 +2462,10 @@ class _Surface:
 
     def call(self, node, path):
         func = node.func
+        if path is None and self.template_used and isinstance(func, ast.Attribute) \
+                and func.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers') \
+                and func.attr not in self.user_methods:
+            return self.template_method(node, func.attr)
         if (isinstance(func, ast.Name) and func.id in ('max', 'min') and func.id not in self.names
                 and func.id not in self.def_names and len(node.args) >= 2 and not node.keywords
                 and isinstance(node.args[-1], ast.Starred)
@@ -2462,6 +2609,27 @@ class _Surface:
         self.replace(node, '; '.join(parts), True)
         return True
 
+    def template_method(self, node, name):
+        """Template.substitute / safe_substitute / is_valid / get_identifiers on the prelude object."""
+        func = node.func
+        if any(isinstance(arg, ast.Starred) for arg in node.args) \
+                or any(item.arg is None for item in node.keywords):
+            return None
+        self.helper('string_template')
+        if name in ('is_valid', 'get_identifiers'):
+            if node.args or node.keywords:
+                return None
+            return ast.Call(func=ast.Name(id='_ail_tpl_' + name, ctx=ast.Load()),
+                            args=[func.value], keywords=[])
+        if len(node.args) > 1:
+            return None
+        mapping = node.args[0] if node.args else ast.Dict(keys=[], values=[])
+        kws = ast.Dict(keys=[ast.Constant(value=item.arg) for item in node.keywords],
+                       values=[item.value for item in node.keywords])
+        helper = '_ail_tpl_substitute' if name == 'substitute' else '_ail_tpl_safe_substitute'
+        return ast.Call(func=ast.Name(id=helper, ctx=ast.Load()),
+                        args=[func.value, mapping, kws, ast.Constant(value=bool(node.args))], keywords=[])
+
     def small_call(self, node, module, name):
         """time / string / os / operator, mapped onto what is built (None keeps the call as written)."""
         args = node.args
@@ -2474,12 +2642,35 @@ class _Surface:
                     self.helpers.append('tw_indent')
                 return ast.Call(func=ast.Name(id='_ail_tw_indent', ctx=ast.Load()),
                                 args=args, keywords=[])
-        if module == 'string' and name == 'capwords' and plain and len(args) in (1, 2):
-            if 'string_capwords' not in self.helpers:
-                self.helpers.append('string_capwords')
-            sep = args[1] if len(args) == 2 else ast.Constant(value=None)
-            return ast.Call(func=ast.Name(id='_ail_string_capwords', ctx=ast.Load()),
-                            args=[args[0], sep], keywords=[])
+        if module == 'string' and name == 'Template' and not any(isinstance(arg, ast.Starred) for arg in args):
+            template = args[0] if len(args) == 1 else None
+            ok = len(args) <= 1
+            for keyword in node.keywords:
+                if keyword.arg == 'template' and template is None:
+                    template = keyword.value
+                else:
+                    ok = False
+            if ok and template is not None:
+                if 'string_template' not in self.helpers:
+                    self.helpers.append('string_template')
+                return ast.Call(func=ast.Name(id='_AilStringTemplate', ctx=ast.Load()),
+                                args=[template], keywords=[])
+        if module == 'string' and name == 'capwords' and not any(isinstance(arg, ast.Starred) for arg in args):
+            text = args[0] if len(args) >= 1 else None
+            sep = args[1] if len(args) == 2 else None
+            ok = len(args) <= 2
+            for keyword in node.keywords:
+                if keyword.arg == 's' and text is None:
+                    text = keyword.value
+                elif keyword.arg == 'sep' and sep is None:
+                    sep = keyword.value
+                else:
+                    ok = False
+            if ok and text is not None:
+                if 'string_capwords' not in self.helpers:
+                    self.helpers.append('string_capwords')
+                return ast.Call(func=ast.Name(id='_ail_string_capwords', ctx=ast.Load()),
+                                args=[text, sep or ast.Constant(value=None)], keywords=[])
         if module == 'textwrap' and name in ('wrap', 'fill', 'dedent', 'shorten') and not any(
                 isinstance(arg, ast.Starred) for arg in args):
             if name == 'dedent' and len(args) == 1 and not node.keywords:
