@@ -1,3 +1,32 @@
+## 2026-11-01 -- `math.dist` precision review fix (job-rbstd_math-11020651)
+
+Review follow-up on the re-applied `std_math` change. `math.dist` now ports CPython 3.12's compensated
+`vector_norm` (frexp scaling, error-free squares through `fma`, the two-part `frac1` / `frac2` sum and
+the square-root differential correction) instead of a naive scaled sum of squares, so the last bits
+match CPython for ordinary vectors as well as subnormal and huge ones. The helper reaches `fma`
+through a new 3-argument libm intrinsic/wrapper; the typed call path now orders three numeric
+operands left to right. `test_ail_std_math` gained `test_dist_precision_matches_cpython`, which
+compares the review's ULP vector, a 17-dimensional vector, a subnormal vector and a decimal vector
+on the default and forced-general builds. Probes `/tmp/probes/mathfix/d1..d5` (subnormal, up to
+333 dimensions, `inf` / `nan`, argument / list item / attribute / dict paths, ULP vectors) match
+CPython on both builds.
+
+## 2026-11-01 -- `math` real-program coverage (job-rbstd_math-11020651)
+
+Re-applied the accepted `std_math` change on top of the current tree. Added twelve realistic `math`
+programs in `lab/stdlib/math/` and built them in the default mode: ten build (one typed, nine
+general) and all ten match CPython 3.12.3 stdout and exit status; each also matches on the forced
+general path. Four missing common calls were added to the lowering and prelude: `math.prod(...,
+start=...)`, `math.dist`, `math.erf` / `math.erfc`, and `math.nextafter` / `math.remainder`, including
+`math.dist`'s scaled norm and same-length `ValueError`, and `math.remainder`'s domain `ValueError`.
+`math.gamma` / `math.lgamma` and `math.frexp` / `math.ldexp` / `math.ulp` remain named refusals and
+are recorded as follow-ups in `lab/stdlib/math/RESULTS.md`; no program was changed to avoid a
+missing math name. Added `test_ail_std_math.py` (registered through `tests.d/test_ail_std_math.txt`),
+which builds the ten passing programs and compares them with CPython. Probes in `/tmp/probes/math/`
+and `/tmp/probes/feat/` cover empty, negative, huge, `inf` / `nan`, signed-zero and unequal-length
+values, keyword `start=`, and values reaching the calls through an argument, a list item, an
+attribute and a dict value on both builds.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten
