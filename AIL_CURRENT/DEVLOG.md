@@ -1,3 +1,12 @@
+## 2026-11-01 -- typed reach batch 4 review 2: signed literal divisors keep the analysis alive (job-prog4-fix)
+
+Fixed the review defect in `a3fe0c3`: `_provably_nonzero` reassigned the `UnaryOp` to its operand
+and then read `node.op`, so a signed literal divisor in a non-int/bool function raised
+`AttributeError` and aborted the whole hybrid analysis, dropping every clone in the module.  The
+operand now stays in a separate variable.  A probe with `x / -2.0`, `x % -2.0`, `x // -2.0`,
+`x / +2.0` and int `// -2`/`% +3` reports all functions accelerated and matches CPython; `x / -0.0`
+stays refused.  Added that regression case to `AIL_CURRENT/test_ail_prog4.py`.
+
 ## 2026-11-01 -- typed reach batch 4 review: accelerated zero division falls back (job-prog4-fix)
 
 Fixed the review defect in `4957411`: an accelerated int/bool clone no longer exits through the

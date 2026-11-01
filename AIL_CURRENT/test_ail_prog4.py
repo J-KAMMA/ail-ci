@@ -17,6 +17,8 @@ T3  division/modulo boundaries (zero, negative, bool, int64 edges) and a safe sl
 T4  an uncaught zero divisor in an accelerated int clone falls back to CPython: stdout printed
     before the trap survives and the exit status and exception text match.  A float clone with a
     run-time divisor is not accelerated, so its zero division also matches CPython.
+T5  a signed numeric literal divisor (`x / -2.0`, `x % +3`) is still provably non-zero, so the
+    float/int function keeps its clone; the sign test must not itself abort the whole analysis.
 """
 import json
 import os
@@ -106,6 +108,38 @@ print('start')
 print(tdiv(3.0, 2.0))
 print('before-zero')
 print(tdiv(3.0, 0.0))
+'''
+
+SIGNED_LITERAL = '''
+def fdiv(x: float) -> float:
+    return x / -2.0
+
+def ffloordiv(x: float) -> float:
+    return x // -2.0
+
+def fmod(x: float) -> float:
+    return x % -2.0
+
+def fdivp(x: float) -> float:
+    return x / +2.0
+
+def fdivzero(x: float) -> float:
+    return x / -0.0
+
+def idiv(x: int) -> int:
+    return x // -2
+
+def imod(x: int) -> int:
+    return x % +3
+
+def neg(x: int) -> int:
+    return -x
+
+print(fdiv(7.0), ffloordiv(7.0), fmod(7.0), fdivp(7.0), idiv(-7), imod(-7), neg(3))
+try:
+    print(fdivzero(7.0))
+except Exception as exc:
+    print('zero-exc', type(exc).__name__, exc)
 '''
 
 SLICES = '''
@@ -219,6 +253,14 @@ class Prog4TypedReach(unittest.TestCase):
             self.assertNotIn('tdiv', report['accelerated'])
             got = self.compare(tmp, src, out, 'float_trap')
             self.assertIn(b'before-zero', got.stdout)
+
+    def test_signed_literal_divisors_are_accelerated(self):
+        with tempfile.TemporaryDirectory(prefix='ail-prog4-') as tmp:
+            src, out, report = self.build(tmp, 'signed_literal', SIGNED_LITERAL)
+            for name in ('fdiv', 'ffloordiv', 'fmod', 'fdivp', 'idiv', 'imod', 'neg'):
+                self.assertIn(name, report['accelerated'])
+            self.assertNotIn('fdivzero', report['accelerated'])
+            self.compare(tmp, src, out, 'signed_literal')
 
     def test_slice_steps_are_safe(self):
         with tempfile.TemporaryDirectory(prefix='ail-prog4-') as tmp:

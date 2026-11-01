@@ -81,10 +81,10 @@ def _provably_nonzero(node):
     """A divisor that is a non-zero numeric literal (with an optional sign) cannot trap."""
     if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd))
             and isinstance(node.operand, ast.Constant)):
-        node = node.operand
-        if not isinstance(node.value, (int, float)) or isinstance(node.value, bool):
+        operand = node.operand
+        if not isinstance(operand.value, (int, float)) or isinstance(operand.value, bool):
             return False
-        value = -node.value if isinstance(node.op, ast.USub) else node.value
+        value = -operand.value if isinstance(node.op, ast.USub) else operand.value
         return value != 0
     return (isinstance(node, ast.Constant) and isinstance(node.value, (int, float))
             and not isinstance(node.value, bool) and node.value != 0)
