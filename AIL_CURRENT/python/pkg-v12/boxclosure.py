@@ -397,17 +397,24 @@ class ClosureMixin:
                                                                   self.global_slots['class:' + cname]))
                 first = False
                 ctx.indent += 1
-                if self._resolve_method(cname, '_ail_abc_guard__') is not None:
-                    self._call_user_function('_ail_abc_check_name', [ast.Constant(value=cname)], {}, ctx)
-                mark = len(ctx.lines)
-                try:
-                    r = self._call_class(cname, [_PreC(x) for x in slots], {}, ctx)
-                    ctx.emit('%s = %s;' % (t, r))
-                except Unsupported:
-                    del ctx.lines[mark:]
-                    ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes other arguments"); goto %s;'
+                info = self._resolve_method(cname, '__init__')
+                if info is None and slots:
+                    # object.__new__'s "takes no arguments" check runs before the ABC guard.
+                    ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes no arguments"); goto %s;'
                              % (cname, ctx.cur_err_target()))
                     ctx.uses_st = True
+                else:
+                    if info is not None and self._resolve_method(cname, '_ail_abc_guard__') is not None:
+                        self._call_user_function('_ail_abc_check_name', [ast.Constant(value=cname)], {}, ctx)
+                    mark = len(ctx.lines)
+                    try:
+                        r = self._call_class(cname, [_PreC(x) for x in slots], {}, ctx)
+                        ctx.emit('%s = %s;' % (t, r))
+                    except Unsupported:
+                        del ctx.lines[mark:]
+                        ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes other arguments"); goto %s;'
+                                 % (cname, ctx.cur_err_target()))
+                        ctx.uses_st = True
                 ctx.indent -= 1
             ctx.emit('} else {')
             ctx.indent += 1

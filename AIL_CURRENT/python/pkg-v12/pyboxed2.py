@@ -7665,18 +7665,38 @@ class Compiler(boxclosure.ClosureMixin):
         for kls in reversed(chain):
             self._ensure_class_attrs(kls, ctx)
         guard = self._resolve_method(name, '_ail_abc_guard__')
-        if guard:
-            dummy = ctx.tmp()
-            ctx.emit('st = %s(cx, &%s, %s);' % (guard['cname'], dummy, t))
-            ctx.check()
         if info:
-            argcs = self._bind_args(name, info, args, kwargs, ctx)
+            # CPython's object.__new__ checks abstractness before type.__init__ binds the
+            # arguments, so an incomplete class reports the abstract error even for a bad arity.
+            if guard:
+                dummy = ctx.tmp()
+                ctx.emit('st = %s(cx, &%s, %s);' % (guard['cname'], dummy, t))
+                ctx.check()
+            try:
+                argcs = self._bind_args(name, info, args, kwargs, ctx)
+            except Unsupported as exc:
+                if guard and any(word in str(exc) for word in (
+                        'too many positional arguments', 'unknown keyword argument',
+                        'called without a required argument',
+                        'called without required keyword-only argument',
+                        'got multiple values for argument', 'got the positional-only argument')):
+                    # the guard always raises for this class, so a binding error CPython would
+                    # report after the abstract check never runs
+                    return t
+                raise
             dummy = ctx.tmp()
             ctx.emit('st = %s(cx, &%s, %s%s);' % (info['cname'], dummy, t,
                      ''.join(', ' + a for a in argcs)))
             ctx.check()
         elif args or kwargs:
-            raise Unsupported('%s() called with arguments but has no __init__' % name)
+            # ... but object.__new__'s own excess-argument check comes first when the class
+            # has no __init__ at all.
+            ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes no arguments");' % name)
+            ctx.check()
+        elif guard:
+            dummy = ctx.tmp()
+            ctx.emit('st = %s(cx, &%s, %s);' % (guard['cname'], dummy, t))
+            ctx.check()
         return t
 
     def _call_exc_class(self, name, info, t, args, kwargs, ctx):

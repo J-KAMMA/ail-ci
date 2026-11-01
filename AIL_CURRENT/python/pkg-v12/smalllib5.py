@@ -148,20 +148,71 @@ def run_abc(tree, text):
     def is_abstract(decorator):
         return b.attr(decorator) in abstract_decorators
 
+    def abstract_value(value):
+        return isinstance(value, ast.Call) and b.attr(value.func) in abstract_decorators
+
+    def target_names(target):
+        if isinstance(target, ast.Name):
+            return {target.id}
+        if isinstance(target, (ast.Tuple, ast.List)):
+            out = set()
+            for element in target.elts:
+                out.update(target_names(element))
+            return out
+        return set()
+
     def defined_methods(cls):
-        methods = set()
-        abstract = set()
+        """The class namespace's own definitions, in source order: name -> abstract? A plain
+        assignment (`m = 5`, `m = lambda self: 7`) or an annotated assignment implements the name
+        just as a `def` does, so it clears an inherited abstract method (as in CPython)."""
+        own = {}
         for item in cls.body:
             if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                if any(is_abstract(d) for d in item.decorator_list):
-                    abstract.add(item.name)
-                else:
-                    methods.add(item.name)
-        return methods, abstract
+                own[item.name] = any(is_abstract(d) for d in item.decorator_list)
+            elif isinstance(item, ast.Assign):
+                abstract = (len(item.targets) == 1 and isinstance(item.targets[0], ast.Name)
+                            and abstract_value(item.value))
+                for target in item.targets:
+                    for name in target_names(target):
+                        own[name] = abstract
+            elif isinstance(item, ast.AnnAssign):
+                abstract = item.value is not None and abstract_value(item.value)
+                for name in target_names(item.target):
+                    own[name] = abstract
+            elif isinstance(item, ast.AugAssign):
+                for name in target_names(item.target):
+                    own[name] = False
+        return own
 
-    classes = [stmt for stmt in tree.body if isinstance(stmt, ast.ClassDef)]
+    def class_defs(node):
+        out = []
+        for item in getattr(node, 'body', []):
+            if isinstance(item, ast.ClassDef):
+                out.append(item)
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                out.extend(class_defs(item))
+        return out
+
+    classes = class_defs(tree)
     heritage = {}
     abstract = {}
+    own_defs = {}
+    local_bases = {}
+
+    def resolves_abstract(cls, name, seen=()):
+        key = (cls, name)
+        if key in seen:
+            return None
+        own = own_defs.get(cls)
+        if own is not None and name in own:
+            return own[name]
+        for base in local_bases.get(cls, ()):
+            if base in own_defs:
+                found = resolves_abstract(base, name, seen + (key,))
+                if found is not None:
+                    return found
+        return None
+
     for cls in classes:
         direct = False
         bases = []
@@ -169,17 +220,31 @@ def run_abc(tree, text):
             found = b.attr(base)
             if found in ('ABC', 'ABCMeta'):
                 direct = True
-            elif isinstance(base, ast.Name) and base.id in abstract:
+            elif isinstance(base, ast.Name):
                 bases.append(base.id)
         for keyword in cls.keywords:
             if keyword.arg == 'metaclass' and b.attr(keyword.value) == 'ABCMeta':
                 direct = True
+        is_abc = direct or any(heritage.get(base) for base in bases)
+        heritage[cls.name] = is_abc
+        local_bases[cls.name] = bases
+        own = defined_methods(cls)
+        own_defs[cls.name] = own
+        if not is_abc:
+            # `@abstractmethod` on a class whose metaclass is not ABCMeta does nothing, and a
+            # later ABC subclass does not inherit it (CPython's __abstractmethods__ only comes
+            # from ABCMeta bases).
+            abstract[cls.name] = set()
+            continue
         inherited = set()
         for base in bases:
-            inherited.update(abstract[base])
-        methods, declared = defined_methods(cls)
-        heritage[cls.name] = direct or bool(bases)
-        abstract[cls.name] = (inherited - methods) | declared
+            if heritage.get(base):
+                inherited.update(abstract.get(base, ()))
+        # an inherited abstract name is still abstract only if it resolves to an abstract
+        # definition in this class's MRO (a concrete mixin before the ABC clears it)
+        final = {name for name in inherited if resolves_abstract(cls.name, name)}
+        final.update(name for name, flag in own.items() if flag)
+        abstract[cls.name] = final
 
     class Strip(ast.NodeTransformer):
         def visit_ClassDef(self, node):
@@ -191,6 +256,23 @@ def run_abc(tree, text):
                 keep.append(kw)
             node.keywords = keep
             self.generic_visit(node)
+            if heritage.get(node.name):
+                # a function-valued class attribute (`m = lambda self: ...`) is a method in
+                # CPython; give the method dispatcher a real def instead of a plain value.
+                body = []
+                for item in node.body:
+                    if (isinstance(item, ast.Assign) and len(item.targets) == 1
+                            and isinstance(item.targets[0], ast.Name)
+                            and isinstance(item.value, ast.Lambda)):
+                        func = ast.FunctionDef(name=item.targets[0].id, args=item.value.args,
+                                               body=[ast.Return(value=item.value.body)],
+                                               decorator_list=[])
+                        ast.copy_location(func, item)
+                        ast.fix_missing_locations(func)
+                        body.append(func)
+                    else:
+                        body.append(item)
+                node.body = body
             return node
 
         def visit_FunctionDef(self, node):
@@ -208,6 +290,9 @@ def run_abc(tree, text):
                          and s.value.value is Ellipsis else s for s in node.body]
             self.generic_visit(node)
             return node
+
+        def visit_AsyncFunctionDef(self, node):
+            return self.visit_FunctionDef(node)
     tree.body = [Strip().visit(s) for s in tree.body]
 
     guards = []

@@ -30,6 +30,88 @@ PASSING = (
     "shapes",
 )
 
+# Review regressions: a plain (non-ABC) hierarchy stays instantiable, a non-`def` override
+# implements an abstract method, and object.__new__'s "takes no arguments" check precedes the
+# abstract check for a class with no __init__.
+REGRESSIONS = {
+    "plain": '''\
+from abc import ABC, abstractmethod
+
+
+class Mixin:
+    @abstractmethod
+    def run(self) -> str:
+        return "mixin"
+
+
+class Child(Mixin):
+    pass
+
+
+d = Child()
+print("built", type(d).__name__, d.run())
+try:
+    Child(1)
+except TypeError as exc:
+    print("blocked", str(exc))
+''',
+    "override": '''\
+import abc
+
+
+class A(abc.ABC):
+    @abc.abstractmethod
+    def m(self) -> int:
+        ...
+
+
+class Value(A):
+    m = 5
+
+
+class Function(A):
+    m = lambda self: 7
+
+
+print("built", Value().m, Function().m())
+''',
+    "arity": '''\
+from abc import ABC, abstractmethod
+
+
+class Shape(ABC):
+    @abstractmethod
+    def area(self) -> int:
+        ...
+
+
+Base = Shape
+try:
+    Base(1)
+except TypeError as exc:
+    print("blocked", str(exc))
+
+
+class WithInit(ABC):
+    def __init__(self, x: int) -> None:
+        self.x = x
+
+    @abstractmethod
+    def m(self) -> int:
+        ...
+
+
+class Partial(WithInit):
+    pass
+
+
+try:
+    Partial(1, 2, 3, 4)
+except TypeError as exc:
+    print("blocked", str(exc))
+''',
+}
+
 
 class StdAbc(unittest.TestCase):
     def test_lab_programs_match_cpython(self):
@@ -40,6 +122,34 @@ class StdAbc(unittest.TestCase):
                 directory = Path(tmp)
                 src = directory / (stem + ".py")
                 src.write_bytes((PROGRAMS / (stem + ".py")).read_bytes())
+                want = subprocess.run([sys.executable, "-B", str(src)], cwd=directory,
+                                      capture_output=True, timeout=120)
+                for ir in ("0", "1"):
+                    exe = directory / ("exe" + ir)
+                    env = dict(os.environ, AIL_IR=ir, AIL_NO_CACHE="1")
+                    env.pop("AIL_NO_GENERAL", None)
+                    env.pop("AIL_UNIFIED_FORCE", None)
+                    built = subprocess.run(
+                        [sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", src.name,
+                         "--syntax", "python", "-o", exe.name],
+                        cwd=directory, capture_output=True, text=True, timeout=900, env=env)
+                    self.assertEqual(built.returncode, 0,
+                                     "%s (AIL_IR=%s) did not build:\n%s\n%s"
+                                     % (stem, ir, built.stdout[-3000:], built.stderr[-3000:]))
+                    got = subprocess.run([str(exe)], cwd=directory, input=b"",
+                                         capture_output=True, timeout=120)
+                    self.assertEqual(
+                        (got.returncode, got.stdout), (want.returncode, want.stdout),
+                        "%s (AIL_IR=%s)\nexit %r != %r\nstderr:\n%s"
+                        % (stem, ir, got.returncode, want.returncode,
+                           got.stderr.decode("utf-8", "replace")[-2000:]))
+
+    def test_review_regressions(self):
+        for stem, source in sorted(REGRESSIONS.items()):
+            with self.subTest(program=stem), tempfile.TemporaryDirectory() as tmp:
+                directory = Path(tmp)
+                src = directory / (stem + ".py")
+                src.write_text(source, encoding="utf-8")
                 want = subprocess.run([sys.executable, "-B", str(src)], cwd=directory,
                                       capture_output=True, timeout=120)
                 for ir in ("0", "1"):

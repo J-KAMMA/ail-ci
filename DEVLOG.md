@@ -1,3 +1,18 @@
+## 2026-11-01 -- abc review fixes: plain hierarchies, non-def overrides, guard order (job-std_abc-11020026)
+
+Fixed the reviewer's three defects in the `abc` pass. Only classes with ABC ancestry are now
+abstract, so `@abstractmethod` on a plain class does nothing and a plain subclass instantiates (as
+in CPython). An override written as an assignment (`m = 5`, `m = lambda self: 7`) counts as an
+implementation, the MRO resolves inherited abstract names so a concrete mixin clears them, and a
+function-valued class attribute in an ABC hierarchy is dispatched as a method. The abstract guard
+now runs after `object.__new__`'s no-`__init__` argument check (`Shape(1)` -> `Shape() takes no
+arguments`) and before a custom `__init__` binds its arguments (`Partial(1, 2, 3, 4)` -> the
+abstract-class `TypeError`), for direct calls and class values. `test_ail_std_abc` gains three
+review-regression sources and passes on both `AIL_IR` modes. Remaining named refusals are recorded
+in `lab/stdlib/abc/RESULTS.md` (multiple inheritance, nested class definitions, a class alias as a
+base, starred class arguments, `register`/`issubclass`/`update_abstractmethods`), together with the
+pre-existing general-path object/bound-method display difference.
+
 ## 2026-11-01 -- abc real-program coverage (job-std_abc-11020026)
 
 Added twelve realistic `abc` programs in `lab/stdlib/abc/` and made nine of them build and match
