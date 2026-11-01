@@ -1,3 +1,16 @@
+## 2026-11-01 -- `math.dist` precision review fix (job-std_math-11020038)
+
+Review follow-up on `48d57d2`. `math.dist` now ports CPython 3.12's compensated `vector_norm`
+(frexp scaling, error-free squares through `fma`, the two-part `frac1` / `frac2` sum and the
+square-root differential correction) instead of a naive scaled sum of squares, so the last bits
+match CPython for ordinary vectors as well as subnormal and huge ones. The helper reaches `fma`
+through a new 3-argument libm intrinsic/wrapper; the typed call path now orders three numeric
+operands left to right. `test_ail_std_math` gained `test_dist_precision_matches_cpython`, which
+compares the review's ULP vector, a 17-dimensional vector, a subnormal vector and a decimal vector
+on the default and forced-general builds. Probes `/tmp/probes/mathfix/d1..d5` (subnormal, up to
+333 dimensions, `inf` / `nan`, argument / list item / attribute / dict paths, ULP vectors) match
+CPython on both builds.
+
 ## 2026-11-01 -- `math` real-program coverage (job-std_math-11020038)
 
 Added twelve realistic `math` programs in `lab/stdlib/math/` and built them in the default mode: ten

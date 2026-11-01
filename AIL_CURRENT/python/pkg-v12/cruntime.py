@@ -28869,7 +28869,7 @@ def _host_unprintable_rows():
             pass
     return _HOST_ROWS
 
-LIBM_FUNCS = {'sin': 1, 'cos': 1, 'tan': 1, 'asin': 1, 'acos': 1, 'atan': 1, 'sinh': 1, 'cosh': 1, 'tanh': 1, 'asinh': 1, 'acosh': 1, 'atanh': 1, 'exp': 1, 'exp2': 1, 'expm1': 1, 'log': 1, 'log1p': 1, 'log2': 1, 'log10': 1, 'cbrt': 1, 'floor': 1, 'ceil': 1, 'trunc': 1, 'fabs': 1, 'erf': 1, 'erfc': 1, 'atan2': 2, 'pow': 2, 'fmod': 2, 'copysign': 2, 'hypot': 2, 'nextafter': 2, 'remainder': 2}
+LIBM_FUNCS = {'sin': 1, 'cos': 1, 'tan': 1, 'asin': 1, 'acos': 1, 'atan': 1, 'sinh': 1, 'cosh': 1, 'tanh': 1, 'asinh': 1, 'acosh': 1, 'atanh': 1, 'exp': 1, 'exp2': 1, 'expm1': 1, 'log': 1, 'log1p': 1, 'log2': 1, 'log10': 1, 'cbrt': 1, 'floor': 1, 'ceil': 1, 'trunc': 1, 'fabs': 1, 'erf': 1, 'erfc': 1, 'atan2': 2, 'pow': 2, 'fmod': 2, 'copysign': 2, 'hypot': 2, 'nextafter': 2, 'remainder': 2, 'fma': 3}
 LIBM = r'''
 #include <math.h>
 /* math-module functions: one noipa wrapper per libm function (parts LIBM_<name>), so the same glibc
@@ -28885,8 +28885,12 @@ SOURCE['LIBM'] = LIBM
 REQUIRES['LIBM'] = []
 ORDER.insert(ORDER.index('FPOW') + 1, 'LIBM')
 for _name, _arity in LIBM_FUNCS.items():
-    SOURCE['LIBM_' + _name] = ('AIL_NOIPA __attribute__((unused)) static double ail_m_%s(double x%s) { return (%s)(x%s); }\n'
-                               % (_name, ', double y' if _arity == 2 else '', _name, ', y' if _arity == 2 else ''))
+    if _arity == 3:
+        SOURCE['LIBM_' + _name] = ('AIL_NOIPA __attribute__((unused)) static double ail_m_%s(double x, double y, double z) '
+                                   '{ return (%s)(x, y, z); }\n' % (_name, _name))
+    else:
+        SOURCE['LIBM_' + _name] = ('AIL_NOIPA __attribute__((unused)) static double ail_m_%s(double x%s) { return (%s)(x%s); }\n'
+                                   % (_name, ', double y' if _arity == 2 else '', _name, ', y' if _arity == 2 else ''))
     REQUIRES['LIBM_' + _name] = ['LIBM']
     ORDER.insert(ORDER.index('LIBM') + 1, 'LIBM_' + _name)
 

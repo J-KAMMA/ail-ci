@@ -37,8 +37,10 @@ blocked at least one program (verified with the probes listed at the end):
 * `math.prod(iterable, start=...)`: the keyword form and a start value, including `math.prod([],
   start=1)`. The helper now takes the start value and the lowering accepts only the `start=` keyword
   (`math.prod` takes one positional argument in CPython).
-* `math.dist(p, q)`: two sequences, CPython's same-length `ValueError`, and its scaled norm so huge
-  values do not overflow while `inf` / `nan` flow through as CPython's do.
+* `math.dist(p, q)`: two sequences, CPython's same-length `ValueError`, and CPython 3.12's own
+  compensated `vector_norm` (power-of-two scaling, error-free squares through `fma`, two-part
+  compensation and the square-root differential correction), so ordinary, subnormal and huge
+  values round exactly as CPython's do while `inf` / `nan` flow through as CPython's do.
 * `math.erf(x)` / `math.erfc(x)`: the two C libm calls, with CPython's `inf` / `nan` results.
 * `math.nextafter(x, y)` / `math.remainder(x, y)`: the C libm calls, with `remainder`'s
   `ValueError("math domain error")` for a zero divisor and an infinite operand.
@@ -73,7 +75,9 @@ was not changed to avoid them.
 ## Checks
 
 * `test_ail_std_math.py` builds the ten passing programs in the default mode and compares stdout and the
-  exit code with CPython; `AIL_CURRENT/tests.d/test_ail_std_math.txt` registers it.
+  exit code with CPython; `AIL_CURRENT/tests.d/test_ail_std_math.txt` registers it. Its
+  `test_dist_precision_matches_cpython` also compares ULP-sensitive, 17-dimensional and subnormal
+  `math.dist` vectors on the default and forced-general builds.
 * Probes in `/tmp/probes/math/` and `/tmp/probes/feat/` cover `prod` with empty, negative, float and
   non-default start values; `dist` with empty, unequal, negative, huge, `inf`, `nan`, int and float
   points; `erf` / `erfc` at both infinities, `nan`, negative zero and values through an argument, a list
