@@ -1530,6 +1530,151 @@ _MATH_HELPERS['string_capwords'] = (
     '    if sep:\n'
     '        return sep.join(out)\n'
     '    return " ".join(out)\n')
+_MATH_HELPERS['string_template'] = '''\
+def _ail_tpl_invalid(template, index):
+    lines = template[:index].splitlines(True)
+    if not lines:
+        line = 1
+        col = 1
+    else:
+        line = len(lines)
+        col = index - len("".join(lines[:-1]))
+    raise ValueError("Invalid placeholder in string: line %d, col %d" % (line, col))
+
+
+def _ail_tpl_text(obj):
+    text = obj.template
+    if isinstance(text, bytes) or isinstance(text, bytearray):
+        raise TypeError("cannot use a string pattern on a bytes-like object")
+    if not isinstance(text, str):
+        raise TypeError("expected string or bytes-like object, got '%s'" % type(text).__name__)
+    return text
+
+
+def _ail_tpl_parts(text, delim):
+    start = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"
+    chars = start + "0123456789"
+    out = []
+    i = 0
+    n = len(text)
+    while i < n:
+        j = text.find(delim, i)
+        if j < 0:
+            out.append((0, text[i:], text[i:], i))
+            break
+        if j > i:
+            out.append((0, text[i:j], text[i:j], i))
+        if j + 1 >= n:
+            out.append((2, "", delim, j + 1))
+            i = n
+            break
+        c = text[j + 1]
+        if c == delim:
+            out.append((0, delim, text[j:j + 2], j))
+            i = j + 2
+        elif c == "{":
+            k = text.find("}", j + 2)
+            if k < 0:
+                out.append((2, "", delim, j + 1))
+                i = j + 1
+            else:
+                name = text[j + 2:k]
+                good = bool(name) and name[0] in start
+                for ch in name[1:]:
+                    if ch not in chars:
+                        good = False
+                if good:
+                    out.append((1, name, text[j:k + 1], j))
+                    i = k + 1
+                else:
+                    out.append((2, "", delim, j + 1))
+                    i = j + 1
+        elif c in start:
+            k = j + 2
+            while k < n and text[k] in chars:
+                k += 1
+            out.append((1, text[j + 1:k], text[j:k], j))
+            i = k
+        else:
+            out.append((2, "", delim, j + 1))
+            i = j + 1
+    return out
+
+
+def _ail_tpl_lookup(mapping, kws, name):
+    if name in kws:
+        return kws[name]
+    return mapping[name]
+
+
+def _ail_tpl_substitute(obj, mapping, kws, has_mapping):
+    text = _ail_tpl_text(obj)
+    if not has_mapping:
+        mapping = kws
+    out = []
+    for kind, value, raw, pos in _ail_tpl_parts(text, obj.delimiter):
+        if kind == 0:
+            out.append(value)
+        elif kind == 1:
+            out.append(str(_ail_tpl_lookup(mapping, kws, value)))
+        else:
+            _ail_tpl_invalid(text, pos)
+    return "".join(out)
+
+
+def _ail_tpl_safe_substitute(obj, mapping, kws, has_mapping):
+    text = _ail_tpl_text(obj)
+    if not has_mapping:
+        mapping = kws
+    out = []
+    for kind, value, raw, pos in _ail_tpl_parts(text, obj.delimiter):
+        if kind == 0:
+            out.append(value)
+        elif kind == 1:
+            try:
+                out.append(str(_ail_tpl_lookup(mapping, kws, value)))
+            except KeyError:
+                out.append(raw)
+        else:
+            out.append(raw)
+    return "".join(out)
+
+
+def _ail_tpl_is_valid(obj):
+    text = _ail_tpl_text(obj)
+    for kind, value, raw, pos in _ail_tpl_parts(text, obj.delimiter):
+        if kind == 2:
+            return False
+    return True
+
+
+def _ail_tpl_get_identifiers(obj):
+    text = _ail_tpl_text(obj)
+    out = []
+    for kind, value, raw, pos in _ail_tpl_parts(text, obj.delimiter):
+        if kind == 1 and value not in out:
+            out.append(value)
+    return out
+
+
+class _AilStringTemplate:
+    delimiter = "$"
+
+    def __init__(self, template):
+        self.template = template
+
+    def substitute(self, mapping):
+        return _ail_tpl_substitute(self, mapping, {}, True)
+
+    def safe_substitute(self, mapping):
+        return _ail_tpl_safe_substitute(self, mapping, {}, True)
+
+    def is_valid(self):
+        return _ail_tpl_is_valid(self)
+
+    def get_identifiers(self):
+        return _ail_tpl_get_identifiers(self)
+'''
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',),
              'tw_wrap': ('tw_wrap_more',), 'tw_shorten': ('tw_wrap_more',)}
 import string as _string_module
@@ -1537,6 +1682,9 @@ import string as _string_module
 _STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
     'ascii_lowercase', 'ascii_uppercase', 'ascii_letters', 'digits', 'hexdigits', 'octdigits', 'punctuation',
     'whitespace', 'printable')}
+_STRING_CLASSES = {'Template': '_AilStringTemplate'}
+_NON_TEMPLATE_TYPES = {'int', 'float', 'str', 'bool', 'bytes', 'bytearray', 'list', 'dict', 'set', 'tuple',
+                       'frozenset', 'object'}
 _TIME_CLOCKS = {'perf_counter': '_ail_perf_counter', 'monotonic': '_ail_perf_counter',
                 'perf_counter_ns': '_ail_perf_counter_ns', 'monotonic_ns': '_ail_perf_counter_ns',
                 'time': '_ail_time', 'time_ns': '_ail_time_ns'}
@@ -1550,7 +1698,7 @@ _OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv'
 _SMALL_MODULES = {
     'textwrap': ('wrap', 'fill', 'dedent', 'shorten', 'indent'),
     'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
-    'string': (*tuple(_STRING_CONSTANTS), 'capwords'),
+    'string': (*tuple(_STRING_CONSTANTS), *_STRING_CLASSES, 'capwords'),
     'os': ('cpu_count',),
     'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem', 'itemgetter'),
 }
@@ -1561,7 +1709,8 @@ _SMALL_NOTE = {
             'strftime() and mktime() are built (the wall clock is an input: AIL_CLOCK=<seconds> pins it); '
             'asctime, ctime, struct_time, tzset and the zone constants are not',
     'string': 'the string module is built as its constants (ascii_lowercase, ascii_uppercase, ascii_letters, '
-              'digits, hexdigits, octdigits, punctuation, whitespace, printable) and capwords()',
+              'digits, hexdigits, octdigits, punctuation, whitespace, printable), capwords() and the Template '
+              'class with substitute / safe_substitute / is_valid / get_identifiers',
     'os': 'os.cpu_count() is built; the rest of os (environ, path, ...) is not',
     'operator': 'operator.add/sub/mul/truediv/floordiv/mod/pow/and_/or_/xor/lshift/rshift, the comparisons, '
                 'neg/pos/invert/not_/abs/getitem called directly, and itemgetter(k) as a key= are built',
@@ -1711,6 +1860,11 @@ class _SurfaceExpr(ast.NodeTransformer):
                 and not isinstance(node.func.value, ast.Name)):
             node.func.value = self.visit(node.func.value)      # re.search(...).start(): the inner call too
         node.args = [self.visit(arg) for arg in node.args]
+        template_call = (path is None and surface.template_used and isinstance(node.func, ast.Attribute)
+                         and node.func.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers'))
+        template_kind = surface.receiver_kind(node.func.value) if template_call else 'other'
+        if template_kind == 'template':
+            node.func.value = self.visit(node.func.value)
         for item in node.keywords:
             item.value = self.visit(item.value)
             if (item.arg == 'key' and isinstance(item.value, ast.Attribute) and item.value.attr == '__getitem__'
@@ -1722,11 +1876,15 @@ class _SurfaceExpr(ast.NodeTransformer):
                     body=ast.Subscript(value=item.value.value, slice=ast.Name(id='_ail_key', ctx=ast.Load()),
                                        ctx=ast.Load()))
                 self.changed = True
-        new = surface.call(node, path)
+        new = surface.call(node, path, template_kind)
         if new is not None:
             return self.replaced(new, node)
         if path is None:
-            node.func = self.visit(node.func)
+            if template_call and template_kind is None:
+                # The receiver is not known to be a Template: the call stays an ordinary method call.
+                node.func.value = self.visit(node.func.value)
+            else:
+                node.func = self.visit(node.func)
         return node
 
     def visit_Dict(self, node):
@@ -1756,6 +1914,16 @@ class _SurfaceExpr(ast.NodeTransformer):
         if path is not None:
             new = surface.value(node, path)
             return node if new is None else self.replaced(new, node)
+        if (surface.template_used and isinstance(node.ctx, ast.Load)
+                and node.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers')
+                and node.attr not in surface.user_methods
+                and surface.receiver_kind(node.value) != 'other'):
+            raise SyntaxErrorAIL(
+                'not in the subset: string.Template.%s used as a value (a bound method is not built)\n'
+                '  write instead: call it directly (t.%s(...)); a Template built with '
+                'string.Template(...) can also be called through getattr(t, "%s")(...)' % (
+                    node.attr, node.attr, node.attr),
+                lineno=node.lineno, offset=node.col_offset + 1)
         if (isinstance(node.value, ast.Name) and node.value.id in surface.re_patterns and node.attr == 'pattern'
                 and not surface.re_lib.programs[surface.re_patterns[node.value.id]].is_bytes):
             return self.replaced(ast.Constant(value=surface.re_lib.programs[surface.re_patterns[node.value.id]].pattern),
@@ -1836,6 +2004,14 @@ class _Surface:
         self.consumed = set()
         self.void = set()
         self.re_on = False             # `import re` seen
+        self.template_used = False     # the program builds a string.Template: its methods are lowered
+        self.template_bindings = {}    # scope -> {local name -> the values assigned to it} (the Template receiver test)
+        self.template_rebindings = {}  # scope -> names bound by a for/comprehension/walrus/with/except/tuple target
+        self.template_params = {}      # scope -> its parameter names (a parameter is not told to be a Template)
+        self.template_parents = {}     # scope -> the scope that encloses it
+        self.template_classes = set()  # the scopes that are class bodies (a method does not see them)
+        self.template_ranges = []      # (first line, last line, scope): the innermost scope of a node
+        self.scope_kind = {}           # (scope, local name) -> 'template' / 'other' (never a Template)
         self.re_patterns = {}          # NAME -> (library index) for NAME = re.compile(literal)
         self.re_nodes = set()          # those assignment statements
         self.def_names = {node.name for node in ast.walk(self.tree)
@@ -1976,6 +2152,194 @@ class _Surface:
                     self.aliases[node.targets[0].id] = path
                     self.names[node.targets[0].id] = path
                     self.alias_nodes.add(node)
+        self.template_used = any(self.path(node) == 'string.Template' for node in ast.walk(self.tree)
+                                 if isinstance(node, (ast.Attribute, ast.Name)))
+        self.collect_template_scopes()
+
+    def collect_template_scopes(self):
+        """Record, per scope, the values assigned to each local name, so a receiver is classified in the scope
+        where it is used (a parameter or a local in another function is not told by a same-named variable)."""
+        bindings, params, parents, classes, ranges = {}, {}, {}, set(), []
+        rebindings = {}
+
+        def add_target(target, scope):
+            """Record the names a binding target rebinds; its value is not told, so it is never a known Template."""
+            if isinstance(target, ast.Name):
+                rebindings.setdefault(scope, set()).add(target.id)
+            elif isinstance(target, (ast.Tuple, ast.List)):
+                for each in target.elts:
+                    add_target(each, scope)
+            elif isinstance(target, ast.Starred):
+                add_target(target.value, scope)
+
+        def walk(node, scope):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                key = node
+                ranges.append((node.lineno, getattr(node, 'end_lineno', node.lineno), key))
+                args = node.args
+                names = {each.arg for each in args.posonlyargs + args.args + args.kwonlyargs}
+                if args.vararg is not None:
+                    names.add(args.vararg.arg)
+                if args.kwarg is not None:
+                    names.add(args.kwarg.arg)
+                params[key] = names
+                bindings.setdefault(key, {})
+                parents[key] = scope
+                if isinstance(node, ast.Lambda):
+                    for each in list(args.defaults) + [each for each in args.kw_defaults if each is not None]:
+                        walk(each, scope)
+                    walk(node.body, key)
+                    return
+                for each in node.decorator_list:
+                    walk(each, scope)
+                for each in list(args.defaults) + [each for each in args.kw_defaults if each is not None]:
+                    walk(each, scope)
+                for each in args.posonlyargs + args.args + args.kwonlyargs:
+                    if each.annotation is not None:
+                        walk(each.annotation, scope)
+                if args.vararg is not None and args.vararg.annotation is not None:
+                    walk(args.vararg.annotation, scope)
+                if args.kwarg is not None and args.kwarg.annotation is not None:
+                    walk(args.kwarg.annotation, scope)
+                if node.returns is not None:
+                    walk(node.returns, scope)
+                for each in node.body:
+                    walk(each, key)
+                return
+            if isinstance(node, ast.ClassDef):
+                key = node
+                ranges.append((node.lineno, getattr(node, 'end_lineno', node.lineno), key))
+                bindings.setdefault(key, {})
+                parents[key] = scope
+                classes.add(key)
+                for each in node.decorator_list + node.bases + [each.value for each in node.keywords]:
+                    walk(each, scope)
+                for each in node.body:
+                    walk(each, key)
+                return
+            if isinstance(node, (ast.For, ast.AsyncFor)):
+                add_target(node.target, scope)
+            elif isinstance(node, ast.comprehension):
+                add_target(node.target, scope)
+            elif isinstance(node, ast.NamedExpr):
+                add_target(node.target, scope)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        add_target(item.optional_vars, scope)
+            elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+                rebindings.setdefault(scope, set()).add(node.name)
+            if isinstance(node, ast.Assign):
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        bindings.setdefault(scope, {}).setdefault(target.id, []).append(node.value)
+                    else:
+                        add_target(target, scope)
+            elif isinstance(node, ast.AnnAssign) and node.value is not None and isinstance(node.target, ast.Name):
+                bindings.setdefault(scope, {}).setdefault(node.target.id, []).append(node.value)
+            elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
+                bindings.setdefault(scope, {}).setdefault(node.target.id, []).append(node.value)
+            for each in ast.iter_child_nodes(node):
+                walk(each, scope)
+
+        walk(self.tree, None)
+        self.template_bindings = bindings
+        self.template_rebindings = rebindings
+        self.template_params = params
+        self.template_parents = parents
+        self.template_classes = classes
+        self.template_ranges = ranges
+        self.template_param_args = {}
+        top_defs = {node.name: node for node in self.tree.body
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        for node in ast.walk(self.tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            func = top_defs.get(node.func.id)
+            if func is None:
+                continue
+            names = [each.arg for each in func.args.posonlyargs + func.args.args]
+            for index, arg in enumerate(node.args):
+                if index < len(names) and not isinstance(arg, ast.Starred):
+                    self.template_param_args.setdefault((id(func), names[index]), []).append(arg)
+            for item in node.keywords:
+                if item.arg is not None and not isinstance(item.value, ast.Starred):
+                    self.template_param_args.setdefault((id(func), item.arg), []).append(item.value)
+
+    def scope_of(self, node):
+        """The innermost function, lambda or class body that holds the node (None is the module)."""
+        line = getattr(node, 'lineno', None)
+        if line is None:
+            return None
+        found, span = None, None
+        for start, end, key in self.template_ranges:
+            if start <= line <= end:
+                size = end - start
+                if found is None or size < span:
+                    found, span = key, size
+        return found
+
+    def kind_of_name(self, name, seen, scope=None):
+        """'template' / 'other' (a value that is never a Template) / None (not told) for a name in a scope."""
+        cache = (id(scope), name)
+        if cache in self.scope_kind:
+            return self.scope_kind[cache]
+        if cache in seen:
+            return None
+        if name in self.template_rebindings.get(scope, ()):
+            self.scope_kind[cache] = None
+            return None
+        local = self.template_bindings.get(scope, {})
+        if name in local:
+            kinds = {self.kind_of_value(value, seen | {cache}) for value in local[name]}
+            kind = 'template' if kinds == {'template'} else 'other' if kinds == {'other'} else None
+            self.scope_kind[cache] = kind
+            return kind
+        if scope is not None and name in self.template_params.get(scope, set()):
+            args = self.template_param_args.get((id(scope), name))
+            if args:
+                kinds = {self.kind_of_value(value, seen | {cache}) for value in args}
+                kind = 'template' if kinds == {'template'} else 'other' if kinds == {'other'} else None
+                self.scope_kind[cache] = kind
+                return kind
+            return None
+        parent = self.template_parents.get(scope) if scope is not None else None
+        while parent is not None:
+            if parent not in self.template_classes:
+                if name in self.template_rebindings.get(parent, ()):
+                    return None
+                local = self.template_bindings.get(parent, {})
+                if name in local:
+                    return self.kind_of_name(name, seen | {cache}, parent)
+                if name in self.template_params.get(parent, set()):
+                    return None
+            parent = self.template_parents.get(parent)
+        if scope is not None:
+            if name in self.template_bindings.get(None, {}) or name in self.template_rebindings.get(None, ()):
+                return self.kind_of_name(name, seen | {cache}, None)
+        if name in self.classes or name in self.def_names or name in _NON_TEMPLATE_TYPES:
+            return 'other'
+        return None
+
+    def kind_of_value(self, node, seen):
+        if isinstance(node, ast.Call):
+            if self.path(node.func) == 'string.Template':
+                return 'template'
+            if isinstance(node.func, ast.Name) and (node.func.id in self.classes
+                                                    or node.func.id in _NON_TEMPLATE_TYPES):
+                return 'other'
+            return None
+        if isinstance(node, ast.Name):
+            return self.kind_of_name(node.id, seen, self.scope_of(node))
+        if isinstance(node, (ast.Constant, ast.List, ast.Dict, ast.Set, ast.Tuple)):
+            return 'other'
+        return None
+
+    def receiver_kind(self, node):
+        """Whether the receiver of a method call is known to be a string.Template, known not to be one, or not told."""
+        if isinstance(node, (ast.Call, ast.Name, ast.Constant, ast.List, ast.Dict, ast.Set, ast.Tuple)):
+            return self.kind_of_value(node, set())
+        return None
 
     # -- expressions --------------------------------------------------------------------------
     def rewritten(self, node, boolean=False):
@@ -2049,6 +2413,15 @@ class _Surface:
         elif module in _SMALL_MODULES and name:
             if module == 'string' and name in _STRING_CONSTANTS:
                 return ast.Constant(value=_STRING_CONSTANTS[name])
+            if module == 'string' and name in _STRING_CLASSES:
+                parent = self.parents.get(node)
+                if isinstance(parent, ast.Call) and parent.func is node:
+                    self.helper('string_template')
+                    return ast.Name(id=_STRING_CLASSES[name], ctx=ast.Load())
+                self.keep.add('string')
+                self.note(node, f'{path} used as a value is not built; call it directly '
+                          '(string.Template(text).substitute(...)) or use the result of the call')
+                return None
             self.keep.add(module)
             self.note(node, f'{path} used as a value is not built; ' + _SMALL_NOTE[module])
         elif path == 'sys.maxsize':
@@ -2384,8 +2757,23 @@ class _Surface:
         if name not in self.helpers:
             self.helpers.append(name)
 
-    def call(self, node, path):
+    def call(self, node, path, template_kind=None):
         func = node.func
+        if path is None and self.template_used and isinstance(func, ast.Attribute) \
+                and func.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers'):
+            kind = self.receiver_kind(func.value) if template_kind is None else template_kind
+            if kind == 'template':
+                return self.template_method(node, func.attr)
+            if kind is None:
+                if self.template_direct_call(node, func.attr):
+                    return None
+                raise SyntaxErrorAIL(
+                    'not in the subset: string.Template.%s(...) on a receiver that is not known to be a '
+                    'string.Template cannot be lowered with these arguments (keyword or optional forms are '
+                    'built only for a receiver known to be a Template)\n'
+                    '  write instead: call it directly with one mapping argument (t.%s(mapping)), or make '
+                    'the receiver a local string.Template' % (func.attr, func.attr),
+                    lineno=node.lineno, offset=node.col_offset + 1)
         if (isinstance(func, ast.Name) and func.id in ('max', 'min') and func.id not in self.names
                 and func.id not in self.def_names and len(node.args) >= 2 and not node.keywords
                 and isinstance(node.args[-1], ast.Starred)
@@ -2529,6 +2917,35 @@ class _Surface:
         self.replace(node, '; '.join(parts), True)
         return True
 
+    def template_direct_call(self, node, name):
+        """Whether the prelude object's own method has exactly CPython's behaviour for this call form."""
+        if any(isinstance(arg, ast.Starred) for arg in node.args) or node.keywords:
+            return False
+        if name in ('is_valid', 'get_identifiers'):
+            return not node.args
+        return len(node.args) == 1
+
+    def template_method(self, node, name):
+        """Template.substitute / safe_substitute / is_valid / get_identifiers on the prelude object."""
+        func = node.func
+        if any(isinstance(arg, ast.Starred) for arg in node.args) \
+                or any(item.arg is None for item in node.keywords):
+            return None
+        self.helper('string_template')
+        if name in ('is_valid', 'get_identifiers'):
+            if node.args or node.keywords:
+                return None
+            return ast.Call(func=ast.Name(id='_ail_tpl_' + name, ctx=ast.Load()),
+                            args=[func.value], keywords=[])
+        if len(node.args) > 1:
+            return None
+        mapping = node.args[0] if node.args else ast.Dict(keys=[], values=[])
+        kws = ast.Dict(keys=[ast.Constant(value=item.arg) for item in node.keywords],
+                       values=[item.value for item in node.keywords])
+        helper = '_ail_tpl_substitute' if name == 'substitute' else '_ail_tpl_safe_substitute'
+        return ast.Call(func=ast.Name(id=helper, ctx=ast.Load()),
+                        args=[func.value, mapping, kws, ast.Constant(value=bool(node.args))], keywords=[])
+
     def small_call(self, node, module, name):
         """time / string / os / operator, mapped onto what is built (None keeps the call as written)."""
         args = node.args
@@ -2541,12 +2958,35 @@ class _Surface:
                     self.helpers.append('tw_indent')
                 return ast.Call(func=ast.Name(id='_ail_tw_indent', ctx=ast.Load()),
                                 args=args, keywords=[])
-        if module == 'string' and name == 'capwords' and plain and len(args) in (1, 2):
-            if 'string_capwords' not in self.helpers:
-                self.helpers.append('string_capwords')
-            sep = args[1] if len(args) == 2 else ast.Constant(value=None)
-            return ast.Call(func=ast.Name(id='_ail_string_capwords', ctx=ast.Load()),
-                            args=[args[0], sep], keywords=[])
+        if module == 'string' and name == 'Template' and not any(isinstance(arg, ast.Starred) for arg in args):
+            template = args[0] if len(args) == 1 else None
+            ok = len(args) <= 1
+            for keyword in node.keywords:
+                if keyword.arg == 'template' and template is None:
+                    template = keyword.value
+                else:
+                    ok = False
+            if ok and template is not None:
+                if 'string_template' not in self.helpers:
+                    self.helpers.append('string_template')
+                return ast.Call(func=ast.Name(id='_AilStringTemplate', ctx=ast.Load()),
+                                args=[template], keywords=[])
+        if module == 'string' and name == 'capwords' and not any(isinstance(arg, ast.Starred) for arg in args):
+            text = args[0] if len(args) >= 1 else None
+            sep = args[1] if len(args) == 2 else None
+            ok = len(args) <= 2
+            for keyword in node.keywords:
+                if keyword.arg == 's' and text is None:
+                    text = keyword.value
+                elif keyword.arg == 'sep' and sep is None:
+                    sep = keyword.value
+                else:
+                    ok = False
+            if ok and text is not None:
+                if 'string_capwords' not in self.helpers:
+                    self.helpers.append('string_capwords')
+                return ast.Call(func=ast.Name(id='_ail_string_capwords', ctx=ast.Load()),
+                                args=[text, sep or ast.Constant(value=None)], keywords=[])
         if module == 'textwrap' and name in ('wrap', 'fill', 'dedent', 'shorten') and not any(
                 isinstance(arg, ast.Starred) for arg in args):
             if name == 'dedent' and len(args) == 1 and not node.keywords:

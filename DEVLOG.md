@@ -998,6 +998,121 @@ Final-state tests with `-j 2`: test_ail_stdlib_reach, test_ail_pre116, test_ail_
 test_ail_modsys, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 `python3 tools/update_manifest.py` and `--check` pass; `tools/ci_shards.py --update` places the
 new module once.
+## 2026-11-01 -- std_string review 5: shadowed names are not known Templates
+
+The review found the receiver classifier still treated a name as a known `string.Template` when a
+`for`/comprehension/walrus/`with`/`except`/tuple-unpack target rebound it, so lowering sent the call on
+the non-Template value to the Template helper (`p_loop_shadow`, `p_unpack_shadow`, `p_comp_shadow`,
+`p_walrus_shadow` crashed with `AttributeError: 'Box' object has no attribute 'template'`; the silent
+variant with `Box.template`/`delimiter` printed `WRONG`).  `collect_template_scopes` now records every
+binding target (including the names inside `Tuple`/`List`/`Starred` targets and a non-`Name` assignment
+target) in `template_rebindings`; `kind_of_name` returns "not told" for such a name in its scope and in
+an enclosing scope, so it is never classified as a Template.  The isolated shadow programs now match
+CPython on both builds (the for target, tuple unpack, comprehension target, walrus target and the silent
+`Box.template` variant); the reviewer's exact programs, which call a keyword form earlier in the same
+scope, are named compile-time refusals instead of crashes.  Added
+`test_template_method_names_shadowed_by_other_bindings`.  Probes: the full `/tmp/rprobes` and
+`/tmp/probes` sets match CPython or are refused by name.  Final-state tests: test_ail_std_string,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed).
+
+## 2026-11-01 -- std_string review 4: Template lowering only on known Templates
+
+The review found that `_Surface.call` still lowered `.substitute` / `.safe_substitute` / `.is_valid` /
+`.get_identifiers` when the receiver's kind was unknown, so `self.substitute(5)`, `d["b"].substitute(5)`,
+`make().substitute(5)`, `h.b.substitute(5)`, a loop variable and a tuple-unpack target were sent to the
+Template helper and crashed with `AttributeError: 'Box' object has no attribute 'template'` where CPython
+printed `SUB5`.  Lowering now happens only for a receiver known to be a `string.Template` (and the
+`user_methods` name check is gone, so a program that also defines a `substitute` method still lowers its
+real Templates).  An unknown receiver stays an ordinary method call when the call has the form the prelude
+object's own method implements exactly (one positional mapping, or no arguments for `is_valid` /
+`get_identifiers`), which matches CPython for non-Templates and for Templates reached through a list item,
+dict value or attribute; the keyword/optional forms are named compile-time refusals, since only a known
+Template can be lowered.  All six review probes (`p_self_attr`, `p_dict_sub`, `p_call_result`,
+`p_attr_chain`, `p_tuple_unpack`, `p_for_loop`) no longer crash: the five without a lambda match CPython on
+both paths, and `p_self_attr` is refused by name for its lambda-as-value.  Added
+`test_template_method_names_on_unknown_receivers` and
+`test_unknown_receiver_keyword_form_is_refused_by_name` to `test_ail_std_string.py`; the twelve lab
+programs and the earlier receiver/scope probes are unchanged.  Final-state tests: test_ail_std_string,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed).
+
+## 2026-11-01 -- std_string review 3: Template receivers resolved per scope
+
+The review found the new receiver test was still too coarse.  The binding map was keyed by name
+globally, so a Template parameter `t` in one function was classified from an unrelated local
+`t = Box()` in another (the call was then refused, `pN_false_other`); and the method-as-value gate
+only refused a receiver known to be a Template, so a parameter, call result or dict value skipped
+the refusal and crashed with `AttributeError` (`pE2_value_arg`, `pF_value_call`, `pH_value_ok`,
+`pJ_dict_value`).  `_Surface` now records assignments, parameters and enclosing scopes separately
+(`collect_template_scopes` / `scope_of` / `kind_of_name`), resolves a name in the scope where it is
+used (falling back to enclosing function scopes and then the module), and infers a parameter's kind
+from the arguments at its call sites, so `run(Box())` is known non-Template and `render(tpl)` is
+known Template.  The value gate now refuses any receiver not known to be non-Template, and applies
+only to attribute reads (an assignment target such as `self.substitute = "S"` is not a value use).
+`pN_false_other`, `pI_call_param`, `pA_arg_call`, `pK_call_unknown` and `pM_call_unknown` now match
+CPython on both paths; `pE2`/`pF`/`pH`/`pJ` are named value refusals like the base; `p3_collision2`,
+`p7_dataclass_flag`, `p9b_class_method`, `p_template_ok` and `pG_direct` still match.  Added
+`test_template_receiver_is_resolved_in_its_own_scope` and
+`test_template_method_value_through_unknown_receiver_is_refused` to `test_ail_std_string.py`.
+
+## 2026-11-01 -- std_string review 2: Template method names only on Template receivers
+
+The review found that `_Surface.call` lowered every `.substitute` / `.safe_substitute` / `.is_valid` /
+`.get_identifiers` call once any `string.Template` appeared, so an unrelated `b.is_valid()` was sent to
+the Template helper and crashed with `AttributeError: 'Box' object has no attribute 'template'`.
+`_Surface` now records the values bound to each local name (`kind_of_name` / `kind_of_value` /
+`receiver_kind`): a receiver known never to be a Template (a user-class instance or a builtin value,
+e.g. `b = Box()`) is left as an ordinary method call, and only a receiver not known to be non-Template
+is lowered (or, as a bound method value, refused by name).  Unrelated dataclass fields, instance
+attributes and class attributes named `is_valid` / `substitute` (`p7_dataclass_flag`, `p3_collision`,
+`p3_collision2`) now build and match CPython on both paths.  The two collision probes that the general
+path still cannot model (`p8_setattr`, a `setattr`-installed method on a class without `__init__`, and
+`p9_lambda_method`, a class attribute holding a lambda) are now named compile-time refusals instead of
+run-time crashes.  `test_ail_std_string.py` gained
+`test_template_method_names_on_other_receivers` and
+`test_template_method_name_collisions_are_refused_by_name`.  Final-state tests: test_ail_std_string,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed).
+
+## 2026-11-01 -- std_string review: Template method values and the bytes-template message
+
+The review found two defects in the `string.Template` lowering.  A method read as a value
+(`f = t.substitute`, `f = t.get_identifiers`) compiled and then crashed with `AttributeError`; the
+prelude object now carries real `substitute` / `safe_substitute` / `is_valid` / `get_identifiers`
+methods (so `getattr(t, "substitute")(...)` still works as a direct call), and a plain attribute
+read of one of those methods is refused by name at build time, which this subset cannot represent
+as a bound method (exact refusal in RESULTS.md).  A bytes template also gave the wrong TypeError
+text; `_ail_tpl_text` now raises CPython's `cannot use a string pattern on a bytes-like object` for
+both bytes and bytearray while every other non-str type keeps `expected string or bytes-like
+object, got '<type>'`.  `test_ail_std_string.py` gained `test_template_methods_and_bad_templates`
+(direct and `getattr` calls, list/dict/argument/attribute receivers, bytes/bytearray/int/None/list/
+float templates) and `test_template_method_value_is_refused_by_name`; both build modes pass.
+Probes `/tmp/probes/p_tpl_value.py` and `p_tpl_value2.py` are refused by name, `p_tpl_getattr_value.py`
+is refused by name, and `p_tpl_getattr_call.py`, `p_tpl_badtext_direct.py` and
+`p_tpl_methods_all.py` match CPython on the default and forced-general paths.  Final-state tests:
+test_ail_std_string, test_ail_stdlib1, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
+## 2026-11-01 -- std_string: `string` coverage: capwords keywords and Template (job-std_string-11011434)
+
+Added the 12-program `lab/stdlib/string/` coverage set and `RESULTS.md`.  Before the fix 6 built and
+6 were refused: `string.capwords(..., sep=...)` / `s=` (3), `string.Template` (2) and
+`string.Formatter` (1).  `ail_syntax.small_call` now takes the capwords keywords (still with the
+existing None / empty / non-str separator errors), and `string.Template` lowers to a small prelude
+object with `substitute`, `safe_substitute`, `is_valid`, `get_identifiers`, `template`, `$$` and
+`$name` / `${name}`; missing keys raise KeyError and invalid placeholders raise CPython's line/col
+ValueError.  Keyword values override a positional mapping like CPython's ChainMap.  A Template
+subclass stays refused by name, and using the Template class itself as a plain value is refused
+by name (so it cannot print a different class repr).  `string.Formatter` remains the documented
+follow-up (exact refusal in RESULTS.md).  Final: 11/12 build (2 typed, 9 general, 1 refused) and all
+11 match CPython on the default and forced-general paths.  Probes `/tmp/probes/string/p_const.py`,
+`p_capwords_edges.py`, `p_template.py`, `p_template_edges.py`, `p_template_values.py`, the
+refused `p_template_value.py` and the refused `p_formatter.py` cover constants,
+keyword/runtime/empty/non-str separators, missing keys, safe substitution, invalid placeholders
+with newlines, mapping precedence, non-str templates, the class-as-value refusal, and values
+through arguments, a list item, a dict value and an attribute.  Added
+`AIL_CURRENT/test_ail_std_string.py` (registered through `tests.d/test_ail_std_string.txt`) and
+updated `test_ail_stdlib1.py`'s old Template-refusal case to Formatter.  Final-state tests:
+test_ail_std_string, test_ail_stdlib1, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 

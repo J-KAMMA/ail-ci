@@ -1,0 +1,112 @@
+# `string` coverage results
+
+Twelve programs in this directory, built with the default command
+`ail_chatgpt.py compile X.py --syntax python`.  Every built program was also run and compared with
+CPython 3.12 (stdout and exit code), on the default and forced-general (`AIL_UNIFIED_FORCE=1`)
+paths; all match.
+
+## Before the fixes
+
+Six programs built (the constants-only ones); six were refused:
+
+- `string.capwords(...)` with the `sep=` keyword (and with `s=`): 3 programs
+  (`slugify`, `name_formatter`, `initials`).
+- `string.Template`: 2 programs (`template_email`, `template_config`).
+- `string.Formatter`: 1 program (`formatter_table`).
+
+The first refusal for the capwords-keyword group was
+`not in the subset: string.capwords() with these arguments is not built`; for the Template group,
+`not in the subset: string.Template() with these arguments is not built`.
+
+## Final result
+
+| program | result | first refusal / first general-path reason |
+| --- | --- | --- |
+| `word_stats.py` | general | `word_stats.py:23:5: built on the general path ... with key= columns (sorted/sort/d.items()): counts.keys() cannot be walked inline here` |
+| `slugify.py` | general | `slugify.py:15:5: built on the general path ... 'raw' is an int and is being assigned a str` |
+| `password_rules.py` | typed | - |
+| `name_formatter.py` | general | `name_formatter.py:7:22: built on the general path ... the default for 'sep' must be a compile-time int, float or bool constant` |
+| `csv_punctuation_report.py` | general | `csv_punctuation_report.py:17:9: built on the general path ... clean() where a str is needed` |
+| `identifier_check.py` | typed | - |
+| `hex_parser.py` | general | `hex_parser.py:7:5: built on the general path ... 'text' is a parameter and cannot be reassigned` |
+| `text_sanitizer.py` | general | `text_sanitizer.py:24:9: built on the general path ... sanitize() where a str is needed` |
+| `initials.py` | general | `initials.py:12:20: built on the general path ... the default for 'sep' must be a compile-time int, float or bool constant` |
+| `template_email.py` | general | `template_email.py:10:1: built on the general path ... *args, **kwargs, positional-only and keyword-only parameters are refused` |
+| `template_config.py` | general | `template_config.py:11:5: built on the general path ... passing ('obj', '_AilStringTemplate') where _ail_tpl_is_valid() wants int` |
+| `formatter_table.py` | refused | `formatter_table.py:1:1: not in the subset: string.Formatter() with these arguments is not built (see the note below)` |
+
+11 of 12 build and match CPython.  The general-path reasons above are advisory notes, not refusals;
+the default build falls back to the general path for those programs.
+
+## What was changed
+
+- `ail_syntax.py` now accepts `string.capwords(s, sep)` with either argument passed as a keyword
+  (`s=` / `sep=`), including `sep=None`, runtime separators and the existing error cases.
+- `string.Template` is lowered to a small prelude object: `substitute`, `safe_substitute`,
+  `is_valid`, `get_identifiers`, the `template` attribute and `$$` / `$name` / `${name}` are
+  built.  The methods also exist on the prelude object, so `getattr(t, "substitute")(...)` is
+  built as a direct call.  Missing keys raise `KeyError`, invalid placeholders raise CPython's
+  `ValueError: Invalid placeholder in string: line L, col C`, and `safe_substitute` keeps invalid
+  or missing placeholders as written.  Keyword substitution values override a positional mapping,
+  as CPython's `ChainMap` does.  A bytes or bytearray template raises CPython's exact
+  `TypeError: cannot use a string pattern on a bytes-like object`; other non-str templates keep
+  `TypeError: expected string or bytes-like object, got '<type>'`.  A subclass of
+  `string.Template` is still refused by name, and using the `string.Template` class itself as a
+  plain value (for example `print(string.Template)`) is refused by name rather than printing a
+  different class repr; call it directly instead.
+- Reading one of the four Template methods as a value (a bound method) is refused by name at
+  build time instead of compiling to a run-time `AttributeError`; see the follow-up below.
+- The Template method lowering is restricted to receivers actually known to be a
+  `string.Template`.  The classification is per scope (a parameter or local in another function is
+  not confused with a same-named variable elsewhere) and a parameter is classified from its
+  call-site arguments.  An unrelated `.is_valid` / `.substitute` attribute on a dataclass field, an
+  instance attribute or a class attribute is an ordinary attribute read/call again, so a Template
+  elsewhere in the program no longer hijacks it.  When the receiver's kind is unknown (a parameter
+  with no resolved call site, a call result, a list/dict item, a loop or unpacking target, an
+  attribute chain), a call in the form the prelude object's own method supports exactly (one
+  positional mapping, or no arguments for `is_valid` / `get_identifiers`) stays an ordinary method
+  call and matches CPython for non-Templates; the keyword/optional forms are refused by name,
+  because only a known Template can be lowered to the helper.  Reading one of the four methods as a
+  value from a receiver not known to be non-Template is likewise refused by name.  The two
+  remaining collisions (a `setattr`-installed method on a class without `__init__`, and a class
+  attribute holding a lambda) are named compile-time refusals, not run-time crashes.
+- `test_ail_stdlib1.py`'s old "string template is refused" case now checks `string.Formatter`
+  instead.
+
+## Follow-ups (out of scope: big new features)
+
+### `string.Formatter`
+
+`string.Formatter` is not built.  The exact refusal is:
+
+```
+formatter_table.py:1:1: not in the subset: string.Formatter() with these arguments is not built (see the note below)
+note: formatter_table.py:5: string.Formatter() with these arguments is not built; the string module is built as its constants (ascii_lowercase, ascii_uppercase, ascii_letters, digits, hexdigits, octdigits, punctuation, whitespace, printable), capwords() and the Template class with substitute / safe_substitute / is_valid / get_identifiers
+```
+
+Implementing `Formatter` means its `parse` / `format` / `vformat` / `get_field` / `get_value` /
+`convert_field` / `format_field` protocol (nested fields, conversion flags, format specs) as a new
+class; that is a larger feature than the Template lowering above.
+
+### Template method read as a value (bound method)
+
+`f = t.substitute` / `f = t.get_identifiers` (and the same read through a list item, a dict value,
+an argument or an attribute) is not built: this subset has no representation for a bound method
+value.  It is refused by name, not compiled to a crash.  The exact refusal is:
+
+```
+bound_method.py:4:5: not in the subset: string.Template.substitute used as a value (a bound method is not built)
+  write instead: call it directly (t.substitute(...)); a Template built with string.Template(...) can also be called through getattr(t, "substitute")(...)
+```
+
+`getattr(t, "substitute")` used as a value is likewise refused by name
+(`not in the subset: getattr() of the method substitute as a value (getattr(obj, "substitute")(...)
+is built)`).  Building real bound methods is a compiler/runtime feature larger than this task.
+
+### Template method name on an unrelated class
+
+A program that uses a Template and also has an unrelated class attribute named `is_valid` or
+`substitute` that the general path cannot model is refused by name rather than crashing.  For example
+`setattr(b, "is_valid", check)` on a class without `__init__` and `is_valid = lambda self: "BOX"`
+both stop at build time with `not in the subset: ...`; the Template lowering itself no longer sends
+those calls to the Template helper.
