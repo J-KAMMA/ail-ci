@@ -427,16 +427,37 @@ print(Fraction(2, 1) ** 100)
                 self.assertEqual(run(exe, ''), (0, self.WANT, ''))
 
     def test_visible_int_beyond_int64_stops(self):
+        snippets = (
+            ('int(Decimal(2) ** 100)', 'from decimal import Decimal\n'),
+            ('int(Fraction(2) ** 100)', 'from fractions import Fraction\n'),
+            ('(Decimal(2) ** 100).as_integer_ratio()', 'from decimal import Decimal\n'),
+            ('(Fraction(2) ** 100).as_integer_ratio()', 'from fractions import Fraction\n'),
+            ('(Fraction(2) ** 100).numerator', 'from fractions import Fraction\n'),
+            ('(Fraction(1, 2) ** 200).denominator', 'from fractions import Fraction\n'),
+            ('round(Decimal(2) ** 100)', 'from decimal import Decimal\n'),
+            ('(Decimal(2) ** 100).__trunc__()', 'from decimal import Decimal\n'),
+        )
+        for expr, setup in snippets:
+            with self.subTest(expr=expr), tempfile.TemporaryDirectory() as tmp:
+                made, exe = build(tmp, setup + 'print(%s)\n' % expr, 'deci')
+                self.assertEqual(made.returncode, 0, made.stderr)
+                code, out, err = run(exe, '')
+                self.assertEqual((code, out), (1, ''))
+                self.assertEqual(err, 'OverflowError: integer overflow in int()%s\n' % SUFFIX)
+
+    def test_exact_mode_hands_back_exact_ints(self):
         text = ('from decimal import Decimal\n'
                 'from fractions import Fraction\n'
-                'print(int(Decimal(2) ** 100))\n'
-                'print(int(Fraction(2) ** 100))\n')
+                'print((Decimal(2) ** 100).as_integer_ratio())\n'
+                'print((Fraction(2) ** 100).numerator)\n'
+                'print((Fraction(1, 2) ** 200).denominator)\n')
+        want = ('(1267650600228229401496703205000, 1)\n'
+                '1267650600228229401496703205376\n'
+                '1606938044258990275541962092341162602522202993782792835301376\n')
         with tempfile.TemporaryDirectory() as tmp:
-            made, exe = build(tmp, text, 'deci')
+            made, exe = build(tmp, text, 'dece', 'exact')
             self.assertEqual(made.returncode, 0, made.stderr)
-            code, out, err = run(exe, '')
-            self.assertEqual((code, out), (1, ''))
-            self.assertEqual(err, 'OverflowError: integer overflow in int()%s\n' % SUFFIX)
+            self.assertEqual(run(exe, ''), (0, want, ''))
 
 
 if __name__ == '__main__':

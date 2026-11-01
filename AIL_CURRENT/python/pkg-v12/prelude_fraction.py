@@ -207,15 +207,15 @@ def _ail_fr_parse(text: str) -> list[int]:
 class Fraction:
     def __init__(self, numerator=0, denominator=None, _ail_raw=False):
         if _ail_raw:
-            self.numerator = numerator
-            self.denominator = denominator
+            self._n = numerator
+            self._d = denominator
             return
         n = 0
         d = 1
         if denominator is None:
             if isinstance(numerator, Fraction):
-                n = numerator.numerator
-                d = numerator.denominator
+                n = numerator._n
+                d = numerator._d
             elif isinstance(numerator, int):
                 n = numerator
             elif isinstance(numerator, float):
@@ -234,8 +234,8 @@ class Fraction:
                     raise TypeError("both arguments should be Rational instances")
                 a = Fraction(numerator)
                 b = Fraction(denominator)
-                n = a.numerator * b.denominator
-                d = a.denominator * b.numerator
+                n = a._n * b._d
+                d = a._d * b._n
             elif isinstance(numerator, int) and isinstance(denominator, int):
                 n = numerator
                 d = denominator
@@ -246,68 +246,76 @@ class Fraction:
         g = _ail_fr_gcd(n, d)
         if d < 0:
             g = -g
-        self.numerator = n // g
-        self.denominator = d // g
+        self._n = n // g
+        self._d = d // g
+
+    @property
+    def numerator(self):
+        return self._n
+
+    @property
+    def denominator(self):
+        return self._d
 
     def __repr__(self) -> str:
-        return "Fraction(%s, %s)" % (self.numerator, self.denominator)
+        return "Fraction(%s, %s)" % (self._n, self._d)
 
     def __str__(self) -> str:
-        if self.denominator == 1:
-            return str(self.numerator)
-        return "%s/%s" % (self.numerator, self.denominator)
+        if self._d == 1:
+            return str(self._n)
+        return "%s/%s" % (self._n, self._d)
 
     def __float__(self) -> float:
-        return _ail_fr_to_float(self.numerator, self.denominator)
+        return _ail_fr_to_float(self._n, self._d)
 
     def as_integer_ratio(self):
-        n: int = self.numerator
-        d: int = self.denominator
+        n: int = self._n
+        d: int = self._d
         return (n, d)
 
     def is_integer(self) -> bool:
-        return self.denominator == 1
+        return self._d == 1
 
     def __hash__(self):
-        if self.denominator == 1:
-            return self.numerator
-        return self.numerator * 1000003 + self.denominator
+        if self._d == 1:
+            return self._n
+        return self._n * 1000003 + self._d
 
     def __bool__(self) -> bool:
-        return self.numerator != 0
+        return self._n != 0
 
     def __neg__(self):
-        return Fraction(-self.numerator, self.denominator, True)
+        return Fraction(-self._n, self._d, True)
 
     def __pos__(self):
-        return Fraction(self.numerator, self.denominator, True)
+        return Fraction(self._n, self._d, True)
 
     def __abs__(self):
-        return Fraction(abs(self.numerator), self.denominator, True)
+        return Fraction(abs(self._n), self._d, True)
 
     def __trunc__(self):
-        if self.numerator < 0:
-            return -(-self.numerator // self.denominator)
-        return self.numerator // self.denominator
+        if self._n < 0:
+            return -(-self._n // self._d)
+        return self._n // self._d
 
     def __int__(self):
-        if self.numerator < 0:
-            return -(-self.numerator // self.denominator)
-        return self.numerator // self.denominator
+        if self._n < 0:
+            return -(-self._n // self._d)
+        return self._n // self._d
 
     def __floor__(self):
-        return self.numerator // self.denominator
+        return self._n // self._d
 
     def __ceil__(self):
-        return -(-self.numerator // self.denominator)
+        return -(-self._n // self._d)
 
     def __round__(self, ndigits=None):
         if ndigits is None:
-            fl = self.numerator // self.denominator
-            rem = self.numerator % self.denominator
-            if rem * 2 < self.denominator:
+            fl = self._n // self._d
+            rem = self._n % self._d
+            if rem * 2 < self._d:
                 return fl
-            if rem * 2 > self.denominator:
+            if rem * 2 > self._d:
                 return fl + 1
             if fl % 2 == 0:
                 return fl
@@ -320,14 +328,14 @@ class Fraction:
     def limit_denominator(self, max_denominator=1000000):
         if max_denominator < 1:
             raise ValueError("max_denominator should be at least 1")
-        if self.denominator <= max_denominator:
-            return Fraction(self.numerator, self.denominator, True)
+        if self._d <= max_denominator:
+            return Fraction(self._n, self._d, True)
         p0 = 0
         q0 = 1
         p1 = 1
         q1 = 0
-        n = self.numerator
-        d = self.denominator
+        n = self._n
+        d = self._d
         while True:
             a = n // d
             q2 = q0 + a * q1
@@ -342,7 +350,7 @@ class Fraction:
             n = d
             d = t
         k = (max_denominator - q0) // q1
-        if 2 * d * (q0 + k * q1) <= self.denominator:
+        if 2 * d * (q0 + k * q1) <= self._d:
             return Fraction(p1, q1, True)
         return Fraction(p0 + k * p1, q0 + k * q1, True)
 
@@ -422,14 +430,14 @@ class Fraction:
             o = other
             if isinstance(other, int):
                 o = Fraction(other, 1, True)
-            return (self.numerator * o.denominator) // (self.denominator * o.numerator)
+            return (self._n * o._d) // (self._d * o._n)
         raise TypeError("unsupported operand type(s) for //: 'Fraction' and '%s'" % _ail_fr_tname(other))
 
     def __rfloordiv__(self, other):
         if isinstance(other, float):
             return other // float(self)
         if isinstance(other, int):
-            return (other * self.denominator) // self.numerator
+            return (other * self._d) // self._n
         raise TypeError("unsupported operand type(s) for //: '%s' and 'Fraction'" % _ail_fr_tname(other))
 
     def __mod__(self, other):
@@ -439,9 +447,9 @@ class Fraction:
             o = other
             if isinstance(other, int):
                 o = Fraction(other, 1, True)
-            da = self.denominator
-            db = o.denominator
-            return Fraction((self.numerator * db) % (o.numerator * da), da * db)
+            da = self._d
+            db = o._d
+            return Fraction((self._n * db) % (o._n * da), da * db)
         raise TypeError("unsupported operand type(s) for %%: 'Fraction' and '%s'" % _ail_fr_tname(other))
 
     def __rmod__(self, other):
@@ -449,8 +457,8 @@ class Fraction:
             return other % float(self)
         if isinstance(other, int):
             da = 1
-            db = self.denominator
-            return Fraction((other * db) % (self.numerator * da), da * db)
+            db = self._d
+            return Fraction((other * db) % (self._n * da), da * db)
         raise TypeError("unsupported operand type(s) for %%: '%s' and 'Fraction'" % _ail_fr_tname(other))
 
     def __divmod__(self, other):
@@ -464,16 +472,16 @@ class Fraction:
         return (q, r)
 
     def __pow__(self, other):
-        if isinstance(other, Fraction) and other.denominator == 1:
-            other = other.numerator
+        if isinstance(other, Fraction) and other._d == 1:
+            other = other._n
         if isinstance(other, int):
             if other >= 0:
-                return Fraction(self.numerator ** other, self.denominator ** other, True)
-            if self.numerator > 0:
-                return Fraction(self.denominator ** (-other), self.numerator ** (-other), True)
-            if self.numerator == 0:
-                raise ZeroDivisionError("Fraction(%s, 0)" % (self.denominator ** (-other)))
-            return Fraction((-self.denominator) ** (-other), (-self.numerator) ** (-other), True)
+                return Fraction(self._n ** other, self._d ** other, True)
+            if self._n > 0:
+                return Fraction(self._d ** (-other), self._n ** (-other), True)
+            if self._n == 0:
+                raise ZeroDivisionError("Fraction(%s, 0)" % (self._d ** (-other)))
+            return Fraction((-self._d) ** (-other), (-self._n) ** (-other), True)
         if isinstance(other, Fraction):
             return float(self) ** float(other)
         if isinstance(other, float):
@@ -481,25 +489,25 @@ class Fraction:
         raise TypeError("unsupported operand type(s) for ** or pow(): 'Fraction' and '%s'" % _ail_fr_tname(other))
 
     def __rpow__(self, other):
-        if self.denominator == 1 and self.numerator >= 0:
-            return other ** self.numerator
+        if self._d == 1 and self._n >= 0:
+            return other ** self._n
         if isinstance(other, int):
             return Fraction(other, 1, True) ** self
-        if self.denominator == 1:
-            return other ** self.numerator
+        if self._d == 1:
+            return other ** self._n
         return other ** float(self)
 
     # -- comparison ------------------------------------------------------------------------------
     def __eq__(self, other):
         if isinstance(other, Fraction):
-            return self.numerator == other.numerator and self.denominator == other.denominator
+            return self._n == other._n and self._d == other._d
         if isinstance(other, int):
-            return self.denominator == 1 and self.numerator == other
+            return self._d == 1 and self._n == other
         if isinstance(other, float):
             if other != other or other - other != 0.0:
                 return False
             p = _ail_fr_float_parts(other)
-            return self.numerator == p[0] and self.denominator == p[1]
+            return self._n == p[0] and self._d == p[1]
         return False
 
     def __lt__(self, other):
@@ -518,10 +526,10 @@ class Fraction:
 
 
 def _ail_fr_add(a, b):
-    na = a.numerator
-    da = a.denominator
-    nb = b.numerator
-    db = b.denominator
+    na = a._n
+    da = a._d
+    nb = b._n
+    db = b._d
     g = _ail_fr_gcd(da, db)
     if g == 1:
         return Fraction(na * db + da * nb, da * db, True)
@@ -534,10 +542,10 @@ def _ail_fr_add(a, b):
 
 
 def _ail_fr_sub(a, b):
-    na = a.numerator
-    da = a.denominator
-    nb = b.numerator
-    db = b.denominator
+    na = a._n
+    da = a._d
+    nb = b._n
+    db = b._d
     g = _ail_fr_gcd(da, db)
     if g == 1:
         return Fraction(na * db - da * nb, da * db, True)
@@ -550,10 +558,10 @@ def _ail_fr_sub(a, b):
 
 
 def _ail_fr_mul(a, b):
-    na = a.numerator
-    da = a.denominator
-    nb = b.numerator
-    db = b.denominator
+    na = a._n
+    da = a._d
+    nb = b._n
+    db = b._d
     g1 = _ail_fr_gcd(na, db)
     if g1 > 1:
         na = na // g1
@@ -566,10 +574,10 @@ def _ail_fr_mul(a, b):
 
 
 def _ail_fr_div(a, b):
-    na = a.numerator
-    da = a.denominator
-    nb = b.numerator
-    db = b.denominator
+    na = a._n
+    da = a._d
+    nb = b._n
+    db = b._d
     if nb == 0:
         raise ZeroDivisionError("Fraction(%s, 0)" % da)
     g1 = _ail_fr_gcd(na, nb)
@@ -591,11 +599,11 @@ def _ail_fr_div(a, b):
 def _ail_fr_cmp(a, other) -> int:
     # -1, 0, 1; 2 when unordered (a NaN)
     if isinstance(other, Fraction):
-        l = a.numerator * other.denominator
-        r = a.denominator * other.numerator
+        l = a._n * other._d
+        r = a._d * other._n
     elif isinstance(other, int):
-        l = a.numerator
-        r = a.denominator * other
+        l = a._n
+        r = a._d * other
     elif isinstance(other, float):
         if other != other:
             return 2
@@ -604,8 +612,8 @@ def _ail_fr_cmp(a, other) -> int:
                 return -1
             return 1
         p = _ail_fr_float_parts(other)
-        l = a.numerator * p[1]
-        r = a.denominator * p[0]
+        l = a._n * p[1]
+        r = a._d * p[0]
     else:
         raise TypeError("'<' not supported between instances of 'Fraction' and '%s'" % _ail_fr_tname(other))
     if l < r:

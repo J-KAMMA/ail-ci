@@ -4262,6 +4262,10 @@ class Compiler(boxclosure.ClosureMixin):
             _enter = '    AIL_FRAME_ENTER(cx, f, %d);\n' % n_slots
             full = full.replace(_enter, _enter + '    ail_exact_enter(cx);\n', 1)
             full = full.replace('AIL_FRAME_LEAVE(cx, f);', 'ail_exact_leave(cx); AIL_FRAME_LEAVE(cx, f);')
+            _ok = '    ail_exact_leave(cx); AIL_FRAME_LEAVE(cx, f);\n    return AIL_OK;'
+            _guard = ('    if (cx->exact_depth == 1) { ail_st _vst = ail_exact_visible(cx, out); '
+                      'if (_vst != AIL_OK) { ail_exact_leave(cx); AIL_FRAME_LEAVE(cx, f); return _vst; } }\n')
+            full = full.replace(_ok, _guard + _ok)
         self.top_defs.append(full)
         if info['lru_cache']:
             self._emit_lru_wrapper(info)

@@ -24,6 +24,22 @@ static inline int ail__isint(uint8_t t) { return t == AIL_T_INT || t == AIL_T_BO
    one); the user's own code keeps the loud int64 stop. */
 static inline void ail_exact_enter(ail_ctx *cx) { cx->exact_depth++; }
 static inline void ail_exact_leave(ail_ctx *cx) { cx->exact_depth--; }
+/* An int (or a tuple/list of ints, e.g. Decimal.as_integer_ratio) that a library prelude hands back to the program follows the
+   program's mode: in int64 mode a value outside int64 stops loudly instead of escaping as a big int the program then computes
+   with at depth 0.  Only the outermost library return is checked; inside the library the depth stays positive and exact values
+   pass through. */
+static ail_st ail_exact__scan(ail_ctx *cx, ail_obj v, int depth) {
+    if (v.tag == AIL_T_BIG) return ail_hit_limit(cx, "int_overflow", "integer overflow in int()");
+    if (depth < 4 && (v.tag == AIL_T_TUPLE || v.tag == AIL_T_LIST)) {
+        ail_vecobj *vec = (ail_vecobj *)v.o;
+        for (int64_t i = 0; i < vec->n; i++) {
+            ail_st st = ail_exact__scan(cx, vec->p[i], depth + 1);
+            if (st != AIL_OK) return st;
+        }
+    }
+    return AIL_OK;
+}
+static inline ail_st ail_exact_visible(ail_ctx *cx, const ail_obj *out) { return ail_exact__scan(cx, *out, 0); }
 /* Prototypes of the pieces biggate.py may leave out: the definitions below are conditional, and an
    unused caller (a math helper the program never names) must still see the right return type. */
 static AIL_BIGFN void ail_big_divmod(ail_ctx *cx, ail_obj *q, ail_obj *r, ail_obj a, ail_obj b);

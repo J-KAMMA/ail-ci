@@ -1,3 +1,19 @@
+## 2026-11-01 -- Decimal/Fraction review: an exact int cannot escape through a returned value (job-decexact2-11011010)
+
+The review found that big ints still escaped the library into the program: `(Decimal(2) ** 100).as_integer_ratio()`
+and `Fraction(2) ** 100`'s `.numerator` / `.denominator` handed out big ints, so user code then did arbitrary
+precision arithmetic at depth 0. Every successful return of a Decimal/Fraction prelude function now checks the
+outermost return when it leaves the library (`exact_depth == 1`): a big int, or a tuple/list holding one, stops
+with `integer overflow in int()`, while internal calls (depth > 1) pass exact values through. Fraction's
+numerator/denominator are now read-only properties backed by the internal `_n`/`_d`, so the read goes through the
+same check; `int()`, `__trunc__`, `__floor__`, `__ceil__`, `__round__` and `as_integer_ratio` are covered by the
+same return check. `test_ail_int64_default` gained the escape cases and an exact-mode counterpart. Probes in
+`/tmp/probes`: `p_dec_ratio`, `p_dec_ratio_print`, `p_frac_num`, `p_frac_den`, `p_frac_ratio`, `p_arg`, `p_list`,
+`p_dict`, `p_attr` stop loudly (exit 1) on both builds; `p_small` matches CPython; `p_exact` matches CPython in
+exact mode. All ten `lab/compare` `main.ail` builds are byte-identical to the base, and so are the six default
+`main.py` builds; the two exact-int tasks differ only by the exact-depth machinery from the previous commit, and
+the other three `main.py` files refuse identically at base and HEAD.
+
 ## 2026-11-01 -- Decimal/Fraction prelude: exact ints inside, int64 for the program (job-decexact2-11011010)
 
 The default int64 mode made the Decimal prelude fail on its own `10 ** prec`: `Decimal(1) / Decimal(3)`,

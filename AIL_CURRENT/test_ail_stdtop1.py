@@ -129,6 +129,13 @@ def as_int(d):
     return int(d)
 
 
+def as_visible_int(v):
+    # an int a Decimal method hands to the program follows the program's mode: outside int64 it stops loudly there.
+    if -9223372036854775808 <= v <= 9223372036854775807:
+        return v
+    return "out of int64"
+
+
 def main():
     for line in sys.stdin.read().split("\n"):
         show("new " + repr(line), lambda: Decimal(line))
@@ -174,7 +181,7 @@ def main():
     show("pow one", lambda: Decimal("1.000") ** 5)
     show("pow int", lambda: Decimal(4) ** Decimal(2))
     show("ovf", lambda: Decimal("9e999999") * 10)
-    show("round big", lambda: round(Decimal("1e30")))
+    show("round big", lambda: as_visible_int(round(Decimal("1e10"))))
     show("quant err", lambda: Decimal("1e30").quantize(Decimal("0.01")))
     show("max", lambda: Decimal("NaN").max(Decimal(3)))
     show("round n", lambda: round(Decimal("123.456"), -1))
