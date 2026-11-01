@@ -43,6 +43,7 @@ class Info:
         self.kind = kind
         self.members = []          # (member name, variable)
         self.aliases = []          # (alias name, member variable)
+        self.entries = []          # (member or alias name, variable) in definition order, for __members__
         self.values = {}           # variable -> (value expression, position)
         self.order = []            # a Flag class: the variables in definition order, an alias repeating its member
         self.ints = {}             # a Flag class: variable -> its int value
@@ -157,67 +158,92 @@ def lower_class(cls, kind, binder, enums):
     info = Info(cls.name, kind_name)
     body = []
     last = None
+    largest = None            # the largest int value so far, for auto() (CPython 3.12: max + 1)
+    member_names = {}              # every member or alias name -> its member variable
     seen_values = []               # (member var, value dump)
     flag_env, flag_by_value, flag_values = {}, {}, []
     index = 0
     for item in cls.body:
-        target = value = None
-        if isinstance(item, ast.Assign) and len(item.targets) == 1 and isinstance(item.targets[0], ast.Name):
-            target, value = item.targets[0].id, item.value
+        targets, value = [], None
+        if isinstance(item, ast.Assign) and item.targets and \
+                all(isinstance(t, ast.Name) for t in item.targets):
+            targets, value = [t.id for t in item.targets], item.value
         elif isinstance(item, ast.AnnAssign) and isinstance(item.target, ast.Name) and item.value is not None:
-            target, value = item.target.id, item.value
-        if target is not None and not target.startswith('_') and not isinstance(value, (ast.Lambda,)) \
-                and kind_name in FLAGS:
+            targets, value = [item.target.id], item.value
+        members = [t for t in targets if not t.startswith('_') and not isinstance(value, (ast.Lambda,))]
+        if members and len(members) == len(targets) and kind_name in FLAGS:
             if is_auto(value, binder):
                 number = 1 if not flag_values else 2 ** max(flag_values).bit_length()
             else:
                 number = const_int(value, flag_env, cls)
-            if number < 0:
-                refuse(item, 'enum class %s: %s has the negative value %d; a flag value is not negative here'
-                       % (cls.name, target, number))
-            if number >= 1 << 63:
-                refuse(item, 'enum class %s: %s is %d, past the 63 bits an int holds on the general path'
-                       % (cls.name, target, number))
-            flag_env[target] = number
-            if number in flag_by_value:
-                info.aliases.append((target, flag_by_value[number]))
-                info.order.append(flag_by_value[number])
-            else:
-                var = info.var(target)
-                info.members.append((target, var))
-                info.values[var] = (ast.Constant(value=number), index)
-                info.ints[var] = number
-                info.order.append(var)
-                flag_by_value[number] = var
-                flag_values.append(number)
-                index += 1
-            info.names.append(target)
+            for target in targets:
+                if number < 0:
+                    refuse(item, 'enum class %s: %s has the negative value %d; a flag value is not negative here'
+                           % (cls.name, target, number))
+                if number >= 1 << 63:
+                    refuse(item, 'enum class %s: %s is %d, past the 63 bits an int holds on the general path'
+                           % (cls.name, target, number))
+                flag_env[target] = number
+                if number in flag_by_value:
+                    var = flag_by_value[number]
+                    info.aliases.append((target, var))
+                    info.order.append(var)
+                else:
+                    var = info.var(target)
+                    info.members.append((target, var))
+                    info.values[var] = (ast.Constant(value=number), index)
+                    info.ints[var] = number
+                    info.order.append(var)
+                    flag_by_value[number] = var
+                    flag_values.append(number)
+                    index += 1
+                info.names.append(target)
+                info.entries.append((target, var))
+                member_names[target] = var
             continue
-        if target is not None and not target.startswith('_') and not isinstance(value, (ast.Lambda,)):
+        if members and len(members) == len(targets) and kind_name not in FLAGS and \
+                isinstance(value, ast.Name) and value.id in member_names:
+            var = member_names[value.id]
+            for target in targets:
+                info.aliases.append((target, var))
+                info.entries.append((target, var))
+                member_names[target] = var
+            lit = literal(info.values[var][0])
+            last = lit if lit is not None else last
+            if isinstance(lit, int) and not isinstance(lit, bool):
+                largest = lit if largest is None else max(largest, lit)
+            continue
+        if members and len(members) == len(targets):
             if is_auto(value, binder):
                 if kind_name == 'StrEnum':
-                    value = ast.Constant(value=target.lower())
+                    value = ast.Constant(value=targets[0].lower())
                 elif last is None:
                     value = ast.Constant(value=1)
                 elif isinstance(last, int) and not isinstance(last, bool):
-                    value = ast.Constant(value=last + 1)
+                    value = ast.Constant(value=(largest if largest is not None else last) + 1)
                 else:
                     refuse(item, 'enum class %s: auto() after a value that is not an int' % cls.name)
             if kind_name == 'IntEnum':
-                check_intenum_member(item, cls.name, target, value)
+                for target in targets:
+                    check_intenum_member(item, cls.name, target, value)
             lit = literal(value)
             last = lit if lit is not None else last
+            if isinstance(lit, int) and not isinstance(lit, bool):
+                largest = lit if largest is None else max(largest, lit)
             dump = ast.dump(value)
-            for var, other in seen_values:
-                if other == dump and lit is not None:
-                    info.aliases.append((target, var))
-                    break
-            else:
-                var = info.var(target)
-                info.members.append((target, var))
-                seen_values.append((var, dump))
-                info.values[var] = (copy.deepcopy(value), index)
-                index += 1
+            for target in targets:
+                for var, other in seen_values:
+                    if other == dump and lit is not None:
+                        info.aliases.append((target, var))
+                        break
+                else:
+                    var = info.var(target)
+                    info.members.append((target, var))
+                    seen_values.append((var, dump))
+                    info.values[var] = (copy.deepcopy(value), index)
+                    index += 1
+                info.entries.append((target, var))
+                member_names[target] = var
             continue
         if isinstance(item, ast.FunctionDef) and item.name in MEMBER_REFUSED:
             refuse(item, 'enum class %s: %s is not built (members take plain values)' % (cls.name, item.name))
@@ -440,11 +466,19 @@ def generated(info):
         value, index = info.values[var]
         lines.append('%s = %s(%r, %r, %s, %d)' % (var, info.name, classname.display(info.name), member, ast.unparse(value), index))
     lines.append('%s = [%s]' % (info.all, ', '.join(var for _, var in info.members)))
-    entries = ['%r: %s' % (m, v) for m, v in info.members] + ['%r: %s' % (a, v) for a, v in info.aliases]
+    entries = ['%r: %s' % (name, var) for name, var in info.entries]
     lines.append('%s = {%s}' % (info.map, ', '.join(entries)))
-    lines.append('def %s(v):\n    for m in %s:\n        if m.value == v:\n            return m\n'
-                 '    raise ValueError(repr(v) + " is not a valid %s")' % (info.call, info.all, info.name))
+    if not info.members and not info.aliases:
+        message = ("<enum '%s'> has no members; specify `names=()` if you meant to create a new, empty, enum"
+                   % classname.qualified(info.name))
+        lines.append('def %s(v):\n    raise TypeError(%r)' % (info.call, message))
+    else:
+        lines.append('def %s(v):\n    for m in %s:\n        if m.value == v:\n            return m\n'
+                     '    raise ValueError(repr(v) + " is not a valid %s")' % (info.call, info.all, info.name))
     lines.append('def %s(k):\n    if k in %s:\n        return %s[k]\n    raise KeyError(k)' % (info.get, info.map, info.map))
+    lines.append('def _ail_en_%s_has(v):\n    if isinstance(v, %s):\n        return True\n    hash(v)\n    for m in %s:\n'
+                 '        if m.value == v:\n            return True\n    return False'
+                 % (info.name, info.name, info.all))
     return ast.parse('\n'.join(lines)).body
 
 
@@ -478,9 +512,6 @@ class Uses(ast.NodeTransformer):
     def visit_Call(self, node):
         info = self.enum_of(node.func)
         if info is not None:
-            if not info.members and not info.aliases:
-                refuse(node, 'enum class %s has no members this compiler builds; calling an empty %s is not built '
-                       '(CPython raises TypeError); give it at least one plain member' % (info.name, info.kind))
             if len(node.args) != 1 or node.keywords:
                 refuse(node, 'enum %s(...): one value is built (Color(1)); the functional API is not' % info.name)
             self.generic_visit(node)
@@ -494,7 +525,7 @@ class Uses(ast.NodeTransformer):
     def visit_Compare(self, node):
         if len(node.ops) == 1 and isinstance(node.ops[0], (ast.In, ast.NotIn)):
             info = self.enum_of(node.comparators[0])
-            if info is not None and info.kind in FLAGS:
+            if info is not None:
                 has = ast.Call(func=ast.Name(id='_ail_en_%s_has' % info.name, ctx=ast.Load()),
                                args=[self.visit(node.left)], keywords=[])
                 if isinstance(node.ops[0], ast.NotIn):

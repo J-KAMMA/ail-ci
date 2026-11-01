@@ -187,6 +187,14 @@ class _AilIntEnum(_AilEnum):
     def __invert__(self):
         return ~self.value
 
+    def __pow__(self, other):
+        if isinstance(other, _AilEnum):
+            return self.value ** other.value
+        return self.value ** other
+
+    def __rpow__(self, other):
+        return other ** self.value
+
 
 class _AilStrEnum(_AilEnum):
     def __str__(self) -> str:
@@ -210,11 +218,155 @@ class _AilStrEnum(_AilEnum):
             return self.value > other.value
         return self.value > other
 
+    def __le__(self, other):
+        if isinstance(other, _AilEnum):
+            return self.value <= other.value
+        return self.value <= other
+
+    def __ge__(self, other):
+        if isinstance(other, _AilEnum):
+            return self.value >= other.value
+        return self.value >= other
+
     def __add__(self, other):
         return self.value + other
 
     def __radd__(self, other):
         return other + self.value
 
+    def __mul__(self, other):
+        if isinstance(other, _AilEnum):
+            return self.value * other.value
+        return self.value * other
+
+    def __rmul__(self, other):
+        return other * self.value
+
+    def __contains__(self, item):
+        return item in self.value
+
+    def __getitem__(self, index):
+        return self.value[index]
+
     def __len__(self) -> int:
         return len(self.value)
+
+    def upper(self) -> str:
+        return self.value.upper()
+
+    def lower(self) -> str:
+        return self.value.lower()
+
+    def title(self) -> str:
+        return self.value.title()
+
+    def capitalize(self) -> str:
+        return self.value.capitalize()
+
+    def casefold(self) -> str:
+        return self.value.casefold()
+
+    def swapcase(self) -> str:
+        return self.value.swapcase()
+
+    def strip(self) -> str:
+        return self.value.strip()
+
+    def lstrip(self) -> str:
+        return self.value.lstrip()
+
+    def rstrip(self) -> str:
+        return self.value.rstrip()
+
+    def startswith(self, prefix: str) -> bool:
+        return self.value.startswith(prefix)
+
+    def endswith(self, suffix: str) -> bool:
+        return self.value.endswith(suffix)
+
+    def find(self, sub: str) -> int:
+        return self.value.find(sub)
+
+    def rfind(self, sub: str) -> int:
+        return self.value.rfind(sub)
+
+    def index(self, sub: str) -> int:
+        return self.value.index(sub)
+
+    def rindex(self, sub: str) -> int:
+        return self.value.rindex(sub)
+
+    def count(self, sub: str) -> int:
+        return self.value.count(sub)
+
+    def replace(self, old: str, new: str, count: int = -1) -> str:
+        return self.value.replace(old, new, count)
+
+    def removeprefix(self, prefix: str) -> str:
+        return self.value.removeprefix(prefix)
+
+    def removesuffix(self, suffix: str) -> str:
+        return self.value.removesuffix(suffix)
+
+    def split(self, sep: str) -> list[str]:
+        return self.value.split(sep)
+
+    def rsplit(self, sep: str) -> list[str]:
+        return self.value.rsplit(sep)
+
+    def splitlines(self) -> list[str]:
+        return self.value.splitlines()
+
+    def join(self, items: list[str]) -> str:
+        return self.value.join(items)
+
+    def partition(self, sep: str) -> list[str]:
+        return list(self.value.partition(sep))
+
+    def rpartition(self, sep: str) -> list[str]:
+        return list(self.value.rpartition(sep))
+
+    def zfill(self, width: int) -> str:
+        return self.value.zfill(width)
+
+    def center(self, width: int) -> str:
+        return self.value.center(width)
+
+    def ljust(self, width: int) -> str:
+        return self.value.ljust(width)
+
+    def rjust(self, width: int) -> str:
+        return self.value.rjust(width)
+
+    def isdigit(self) -> bool:
+        return self.value.isdigit()
+
+    def isalpha(self) -> bool:
+        return self.value.isalpha()
+
+    def isalnum(self) -> bool:
+        return self.value.isalnum()
+
+    def isspace(self) -> bool:
+        return self.value.isspace()
+
+    def isupper(self) -> bool:
+        return self.value.isupper()
+
+    def islower(self) -> bool:
+        return self.value.islower()
+
+    def isnumeric(self) -> bool:
+        return self.value.isnumeric()
+
+    def isdecimal(self) -> bool:
+        return self.value.isdecimal()
+
+    def isidentifier(self) -> bool:
+        return self.value.isidentifier()
+
+    def isprintable(self) -> bool:
+        return self.value.isprintable()
+
+    def isascii(self) -> bool:
+        return self.value.isascii()

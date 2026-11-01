@@ -1,3 +1,30 @@
+## 2026-11-01 -- stdlib enum: twelve realistic programs (job-std_enum-11011520)
+
+`lab/stdlib/enum/` now holds twelve 16-47 line programs using `Enum`, `IntEnum`, `StrEnum`, `Flag`,
+`IntFlag`, `auto`, `unique`, aliases, tuple values, properties and caught lookup errors. Nine build in
+the default mode (`compile --syntax python`, all on the general path) and print CPython 3.12's stdout
+with its exit code; the three that stay refused are recorded in `RESULTS.md` with their exact first
+refusal and reason (enum `@classmethod`, member `__init__`, the functional API).
+
+The lowering and the enum prelude were fixed, never the programs:
+* `StrEnum` members forward the ordinary string methods, indexing, containment, repetition and
+  `<=`/`>=` to `.value` (previously `.upper()` compiled but failed at run time as an AttributeError).
+* `IntEnum` gains `__pow__` / `__rpow__`.
+* Chained assignment (`MISSING = ALSO_MISSING = 404`, including `auto()`) makes the later names
+  aliases; `__members__` now keeps definition order when an alias sits between members.  A member
+  assigned directly from an earlier member name (`B = A`) is an alias too (it used to be a new member
+  whose value named an undefined variable).
+* `auto()` follows CPython 3.12 and uses the largest previous int value plus one (it used the last
+  literal, so a descending value before `auto()` gave the wrong number).
+* An empty enum builds, and calling it with one value raises CPython's exact `TypeError` instead of
+  being refused at compile time.
+* `value in EnumClass` uses CPython 3.12's value lookup for `Enum`/`IntEnum`/`StrEnum`, not only
+  `Flag`/`IntFlag`, and hashes the value first so an unhashable value raises the same `TypeError`.
+
+`test_ail_std_enum.py` (registered in `tests.d/`) compiles the nine passing lab programs and a small
+edge program, and compares each with CPython. Probes in `/tmp/probes` cover both builds for the alias
+order, `auto()` after a descending value, direct-name aliases, StrEnum methods, IntEnum power,
+empty-enum call, unhashable values, and `in` through arguments, list items, attributes and dict values.
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
