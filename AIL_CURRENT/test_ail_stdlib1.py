@@ -91,7 +91,7 @@ REFUSALS = {
     "textwrap class": ("import textwrap\n\nprint(textwrap.TextWrapper(width=10))\n", "textwrap"),
     "shorten options": ("import textwrap\n\nprint(textwrap.shorten('a b c', 10, placeholder='...'))\n", "textwrap"),
     "shorten duplicate width": ("import textwrap\n\nprint(textwrap.shorten('a b c d e', 5, width=10))\n", "textwrap"),
-    "string template": ("import string\n\nprint(string.Template('x').substitute(x=1))\n", "string"),
+    "string formatter": ("import string\n\nprint(string.Formatter().format('{x}', x=1))\n", "string"),
 }
 
 
