@@ -89,7 +89,7 @@ class Random:
         total = cum[-1] + 0.0
         if total <= 0.0:
             raise ValueError("Total of weights must be greater than zero")
-        if total != total or total == float("inf") or total == float("-inf"):
+        if total != total or total > 1.7976931348623157e308 or total < -1.7976931348623157e308:
             raise ValueError("Total of weights must be finite")
         hi = n - 1
         i = 0

@@ -1,3 +1,14 @@
+## 2026-11-01 -- stdlib random: keep the unified plan (job-std_random-11011843)
+
+Integration follow-up. The finite-total check added to both `choices` preludes spelled
+`float("inf")`. The general path's `unified.nan_capable` sees that `"inf"` string in the merged
+program and refuses a type plan for it, so `test_ail_unified`'s plan test found no `stats.jsonl`
+(the plan is what writes it). The check now compares `total` against the finite double bounds
+(`> 1.7976931348623157e308` / `< -1.7976931348623157e308`): NaN is still caught by `total != total`,
+infinity by the bounds, and every finite total is unchanged. On top of `origin/integ` (4397565) the
+targeted `test_ail_obj_refs`, `test_ail_safetynet`, `test_ail_std_random`, `test_ail_unified` and
+`test_ail_virtual_dispatch` pass, as do `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-11-01 -- stdlib random coverage: review fixes (job-std_random-11011523)
 
 Review follow-up on `26c4101`. `choices` no longer copies `cum_weights` into a list in either prelude: it
