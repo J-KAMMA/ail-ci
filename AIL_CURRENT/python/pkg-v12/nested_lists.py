@@ -55,6 +55,8 @@ def _struct(t):
 def _elem(t):
     if _nest(t):
         return ('row', t[1])
+    if isinstance(t, tuple) and t[0] == 'groupby':
+        return t
     if _listlike(t):
         return t[1]
     if t == 'str':
@@ -293,6 +295,8 @@ class NestedLists:
                 return t
             if name == 'range':
                 return 'range'
+            if name == 'groupby' and e.args:
+                return ('groupby', _elem(self.ty(e.args[0], env)))
             if name == 'heappop' and e.args:
                 return _elem(self.ty(e.args[0], env))
             return None
@@ -332,6 +336,9 @@ class NestedLists:
         elif isinstance(target, ast.Tuple) and isinstance(t, tuple) and t[0] == 'enum' and len(target.elts) == 2:
             self.bind_target(target.elts[0], 'int', env, force)
             self.bind_target(target.elts[1], _elem(t[1]), env, force)
+        elif isinstance(target, ast.Tuple) and isinstance(t, tuple) and t[0] == 'groupby' and len(target.elts) == 2:
+            self.bind_target(target.elts[0], t[1], env, force)
+            self.bind_target(target.elts[1], ('list', t[1]), env, force)
 
     # ---------------------------------------------------------------- per-function environment
     def statements(self, body):
@@ -376,11 +383,29 @@ class NestedLists:
                     error.source_line = getattr(s, 'lineno', None)
                     raise
         # `let g = [[] for _ in range(n)];` says nothing about T: take it from what is appended
-        # to or stored in a row, else int.
+        # to or stored in a row, else int. A plain `let rows = []` that only gets lists appended
+        # (`rows.append([...])`, the shape iterlower leaves behind) is a nested list too.
         for name, t in list(env.items()):
             if _nest(t) and t[1] is None:
                 env[name] = ('nest', self.infer_element(fn, name, env) or 'int')
+            elif _listlike(t) and t[1] is None:
+                nested = self.infer_nested(fn, name, env)
+                if nested is not None:
+                    env[name] = ('nest', nested)
         return env
+
+    def infer_nested(self, fn, name, env):
+        """The element of a plain list local that receives only lists in `.append`."""
+        element = None
+        for n in ast.walk(fn):
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and 'append' == n.func.attr
+                    and isinstance(n.func.value, ast.Name) and n.func.value.id == name and n.args):
+                t = self.ty(n.args[0], env)
+                if _listlike(t) or _nest(t):
+                    element = t[1]
+                elif t is not None:
+                    return None
+        return element
 
     def infer_element(self, fn, name, env):
         for n in ast.walk(fn):

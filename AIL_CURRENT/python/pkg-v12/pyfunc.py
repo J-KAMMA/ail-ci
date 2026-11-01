@@ -4477,7 +4477,8 @@ def _annotation_kind(ann, classes=()):
         return fnkind
     if ann is None:
         return None
-    if isinstance(ann, ast.Name) and ann.id in (EXCEPTION, '__ail_checked_exception__'):
+    if isinstance(ann, ast.Name) and (ann.id in (EXCEPTION, '__ail_checked_exception__')
+                                      or ann.id == 'Exception' and ann.id not in classes):
         return EXCEPTION
     if isinstance(ann, ast.Name) and (ann.id == '__ail_checked_bytearray__' or ann.id == BYTEARRAY and ann.id not in classes):
         return BYTEARRAY
@@ -12393,10 +12394,31 @@ def _mixed_numeric_pair(left, right, op, ctx):
     return '((%s = %s), (%s = %s), %s)' % (ltmp, left_c, rtmp, right_c, relation)
 
 
+def _set_operand_kind(node, ctx):
+    """The kind of one operand of `a & b`: a `set(s)` call says it before its assignment's
+    annotation is known, so the BinOp has a kind to combine (its own operand, not the default
+    INT).  Kept out of `_map_kind` itself: a bare `set(xs)` is a value this compiler builds at the
+    use site (`_set_value`), not a persistent typed table whose pointer could be taken."""
+    if (isinstance(node, ast.Call) and _is_set_literal(node) and node.args
+            and 'set' not in ctx.funcs):
+        source = node.args[0]
+        try:
+            if _is_str_expr(source, ctx) or _is_slist_expr(source, ctx):
+                return SSET
+        except Unsupported:
+            pass
+        try:
+            if _etype(source, ctx) in (LIST, 'array', RANGE) or _is_map_expr(source, ctx):
+                return ISET
+        except Unsupported:
+            pass
+    return _map_kind(node, ctx)
+
+
 def _map_kind(node, ctx):
     if isinstance(node, ast.BinOp) and type(node.op) in SET_OPS:
         # A typed set with a typed set of the same kind, or with a set literal: .
-        left, right = _map_kind(node.left, ctx), _map_kind(node.right, ctx)
+        left, right = _set_operand_kind(node.left, ctx), _set_operand_kind(node.right, ctx)
         if left in SETS and (right == left or right is None and _is_set_literal(node.right)):
             return left
         return right if right in SETS and left is None and _is_set_literal(node.left) else None
@@ -12520,11 +12542,26 @@ def _set_literal(node, ctx, kind):
     if isinstance(node, ast.Call) and node.args:
         source = node.args[0]
         if kind == SSET:
-            if not _is_slist_expr(source, ctx):
-                raise Unsupported('set[str] is built from a list of str')
-            def render():
-                items = _slist_arg_c(source, ctx)
-                return '({ for (int64_t _i = 0; _i < %s.n; _i++) ail_sset_add(&%s, %s.p[_i]); 0; })' % (items, temporary, items)
+            if _is_slist_expr(source, ctx):
+                def render():
+                    items = _slist_arg_c(source, ctx)
+                    return '({ for (int64_t _i = 0; _i < %s.n; _i++) ail_sset_add(&%s, %s.p[_i]); 0; })' % (items, temporary, items)
+            elif _is_str_expr(source, ctx):
+                def render():
+                    # `set(s)` iterates the str's CODE POINTS, exactly as CPython does.  A view of
+                    # one character is the same allocation-free ail_str `for c in s` already binds;
+                    # the byte offset steps by the UTF-8 width so non-ASCII text yields one entry
+                    # per character, never one per byte.
+                    ctx.parts.add('STR')
+                    text = _str_value(source, ctx)
+                    return ('({ ail_str _set_s = %s; '
+                            'for (int64_t _i = 0, _w = 0; _i < _set_s.n; _i += _w) { '
+                            'const uint8_t _b = _set_s.p[_i]; '
+                            '_w = _b < 0x80 ? 1 : ail__utf8_w(_b, _set_s.n - _i); '
+                            'ail_sset_add(&%s, (ail_str){_set_s.p + _i, _w, _b < 0x80}); } 0; })'
+                            % (text, temporary))
+            else:
+                raise Unsupported('set[str] is built from a list of str or a str')
         else:
             if _etype(source, ctx) not in (LIST, 'array', RANGE) and not _is_map_expr(source, ctx):
                 raise Unsupported('set[int] is built from a list of int')

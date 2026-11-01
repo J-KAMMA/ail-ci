@@ -1,3 +1,25 @@
+## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
+
+Made two more of the eight prog5 programs take the typed path without touching the programs.
+`gdev/g07_022.py` was blocked by `'groups' is declared list[list[int]]; assigning gridret is
+unsupported`: iterlower turns `[list(group) for _, group in groupby(items)]` into
+`rows = []; rows.append([...])`, and nested_lists only inferred an element for a `_nest` local, not
+for that plain list.  The pass now infers a nested list from an append-only plain list
+(`infer_nested`; it refuses the inference when any append is not a list) and understands `groupby`
+pairs when it sees the comprehension first.  `gdev/g06_014.py` now builds typed with the branch's
+`set(str)`/`set[str]` changes.  `callable_types` accepts the Python spellings `Callable[[], None]`
+(noret) and `Callable[[Exception], T]` (the canonical `exception` kind).
+
+Typed after this change: g06_014, t243, g07_022, g18_038 (4/8).  Still general: g10_000
+(`dict[int, list[int]]` values), g14_004 (`comparison Is` on two list values), g15_034 (deliberate
+`"count: " + 5` needs a catchable TypeError), t467 (`*args`/`**kwargs` and an Optional list
+parameter).  Exact messages and hot-function shares are in `lab/progfix/prog5.md`.
+
+`AIL_CURRENT/test_ail_prog5.py` (registered through `AIL_CURRENT/tests.d/test_ail_prog5.txt`)
+builds the four typed programs and compares stdout/exit with CPython, plus typed callable and
+appended-rows programs.  Probes `/tmp/probes/p5_{groupby,rows_append,rows_sources,set_str,
+callable_exc}.py` match CPython on both `cmp.sh` builds.  No new semantic difference was added.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten
