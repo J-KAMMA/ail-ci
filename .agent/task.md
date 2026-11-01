@@ -7,59 +7,49 @@
 --- LAST REVIEW ---
 ## review 1
 [model opencode-go/deepseek-v4.1-flash]
-**Diff.** `tuplib._expand_isinstance_type_constants` rewrites module-level type constants into literal type specs at each `isinstance()` use before the tuple pass, with scope/order guards and assignment dropping; `pyboxed2`/`pyfunc`/`dunders` flatten nested tuples and add a dynamic `ail2_dyn_isinstance` fallback for non-name elements. Tests: `test_ail_covisin1` added via `tests.d`.
+**Diff.** `tuplib` now snapshots unstable module type constants (attribute values, later-rebound or forward names) into hidden `_ail_snap_*` names and adds `_ail_defined_*` forward markers; `pyboxed2` routes every module-bound class name through the module slot and registers those classes in `class_values` so the dynamic call path can construct them.
 
 **Verified claims**
-- `lab/compare` 10/10 `main.ail`: generated `program.c` byte-identical HEAD vs base `9afd6e4`.
-- `test_ail_covisin1` + `test_ail_safetynet`: 2 modules, 0 failed.
-- Review probes `p7_shadowclass`, `p9_localshadow`, `p10_order` on HEAD match CPython (exit 1 / empty stdout for p10).
-- The new scope/order guard works for parameter/local/comprehension/class shadowing cases covered by the added tests.
+- Review probes `p11_attr_snapshot` (`True False`), `p8_rebind_class` (`False False`), `p4_forward_alias`/`p5_nested_forward` (exit 1, empty stdout) now match CPython on both builds. (NameError text names the hidden `_ail_defined_*` alias; stdout/exit match.)
+- `p29`, `p30`, `p31`, `p32`, `p43_const_extra_read`, `p44_tuple_attr_mutation`, and worker probes `n1`–`n8` match CPython.
+- Fresh `program.c` for all 10 `lab/compare` `main.ail` builds is byte-identical HEAD vs base `33ae61c`.
+- `test_ail_covisin1`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`: 4 modules, 0 failed. `update_manifest.py --check` passes.
+- Claim that module-bound class names "stay constructible" is **false in general**: keyword construction now refuses to build.
 
-**Defects (wrong answer / wrong exit, absent on base — base refuses by name)**
-1. **Attribute value re-read at use instead of the value captured at assignment.** Probe `p11_attr_snapshot.py`:
+**Defect (change-caused regression)**
+1. A module-bound class constructor with keyword arguments is now a compile-time refusal. The new dynamic path (`pyboxed2.py:2704`, `pyboxed2.py:7887`) sends all calls of a class in `module_names` through `call_value`, which refuses keywords at `boxclosure.py:372`.
 ```python
-class A: pass
+class A:
+    def __init__(self, x, y=2):
+        self.x = x; self.y = y
 class B: pass
-class Box: pass
-b = Box(); b.t = A
-T = b.t
-b.t = B
-print(isinstance(A(), T), isinstance(B(), T))
+if False:
+    A = B                      # only this dead binding makes A module-bound
+a = A(x=3)
+print(a.x + a.y)
 ```
-CPython: `True False`. HEAD default and general: `False True`. The assignment is dropped and `T` is replaced by `b.t` at the later use, after `b.t` changed.
+CPython/base: `5`, exit 0. HEAD: both builds fail with `not in the subset: keyword arguments in a call through a function value`.
+Same defect: `p46_rebound_ctor_kwargs` (CPython `7 4`; base wrong `5 6`), `p53_rebind_exc_kwargs` (CPython `7 f`; base wrong `7 x`), and `p45` (`5 6`) now all refuse instead of matching. `_call_class` already handles keyword arguments, so this can be exact.
 
-2. **Names inside a constant are re-evaluated after rebinding.** Probe `p8_rebind_class.py`:
-```python
-class A: pass
-class B: pass
-T = (A,)
-A = B
-print(isinstance(A(), T), isinstance(B(), T))
-```
-CPython: `False False` (the tuple captured old `A`). HEAD both builds: `True False`.
+**Pre-existing (identical on base, not blocking)**
+- `p56`/`p57` unstable alias chains: CPython `True False`; both builds `False True` (snapshot re-expands an earlier unstable constant at the later assignment).
+- `p50`/`p51` class rebound to a non-type used in `isinstance`: CPython TypeError exit 1; both builds print `False`, exit 0.
+- `p49` module tuples naming `BaseException`/`LookupError`/`ArithmeticError`/`UserWarning` are refused identically on base (`_ISINSTANCE_EXC_NAMES` remains incomplete).
 
-3. **Forward references inside a constant are silently resolved.** `p4_forward_alias.py` (`K = C` before `class C: pass; print(isinstance(C(), K))`): CPython exits 1 with `NameError`; HEAD both builds exit 0 and print `True`. `p5_nested_forward.py` (`T = (K,); print(isinstance(1, T)); K = str`): CPython exits 1; HEAD exits 0 printing `False`. `is_type` checks only that `K`/`C` exists somewhere, not that it is bound at the assignment.
-
-Root cause: `is_type`/`where[name] < index` validates only the outer assignment's position; `expand_value` then re-evaluates the element expressions at the use site, losing CPython's snapshot semantics.
-
-**Pre-existing / other**
-- `T = (ValueError, KeyError)` and a module constant used from a class body are still named refusals on both HEAD and base (`name 'int'/'ValueError' is not defined`, module tuple note); not caused by this change, but the "must never be refused" scope is not fully met.
-- Module census (`148`, 0 refusals) and `p23_builtin_order` were not re-run; unverified.
+**Unverified.** Speed/icount on gdev, the 148-module census, `p37_attr_non_type`, and worker probes `p43`/`p53`–`p59` (not present in `/tmp/probes`).
 
 VERDICT: FIX
-1. `p11_attr_snapshot.py`: expected `True False`; actual `False True` (both builds) — attribute re-read after mutation.
-2. `p8_rebind_class.py`: expected `False False`; actual `True False` (both builds) — element rebound before use.
-3. `p4_forward_alias.py`: expected exit 1, empty stdout; actual exit 0, `True`. `p5_nested_forward.py`: expected exit 1, empty stdout; actual exit 0, `False` — unbound name inside a constant resolved.
-[cost $0.0260, opencode tokens {"total": 1150177, "input": 54887, "output": 6076, "reasoning": 18238, "cache.write": 0, "cache.read": 1070976}]
-    tool time: bash 5.6 min, write 0.0 min
-        131s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 1500 python3 ../tools/par_check.py -j 2 test_ail_cov
-        120s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && nohup python3 ../tools/par_check.py -j 2 test_ail_covisin1 t
-         44s bash   cd /tmp/ctmp && for t in berth_sim chain_relax echo_pack ledger_bin rail_transfer scar_life tally_lang term_ra
-         23s bash   cd /home/runner/work/ail-ci/ail-ci && for p in /tmp/rprobes/p*.py; do echo "===== $(basename $p)"; timeout 300
-          5s bash   cd /tmp/base && for p in p4_forward_alias p5_nested_forward p8_rebind_class p3_class_body_order p1_exc_const p
-          4s bash   cd /tmp/ctmp && rm -rf h/echo_pack b/echo_pack out/h_echo_pack out/b_echo_pack; src=/home/runner/work/ail-ci/a
-          3s bash   cd /home/runner/work/ail-ci/ail-ci && for p in p9_rebind_alias p10_lambda_isinstance; do echo "===== $p HEAD";
-          2s bash   cd /home/runner/work/ail-ci/ail-ci && echo HEAD; timeout 300 bash ~/tools/cmp.sh /tmp/rprobes/p11_attr_snapsho
+1. `p54_kw_dead_if.py` (and `p45`/`p46`/`p53`): a module-bound class constructor with keyword arguments is refused (`keyword arguments in a call through a function value`) in both builds; expected CPython output `5` for p54, `7 4` for p46, `7 f` for p53.
+[cost $0.0374, opencode tokens {"total": 2582726, "input": 84687, "output": 8423, "reasoning": 20368, "cache.write": 0, "cache.read": 2469248}]
+    tool time: bash 8.8 min
+        285s bash   date; cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 2400 python3 ../tools/par_check.py -j 2 test_a
+         79s bash   cd /home/runner/work/ail-ci/ail-ci && rm -rf /tmp/cmpC_head /tmp/cmpC_base && mkdir -p /tmp/cmpC_head /tmp/cmp
+         22s bash   cd /home/runner/work/ail-ci/ail-ci && for p in /tmp/probes/n*.py; do b=$(basename $p); echo "===== $b"; timeou
+         17s bash   cd /tmp/base && for p in p45_kw_ctor_conditional p46_rebound_ctor_kwargs p47_rebound_default p48_rebound_subcl
+         17s bash   cd /tmp/base && for p in p40_kw_ctor p41_default_ctor p42_kw_exc p43_const_extra_read p44_tuple_attr_mutation;
+         17s bash   cd /home/runner/work/ail-ci/ail-ci && for p in p40_kw_ctor p41_default_ctor p42_kw_exc p43_const_extra_read p4
+         12s bash   cd /home/runner/work/ail-ci/ail-ci && for p in p29_rebind_conditional p30_rebind_constructor p31_rebind_static
+         11s bash   cd /home/runner/work/ail-ci/ail-ci && for p in p45_kw_ctor_conditional p46_rebound_ctor_kwargs p47_rebound_def
 
 
 --- ORIGINAL TASK ---
