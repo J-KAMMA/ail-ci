@@ -5,48 +5,65 @@
 3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
 
 --- LAST REVIEW ---
-## review 1
-[model opencode-go/deepseek-v4.1-flash]
-**What the change really does:** extends the `abc` source pass (`smalllib5.py`) to compute per-class abstract-method sets, strip `ABC`/decorators, inject an `_ail_abc_guard__` method plus a generated `_ail_abc_check_name`, and calls that guard from class construction in `pyboxed2.py` / `boxclosure.py`; it also maps `get_cache_token()` to a constant `0`. It is not just the three stated review fixes: it changes class-call ordering and error handling for every class with a guard.
+## review 2 (final)
 
-**Checks run**
-- `test_ail_std_abc`, `test_ail_safetynet`: 2/2 pass (179 s).
+**What the change really does:** fixes the prior review's three defects in the `abc` pass: `get_cache_token()` is now a compile-time-read exact value only for `abc`-only imports (otherwise a named refusal), `ABCMeta` subclasses used as metaclasses are recognised, and only a class's *own* guard raises before `__init__` binding, so concrete subclasses that inherit a guard no longer swallow arity errors. As before, it also touches `pyboxed2._call_class` / `boxclosure.call_value` for all class-value dispatch whenever a guard exists.
+
+**Probes (`/tmp/rprobes4`, `cmp.sh`, both builds; base `/tmp/base`)**
+- Match CPython both builds: `cache_simple`, `cache_alias`, `cache_from`, `cache_future` (token 24, positive, stable); `meta_sub`, `meta_sub2` (exact `Can't instantiate abstract class ...`); `valid_concrete`, `own_init_concrete_valid`, `route_direct`, `route_list`, `route_dict`, `route_arg`.
+- Named refusal, both builds: `cache_other`, `cache_nested_import`, `cache_ref`, `cache_dynamic`, `cache_monkey`, `cache_alias_value`, `cache_register`, `cache_update_abs`; `arity_concrete`, `arity_custom_own_init` (`B() called without a required argument x`).
+- Collateral regression (caused by change, named refusal): `lambda_regress` — an ABC subclass with a required `__init__` passed to a factory plus a zero-arg lambda. Base built it and matched (`5`); HEAD refuses `B() called without a required argument x`, because `class_values` makes every zero-arg value call speculatively try `_call_class(B, [])`. This is a named refusal, so acceptable under the probe rule, but it is a real coverage loss worth noting.
+- Pre-existing (identical wrong output/refusal on base): `meta_type` (`Meta Meta` vs `type type`), `meta_init_print` (missing metaclass `__init__` prints), `meta_abc_base`, `plain_value_arity`.
+
+**Tests / checks**
+- `test_ail_std_abc`, `test_ail_safetynet`: 2/2 pass (134 s).
 - `python3 tools/update_manifest.py --check`: exit 0.
-- `lab/compare` rebuilt against `work` (`/tmp/base`): 5 build with byte-identical `program.c`; 5 fail identically on both. The report's "six build / four fail" is false (it is 5/5), though the C-equality conclusion holds.
-- Probes (`bash ~/tools/cmp.sh`, both builds) found the defects below; all were compile-time refusals on `work`, so they are caused by this change.
+- `lab/compare`: not rebuilt this round; grep shows no `main.ail` mentioning `abc`, and the guarded code is inert without a generated guard, so C is unaffected (consistent with commit `7a6e7f9`'s 10/10).
 
-**Defects**
-1. **Constructor binding errors are silently swallowed for any concrete subclass that inherits an ABC guard** (`pyboxed2.py:7677-7686`; same via `boxclosure.py`). The comment "the guard always raises for this class" is false for concrete subclasses: the inherited guard checks `type(obj).__name__`, which is not in the abstract set, so it does not raise, and the caught arity/keyword `Unsupported` is converted to `return t`.
-   - Probe `/tmp/rprobes2/arity_concrete.py`: expected `none TypeError A.__init__() missing 2 ...`, `many TypeError A.__init__() takes 3 positional arguments but 4 were given`; actual `none ok B NOX`, `many ok B NOX`.
-   - Probe `/tmp/rprobes2/arity_custom_own_init.py`: expected three `TypeError`s; actual prints `valid 9` then crashes `AttributeError: 'B' object has no attribute 'x'` (exit 1).
-   - Probe `/tmp/rprobes2/routes_arity.py`: same wrong `ok B NOX` through list item, dict value, function argument and alias.
-2. **`abc.get_cache_token()` returns a fake `0`** (`smalllib5.py:342`). Probe `/tmp/rprobes2/cache_value.py`: expected `token 24` / `positive True`; actual `token 0` / `positive False`. Base refused this by name, so a refusal would be acceptable; silently returning a wrong token is not.
-3. **A metaclass subclassing `ABCMeta` is not recognised as an ABC metaclass** (`smalllib5.py` only compares `keyword.value` to the name `ABCMeta`). Probe `/tmp/rprobes2/meta_sub.py` (`class Meta(ABCMeta)`, `class Shape(metaclass=Meta)`): expected `blocked Can't instantiate abstract class Shape ...`; actual `built`. Base refused the program; this change made it silently wrong.
+**Report claims**
+- cache-token exactness and named refusal for other imports: verified (probes above).
+- prior arity/meta review cases now refuse or match: verified.
+- final commit `2195906`, 4/4 tests, manifest: commit/manifest verified; I ran only the 2 edited/relevant modules (files/corpus not edited, not re-run).
+- `lab/compare` unaffected: verified by inspection/reasoning, not rebuilt.
+- No crash or silent difference found from the change; metaclass recognition improves `Shape()` from silently built (base) to the exact abstract error.
 
-**Claims in the report**
-- Defects 1-3 in the report: plain-hierarchy fix verified (test/regression); assignment/lambda override verified (`override_chain.py`); guard ordering verified for abstract classes (`abstract_arity.py`, `incomplete_sub_arity.py`, `noinit_concrete.py`) but the shared implementation broke concrete subclasses as above. "MRO concrete mixins clear them" is unverified because multiple inheritance is still refused.
-- "29 probes match CPython": unverified and contradicted by the probes above; the suite misses arity errors on concrete subclasses, custom `ABCMeta` subclasses and the token value.
-- Test/manifest claims verified for the modules I ran; `test_ail_stdlib5`, `test_ail_files`, `test_ail_corpus_findings3` not re-run (not edited by this change per instruction).
-- `lab/compare` count is false (5/5, not 6/4); generated C is identical for the 5 that build.
+**Non-blocking note:** `lambda_regress` shows the inherited-guard re-raise in `boxclosure.call_value` also fires for unreachable speculative class-value branches; it is still a named refusal, never silence.
 
-**Pre-existing (identical on `work`)**
-- `m: int` annotation-only override wrongly clears an abstract method (`ann_only.py`: base and HEAD both print `B built`).
-- Abstract property overridden by plain class attributes reads `None None` (`prop_abs.py`).
-- Nested/conditional class definitions and the general-path object/bound-method display limitations remain refusals/differences on both.
+VERDICT: ACCEPT
+[cost $0.0316, opencode tokens {"total": 1283651, "input": 69600, "output": 7809, "reasoning": 21474, "cache.write": 0, "cache.read": 1184768}]
+    tool time: bash 3.5 min
+        135s bash   date && cd /home/runner/work/ail-ci/ail-ci && timeout 900 python3 tools/par_check.py -j 2 test_ail_std_abc tes
+         20s bash   cd /tmp/rprobes4 && cat > route_direct.py <<'EOF' from abc import ABC, abstractmethod class A(ABC):     @abstr
+         13s bash   cd /tmp/rprobes4 && cat > bisect_a.py <<'EOF' from abc import ABC, abstractmethod class A(ABC):     @abstractm
+          7s bash   cd /tmp/rprobes3 && for p in meta_abc_base.py plain_value_arity.py; do echo "===== $p ====="; for wt in /home/
+          5s bash   cd /tmp/rprobes4 && cat > valid_concrete.py <<'EOF' from abc import ABC, abstractmethod  class A(ABC):     @ab
+          5s bash   cd /tmp/rprobes4 && for p in arity_concrete.py arity_custom_own_init.py meta_sub.py meta_sub2.py; do echo "===
+          4s bash   cd /tmp/rprobes4 && cat > meta_init_print.py <<'EOF' from abc import ABCMeta, abstractmethod   class Meta(ABCM
+          4s bash   cd /tmp/rprobes4 && for p in cache_alias.py cache_from.py cache_future.py cache_other.py cache_nested_import.p
 
-**Non-blocking note:** `Plain(1)` for a non-ABC class with no `__init__` changed from a named compile refusal on `work` to a runtime `TypeError` matching CPython (`noinit_plain2.py`), so the shared `_call_class` change alters non-`abc` C behaviour; output is correct, but it is outside the feature's provenance.
+## full suite
+test_ail_quirks
 
-VERDICT: FIX
-[cost $0.0307, opencode tokens {"total": 1307172, "input": 65331, "output": 8249, "reasoning": 20536, "cache.write": 0, "cache.read": 1213056}]
-    tool time: bash 9.3 min
-        317s bash   sed 's#BASE=/tmp/base_abc#BASE=/tmp/base#; s#OUT=/tmp/compare_c#OUT=/tmp/compare_c2#' /tmp/compare_c.sh > /tmp
-        180s bash   date && cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 900 python3 ../tools/par_check.py -j 2 test_
-         19s bash   cd /tmp/rprobes2 && for p in *.py; do echo "===== $p ====="; timeout 180 bash ~/tools/cmp.sh "$p" /home/runner
-         17s bash   cd /tmp/rprobes2 && for p in routes2.py meta_sub.py prop_abs.py incomplete_sub_arity.py noinit_concrete.py; do
-          4s bash   cd /tmp/rprobes2 && cat > routes_arity.py <<'EOF' from abc import ABC, abstractmethod  class A(ABC):     def _
-          4s bash   cd /tmp/rprobes2 && timeout 200 bash ~/tools/cmp.sh prop_abs.py /home/runner/work/ail-ci/ail-ci 2>&1 | tail -4
-          3s bash   cd /tmp/rprobes2 && for p in arity_concrete.py arity_custom_own_init.py cache_value.py class_in_if.py; do echo
-          3s bash   cd /tmp/rprobes2 && cat > ann_only.py <<'EOF' from abc import ABC, abstractmethod  class A(ABC):     @abstract
+## worker report (suite fix)
+[model opencode-go/deepseek-v4.1-flash]
+Fixed and committed as `8dad2a6`.
+
+- Cause: `test_ail_quirks` passes raw `@dataclass` source straight to the general path, which built classes without the generated `__init__`, causing runtime `TypeError`.
+- Fix: `pyboxed2` now refuses a raw `@dataclass` by name instead of silently building a broken class. Preprocessed dataclass sources still work.
+- Verified: `test_ail_quirks`, `test_ail_std_abc`, `test_ail_silent6.DataclassEqTests`, `test_ail_safetynet` all pass; manifest check clean.
+[cost $0.0333, opencode tokens {"total": 2671576, "input": 129938, "output": 4881, "reasoning": 5557, "cache.write": 0, "cache.read": 2531200}]
+    tool time: bash 7.2 min, edit 0.0 min
+        140s bash   cd AIL_CURRENT && python3 -m unittest -q test_ail_safetynet 2>&1 | tail -30
+        125s bash   cd AIL_CURRENT && python3 -m unittest -q test_ail_quirks 2>&1 | tail -80
+         82s bash   cd AIL_CURRENT && python3 -m unittest -q test_ail_quirks 2>&1 | tail -40
+         45s bash   cd AIL_CURRENT && python3 -m unittest -q test_ail_std_abc 2>&1 | tail -30
+         29s bash   cd AIL_CURRENT && python3 -m unittest -q test_ail_silent6.DataclassEqTests 2>&1 | tail -30
+         10s bash   cd /tmp/orig/AIL_CURRENT && python3 -m unittest -q test_ail_quirks.Quirks.test_fold_over_dataclass_instances t
+          2s bash   git worktree add --detach /tmp/orig origin/job-std_abc-11020347 >/dev/null && cd /tmp/orig/AIL_CURRENT && pyth
+          1s bash   cd AIL_CURRENT && mkdir -p /tmp/qk && cat > /tmp/qk/t.py <<'EOF' from dataclasses import dataclass  @dataclass
+
+## full suite again
+test_ail_genlib
 
 
 --- ORIGINAL TASK ---
