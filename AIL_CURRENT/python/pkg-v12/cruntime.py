@@ -8996,9 +8996,11 @@ static ail_str ail_fmt_spec_int(ail_sarena *A, int64_t v, int64_t width, int ali
    precision was given in the spec (CPython's own default for `f` is 6). glibc's
    `snprintf("%.*f")` is already correctly rounded (round-half-to-even at the exact binary value)
    -- the same fact `ail_round_n` (ROUND block) already relies on -- so this reproduces CPython's
-   `.Nf` formatting exactly, sign on `-0.0` included. */
+   `.Nf` formatting exactly, sign on `-0.0` included. glibc writes a negative NaN as `-nan`;
+   CPython never shows a NaN's sign, so NaN is padded from the word `nan` itself. */
 static ail_str ail_fmt_spec_float(ail_sarena *A, double v, int64_t width, int align, int zero,
                                    int64_t prec, int fill) {
+    if (v != v) return ail__fmt_pad(A, "nan", 3, width, align, zero, fill);
     char stackbuf[512];
     int n = snprintf(stackbuf, sizeof stackbuf, "%.*f", (int)(prec < 0 ? 6 : prec), v);
     if (n < 0) ail_die("formatting a float failed");
@@ -10818,6 +10820,7 @@ static inline ail_str ail_obj_format(ail_obj x, ail_str spec) {
     }
     if (type == 'f') {
         double v = ail__is_num(x.tag) ? ail__as_double(x) : (ail_raise_c(AIL_ERR_TYPE, "unsupported format string passed to non-float"), 0.0);
+        if (v != v) return ail__pad("nan", 3, f, 1);
         int prec = f.has_prec ? f.prec : 6;
         char stackbuf[64];
         int len = snprintf(stackbuf, sizeof stackbuf, "%.*f", prec, v);
@@ -17593,7 +17596,7 @@ static inline ail_obj ail__pad(ail_ctx *cx, const char *content, int64_t clen, a
     int64_t pad = f.width - clen; if (pad < 0) pad = 0;
     ail_strbuild bu = ail_str_buf(cx, clen + pad);
     int64_t o = 0;
-    if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+')) {
+    if (align == '=' && numeric && clen > 0 && (content[0] == '-' || content[0] == '+' || content[0] == ' ')) {
         bu.buf[o++] = content[0];
         for (int64_t k = 0; k < pad; k++) bu.buf[o++] = (uint16_t)f.fill;
         for (int64_t k = 1; k < clen; k++) bu.buf[o++] = (unsigned char)content[k];
@@ -17682,6 +17685,13 @@ static inline ail_st ail_obj_format(ail_ctx *cx, ail_obj *out, ail_obj x, ail_ob
 /*B|*/
         double v = x.tag == AIL_T_FLOAT ? ail_float_val(x) : (double)x.i;
 /*B>*/
+        if (v != v) {
+            char nbuf[4]; nbuf[0] = ' '; memcpy(nbuf + 1, "nan", 3);
+            int nlen = 3;
+            const char *ntxt = ail__apply_sign(nbuf, &nlen, f.sign);
+            *out = ail__pad(cx, ntxt, nlen, f, 1);
+            return AIL_OK;
+        }
         /* The text of a fixed-point double is up to 309 integer digits plus the fraction; a
            fixed stack buffer truncates (or overruns) for a value near the top of the double
            range.  Size it from the required length instead. */
