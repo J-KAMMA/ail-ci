@@ -679,24 +679,54 @@ __attribute__((noinline, cold)) static ail_st ail2_bisect_bound(ail_ctx *cx, ail
 '''
 
 BISECTKEY_C = r'''
-/* bisect(key=...) / insort(key=...). CPython's C _bisect calls the key on each list element
-   the binary search actually visits; insort computes key(x) once and then compares it with
+/* bisect(key=...) / insort(key=...). CPython's C _bisect calls the key on each element the
+   binary search actually visits; insort computes key(x) once and then compares it with
    key(element), so it reuses the same loop with the keyed value. A key result is rooted
-   because the key function or a user __lt__ may allocate while it is still live. */
+   because the key function or a user __lt__ may allocate while it is still live.
+   The sequence is not necessarily a list: CPython's _bisect accepts any sequence, so a str
+   or tuple reads its elements through the same indexing helper (the old unconditional
+   ail_vecobj cast read a str's payload as a vector and crashed). */
 static inline ail_st ail__bisect_key(ail_ctx *cx, ail_obj *out, ail_obj key, ail_obj item) {
     ail_funcobj *f = (ail_funcobj *)key.o;
     return f->fn(cx, out, item, f->cells);
 }
+static inline ail_st ail__bisect_len(ail_ctx *cx, int64_t *out, ail_obj a) {
+    switch (a.tag) {
+        case AIL_T_LIST: case AIL_T_TUPLE: *out = ((ail_vecobj *)a.o)->n; return AIL_OK;
+        case AIL_T_STR: *out = a.sv.len; return AIL_OK;
+        default: {
+            char buf[96];
+            snprintf(buf, sizeof buf, "object of type '%s' has no len()", ail__tname_c(a));
+            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+        }
+    }
+}
+static inline ail_st ail__bisect_at(ail_ctx *cx, ail_obj *out, ail_obj a, int64_t i) {
+    return ail_op_getitem(cx, out, a, ail_box_int(i));
+}
+static inline ail_st ail__bisect_insert(ail_ctx *cx, ail_obj a, int64_t pos, ail_obj x) {
+    if (a.tag != AIL_T_LIST) {   /* CPython's insort calls a.insert, so a str/tuple is an AttributeError */
+        char buf[96];
+        snprintf(buf, sizeof buf, "'%s' object has no attribute 'insert'", ail__tname_c(a));
+        return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
+    }
+    ail_list_insert(cx, a, pos, x);
+    return AIL_OK;
+}
 static inline ail_st ail_bisect_left_key(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj x,
                                          int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
-    ail_vecobj *v = (ail_vecobj *)a.o;
-    int64_t l = has_lo ? lo : 0, h = (!has_hi || hi == -1) ? v->n : hi;
+    int64_t l = has_lo ? lo : 0;
     if (l < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "lo must be non-negative");
+    int64_t n, h;
+    ail_st st = ail__bisect_len(cx, &n, a);
+    if (st != AIL_OK) return st;
+    h = (!has_hi || hi == -1) ? n : hi;
     while (l < h) {
         int64_t mid = (l + h) / 2, c;
-        if (mid < 0 || mid >= v->n) return ail_raise_c(cx, AIL_B_INDEXERROR, "list index out of range");
-        ail_obj k;
-        ail_st st = ail__bisect_key(cx, &k, key, v->p[mid]);
+        ail_obj item, k;
+        st = ail__bisect_at(cx, &item, a, mid);
+        if (st != AIL_OK) return st;
+        st = ail__bisect_key(cx, &k, key, item);
         if (st != AIL_OK) return st;
         AIL_ROOT1(cx, frk, k);
         st = ail_obj_cmp(cx, &c, k, x);
@@ -708,14 +738,18 @@ static inline ail_st ail_bisect_left_key(ail_ctx *cx, int64_t *out, ail_obj a, a
 }
 static inline ail_st ail_bisect_right_key(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj x,
                                           int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
-    ail_vecobj *v = (ail_vecobj *)a.o;
-    int64_t l = has_lo ? lo : 0, h = (!has_hi || hi == -1) ? v->n : hi;
+    int64_t l = has_lo ? lo : 0;
     if (l < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "lo must be non-negative");
+    int64_t n, h;
+    ail_st st = ail__bisect_len(cx, &n, a);
+    if (st != AIL_OK) return st;
+    h = (!has_hi || hi == -1) ? n : hi;
     while (l < h) {
         int64_t mid = (l + h) / 2, c;
-        if (mid < 0 || mid >= v->n) return ail_raise_c(cx, AIL_B_INDEXERROR, "list index out of range");
-        ail_obj k;
-        ail_st st = ail__bisect_key(cx, &k, key, v->p[mid]);
+        ail_obj item, k;
+        st = ail__bisect_at(cx, &item, a, mid);
+        if (st != AIL_OK) return st;
+        st = ail__bisect_key(cx, &k, key, item);
         if (st != AIL_OK) return st;
         AIL_ROOT1(cx, frk, k);
         st = ail_obj_cmp(cx, &c, x, k);
@@ -733,7 +767,7 @@ static inline ail_st ail_bisect_insort_left_key(ail_ctx *cx, ail_obj a, ail_obj 
     AIL_ROOT1(cx, frx, kx);
     int64_t pos;
     st = ail_bisect_left_key(cx, &pos, a, kx, has_lo, lo, has_hi, hi, key);
-    if (st == AIL_OK) ail_list_insert(cx, a, pos, x);
+    if (st == AIL_OK) st = ail__bisect_insert(cx, a, pos, x);
     AIL_FRAME_LEAVE(cx, frx);
     return st;
 }
@@ -745,7 +779,7 @@ static inline ail_st ail_bisect_insort_right_key(ail_ctx *cx, ail_obj a, ail_obj
     AIL_ROOT1(cx, frx, kx);
     int64_t pos;
     st = ail_bisect_right_key(cx, &pos, a, kx, has_lo, lo, has_hi, hi, key);
-    if (st == AIL_OK) ail_list_insert(cx, a, pos, x);
+    if (st == AIL_OK) st = ail__bisect_insert(cx, a, pos, x);
     AIL_FRAME_LEAVE(cx, frx);
     return st;
 }

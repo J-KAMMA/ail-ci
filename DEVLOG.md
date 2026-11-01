@@ -1,3 +1,22 @@
+## 2026-11-01 -- std_bisect review: key= on a str/tuple sequence crashed (job-std_bisect-11011433)
+
+The review found that `bisect_left("abcd", "b", key=str)` segfaulted: `key=` forces the
+general path, and `BISECTKEY_C` cast the sequence to `ail_vecobj *` unconditionally, reading
+a str's payload as a vector. `BISECTKEY_C` now reads the length and each visited element
+through the general indexing helpers for lists, tuples and strs, so the key searches match
+CPython (`1`/`3` for the reviewer's probe) while the list path is unchanged. `insort*` with
+`key=` on a non-list now raises CPython's `AttributeError: 'str' object has no attribute
+'insert'` after the search instead of writing through the cast.
+
+Probes `p1_review`, `p2_str_paths`, `p3_tuple_paths`, `p4_insort_str` and `p5_list_key`
+in `/tmp/probes` (str through an argument, a list item, an attribute and a dict value; empty
+str, lo/hi bounds, IndexError/ValueError, tuple key, insort on str/tuple, list regression)
+match CPython on both the general and default builds. The ten `lab/compare` tasks' generated
+C is unchanged: 17 buildable task/language pairs are byte-identical to the base revision, and
+the same three Python-column pairs are refused by both. `test_ail_std_bisect` gained
+`test_key_on_str_and_tuple`. Final-state tests: test_ail_std_bisect, test_ail_heapq_bisect,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed).
+
 ## 2026-11-01 -- std_bisect: key= for bisect/insort on the general path (job-std_bisect-11011433)
 
 Added twelve realistic `bisect` programs under `lab/stdlib/bisect/` (grade bands, price tiers,

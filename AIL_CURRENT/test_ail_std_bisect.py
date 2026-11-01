@@ -64,6 +64,43 @@ main()
 '''
 
 
+STR_KEY_PROGRAM = r'''import bisect
+
+
+class Box:
+    def __init__(self):
+        self.s = "abcd"
+
+
+def main():
+    print(bisect.bisect_left("abcd", "b", key=str))
+    print(bisect.bisect_right("abcd", "c", key=str.lower))
+    print(bisect.bisect_left("", "a", key=str))
+    box = Box()
+    print(bisect.bisect(box.s, "d", key=str))
+    table = {"k": "abcd"}
+    print(bisect.bisect_left(table["k"], "a", key=str))
+    t = ("a", "b", "d")
+    print(bisect.bisect_left(t, "c", key=str))
+    print(bisect.bisect_right(t, "b", key=str))
+    try:
+        bisect.bisect_left("abc", "b", 0, 10, key=str)
+    except IndexError as e:
+        print(type(e).__name__, e)
+    try:
+        bisect.insort("abc", "b", key=str)
+    except AttributeError as e:
+        print(type(e).__name__, e)
+    try:
+        bisect.insort_left(t, "c", key=str)
+    except AttributeError as e:
+        print(type(e).__name__, e)
+
+
+main()
+'''
+
+
 def build_and_run(directory, source):
     local = Path(directory) / source.name
     shutil.copyfile(source, local)
@@ -105,6 +142,12 @@ class StdlibBisect(unittest.TestCase):
             source = Path(directory) / "key_calls.py"
             source.write_text(KEY_PROGRAM, encoding="utf-8")
             self.check(source, "key_calls")
+
+    def test_key_on_str_and_tuple(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "str_key.py"
+            source.write_text(STR_KEY_PROGRAM, encoding="utf-8")
+            self.check(source, "str_key")
 
 
 if __name__ == "__main__":
