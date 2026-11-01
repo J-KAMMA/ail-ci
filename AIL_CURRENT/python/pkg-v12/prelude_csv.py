@@ -113,7 +113,7 @@ def _ail_csv_tname(x):
 class _AilCsvReader:
     def __init__(self, src, d):
         self.dialect = d
-        self.lines = list(src)
+        self.lines = iter(src)
         self.pos = 0
         self.line_num = 0
         self.state = 0
@@ -245,14 +245,15 @@ class _AilCsvReader:
         self.field = []
         self.numeric = False
         while True:
-            if self.pos >= len(self.lines):
+            try:
+                line = next(self.lines)
+            except StopIteration:
                 if len(self.field) != 0 or self.state == 4:
                     if self.dialect.strict:
                         raise _AilCsvError("unexpected end of data")
                     self._save()
                     break
                 raise StopIteration
-            line = self.lines[self.pos]
             self.pos += 1
             if not isinstance(line, str):
                 raise _AilCsvError("iterator should return strings, not " + _ail_csv_tname(line)

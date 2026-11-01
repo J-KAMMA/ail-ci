@@ -105,6 +105,20 @@ def _ail_open_text(path: str, mode: str, buffering: int, enc: str, hasenc: int, 
     return _AilTextIO(h, path, mode, encoding, errors)
 ''')
 
+# The general path's csv reader reads a file source whole (`list(src)`), so only there is the text
+# file iterable. The typed path keeps the class as written (its dunder check allows only __init__).
+TEXT_IO_GENERAL = SNIPPETS['text_io'][0].replace(
+    "    def read(self, size: int) -> str:",
+    "    def __iter__(self):\n"
+    "        while True:\n"
+    "            line = _ail_f_tnext(self.h)\n"
+    "            if len(line) == 0:\n"
+    "                return\n"
+    "            yield line\n"
+    "\n"
+    "    def read(self, size: int) -> str:", 1)
+
+
 snippet('bin_io', '''
 class _AilBinaryIO:
     def __init__(self, h: int, name: str, mode: str):
