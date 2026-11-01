@@ -1,3 +1,16 @@
+## 2026-11-01 -- stdlib copy: second review fixes (job-std_copy-11011617)
+
+`copy.copy` / `copy.deepcopy` now refuse two more copies-by-name instead of producing a wrong object. A class
+that defines `__getstate__` or `__setstate__` is part of CPython's copy protocol (`_reconstruct` calls them), so
+both names joined `_COPY_PROTOCOL`; the scan also catches hooks assigned after the class statement
+(`C.__copy__ = f`, `C.__deepcopy__: object = f`, `setattr(C, "__reduce__", f)`) and class-body assignments to
+those names, which were previously ignored and copied silently. The deep copier for `set` / `frozenset` now
+follows CPython's `__reduce_ex__` shape: it builds and memoises a temporary element list (and records it in the
+keep-alive list) before constructing the result, so an explicit `memo` reports the same three entries as
+CPython. Probes `rv_state` and `rv_dynamic` now refuse by name on both builds, and `rv_frozen` /
+`rv_frozen_vals` match CPython (`3 False True`, values `['frozenset', 'list', 'list']`); `test_ail_std_copy`
+covers the new refusals and the set/frozenset memo counts.
+
 ## 2026-11-01 -- stdlib copy: review fixes (job-std_copy-11011617)
 
 Generators are refused by both copiers with CPython's `TypeError: cannot pickle 'generator' object` (also when

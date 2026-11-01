@@ -37,15 +37,20 @@ Summary: 12 built / 12 compared, 0 refused. The compiler change is `copy.copy` a
   `dict` / `set`, as CPython returns, so generic iteration of the copy works instead of failing with
   `TypeError: '_AilD_...' object is not iterable`.
 - A class that defines the copy protocol is now refused by name instead of being copied as a plain instance
-  (see the follow-up below).
+  (see the follow-up below). The check also covers `__getstate__` / `__setstate__` (both are part of what
+  CPython's `_reconstruct` honours) and hooks assigned after the class statement (`C.__copy__ = f`,
+  `C.__deepcopy__: object = f`, `setattr(C, "__reduce__", f)`), not only class-body `def`s.
+- The deep copy of a `set` / `frozenset` now builds CPython's temporary reduce list first, so an explicit
+  `memo` sees the same three entries as CPython (`len(memo) == 3`, with a copied list among the values).
 
 ## Follow-ups (not needed by these programs)
 
 - Typed-path `copy`: the typed path has no model of `copy.copy` / `copy.deepcopy` over arbitrary object graphs;
   every program here takes the general path instead. A typed implementation is a new feature, not a refusal.
 - Copy protocol: the general-path copier copies list/dict/tuple/set/frozenset/bytearray/bytes/atomic values and
-  plain instance attributes. A user class's `__copy__`, `__deepcopy__`, `__reduce__` / `__reduce_ex__` and
-  `copy.dispatch_table` entries are not called; supporting them needs method dispatch and `_reconstruct`
-  semantics (a new feature). A program that calls `copy.copy` / `copy.deepcopy` and defines any of those
-  methods is now refused by name, for example:
+  plain instance attributes. A user class's `__copy__`, `__deepcopy__`, `__reduce__` / `__reduce_ex__`,
+  `__getstate__` / `__setstate__` and `copy.dispatch_table` entries are not called; supporting them needs method
+  dispatch and `_reconstruct` semantics (a new feature). A program that calls `copy.copy` / `copy.deepcopy` and
+  defines any of those hooks (as a method, a class-body assignment or a later attribute assignment) is now
+  refused by name, for example:
   `not in the subset: copy.copy()/copy.deepcopy() with WithCopy.__copy__ is not built on the general path: the copy protocol needs method dispatch and _reconstruct`.

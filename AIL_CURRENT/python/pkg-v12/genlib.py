@@ -482,7 +482,14 @@ def _module_names(tree):
     return out
 
 
-_COPY_PROTOCOL = frozenset(('__copy__', '__deepcopy__', '__reduce__', '__reduce_ex__'))
+_COPY_PROTOCOL = frozenset(('__copy__', '__deepcopy__', '__reduce__', '__reduce_ex__',
+                            '__getstate__', '__setstate__'))
+
+
+def _copy_hook_label(target):
+    if isinstance(target, ast.Attribute) and target.attr in _COPY_PROTOCOL:
+        return ast.unparse(target)
+    return None
 
 
 def _refuse_copy_protocol(tree, used):
@@ -491,13 +498,46 @@ def _refuse_copy_protocol(tree, used):
     have).  Only programs that actually reach copy.copy / copy.deepcopy are affected."""
     if not ({'_ail_copy_copy', '_ail_copy_deepcopy'} & used):
         return
+
+    def refuse(label):
+        raise Unsupported('copy.copy()/copy.deepcopy() with %s is not built on the general '
+                          'path: the copy protocol needs method dispatch and _reconstruct' % label)
+
     for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
         for stmt in cls.body:
             if (isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
                     and stmt.name in _COPY_PROTOCOL):
-                raise Unsupported('copy.copy()/copy.deepcopy() with %s.%s is not built on the general '
-                                  'path: the copy protocol needs method dispatch and _reconstruct'
-                                  % (cls.name, stmt.name))
+                refuse('%s.%s' % (cls.name, stmt.name))
+            targets = []
+            if isinstance(stmt, ast.Assign):
+                targets = stmt.targets
+            elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                targets = [stmt.target]
+            elif isinstance(stmt, ast.AugAssign):
+                targets = [stmt.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in _COPY_PROTOCOL:
+                    refuse('%s.%s' % (cls.name, target.id))
+    # A hook assigned after the class statement (C.__copy__ = f, C.__deepcopy__: t = f) defines the same
+    # protocol at run time; the copier would ignore it.  setattr with a literal name is the same case.
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        elif isinstance(node, ast.AugAssign):
+            targets = [node.target]
+        for target in targets:
+            label = _copy_hook_label(target)
+            if label is not None:
+                refuse(label)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'setattr' and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+                and node.args[1].value in _COPY_PROTOCOL):
+            refuse('%s' % ast.unparse(node.args[1]))
 
 
 def rewrite(tree):

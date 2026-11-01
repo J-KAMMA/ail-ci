@@ -2392,22 +2392,35 @@ static ail_st ail2c_deep_new(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj memo,
         }
         case AIL_T_SET: case AIL_T_FROZENSET: {
             ail_setobj *m = AIL_SETOBJ(x);
-            ail_obj r = ail_setx_new(cx, x.tag == AIL_T_FROZENSET);
-            AIL_FRAME_ENTER(cx, fr, 4);
-            fr.slots[0] = memo; fr.slots[1] = key; fr.slots[2] = r;
-            ail_st st = ail_dict_set(cx, fr.slots[0], fr.slots[1], fr.slots[2]);
+            /* CPython deep-copies set / frozenset through __reduce_ex__, whose argument is a temporary
+               list: the deep copy of that list is memoised (and keep-alive'd) before the set is built,
+               so an explicit memo observes three entries, not two. */
+            AIL_FRAME_ENTER(cx, fr, 5);
+            fr.slots[0] = memo;
+            fr.slots[1] = ail_list_new(cx);
+            fr.slots[2] = ail_box_int((int64_t)(intptr_t)fr.slots[1].o);
+            ail_st st = ail_dict_set(cx, fr.slots[0], fr.slots[2], fr.slots[1]);
             if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
             int64_t pos = 0;
             ail_setentry *e;
             while (ail_setx_next(m, &pos, &e)) {
                 st = ail2c_deep(cx, &fr.slots[3], e->key, fr.slots[0]);
                 if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-                st = ail_setx_add_key(cx, AIL_SETOBJ(fr.slots[2]), fr.slots[3]);
+                ail_list_append(cx, fr.slots[1], fr.slots[3]);
+            }
+            st = ail2c_keep(cx, fr.slots[1], fr.slots[0]);
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+            fr.slots[4] = ail_setx_new(cx, x.tag == AIL_T_FROZENSET);
+            ail_vecobj *w = (ail_vecobj *)fr.slots[1].o;
+            for (int64_t i = 0; i < w->n; i++) {
+                st = ail_setx_add_key(cx, AIL_SETOBJ(fr.slots[4]), w->p[i]);
                 if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
             }
+            st = ail_dict_set(cx, fr.slots[0], key, fr.slots[4]);
+            if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
             st = ail2c_keep(cx, x, fr.slots[0]);
             if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
-            *out = fr.slots[2];
+            *out = fr.slots[4];
             AIL_FRAME_LEAVE(cx, fr);
             return AIL_OK;
         }

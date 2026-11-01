@@ -44,6 +44,12 @@ def main() -> None:
     print(one[0] is one[1], len(memo))
     two = dc(source, memo)
     print(two[0] is one[0], len(memo))
+    frozen_memo = {}
+    dc(frozenset({1, 2}), frozen_memo)
+    print("frozen memo", len(frozen_memo))
+    set_memo = {}
+    dc({1, 2}, set_memo)
+    print("set memo", len(set_memo))
     ring = []
     ring.append(ring)
     clone = dc(ring)
@@ -142,6 +148,55 @@ main()
                         "copy_protocol", env, built.stdout, built.stderr))
                     self.assertIn("copy protocol needs method dispatch and _reconstruct",
                                   built.stdout + built.stderr)
+
+    def test_copy_state_hooks_and_dynamic_hooks_are_refused(self):
+        cases = {
+            "copy_state": """import copy
+class WithState:
+    def __init__(self):
+        self.a = 1
+    def __getstate__(self):
+        return {"a": 99}
+    def __setstate__(self, state):
+        self.a = state["a"]
+def main():
+    print(copy.deepcopy(WithState()).a)
+main()
+""",
+            "copy_dynamic": """import copy
+class C:
+    pass
+def alt(self):
+    return "special"
+C.__copy__ = alt
+print(copy.copy(C()))
+""",
+            "copy_setattr": """import copy
+class C:
+    pass
+def alt(self, memo):
+    return "special"
+setattr(C, "__deepcopy__", alt)
+print(copy.deepcopy(C()))
+""",
+            "copy_annassign": """import copy
+class C:
+    pass
+def alt(self):
+    return "special"
+C.__copy__: object = alt
+print(copy.copy(C()))
+""",
+        }
+        for name, text in cases.items():
+            for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
+                with self.subTest(name=name, env=env):
+                    with tempfile.TemporaryDirectory() as directory:
+                        built, _, _ = compile_python(directory, text, name, **env)
+                        self.assertNotEqual(built.returncode, 0, "%s %r\n%s%s" % (
+                            name, env, built.stdout, built.stderr))
+                        self.assertIn("copy protocol needs method dispatch and _reconstruct",
+                                      built.stdout + built.stderr)
 
 
 if __name__ == "__main__":
