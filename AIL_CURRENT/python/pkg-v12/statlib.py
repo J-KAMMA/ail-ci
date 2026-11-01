@@ -308,6 +308,8 @@ class Stat:
             if elem not in ('int', 'float'):
                 refuse(call, 'statistics.fmean with weights of strings is not defined')
             kinds.append(elem)
+        if kinds == ['int', 'int']:
+            return self.call('fmean_weights_int', data, weights)
         left = data if kinds[0] == 'float' else self.call('to_floats', data)
         right = weights if kinds[1] == 'float' else self.call('to_floats', weights)
         return self.call('fmean_weights', left, right)
@@ -360,7 +362,9 @@ class Stat:
         if name == 'covariance':
             return self.call('covariance_f', *args)
         method = kwargs.get('method', ast.Constant(value='linear'))
-        if isinstance(method, ast.Constant) and method.value == 'ranked':
+        if not (isinstance(method, ast.Constant) and isinstance(method.value, str)):
+            refuse(call, "statistics.correlation(..., method=...) needs the literal 'linear' here; a computed method is not built (method='ranked' is not built either)")
+        if method.value == 'ranked':
             refuse(call, "statistics.correlation(..., method='ranked') is not built; method='linear' is")
         return self.call('correlation_f', *args, method)
 

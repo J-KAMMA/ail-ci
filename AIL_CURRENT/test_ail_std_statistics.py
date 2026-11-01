@@ -33,9 +33,8 @@ REFUSED = {
 }
 
 
-def compile_program(directory, name):
-    source = Path(directory, name)
-    source.write_text((LAB / name).read_text(encoding="utf-8"), encoding="utf-8")
+def build_source(directory, name, text):
+    Path(directory, name).write_text(text, encoding="utf-8")
     exe = name[:-3]
     built = subprocess.run(
         [sys.executable, str(ROOT / "ail_chatgpt.py"), "compile", name, "--syntax", "python", "-o", exe],
@@ -43,6 +42,10 @@ def compile_program(directory, name):
         env=dict(os.environ, AIL_NO_CACHE="1"),
     )
     return built, Path(directory, exe)
+
+
+def compile_program(directory, name):
+    return build_source(directory, name, (LAB / name).read_text(encoding="utf-8"))
 
 
 class StatisticsLabTests(unittest.TestCase):
@@ -56,6 +59,57 @@ class StatisticsLabTests(unittest.TestCase):
                 self.assertEqual(expected.returncode, 0, expected.stderr)
                 self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout),
                                  ran.stderr[:500])
+
+    def test_weighted_fmean_int_precision(self):
+        source = """import statistics
+
+
+def main() -> None:
+    a: list[int] = [9007199254740993, 9007199254740993, 9007199254740993]
+    w: list[int] = [1, 1, 1]
+    print(statistics.fmean(a, weights=w))
+    b: list[int] = [9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993, 9007199254740993]
+    print(statistics.fmean(b, weights=[1, 1, 1, 1, 1]))
+    one: list[int] = [1, 1, 1]
+    print(statistics.fmean(one, weights=[9007199254740993, 9007199254740993, 9007199254740993]))
+    p: list[int] = [9007199254740993, 9007199254740993]
+    z: list[int] = [9007199254740993, -9007199254740993]
+    try:
+        print(statistics.fmean(p, weights=z))
+    except statistics.StatisticsError as exc:
+        print("zero:", exc)
+
+
+main()
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            built, exe = build_source(directory, "fmean_int.py", source)
+            self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+            ran = subprocess.run([str(exe)], capture_output=True, timeout=300)
+            expected = subprocess.run([sys.executable, str(Path(directory, "fmean_int.py"))],
+                                      capture_output=True, timeout=300)
+            self.assertEqual(expected.returncode, 0, expected.stderr)
+            self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout),
+                             ran.stderr[:500])
+
+    def test_computed_correlation_method_is_refused(self):
+        source = """import statistics
+
+
+def main() -> None:
+    x: list[int] = [1, 2, 3, 4]
+    y: list[int] = [1, 4, 9, 16]
+    m: str = "ranked"
+    print(statistics.correlation(x, y, method=m))
+
+
+main()
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            built, exe = build_source(directory, "corr_method.py", source)
+            self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
+            self.assertIn("computed method is not built", built.stderr)
+            self.assertFalse(exe.exists())
 
     def test_followups_are_refused_by_name(self):
         for name, wanted in REFUSED.items():

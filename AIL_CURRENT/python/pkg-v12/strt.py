@@ -655,3 +655,17 @@ def fmean_weights(xs: list[float], ws: list[float]) -> float:
     if den == 0.0:
         raise ValueError("sum of weights must be non-zero")
     return sumprod_floats(xs, ws) / den
+
+
+def fmean_weights_int(xs: list[int], ws: list[int]) -> float:
+    """Weighted fmean over ints: the product sum is an exact int like math.sumprod, then CPython's
+    int / float division rounds it once; the denominator is fsum of the weights (each as a float)."""
+    if len(xs) != len(ws):
+        raise ValueError("data and weights must be the same length")
+    den = fsum_floats(to_floats(ws))
+    if den == 0.0:
+        raise ValueError("sum of weights must be non-zero")
+    num = 0
+    for i in range(len(xs)):
+        num += xs[i] * ws[i]
+    return float(num) / den

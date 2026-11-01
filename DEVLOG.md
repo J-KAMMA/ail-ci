@@ -1,3 +1,15 @@
+## 2026-11-01 -- `statistics` review fixes: computed correlation method and exact weighted fmean (job-std_statistics-11011523)
+
+Fixed the two review defects in the `statistics` work. `correlation(..., method=...)` now requires the
+literal `"linear"`; a computed method (including a variable holding `"ranked"` or `"linear"`) is refused
+by name at compile time instead of building into a runtime `ValueError`. Weighted `fmean` over two int
+lists no longer converts both lists to float first: the products are summed exactly in int64 (a product
+that leaves int64 stops loudly), the weight sum is still `fsum` of the weights as floats and is checked
+for zero first, and the final int / float division matches CPython's rounding. For example
+`fmean([2**53+1]*3, weights=[1, 1, 1])` is now `9007199254740994.0`. `test_ail_std_statistics` gained
+regressions for both; `RESULTS.md` and `DIFFERENCES.md` record the fixes and the remaining big-integer
+product-sum limitation.
+
 ## 2026-11-01 -- `statistics` lab: quantiles, covariance/correlation and weighted fmean (job-std_statistics-11011523)
 
 Added the `statistics` lab (`lab/stdlib/statistics/`, 12 programs) and its results: before the fixes 7 of 12
