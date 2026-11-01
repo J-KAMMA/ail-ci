@@ -151,7 +151,7 @@ T_CTR_ELEMS = '''def _ail_ctr_elems_@K(c: dict[@KA, int]) -> list[@KA]:
     return out
 '''
 T_CTR_SUBTRACT_MAP = '''def _ail_ctr_subtract_map_@K(c: dict[@KA, int], other: dict[@KA, int]) -> None:
-    for k in other:
+    for k in other.keys():
         c[k] = c.get(k, 0) - other[k]
 '''
 T_CTR_SUBTRACT_ITER = '''def _ail_ctr_subtract_iter_@K(c: dict[@KA, int], xs: list[@KA]) -> None:
@@ -1324,6 +1324,9 @@ class Rewriter:
             elif isinstance(item, ast.FunctionDef) and item.name == '__init__':
                 params = {a.arg: a.annotation for a in item.args.args[1:]}
                 for st in ast.walk(item):
+                    if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Attribute) \
+                            and isinstance(st.target.value, ast.Name) and st.target.value.id == 'self':
+                        fields[st.target.id] = self.ann_type(st.annotation)
                     if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Attribute) \
                             and isinstance(st.targets[0].value, ast.Name) and st.targets[0].value.id == 'self':
                         if self.mentions_collection(st.value):
@@ -2112,6 +2115,26 @@ class Scope:
                 text = 'for %s in %s: %s[%s] = %s.get(%s, 0) + 1' % (tmp, ast.unparse(it), name, tmp, name, tmp)
         self.put_stmt(st, text)
 
+    def mapping_arg(self, arg, t):
+        """A mapping argument, including a dict display or an unannotated name bound to one."""
+        if (isinstance(t, C) and t.kind in ('ctr', 'dds', 'od')) or (isinstance(t, tuple) and t[0] == 'dict'):
+            return True
+        if isinstance(arg, ast.Dict):
+            return True
+        if isinstance(arg, ast.Name) and arg.id not in self.params:
+            found = False
+            for st in self.own():
+                if isinstance(st, ast.Assign) and len(st.targets) == 1 \
+                        and isinstance(st.targets[0], ast.Name) and st.targets[0].id == arg.id:
+                    v = st.value
+                    if isinstance(v, ast.Dict) or (isinstance(v, ast.Call)
+                                                   and isinstance(v.func, ast.Name) and v.func.id == 'dict'):
+                        found = True
+                    else:
+                        return False
+            return found
+        return False
+
     def ctr_subtract(self, st, c, call):
         r = self.r
         recv = call.func.value
@@ -2119,13 +2142,19 @@ class Scope:
             r.refuse(st, 'Counter.subtract takes one iterable or mapping')
         arg = call.args[0]
         t = r.infer(arg, self.env)
-        if (isinstance(t, C) and t.kind in ('ctr', 'dds', 'od')) or (isinstance(t, tuple) and t[0] == 'dict'):
-            if not isinstance(arg, ast.Name):
-                r.refuse(st, 'Counter.subtract(mapping) needs the mapping in a name')
+        if self.mapping_arg(arg, t):
+            if isinstance(arg, ast.Dict) and not arg.keys:
+                return self.put_stmt(st, 'pass')
+            if isinstance(arg, ast.Name):
+                src, head = arg, ''
+            else:
+                name = r.new_name('m')
+                src = ast.Name(id=name, ctx=ast.Load())
+                head = '%s = %s' % (name, ast.unparse(arg)) + chr(10) + ' ' * st.col_offset
             helper = r.ctr(c.K, 'subtract_map', T_CTR_SUBTRACT_MAP)
             new = ast.Expr(value=ast.Call(func=ast.Name(id=helper, ctx=ast.Load()),
-                                          args=[recv, ast.Name(id=arg.id, ctx=ast.Load())], keywords=[]))
-            return self.put_stmt(st, ast.unparse(new))
+                                          args=[recv, src], keywords=[]))
+            return self.put_stmt(st, head + ast.unparse(new))
         helper = r.ctr(c.K, 'subtract_iter', T_CTR_SUBTRACT_ITER)
         if is_tup(c.K) and isinstance(arg, ast.List) and not arg.elts:
             return self.put_stmt(st, 'pass')
@@ -2402,8 +2431,10 @@ class _X(ast.NodeTransformer):
                 return ast.Dict(keys=[], values=[])
             t = r.infer(node.args[0], self.env)
             a = node.args[0]
-            if (isinstance(t, C) and t.kind in ('ctr', 'dds', 'od')) or (isinstance(t, tuple) and t[0] == 'dict'):
-                if t.kind != 'ctr' if isinstance(t, C) else t[2] != 'int':
+            if self.s.mapping_arg(a, t):
+                if isinstance(t, C) and t.kind != 'ctr':
+                    r.refuse(node, 'Counter(mapping) needs int values')
+                if isinstance(t, tuple) and t[0] == 'dict' and t[2] != 'int':
                     r.refuse(node, 'Counter(mapping) needs int values')
                 return call(attr(self.visit_argument(a), 'copy'))
             if t == 'str':

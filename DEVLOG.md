@@ -1,3 +1,24 @@
+## 2026-11-01 -- std_collections review: Counter.subtract mapping values for literals, names and tuple-keyed tables
+
+The review found that `Counter.subtract({"a": 2})` and `d = {"a": 2}; c.subtract(d)` subtracted
+one per key instead of the mapping's value, and that a tuple-keyed mapping still crashed with
+`TypeError: '_AilD_Pi_iQ__i' object is not iterable`.  `collib.py` now recognises a dict display
+and an unannotated name bound to a dict (not only an annotated `Dict[K, V]`), so both the
+`Counter(mapping)` constructor and `subtract` take the mapping route; the typed subtract helper
+walks `other.keys()` because a tuple-keyed table class has no `__iter__`.  The general path tracks
+tuple-keyed table values and subtracts their `ks` / `vs` / `live` rows, and instance annotations
+inside `__init__` now feed the class field table, so `self.counts: Dict[str, int]` works as a
+mapping argument.
+
+Probes `p1`-`p21` in `/tmp/probes/collections_fix/` cover dict displays, annotated and
+unannotated names, `dict(...)`, empty/negative values, self-alias, function arguments/returns,
+list items, dict values, instance attributes, and tuple-keyed mapping literals/names both
+directly and through attributes; all match CPython on both builds, and `p21` (an unannotated
+function parameter) is refused by name on both.  `test_ail_std_collections` gained
+`test_counter_subtract_mapping_forms` for the two review cases.  Generated C of the seven
+buildable compare tasks stays byte-identical to `HEAD`, and the three regex tasks refuse
+identically.
+
 ## 2026-11-01 -- std_collections lab: 9 of 12 collections programs build and match CPython (job-std_collections-11011436)
 
 Added `lab/stdlib/collections/` (12 realistic Python programs using Counter, defaultdict, OrderedDict,
