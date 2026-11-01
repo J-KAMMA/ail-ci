@@ -158,6 +158,50 @@ handler now keeps the key as `args[0]`, so `str(exc)` is `(9, 9)` rather than `'
 tuple-key change is conditional on a bound handler, so generated C without one is unchanged.
 `test_ail_std_fractions.py` compares all twelve against CPython (empty and mixed stdin for
 `unit_convert.py`).
+## 2026-11-01 -- `statistics` second review fixes: scaled product sum, `repr` methods, longer lab program (job-std_statistics-11011831)
+
+Fixed the three defects from the second review. `strt.sumprod_floats` now uses CPython's TripleLength
+compensated sum of error-free products, with the Dekker split done on power-of-two-scaled operands, so
+`covariance([1e301, 2e301, 3e301], [1e-300, 2e-300, 4e-300])` is `15.0` and weighted `fmean` is
+`2.4285714285714285e+301` instead of `nan`; a genuinely overflowing product stops the compensated path
+and the rest is ordinary float multiplication and addition, matching CPython's `inf`/`nan`.
+The unknown-method messages in `quantiles_int`, `quantiles_f` and `correlation_f` use `repr`, so
+`method="a'b"` prints `Unknown method: "a'b"`. `lab/stdlib/statistics/11_geometric_harmonic.py` is now
+17 lines and still matches CPython. `RESULTS.md` and `DIFFERENCES.md` record the fixes; probes
+`k_split_overflow`, `j_float_overflow`, `c2_q_quote`, `l_corr_quote`, `p_method_literals` and
+`p_st_extremes` match CPython (the forced general path refuses these names by name).
+
+## 2026-11-01 -- `statistics` review fixes: computed correlation method and exact weighted fmean (job-std_statistics-11011523)
+
+Fixed the two review defects in the `statistics` work. `correlation(..., method=...)` now requires the
+literal `"linear"`; a computed method (including a variable holding `"ranked"` or `"linear"`) is refused
+by name at compile time instead of building into a runtime `ValueError`. Weighted `fmean` over two int
+lists no longer converts both lists to float first: the products are summed exactly in int64 (a product
+that leaves int64 stops loudly), the weight sum is still `fsum` of the weights as floats and is checked
+for zero first, and the final int / float division matches CPython's rounding. For example
+`fmean([2**53+1]*3, weights=[1, 1, 1])` is now `9007199254740994.0`. `test_ail_std_statistics` gained
+regressions for both; `RESULTS.md` and `DIFFERENCES.md` record the fixes and the remaining big-integer
+product-sum limitation.
+
+## 2026-11-01 -- `statistics` lab: quantiles, covariance/correlation and weighted fmean (job-std_statistics-11011523)
+
+Added the `statistics` lab (`lab/stdlib/statistics/`, 12 programs) and its results: before the fixes 7 of 12
+built (5 typed, 2 general), 5 were refused. The typed lowering in `python/pkg-v12/statlib.py` and the runtime
+helpers in `python/pkg-v12/strt.py` now cover `quantiles` (`n=`, `method=`), `covariance`,
+`correlation(method="linear")` and `fmean(..., weights=...)` (keyword and second positional form), with
+CPython's error texts and precedence, so 10 of 12 build (8 typed, 2 general) and all 10 match CPython's stdout
+and exit code. The covariance/correlation product sum follows `math.sumprod` (Dekker two-product split plus
+`fsum`), so ordinary cases such as the `216.15` sample match instead of losing the last bit.
+`linear_regression` (named-tuple result, `proportional=`) and `NormalDist` stay named refusals and are the two
+recorded follow-ups; `correlation(..., method="ranked")` is also still a named refusal. The general path does
+not publish the new names, so a forced general build refuses them by name while the default build uses the
+typed path.
+
+`test_ail_std_statistics` (registered in `tests.d/`) compiles and compares the 10 passing programs with
+CPython; the named-refusal tests in `test_ail_stdlib_batch4` / `test_ail_genlib` were moved to
+`linear_regression`. Targeted run on the final tree: `test_ail_std_statistics`, `test_ail_stdlib_batch4`,
+`test_ail_genlib`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 6 modules, 0 failed.
+Generated C for the 10 `lab/compare/src/*/main.ail` tasks is byte-identical to the base commit.
 
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
