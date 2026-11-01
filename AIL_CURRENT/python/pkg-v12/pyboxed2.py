@@ -678,6 +678,79 @@ __attribute__((noinline, cold)) static ail_st ail2_bisect_bound(ail_ctx *cx, ail
 }
 '''
 
+BISECTKEY_C = r'''
+/* bisect(key=...) / insort(key=...). CPython's C _bisect calls the key on each list element
+   the binary search actually visits; insort computes key(x) once and then compares it with
+   key(element), so it reuses the same loop with the keyed value. A key result is rooted
+   because the key function or a user __lt__ may allocate while it is still live. */
+static inline ail_st ail__bisect_key(ail_ctx *cx, ail_obj *out, ail_obj key, ail_obj item) {
+    ail_funcobj *f = (ail_funcobj *)key.o;
+    return f->fn(cx, out, item, f->cells);
+}
+static inline ail_st ail_bisect_left_key(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj x,
+                                         int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
+    ail_vecobj *v = (ail_vecobj *)a.o;
+    int64_t l = has_lo ? lo : 0, h = (!has_hi || hi == -1) ? v->n : hi;
+    if (l < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "lo must be non-negative");
+    while (l < h) {
+        int64_t mid = (l + h) / 2, c;
+        if (mid < 0 || mid >= v->n) return ail_raise_c(cx, AIL_B_INDEXERROR, "list index out of range");
+        ail_obj k;
+        ail_st st = ail__bisect_key(cx, &k, key, v->p[mid]);
+        if (st != AIL_OK) return st;
+        AIL_ROOT1(cx, frk, k);
+        st = ail_obj_cmp(cx, &c, k, x);
+        AIL_FRAME_LEAVE(cx, frk);
+        if (st != AIL_OK) return st;
+        if (c < 0) l = mid + 1; else h = mid;
+    }
+    *out = l; return AIL_OK;
+}
+static inline ail_st ail_bisect_right_key(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj x,
+                                          int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
+    ail_vecobj *v = (ail_vecobj *)a.o;
+    int64_t l = has_lo ? lo : 0, h = (!has_hi || hi == -1) ? v->n : hi;
+    if (l < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "lo must be non-negative");
+    while (l < h) {
+        int64_t mid = (l + h) / 2, c;
+        if (mid < 0 || mid >= v->n) return ail_raise_c(cx, AIL_B_INDEXERROR, "list index out of range");
+        ail_obj k;
+        ail_st st = ail__bisect_key(cx, &k, key, v->p[mid]);
+        if (st != AIL_OK) return st;
+        AIL_ROOT1(cx, frk, k);
+        st = ail_obj_cmp(cx, &c, x, k);
+        AIL_FRAME_LEAVE(cx, frk);
+        if (st != AIL_OK) return st;
+        if (c < 0) h = mid; else l = mid + 1;
+    }
+    *out = l; return AIL_OK;
+}
+static inline ail_st ail_bisect_insort_left_key(ail_ctx *cx, ail_obj a, ail_obj x,
+                                                int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
+    ail_obj kx;
+    ail_st st = ail__bisect_key(cx, &kx, key, x);
+    if (st != AIL_OK) return st;
+    AIL_ROOT1(cx, frx, kx);
+    int64_t pos;
+    st = ail_bisect_left_key(cx, &pos, a, kx, has_lo, lo, has_hi, hi, key);
+    if (st == AIL_OK) ail_list_insert(cx, a, pos, x);
+    AIL_FRAME_LEAVE(cx, frx);
+    return st;
+}
+static inline ail_st ail_bisect_insort_right_key(ail_ctx *cx, ail_obj a, ail_obj x,
+                                                 int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
+    ail_obj kx;
+    ail_st st = ail__bisect_key(cx, &kx, key, x);
+    if (st != AIL_OK) return st;
+    AIL_ROOT1(cx, frx, kx);
+    int64_t pos;
+    st = ail_bisect_right_key(cx, &pos, a, kx, has_lo, lo, has_hi, hi, key);
+    if (st == AIL_OK) ail_list_insert(cx, a, pos, x);
+    AIL_FRAME_LEAVE(cx, frx);
+    return st;
+}
+'''
+
 TYPE_NAME_C = '''
 static inline ail_st ail_type_name_of(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC) {
@@ -2886,6 +2959,8 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append(ARGCHK_C)
         if getattr(self, 'needs_bisect_bound', False):
             parts.append(BISECTBOUND_C)
+        if getattr(self, 'needs_bisect_key', False):
+            parts.append(BISECTKEY_C)
         if getattr(self, 'needs_stararity', False):
             parts.append(stararity.C)
         if 'SYSINFO' in self.rt_needs:
@@ -9007,7 +9082,7 @@ class Compiler(boxclosure.ClosureMixin):
     def _bisect_call(self, fn, args, kwargs, ctx, has_out):
         if len(args) < 2 or len(args) > 4:
             raise Unsupported('%s() with other than (a, x[, lo[, hi]])' % fn)
-        extra = set(kwargs) - {'lo', 'hi'}
+        extra = set(kwargs) - {'lo', 'hi', 'key'}
         if extra:
             raise Unsupported('%s(): %s is not supported; the bounds are lo= and hi='
                               % (fn, ', '.join(sorted(extra))))
@@ -9041,17 +9116,30 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('int64_t %s = (%s.tag != AIL_T_NONE);' % (hv, ht))
             self._bisect_bound_check(ht, ctx, True, hv)
             has_hi, hi = hv, '(%s ? %s.i : 0)' % (hv, ht)
+        keyfn = None
+        if 'key' in kwargs:
+            keyfn = self._wrap_cfunc(ctx, self._func_pointer_of(kwargs['key'], ctx))
+            self.needs_bisect_key = True
+            fn += '_key'
         if has_out:
             iv = ctx.new_cvar('bi')
             ctx.emit('int64_t %s;' % iv)
-            ctx.emit('st = %s(cx, &%s, %s, %s, %s, %s, %s, %s);' %
-                    (fn, iv, a, x, has_lo, lo, has_hi, hi))
+            if keyfn is None:
+                ctx.emit('st = %s(cx, &%s, %s, %s, %s, %s, %s, %s);' %
+                        (fn, iv, a, x, has_lo, lo, has_hi, hi))
+            else:
+                ctx.emit('st = %s(cx, &%s, %s, %s, %s, %s, %s, %s, %s);' %
+                        (fn, iv, a, x, has_lo, lo, has_hi, hi, keyfn))
             ctx.check()
             t = ctx.tmp()
             ctx.emit('%s = ail_box_int(%s);' % (t, iv))
             return t
-        ctx.emit('st = %s(cx, %s, %s, %s, %s, %s, %s); if (st != AIL_OK) goto %s;' %
-                (fn, a, x, has_lo, lo, has_hi, hi, ctx.cur_err_target()))
+        if keyfn is None:
+            ctx.emit('st = %s(cx, %s, %s, %s, %s, %s, %s); if (st != AIL_OK) goto %s;' %
+                    (fn, a, x, has_lo, lo, has_hi, hi, ctx.cur_err_target()))
+        else:
+            ctx.emit('st = %s(cx, %s, %s, %s, %s, %s, %s, %s); if (st != AIL_OK) goto %s;' %
+                    (fn, a, x, has_lo, lo, has_hi, hi, keyfn, ctx.cur_err_target()))
         ctx.uses_st = True
         return 'ail_box_none()'
 

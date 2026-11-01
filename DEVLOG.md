@@ -1,3 +1,30 @@
+## 2026-11-01 -- std_bisect: key= for bisect/insort on the general path (job-std_bisect-11011433)
+
+Added twelve realistic `bisect` programs under `lab/stdlib/bisect/` (grade bands, price tiers,
+word indexes, leaderboards, event windows, float intervals, sparse ids, alias/star imports,
+keyed rows, caught edges). Eleven built before any change; the twelfth, `key_records`, was
+refused because the typed path does not model a tuple row and the general path rejected
+`key=`. The general path now accepts `key=` on `bisect_left`, `bisect_right`, `bisect`,
+`insort`, `insort_left` and `insort_right`: the key is called on exactly the elements the
+binary search visits, `insort` computes `key(x)` once, and key results are rooted across
+allocating comparisons. The new C fragment is emitted only for a program that uses `key=`
+(`python/pkg-v12/pyboxed2.py`, `BISECTKEY_C`), so programs without it emit the same C.
+All twelve now build in the default mode and match CPython 3.12 stdout and exit status.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `p_bisect_key_tuples` (all six calls,
+duplicates, empty, lo/hi positional and keyword, `hi=None`, negative hi), `p_bisect_key_calls`
+(key called only on visited elements; insort key-once), `p_bisect_key_types` (int, float,
+str, `key=abs/int/float/len/str.lower`), `p_bisect_key_routes` (argument, list item,
+attribute, dict value, alias) and `p_bisect_key_errors` (a raising key and bound errors);
+all match CPython or stop with CPython's exception. The generated C of the ten `lab/compare`
+tasks was compared with `HEAD`: 17 task/language pairs byte-identical, and the three
+Python-column pairs `scar_life`/`tally_lang`/`tree_fold` are refused by both revisions.
+
+Added `AIL_CURRENT/test_ail_std_bisect.py` (12 programs plus a key-call/insort program) and
+its `AIL_CURRENT/tests.d/test_ail_std_bisect.txt` registration. `tools/update_manifest.py`
+was run and `--check` passes. Final-state tests: test_ail_std_bisect, test_ail_heapq_bisect,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
