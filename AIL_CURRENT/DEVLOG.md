@@ -1,3 +1,23 @@
+## 2026-11-01 -- cmath coverage: 12 real programs over a complex class (job-std_cmath-11020039)
+
+`cmath` is now modelled for real programs. Twelve 15-60 line programs in `lab/stdlib/cmath/` use the
+common functions (`sqrt`, `exp`, `log`/`log10`, the trigonometric and hyperbolic families and their
+inverses, `phase`, `polar`, `rect`, `isclose`, `isfinite`/`isnan`/`isinf`), the constants, complex
+literals, `complex(...)` and the `ValueError`/`OverflowError` cases; before the fix every one was
+refused (0/12), now all 12 build in the default mode and match CPython 3.12 stdout and exit status
+(general path; the complex class uses operator methods, so the typed path refuses it and the default
+build falls back, as for `fractions.Fraction`).
+
+`python/pkg-v12/cmathlib.py` (called from `stdlib5.py` when the program imports `cmath`) lowers the
+module's names and constants, complex literals and `complex(...)` onto `prelude_cmath.py`: a plain
+Python `_AilComplex` with the arithmetic operators, `abs`, comparison, CPython's complex repr, and
+CPython 3.12's `cmathmodule.c` / `complexobject.c` algorithms and special-value tables, so branch
+cuts, signed zeros, infinities, NaNs, the domain errors and overflow points agree. The rewrite runs
+only for a program that imports `cmath`, so other programs' generated C is unchanged. The programs
+are checked by `test_ail_std_cmath.py` (registered by `tests.d/test_ail_std_cmath.txt`); separate
+probes over thousands of values, the special-value table, aliased/from-import forms, complex string
+parsing and both builds all match CPython.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
