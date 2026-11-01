@@ -1,3 +1,25 @@
+## 2026-11-01 -- typed reach review fix: pin prog8, cover the new float-slice and enumerate-str paths (job-prog8-11020731)
+
+Review fix on the same job. Pinned `test_ail_prog8.py` and `tests.d/test_ail_prog8.txt` through
+`tools/update_manifest.py` (the previous commit left them unpinned, so `--check` and `par_check`
+failed before running the module), and corrected `lab/progfix/prog8.md`, which wrongly said
+`g03_020` and `g05_014` were already typed. On the base commit both build on the general path:
+`sum() over a slice of a list of floats; not implemented` (g03_020) and `this use of a str as an
+iterable is not built ...` (g05_014); the float-slice and enumerate-str changes in `pyfunc.py` make
+them typed on HEAD.
+
+`test_ail_prog8.py` now also compiles the two real programs from `lab/` and checks them typed and
+equal to CPython, plus inline boundary programs for float-list slices (local, parameter, attribute,
+negative/past-the-end/empty slices and a generator fold) and `enumerate(str)` (empty, unicode,
+nested, break/continue, body rebind, list item, dict value, attribute, slice and concatenation).
+Probes `/tmp/probes/pfloat_test.py`, `/tmp/probes/penum_test.py`, `pfloat_slice.py`,
+`pfloat_slice2.py`, `penum_unicode.py` and the two real programs match CPython on both `cmp.sh`
+builds; `pfloat_test.py`, `penum_test.py`, `penum_unicode.py` and the two real programs build typed,
+while `pfloat_slice.py` (printing a slice) and `pfloat_slice2.py` (an annotation/caller kind clash)
+match on the general path only. `pfloat_empty.py` shows the pre-existing empty-float-`sum`
+difference (`0.0` vs CPython's int `0`, also on base for a bare `sum(empty_float_list)`) recorded
+in `prog8.md`. Only the new module was rerun here: `test_ail_prog8` (7 tests, OK).
+
 ## 2026-11-01 -- typed reach: nested bool lists for the hot palindrome DP (job-prog8-11020731)
 
 Profiled the eight prog8 programs with CPython 3.12 `cProfile` (own time; `main()` repeated so the

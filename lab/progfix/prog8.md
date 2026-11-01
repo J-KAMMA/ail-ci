@@ -70,19 +70,28 @@ Follow-up (big: exact-ratio `pstdev` over floats).
 
 Follow-up (big: the general `fractions.Fraction` dunder surface).
 
-## moving average (`lab/census/programs/gdev/g03_020.py`)
+## moving average (`lab/census/programs/gdev/g03_020.py`) - fixed
 
-| hot function | own % | cum % | typed path |
-| --- | ---: | ---: | --- |
-| `main` | 43.50 | 43.50 | typed |
-| `print` | 22.86 | 66.36 | built-in |
-| `simple_moving_average` | 12.00 | 78.36 | typed |
-| `sine_series` | 8.59 | 86.96 | typed |
-| `list.append` | 6.13 | 93.08 | built-in |
-| `math.sin` | 5.79 | 98.88 | built-in |
+| hot function | own % | cum % | typed path before | after |
+| --- | ---: | ---: | --- | --- |
+| `main` | 43.50 | 43.50 | through the `sum` slice refusal in its callee | **typed** |
+| `print` | 22.86 | 66.36 | built-in | built-in |
+| `simple_moving_average` | 12.00 | 78.36 | no: `sum() over a slice of a list of floats; not implemented` | **typed** |
+| `sine_series` | 8.59 | 86.96 | typed | typed |
+| `list.append` | 6.13 | 93.08 | built-in | built-in |
+| `math.sin` | 5.79 | 98.88 | built-in | built-in |
 
-The whole program was already typed; nothing to fix. (`main` is 43% own because the f-string and
+The fix is in `python/pkg-v12/pyfunc.py`: `_is_flist_name` now sees through a slice to its base
+list, and `_inline_fold_inner` no longer refuses a float slice. `_iter_plan`'s slice branch was
+already reading the base list's `double` elements, so `sum`/`min`/`max` and a generator fold over
+`values[:window]`, `xs[a:b]`, a negative or past-the-end slice and an attribute slice keep a
+`double` accumulator instead of truncating to int64. (`main` is 43% own because the f-string and
 formatting work is there.)
+
+Known pre-existing difference, not changed here: an *empty* float slice (or a bare empty
+`list[float]`) makes the typed `sum` return `0.0` where CPython returns the int `0`. The base tree
+already did this for bare `sum(empty_float_list)`; the fold has one static result type. Matching it
+needs a content-dependent `sum` result type, which is a follow-up, not part of this slice fix.
 
 ## shell sort (`lab/census/programs/gdev/g04_010.py`)
 
@@ -134,23 +143,35 @@ and a number stored into a bool row is still refused (or stays on the general pa
 The unannotated `[[False] * n ...]` form is still inferred as `int` and remains a follow-up
 (`field 'v' is a list or dict that gets bools and numbers (Python keeps each element's own type)`).
 
-## first non-repeating character (`lab/census/programs/gdev/g05_014.py`)
+## first non-repeating character (`lab/census/programs/gdev/g05_014.py`) - fixed
 
-| hot function | own % | cum % | typed path |
-| --- | ---: | ---: | --- |
-| `count_characters` | 35.06 | 35.06 | typed |
-| `dict.get` | 24.77 | 59.83 | built-in |
-| `main` | 19.16 | 78.99 | typed |
-| `print` | 18.41 | 97.40 | built-in |
-| `first_non_repeating` | 2.07 | 99.46 | typed |
+| hot function | own % | cum % | typed path before | after |
+| --- | ---: | ---: | --- | --- |
+| `count_characters` | 35.06 | 35.06 | typed | typed |
+| `dict.get` | 24.77 | 59.83 | built-in | built-in |
+| `main` | 19.16 | 78.99 | through the enumerate-str refusal in its callee | **typed** |
+| `print` | 18.41 | 97.40 | built-in | built-in |
+| `first_non_repeating` | 2.07 | 99.46 | no: `this use of a str as an iterable is not built (plain `for c in s` is); for an index keep a counter: `i = 0; for c in s: ...; i += 1`` | **typed** |
 
-The whole program was already typed; nothing to fix.
+The fix is in `python/pkg-v12/pyfunc.py`: an `enumerate(text)` loop whose source is a str now
+builds the same UTF-8 walk as `for ch in text:`, one code-point `ail_str` view per step, with a
+separate counter so the index counts characters (not the byte offset). It takes the text through
+a parameter, a local, a list item, a dict value, an attribute, a slice or a `+` concatenation, and
+handles nested loops, `break`/`continue` and a body that rebinds the loop variable to another str.
+A loop variable used only in a self-referential expression (`ch + ch`, `ch = ch`) still keeps the
+general path: the function-wide type inference does not know the enumerate-str element type. The
+two hot functions above do not need that shape.
 
 ## Summary
 
-- Hot program functions newly typed: `count_palindromic_substrings`, `main` (g09).
-- Already typed hot program functions: all of g03_020, all of g05, `knuth_gaps` in g04.
+- Hot program functions newly typed: `count_palindromic_substrings` and `main` (g09);
+  `simple_moving_average` and `main` (g03_020, float-list slices); `first_non_repeating` and `main`
+  (g05_014, `enumerate(str)`).
+- Already typed hot program functions: `sine_series` in g03_020, `count_characters` in g05,
+  `knuth_gaps` in g04.
 - Left as follow-ups (all big, exact messages above): the `random.Random` method surface;
   exact-ratio `statistics.pstdev`; the `fractions.Fraction` dunder surface; mutating a `list`
-  parameter; `json.loads` result typing / `list[dict[...]]`; unannotated nested bool lists.
+  parameter; `json.loads` result typing / `list[dict[...]]`; unannotated nested bool lists;
+  an enumerate-str loop variable used in a self-referential expression; the pre-existing empty
+  float-list `sum` returning `0.0` where CPython returns int `0`.
 - Large blockers `main` in t396/g03_018/g23/g04/t176 only because their callees are refused.
