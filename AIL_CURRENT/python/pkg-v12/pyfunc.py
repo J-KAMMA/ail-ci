@@ -1774,6 +1774,10 @@ def _etype(node, ctx):
             return FLT
         if f == '__ail_class_id' and _HIER or f == 'isinstance' and _is_class_isinstance(node, ctx):
             return INT
+        if f == 'isinstance' and _mixed_class_isinstance(node, ctx):
+            return INT
+        if f == 'issubclass' and _static_issubclass(node, ctx) is not None:
+            return INT
         if f == 'isinstance' and _static_isinstance(node, ctx) is not None:
             return INT
         if f == 'pow' and len(a) == 3 and f not in ctx.funcs:
@@ -16580,6 +16584,75 @@ def _is_class_isinstance(node, ctx):
     return bool(names) and all(isinstance(n, ast.Name) and n.id in ctx.classes for n in names)
 
 
+_BUILTIN_TYPE_OBJECTS = {
+    'bool': bool, 'int': int, 'float': float, 'str': str, 'bytes': bytes, 'bytearray': bytearray,
+    'list': list, 'tuple': tuple, 'dict': dict, 'set': set, 'frozenset': frozenset, 'range': range,
+    'object': object,
+}
+
+
+def _builtin_type_name(name, ctx):
+    """A builtin type name that no function, class or local of the program shadows."""
+    return name in _BUILTIN_TYPE_OBJECTS and all(
+        name not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))
+
+
+def _mixed_class_isinstance(node, ctx):
+    """`isinstance(x, (C, int, ...))` in a hierarchy: a tuple that mixes classes of this program with
+    builtin types. `_isinstance_value` already knows how to ignore a builtin target for a class
+    instance; this predicate admits the mixed tuple to it. None for a value whose kind is not a class
+    instance, so the ordinary builtin lowering still sees (and refuses or builds) that shape."""
+    if not (_HIER and isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'isinstance' and len(node.args) == 2 and not node.keywords
+            and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))
+            and isinstance(node.args[0], (ast.Name, ast.Attribute))):
+        return False
+    spec = node.args[1]
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    if not names or not all(isinstance(n, ast.Name) for n in names):
+        return False
+    if not any(n.id in ctx.classes for n in names):
+        return False
+    if not all(n.id in ctx.classes or _builtin_type_name(n.id, ctx) for n in names):
+        return False
+    try:
+        kind = _etype(node.args[0], ctx)
+    except Unsupported:
+        return False
+    return _is_obj_kind(kind)
+
+
+def _static_issubclass(node, ctx):
+    """True or False when `issubclass(C, D)` (or a tuple of Ds) is settled when the program is built:
+    C and every D a class of this program or a builtin type name. None otherwise."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'issubclass' and len(node.args) == 2 and not node.keywords
+            and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))):
+        return None
+    left, spec = node.args
+    if not isinstance(left, ast.Name):
+        return None
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    if not names or not all(isinstance(n, ast.Name) for n in names):
+        return None
+    if left.id in ctx.classes:
+        if not all(n.id in ctx.classes or _builtin_type_name(n.id, ctx) for n in names):
+            return None
+        chain = set(_class_chain(left.id))
+        return any((n.id in chain) if n.id in ctx.classes else n.id == 'object' for n in names)
+    if not _builtin_type_name(left.id, ctx):
+        return None
+    if not all(n.id in ctx.classes or _builtin_type_name(n.id, ctx) for n in names):
+        return None
+    left_type = _BUILTIN_TYPE_OBJECTS[left.id]
+    for n in names:
+        if n.id in ctx.classes:
+            continue
+        if issubclass(left_type, _BUILTIN_TYPE_OBJECTS[n.id]):
+            return True
+    return False
+
+
 def _bare_except_to_exception(tree):
     """A bare `except:` catches what `except Exception:` catches here: every exception the program can
     raise (CPython's bare except also takes SystemExit and KeyboardInterrupt; `sys.exit()` ends the
@@ -16715,6 +16788,9 @@ def _isinstance_value(node, ctx):
     static = kind[1]
     tests = []
     for t in targets:
+        if t == 'object':
+            tests = None                 # every class instance is an object (unless None)
+            break
         if t in _class_chain(static) or t == static:
             tests = None                 # always an instance (unless None)
             break
@@ -16744,6 +16820,11 @@ def _call(node, ctx):
         return _tcp_poll_value(node, ctx)[0]
     if _is_class_isinstance(node, ctx):
         return _isinstance_value(node, ctx)
+    if _mixed_class_isinstance(node, ctx):
+        return _isinstance_value(node, ctx)
+    known = _static_issubclass(node, ctx)
+    if known is not None:
+        return '1' if known else '0'
     known = _static_isinstance(node, ctx)
     if known is not None:
         return '1' if known else '0'

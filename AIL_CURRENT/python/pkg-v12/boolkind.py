@@ -38,7 +38,7 @@ import os
 STR_PREDICATES = frozenset(('isdigit', 'isalpha', 'isalnum', 'isspace', 'isdecimal', 'isnumeric',
                             'isupper', 'islower', 'istitle', 'startswith', 'endswith'))
 SET_PREDICATES = frozenset(('issubset', 'issuperset', 'isdisjoint'))
-BOOL_BUILTINS = frozenset(('bool', 'any', 'all', 'isinstance'))
+BOOL_BUILTINS = frozenset(('bool', 'any', 'all', 'isinstance', 'issubclass'))
 TEXT_CALLS = frozenset(('print', 'str', 'repr', 'format', 'ascii'))
 INT_NAMES = frozenset(('int', '__ail_checked_int__'))
 

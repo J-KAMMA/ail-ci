@@ -1,3 +1,21 @@
+## 2026-11-01 -- cls1: static `issubclass` and mixed `isinstance` tuples on the typed path (job-cls1-11011231)
+
+Measured 30 class-hierarchy programs (`/tmp/probes/hier/h01.py`..`h30.py`): before the change
+13 were typed, 11 took the general path and 6 were refused; after it 16 are typed, 10 general and
+4 refused. The required class-test programs (`h05`, `h27`) refused because the typed path had no
+`issubclass` and rejected an `isinstance` tuple that mixed a program class with a builtin. A
+statically named `issubclass(C, A)` / `(C, B, object)` is now folded to a bool, and a mixed
+`isinstance(x, (C, int))` tuple uses the class-id test (builtin targets that cannot match are
+false, `object` is true); the receiver stays a name or attribute. `BOOL_BUILTINS` gained
+`issubclass`, so the typed path prints `True`/`False`, not `1`/`0`. The general path still refuses
+`issubclass` and `(C, object)` by name; the default build is typed for these programs and matches
+CPython. Multiple inheritance/library bases, a starred `super()` argument and class objects in a
+tuple stay named refusals. `h17` and `h26` keep their pre-existing general-path differences.
+Added `AIL_CURRENT/test_ail_class_reach.py` (5 cases) and
+`AIL_CURRENT/docs/design/CLASS_REACH.md`. Final-state tests: test_ail_class_reach,
+test_ail_typed_inherit, test_ail_virtual_dispatch, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
