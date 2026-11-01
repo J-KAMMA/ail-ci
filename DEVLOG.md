@@ -1,3 +1,257 @@
+## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
+
+Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
+context and print `<Recursion on ... with id=N>` instead of segfaulting (the identity comes from a new
+`ppid` safetyrt fragment, so programs that do not use pprint keep their C). Long `bytes` and
+`bytearray` values wrap in CPython's four-byte chunks. `pprint`, `pformat`, `pp` and `PrettyPrinter`
+now have CPython 3.12's signatures, with `compact` / `sort_dicts` / `underscore_numbers` keyword-only,
+so extra positional arguments are refused by name rather than accepted.
+
+`lab/stdlib/pprint/p10_strings.py` gained the long-bytes cases; `test_ail_std_pprint` gained a
+recursive-container case (normalising only the process-specific `id=` number) and still passes all 12
+programs on the default and `AIL_IR=1` builds. Probes `/tmp/probes/pp_rec*.py`, `pp_bytes*.py`,
+`pp_arity_ok.py` and `pp_arity_bad_*.py` cover recursion through arguments / list items / dict values,
+aliasing, depth limits, empty and short bytes, narrow widths, invalid widths, and valid/invalid argument
+forms on both `cmp.sh` builds.
+
+## 2026-11-01 -- CPython `pprint` on the general path (job-std_pprint-11011616)
+
+Added `pprint` to the general-path library lowering (`python/pkg-v12/genlib.py` and
+`prelude_genlib.py`): `pprint`, `pformat`, `pp`, `saferepr`, `isreadable`, `isrecursive` and
+`PrettyPrinter`, with `stream`, `indent`, `width`, `depth`, `compact`, `sort_dicts` and
+`underscore_numbers`. The pieces follow CPython 3.12's `pprint.py` for dict / list / tuple / set /
+frozenset / str / int / float / bool / None, including compact wrapping, depth limits, sorted or
+insertion-order dicts, singleton tuples, empty containers and the `ValueError`s for `indent < 0`,
+`depth <= 0` and `width == 0`.
+
+All 12 programs in `lab/stdlib/pprint` build on the default (general) path and match CPython 3.12
+stdout and exit status, also with `AIL_IR=1`; the typed path still refuses `import pprint` by name.
+`lab/stdlib/pprint/RESULTS.md` records each result and first refusal. The probes in `/tmp/probes`
+(`pp_types`, `pp_sources`, `pp_stream`, `pp_errors`, `pp_numbers`, `pp_strings`,
+`pp_sets_deterministic`) match CPython on both `cmp.sh` builds; `pp_star_refused` is refused by name
+(`with the keyword argument **`). Known limits (documented in RESULTS.md): no dataclass /
+OrderedDict / Counter / defaultdict / ChainMap / deque / User* / mappingproxy / SimpleNamespace
+dispatch, no `id()`-based recursion text, no long `bytes` / `bytearray` wrapping, and a short
+non-singleton set keeps CPython's per-process hash order.
+
+Added `AIL_CURRENT/test_ail_std_pprint.py` (registered through `tests.d/test_ail_std_pprint.txt`),
+ran `test_ail_std_pprint`, `test_ail_genlib`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`, and refreshed the manifest.
+
+## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
+
+Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
+`min(4, cpu_count)` workers; `AIL_FE_JOBS=N` chooses N (1 forces serial), and Windows, `--debug`,
+native-report builds and separate-link-unit/object builds stay serial. Each worker compiles one
+function (and its clones) with `_one_function_legacy`; the parent replays the generated-name
+requests (`_handled_name`, borrowed-callback pairs, `ail_unwind_`, `_ail_finally_release_`,
+`_ail_frame_cells`) in serial function order, merges each class's `sort_specs`/`heap_specs` in that
+order, substitutes placeholders before IR lowering, then applies the IR and aliasing checks
+serially. Probe-only name requests are discarded, matching the probe's copied cleanup set.
+
+Review follow-up: `AIL_FE_JOBS=N` is now honoured for a program with fewer than 8 functions too
+(the old `nfns < 8` test ran before reading the variable); only the unset default keeps that
+threshold. Units are scheduled longest-first so the largest body does not start last, and a
+conservative work/dominance gate (`_fe_worth_parallel`: at least 400 AST nodes and no function over
+60% of them) keeps a pool from slowing a single-function program; the gate never changes the C.
+`test_ail_fe_jobs` now covers try/finally in class methods and module functions, clone-producing
+int/float call sites, reserved-looking locals (`_handled_boundary`, `_handled_entry`,
+`_ail_frame_cells`) and user functions named like generated helpers (`v__handled_boundary`), plus
+the job-count and gate rules.
+
+`jobs=1` C is unchanged from the base commit on the first 200 `lab/corpus/programs` files and the
+10 `lab/compare/src` tasks. `jobs=4` C is byte-identical to `jobs=1` for the same 200 corpus
+programs and the 10 compare tasks under `PYTHONHASHSEED=0/3/5/random`; the probes in
+`/tmp/probes` (methods, clones, reserved names, collisions, values through arguments/list
+items/attributes/dict values, builder refusal, small and dominant-function programs) agree for all
+seeds and with the base commit. `docs/design/alias_study/trans` is not present in this tree, so that
+part of the acceptance set could not be run.
+
+Median of 3 cold `--no-cache` builds (`AIL_FE_JOBS=1` vs `4`), and peak RSS of the whole process
+tree sampled while the build ran:
+
+| task | serial | parallel | speedup | peak RSS (MiB) |
+| --- | --- | --- | --- | --- |
+| berth_sim | 6.61s | 6.64s | 0.995x | 156 |
+| chain_relax | 1.49s | 1.51s | 0.992x | 113 |
+| echo_pack | 2.34s | 2.10s | 1.111x | 189 |
+| ledger_bin | 2.63s | 2.62s | 1.002x | 139 |
+| rail_transfer | 1.92s | 1.78s | 1.074x | 158 |
+| scar_life | 1.70s | 1.72s | 0.986x | 124 |
+| tally_lang | 2.89s | 2.69s | 1.075x | 210 |
+| term_rank | 2.45s | 2.33s | 1.049x | 200 |
+| ticket_audit | 4.16s | 3.76s | 1.106x | 229 |
+| tree_fold | 3.93s | 3.80s | 1.033x | 232 |
+| **total** | **30.11s** | **28.97s** | **1.039x** | **232** |
+
+The whole-build 1.2x target of the old tree is not reached on this tree: seven of the ten tasks
+are one dominant function (front-end parallelism cannot divide a function) and gcc is a large share
+of the rest, while the signatures fixed point stays serial. What the change does now is gain on the
+balanced multi-function programs and avoid the earlier single-function regressions. Peak RSS stays
+far below 6 GB.
+
+Added `AIL_CURRENT/test_ail_fe_jobs.py` (registered through `tests.d/test_ail_fe_jobs.txt`, shard
+entry updated) and refreshed the manifest. Ran `test_ail_fe_jobs`, `test_ail_build_cache`,
+`test_ail_server`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+## 2026-11-01 -- int(text, base) lowers through the typed IR path (job-i64base1-11011226)
+
+The IR lowering refused `int(text, base)` outside the exact mode, so a Python-syntax function that
+parsed a number kept its whole body on the legacy emitter. `lower.int_text` now evaluates the text
+and base expressions, requires a str first argument (bytes with an explicit base stays on the
+legacy emitter), and in the default int64 mode emits the existing
+`ail_str_to_int_base(text, base)` runtime through a new `str_to_int_base` RTC entry
+(`parts=('STR', 'INTBASE')`). That runtime already implements CPython's `PyLong_FromString` rules:
+ASCII/Unicode whitespace and decimal digits, an optional sign, single underscores, `0x`/`0o`/`0b`
+prefixes for base 0 or a matching explicit base, base 0's leading-zero rule, the catchable
+ValueError messages and the 4300-digit limit. A value outside int64 stops loudly with
+`OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)`, the
+same policy as the other int operations. The exact (`--exact-int`) mode keeps the `tint` parser.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `int_base_smoke`, `int_base_ir`,
+`int_base_typed`, `int_base_rules`, `int_base_shapes`, `int_base_types`, `int_base_main` and
+`int_base_errors_ir` cover every rule above, direct/keyword calls, values and bases through a
+parameter, a list item, an attribute, a dict value and an alias, invalid literals/bases and the
+int64 boundaries; all match CPython. `int_base_overflow_pos`, `_neg`, `_hex` and `_base0` print the
+boundary value and then stop loudly on both builds as intended; the test module's digit-limit case
+matches CPython's caught 4300-digit ValueError. `AIL_IR=verify` plus `AIL_IR_STATS` shows `main` on the `ir` path
+and the kept C contains `ail_str_to_int_base`. The generated C of the 10 `lab/compare/src/*/main.ail`
+tasks is byte-identical to the pre-change baseline (bytes parsing and the general path are
+untouched).
+
+Added `AIL_CURRENT/test_ail_int_base.py` (6 cases) and registered it through
+`AIL_CURRENT/tests.d/test_ail_int_base.txt`; `tools/ci_shards.py --update` placed it and
+`tools/update_manifest.py` refreshed the pins. No new `DIFFERENCES.md` row: the loud overflow is
+the existing int64 policy. Final-state tests: test_ail_int_base, test_ail_pre192,
+test_ail_pre212, test_ail_pre253, test_ail_int64_default, test_ail_ir_s0, test_ail_exc_str,
+test_ail_stdlib_batch1, test_ail_cmp_classname, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+## 2026-11-01 -- covenv2 review: `Path.home()` rejects a `~` result (job-covenv2-11011011)
+
+The review found `Path.home()` printed `~` (also `~/x`, `~~`, `~//`) and exited 0 when HOME
+began with `~`, where CPython's `Path.home()` is `cls("~").expanduser()` and raises
+`RuntimeError: Could not determine home directory.` (exit 1, empty stdout).  pathlower now calls
+a new prelude helper `_ail_pl_home`, which reads `_ail_pp_home()` and raises when the text still
+starts with `~` before normalising it.  Probes over HOME `~`, `~/x`, `~~`, `~//`, `/~`, `.`, `..`,
+`/`, empty and unset, plus `Path.home() / "a"` and f-string uses, match CPython stdout and exit
+code on the default and general builds; the typed path is covered by the new tilde cases in
+`test_ail_covenv`.  The env probes (key present/absent/empty, `or`, `is None`, direct uses) still
+match, and all 10 lab/compare `main.ail` C hashes are byte-identical to base.  `test_ail_covenv`,
+`test_ail_pathlib`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+No new DIFFERENCES row: the result now matches CPython.
+
+## 2026-11-01 -- covenv2: `os.environ.get(key)` without a default and `Path.home()` (job-covenv2-11011011)
+
+`os.environ.get(key)` with no default is now a str-or-None value on the typed path (optlib): a present flag
+and the `_ail_os_hasenv` / `_ail_os_getenv` pair, with the key evaluated once.  `is None`, truth tests,
+`v or default`, `print`/`str`/f-strings, assignments, returns and Optional parameters/calls are built;
+uses that cannot follow the pair keep the old route, and the general path lowers the same call to the
+`_ail_environ_get_or_none` prelude function (`hasenv ? getenv : None`) instead of refusing.  The prelude
+call keeps the key evaluated once without a hoisted temporary, so a key that names a loop variable is
+still read inside the loop (the first cut hoisted it before the `for` and read the variable unbound).
+`Path.home()` is a new `_ail_pp_home` primitive
+(ailpath_core.h), wrapped by pathlower: HOME is used even when empty, otherwise the passwd entry, trailing
+slashes are removed and an empty result is `/`, matching CPython's `os.path.expanduser("~")`.
+
+CPython 3.12 stdout and exit code match on the typed, default and general builds for HOME set/unset/empty,
+key present/absent/empty, `or`, direct `if`/`is None`/`print`/`str`/f-string uses, keys through a
+variable, a list item and an attribute, and env gets inside a loop, a list and a dict.  `test_ail_covenv.py`
+covers them (registered in `tests.d`);
+`test_ail_safetynet`, `test_ail_files`, `test_ail_pathlib`, `test_ail_optional_locals` and
+`test_ail_corpus_findings3` pass.  All 10 lab/compare `main.ail` C hashes are unchanged.  No new
+DIFFERENCES row: both spellings now match CPython.
+## 2026-11-01 -- int64 tests exercise the default again (job-i64tests1-11011225)
+
+`test_ail_pre425`, `test_ail_pre429`, `test_ail_pre433` and `test_ail_overflow_uncatchable`
+still carried `setUpModule` blocks that set `AIL_EXACT_INT=1`, so their int64 expectations never
+ran after ints became 64-bit by default. The exact mark is gone from all four. The int64 cases
+now assert the default behaviour and a separate explicit `AIL_EXACT_INT=1` case keeps the
+CPython-value coverage: pre425 refuses routed wide augmented powers by name at build time and
+compares the same programs with CPython in exact mode; pre429 checks the typed wide `round()`
+loud stop, the forced general path's catchable `OverflowError("integer overflow")`, the build
+refusal of a constant wide round, and CPython equality in exact mode; pre433 keeps the adaptive
+int64 refusal and adds exact-mode builds; overflow_uncatchable tunes its runtime operands through
+`sys.argv` so the default build reaches the overflow instead of refusing the constant, and adds
+one exact-mode equality case. No product code changed.
+
+Added `test_ail_int64_edges` (7 tests) for values only known at run time: power at 2**62,
+-2**63, 0**0, negative exponents, 0/1/-1 bases, wide 2**63/-2**64/10**19, and round just inside
+and just outside int64 (nan/inf kept), on the typed default, its IR arm, the forced general path
+and exact mode. Registered through `tests.d/test_ail_int64_edges.txt`.
+## 2026-11-01 -- resident compile server on by default, started in the background (job-srvdef1-11011011)
+
+The resident compile server (`AIL_CURRENT/ail_server.py`) is now the default on POSIX with
+`SO_PEERCRED`; only an explicit `AIL_SERVER=0` (or `off`/`false`/`no`) turns it off, and Windows
+keeps it off. `ail_chatgpt.py` takes the same default at its entry. The first build no longer waits
+for a server: a detached starter holds one per-user lock (`<runtime dir>/start.lock`; the runtime
+directory is mode 0700, never inside a repository), starts the server, and the first build compiles
+in-process as before. Later builds connect to the warm server. A build that finds a starter already
+running waits at most 2 s for its socket; a server that takes more than 2 s to answer the start of a
+request, is unreachable, or dies during a build falls back to the in-process path with no extra
+output. The server still exits after `AIL_SERVER_IDLE` seconds (default 600). The identity hash
+covers the whole compiler tree including `python/pkg-v12`, so a source change means a new server.
+Request argv, cwd, umask and the full environment are applied per request: `--exact-int`,
+`AIL_EXACT_INT=1` and the other `AIL_*` knobs are never frozen from the server's start.
+
+Acceptance: built the 10 `lab/compare/src` tasks, the first 100 `lab/corpus/programs` files, and
+`--exact-int` builds of `rail_transfer` and `chain_relax` with the server and with
+`AIL_SERVER=0` (112 builds): return code, concatenated generated C sha256 and executable sha256
+all identical. `rail_transfer`/`chain_relax` exact-int C and exe also match for
+`PYTHONHASHSEED=0..5`. Median of 5 warm vs 5 in-process builds: `chain_relax` without the build
+cache 2.293 s vs 3.047 s; a hello program without the cache 0.368 s vs 0.481 s (with a warm build
+cache the compile itself is already cached: 0.275 s vs 0.282 s).
+
+Probes in `/tmp/probes` (`bash ~/tools/cmp.sh`, default server and `AIL_SERVER=0`):
+`p_srv_arith` (int64 boundaries, negative/zero, pow/mul/mod/div, values through a function),
+`p_srv_routes` (argument, list item, attribute, dict value, aliasing, empty slice/reverse),
+`p_srv_edges` (bool/zero/negative, int64 bounds, empty string, negative indices, dict get/default)
+and `p_srv_functions` (clamps, a counter object, composed arithmetic) all match CPython on both
+builds. The exact-int probe `p_srv_exact` reaches big values through an argument, a list, an
+attribute and a dict; with `PYTHONHASHSEED=1` its generated C and exe sha256 are identical with and
+without the server and its stdout matches CPython.
+
+Tests on the final commit: `test_ail_server`, `test_ail_build_cache`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` with the server on, and `test_ail_build_cache` and
+`test_ail_safetynet` with `AIL_SERVER=0`; all passed with `-j 2`. `tools/update_manifest.py` was run
+and `--check` passed. No new DIFFERENCES rows. The test modules were already registered through
+`AIL_CURRENT/tests.d/`; no `ail_check.py` tuple change.
+## 2026-11-01 -- stdlib heapq: review fixes for merge (job-std_heapq-11011434)
+
+The review found two defects in `_ail_merge`. It now follows CPython's `Lib/heapq.py` merge exactly:
+the heads are kept in a real heap (`_ail_merge_siftup` / `_ail_merge_siftdown` / `_ail_merge_heapify`
+/ `_ail_merge_heapreplace` / `_ail_merge_heappop`) with the list comparison of
+`[key, order * direction, ...]` entries (identity first, then `==`; the order field is consulted only
+for equal keys), and the single-stream fast path relays the remaining values without calling `key`
+again. This fixes the extra key calls / the `ValueError` that CPython never raises after one stream
+is left, and the heap order for `__lt__`-only objects and NaNs. `test_ail_genlib` now covers those
+cases in both directions; the reviewer probes `p_keyraise`, `p_keycalls`, `p_lt_only`, `p_nan`,
+`p_tie`, `p_mutate`, `p_routes` and a new `/tmp/probes/p_merge_edges` (empty/no streams, later key
+error, infinite and mutated streams, identical and distinct NaNs) match CPython on both builds.
+
+## 2026-11-01 -- stdlib heapq: merge on the general path, twelve lab programs (job-std_heapq-11011434)
+
+The new `lab/stdlib/heapq/` programs exercise heappush / heappop / heapify / heappushpop /
+heapreplace, nlargest / nsmallest with `key=`, and merge with `key=` / `reverse=`, plus empty heaps,
+caught IndexError, duplicate keys, classes and struct heaps. Nine built initially (one typed, eight
+general); `heapq.merge` was the shared blocker for the three refused programs. The general path now
+publishes `heapq.merge` through `genlib.py` and `prelude_genlib.py` (`_ail_merge`, with
+`_ail_merge_before` for CPython's key/order comparison): any number of streams, `key=`, `reverse=`,
+empty and infinite inputs, and the earlier stream first on equal keys in both directions. Eleven of
+twelve now build and match CPython 3.12 on stdout and exit status in both `AIL_IR` modes. The last,
+`merge_k_lists.py`, calls `heapq.merge(*rows)`; a starred call argument in general is a separate
+feature and is recorded in `lab/stdlib/heapq/RESULTS.md` with its exact refusal.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `hq_merge_basic` (empty, no streams, one
+stream, duplicates, forward/reverse, tuple keys, equal keys), `hq_merge_routes` (argument, list
+item, attribute, dict value, bound key, infinite `itertools.count` streams), `hq_merge_from`
+(`from heapq import merge` and an alias) and `hq_merge_custom` (class instances with `__lt__`, key
+and reverse); all match CPython. Added `AIL_CURRENT/test_ail_std_heapq.py` (11 lab programs, 2 IR
+modes, stdout and exit code against CPython) and registered it through
+`AIL_CURRENT/tests.d/test_ail_std_heapq.txt`; `test_ail_genlib` gained a 2500-case merge comparison
+with `heapq.merge`, including infinite streams and a non-callable key. Final-state tests with
+`-j 2`: test_ail_std_heapq, test_ail_genlib, test_ail_heapq_bisect, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3, 0 failed. `tools/update_manifest.py` was run and
+`--check` passes; `tools/ci_shards.py --check` exits 0 and reports the new module as unassigned (it is still spread over the shards by name until the next `--update`).
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`

@@ -2158,12 +2158,26 @@ static inline int ail2u_palindrome(ail_obj s) {
 }
 '''
 
+PPID = r'''
+/* ---- identity of a boxed value, for pprint's recursion context (prelude_genlib.py) ---- */
+static inline ail_st ail2q_identity(ail_ctx *cx, ail_obj *out, ail_obj a) {
+    (void)cx;
+    int64_t v;
+    if (a.tag == AIL_T_NONE) v = 0;
+    else if (a.tag == AIL_T_BOOL || a.tag == AIL_T_INT) v = a.i;
+    else if (a.tag == AIL_T_STR) v = (int64_t)(uintptr_t)a.sv.backing + a.sv.off;
+    else v = (int64_t)(uintptr_t)a.o;
+    *out = ail_box_int(v);
+    return AIL_OK;
+}
+'''
+
 FRAGMENTS = {'strpred': STRPRED2, 'slice': SLICE, 'bytes': BYTES, 'bytesfile': BYTESFILE, 'fmt': FMT, 'gen': GEN,
-             'misc': MISC, 'ddict': DDICT, 'attr': ATTR, 'exc': EXC, 'hash': HASH, 'rng': randrt.RNG,
+             'misc': MISC, 'ppid': PPID, 'ddict': DDICT, 'attr': ATTR, 'exc': EXC, 'hash': HASH, 'rng': randrt.RNG,
              'rng_u': randrt.RNG_U,      # rng_u: only under AIL_UNIFIED=1 (unified.py)
              'ba_u': BA_U, 'str_u': STR_U,
              'jsn': jsonbrt.JSN, 'sta': statbrt.STA, 'rex': rebrt.REX}
-ORDER = ['strpred', 'slice', 'bytes', 'bytesfile', 'fmt', 'gen', 'misc', 'ddict', 'attr', 'exc', 'hash', 'rng', 'rng_u', 'ba_u', 'str_u', 'jsn', 'sta', 'rex']
+ORDER = ['strpred', 'slice', 'bytes', 'bytesfile', 'fmt', 'gen', 'misc', 'ppid', 'ddict', 'attr', 'exc', 'hash', 'rng', 'rng_u', 'ba_u', 'str_u', 'jsn', 'sta', 'rex']
 
 GEN_PRELUDE = '''
 class generator:
@@ -2647,6 +2661,7 @@ PRIMS = {
     '_ail_gen_close': ('ail2g_close(cx, &{t}, {a0})', 1, 'gen'),
     '_ail_gen_name': ('ail2g_name(cx, &{t}, {a0})', 1, 'gen'),
     '_ail_stderr_write': ('ail2e_write(cx, &{t}, {a0})', 1, 'misc'),
+    '_ail_pp_identity': ('ail2q_identity(cx, &{t}, {a0})', 1, 'ppid'),
     '_ail_same_class': ('ail2e_same_class(cx, &{t}, {a0}, {a1})', 2, 'misc'),
     '_ail_exc_name': ('ail2e_exc_name(cx, &{t}, {a0})', 1, 'misc'),
     '_ail_exc_cause_is': ('ail2e_cause_is(cx, &{t}, {a0}, {a1})', 2, 'misc'),

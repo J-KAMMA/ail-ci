@@ -64,6 +64,15 @@ def _ail_pl_norm(raw: str) -> str:
     return out
 
 
+def _ail_pl_home() -> str:
+    # Path.home() is cls("~").expanduser(): posixpath.expanduser("~") gives the HOME text, and
+    # Path.expanduser raises when that text still starts with "~" (HOME="~", "~/x", ...).
+    h = _ail_pp_home()
+    if h.startswith("~"):
+        raise RuntimeError("Could not determine home directory.")
+    return _ail_pl_norm(h)
+
+
 def _ail_pl_joins(a: str, b: str) -> str:
     return _ail_pl_norm(_ail_pjoin(a, b))
 
