@@ -603,7 +603,7 @@ class _Lowerer(ast.NodeTransformer):
                     self.refuse(e, 'Path.%s() takes no arguments' % f.attr)
                 if f.attr == 'cwd':
                     return self.at(self.call('_ail_os_getcwd'), e)
-                return self.at(self.call('_ail_pl_norm', self.call('_ail_pp_home')), e)
+                return self.at(self.call('_ail_pl_home'), e)
             if isinstance(f, ast.Attribute) and f.attr in _P_METHODS and self.isP(f.value):
                 return self.at(self.p_method(e, f.attr), e)
         elif isinstance(e, ast.BinOp) and isinstance(e.op, ast.Div):

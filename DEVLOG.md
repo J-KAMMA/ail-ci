@@ -1,3 +1,17 @@
+## 2026-11-01 -- covenv2 review: `Path.home()` rejects a `~` result (job-covenv2-11011011)
+
+The review found `Path.home()` printed `~` (also `~/x`, `~~`, `~//`) and exited 0 when HOME
+began with `~`, where CPython's `Path.home()` is `cls("~").expanduser()` and raises
+`RuntimeError: Could not determine home directory.` (exit 1, empty stdout).  pathlower now calls
+a new prelude helper `_ail_pl_home`, which reads `_ail_pp_home()` and raises when the text still
+starts with `~` before normalising it.  Probes over HOME `~`, `~/x`, `~~`, `~//`, `/~`, `.`, `..`,
+`/`, empty and unset, plus `Path.home() / "a"` and f-string uses, match CPython stdout and exit
+code on the default and general builds; the typed path is covered by the new tilde cases in
+`test_ail_covenv`.  The env probes (key present/absent/empty, `or`, `is None`, direct uses) still
+match, and all 10 lab/compare `main.ail` C hashes are byte-identical to base.  `test_ail_covenv`,
+`test_ail_pathlib`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+No new DIFFERENCES row: the result now matches CPython.
+
 ## 2026-11-01 -- covenv2: `os.environ.get(key)` without a default and `Path.home()` (job-covenv2-11011011)
 
 `os.environ.get(key)` with no default is now a str-or-None value on the typed path (optlib): a present flag

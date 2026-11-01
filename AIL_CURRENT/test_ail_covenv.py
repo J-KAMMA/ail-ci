@@ -210,6 +210,15 @@ class Covenv(unittest.TestCase):
         cases["double_root"] = {"HOME": "//covenv-home"}
         cases["triple_root"] = {"HOME": "///covenv-home"}
         cases["relative"] = {"HOME": "covenv-relative-home"}
+        cases["root"] = {"HOME": "/"}
+        cases["dot"] = {"HOME": "."}
+        cases["dotdot"] = {"HOME": ".."}
+        cases["spaces"] = {"HOME": "/tmp/covenv home"}
+        cases["tilde"] = {"HOME": "~"}
+        cases["tilde_sub"] = {"HOME": "~/x"}
+        cases["tilde_double"] = {"HOME": "~~"}
+        cases["tilde_trailing"] = {"HOME": "~//"}
+        cases["not_tilde"] = {"HOME": "/~"}
         for label, run_env in cases.items():
             for mode in ("typed", "general"):
                 with self.subTest(home=label, mode=mode):
