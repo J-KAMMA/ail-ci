@@ -12,7 +12,8 @@ from a fresh interpreter of the same build at compile time; it stays constant be
 operations that invalidate it (`register`, `update_abstractmethods`) are refused by name.
 `test_ail_std_abc` gains the metaclass, cache-token and concrete-arity regressions and passes on
 both `AIL_IR` modes. `lab/stdlib/abc/RESULTS.md` is updated, including the corrected `lab/compare`
-count (five build byte-identically, five fail identically on both).
+count for the reviewer's base (five build byte-identically, five fail identically on both); against
+the branch's previous commit all ten `main.ail` tasks build and their C is byte-identical (10/10).
 
 ## 2026-11-01 -- abc review fixes: plain hierarchies, non-def overrides, guard order (job-std_abc-11020026)
 

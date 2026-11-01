@@ -110,5 +110,7 @@ concrete subclass's arity error is asserted to be a named refusal. Probes in `/t
 `/tmp/rprobes2/{arity_concrete,arity_custom_own_init,routes_arity,cache_value,meta_sub}.py` cover
 sorted messages, inheritance, overrides, all abstract decorators, attribute spellings, empty ABCs,
 wrong arities, and classes reached as an alias, a list item, a dict value and a function argument,
-on both `cmp.sh` builds. The ten `lab/compare` tasks were rebuilt with the base tree and the changed
-compiler: the five that build are byte-identical; the other five fail identically on both.
+on both `cmp.sh` builds. The ten `lab/compare/src/*/main.ail` tasks were built with the branch's
+previous commit and with this compiler: all ten build and their generated `program.c` is
+byte-identical (10/10). Against the reviewer's earlier base tree five build and five fail
+identically on both.
