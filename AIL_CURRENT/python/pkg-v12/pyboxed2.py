@@ -12911,44 +12911,147 @@ def _genexp_bound_names(node):
     return out
 
 
-def _scope_bound_names(nodes):
-    """Names bound in one scope (a function body or the module body), not in a nested def,
-    class, lambda or comprehension (those have a scope of their own)."""
-    out = set()
+def _scope_bindings(nodes):
+    """(name, node) for each name bound in one scope (a function body or the module body).
+
+    A nested def/class binds its own name but its body is a different scope.  A walrus inside
+    a comprehension binds in the containing scope, but the comprehension's for-targets do not.
+    """
+    out = []
 
     def visit(n):
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            out.add(n.name)
+            out.append((n.name, n))
             return
-        if isinstance(n, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+        if isinstance(n, ast.Lambda):
+            return
+        if isinstance(n, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            visit_comp(n)
             return
         if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
-            out.add(n.id)
+            out.append((n.id, n))
         elif isinstance(n, (ast.Import, ast.ImportFrom)):
             for a in n.names:
                 if a.name != '*':
-                    out.add(a.asname or (a.name if isinstance(n, ast.ImportFrom) else a.name.split('.')[0]))
+                    out.append((a.asname or (a.name if isinstance(n, ast.ImportFrom)
+                                             else a.name.split('.')[0]), n))
             return
         elif isinstance(n, ast.ExceptHandler) and n.name:
-            out.add(n.name)
+            out.append((n.name, n))
         elif isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
-            out.add(n.name)
+            out.append((n.name, n))
         elif isinstance(n, ast.MatchMapping) and n.rest:
-            out.add(n.rest)
+            out.append((n.rest, n))
         for child in ast.iter_child_nodes(n):
             visit(child)
+
+    def visit_comp(n):
+        if isinstance(n, ast.NamedExpr) and isinstance(n.target, ast.Name):
+            out.append((n.target.id, n.target))
+            visit(n.value)
+            return
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            return
+        for child in ast.iter_child_nodes(n):
+            visit_comp(child)
 
     for n in nodes:
         visit(n)
     return out
 
 
-def _function_locals(fn):
+def _scope_bound_names(nodes):
+    return {name for name, _ in _scope_bindings(nodes)}
+
+
+def _function_params(fn):
     params = {a.arg for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs}
     for extra in (fn.args.vararg, fn.args.kwarg):
         if extra is not None:
             params.add(extra.arg)
-    return params | _scope_bound_names(fn.body)
+    return params
+
+
+def _own_declarations(fn):
+    """The names `fn` itself declares global/nonlocal, not those of a nested scope."""
+    out = set()
+
+    def visit(n):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            return
+        if isinstance(n, (ast.Global, ast.Nonlocal)):
+            out.update(n.names)
+        for child in ast.iter_child_nodes(n):
+            visit(child)
+
+    for stmt in fn.body:
+        visit(stmt)
+    return out
+
+
+def _function_locals(fn):
+    return _function_params(fn) | (_scope_bound_names(fn.body) - _own_declarations(fn))
+
+
+def _nested_nonlocal(fn, name):
+    """True if a function or class nested in `fn` declares `name` nonlocal: it can write fn's cell."""
+    def scan(n):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            return any(isinstance(m, ast.Nonlocal) and name in m.names for m in ast.walk(n))
+        return any(scan(child) for child in ast.iter_child_nodes(n))
+    return any(scan(stmt) for stmt in fn.body)
+
+
+def _definitely_binds(stmt, name):
+    """True if `stmt`, when it completes normally, definitely binds `name` in the current scope."""
+    if isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        targets = stmt.targets if isinstance(stmt, ast.Assign) else [stmt.target]
+        return any(name in _scope_bound_names([t]) for t in targets)
+    if isinstance(stmt, (ast.Import, ast.ImportFrom)):
+        return name in _scope_bound_names([stmt])
+    if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        return stmt.name == name
+    return False
+
+
+def _definitely_bound(fn, name, node, parents):
+    """True if `name` is certainly bound when `node` runs, so passing its value at creation is valid.
+
+    Walks the statements that contain `node` and looks only at preceding siblings that always
+    run once control reaches the point (a plain assignment, import or def).  A binding under
+    `if`/`try`/`while` is not trusted, so a possibly unbound local keeps the by-name refusal.
+    """
+    if name in _function_params(fn):
+        return True
+    cur = fn
+    target = node
+    while True:
+        child = target
+        while parents.get(child) is not cur:
+            child = parents.get(child)
+            if child is None:
+                return False
+        if isinstance(cur, ast.stmt):
+            for field in ('body', 'orelse', 'finalbody'):
+                seq = getattr(cur, field, None)
+                if isinstance(seq, list) and child in seq:
+                    for sib in seq[:seq.index(child)]:
+                        if _definitely_binds(sib, name):
+                            return True
+                    break
+            if isinstance(cur, (ast.For, ast.AsyncFor)) and child in (cur.body or []) \
+                    and name in _scope_bound_names([cur.target]):
+                return True
+            if isinstance(cur, ast.With) and child in (cur.body or []) \
+                    and any(item.optional_vars is not None
+                            and name in _scope_bound_names([item.optional_vars])
+                            for item in cur.items):
+                return True
+            if isinstance(cur, ast.ExceptHandler) and child in (cur.body or []) and cur.name == name:
+                return True
+        if child is node:
+            return False
+        cur = child
 
 
 def _module_bound_names(tree):
@@ -13020,6 +13123,7 @@ def _lazy_genexp_functions(tree):
         chain = []
         p = parents.get(node)
         class_body = False
+        crossed_scope = False
         while p is not None and not isinstance(p, ast.Module):
             if isinstance(p, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 chain.append(p)
@@ -13028,8 +13132,12 @@ def _lazy_genexp_functions(tree):
                 # alone; one inside a method has the method as its enclosing scope.
                 class_body = not chain
                 break
+            elif isinstance(p, (ast.Lambda, ast.ListComp, ast.SetComp, ast.DictComp)):
+                # A lambda or comprehension has its own scope, so a name read here may be a
+                # variable of that scope, not of the enclosing function we can pass by value.
+                crossed_scope = True
             p = parents.get(p)
-        if class_body:
+        if class_body or crossed_scope:
             continue
         bound = _genexp_bound_names(node)
         body_roots = [node.elt]
@@ -13047,27 +13155,46 @@ def _lazy_genexp_functions(tree):
                   if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)} - bound
         local_sets = [(fn, _function_locals(fn)) for fn in chain]
         captures = []
+        unsafe = None
         for name in sorted(loaded):
             owner = next((fn for fn, locals_ in local_sets if name in locals_), None)
             if owner is not None:
-                # A name the enclosing function rebinds after the generator is made would be
-                # read from a different cell in CPython; keep the by-name refusal for that.
-                if any(isinstance(n, ast.Name) and n.id == name and isinstance(n.ctx, (ast.Store, ast.Del))
-                       and (getattr(n, 'lineno', 0) or 0) > (node.end_lineno or node.lineno)
-                       for n in ast.walk(owner)):
-                    refusal = Unsupported(
-                        'a generator expression saved as a value reads the local %r, which the '
-                        'enclosing function binds again after the generator is made; CPython reads '
-                        'the new value when the body runs, and this compiler would pass the old one.\n'
-                        '  write instead: pass the value in at consumption time, or build a list '
-                        'comprehension instead of a generator expression' % name)
-                    refusal.source_line = getattr(node, 'lineno', None)
-                    raise refusal
+                # CPython reads the local from its cell when the body runs.  Passing the value at
+                # creation is only right when the name is certainly bound then and is not bound
+                # again anywhere in the enclosing scope (including same-line stores, `del`, a
+                # nested function's `nonlocal` write, and a conditional binding that may leave it
+                # unbound).  Everything else keeps the by-name refusal.
+                reason = None
+                bindings = [(nm, b) for nm, b in _scope_bindings(owner.body) if nm == name]
+                if _nested_nonlocal(owner, name):
+                    reason = 'a nested function rebinds it through `nonlocal`'
+                elif any(isinstance(b, ast.ExceptHandler) for _, b in bindings):
+                    reason = 'it is bound by an `except ... as` clause, which CPython unbinds when the handler exits'
+                elif any(isinstance(b, ast.Name) and isinstance(b.ctx, ast.Del) for _, b in bindings):
+                    reason = 'the enclosing scope deletes it'
+                elif not _definitely_bound(owner, name, node, parents):
+                    reason = 'it may be unbound when the generator is made'
+                else:
+                    pos = (getattr(node, 'lineno', 0) or 0, getattr(node, 'col_offset', 0) or 0)
+                    if any((getattr(b, 'lineno', 0) or 0, getattr(b, 'col_offset', 0) or 0) >= pos
+                           for _, b in bindings):
+                        reason = 'the enclosing function binds it again after the generator is made'
+                if reason is not None:
+                    unsafe = (name, reason)
+                    break
                 captures.append(name)
             elif name not in module_bound and name not in builtin_names:
                 # Not defined anywhere: CPython raises NameError when the body runs, not at
                 # creation, so leave it as a global read in the generated function.
                 pass
+        if unsafe is not None:
+            refusal = Unsupported(
+                'a generator expression saved as a value reads the local %r, which %s; CPython '
+                'reads the cell when the body runs, and this compiler would pass the value at '
+                'creation.\n  write instead: pass the value in at consumption time, or build a '
+                'list comprehension instead of a generator expression' % unsafe)
+            refusal.source_line = getattr(node, 'lineno', None)
+            raise refusal
         if not _genexp_can_raise(node, user_functions, safe_classes, real_next):
             continue
 

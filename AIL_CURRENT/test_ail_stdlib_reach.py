@@ -4,8 +4,10 @@ A generator expression used as a value was refused by both builds.  The general 
 it to a real module-level generator function, so the body runs lazily (outer iterable at the call,
 element and exception at next()), and the default build routes such a program there.  Every case
 below is compared with CPython 3.12 on the default and the forced-general build.  A generator
-inside a class body, a nested generator expression, a walrus inside one, a captured local rebound
-after creation, and a constructor of a class defined by the program keep the by-name refusal.
+inside a class body, a nested generator expression, a walrus inside one, a captured local that is
+rebound after creation (on the same line, through a nested function's `nonlocal` write, or by a
+later store), a captured local that may be unbound, and a constructor of a class defined by the
+program keep the by-name refusal.
 """
 import os
 import subprocess
@@ -116,6 +118,82 @@ NESTED = r'''def main():
 main()
 '''
 
+SAME_LINE = r'''def main():
+    x = 1; g = (10 // x for _ in [0]); x = 2; print(list(g))
+main()
+'''
+
+NONLOCAL = r'''def main():
+    x = 1
+    def bump():
+        nonlocal x
+        x = 2
+    g = (10 // x for _ in [0])
+    bump()
+    print(list(g))
+main()
+'''
+
+UNBOUND = r'''def main():
+    if False:
+        x = 3
+    g = (10 // x for _ in [0])
+    print("made")
+    try:
+        print(list(g))
+    except UnboundLocalError:
+        print("unbound")
+main()
+'''
+
+DELETED_BEFORE = r'''def main():
+    x = 1
+    del x
+    g = (10 // x for _ in [0])
+    print("made")
+    try:
+        print(list(g))
+    except NameError:
+        print("nameerror")
+main()
+'''
+
+EXCEPT_NAME = r'''def main():
+    try:
+        raise ValueError(3)
+    except ValueError as x:
+        g = (10 // x for _ in [0])
+    print("made")
+    try:
+        print(list(g))
+    except NameError:
+        print("nameerror")
+main()
+'''
+
+SAME_LINE_BEFORE = r'''def main():
+    x = 1; g = (10 // x for _ in [0]); print(list(g))
+main()
+'''
+
+PARAM_CAPTURE = r'''def make(x):
+    return (10 // x for _ in [0])
+
+
+def main():
+    print(list(make(2)))
+    print(list(make(-3)))
+main()
+'''
+
+NESTED_READ = r'''def main():
+    x = 2
+    def reader():
+        return list((10 // x for _ in [0]))
+    print(reader())
+main()
+'''
+
 
 def _cpython(directory, name, text):
     src = Path(directory) / (name + '_cpython.py')
@@ -172,6 +250,22 @@ class StdlibReachTests(unittest.TestCase):
     def test_rebound_capture_and_nested_generator_refused(self):
         self.refused('rebound', REBOUND)
         self.refused('nested', NESTED)
+
+    def test_same_line_rebound_capture_refused(self):
+        self.refused('same_line', SAME_LINE)
+
+    def test_nonlocal_rebound_capture_refused(self):
+        self.refused('nonlocal', NONLOCAL)
+
+    def test_possibly_unbound_capture_refused(self):
+        self.refused('unbound', UNBOUND)
+        self.refused('deleted_before', DELETED_BEFORE)
+        self.refused('except_name', EXCEPT_NAME)
+
+    def test_stable_captures_match(self):
+        self.check('same_line_before', SAME_LINE_BEFORE)
+        self.check('param_capture', PARAM_CAPTURE)
+        self.check('nested_read', NESTED_READ)
 
 
 if __name__ == '__main__':

@@ -64,10 +64,14 @@ lowering also keeps the generated C of the ten `lab/compare` tasks byte-identica
 every task and both builds that build).
 
 Still refused by name: a generator expression directly in a class body, a nested generator
-expression, a walrus inside one, a captured local rebound after creation, and a generator
-expression that calls a constructor of a class defined by the program (moving that call
-into the generated function changed the general path's class resolution). The diagnostics
-for those are unchanged or name the narrower construct.
+expression, a walrus inside one, a captured local rebound after creation (including a same-line
+store and a nested function's `nonlocal` write), a captured local that may be unbound when the
+generator is made, and a generator expression that calls a constructor of a class defined by the
+program (moving that call into the generated function changed the general path's class
+resolution). When `nestfn` would create the nested-function environment only after a saved
+generator that reads a shared name, it leaves the function as written, so the compilers refuse
+that lazy read by name instead of passing the old value. The diagnostics for those are unchanged
+or name the narrower construct.
 
 ## Reasons after the change
 

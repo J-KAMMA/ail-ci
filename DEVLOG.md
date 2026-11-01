@@ -1,3 +1,28 @@
+## 2026-11-01 -- stdlib2 review fixes: unsafe captures of a saved generator expression (job-stdlib2-11011233)
+
+The reviewer found three new acceptances where `_lazy_genexp_functions` passed a captured local by
+value but CPython reads the cell when the body runs: a store on the same source line, a `nonlocal`
+store in a nested function, and a possibly-unbound local. A capture is now accepted only when it is
+a parameter or a definitely-bound preceding assignment and nothing binds it at or after the
+generator's position; a binding in a conditional branch is not trusted, and a nested `nonlocal`
+declaration, `del`, walrus in another comprehension, or later store refuses by name. `nestfn` also
+leaves an enclosing function as written when the nested-function environment would be created
+after a saved generator or lambda that reads a shared name (the environment used to be made too
+late for that lazy read); the compilers then refuse it by name instead of passing the old value.
+Safe captures (a parameter, a plain local before creation, a nested function that only reads)
+still build and match CPython.
+
+The census is unchanged: the 14 modules that built still build, and the nine generator-expression
+modules still move to the same next blockers (rechecked both builds). Generated C of the seven
+building `lab/compare` tasks is byte-identical to `fc01930` on both builds; the three refusing
+tasks keep rc 3. Probes in `/tmp/probes` (both builds, `cmp.sh`): `p_same_line`, `p_nonlocal`,
+`p_unbound`, `p_delete`, `p_arg_rebind`, `p_list_rebind`, `p_attr_rebind`, `p_dict_rebind`,
+`p_walrus_other`, `p_outer_rebind`, `p_nested_nonlocal_deep`, `p_while_rebind`,
+`p_nonlocal_container` are refused by name; `p_same_line_before`, `p_param`, `p_local_safe`,
+`p_nested_read`, `p_loop_before`, `p_global_late`, `p_mutate_alias`, `p_empty`,
+`p_default_capture`, `p_nonlocal_after`, `p_nonlocal_append`, `p_lambda_nonlocal` match CPython.
+Added those cases to `test_ail_stdlib_reach.py`.
+
 ## 2026-11-01 -- stdlib2: saved generator expressions; stdlib reach census (job-stdlib2-11011233)
 
 Built `import X; print("ok")` for the 176 top-level pure-Python modules of the installed CPython
