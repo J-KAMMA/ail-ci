@@ -82,6 +82,11 @@ def comp_early_arg(n: int) -> list[str]:
     return xs
 
 
+def big_int_comp(n: int) -> list[int]:
+    xs: list[int] = [i for i in range(n)]
+    return xs
+
+
 def stopped() -> list[str]:
     xs: list[str] = []
     for i in range(100000000000000000):
@@ -153,6 +158,8 @@ def main() -> int:
         comp_early_arg(1000000000000)
     except ValueError:
         print("comp-caught-arg")
+    big = big_int_comp(5000000)
+    print("big:" + str(len(big)) + ":" + str(big[4999999]))
     a = gen(6)
     b = a
     print(both(a, b))

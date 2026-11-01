@@ -1494,12 +1494,15 @@ class Lowering(TextLowering):
                 lo, hi = self.slice_bounds(slice_of, hi)
             nargs = 1
         if reserve is not None and nargs < 3 and not g.ifs:
-            # one allocation for a comprehension of known length (the legacy path reserves too),
-            # capped so a huge bound cannot allocate before an early exception
+            # one allocation for a comprehension of known length (the legacy path reserves too).
+            # Only list[str] is capped so a huge bound cannot allocate before an early exception;
+            # list[int]/list[float] keep the exact reserve so a large comprehension does not realloc.
             trip = self.b.value('sub', [hi, lo], I.I64, {'mode': 'nsw'})
-            limit = self.const(I.I64, _LIST_RESERVE_LIMIT)
-            below = self.b.value('cmp.lt', [trip, limit], I.I1)
-            self.b.emit('list.reserve', [reserve, self.b.value('select', [below, trip, limit], I.I64)])
+            if tagged:
+                limit = self.const(I.I64, _LIST_RESERVE_LIMIT)
+                below = self.b.value('cmp.lt', [trip, limit], I.I1)
+                trip = self.b.value('select', [below, trip, limit], I.I64)
+            self.b.emit('list.reserve', [reserve, trip])
         index = I.Value(I.I64, hint=name if over_range else 'k')
         body = I.Region([index])
 

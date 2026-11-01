@@ -19241,9 +19241,12 @@ def _listcomp_into_temp(node, ctx):
             and simple.fullmatch(lo) and simple.fullmatch(n)):
         # A huge range bound must not force a huge allocation before an early exception: cap the
         # one-shot reserve exactly like `_append_loop_reserve` (a larger list still grows by
-        # doubling from here, so only the preallocation is bounded).
+        # doubling from here, so only the preallocation is bounded). Only the push-based list[str]
+        # path is capped: the indexed list[int]/list[float] path below stores directly into
+        # `.p[n++]` and depends on the reserve matching the trip count exactly.
         trip = '(%s) - (%s)' % (n, lo)
-        sized = '(%s) < %d ? (%s) : %d' % (trip, _LIST_RESERVE_LIMIT, trip, _LIST_RESERVE_LIMIT)
+        sized = ('(%s) < %d ? (%s) : %d' % (trip, _LIST_RESERVE_LIMIT, trip, _LIST_RESERVE_LIMIT)
+                 if kind == SLIST else trip)
         head = '%s_reserve(&%s, %s); %s%s' % (
             'ail_flist' if kind == FLIST else 'ail_slist' if kind == SLIST else 'ail_list', c, sized,
             '\n#pragma omp simd\n' if indexed and _listcomp_simd_safe(node.elt, ctx) else '', head)

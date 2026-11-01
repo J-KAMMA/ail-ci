@@ -1,3 +1,18 @@
+## 2026-11-01 -- mem1 review: cap only the list[str] comprehension reserve (job-mem1-11020654)
+
+The review found that the previous fix capped every comprehension reserve, which broke the legacy
+emitter's indexed `list[int]`/`list[float]` path: it skips the push capacity check and stores
+directly into `.p[n++]`, relying on the reserve matching the trip count, so a 32,000,000-element
+comprehension wrote past a 2^22 buffer and exited 139. The cap also forced doubling reallocs for
+large legitimate `list[int]` comprehensions, raising peak RSS (~+12 MiB on a 32M one). Both emitters
+now cap only the push-based `list[str]` comprehension reserve; `list[int]`/`list[float]` keep the
+exact reserve, so the pre-existing huge-bound/early-exception case for those types is unchanged
+(CPython/base also fail it). Added a 5,000,000-element `list[int]` comprehension case to
+`test_ail_slist_reserve` to keep the indexed path exact. Probes p1/p2 (huge `list[str]` bound),
+p4/p5 (empty range, dict/list item), p6/p7 (4,194,305 and 32,000,000 `list[int]`) match CPython on
+the default and general builds and typed AIL_IR=0/1; p3 remains the known pre-existing `list[int]`
+huge-bound failure.
+
 ## 2026-11-01 -- mem1 review: cap the comprehension reserve too (job-mem1-11020654)
 
 The review found the new `list[str]` comprehension reserve was uncapped: `[boom(i) for i in

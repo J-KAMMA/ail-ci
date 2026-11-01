@@ -91,11 +91,14 @@ All in `AIL_CURRENT/python/pkg-v12`; no task source changed.
    is not recognised), whose target was emptied immediately
    before it, and whose body appends unconditionally -- no `break`/`continue`/`return`/`raise`,
    no `if`/loop/`try`/`with`/`assert`, and the append is a whole statement (also for `list[int]`
-   and `list[float]`).  Both the append-loop and the comprehension reserves are capped at 2^22
-   elements, so a range whose body leaves early through an exception cannot force a huge
-   allocation before it runs; a longer result still grows by doubling from the cap.
+   and `list[float]`).  The append-loop reserve and the `list[str]` comprehension reserve are
+   capped at 2^22 elements, so a range whose body leaves early through an exception cannot force
+   a huge allocation before it runs; a longer result still grows by doubling from the cap.
+   `list[int]`/`list[float]` comprehensions keep the exact reserve, because the legacy indexed
+   path stores directly into the reserved capacity and a large one must not realloc.  The
+   pre-existing huge-bound/early-exception case for those types is unchanged.
    `ir/lower.py`/`ir/emit_c.py` add the same `list.reserve` operation to the IR for
-   comprehensions, with the same cap.
+   comprehensions, capped the same way for `list[str]` only.
 2. `pyfunc.py` and `ir/lower.py`: a `list[str]` local is released at its last use, exactly like the
    numeric-list path.  This is what turns the old three simultaneous spines into one.
 
