@@ -27,6 +27,7 @@ PRIMS = {
     '_ail_rg_sample': ('ail2r_sample(cx, &{t}, {a0}, {a1}, {a2})', 3),
     '_ail_rg_uniform': ('ail2r_uniform(cx, &{t}, {a0}, {a1}, {a2})', 3),
     '_ail_rg_gauss': ('ail2r_gauss(cx, &{t}, {a0}, {a1}, {a2})', 3),
+    '_ail_rg_normal': ('ail2r_normal(cx, &{t}, {a0}, {a1}, {a2})', 3),
     '_ail_rg_expo': ('ail2r_expo(cx, &{t}, {a0}, {a1})', 2),
     '_ail_rg_tri': ('ail2r_tri(cx, &{t}, {a0}, {a1}, {a2}, {a3})', 4),
 }
@@ -165,7 +166,7 @@ static inline ail_st ail2r_bits(ail_ctx *cx, ail_obj *out, ail_obj L, ail_obj k)
     if ((st = ail2r_need_int(cx, k)) != AIL_OK) return st;
     if (k.i < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "number of bits must be non-negative");
     if (k.i == 0) { *out = ail_box_int(0); return AIL_OK; }
-    if (k.i > 62) return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "getrandbits: more than 62 bits needs integers beyond 64 bits");
+    if (k.i > 63) return ail_raise_c(cx, AIL_B_RUNTIMEERROR, "getrandbits: more than 63 bits needs integers beyond 64 bits");
     *out = ail_box_int((int64_t)ail2r_getbits(p, (int)k.i));
     return AIL_OK;
 }
@@ -308,6 +309,22 @@ static inline ail_st ail2r_gauss(ail_ctx *cx, ail_obj *out, ail_obj L, ail_obj m
     }
     volatile double scaled = z * ds;
     *out = ail_box_float(cx, dm + scaled);
+    return AIL_OK;
+}
+static inline ail_st ail2r_normal(ail_ctx *cx, ail_obj *out, ail_obj L, ail_obj mu, ail_obj sigma) {
+    ail_obj *p; ail_st st = ail2r_state(cx, L, &p); if (st != AIL_OK) return st;
+    double m, s;
+    if ((st = ail2r_need_num(cx, mu, &m)) != AIL_OK) return st;
+    if ((st = ail2r_need_num(cx, sigma, &s)) != AIL_OK) return st;
+    double u1, u2, z, zz;
+    do {
+        u1 = ail2r_rand(p);
+        u2 = 1.0 - ail2r_rand(p);
+        z = 1.7155277699214135 * (u1 - 0.5) / u2;
+        zz = z * z / 4.0;
+    } while (zz > -log(u2));
+    volatile double scaled = z * s;
+    *out = ail_box_float(cx, m + scaled);
     return AIL_OK;
 }
 static inline ail_st ail2r_expo(ail_ctx *cx, ail_obj *out, ail_obj L, ail_obj lambd) {

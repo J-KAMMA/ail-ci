@@ -147,8 +147,9 @@ def binds(tree, name):
     return False
 
 
-RANDOM_NOTE = ('random is built for seed(<int>), random, randint, randrange, uniform, gauss, choice (a list), '
-               'shuffle (a list) and sample (a list): CPython 3.12\'s MT19937, bit for bit')
+RANDOM_NOTE = ('random is built for seed(<int>), random, randint, randrange, uniform, gauss, normalvariate, '
+               'getrandbits, choice (a list), shuffle (a list) and sample (a list): CPython 3.12\'s MT19937, '
+               'bit for bit')
 
 
 class Lib3(iterlower._Lower):
@@ -263,7 +264,7 @@ class Lib3(iterlower._Lower):
             if call.args or call.keywords:
                 refuse(call, 'random.random() takes no arguments')
             return self.at(call, _call(_name('_ail_rand_random')))
-        if attr in ('uniform', 'gauss'):
+        if attr in ('uniform', 'gauss', 'normalvariate'):
             if attr == 'uniform':
                 got = self.args_of(call, ['a', 'b'], what=what)
                 if set(got) != {'a', 'b'}:
@@ -272,7 +273,7 @@ class Lib3(iterlower._Lower):
             else:
                 got = self.args_of(call, ['mu', 'sigma'], what=what)
                 if set(got) != {'mu', 'sigma'}:
-                    refuse(call, 'random.gauss(mu, sigma) takes both arguments (the defaults are not built)')
+                    refuse(call, 'random.%s(mu, sigma) takes both arguments (the defaults are not built)' % attr)
                 ordered = [got['mu'], got['sigma']]
             self.rand_arg_check(call, what)
             return self.at(call, _call(_name('_ail_rand_' + attr), *ordered))
@@ -296,6 +297,12 @@ class Lib3(iterlower._Lower):
                     args = [got['start'], got['stop'], got['step'], num(3)]
             self.rand_arg_check(call, what)
             return self.at(call, _call(_name('_ail_rand_range'), *args))
+        if attr == 'getrandbits':
+            got = self.args_of(call, ['k'], what=what)
+            if set(got) != {'k'}:
+                refuse(call, 'random.getrandbits(k) takes one argument')
+            self.rand_arg_check(call, what)
+            return self.at(call, _call(_name('_ail_rand_getrandbits'), got['k']))
         if attr == 'choice':
             got = self.args_of(call, ['seq'], what=what)
             seq = got.get('seq')

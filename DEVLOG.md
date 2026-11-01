@@ -1,3 +1,26 @@
+## 2026-11-01 -- stdlib random coverage: real programs (job-std_random-11011523)
+
+Added 12 realistic `random` programs under `lab/stdlib/random/`. In the default build, 11 build and
+print CPython 3.12's stdout and exit status; `secure_token.py` remains a named refusal because
+`random.SystemRandom` needs an OS-entropy source (recorded as a follow-up with the exact text in
+`lab/stdlib/random/RESULTS.md`). The compiler/runtime/prelude changes were not program workarounds:
+
+* `random.normalvariate(mu, sigma)` is built on the typed path (`cruntime.py`, `stdlib3.py`,
+  `pyfunc.py`) and the general path (`prelude_random_boxed.py`, `randrt.py`), using CPython 3.12's
+  ratio-of-uniforms loop.
+* `random.getrandbits(k)` is built on the typed path; `k < 0` is CPython's `ValueError`, `k == 0`
+  returns 0 without a draw, and `k <= 63` matches CPython (ints above 63 bits are the declared
+  int64 limit and stop loudly).
+* `choices` accepts keyword-only `cum_weights=` on both paths, with CPython's `TypeError` for both
+  weight forms, the population-length `ValueError`, and the zero/negative/non-finite total errors.
+
+The generated C of all 10 `lab/compare/src/*/main.ail` tasks is byte-identical before/after
+(`--debug-dir` `program.c`, 10/10 same). Every passing program also matches CPython when forced
+through the general path (`AIL_UNIFIED_FORCE=1`) and, where it builds, the typed path
+(`AIL_NO_GENERAL=1`). `test_ail_std_random.py` pins the 11 programs plus the new feature paths;
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and the targeted random tests
+were run on the final commit.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use

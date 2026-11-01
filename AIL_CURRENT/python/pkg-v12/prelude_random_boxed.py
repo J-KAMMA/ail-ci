@@ -54,32 +54,43 @@ class Random:
     def gauss(self, mu=0.0, sigma=1.0):
         return _ail_rg_gauss(self.mt, mu, sigma)
 
+    def normalvariate(self, mu=0.0, sigma=1.0):
+        return _ail_rg_normal(self.mt, mu, sigma)
+
     def expovariate(self, lambd=1.0):
         return _ail_rg_expo(self.mt, lambd)
 
     def triangular(self, low=0.0, high=1.0, mode=None):
         return _ail_rg_tri(self.mt, low, high, mode)
 
-    def choices(self, population, weights=None, k=1):
+    def choices(self, population, weights=None, *, cum_weights=None, k=1):
         if not isinstance(population, list):
             population = list(population)
         n = len(population)
         out = []
-        if weights is None:
-            i = 0
-            while i < k:
-                out.append(population[int(self.random() * n)])
-                i = i + 1
-            return out
-        if len(weights) != n:
+        if cum_weights is None:
+            if weights is None:
+                i = 0
+                while i < k:
+                    out.append(population[int(self.random() * n)])
+                    i = i + 1
+                return out
+            cum = []
+            total = 0.0
+            for w in weights:
+                total = total + w
+                cum.append(total)
+        else:
+            if weights is not None:
+                raise TypeError("Cannot specify both weights and cumulative weights")
+            cum = list(cum_weights)
+        if len(cum) != n:
             raise ValueError("The number of weights does not match the population")
-        cum = []
-        total = 0.0
-        for w in weights:
-            total = total + w
-            cum.append(total)
+        total = cum[-1] + 0.0
         if total <= 0.0:
             raise ValueError("Total of weights must be greater than zero")
+        if total != total or total == float("inf") or total == float("-inf"):
+            raise ValueError("Total of weights must be finite")
         hi = n - 1
         i = 0
         while i < k:

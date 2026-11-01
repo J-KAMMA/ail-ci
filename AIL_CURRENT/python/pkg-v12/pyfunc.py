@@ -1422,6 +1422,8 @@ _AIL_SYSINFO = {'_ail_perf_counter': (FLT, 'ail_perf_counter'), '_ail_perf_count
 # names stdlib3.py (random) lowers to: (result kind, C function, argument kinds); all in cruntime RANDOM
 _AIL_RAND = {'_ail_rand_seed': (INT, 'ail_rand_seed', (INT,)), '_ail_rand_random': (FLT, 'ail_rand_random', ()),
              '_ail_rand_uniform': (FLT, 'ail_rand_uniform', (FLT, FLT)), '_ail_rand_gauss': (FLT, 'ail_rand_gauss', (FLT, FLT)),
+             '_ail_rand_normalvariate': (FLT, 'ail_rand_normalvariate', (FLT, FLT)),
+             '_ail_rand_getrandbits': (INT, 'ail_rand_getrandbits', (INT,)),
              '_ail_rand_range': (INT, 'ail_rand_randrange', (INT, INT, INT, INT)),
              '_ail_rand_below_i': (INT, 'ail_rand_below_i', (INT,)),
              '_ail_rand_choice_index': (INT, 'ail_rand_choice_index', (INT,)),

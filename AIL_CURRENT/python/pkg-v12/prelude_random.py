@@ -109,8 +109,8 @@ class Random:
             return 0
         if k <= 32:
             return self._genrand() >> (32 - k)
-        if k > 62:
-            raise RuntimeError("getrandbits: more than 62 bits needs integers beyond 64 bits")
+        if k > 63:
+            raise RuntimeError("getrandbits: more than 63 bits needs integers beyond 64 bits")
         words = (k - 1) // 32 + 1
         r = 0
         shift = 0
@@ -229,6 +229,17 @@ class Random:
             self.has_gauss = True
         return mu + z * sigma
 
+    def normalvariate(self, mu: float = 0.0, sigma: float = 1.0) -> float:
+        magic = 1.7155277699214135
+        while True:
+            u1 = self.random()
+            u2 = 1.0 - self.random()
+            z = magic * (u1 - 0.5) / u2
+            zz = z * z / 4.0
+            if zz <= -math.log(u2):
+                break
+        return mu + z * sigma
+
     def expovariate(self, lambd: float = 1.0) -> float:
         return -math.log(1.0 - self.random()) / lambd
 
@@ -249,26 +260,34 @@ class Random:
             high = t
         return low + (high - low) * math.sqrt(u * c)
 
-    def choices(self, population, weights=None, k: int = 1):
+    def choices(self, population, weights=None, *, cum_weights=None, k: int = 1):
         if not isinstance(population, list):
             population = list(population)
         n = len(population)
         out = []
-        if weights is None:
-            i = 0
-            while i < k:
-                out.append(population[int(self.random() * n)])
-                i = i + 1
-            return out
-        if len(weights) != n:
+        if cum_weights is None:
+            if weights is None:
+                i = 0
+                while i < k:
+                    out.append(population[int(self.random() * n)])
+                    i = i + 1
+                return out
+            cum = []
+            total = 0.0
+            for w in weights:
+                total = total + w
+                cum.append(total)
+        else:
+            if weights is not None:
+                raise TypeError("Cannot specify both weights and cumulative weights")
+            cum = list(cum_weights)
+        if len(cum) != n:
             raise ValueError("The number of weights does not match the population")
-        cum = []
-        total = 0.0
-        for w in weights:
-            total = total + w
-            cum.append(total)
+        total = cum[-1] + 0.0
         if total <= 0.0:
             raise ValueError("Total of weights must be greater than zero")
+        if total != total or total == float("inf") or total == float("-inf"):
+            raise ValueError("Total of weights must be finite")
         hi = n - 1
         i = 0
         while i < k:

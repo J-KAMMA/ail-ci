@@ -29396,6 +29396,14 @@ static uint64_t ail_rand_bits(int k) {
     return low | (high << 32);
 }
 /* _randbelow(n) for n > 0: getrandbits(n.bit_length()) until the draw is < n. */
+/* random.getrandbits(k): CPython's ValueError for k < 0; 64-bit ints stop above 63 bits. */
+static int64_t ail_rand_getrandbits(int64_t k) {
+    if (k < 0) ail_rand_fail(AIL_EXC_VALUE, "number of bits must be non-negative");
+    if (k == 0) return 0;
+    if (k > 63) ail_rand_fail(AIL_EXC_RUNTIME, "getrandbits: more than 63 bits needs integers beyond 64 bits");
+    return (int64_t)ail_rand_bits((int)k);
+}
+/* _randbelow(n) for n > 0: getrandbits(n.bit_length()) until the draw is < n. */
 static uint64_t ail_rand_below(uint64_t n) {
     int k = 64 - __builtin_clzll(n);
     uint64_t r = ail_rand_bits(k);
@@ -29466,6 +29474,18 @@ static double ail_rand_gauss(double mu, double sigma) {
         ail_rand_gauss_next = sin(x_sin) * g2rad;
         ail_rand_have_gauss = 1;
     }
+    volatile double scaled = z * sigma;
+    return mu + scaled;
+}
+/* random.normalvariate(mu, sigma): CPython 3.12's ratio-of-uniforms rejection loop. */
+static double ail_rand_normalvariate(double mu, double sigma) {
+    double u1, u2, z, zz;
+    do {
+        u1 = ail_rand_random();
+        u2 = 1.0 - ail_rand_random();
+        z = 1.7155277699214135 * (u1 - 0.5) / u2;
+        zz = z * z / 4.0;
+    } while (zz > -log(u2));
     volatile double scaled = z * sigma;
     return mu + scaled;
 }
