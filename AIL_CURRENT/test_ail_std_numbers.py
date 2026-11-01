@@ -108,6 +108,19 @@ print(hasattr(Money(), "real"), hasattr(Money(), "imag"))
 print(isinstance(Sub(), numbers.Real), issubclass(Sub, numbers.Real))
 print(isinstance(Money(), numbers.Rational), isinstance(Money(), numbers.Number))
 """,
+    "register_decorator_only.py": """import numbers
+
+@numbers.Real.register
+class A:
+    pass
+
+@numbers.Number.register
+class B:
+    pass
+
+print(A.__name__, B.__name__)
+print(hasattr(A, "real"), hasattr(A, "imag"), hasattr(A, "conjugate"))
+""",
     "tuple_and_nested.py": """import numbers
 
 class A:

@@ -160,6 +160,7 @@ def run(tree, text):
     # registration immediately after it, so its position in the control flow is respected.  Combining it
     # with another decorator is refused rather than guessed at (the decorator order could change which
     # class object is registered).
+    used = set()
     body = []
     for stmt in tree.body:
         if isinstance(stmt, ast.ClassDef):
@@ -178,13 +179,13 @@ def run(tree, text):
                 stmt.decorator_list = []
                 body.append(stmt)
                 body.append(ast.Expr(value=register_expression(stmt.name, kinds[0])))
+                used.add('register')
                 continue
         body.append(stmt)
     tree.body = body
 
     kinds_of = class_kinds(tree, binder, actual_kind)
     kinds_map = {name: kinds_of(name) for name in defs}
-    used = set()
 
     def static_issubclass(first, target_kinds):
         """True/False when the first argument names a class known at compile time, else None (a user class

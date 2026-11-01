@@ -1,3 +1,16 @@
+## 2026-11-01 -- `numbers` review 2 fix: decorator-only registration helper gating
+
+Fixed the review defect in `numberslib.py`: the register-decorator lowering inserted
+`_ail_num_register(...)` but did not mark `register` as used, so the helper was emitted as an
+empty string and `@numbers.Real.register` alone failed with `not in the subset: the name
+'_ail_num_register' is not a known function/class/builtin`. The decorator branch now adds
+`used.add('register')` (the `used` set is created before the class rewrite), so
+`decorator_only`, `decorator_attrs`, `decorator_only3`, `decorator_only_isc` and
+`decorator_plus_other` build and match CPython on both `cmp.sh` builds. A decorator-only
+regression case was added to `test_ail_std_numbers.py`. `test_ail_std_numbers`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass (4/4, 375s);
+`update_manifest.py --check` is clean.
+
 ## 2026-11-01 -- `numbers` review fixes: virtual run-time registration, decorator timing, shadowing
 
 Fixed the three review defects in `numberslib.py`. `register` is now a virtual run-time table
