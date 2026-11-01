@@ -154,6 +154,144 @@ CPython; the named-refusal tests in `test_ail_stdlib_batch4` / `test_ail_genlib`
 `linear_regression`. Targeted run on the final tree: `test_ail_std_statistics`, `test_ail_stdlib_batch4`,
 `test_ail_genlib`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` -- 6 modules, 0 failed.
 Generated C for the 10 `lab/compare/src/*/main.ail` tasks is byte-identical to the base commit.
+## 2026-11-01 -- BEAT_C review fix: add C/tally_lang (job-beatc1-11011753)
+
+Fixed the review of `e4b0541`. The pricing table already carried C / `tally_lang` at `s=0.65`,
+bound 2.86x, but the text said only three cells were above their gap and concluded that no single
+mechanism closes the AIL-to-C gap. Corrected: C / `tally_lang` (2.86x bound vs 1.49x needed) is
+the fourth cell, and at the assumed 40% reach gives 1.74x, the only priced single-mechanism win;
+it is now in section 3, the realistic-gain discussion and the ranked list ahead of `echo_pack`.
+Re-checked Step 4 by adding the highest-bound pair: hand-specialized tally's `popcnt` helper to
+`__builtin_popcountll`; output was byte-identical, paired gain 1.029x one-core and 1.090x
+all-core (the latter is noise for a single-threaded edit), so the 1.74x remains an upper bound,
+not evidence. Added `tally_specialize` to `lab/beatc/step4.py`, merged the result into
+`results/step4.json`, and moved the ranked list to the end of `BEAT_C.md` (section 6, after the
+checks). No compiler, runtime or test changed, so no behaviour probes apply. Required tests
+(`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`) were run on the final
+commit; see the job report.
+
+## 2026-11-01 -- BEAT_C: where AIL can beat C at equal effort (job-beatc1-11011753)
+
+Measurement and pricing only; no compiler code changed and the default output is untouched.
+Built the ten `lab/compare` tasks with the default AIL build and `gcc -O2 -std=c11`, and recorded
+median-of-5 wall time on one core (`taskset -c 0`) and all four cores, peak RSS, and the CPython
+reference hash. AIL wins one task (`term_rank`, 1.30x); C wins the other nine, with gaps from
+1.22x (`chain_relax`) to 10.15x (`rail_transfer`). The largest memory gap is `tree_fold` (603 MiB
+vs 194 MiB). `tools/icount.c` builds but `perf_event_open` is denied (`perf_event_paranoid` 4,
+no `sudo`), and there is no valgrind, so instruction counts are recorded as unavailable and no
+instruction claim is made.
+
+Profiled the nine non-wins with `gprof` on `-pg` generated C: the hot work is scar's cell loop
+(~50% in the update lines), berth's int64 key sort (31.9% on one line), echo's hash probe
+(~37%), ticket's string-table lookup (18.5%), tree's sort/slist (~46% combined), rail's Dijkstra
+(86% in `solve`), and tally's interpreter `ev` (67.6%). Priced A automatic parallelism, B
+`restrict`, C specialization/inlining and D arenas per task with the `speed-claims` rule. Only
+A/scar_life (1.60x bound vs 1.53x needed), B/berth_sim (1.47x vs 1.31x) and C/echo_pack (1.82x vs
+1.65x) have a removal bound above their gap; C/tally_lang (2.86x vs 1.49x) also qualifies and was
+added in the review fix above. `tools/roofcheck_v1.py` is not in this tree.
+
+Hand-edited generated C for the two pairs (a third, C/tally_lang, was added in the review fix
+above), interleaving base and edited runs: OpenMP on scar's
+cell loop kept output byte-identical and gave 1.395x all-core (paired 1.449x; best run 2.33x, but
+the median 17.8 s is still slower than C's 16.2 s); `restrict` on berth's keysort also kept output
+byte-identical but gave 1.00-1.03x, a tie. Report and raw JSON are in `docs/design/BEAT_C.md` and
+`lab/beatc/`. Required tests (`test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`) were run on the final commit; see the job report.
+## 2026-11-01 -- stdlib/json lab: 12 realistic programs, 10 build (job-std_json-11011754)
+
+Added `lab/stdlib/json/` with twelve 15-60 line Python programs that use `json` the way normal
+code does: `loads` / `dumps` / `load` / `dump`, `JSONDecodeError` fields, `object_hook` /
+`parse_float` / `object_pairs_hook`, `indent`, `sort_keys`, `separators`, `ensure_ascii`,
+`allow_nan`, `cls=` with a `JSONEncoder` subclass, typed nested containers, non-ASCII text and
+malformed inputs caught in `try` blocks. The default build (`compile X.py --syntax python`)
+gives 10 built (2 typed, 8 general) and 2 named refusals, so the 9/12 target was met without a
+compiler, runtime or prelude change. Both refused programs are recorded in
+`lab/stdlib/json/RESULTS.md` as follow-ups: `json.dumps(..., cls=JSONEncoder)` and
+`json.dump` / `json.load` on a file object (plus a module-level list of dicts).
+
+Added `AIL_CURRENT/test_ail_std_json.py` (registered through `tests.d/test_ail_std_json.txt`),
+which builds the ten passing programs in the default mode, runs each next to CPython in a fresh
+directory and compares stdout and exit code. Refreshed the manifest; ran
+`test_ail_std_json`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+## 2026-11-01 -- stdlib random: keep the unified plan (job-std_random-11011843)
+
+Integration follow-up. The finite-total check added to both `choices` preludes spelled
+`float("inf")`. The general path's `unified.nan_capable` sees that `"inf"` string in the merged
+program and refuses a type plan for it, so `test_ail_unified`'s plan test found no `stats.jsonl`
+(the plan is what writes it). The check now compares `total` against the finite double bounds
+(`> 1.7976931348623157e308` / `< -1.7976931348623157e308`): NaN is still caught by `total != total`,
+infinity by the bounds, and every finite total is unchanged. On top of `origin/integ` (4397565) the
+targeted `test_ail_obj_refs`, `test_ail_safetynet`, `test_ail_std_random`, `test_ail_unified` and
+`test_ail_virtual_dispatch` pass, as do `test_ail_files` and `test_ail_corpus_findings3`.
+
+## 2026-11-01 -- stdlib random coverage: review fixes (job-std_random-11011523)
+
+Review follow-up on `26c4101`. `choices` no longer copies `cum_weights` into a list in either prelude: it
+uses the object as given, so a dict raises `KeyError -1`, and a set or int raises `TypeError` exactly as
+CPython does, while list, tuple, range and bytes inputs keep matching (the earlier `list()` accepted or
+reworded those errors). `test_ail_std_random` now pins those cases in the `choices` program and the
+prelude unit test. `docs/spec/DIFFERENCES.md` A51(7) now says `getrandbits(k)` needs `k <= 63` and
+A61(5) records `normalvariate` as built; a new `C?-job-std_random-11011523-1` row records the 63-bit
+`getrandbits` limit and the `cum_weights` behaviour.
+
+## 2026-11-01 -- stdlib random coverage: real programs (job-std_random-11011523)
+
+Added 12 realistic `random` programs under `lab/stdlib/random/`. In the default build, 11 build and
+print CPython 3.12's stdout and exit status; `secure_token.py` remains a named refusal because
+`random.SystemRandom` needs an OS-entropy source (recorded as a follow-up with the exact text in
+`lab/stdlib/random/RESULTS.md`). The compiler/runtime/prelude changes were not program workarounds:
+
+* `random.normalvariate(mu, sigma)` is built on the typed path (`cruntime.py`, `stdlib3.py`,
+  `pyfunc.py`) and the general path (`prelude_random_boxed.py`, `randrt.py`), using CPython 3.12's
+  ratio-of-uniforms loop.
+* `random.getrandbits(k)` is built on the typed path; `k < 0` is CPython's `ValueError`, `k == 0`
+  returns 0 without a draw, and `k <= 63` matches CPython (ints above 63 bits are the declared
+  int64 limit and stop loudly).
+* `choices` accepts keyword-only `cum_weights=` on both paths, with CPython's `TypeError` for both
+  weight forms, the population-length `ValueError`, and the zero/negative/non-finite total errors.
+
+The generated C of all 10 `lab/compare/src/*/main.ail` tasks is byte-identical before/after
+(`--debug-dir` `program.c`, 10/10 same). Every passing program also matches CPython when forced
+through the general path (`AIL_UNIFIED_FORCE=1`) and, where it builds, the typed path
+(`AIL_NO_GENERAL=1`). `test_ail_std_random.py` pins the 11 programs plus the new feature paths;
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and the targeted random tests
+were run on the final commit.
+## 2026-11-01 -- shlex review 1 fixes (job-std_shlex-11011956)
+
+Fixed the three defects from review 1. `split(None)` now raises CPython's
+`ValueError: s argument must not be None` (it previously reached `len(None)` and raised
+`TypeError`); `quote` tests truthiness (`if not s`) so `quote(None)`, `quote(0)` and
+`join([None])` return `"''"` as CPython does; and the lexer's `source` attribute is `None`
+instead of `""`. Probes cover `split(None)`, `quote(None)`/`quote(0)`/falsy values,
+`join([None])`, and `source` with and without `infile` on both builds. No compiler or runtime
+source changed; `test_ail_std_shlex` still builds and matches all twelve programs.
+
+## 2026-11-01 -- shlex review fixes (job-std_shlex-11011615)
+
+Review follow-up on the `shlex` coverage change. POSIX `get_token()`, `read_token()`, `eof` and
+`state` now return CPython's `None` at end of input instead of the empty string, so the common
+`tok = lex.get_token(); if tok is None` pattern works. `__iter__` returns the lexer and a new
+`__next__` makes `next(lex)` and `for token in lex` match CPython. `infile` now defaults to `None`
+(and `push_source` sets `None` when `newfile` is omitted); `error_leader(infile=None, lineno=None)`
+uses those sentinels, so an explicit `""`/`0` is kept and an omitted `infile` renders `None` as
+CPython does. Probes cover posix/non-posix EOF, `read_token`, `state`, `next()`, source push/pop,
+and `error_leader` defaults and explicit values through arguments, list items, attributes and dict
+values on both builds. No compiler or runtime source changed; `test_ail_std_shlex` still builds
+and matches all twelve programs.
+
+## 2026-11-01 -- shlex stdlib coverage (job-std_shlex-11011615)
+
+Added `AIL_CURRENT/stdlib/shlex.py`, a bundled `shlex` module (`split`, `quote`, `join`, and the
+`shlex` lexer: comments, posix/non-posix quoting, punctuation characters, custom delimiters,
+wordchars, pushback, source stack, iteration and the `ValueError` cases). Before it, every shlex
+use was refused at the import (`not in the subset: import of 'shlex' is not available`, with
+`general path: shlex.split` / `shlex.shlex` / `shlex.join`). The twelve programs in
+`lab/stdlib/shlex/` now all build in the default mode and match CPython's stdout and exit status
+on the default and forced-general builds; `lab/stdlib/shlex/RESULTS.md` records the typed/general
+result and the one typed-path follow-up (method defaults keep the bundled lexer on the general
+path). `test_ail_std_shlex.py` compiles and compares all twelve. `read_token()` no longer leaks
+an internal sentinel. No compiler or runtime source changed, so generated C for existing programs
+is unchanged. The review follow-up below fixes the end-of-input and source-stack sentinels.
 
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
@@ -393,6 +531,36 @@ tables. The merged refusal keeps its message and `_biggate_on`; a build with typ
 only when the first build wired none. New `test_ail_walkmemo.py`, registered through `tests.d/`. The accepted
 PR's CRLF conversion of `pyboxed2.py` was not kept (the file stays LF). `tools/diff_ids.py` is not present on this
 tree; `tools/update_manifest.py` was run and `--check` passes.
+## 2026-11-01 -- no-implicit-decl follow-up: v1 runtime preamble declares stdlib (job-rbnoimpl-11011913)
+
+The re-applied strict declaration flags made the v1 general emitter's C fail: its DIE block calls
+`calloc`/`malloc`/`free` before the `ail_obj` runtime's own `<stdlib.h>` include. gcc used to warn
+(and truncate those pointers to `int`), so the build "worked"; with `-Werror=implicit-function-declaration`
+the C was rejected and the pipeline silently rebuilt the program through the unified fallback. That
+broke `test_ail_pre246` (v1 programs no longer built on the v1 path) and `test_ail_pre33` (the fallback
+supports exact big ints, so v1 printed `10**40` instead of stopping with OverflowError). `pyboxed.py`'s
+build preamble now includes `<stdlib.h>` before the `OBJ` fragment, so the v1 C compiles under the strict
+flags and no fallback is used. `test_ail_no_implicit_decl` gained
+`test_v1_general_runtime_declares_stdlib`, which builds a v1 program and asserts there is no
+`program-2.c` fallback. Tests: test_ail_pre246, test_ail_pre33 and test_ail_no_implicit_decl pass.
+Probes `p_v1_alloc`, `p_v1_args`, `p_v1_empty`, `p_v1_negative` match CPython on both cmp.sh builds and
+on `AIL_GENERAL=v1` (no fallback).
+
+## 2026-11-01 -- re-apply PR #301 (no-implicit-decl) on the int64 tree (job-rbnoimpl-11011236)
+
+Re-applied PR #301: `pipeline.STRICT_DECL_FLAGS` (implicit function declaration, implicit int and
+incompatible pointer types as errors) now reaches every compile of generated C, and
+`test_ail_no_implicit_decl` is registered through `tests.d`. #284 had already added a non-big
+`ail__math_double` in its own `/*B<*/.../*B|*/.../*B>*/` block, so the PR's non-big definition in
+the older block made the int64/general world define it twice (`error: redefinition`). The #284
+block was removed: the PR's placement keeps one definition on both sides of the remaining block,
+so every world -- typed/general and default int64/`--exact-int` -- has exactly one
+`ail__math_double`. The strict flags stay in `pyc.CFLAGS_TUNE` and in the module, C-API and app/py
+builders. `tools/diff_ids.py` is absent on this tree. Probes: `p_math_channels`,
+`p_math_negative_widths`, `p_math_exact_big` match CPython on both builds (the big-int probe is
+refused by name in the default int64 mode). Tests: test_ail_no_implicit_decl, test_ail_int64_default,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass; the 10 lab/compare tasks build
+under the default and `--exact-int` with no compiler diagnostics.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
