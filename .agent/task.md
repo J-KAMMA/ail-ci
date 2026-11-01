@@ -1,3 +1,64 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode-go/deepseek-v4.1-flash]
+## Review report
+
+**What the change really does.** `work..HEAD` (2fafbd0 + 0aacd83) adds the 12 `lab/stdlib/decimal` programs and `test_ail_std_decimal`, makes `Decimal.as_tuple` build, and rewrites the int64 default to keep coefficients in a new `_DecInt` arbitrary-precision class with int64 fast paths (string arithmetic only on overflow). `stdtop.py` stops refusing `as_tuple`, and the manifest/docs/DEVLOG are updated. This matches the report, with two false claims (below).
+
+**Verified**
+- `test_ail_std_decimal`, `test_ail_stdtop1`, `test_ail_safetynet`: 3 modules, 0 failed; the decimal test builds and compares all 12 lab programs with CPython.
+- `tools/update_manifest.py --check` exits 0.
+- A program that does not import `decimal` produces byte-identical `program.c` / `program_mix0.c` on HEAD and `/tmp/base`.
+- `lab/compare` is untouched by the diff, so its committed C is unchanged.
+- Big-coefficient probes `r_big`, `r_boundary2`, `r_float`, `r_quant`, `r_places`, `r_long`, `r_hash` match CPython on both builds (int64 boundaries, negatives, add/sub/mul/div/mod/divmod, float construction incl. subnormals/1e308, quantize/sqrt/format, values via argument/list/attribute/dict). No silent wrap seen.
+- `as_tuple` finite/NaN/inf/negative/empty, slicing, `_fields`, containment, `count`/`index`, concatenation, hashing, equality, unpacking match CPython.
+- `int()` of a coefficient above int64 stops loudly, as declared.
+
+**False claims / limitations**
+- Report says `_DecTuple` supports `reversed`; it does not (defect 2). The worker's `p7_slice.py` never calls `reversed(t)` (only `t[::-1]`), so this was untested.
+- Report says `s_mix.py` is 0.13 s. The real `s_mix.py` (with `Decimal(i)/Decimal("100")`) is ~50 s on HEAD (old 2fafbd0 ~81 s); 0.15 s is `s_mul.py` (no division). The "string algorithms only on overflow" wording is false for division, whose `10**shift` intermediate is big by construction. Not a regression vs 2fafbd0, but the number is mislabeled.
+
+**Pre-existing (identical on base)**
+- `hash(Decimal("NaN"))` is a random nonzero value in CPython but `0` in AIL (`_ail_dec_hash` k==2); base is also `0`.
+- `reversed()` on any user class defining `__reversed__` fails in AIL (`r_revcls.py` fails on base too).
+
+**Unverified**
+- Worker probes `p1,p3,p4,p6,p7,p8,p9,p10,p11` not re-run; `test_ail_bytearray_decimal`, `test_ail_files`, `test_ail_corpus_findings3` not run; exact-int (`AIL_EXACT_INT=1`) not tested; no gdev instruction counts (prelude-only change).
+
+VERDICT: FIX
+
+1. `Decimal(d.as_tuple())` round-trip fails. Probe `/tmp/rprobes/r_roundtrip.py`:
+   ```python
+   from decimal import Decimal
+   d = Decimal("1.2345"); t = d.as_tuple()
+   print(isinstance(t, tuple)); print(Decimal(t))
+   ```
+   CPython: `True` then `1.2345`. AIL (g and d): `False` then `TypeError: conversion from _DecTuple to Decimal is not supported`, exit 1. `_DecTuple` is not a tuple, and `Decimal.__init__` only accepts `tuple`/`list`; `_ail_dec_from_tuple` already works with len/indexing, so accepting `_DecTuple` there fixes it. This is a common round-trip idiom and is a direct gap in the new `as_tuple` feature.
+2. `reversed()` on the `as_tuple` result crashes. Probe `/tmp/rprobes/r_tuple.py` (minimal):
+   ```python
+   from decimal import Decimal
+   print(list(reversed(Decimal("1.2345").as_tuple())))
+   ```
+   CPython: `[-4, (1, 2, 3, 4, 5), 0]`. AIL (g and d): `TypeError: '_DecTuple' object is not reversible`, exit 1, because the runtime's `reversed()` ignores a user class's `__reversed__`. The report explicitly claims `reversed` support, so either the claim or the feature must be corrected.
+[cost $0.0541, opencode tokens {"total": 2619133, "input": 126572, "output": 9444, "reasoning": 36781, "cache.write": 0, "cache.read": 2446336}]
+    tool time: bash 23.9 min
+        366s bash   cd /home/runner/work/ail-ci/ail-ci && date; python3 tools/par_check.py -j 2 test_ail_std_decimal test_ail_stdt
+        269s bash   cd /tmp && for name in old head; do dir=t_$name; [ "$name" = head ] && dir=t_head2; for p in s_mul s_div s_add
+        113s bash   cd /tmp && rm -rf ts_head ts_base && mkdir ts_head ts_base && for pair in "head /home/runner/work/ail-ci/ail-c
+        104s bash   cd /tmp/ts_head && echo "--- head s_mix out"; cat /tmp/head.s_mix.out; echo "--- head log tail"; tail -3 /tmp/
+         91s bash   cd /tmp && rm -rf tsg_head tsg_base && mkdir tsg_head tsg_base && for pair in "head /home/runner/work/ail-ci/a
+         85s bash   cd /tmp/rprobes && cat > r_roundtrip.py <<'EOF' from decimal import Decimal for s in ["1.2345", "-0", "1234567
+         64s bash   cd /home/runner/work/ail-ci/ail-ci && rm -rf /tmp/old && git worktree add /tmp/old 2fafbd0 2>&1 | tail -1; cd 
+         60s bash   date; cd /tmp/rprobes && for p in r_places r_quant; do echo "===== $p"; bash ~/tools/cmp.sh /tmp/rprobes/$p.py
+
+
+--- ORIGINAL TASK ---
 **Coverage: make real programs that use the CPython stdlib module `decimal` build and print exactly what CPython prints.**
 
 1. Write 12 small realistic programs, each 15–60 lines, that use `decimal` the way typical code does: its most common functions and classes, the common argument forms and keyword arguments, and its edge cases (empty inputs, errors that the program catches). Put them in lab/stdlib/decimal/.
