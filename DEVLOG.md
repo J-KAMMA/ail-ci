@@ -292,6 +292,66 @@ result and the one typed-path follow-up (method defaults keep the bundled lexer 
 path). `test_ail_std_shlex.py` compiles and compares all twelve. `read_token()` no longer leaks
 an internal sentinel. No compiler or runtime source changed, so generated C for existing programs
 is unchanged. The review follow-up below fixes the end-of-input and source-stack sentinels.
+## 2026-11-01 -- std_base64 review 2 follow-up: altchars validated after the data (job-std_base64-11011521)
+
+`b64encode(data, altchars=...)` validates and encodes `data` before it looks at `altchars`, matching
+CPython's `binascii.b2a_base64` call before the length assert and `bytes.maketrans`. The same order
+now holds on the decode side, so an invalid data argument reports its own type even when `altchars`
+is also invalid. A run-time `altchars=None` behaves like CPython's omitted altchars. Constant
+`str` altchars for `b64encode` and non-ASCII constant `str` altchars for `b64decode` remain named
+compile-time refusals.
+
+Probes `/tmp/probes/order_literal.py`, `order_static.py`, `order_alts.py`, `order_containers.py`
+and `/tmp/rprobes/p_order.py`, `r_badtypes.py`, `r_alt.py`, `r_b16.py`, `r_b16b.py`, `p_len.py`
+match CPython on both builds; `/tmp/rprobes2/p_mv.py` is refused identically on both. Tests:
+`test_ail_std_base64`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
+## 2026-11-01 -- std_base64 review 2: b16decode type check, altchars type check (job-std_base64-11011521)
+
+`base64.b16decode` on a non-bytes/non-str argument now raises CPython's
+`TypeError: argument should be a bytes-like object or ASCII string, not '<type>'` instead of
+`object of type '<type>' has no len()`. `b64encode(..., altchars=...)` now rejects a non-bytes-like
+altchars after the length assert (`TypeError: a bytes-like object is required, not '<type>'`) instead
+of using its items as character codes; bytes, bytearray and str altchars keep their behaviour, and the
+decode-side `argument should be a bytes-like object or ASCII string` message is unchanged.
+
+Probes `/tmp/rprobes/r_b16.py`, `r_badtypes.py`, `r_alt.py`, `r_b16b.py` match CPython on both
+builds. Tests: `test_ail_std_base64`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
+## 2026-11-01 -- std_base64 review fixes: altchars assert, decodebytes/encoder type errors, b32 bytearray (job-std_base64-11011521)
+
+Follow-up to the `std_base64` review. `b64encode`/`b64decode` now assert `len(altchars) == 2`
+with `repr(altchars)` (CPython's `AssertionError`), including a constant `str` altchars on the
+typed path, and a dynamic `str` altchars for `b64encode` raises CPython's bytes-like `TypeError`.
+`decodebytes` no longer accepts `str`: it raises `TypeError: expected bytes-like object, not str`
+(also for non-ASCII text). `b16encode`, `b32encode` and `encodebytes` check their input first and
+raise CPython's own messages (`a bytes-like object is required...`, `memoryview: ...`,
+`expected bytes-like object...`). `b32decode` converts a `bytearray` to bytes before indexing, so
+it returns the decoded value instead of reading the prelude's `_s`. The type-check helper keeps a
+real `TypeError` on the injected prelude, so the default build falls back to the general path for
+the exact text; `chunked_stream.py` is therefore general in `lab/stdlib/base64/RESULTS.md` now.
+
+Probes in `/tmp/probes/fix_*.py` (both builds) cover altchars lengths 0/1/2/3 as bytes,
+bytearray and str, direct/argument/list/attribute/dict values, decoder and encoder type errors,
+and `b32decode`/`b16decode` on bytearray. All match CPython or are refused by name. Required tests:
+`test_ail_std_base64`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
+## 2026-11-01 -- std_base64: `base64` codecs, altchars and line wrapping (job-std_base64-11011521)
+
+Added `base64.b16encode` / `b16decode`, `b32encode` / `b32decode`, `encodebytes` / `decodebytes`,
+`b64encode(altchars=)` and `b64decode(altchars=)` to `hashlower.py` and `hash_prelude.py`, plus a
+run-time `validate=` flag for `b64decode`. The decoders now raise a `ValueError` subclass named
+`Error` (CPython's `binascii.Error` name); a user binding named `Error` is refused by name. `_strish`
+now keeps `bytes.lower()` / `bytes.upper()` bytes-typed.
+
+`lab/stdlib/base64/` holds 12 realistic programs; 10 build and match CPython 3.12.3 stdout and exit
+code, 2 are refused with the follow-up texts in `lab/stdlib/base64/RESULTS.md` (`b85`/`a85` and the
+legacy `base64.encode` / `base64.decode` stream API). `test_ail_std_base64.py` checks the ten on both
+`AIL_IR` builds and pins the two refusals. `test_ail_crypto.py` now pins `b85encode` as the refused
+base64 name instead of the now-built `b32encode`.
 
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
@@ -561,6 +621,87 @@ builders. `tools/diff_ids.py` is absent on this tree. Probes: `p_math_channels`,
 refused by name in the default int64 mode). Tests: test_ail_no_implicit_decl, test_ail_int64_default,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass; the 10 lab/compare tasks build
 under the default and `--exact-int` with no compiler diagnostics.
+## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
+
+Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
+`jmp_buf` and its save pointer are now `__thread` in the hybrid's copy of each unit, so concurrent
+calls that overflow no longer share a jump target (the 8x5000 probe now exits 0 with CPython's
+answers). Every conversion failure after a list argument now jumps to the `fallback:` label, which
+frees each buffer once; a later non-list, wrong scalar, wrong list or failed str result no longer
+leaks the earlier list copy (50,000 calls stay at plain-CPython RSS). The wrapper still copies the
+original metadata, and now rewrites `__code__` with the original `co_name`, `co_varnames` (including
+locals), `co_nlocals`, filename and first line, so functions with locals report CPython's
+`co_varnames` and no `__wrapped__`. Helper references in the generated call body use names chosen
+against the parameter list, so parameters called `_ail_hybrid_invoke`/`_ail_hybrid_native_ref`/
+`_ail_hybrid_original_ref` (or their double-underscore spellings) no longer shadow them.
+`test_ail_cpython_hybrid` gained concurrent-overflow, later-argument-fallback and locals/helper-name
+metadata cases. Probes in `/tmp/fixprobe*` and `/tmp/fixthr` matched CPython; the standalone paths
+are unchanged.
+
+## 2026-11-01 -- CPython hybrid review fixes: fallback buffers, packaged paths, metadata (job-cpyhyb1-11011403)
+
+Fixed the three review defects in `ail build --cpython`. A fallback from the first of several list
+parameters no longer frees uninitialised buffers: every list buffer is declared as NULL before the
+conversion loops and the fallback label frees all of them (list[int] and list[float]). The packaged
+`prog.py` now sets `__file__` and `sys.argv[0]` to the original source and puts its directory first
+on `sys.path`, so `__file__`-relative data files and sibling imports work from the output directory.
+The accelerated wrapper is generated with the original parameter layout and copies annotations,
+defaults, kwdefaults, name/qualname/doc/module/dict, so `__code__.co_argcount`/`co_varnames` and
+`inspect.signature` match; keyword calls and default values still behave as CPython. The hybrid
+unit's overflow flag is now thread-local because native calls release the GIL; free-threaded CPython
+is still not claimed.
+
+Tests: `test_ail_cpython_hybrid` gained regression cases for two- and three-list fallbacks, metadata
+and `__file__`/sibling imports. Probes in `/tmp/probes/hyb_*` cover scalar int/float/bool/str
+boundaries, int64 and beyond, empty/negative lists, aliasing, mutation, kwargs/defaults, packaging
+and concurrent overflow calls; every hybrid run matched CPython. Default and general standalone
+paths are unchanged (the same probes still show the pre-existing standalone int64/metadata limits).
+
+## 2026-11-01 -- CPython hybrid prototype: typed helpers in an extension, CPython for the rest (job-cpyhyb1-11011403)
+
+Added an explicit `ail build --cpython prog.py -o DIR` mode. The output is a normal CPython program
+with a generated extension module: scalar and list-int/list-float helpers the real typed emitter
+accepts are called natively, and every call whose values do not fit the ABI, whose int overflows,
+or whose typed clone is absent runs the original Python function. The standalone build is
+untouched; the flag, the design (`docs/design/CPYTHON_HYBRID.md` and its `AIL_CURRENT/docs/design`
+copy) and the fallback rules are new.
+
+The analysis reuses `pymix.analyze` and `pyboxed2`'s mixed-mode units rather than a second
+selection rule. It runs the real CLI general build in a subprocess with a temporary
+`sitecustomize.py`, captures the units, and retries a direct `pyboxed2.build` on the original
+source when the CLI refuses the program. Annotations only seed parameter kinds (the boundary still
+checks the actual value); the CLI's `__ail_checked_*__` return markers are stripped for the unit
+emission because `to_c` otherwise refuses a checked `str` helper. Units use the int64 mixed-mode
+ABI even when the surround build uses exact ints: the existing overflow flag sends a value that
+does not fit back to Python, so no `ail_tint` crosses the extension boundary. Two mixed-mode
+details are loosened only in the analysis process: the entry regex has a word boundary so
+`ail_unwind_<name>` cannot be taken for the entry, and the str ABI's `uint8_t *_out` is accepted
+by the validator. The wrapper defines `ail_mix_drain_out` so a unit's trap path links. A
+conservative body gate then keeps any function with a possible typed trap in CPython: indexing,
+division/power, a call, `raise`/`assert`, `try`/`with`/import, `global`/`nonlocal`, deletes and
+attribute/index stores. A missed speed-up is safe; an IndexError that exits instead of reaching
+the caller's handler is not.
+
+Packaging: `prog.py` is the original source plus a preamble and a rebinding after each accelerated
+def, `prog.orig.py` is the untouched source, `prog` is the launcher, and
+`_ail_<stem>_fast.<ext>.so` plus `build.json` name the native side. A missing extension makes the
+preamble return the original functions. Every native call releases the GIL; typed parallel clones
+are linked with `-pthread`; free-threaded CPython is explicitly not claimed or tested.
+
+Results: `lab/compare` `berth_sim` and `term_rank` are general today and matched CPython on all
+26 and 43 public+hidden cases (hybrid vs CPython: 0.249 s vs 0.246 s and 0.067 s vs 0.065 s on
+medium inputs; standalone general 0.528 s / 0.126 s). Five refused corpus programs (`t440`,
+`t447`, `t472`, `t437`, `t456`) built and matched CPython on every input; they have no wrappable
+unit, so they run as CPython. The accelerated corpus example `t264` (`classify`) was also built
+and compared; the other candidates examined (`t081` `is_palindrome`, `t139` `fmt`, `t211`
+`evaluate`, `t314` `longest_non_decreasing`) index or call and now stay in CPython under the body
+gate. The boundary microbenchmark (`inc(n)=n+1`, 2M calls) is 32.5 ns/call plain,
+67.7 ns native-direct and 115.4 ns through the generated wrapper, so the mode pays only when the
+function body does enough work; a C callable type is the next step for the closure overhead.
+
+Added `AIL_CURRENT/ail_cpython_hybrid.py`, `AIL_CURRENT/test_ail_cpython_hybrid.py` and
+`AIL_CURRENT/tests.d/test_ail_cpython_hybrid.txt`. Final-state tests: test_ail_cpython_hybrid,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 

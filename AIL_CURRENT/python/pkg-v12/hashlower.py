@@ -58,7 +58,7 @@ _PW = 'pass' + 'word'          # the keyword of pbkdf2_hmac (the public export r
 _BUILT = ('Built: hashlib.md5 sha1 sha224 sha256 sha384 sha512 sha3_224 sha3_256 sha3_384 sha3_512 blake2b blake2s new '
           'pbkdf2_hmac; hmac.new HMAC digest compare_digest; secrets.token_bytes token_hex token_urlsafe randbelow randbits '
           'choice compare_digest DEFAULT_ENTROPY; base64.b64encode b64decode standard_b64encode standard_b64decode '
-          'urlsafe_b64encode urlsafe_b64decode')
+          'urlsafe_b64encode urlsafe_b64decode b16encode b16decode b32encode b32decode encodebytes decodebytes')
 
 _REFUSED = {
     'hashlib.file_digest': 'read the file and update() a hash object: h = hashlib.sha256(); h.update(open(p, "rb").read())',
@@ -71,10 +71,7 @@ _REFUSED = {
     'hashlib.sha512_256': 'not built; sha512 and sha384 are',
     'secrets.SystemRandom': 'use secrets.randbelow(n) and secrets.randbits(k)',
     'secrets.token_urlsafe_': '',
-    'base64.encodebytes': 'b64encode(data) and split the lines yourself',
-    'base64.decodebytes': 'b64decode(data)',
-    'base64.b32encode': 'not built', 'base64.b32decode': 'not built', 'base64.b16encode': 'data.hex().upper().encode()',
-    'base64.b16decode': 'bytes.fromhex(text)', 'base64.a85encode': 'not built', 'base64.a85decode': 'not built',
+    'base64.a85encode': 'not built', 'base64.a85decode': 'not built',
     'base64.b85encode': 'not built', 'base64.b85decode': 'not built', 'base64.encode': 'not built',
     'base64.decode': 'not built', 'base64.b32hexencode': 'not built', 'base64.b32hexdecode': 'not built',
 }
@@ -99,6 +96,12 @@ _SIG = {
     'base64.standard_b64decode': (('s', _REQ),),
     'base64.urlsafe_b64encode': (('s', _REQ),),
     'base64.urlsafe_b64decode': (('s', _REQ),),
+    'base64.b16encode': (('s', _REQ),),
+    'base64.b16decode': (('s', _REQ), ('casefold', False)),
+    'base64.b32encode': (('s', _REQ),),
+    'base64.b32decode': (('s', _REQ), ('casefold', False), ('map01', None)),
+    'base64.encodebytes': (('s', _REQ),),
+    'base64.decodebytes': (('s', _REQ),),
 }
 
 
@@ -251,7 +254,9 @@ def _strish(node, names=frozenset()):
         if isinstance(f, ast.Attribute) and f.attr in ('decode', 'hexdigest', 'hex', 'strip', 'lower', 'upper', 'join',
                                                        'format', 'rstrip', 'lstrip', 'replace', 'token_hex',
                                                        'token_urlsafe'):
-            return not (f.attr in ('strip', 'lstrip', 'rstrip', 'join', 'replace') and not _strish(f.value, names))
+            if f.attr in ('strip', 'lstrip', 'rstrip', 'join', 'replace', 'lower', 'upper'):
+                return _strish(f.value, names)
+            return True
     return False
 
 
@@ -550,28 +555,89 @@ class _Lowerer(ast.NodeTransformer):
             return self.compare(node, q)
         self.refuse(node, '%s is not built. %s' % (q, _BUILT))
 
+    def base64_flag(self, node, arg, what):
+        if arg is None:
+            return self.C(0)
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, bool):
+            return self.C(1 if arg.value else 0)
+        if isinstance(arg, ast.Constant) and arg.value is None:
+            return self.C(0)
+        return self.fn('_ail_hl_flag', arg)
+
+    def base64_altchars(self, node, arg, allow_str):
+        # The helper validates altchars after it has validated the data, as CPython does; the lowerer only
+        # refuses the constant forms that can never work.
+        if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+            if not allow_str:
+                self.refuse(node, 'base64.b64encode(altchars=) takes bytes, not str')
+            try:
+                return self.C(arg.value.encode('ascii'))
+            except UnicodeEncodeError:
+                self.refuse(node, 'base64 altchars must contain only ASCII characters')
+        if not allow_str and not self.general and _strish(arg, self.scope[-1]):
+            self.refuse(node, 'base64.b64encode(altchars=) takes bytes, not str')
+        return arg
+
     def base64_call(self, node, q, name):
+        if 'Error' in self.user_defs and name in ('b64decode', 'standard_b64decode', 'urlsafe_b64decode',
+                                                   'b16decode', 'b32decode', 'decodebytes'):
+            self.refuse(node, 'a user binding named Error shadows the binascii.Error class the base64 decoders raise.\n'
+                              '  write instead: rename it')
         args, _ = self.bind(node, q, _SIG[q]) if q in _SIG else (None, None)
         if args is None:
             self.refuse(node, '%s is not built. %s' % (q, _BUILT))
         if name in ('b64encode', 'standard_b64encode', 'urlsafe_b64encode'):
             if name == 'b64encode' and args[1] is not None and not (
                     isinstance(args[1], ast.Constant) and args[1].value is None):
-                self.refuse(node, 'base64.b64encode(altchars=) is not built.\n  write instead: %s' % self.advice(q))
+                return self.fn('_ail_hl_b64e_alt', args[0], self.base64_altchars(node, args[1], False))
             return self.fn('_ail_hl_b64e', args[0], self.C(1 if name == 'urlsafe_b64encode' else 0))
+        if name == 'b16encode':
+            return self.fn('_ail_hl_b16e', args[0])
+        if name == 'b16decode':
+            source = node.args[0] if node.args else node.keywords[0].value
+            flag = self.base64_flag(node, args[1], 'base64.b16decode(casefold=)')
+            if self.general:
+                return self.fn('_ail_hl_b16d_dyn', args[0], flag)
+            return self.fn('_ail_hl_b16d_str' if _strish(source, self.scope[-1]) else '_ail_hl_b16d', args[0], flag)
+        if name == 'b32encode':
+            return self.fn('_ail_hl_b32e', args[0])
+        if name == 'b32decode':
+            if args[2] is not None and not (isinstance(args[2], ast.Constant) and args[2].value is None):
+                self.refuse(node, 'base64.b32decode(map01=) is not built.\n  write instead: b32decode(data)')
+            source = node.args[0] if node.args else node.keywords[0].value
+            flag = self.base64_flag(node, args[1], 'base64.b32decode(casefold=)')
+            if self.general:
+                return self.fn('_ail_hl_b32d_dyn', args[0], flag)
+            return self.fn('_ail_hl_b32d_str' if _strish(source, self.scope[-1]) else '_ail_hl_b32d', args[0], flag)
+        if name == 'encodebytes':
+            return self.fn('_ail_hl_encodebytes', args[0])
+        if name == 'decodebytes':
+            source = node.args[0] if node.args else node.keywords[0].value
+            if self.general:
+                return self.fn('_ail_hl_decodebytes_dyn', args[0])
+            return self.fn('_ail_hl_decodebytes_str' if _strish(source, self.scope[-1]) else '_ail_hl_decodebytes', args[0])
         validate = args[2] if name == 'b64decode' else None
-        if name == 'b64decode' and args[1] is not None and not (isinstance(args[1], ast.Constant) and args[1].value is None):
-            self.refuse(node, 'base64.b64decode(altchars=) is not built.\n  write instead: %s' % self.advice(q))
-        mode = 1 if name == 'urlsafe_b64decode' else 0
-        if validate is not None:
-            if isinstance(validate, ast.Constant) and isinstance(validate.value, bool):
-                mode = 2 if validate.value else 0
-            else:
-                self.refuse(node, 'base64.b64decode(validate=) has to be True or False in the text of the program')
+        altchars = args[1] if name == 'b64decode' else None
+        base = 1 if name == 'urlsafe_b64decode' else 0
+        if validate is None:
+            mode = self.C(base)
+        elif isinstance(validate, ast.Constant) and isinstance(validate.value, bool):
+            mode = self.C(base | (2 if validate.value else 0))
+        elif isinstance(validate, ast.Constant) and validate.value is None:
+            mode = self.C(base)
+        else:
+            mode = self.fn('_ail_hl_b64_mode', self.C(base), validate)
         source = node.args[0] if node.args else node.keywords[0].value
+        has_alt = altchars is not None and not (isinstance(altchars, ast.Constant) and altchars.value is None)
+        if has_alt:
+            alt = self.base64_altchars(node, altchars, True)
+            if self.general:
+                return self.fn('_ail_hl_b64d_alt_dyn', args[0], alt, mode)
+            return self.fn('_ail_hl_b64d_alt_str' if _strish(source, self.scope[-1]) else '_ail_hl_b64d_alt',
+                           args[0], alt, mode)
         if self.general:                    # types are dynamic here: the function looks at the argument
-            return self.fn('_ail_hl_b64d_dyn', args[0], self.C(mode))
-        return self.fn('_ail_hl_b64d_str' if _strish(source, self.scope[-1]) else '_ail_hl_b64d', args[0], self.C(mode))
+            return self.fn('_ail_hl_b64d_dyn', args[0], mode)
+        return self.fn('_ail_hl_b64d_str' if _strish(source, self.scope[-1]) else '_ail_hl_b64d', args[0], mode)
 
     # ---- everything else the modules could be used for -------------------------------------
     def visit_Attribute(self, node):
@@ -653,9 +719,10 @@ class _Lowerer(ast.NodeTransformer):
             if self.general:
                 parsed = _GeneralPrims().visit(parsed)
             if not self.general:                    # the typed path has no TypeError (A-row in DIFFERENCES)
-                for each in ast.walk(parsed):
-                    if isinstance(each, ast.Name) and each.id == 'TypeError':
-                        each.id = 'ValueError'
+                if not (isinstance(parsed, ast.FunctionDef) and parsed.name == '_ail_hl_typefail'):
+                    for each in ast.walk(parsed):
+                        if isinstance(each, ast.Name) and each.id == 'TypeError':
+                            each.id = 'ValueError'
             import filelower
             parsed = ast.parse(filelower._Lowerer.surface(ast.unparse(parsed)))      # what a user program gets (checked returns)
             for each in ast.walk(parsed):
