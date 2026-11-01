@@ -1,3 +1,26 @@
+## 2026-11-01 -- lazymod1 review: only genuinely pure values move with the definitions (job-lazymod1-11011234)
+
+The review found three ways the previous walk moved an effect ahead of the module's own statements:
+standard calls that read state (`os.getcwd()`, `os.environ.get`), attribute loads that run a property
+or raise (`p.x`, `B.missing`), and user methods whose name happens to be in the safe-method list
+(`D.get`). `move_bad_call` now refuses every standard-library call and every method whose receiver is
+not a value folded from constants (only the built-in text/container methods stay safe), and
+`move_bad_attr` accepts only a settled module value, a known standard constant (`sys.maxsize`,
+`os.sep`), a plain class attribute that the class body binds, or an instance attribute that a local
+`__init__` / class body assigns with no property, `__getattr__` or `__getattribute__`. Builtins that
+cannot be folded are refused instead of assumed pure, and attributes of stateful standard objects such
+as `os.environ` and `sys.argv` are refused. Values that are pure still move with the definitions, so
+`N = make(); SIZE = 1 << N; def f(a=SIZE)` keeps working and defaults still capture the value at the
+`def`. A value built from a mutable container a statement may change between its binding and the
+definition (`L = [1]; L.append(2); def f(a=len(L))`, also `L += [2]`) is refused instead of being
+computed early. The C of all ten lab/compare tasks is byte-identical to the `work` base (10 `.ail`,
+7 `.py`; the other 3 `.py` fail identically). Probes in `/tmp/probes` (`p_cwd`, `p_env`, `p_env_sub`,
+`p_prop`, `p_attr_raise`, `p_method`, `p_time`, `p_state_attr`, `p_mutated`, `p_mutate_list` refused
+by name; `p_pure`, `p_pure_method`, `p_class_attr`, `p_settled` match CPython on both builds). Added
+six refusal tests (eight programs) to `test_ail_lazymod1` and restored `test_ail_modsys`'s
+`os.getcwd()` case to a refusal. Final-state tests: test_ail_lazymod1, test_ail_modsys,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (5/5, 0 failed).
+
 ## 2026-11-01 -- lazymod1: definitions may read values a lazily started module computes (job-lazymod1-11011234)
 
 A function-level `import lib` hoists lib's definitions; until now a default, decorator, annotation,

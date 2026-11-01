@@ -219,6 +219,54 @@ class EffectfulValues(ModulesBase):
                                  "cfg.level = 9\nprint(g())\n"},
                      "function-level `import lib`", "write instead")
 
+    def test_a_state_reading_standard_call_is_refused(self):
+        self.refused({"lib.py": "import os\nprint('lib start')\nBASE = os.getcwd()\n\n\n"
+                                "def f(x=BASE):\n    return x\n",
+                      "main.py": "import os\ndef g():\n    import lib\n    return lib.f()\n\n"
+                                 "os.chdir('/')\nprint(g())\n"},
+                     "function-level `import lib`", "write instead")
+
+    def test_an_environment_read_is_refused(self):
+        self.refused({"lib.py": "import os\nLEVEL = int(os.environ.get('LV', '0'))\n\n\n"
+                                "def f(x=LEVEL):\n    return x\n",
+                      "main.py": "import os\ndef g():\n    import lib\n    return lib.f()\n\n"
+                                 "os.environ['LV'] = '9'\nprint(g())\n"},
+                     "function-level `import lib`", "write instead")
+        self.refused({"lib.py": "import os\nLEVEL = int(os.environ['LV'])\n\n\n"
+                                "def f(x=LEVEL):\n    return x\n",
+                      "main.py": "import os\ndef g():\n    import lib\n    return lib.f()\n\n"
+                                 "os.environ['LV'] = '9'\nprint(g())\n"},
+                     "function-level `import lib`", "write instead")
+
+    def test_an_attribute_that_runs_code_is_refused(self):
+        self.refused({"lib.py": "class P:\n    @property\n    def x(self):\n        print('prop')\n"
+                                "        return 5\n\np = P()\nN = p.x\n\n\ndef f(x=N):\n    return x\n",
+                      "main.py": "print('start')\ndef g():\n    import lib\n    return lib.f()\n\n"
+                                 "print(g())\n"},
+                     "function-level `import lib`", "write instead")
+
+    def test_an_attribute_that_would_raise_is_refused(self):
+        self.refused({"lib.py": "class B:\n    pass\nprint('start')\nN = B.missing\n\n\n"
+                                "def f(x=N):\n    return x\n",
+                      "main.py": "def g():\n    import lib\n    return lib.f()\n\nprint(g())\n"},
+                     "function-level `import lib`", "write instead")
+
+    def test_a_user_method_named_like_a_builtin_is_refused(self):
+        self.refused({"lib.py": "class D:\n    def get(self, k):\n        print('get', k)\n        return 5\n\n"
+                                "d = D()\nN = d.get('x')\n\n\ndef f(x=N):\n    return x\n",
+                      "main.py": "print('start')\ndef g():\n    import lib\n    return lib.f()\n\n"
+                                 "print(g())\n"},
+                     "function-level `import lib`", "write instead")
+
+    def test_a_container_mutated_before_the_definition_is_refused(self):
+        self.refused({"lib.py": "L = [1]\n\n\ndef add():\n    L.append(2)\n\n\nadd()\n\n\n"
+                                "def f(a=len(L)):\n    return a\n",
+                      "main.py": "def g():\n    import lib\n    return lib.f()\n\nprint(g())\n"},
+                     "function-level `import lib`", "write instead")
+        self.refused({"lib.py": "L = [1]\nL += [2]\n\n\ndef f(a=len(L)):\n    return a\n",
+                      "main.py": "def g():\n    import lib\n    return lib.f()\n\nprint(g())\n"},
+                     "function-level `import lib`", "write instead")
+
 
 if __name__ == "__main__":
     unittest.main()

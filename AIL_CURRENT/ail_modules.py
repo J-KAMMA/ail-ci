@@ -1810,6 +1810,9 @@ class Program:
 
     MOVE_EFFECT_BUILTINS = frozenset(('print', 'input', 'open', 'exec', 'eval', 'compile', '__import__',
                                       'breakpoint', 'exit', 'quit', 'help', 'setattr', 'delattr'))
+    MOVE_SAFE_BUILTINS = frozenset(('len', 'bool', 'abs', 'min', 'max', 'sum', 'sorted', 'tuple', 'list', 'dict',
+                                    'set', 'frozenset', 'str', 'int', 'float', 'range', 'ord', 'chr', 'repr',
+                                    'bytes', 'bytearray', 'round'))
     MOVE_EFFECT_METHODS = frozenset(('append', 'extend', 'insert', 'remove', 'pop', 'clear', 'sort', 'reverse',
                                      'update', 'setdefault', 'popitem', 'write', 'writelines', 'flush', 'close',
                                      'readline', 'readlines', 'seek', 'truncate', 'add', 'discard',
@@ -2120,6 +2123,147 @@ class Program:
                 return bad
         return None
 
+    @staticmethod
+    def class_bound_names(cls):
+        """The names a class body binds as plain class attributes (a method or a property is not one)."""
+        names = set()
+        for stmt in cls.body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                names.add(stmt.name)
+            elif isinstance(stmt, ast.Assign):
+                for t in stmt.targets:
+                    if isinstance(t, ast.Name):
+                        names.add(t.id)
+                    elif isinstance(t, (ast.Tuple, ast.List)):
+                        names.update(e.id for e in t.elts if isinstance(e, ast.Name))
+            elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+                names.add(stmt.target.id)
+        return names
+
+    def instance_class(self, mod, name):
+        """The local class whose constructor the module body binds to `name` once (otherwise None)."""
+        values = []
+        for node in mod.tree.body:
+            if name not in _scan_scope([node])[0]:
+                continue
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                    and isinstance(node.targets[0], ast.Name) and node.targets[0].id == name:
+                values.append(node.value)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                    and node.target.id == name and node.value is not None:
+                values.append(node.value)
+            else:
+                return None
+        if len(values) != 1 or not isinstance(values[0], ast.Call) \
+                or not isinstance(values[0].func, ast.Name):
+            return None
+        found = self.resolve_def(mod, values[0].func.id)
+        if found is not None and found[0] == 'class':
+            return found[1], found[2]
+        return None
+
+    def instance_attr_safe(self, mod, owner, cls, attr):
+        """Reading `instance.attr` is a plain lookup: the class binds it as a value, or its `__init__`
+        assigns it from a safe expression, and no hook or property runs for it."""
+        for node in ast.walk(cls):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                    and node.name in ('__getattr__', '__getattribute__'):
+                return False
+        for stmt in cls.body:
+            if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef)) and stmt.name == attr:
+                return False
+            if isinstance(stmt, ast.ClassDef) and stmt.name == attr:
+                return True
+            if isinstance(stmt, ast.Assign):
+                for t in stmt.targets:
+                    if isinstance(t, ast.Name) and t.id == attr:
+                        return True
+            if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) \
+                    and stmt.target.id == attr:
+                return stmt.value is not None
+        init = next((s for s in cls.body if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef))
+                     and s.name == '__init__'), None)
+        if init is not None:
+            args = init.args.posonlyargs + init.args.args
+            first = args[0].arg if args else None
+            for node in ast.walk(init):
+                if isinstance(node, ast.Assign):
+                    targets = node.targets
+                elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+                    targets = [node.target]
+                else:
+                    continue
+                for t in targets:
+                    if isinstance(t, ast.Attribute) and t.attr == attr \
+                            and isinstance(t.value, ast.Name) and t.value.id == first:
+                        return True
+        for base in cls.bases:
+            if isinstance(base, ast.Name):
+                found = self.resolve_def(owner, base.id)
+                if found is not None and found[0] == 'class' \
+                        and self.instance_attr_safe(owner, found[1], found[2], attr):
+                    return True
+        return False
+
+    def move_bad_attr(self, mod, node, seen):
+        """A load of `expr.name`: only a settled module value, a known standard constant, a plain class
+        attribute, or an instance attribute a local constructor binds is safe to compute early."""
+        chain, cur = [], node
+        while isinstance(cur, ast.Attribute):
+            chain.append(cur.attr)
+            cur = cur.value
+        if not isinstance(cur, ast.Name):
+            return node
+        name = cur.id
+        entry = mod.alias.get(name)
+        if entry is not None and entry[0] == 'mod':
+            return None
+        if entry is not None:
+            found = self.class_node(mod, name)
+            if len(chain) == 1 and found is not None and not found[1].keywords \
+                    and not self.hooked(mod) and chain[0] in self.class_bound_names(found[1]):
+                return None
+            return node
+        if name in mod.std and name not in mod.kinds and name not in mod.alias:
+            dotted = '.'.join([name] + list(reversed(chain)))
+            return None if dotted in self.STD_ATTRS else node
+        if mod.kinds.get(name) == 'class':
+            found = self.class_node(mod, name)
+            if len(chain) == 1 and found is not None and not found[1].keywords \
+                    and not self.hooked(mod) and chain[0] in self.class_bound_names(found[1]):
+                return None
+            return node
+        env = getattr(self, '_move_env', None)
+        if env is not None:
+            try:
+                value = self.fold(mod, cur, env)
+            except (_Unfoldable, _Raises):
+                value = _UNKNOWN
+            if value is not _UNKNOWN:
+                obj = value
+                for attr in reversed(chain):
+                    if not hasattr(obj, attr):
+                        return node
+                    obj = getattr(obj, attr)
+                return None
+        found = self.instance_class(mod, name)
+        if found is not None and len(chain) == 1 \
+                and self.instance_attr_safe(mod, found[0], found[1], chain[0]):
+            return None
+        return node
+
+    def move_safe_method(self, mod, node):
+        """A method call that cannot run user code: the receiver is a value this module builds from
+        constants, and the method is one of the built-in text/container operations."""
+        env = getattr(self, '_move_env', None)
+        if env is None:
+            return False
+        try:
+            value = self.fold(mod, node, env)
+        except (_Unfoldable, _Raises):
+            return False
+        return isinstance(value, (str, bytes, list, tuple, dict, set, frozenset, int, float, bool))
+
     def move_bad_call(self, mod, node, seen):
         func = node.func
         if isinstance(func, ast.Name):
@@ -2139,18 +2283,15 @@ class Program:
                           if len(sig) > 1 else name)
                 if dotted in self.MOVE_EFFECT_STD or name in self.MOVE_EFFECT_BUILTINS:
                     return node
-                return None
+                return node             # a standard function may read state or raise
             if hasattr(builtins, name) and name not in mod.kinds and name not in mod.alias:
-                return node if name in self.MOVE_EFFECT_BUILTINS else None
+                return node if name not in self.MOVE_SAFE_BUILTINS else None
             return node
         if isinstance(func, ast.Attribute):
             info = self.std_call_name(mod, func)
             if info is not None:
                 if info[0] == 'std':
-                    dotted = info[1]
-                    if dotted in self.MOVE_EFFECT_STD or dotted.rsplit('.', 1)[-1] in self.MOVE_EFFECT_METHODS:
-                        return node
-                    return None
+                    return node        # only a known pure function would be safe, and none is listed
                 owner, attr = info[1], info[2]
                 if '.' not in attr and owner.kinds.get(attr) == 'func':
                     for inner in owner.tree.body:
@@ -2160,7 +2301,7 @@ class Program:
             attr = func.attr
             if attr in self.MOVE_EFFECT_METHODS:
                 return node
-            if attr in self.MOVE_SAFE_METHODS:
+            if attr in self.MOVE_SAFE_METHODS and self.move_safe_method(mod, func.value):
                 return None
             return node
         return node
@@ -2189,6 +2330,9 @@ class Program:
         if kind is ast.Attribute:
             if isinstance(node.ctx, ast.Load):
                 bad = self.reads_state(mod, node, set())
+                if bad is not None:
+                    return bad
+                bad = self.move_bad_attr(mod, node, seen)
                 if bad is not None:
                     return bad
             return self.move_bad_expr(mod, node.value, seen)
@@ -2442,6 +2586,60 @@ class Program:
                 extra |= self.call_reads(mod, name, seen)
             return names | extra
 
+        def immutable(value):
+            if isinstance(value, (int, float, complex, str, bytes, bool, range, type(None))):
+                return True
+            if isinstance(value, (tuple, frozenset)):
+                return all(immutable(v) for v in value)
+            return False
+
+        effect_cache = {}
+
+        def effectful(i):
+            """The statement at `i` may change a value that is already bound (a call, a print, an
+            in-place augmented assignment of a container, a loop, ...)."""
+            if i in effect_cache:
+                return effect_cache[i]
+            node = order[i]
+            if isinstance(node, definitions):
+                effect_cache[i] = False
+                return False
+            result = None
+            if type(node) is ast.AugAssign and isinstance(node.target, ast.Name):
+                before = envs[i].get(node.target.id, _UNKNOWN)
+                after = envs[i + 1].get(node.target.id, _UNKNOWN) if i + 1 < len(envs) else _UNKNOWN
+                result = not immutable(before) or after is _UNKNOWN
+            if not result:
+                self._move_env = collections.ChainMap(dict(envs[i]))
+                result = self.move_bad_stmt(mod, node, set()) is not None
+            effect_cache[i] = result
+            return result
+
+        origin_cache = {}
+
+        def origin(i, trail=None):
+            """The earliest statement whose value the binding at `i` is made from (following aliases)."""
+            if i in origin_cache:
+                return origin_cache[i]
+            trail = set() if trail is None else trail
+            if i in trail:
+                return i
+            trail.add(i)
+            node = order[i]
+            if not isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+                origin_cache[i] = i
+                return i
+            names = self.exec_reads(node)
+            extra = set()
+            local = set()
+            for name in names:
+                extra |= self.call_reads(mod, name, local)
+            sources = [latest(name, i) for name in names | extra]
+            sources = [j for j in sources if j is not None]
+            got = min([i] + [origin(j, trail) for j in sources])
+            origin_cache[i] = got
+            return got
+
         def need_name(name, before, use):
             i = latest(name, before)
             if i is None:
@@ -2449,6 +2647,13 @@ class Program:
                     unresolved.append(use)
                 return
             stmt = order[i]
+            if not isinstance(stmt, definitions):
+                value = envs[i + 1].get(name, _UNKNOWN) if i + 1 < len(envs) else _UNKNOWN
+                if not immutable(value):
+                    start = origin(i)
+                    if any(effectful(j) for j in range(start + 1, before)):
+                        unresolved.append(use)
+                        return
             if isinstance(stmt, definitions) or id(stmt) in needed:
                 return
             needed.add(id(stmt))
