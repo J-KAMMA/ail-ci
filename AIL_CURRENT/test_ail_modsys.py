@@ -303,9 +303,16 @@ class LazyStart(ModulesBase):
                        "print(run())\n"}, irs=ONE)
         self.assertEqual(out, "lib starts\n(6, 22)\n")
 
-    def test_definition_that_needs_a_computed_value_is_refused(self):
-        self.refused({"lib.py": "import os\nBASE = os.getcwd()\n\n\ndef f(x=BASE):\n    return x\n",
-                      "main.py": "def g():\n    import lib\n    return lib.f()\n\n\nprint(g() != '')\n"},
+    def test_definition_that_needs_a_computed_value(self):
+        out = self.same_as_cpython({"lib.py": "import os\nBASE = os.getcwd()\n\n\ndef f(x=BASE):\n    return x\n",
+                                    "main.py": "def g():\n    import lib\n    return lib.f()\n\n\nprint(g() != '')\n"},
+                                   irs=ONE)
+        self.assertEqual(out, "True\n")
+
+    def test_definition_that_needs_an_effectful_value_is_refused(self):
+        self.refused({"lib.py": "def make():\n    print('making')\n    return 3\n\n\nN = make()\n\n\n"
+                                "def f(x=N):\n    return x\n",
+                      "main.py": "def g():\n    import lib\n    return lib.f()\n\n\nprint(g())\n"},
                      "function-level `import lib`")
 
 

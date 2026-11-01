@@ -1,3 +1,29 @@
+## 2026-11-01 -- lazymod1: definitions may read values a lazily started module computes (job-lazymod1-11011234)
+
+A function-level `import lib` hoists lib's definitions; until now a default, decorator, annotation,
+base or class body that read a module-level computed value (`N = make(); SIZE = 1 << N;
+def f(a=SIZE)`) was refused by name. `init_split` now walks the module body in CPython's order,
+resolves each definition's reads through user functions, module aliases, annotated/augmented/
+conditional assignments and class constructors (including a `__init__` that reads a module global),
+and marks the statements that produce those values. The pure, non-raising ones are emitted with the
+definitions before the definitions that need them; every other statement still runs in the
+`_ail_init_<lib>` function when the import statement first runs, so prints keep CPython's order and
+laziness. A computation that acts, reads changing state or would raise (`[1][5]`, `1 // 0`,
+`int('bad')`) is refused by name instead of being moved ahead of its effects; a value bound in a
+loop and a base produced by a helper call are also refused by name. C for the ten lab/compare tasks
+is byte-identical to the base worktree (including the two exact-int tasks; the three Python tasks
+that also fail on base fail the same way).
+
+Probes in `/tmp/probes/lazymod1/` compare stdout and exit with CPython on the default and general
+builds (and AIL_IR=0/1): helper calls, alias chains, Python values through a list item, a dict value,
+an attribute and an argument, int widths up to 2**63-1 and negative/zero/empty, rebinding and list
+mutation after a default was captured, annotated/augmented/conditional bindings, class bodies and
+constructor globals, a package submodule, no-feature and effect/state/raise/loop refusals. Added
+`AIL_CURRENT/test_ail_lazymod1.py` (10 cases) and registered it through
+`AIL_CURRENT/tests.d/test_ail_lazymod1.txt`; `test_ail_modsys` gained a computed-value case and an
+effectful-value refusal. Final-state tests: test_ail_lazymod1, test_ail_modsys, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`

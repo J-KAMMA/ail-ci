@@ -1808,57 +1808,731 @@ class Program:
                 and isinstance(value, (ast.Tuple, ast.List)) and len(value.elts) == len(target.elts)
                 and not any(isinstance(e, ast.Starred) for e in value.elts))
 
+    MOVE_EFFECT_BUILTINS = frozenset(('print', 'input', 'open', 'exec', 'eval', 'compile', '__import__',
+                                      'breakpoint', 'exit', 'quit', 'help', 'setattr', 'delattr'))
+    MOVE_EFFECT_METHODS = frozenset(('append', 'extend', 'insert', 'remove', 'pop', 'clear', 'sort', 'reverse',
+                                     'update', 'setdefault', 'popitem', 'write', 'writelines', 'flush', 'close',
+                                     'readline', 'readlines', 'seek', 'truncate', 'add', 'discard',
+                                     'difference_update', 'intersection_update', 'symmetric_difference_update',
+                                     'shuffle', 'seed'))
+    MOVE_SAFE_METHODS = frozenset(('upper', 'lower', 'strip', 'lstrip', 'rstrip', 'split', 'rsplit', 'join',
+                                   'replace', 'startswith', 'endswith', 'find', 'rfind', 'index', 'rindex', 'count',
+                                   'format', 'encode', 'decode', 'isdigit', 'isalpha', 'isalnum', 'isspace',
+                                   'islower', 'isupper', 'istitle', 'isnumeric', 'isdecimal', 'isidentifier',
+                                   'title', 'capitalize', 'casefold', 'zfill', 'center', 'ljust', 'rjust',
+                                   'partition', 'rpartition', 'splitlines', 'keys', 'values', 'items', 'get',
+                                   'copy', 'union', 'intersection', 'difference', 'issubset', 'issuperset',
+                                   'isdisjoint', 'bit_length', 'conjugate', 'hex', 'as_integer_ratio',
+                                   'is_integer'))
+    MOVE_EFFECT_STD = frozenset(('os.remove', 'os.unlink', 'os.rmdir', 'os.removedirs', 'os.mkdir', 'os.makedirs',
+                                 'os.rename', 'os.renames', 'os.replace', 'os.chdir', 'os.system', 'os.popen',
+                                 'os.putenv', 'os.unsetenv', 'os.chmod', 'os.chown', 'os.kill', 'os.abort',
+                                 'os._exit', 'os.fork', 'os.execv', 'os.execve', 'os.spawnv', 'os.startfile',
+                                 'sys.exit', 'sys.settrace', 'sys.setprofile', 'sys.stdout.write',
+                                 'sys.stderr.write', 'shutil.copy', 'shutil.copy2', 'shutil.copyfile',
+                                 'shutil.copytree', 'shutil.move', 'shutil.rmtree', 'time.sleep'))
+
+    @staticmethod
+    def exec_reads(node):
+        """Names read when `node` runs as a module-level statement: a function body does not run at its
+        definition, but its decorators, defaults and annotations do; a class body does run."""
+        out = set()
+
+        def walk(n):
+            if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for d in n.decorator_list:
+                    walk(d)
+                for d in _defaults(n.args):
+                    walk(d)
+                for arg in n.args.posonlyargs + n.args.args + n.args.kwonlyargs + [n.args.vararg, n.args.kwarg]:
+                    if arg is not None and arg.annotation is not None:
+                        walk(arg.annotation)
+                if n.returns is not None:
+                    walk(n.returns)
+                return
+            if isinstance(n, ast.Lambda):
+                for d in _defaults(n.args):
+                    walk(d)
+                return
+            if isinstance(n, ast.ClassDef):
+                for d in n.decorator_list:
+                    walk(d)
+                for b in n.bases:
+                    walk(b)
+                for k in n.keywords:
+                    walk(k.value)
+                for s in n.body:
+                    walk(s)
+                return
+            if isinstance(n, ast.AugAssign) and isinstance(n.target, ast.Name):
+                out.add(n.target.id)
+            if isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load):
+                out.add(n.id)
+            for c in ast.iter_child_nodes(n):
+                walk(c)
+        walk(node)
+        return out
+
+    def function_node(self, mod, name):
+        entry = mod.alias.get(name)
+        if entry is not None:
+            if entry[0] != 'member':
+                return None
+            owner, orig = entry[1], entry[2]
+            kind = owner.kinds.get(orig)
+        else:
+            owner, orig = mod, name
+            kind = mod.kinds.get(name)
+        if kind != 'func':
+            return None
+        for node in owner.tree.body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == orig:
+                return owner, node
+        return None
+
+    def class_node(self, mod, name):
+        entry = mod.alias.get(name)
+        if entry is not None:
+            if entry[0] != 'member':
+                return None
+            owner, orig = entry[1], entry[2]
+            kind = owner.kinds.get(orig)
+        else:
+            owner, orig = mod, name
+            kind = mod.kinds.get(name)
+        if kind != 'class':
+            return None
+        for node in owner.tree.body:
+            if isinstance(node, ast.ClassDef) and node.name == orig:
+                return owner, node
+        return None
+
+    def resolve_def(self, mod, name, seen=None):
+        """The function or class `name` means, following module-level aliases (`DEC = deco`)."""
+        seen = set() if seen is None else seen
+        key = (id(mod), name)
+        if key in seen:
+            return None
+        seen.add(key)
+        found = self.function_node(mod, name)
+        if found is not None:
+            return ('func',) + found
+        found = self.class_node(mod, name)
+        if found is not None:
+            return ('class',) + found
+        values = []
+        for node in mod.tree.body:
+            if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                    and isinstance(node.targets[0], ast.Name) and node.targets[0].id == name:
+                values.append(node.value)
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                    and node.target.id == name and node.value is not None:
+                values.append(node.value)
+        if len(values) == 1 and isinstance(values[0], ast.Name):
+            return self.resolve_def(mod, values[0].id, seen)
+        return None
+
+    def function_reads(self, mod, name, seen):
+        found = self.resolve_def(mod, name)
+        if found is None or found[0] != 'func':
+            return set()
+        _, owner, fn = found
+        key = ('func', id(owner), id(fn))
+        if key in seen:
+            return set()
+        seen.add(key)
+        out = set()
+        local, _ = _function_locals(fn)
+        for stmt in fn.body:
+            names = self.exec_reads(stmt) - local
+            out |= names
+            for inner in names:
+                out |= self.call_reads(owner, inner, seen)
+        return out
+
+    def class_init_reads(self, mod, name, seen):
+        found = self.resolve_def(mod, name)
+        if found is None or found[0] != 'class':
+            return set()
+        _, owner, cls = found
+        key = ('class', id(owner), id(cls))
+        if key in seen:
+            return set()
+        seen.add(key)
+        init = next((s for s in cls.body if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef))
+                     and s.name == '__init__'), None)
+        if init is None:
+            out = set()
+            for base in cls.bases:
+                if isinstance(base, ast.Name):
+                    out |= self.class_init_reads(owner, base.id, seen)
+            return out
+        local, _ = _function_locals(init)
+        out = set()
+        for stmt in init.body:
+            names = self.exec_reads(stmt) - local
+            out |= names
+            for inner in names:
+                out |= self.call_reads(owner, inner, seen)
+        return out
+
+    def call_reads(self, mod, name, seen):
+        found = self.resolve_def(mod, name)
+        if found is None:
+            return set()
+        kind, owner, node = found
+        if kind == 'func':
+            key = ('func', id(owner), id(node))
+            if key in seen:
+                return set()
+            seen.add(key)
+            out = set()
+            local, _ = _function_locals(node)
+            for stmt in node.body:
+                names = self.exec_reads(stmt) - local
+                out |= names
+                for inner in names:
+                    out |= self.call_reads(owner, inner, seen)
+            return out
+        return self.class_init_reads(owner, node.name, seen)
+
+    def std_call_name(self, mod, node):
+        chain, cur = [], node
+        while isinstance(cur, ast.Attribute):
+            chain.append(cur.attr)
+            cur = cur.value
+        if not isinstance(cur, ast.Name):
+            return None
+        entry = mod.alias.get(cur.id)
+        if entry is not None and entry[0] == 'mod':
+            return ('local', entry[1], '.'.join(reversed(chain)))
+        sig = mod.std.get(cur.id)
+        if sig is None or cur.id in mod.kinds:
+            return None
+        if sig[0] == 'import':
+            base = sig[1]
+        elif sig[0] == 'from':
+            base = (sig[1] or '') + '.' + sig[2]
+        else:
+            return None
+        return ('std', '.'.join([base] + list(reversed(chain))))
+
+    def move_bad_function(self, mod, owner, fn, seen):
+        key = (id(owner), id(fn))
+        if key in seen:
+            return None
+        seen.add(key)
+        for stmt in fn.body:
+            bad = self.move_bad_stmt(owner, stmt, seen)
+            if bad is not None:
+                return bad
+        return None
+
+    def move_bad_class_call(self, mod, owner, cls, seen):
+        """Constructing a class defined here runs its `__init__`; accept a constructor that only binds
+        names and attributes of its first parameter (the new instance) from values that are safe."""
+        key = ('classcall', id(owner), id(cls))
+        if key in seen:
+            return None
+        seen.add(key)
+        if cls.keywords:
+            return cls
+        init = next((s for s in cls.body if isinstance(s, (ast.FunctionDef, ast.AsyncFunctionDef))
+                     and s.name == '__init__'), None)
+        if init is None:
+            for base in cls.bases:
+                if not isinstance(base, ast.Name):
+                    return base
+                found = self.resolve_def(owner, base.id)
+                if found is not None and found[0] == 'class':
+                    bad = self.move_bad_class_call(owner, found[1], found[2], seen)
+                    if bad is not None:
+                        return bad
+            return None
+        args = init.args.posonlyargs + init.args.args
+        first = args[0].arg if args else None
+        local, _ = _function_locals(init)
+        safe = {first} if first else set()
+
+        def root_name(target):
+            while isinstance(target, (ast.Attribute, ast.Subscript)):
+                target = target.value
+            return target.id if isinstance(target, ast.Name) else None
+
+        def target_ok(target):
+            if isinstance(target, ast.Name):
+                return True
+            if isinstance(target, (ast.Attribute, ast.Subscript)):
+                return root_name(target) == first
+            if isinstance(target, (ast.Tuple, ast.List)):
+                return all(target_ok(e) for e in target.elts)
+            return False
+
+        def stmt_bad(node):
+            kind = type(node)
+            if kind is ast.Pass:
+                return None
+            if kind is ast.Assign:
+                for t in node.targets:
+                    if not target_ok(t):
+                        return t
+                return self.move_bad_expr(owner, node.value, seen)
+            if kind is ast.AnnAssign:
+                if not target_ok(node.target):
+                    return node.target
+                return self.move_bad_expr(owner, node.value, seen)
+            if kind is ast.AugAssign:
+                if not target_ok(node.target):
+                    return node.target
+                return self.move_bad_expr(owner, node.value, seen)
+            if kind is ast.Expr:
+                return self.move_bad_expr(owner, node.value, seen)
+            if kind is ast.Return:
+                return self.move_bad_expr(owner, node.value, seen)
+            if kind is ast.If:
+                bad = self.move_bad_expr(owner, node.test, seen)
+                if bad is not None:
+                    return bad
+                for inner in node.body + node.orelse:
+                    bad = stmt_bad(inner)
+                    if bad is not None:
+                        return bad
+                return None
+            if kind in (ast.For, ast.AsyncFor, ast.While):
+                if kind is not ast.While:
+                    bad = self.move_bad_expr(owner, node.iter, seen)
+                    if bad is not None:
+                        return bad
+                if kind is ast.While:
+                    bad = self.move_bad_expr(owner, node.test, seen)
+                    if bad is not None:
+                        return bad
+                for inner in node.body + node.orelse:
+                    bad = stmt_bad(inner)
+                    if bad is not None:
+                        return bad
+                return None
+            return node
+
+        for stmt in init.body:
+            bad = stmt_bad(stmt)
+            if bad is not None:
+                return bad
+        return None
+
+    def move_bad_call(self, mod, node, seen):
+        func = node.func
+        if isinstance(func, ast.Name):
+            name = func.id
+            found = self.function_node(mod, name)
+            if found is not None:
+                return self.move_bad_function(mod, found[0], found[1], seen)
+            resolved = self.resolve_def(mod, name)
+            if resolved is not None:
+                kind, owner, item = resolved
+                if kind == 'func':
+                    return self.move_bad_function(owner, owner, item, seen)
+                return self.move_bad_class_call(owner, owner, item, seen)
+            if name in mod.std and name not in mod.kinds:
+                sig = mod.std[name]
+                dotted = ((sig[1] if sig[0] == 'import' else (sig[1] or '') + '.' + sig[2])
+                          if len(sig) > 1 else name)
+                if dotted in self.MOVE_EFFECT_STD or name in self.MOVE_EFFECT_BUILTINS:
+                    return node
+                return None
+            if hasattr(builtins, name) and name not in mod.kinds and name not in mod.alias:
+                return node if name in self.MOVE_EFFECT_BUILTINS else None
+            return node
+        if isinstance(func, ast.Attribute):
+            info = self.std_call_name(mod, func)
+            if info is not None:
+                if info[0] == 'std':
+                    dotted = info[1]
+                    if dotted in self.MOVE_EFFECT_STD or dotted.rsplit('.', 1)[-1] in self.MOVE_EFFECT_METHODS:
+                        return node
+                    return None
+                owner, attr = info[1], info[2]
+                if '.' not in attr and owner.kinds.get(attr) == 'func':
+                    for inner in owner.tree.body:
+                        if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)) and inner.name == attr:
+                            return self.move_bad_function(mod, owner, inner, seen)
+                return node
+            attr = func.attr
+            if attr in self.MOVE_EFFECT_METHODS:
+                return node
+            if attr in self.MOVE_SAFE_METHODS:
+                return None
+            return node
+        return node
+
+    def move_bad_expr(self, mod, node, seen):
+        if node is None:
+            return None
+        env = getattr(self, '_move_env', None)
+        if env is not None:
+            try:
+                self.fold(mod, node, env)
+            except _Raises as exc:
+                return exc.node
+            except _Unfoldable:
+                pass
+        kind = type(node)
+        if kind is ast.Constant:
+            return None
+        if kind is ast.Name:
+            if isinstance(node.ctx, ast.Load):
+                if mod.alias.get(node.id) is None and mod.kinds.get(node.id) == 'var' \
+                        and self.runtime_written(mod, node.id):
+                    return node
+                return self.reads_state(mod, node, set())
+            return None
+        if kind is ast.Attribute:
+            if isinstance(node.ctx, ast.Load):
+                bad = self.reads_state(mod, node, set())
+                if bad is not None:
+                    return bad
+            return self.move_bad_expr(mod, node.value, seen)
+        if kind is ast.Call:
+            for a in node.args:
+                bad = self.move_bad_expr(mod, a, seen)
+                if bad is not None:
+                    return bad
+            for k in node.keywords:
+                bad = self.move_bad_expr(mod, k.value, seen)
+                if bad is not None:
+                    return bad
+            return self.move_bad_call(mod, node, seen)
+        if kind is ast.Lambda:
+            for d in _defaults(node.args):
+                bad = self.move_bad_expr(mod, d, seen)
+                if bad is not None:
+                    return bad
+            return None
+        if kind is ast.GeneratorExp:
+            return None
+        if kind in (ast.Await, ast.Yield, ast.YieldFrom, ast.NamedExpr):
+            return node
+        for c in ast.iter_child_nodes(node):
+            if isinstance(c, ast.expr):
+                bad = self.move_bad_expr(mod, c, seen)
+                if bad is not None:
+                    return bad
+        return None
+
+    def decorator_bad(self, mod, d):
+        bad = self.impure_decorator(mod, d)
+        if bad is None:
+            return None
+        target = d.func if isinstance(d, ast.Call) else d
+        found = None
+        if isinstance(target, ast.Name):
+            resolved = self.resolve_def(mod, target.id)
+            if resolved is not None and resolved[0] == 'func':
+                found = (resolved[1], resolved[2])
+        elif isinstance(target, ast.Attribute):
+            info = self.std_call_name(mod, target)
+            if info is not None and info[0] == 'local' and '.' not in info[2] \
+                    and info[1].kinds.get(info[2]) == 'func':
+                for inner in info[1].tree.body:
+                    if isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)) and inner.name == info[2]:
+                        found = (info[1], inner)
+                        break
+        if found is not None:
+            return self.move_bad_function(mod, found[0], found[1], set())
+        return bad
+
+    def move_bad_stmt(self, mod, node, seen):
+        kind = type(node)
+        if kind in (ast.Pass, ast.FunctionDef, ast.AsyncFunctionDef):
+            if kind is not ast.Pass:
+                for d in node.decorator_list:
+                    bad = self.decorator_bad(mod, d)
+                    if bad is not None:
+                        return bad
+                for d in _defaults(node.args):
+                    bad = self.move_bad_expr(mod, d, seen)
+                    if bad is not None:
+                        return bad
+            return None
+        if kind is ast.ClassDef:
+            for d in node.decorator_list:
+                bad = self.decorator_bad(mod, d)
+                if bad is not None:
+                    return bad
+            for b in node.bases:
+                bad = self.move_bad_expr(mod, b, seen)
+                if bad is not None:
+                    return bad
+            for k in node.keywords:
+                bad = self.move_bad_expr(mod, k.value, seen)
+                if bad is not None:
+                    return bad
+            for stmt in node.body:
+                bad = self.move_bad_stmt(mod, stmt, seen)
+                if bad is not None:
+                    return bad
+            return None
+        if kind is ast.Assign:
+            for t in node.targets:
+                if isinstance(t, ast.Name):
+                    continue
+                if isinstance(t, (ast.Tuple, ast.List)) and all(isinstance(e, ast.Name) for e in t.elts):
+                    continue
+                return t
+            return self.move_bad_expr(mod, node.value, seen)
+        if kind is ast.AnnAssign:
+            if not isinstance(node.target, ast.Name):
+                return node.target
+            bad = self.move_bad_expr(mod, node.annotation, seen)
+            if bad is not None:
+                return bad
+            return self.move_bad_expr(mod, node.value, seen)
+        if kind is ast.AugAssign:
+            if not isinstance(node.target, ast.Name):
+                return node.target
+            return self.move_bad_expr(mod, node.value, seen)
+        if kind is ast.Expr:
+            return self.move_bad_expr(mod, node.value, seen)
+        if kind is ast.If:
+            bad = self.move_bad_expr(mod, node.test, seen)
+            if bad is not None:
+                return bad
+            for stmt in node.body + node.orelse:
+                bad = self.move_bad_stmt(mod, stmt, seen)
+                if bad is not None:
+                    return bad
+            return None
+        if kind in (ast.For, ast.AsyncFor, ast.While):
+            if kind is not ast.While:
+                bad = self.move_bad_expr(mod, node.iter, seen)
+                if bad is not None:
+                    return bad
+            bad = self.move_bad_expr(mod, node.test, seen) if kind is ast.While else None
+            if bad is not None:
+                return bad
+            for stmt in node.body + node.orelse:
+                bad = self.move_bad_stmt(mod, stmt, seen)
+                if bad is not None:
+                    return bad
+            return None
+        if kind in (ast.Try, getattr(ast, 'TryStar', ast.Try)):
+            for stmt in node.body + node.orelse + node.finalbody:
+                bad = self.move_bad_stmt(mod, stmt, seen)
+                if bad is not None:
+                    return bad
+            for handler in node.handlers:
+                for stmt in handler.body:
+                    bad = self.move_bad_stmt(mod, stmt, seen)
+                    if bad is not None:
+                        return bad
+            return None
+        if kind is ast.Match:
+            bad = self.move_bad_expr(mod, node.subject, seen)
+            if bad is not None:
+                return bad
+            for case in node.cases:
+                if case.guard is not None:
+                    bad = self.move_bad_expr(mod, case.guard, seen)
+                    if bad is not None:
+                        return bad
+                for stmt in case.body:
+                    bad = self.move_bad_stmt(mod, stmt, seen)
+                    if bad is not None:
+                        return bad
+            return None
+        if kind is ast.Return:
+            return self.move_bad_expr(mod, node.value, seen)
+        if kind in (ast.Global, ast.Nonlocal, ast.Import, ast.ImportFrom, ast.Delete, ast.Raise, ast.Assert,
+                    ast.Break, ast.Continue, ast.With, ast.AsyncWith):
+            return node
+        return node
+
     def init_split(self, mod, where, orig):
         """For a module that a function starts when it runs (see `merge_program`): the top-level statements that go
         into the start function. Definitions (def, class) and imports are placed where the module is spliced in;
-        every other statement goes into a function that runs when the import statement runs. A definition is
-        refused when its decorators, defaults, bases or class body would need a value the module only computes
-        when it runs (or do something)."""
+        every other statement goes into a function that runs when the import statement runs. A value a definition
+        needs when it is defined is placed before the definitions, so its decorators, defaults and bases can read
+        it; a statement that does something when it runs is still refused."""
         order = [n for n in mod.tree.body if id(n) not in mod.lazy]
         definitions = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)
-        # a name that the module body assigns once, to an expression that does nothing and cannot raise, and that no
-        # function writes later, is a constant: definitions may read it, so it is placed with them
-        def constant_names(n):
-            if not isinstance(n, ast.Assign) or len(n.targets) != 1:
-                return None
-            t = n.targets[0]
-            if isinstance(t, ast.Name):
-                return [t.id]
-            return [e.id for e in t.elts] if self.literal_unpack(t, n.value) else None
-        hoisted = {id(n) for n in order if constant_names(n) is not None
-                   and all(mod.kinds.get(x) == 'var' and not self.runtime_written(mod, x) for x in constant_names(n))}
-        while True:
-            probe_body = [n for n in order if isinstance(n, definitions) or id(n) in hoisted]
-            probe = copy.copy(mod)
-            probe.tree = ast.Module(body=probe_body, type_ignores=[])
-            probe.pure_cache = False
-            probe.lazy = {}
-            probe.imps = dict(mod.imps)
-            for node in probe_body:
-                imp = mod.imps.get(id(node))
-                if isinstance(node, ast.ImportFrom) and imp is not None and imp.local:
-                    # `from m import x` of a variable that changes copies it when the module starts (a statement of
-                    # the start function, see `snapshots`); a definition that reads the copy is caught by `reads_state`
-                    twin = copy.copy(imp)
-                    twin.binds = [(k, ('copied',) if e[0] == 'member' else e) for k, e in imp.binds]
-                    probe.imps[id(node)] = twin
-            bad = self.impure(probe)
-            if bad is None:
+        index = {id(n): i for i, n in enumerate(order)}
+
+        def fold_value(value, env):
+            try:
+                return self.fold(mod, value, env)
+            except (_Unfoldable, _Raises):
+                return _UNKNOWN
+
+        def apply_env(node, env):
+            """Follow the constant module values a statement binds, so a later fold can tell whether a
+            computation would raise (and would then have to keep its place among the effects)."""
+            kind = type(node)
+            if kind is ast.Assign:
+                value = fold_value(node.value, env)
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        env[target.id] = value
+                    elif self.literal_unpack(target, node.value):
+                        for e, v in zip(target.elts, node.value.elts):
+                            env[e.id] = fold_value(v, env)
+                    else:
+                        for name in _scan_scope([target])[0]:
+                            env[name] = _UNKNOWN
+            elif kind is ast.AnnAssign and isinstance(node.target, ast.Name):
+                env[node.target.id] = fold_value(node.value, env) if node.value is not None else _UNKNOWN
+            elif kind is ast.AugAssign and isinstance(node.target, ast.Name):
+                old = env.get(node.target.id, _UNKNOWN)
+                right = fold_value(node.value, env)
+                op = self.FOLD_BINOPS.get(type(node.op))
+                if old is _UNKNOWN or right is _UNKNOWN or op is None:
+                    env[node.target.id] = _UNKNOWN
+                else:
+                    try:
+                        env[node.target.id] = self.fold_apply(node, op, old, right)
+                    except (_Unfoldable, _Raises):
+                        env[node.target.id] = _UNKNOWN
+            elif kind is ast.If:
+                test = fold_value(node.test, env)
+                if test is not _UNKNOWN:
+                    for inner in (node.body if bool(test) else node.orelse):
+                        apply_env(inner, env)
+                else:
+                    for name in _scan_scope(node.body + node.orelse)[0]:
+                        env[name] = _UNKNOWN
+            elif kind in (ast.For, ast.AsyncFor, ast.While, ast.Try, getattr(ast, 'TryStar', ast.Try),
+                          ast.Match, ast.With, ast.AsyncWith):
+                for name in _scan_scope([node])[0]:
+                    env[name] = _UNKNOWN
+            elif kind in (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef):
+                env[node.name] = _UNKNOWN
+            elif kind in (ast.Import, ast.ImportFrom):
+                for a in node.names:
+                    if a.name != '*':
+                        env[a.asname or a.name.split('.')[0]] = _UNKNOWN
+            elif kind is ast.Delete:
+                for name in _scan_scope([node])[0]:
+                    env[name] = _UNKNOWN
+
+        env = collections.ChainMap({})
+        envs = []
+        for node in order:
+            envs.append(dict(env))
+            apply_env(node, env)
+
+        bindings = {}
+        for i, n in enumerate(order):
+            for name in _scan_scope([n])[0]:
+                bindings.setdefault(name, []).append(i)
+
+        def latest(name, before):
+            found = None
+            for i in bindings.get(name, ()):
+                if i < before:
+                    found = i
+                else:
+                    break
+            return found
+
+        needed, unresolved, seen = set(), [], set()
+
+        def read_names(node):
+            names = self.exec_reads(node)
+            extra = set()
+            for name in names:
+                extra |= self.call_reads(mod, name, seen)
+            return names | extra
+
+        def need_name(name, before, use):
+            i = latest(name, before)
+            if i is None:
+                if not hasattr(builtins, name):
+                    unresolved.append(use)
+                return
+            stmt = order[i]
+            if isinstance(stmt, definitions) or id(stmt) in needed:
+                return
+            needed.add(id(stmt))
+            for inner in read_names(stmt):
+                need_name(inner, i, stmt)
+
+        for i, node in enumerate(order):
+            if isinstance(node, definitions):
+                for name in read_names(node):
+                    need_name(name, i, node)
+        for i, node in enumerate(order):
+            if id(node) in needed:
+                self._move_env = collections.ChainMap(dict(envs[i]))
+                bad = self.move_bad_stmt(mod, node, set())
+                if bad is not None:
+                    self.refuse(where, orig, "function-level `%s`: %s defines %s at import time (line %d), which uses a "
+                                "value the module only computes when it runs, or does something when it is defined; the "
+                                "compiler hoists definitions out of the code that a function-level import starts.\n"
+                                "  write instead: move the import to the top of the file, or keep %s to definitions "
+                                "whose decorators, defaults and bases are constants"
+                                % (ast.unparse(orig), mod.path.name, ast.unparse(bad).split('\n')[0][:50],
+                                   getattr(bad, 'lineno', -1), mod.path.name))
+        if unresolved:
+            bad = unresolved[0]
+            self.refuse(where, orig, "function-level `%s`: %s defines %s at import time (line %d), which uses a "
+                        "value the module only computes when it runs, or does something when it is defined; the "
+                        "compiler hoists definitions out of the code that a function-level import starts.\n"
+                        "  write instead: move the import to the top of the file, or keep %s to definitions "
+                        "whose decorators, defaults and bases are constants"
+                        % (ast.unparse(orig), mod.path.name, ast.unparse(bad).split('\n')[0][:50],
+                           getattr(bad, 'lineno', -1), mod.path.name))
+        def definition_bad(node):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for d in node.decorator_list:
+                    bad = self.decorator_bad(mod, d)
+                    if bad is not None:
+                        return bad
+                for d in _defaults(node.args):
+                    bad = self.move_bad_expr(mod, d, set())
+                    if bad is not None:
+                        return bad
+                for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs + [node.args.vararg, node.args.kwarg]:
+                    if arg is not None and arg.annotation is not None:
+                        bad = self.move_bad_expr(mod, arg.annotation, set())
+                        if bad is not None:
+                            return bad
+                return self.move_bad_expr(mod, node.returns, set())
+            if isinstance(node, ast.ClassDef):
+                for d in node.decorator_list:
+                    bad = self.decorator_bad(mod, d)
+                    if bad is not None:
+                        return bad
+                for b in node.bases:
+                    bad = self.move_bad_expr(mod, b, set())
+                    if bad is not None:
+                        return bad
+                for k in node.keywords:
+                    bad = self.move_bad_expr(mod, k.value, set())
+                    if bad is not None:
+                        return bad
+                for stmt in node.body:
+                    bad = self.move_bad_stmt(mod, stmt, set())
+                    if bad is not None:
+                        return bad
+            return None
+
+        bad = None
+        for i, node in enumerate(order):
+            if not isinstance(node, definitions):
+                continue
+            self._move_env = collections.ChainMap(dict(envs[i]))
+            bad = definition_bad(node)
+            if bad is not None:
                 break
-            line = getattr(bad, 'lineno', -1)
-            culprit = next((n for n in order if id(n) in hoisted and n.lineno <= line <= (n.end_lineno or n.lineno)),
-                           None)
-            if culprit is None:
-                self.refuse(where, orig, "function-level `%s`: %s defines %s at import time (line %d), which uses a "
-                            "value the module only computes when it runs, or does something when it is defined; the "
-                            "compiler hoists definitions out of the code that a function-level import starts.\n"
-                            "  write instead: move the import to the top of the file, or keep %s to definitions "
-                            "whose decorators, defaults and bases are constants"
-                            % (ast.unparse(orig), mod.path.name, ast.unparse(bad).split('\n')[0][:50], line,
-                               mod.path.name))
-            hoisted.discard(id(culprit))
-        mod.hoisted = hoisted
-        return [n for n in order if not isinstance(n, definitions) and id(n) not in hoisted
+        if bad is not None:
+            self.refuse(where, orig, "function-level `%s`: %s defines %s at import time (line %d), which uses a "
+                        "value the module only computes when it runs, or does something when it is defined; the "
+                        "compiler hoists definitions out of the code that a function-level import starts.\n"
+                        "  write instead: move the import to the top of the file, or keep %s to definitions "
+                        "whose decorators, defaults and bases are constants"
+                        % (ast.unparse(orig), mod.path.name, ast.unparse(bad).split('\n')[0][:50],
+                           getattr(bad, 'lineno', -1), mod.path.name))
+        mod.hoisted = needed
+        return [n for n in order if not isinstance(n, definitions) and id(n) not in needed
                 and not (n is mod.tree.body[0] and isinstance(n, ast.Expr) and isinstance(n.value, ast.Constant)
                          and isinstance(n.value.value, str))]
 
