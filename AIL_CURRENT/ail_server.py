@@ -29,7 +29,7 @@ PROTOCOL = 1
 SERVED_COMMANDS = ('compile', 'check')
 # Environment variables read while the compiler is imported (module level).  test_ail_server.py imports the compiler with
 # a recording os.environ and fails when a module reads one that is not named here.
-IMPORT_ENV = ('AIL_EXTRA_CFLAGS', 'AIL_FASTWALK', 'AIL_G7_FORCE', 'AIL_QUERY_CACHE', 'AIL_RANGE_BUDGET', 'AIL_RANGE_DEBUG',
+IMPORT_ENV = ('AIL_EXIT_MERGE_MIN', 'AIL_EXTRA_CFLAGS', 'AIL_FASTWALK', 'AIL_G7_FORCE', 'AIL_QUERY_CACHE', 'AIL_RANGE_BUDGET', 'AIL_RANGE_DEBUG',
               'AIL_V2_INCLUDE_ABS', 'AIL_V2_WIDE_EMBED')
 LIMITS = ('RLIMIT_AS', 'RLIMIT_DATA', 'RLIMIT_STACK', 'RLIMIT_NOFILE', 'RLIMIT_CPU', 'RLIMIT_FSIZE', 'RLIMIT_CORE')
 KEYED_LIMITS = ('RLIMIT_AS', 'RLIMIT_DATA', 'RLIMIT_STACK', 'RLIMIT_NOFILE')   # fixed when the template is made
