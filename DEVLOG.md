@@ -1,3 +1,29 @@
+## 2026-11-01 -- BEAT_C: where AIL can beat C at equal effort (job-beatc1-11011753)
+
+Measurement and pricing only; no compiler code changed and the default output is untouched.
+Built the ten `lab/compare` tasks with the default AIL build and `gcc -O2 -std=c11`, and recorded
+median-of-5 wall time on one core (`taskset -c 0`) and all four cores, peak RSS, and the CPython
+reference hash. AIL wins one task (`term_rank`, 1.30x); C wins the other nine, with gaps from
+1.22x (`chain_relax`) to 10.15x (`rail_transfer`). The largest memory gap is `tree_fold` (603 MiB
+vs 194 MiB). `tools/icount.c` builds but `perf_event_open` is denied (`perf_event_paranoid` 4,
+no `sudo`), and there is no valgrind, so instruction counts are recorded as unavailable and no
+instruction claim is made.
+
+Profiled the nine non-wins with `gprof` on `-pg` generated C: the hot work is scar's cell loop
+(~50% in the update lines), berth's int64 key sort (31.9% on one line), echo's hash probe
+(~37%), ticket's string-table lookup (18.5%), tree's sort/slist (~46% combined), rail's Dijkstra
+(86% in `solve`), and tally's interpreter `ev` (67.6%). Priced A automatic parallelism, B
+`restrict`, C specialization/inlining and D arenas per task with the `speed-claims` rule. Only
+A/scar_life (1.60x bound vs 1.53x needed), B/berth_sim (1.47x vs 1.31x) and C/echo_pack (1.82x vs
+1.65x) have a removal bound above their gap; `tools/roofcheck_v1.py` is not in this tree.
+
+Hand-edited generated C for the two pairs, interleaving base and edited runs: OpenMP on scar's
+cell loop kept output byte-identical and gave 1.395x all-core (paired 1.449x; best run 2.33x, but
+the median 17.8 s is still slower than C's 16.2 s); `restrict` on berth's keysort also kept output
+byte-identical but gave 1.00-1.03x, a tie. Report and raw JSON are in `docs/design/BEAT_C.md` and
+`lab/beatc/`. Required tests (`test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`) were run on the final commit; see the job report.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
