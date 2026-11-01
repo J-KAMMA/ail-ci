@@ -1,3 +1,29 @@
+## 2026-11-01 -- stdlib argparse review fixes (job-std_argparse-11011519)
+
+Fixed the four defects the review found in the bundled `stdlib/argparse.py`; no lab program changed.
+
+- A string default is converted by `type=`, as CPython does for actions that were not given on the
+  command line (type only, without a choices check there). Positional `nargs="?"` defaults are
+  converted and checked, and an optional `nargs="?"` `const` string is converted when the option is
+  present with no value.
+- A positional `nargs="*"` with no arguments keeps its default when that default is not `None`
+  (and checks choices on it); otherwise it gets `[]`. An absent optional `nargs="*"` still gets its
+  default; a present one with no values gets `[]`.
+- A required mutually exclusive group renders as `(...)` in usage (an optional group stays `[...]`,
+  and a required group with one exposed action stays bare), in the single-line and wrapped forms.
+- Help text stays on the invocation line when the invocation fits the column: the fitting test is
+  now CPython's `len(invocation) <= help_position - indent - 2`, and help is wrapped at
+  `78 - help_position` (at least 11) instead of a fixed 79.
+- `_copy_items` copies only an actual list. A non-list default for `append` / `append_const` is
+  returned unchanged, so using the option fails with CPython's `AttributeError` instead of being
+  turned into a list of characters.
+
+`/tmp/probes/rp1_defaults.py`, `rp1e_badint.py`, `rp1e_badchoice.py`, `rp2_star.py`,
+`rp2e_star_choice.py`, `rp2e_missing.py`, `rp3_mutex.py`, `rp4_help.py` and `rp5_values.py` match
+CPython 3.12 on the default and forced general builds (stdout and exit code, stderr included for
+the error probes). `test_ail_std_argparse`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass on the final commit; `tools/update_manifest.py --check` exits 0.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use

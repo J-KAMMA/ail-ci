@@ -66,10 +66,12 @@ def _wrap(text, width, indent):
 def _copy_items(items):
     if items is None:
         return []
-    copied = []
-    for item in items:
-        copied.append(item)
-    return copied
+    if isinstance(items, list):
+        copied = []
+        for item in items:
+            copied.append(item)
+        return copied
+    return items
 
 
 def _metavar(action):
@@ -116,6 +118,20 @@ def _names(action):
                 name = name + " " + " ".join(parts)
         names.append(name)
     return ", ".join(names)
+
+
+def _group_piece(group):
+    inner = []
+    for member in group._actions:
+        if member["help"] != SUPPRESS:
+            inner.append(_usage_piece(member).strip("[]"))
+    if group._required:
+        if len(inner) > 1:
+            return "(" + " | ".join(inner) + ")"
+        if len(inner) == 1:
+            return inner[0]
+        return ""
+    return "[" + " | ".join(inner) + "]"
 
 
 def _usage_piece(action):
@@ -372,11 +388,7 @@ class ArgumentParser:
             if group is not None:
                 if group not in grouped:
                     grouped.append(group)
-                    inner = []
-                    for member in group._actions:
-                        if member["help"] != SUPPRESS:
-                            inner.append(_usage_piece(member).strip("[]"))
-                    pieces.append("[" + " | ".join(inner) + "]")
+                    pieces.append(_group_piece(group))
                 continue
             pieces.append(_usage_piece(action))
         prefix = "usage: " + self.prog
@@ -399,11 +411,7 @@ class ArgumentParser:
             else:
                 opt_pieces.append(piece)
         for group in grouped:
-            inner = []
-            for member in group._actions:
-                if member["help"] != SUPPRESS:
-                    inner.append(_usage_piece(member).strip("[]"))
-            opt_pieces.append("[" + " | ".join(inner) + "]")
+            opt_pieces.append(_group_piece(group))
         indent = " " * (len(prefix) + 1)
         lines = []
         line = prefix
@@ -432,25 +440,23 @@ class ArgumentParser:
     def _ail_help_lines(self, action, position):
         left = "  " + _names(action)
         text = action["help"]
-        if text is None:
+        if not text:
             return [left]
         lines = []
-        if position <= 2 + len(left) + 2:
+        invocation = len(left) - 2
+        action_width = position - 4
+        if invocation <= action_width:
+            prefix = left + " " * (position - len(left))
+        else:
             lines.append(left)
             prefix = " " * position
-        else:
-            prefix = left + " " * (position - len(left))
-        wrapped = _wrap(text, 79, position)
-        if position <= 2 + len(left) + 2:
-            for i in range(len(wrapped)):
-                if i == 0:
-                    lines.append(prefix + wrapped[i])
-                else:
-                    lines.append(prefix + wrapped[i])
-        else:
-            lines.append(prefix + wrapped[0])
-            for i in range(1, len(wrapped)):
-                lines.append(" " * position + wrapped[i])
+        width = 78 - position
+        if width < 11:
+            width = 11
+        wrapped = _wrap(text, width, position)
+        lines.append(prefix + wrapped[0])
+        for i in range(1, len(wrapped)):
+            lines.append(" " * position + wrapped[i])
         return lines
 
     def format_help(self):
@@ -513,39 +519,46 @@ class ArgumentParser:
             print(message, end="", file=sys.stderr)
         sys.exit(status)
 
-    def _ail_convert(self, action, text):
+    def _ail_coerce(self, action, text):
         kind = action["type"]
         if kind is None:
-            value = text
-        else:
-            try:
-                value = kind(text)
-            except ValueError as error:
-                name = _type_name(kind)
-                detail = str(error)
-                if "int" in detail:
-                    name = "int"
-                elif "float" in detail:
-                    name = "float"
-                self.error("argument " + self._ail_arg_name(action) + ": invalid " + name +
-                           " value: " + _quote(text))
-            except TypeError as error:
-                name = _type_name(kind)
-                detail = str(error)
-                if "int" in detail:
-                    name = "int"
-                elif "float" in detail:
-                    name = "float"
-                self.error("argument " + self._ail_arg_name(action) + ": invalid " + name +
-                           " value: " + _quote(text))
+            return text
+        try:
+            return kind(text)
+        except ValueError as error:
+            name = _type_name(kind)
+            detail = str(error)
+            if "int" in detail:
+                name = "int"
+            elif "float" in detail:
+                name = "float"
+            self.error("argument " + self._ail_arg_name(action) + ": invalid " + name +
+                       " value: " + _quote(text))
+        except TypeError as error:
+            name = _type_name(kind)
+            detail = str(error)
+            if "int" in detail:
+                name = "int"
+            elif "float" in detail:
+                name = "float"
+            self.error("argument " + self._ail_arg_name(action) + ": invalid " + name +
+                       " value: " + _quote(text))
+        return text
+
+    def _ail_check_value(self, action, value):
         choices = action["choices"]
-        if choices is not None:
-            if value not in choices:
-                names = []
-                for choice in choices:
-                    names.append(_quote(choice))
-                self.error("argument " + self._ail_arg_name(action) + ": invalid choice: " + _quote(value) +
-                           " (choose from " + ", ".join(names) + ")")
+        if choices is None:
+            return
+        if value not in choices:
+            names = []
+            for choice in choices:
+                names.append(_quote(choice))
+            self.error("argument " + self._ail_arg_name(action) + ": invalid choice: " + _quote(value) +
+                       " (choose from " + ", ".join(names) + ")")
+
+    def _ail_convert(self, action, text):
+        value = self._ail_coerce(action, text)
+        self._ail_check_value(action, value)
         return value
 
     def _ail_arg_name(self, action):
@@ -554,20 +567,30 @@ class ArgumentParser:
         return "/".join(action["option_strings"])
 
     def _ail_store(self, namespace, action, raw):
-        if action["nargs"] is None:
+        nargs = action["nargs"]
+        if nargs is None:
             value = self._ail_convert(action, raw[0])
+        elif nargs == OPTIONAL:
+            if raw:
+                value = self._ail_convert(action, raw[0])
+            else:
+                if action["positional"]:
+                    value = action["default"]
+                else:
+                    value = action["const"]
+                if isinstance(value, str):
+                    value = self._ail_convert(action, value)
+        elif nargs == ZERO_OR_MORE and action["positional"] and not raw:
+            if action["default"] is not None:
+                value = action["default"]
+                self._ail_check_value(action, value)
+            else:
+                value = []
         else:
             values = []
             for item in raw:
                 values.append(self._ail_convert(action, item))
-            if action["nargs"] == OPTIONAL:
-                value = values[0] if values else action["const"]
-            elif action["nargs"] == ZERO_OR_MORE or action["nargs"] == ONE_OR_MORE:
-                value = values
-            elif isinstance(action["nargs"], int):
-                value = values
-            else:
-                value = values
+            value = values
         name = action["dest"]
         action_name = action["action"]
         if action_name == "append":
@@ -768,8 +791,6 @@ class ArgumentParser:
             pos_index = pos_index + take
             if len(raw) < need:
                 continue
-            if len(raw) == 0 and nargs == OPTIONAL:
-                continue
             self._ail_apply(namespace, action, raw, seen)
         if pos_index < len(positional_tokens):
             merged = []
@@ -789,6 +810,17 @@ class ArgumentParser:
                     merged.append(positional_tokens[token_index])
                     token_index = token_index + 1
             extras = merged
+        for action in self._ail_actions:
+            if action in seen:
+                continue
+            default = action["default"]
+            if default is None or default is SUPPRESS or not isinstance(default, str):
+                continue
+            if not hasattr(namespace, action["dest"]):
+                continue
+            if getattr(namespace, action["dest"]) is not default:
+                continue
+            namespace._ail_set(action["dest"], self._ail_coerce(action, default))
         missing = []
         for action in self._ail_actions:
             if action["required"] and action not in seen:
