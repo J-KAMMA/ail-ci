@@ -1,3 +1,59 @@
+## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
+
+Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
+`min(4, cpu_count)` workers; `AIL_FE_JOBS=N` chooses N (1 forces serial), and Windows, `--debug`,
+native-report builds and separate-link-unit/object builds stay serial. Each worker compiles one
+function (and its clones) with `_one_function_legacy`; the parent replays the generated-name
+requests (`_handled_name`, borrowed-callback pairs, `ail_unwind_`, `_ail_finally_release_`,
+`_ail_frame_cells`) in serial function order, merges each class's `sort_specs`/`heap_specs` in that
+order, substitutes placeholders before IR lowering, then applies the IR and aliasing checks
+serially. Probe-only name requests are discarded, matching the probe's copied cleanup set.
+
+Review follow-up: `AIL_FE_JOBS=N` is now honoured for a program with fewer than 8 functions too
+(the old `nfns < 8` test ran before reading the variable); only the unset default keeps that
+threshold. Units are scheduled longest-first so the largest body does not start last, and a
+conservative work/dominance gate (`_fe_worth_parallel`: at least 400 AST nodes and no function over
+60% of them) keeps a pool from slowing a single-function program; the gate never changes the C.
+`test_ail_fe_jobs` now covers try/finally in class methods and module functions, clone-producing
+int/float call sites, reserved-looking locals (`_handled_boundary`, `_handled_entry`,
+`_ail_frame_cells`) and user functions named like generated helpers (`v__handled_boundary`), plus
+the job-count and gate rules.
+
+`jobs=1` C is unchanged from the base commit on the first 200 `lab/corpus/programs` files and the
+10 `lab/compare/src` tasks. `jobs=4` C is byte-identical to `jobs=1` for the same 200 corpus
+programs and the 10 compare tasks under `PYTHONHASHSEED=0/3/5/random`; the probes in
+`/tmp/probes` (methods, clones, reserved names, collisions, values through arguments/list
+items/attributes/dict values, builder refusal, small and dominant-function programs) agree for all
+seeds and with the base commit. `docs/design/alias_study/trans` is not present in this tree, so that
+part of the acceptance set could not be run.
+
+Median of 3 cold `--no-cache` builds (`AIL_FE_JOBS=1` vs `4`), and peak RSS of the whole process
+tree sampled while the build ran:
+
+| task | serial | parallel | speedup | peak RSS (MiB) |
+| --- | --- | --- | --- | --- |
+| berth_sim | 6.61s | 6.64s | 0.995x | 156 |
+| chain_relax | 1.49s | 1.51s | 0.992x | 113 |
+| echo_pack | 2.34s | 2.10s | 1.111x | 189 |
+| ledger_bin | 2.63s | 2.62s | 1.002x | 139 |
+| rail_transfer | 1.92s | 1.78s | 1.074x | 158 |
+| scar_life | 1.70s | 1.72s | 0.986x | 124 |
+| tally_lang | 2.89s | 2.69s | 1.075x | 210 |
+| term_rank | 2.45s | 2.33s | 1.049x | 200 |
+| ticket_audit | 4.16s | 3.76s | 1.106x | 229 |
+| tree_fold | 3.93s | 3.80s | 1.033x | 232 |
+| **total** | **30.11s** | **28.97s** | **1.039x** | **232** |
+
+The whole-build 1.2x target of the old tree is not reached on this tree: seven of the ten tasks
+are one dominant function (front-end parallelism cannot divide a function) and gcc is a large share
+of the rest, while the signatures fixed point stays serial. What the change does now is gain on the
+balanced multi-function programs and avoid the earlier single-function regressions. Peak RSS stays
+far below 6 GB.
+
+Added `AIL_CURRENT/test_ail_fe_jobs.py` (registered through `tests.d/test_ail_fe_jobs.txt`, shard
+entry updated) and refreshed the manifest. Ran `test_ail_fe_jobs`, `test_ail_build_cache`,
+`test_ail_server`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
