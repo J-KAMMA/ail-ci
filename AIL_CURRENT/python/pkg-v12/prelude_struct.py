@@ -699,7 +699,7 @@ def _ail_struct_is_buffer(data) -> bool:
 
 
 def _ail_struct_is_array(buffer) -> bool:
-    return type(buffer).__name__ == "_AilArray"
+    return False
 
 
 def _ail_struct_is_rw_buffer(buffer) -> bool:

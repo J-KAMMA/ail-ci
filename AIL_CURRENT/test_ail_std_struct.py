@@ -174,6 +174,14 @@ for fmt in ['999999999999999999999i', '2305843009213693951i',
 class Foo:
     pass
 
+class _AilArray:
+    def __init__(self):
+        self.typecode = 'B'
+        self.itemsize = 1
+        self.data = [0, 0, 0, 0]
+    def __len__(self):
+        return 4
+
 class Box:
     def __init__(self, b):
         self.b = b
@@ -184,7 +192,7 @@ def through_arg(b):
     return b
 
 for buffer in [None, Foo(), Foo, 1, 1.0, True, 'x', b'0123', [], (), {},
-               bytearray(8)]:
+               bytearray(8), _AilArray()]:
     for call in ['module', 'class']:
         try:
             if call == 'module':

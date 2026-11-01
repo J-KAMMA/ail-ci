@@ -59,4 +59,9 @@ def run(tree, text):
     tree.body = [stdlib5.Replace(fix).visit(stmt) for stmt in tree.body]
     binder.names.clear()
     stdlib5.leftover(tree, binder, WHAT)
-    stdlib5.add_once(text, stdlib5.prelude('struct'))
+    source = stdlib5.prelude('struct')
+    if any('class _AilArray' in chunk for chunk in text):
+        source = source.replace(
+            'def _ail_struct_is_array(buffer) -> bool:\n    return False\n',
+            'def _ail_struct_is_array(buffer) -> bool:\n    return isinstance(buffer, _AilArray)\n')
+    stdlib5.add_once(text, source)

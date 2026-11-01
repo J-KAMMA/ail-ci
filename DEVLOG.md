@@ -1,3 +1,15 @@
+## 2026-11-01 -- stdlib `struct`: `_AilArray` detection uses the real class (job-std_struct-11020600)
+
+Fixed the review defect: a user class named `_AilArray` was treated as a writable array by the
+`type(buffer).__name__` test and `pack_into` wrote into its `.data` silently, while CPython (and the
+base) reject it with `TypeError argument must be read-write bytes-like object, not _AilArray`. The
+prelude now uses `isinstance(buffer, _AilArray)` against the class that `prelude_array` actually
+injects, and `structlib.py` selects that form only when the array prelude is present; without it the
+check is `False`. A real `array.array` still works through every route. Added the fake class to the
+`pack_into_buffer_type` edge program and ran `l_fake`/`l_fake_routes` plus the array probes on both
+builds. Re-ran `test_ail_std_struct`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` and refreshed the manifest.
+
 ## 2026-11-01 -- stdlib `struct`: `pack_into` accepts writable `array.array` buffers (job-std_struct-11020354)
 
 Fixed the review defect: `pack_into` (module and `Struct`) rejected `array.array` with
