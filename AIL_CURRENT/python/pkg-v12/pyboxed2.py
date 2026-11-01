@@ -5634,11 +5634,11 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     # builtins usable as function values, with the one arity they are called with through the value
-    _BUILTIN_VALUE_ARITY = {'len': 1, 'abs': 1, 'ord': 1, 'chr': 1, 'bool': 1, 'repr': 1, 'sorted': 1, 'sum': 1,
+    _BUILTIN_VALUE_ARITY = {'len': 1, 'abs': 1, 'ord': 1, 'chr': 1, 'bool': 1, 'int': 1, 'str': 1, 'float': 1, 'repr': 1, 'sorted': 1, 'sum': 1,
                             'any': 1, 'all': 1, 'reversed': 1, 'iter': 1, 'hex': 1, 'oct': 1, 'bin': 1,
                             'divmod': 2, 'pow': 2, 'isinstance': 2}
     # builtins in _BUILTIN_VALUE_ARITY that are classes, so CPython's type name is `type`
-    _BUILTIN_TYPE_NAMES = frozenset({'bool'})
+    _BUILTIN_TYPE_NAMES = frozenset({'bool', 'int', 'str', 'float'})
 
     BINOP_FN = {ast.Add: 'ail_op_add', ast.Sub: 'ail_op_sub', ast.Mult: 'ail_op_mul',
                ast.Div: 'ail_op_truediv', ast.FloorDiv: 'ail_op_floordiv',

@@ -71,10 +71,14 @@ def main():
     must = {name for name, (_, flags) in pins.items() if "s" in flags}
     must |= {n for n in names if n.startswith("tests.d/") and n.endswith(".txt")}
     must |= {n for n in names if n.endswith(".py") and (n.startswith("python/pkg-v12/") or n[:-3] in registered)}
+    # Bundled standard modules are part of the SDK: a new stdlib/*.py would otherwise be left out of
+    # the export while the stdlib branch of ail_sdk selects every file in that directory.
+    must |= {n for n in names if n.startswith("stdlib/") and n.endswith((".py", ".c", ".h"))}
     unpinned = sorted(n for n in must if n in names and not pins.get(n, ("",))[0])
     for name in unpinned:
         print(("unpinned " if check else "pinned ") + name)
-        pins[name] = (sha(name), pins.get(name, ("", ""))[1])
+        flags = pins.get(name, ("", ""))[1] or ("s" if name.startswith("stdlib/") else "")
+        pins[name] = (sha(name), flags)
     for name, digest in stale.items():
         print(("stale " if check else "updated ") + name)
         pins[name] = (digest, pins[name][1])

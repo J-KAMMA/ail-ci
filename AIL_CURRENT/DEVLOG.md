@@ -1,3 +1,21 @@
+## 2026-11-01 -- bundled argparse: 10 of 12 realistic CLI programs build and match CPython (job-std_argparse-11011519)
+
+`AIL_CURRENT/stdlib/argparse.py` is the bundled `argparse`: ArgumentParser, Namespace, add_argument, the
+store / store_true / store_false / store_const / append / append_const / count / help / version actions,
+nargs `None` / `?` / `*` / `+` / an int, choices, type, default / const / dest / required / metavar,
+mutually exclusive groups, parse_args / parse_known_args, usage, help and the error exits. It follows
+CPython 3.12's `_copy_items` for append / append_const (a default list is not mutated and separate parses
+share it until an append copies it) and keeps unrecognized arguments in argv order. The ten building
+programs in `lab/stdlib/argparse/` are compared with CPython by `test_ail_std_argparse.py` on the default
+and forced general builds; `errtool.py` (a caught `SystemExit`) and `subcmd.py` (`add_subparsers`) are
+refused by name and are the two follow-ups in `lab/stdlib/argparse/RESULTS.md`.
+
+`python/pkg-v12/pyboxed2.py` now knows `int`, `str` and `float` as builtin values (arity 1), as `type=int`
+and the converters in the module require. Generated C of all ten lab/compare tasks is byte-identical to the
+base for both syntaxes (including `--exact-int` for rail_transfer and chain_relax); probes in `/tmp/probes`
+cover argparse actions / defaults / aliasing / extras and int/str/float through arguments, list items,
+attributes and dict values.
+
 ## 2026-11-01 -- int64 constant census: refusals named, safe folds kept
 
 `docs/design/I64_CONSTANTS.md` records the first int64-constant refusal of all 34 modules in the compiler census and
