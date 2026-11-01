@@ -65,6 +65,110 @@ for fmt in ['3 i', '3\\ti', '3\\ni', '3  i', '3i', ' 3i', '3', '3 ', '3\\ti4', '
     except Exception as e:
         print(repr(fmt), type(e).__name__, e)
 """,
+    "default_float": """import struct
+
+class Box:
+    def __init__(self, v):
+        self.v = v
+
+def pack_one(fmt, value):
+    return struct.pack(fmt, value).hex()
+
+box = Box(1e40)
+items = [1e39]
+table = {'x': 1e40}
+for fmt in ['f', ' f', '1f', '@f', '=f', '<f', '>f', '!f']:
+    for value in [1e40, 1e39, -1e40, 3.4028235e38, -0.0, 0.0]:
+        try:
+            print('p', fmt, value, pack_one(fmt, value))
+        except Exception as exc:
+            print('p', fmt, value, type(exc).__name__, exc)
+for fmt in ['f', ' f', '@f', '=f']:
+    for value in [1e40, 1e39, -1e40, -0.0, 0.0]:
+        try:
+            print('s', fmt, value, struct.Struct(fmt).pack(value).hex())
+        except Exception as exc:
+            print('s', fmt, value, type(exc).__name__, exc)
+print('two', struct.pack('2f', 1e40, -1e40).hex())
+print('ten', struct.pack('10f', *([1e40] * 10)).hex())
+buf = bytearray(8)
+struct.pack_into('f', buf, 0, 1e40)
+print('into default', buf[:4].hex())
+buf = bytearray(8)
+struct.pack_into('@f', buf, 0, 1e40)
+print('into native', buf[:4].hex())
+buf = bytearray(8)
+try:
+    struct.pack_into('<f', buf, 0, 1e40)
+    print('into standard ok', buf[:4].hex())
+except Exception as exc:
+    print('into standard', type(exc).__name__, exc)
+print('routes', pack_one('f', 1e40), struct.pack('f', box.v).hex(),
+      struct.pack('f', items[0]).hex(), struct.pack('f', table['x']).hex())
+""",
+    "subnormal_double": """import struct
+for data in [b'\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x00',
+             b'\\x02\\x00\\x00\\x00\\x00\\x00\\x00\\x00',
+             b'\\x00\\x00\\x00\\x00\\x00\\x00\\x10\\x00',
+             b'\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x00',
+             b'\\x00\\x00\\x00\\x00\\x00\\x00\\x00\\x80',
+             b'\\x01\\x00\\x00\\x00\\x00\\x00\\x00\\x80',
+             b'\\x01\\x02\\x03\\x04\\x05\\x06\\x07\\x08',
+             b'\\x34\\x12\\x00\\x00\\x00\\x00\\xf0\\x00']:
+    value = struct.unpack('<d', data)[0]
+    print('d', data.hex(), value, struct.pack('<d', value).hex())
+    value = struct.unpack('>d', data)[0]
+    print('D', data.hex(), value, struct.pack('>d', value).hex())
+for data in [b'\\x01\\x00\\x00\\x00', b'\\xff\\xff\\x7f\\x00', b'\\x01\\x00\\x80\\x00',
+             b'\\x00\\x00\\x80\\x3f', b'\\x01\\x00\\x00\\x80']:
+    value = struct.unpack('<f', data)[0]
+    print('f', data.hex(), value, struct.pack('<f', value).hex())
+for data in [b'\\x01\\x00', b'\\xff\\x03', b'\\x01\\x04', b'\\x00\\x3c', b'\\x01\\x80']:
+    value = struct.unpack('<e', data)[0]
+    print('e', data.hex(), value, struct.pack('<e', value).hex())
+""",
+    "pack_into_contract": """import struct
+for call in ['module', 'class']:
+    buffer = bytearray(4)
+    try:
+        if call == 'module':
+            struct.pack_into('<i', buffer, 0)
+        else:
+            struct.Struct('<i').pack_into(buffer, 0)
+    except Exception as exc:
+        print(call, type(exc).__name__, exc)
+for buffer in [b'0123', '0123', [1, 2, 3, 4], 5]:
+    try:
+        struct.pack_into('<i', buffer, 0, 1)
+        print('buffer ok', buffer)
+    except Exception as exc:
+        print('buffer', type(exc).__name__, exc)
+try:
+    struct.Struct('<i').pack_into(b'0123', 0, 1)
+except Exception as exc:
+    print('struct buffer', type(exc).__name__, exc)
+for fmt in ['4p', '4s']:
+    try:
+        struct.pack(fmt, 'abc')
+    except Exception as exc:
+        print(fmt, type(exc).__name__, exc)
+try:
+    struct.pack_into('<i', bytearray(4), -100)
+except Exception as exc:
+    print('count first', type(exc).__name__, exc)
+try:
+    struct.pack_into('<i', b'0123', -100, 1)
+except Exception as exc:
+    print('type first', type(exc).__name__, exc)
+for fmt in ['999999999999999999999i', '2305843009213693951i',
+            '2305843009213693952i', '9223372036854775807s',
+            '9223372036854775808s', '999999999999999999999x',
+            '999999999999999999999p', '00000000000000000000000000000003i']:
+    try:
+        print('size', fmt, struct.calcsize(fmt))
+    except Exception as exc:
+        print('size', fmt, type(exc).__name__, exc)
+""",
     "negative_offsets": """import struct
 for offset in [-20, -11, -10, -5, -4, -1, 0, 6, 7]:
     try:

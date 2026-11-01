@@ -1,3 +1,19 @@
+## 2026-11-01 -- stdlib `struct`: second review fixes (job-std_struct-11020025)
+
+Fixed the five remaining defects from the second review. The default (unprefixed) float mode is now native like
+CPython's `@`, so `struct.pack('f', 1e40)` and `Struct('f')` write infinity instead of raising `OverflowError`;
+the `_ail_struct_scale` negative branch now subtracts the full exponent (loops instead of the 1023-max chain), so
+all subnormal doubles round-trip (`b'\x01' + b'\x00' * 7` gives `5e-324` and packs back to `0100000000000000`);
+`pack_into` (module and `Struct`) checks the item count first and says `pack_into expected ...`, then rejects a
+non-writable buffer with CPython's `argument must be read-write bytes-like object, not bytes`; and a `p` field
+names `p` in its wrong-type error. `calcsize` of an overlong repeat count now raises
+`struct.error: total struct size too long` at the int64 boundary. `unpack('0p', b'')` can no longer return a value;
+it raises `struct.error` with CPython's message, because AIL cannot raise `SystemError` (declared as
+`C?-job-std_struct-11020025-2`, with the NaN-payload limit as `C?-job-std_struct-11020025-1`). Added three edge
+programs to `test_ail_std_struct.py`; the probes in `/tmp/probes/struct_*.py` match CPython on both builds except
+the two declared rows. Re-ran `test_ail_std_struct`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`, then refreshed the manifest.
+
 ## 2026-11-01 -- stdlib `struct`: review fixes (job-std_struct-11012058)
 
 Fixed the five defects from the review of the `struct` change. `pack_into` (module and `Struct`) now sets the

@@ -23,6 +23,12 @@ def _ail_struct_tname(x) -> str:
         return "bytes"
     if isinstance(x, bytearray):
         return "bytearray"
+    if isinstance(x, list):
+        return "list"
+    if isinstance(x, tuple):
+        return "tuple"
+    if isinstance(x, dict):
+        return "dict"
     if x is None:
         return "NoneType"
     return "object"
@@ -37,6 +43,7 @@ _STRUCT_STANDARD = {"b": (1, 1, "i"), "B": (1, 1, "i"), "?": (1, 1, "?"), "h": (
                     "i": (4, 1, "i"), "I": (4, 1, "i"), "l": (4, 1, "i"), "L": (4, 1, "i"),
                     "q": (8, 1, "i"), "Q": (8, 1, "i"), "e": (2, 1, "f"), "f": (4, 1, "f"), "d": (8, 1, "f")}
 _STRUCT_WHITE = " \t\r\n\v\f"
+_STRUCT_MAX = 9223372036854775807
 
 
 def _ail_struct_bad() -> None:
@@ -78,21 +85,37 @@ def _ail_struct_parse(fmt):
             j = i
             while j < len(fmt) and fmt[j] >= "0" and fmt[j] <= "9":
                 j = j + 1
-            count = int(fmt[i:j])
+            digits = fmt[i:j]
+            first = 0
+            while first < len(digits) and digits[first] == "0":
+                first = first + 1
+            significant = digits[first:]
+            if len(significant) > 19 or (len(significant) == 19 and significant > "9223372036854775807"):
+                raise error("total struct size too long")
+            if significant == "":
+                count = 0
+            else:
+                count = int(significant)
             i = j
             if i >= len(fmt):
                 raise error("repeat count given without format specifier")
             ch = fmt[i]
         i = i + 1
         if ch == "x":
+            if count > _STRUCT_MAX - offset:
+                raise error("total struct size too long")
             items.append(("x", count, 1, offset))
             offset = offset + count
             continue
         if ch == "s" or ch == "p":
+            if count > _STRUCT_MAX - offset:
+                raise error("total struct size too long")
             items.append((ch, count, count, offset))
             offset = offset + count
             continue
         if ch == "c":
+            if count > _STRUCT_MAX - offset:
+                raise error("total struct size too long")
             items.append(("c", count, 1, offset))
             offset = offset + count
             continue
@@ -101,7 +124,12 @@ def _ail_struct_parse(fmt):
         unit = table[ch][0]
         align = table[ch][1] if order == "@" else 1
         if align > 1 and offset % align != 0:
-            offset = offset + (align - offset % align)
+            pad = align - offset % align
+            if pad > _STRUCT_MAX - offset:
+                raise error("total struct size too long")
+            offset = offset + pad
+        if count > (_STRUCT_MAX - offset) // unit:
+            raise error("total struct size too long")
         items.append((ch, count, unit, offset))
         offset = offset + unit * count
     return items, offset
@@ -256,35 +284,36 @@ def _ail_struct_scale(m: float, ex: int) -> float:
             r = r * 2.0
     else:
         k = 0 - k
-        if k >= 512:
+        while k >= 512:
             r = r * 7.458340731200207e-155
             k = k - 512
-        if k >= 256:
+        while k >= 256:
             r = r * 8.636168555094445e-78
             k = k - 256
-        if k >= 128:
+        while k >= 128:
             r = r * 2.938735877055719e-39
             k = k - 128
-        if k >= 64:
+        while k >= 64:
             r = r * 5.421010862427522e-20
             k = k - 64
-        if k >= 32:
+        while k >= 32:
             r = r * 2.3283064365386963e-10
             k = k - 32
-        if k >= 16:
+        while k >= 16:
             r = r * 1.52587890625e-05
             k = k - 16
-        if k >= 8:
+        while k >= 8:
             r = r * 0.00390625
             k = k - 8
-        if k >= 4:
+        while k >= 4:
             r = r * 0.0625
             k = k - 4
-        if k >= 2:
+        while k >= 2:
             r = r * 0.25
             k = k - 2
-        if k >= 1:
+        while k >= 1:
             r = r * 0.5
+            k = k - 1
     return r
 
 
@@ -471,16 +500,20 @@ def _ail_struct_put_float(out, off: int, size: int, value: float, code: str, big
             out[off + 1] = bits // 256
 
 
-def _ail_struct_bytes(v):
+def _ail_struct_bytes(v, code: str):
     if not isinstance(v, bytes) and not isinstance(v, bytearray):
-        raise error("argument for 's' must be a bytes object")
+        raise error("argument for '" + code + "' must be a bytes object")
     return v
 
 
-def _ail_struct_pack_items(items, size: int, values) -> bytes:
+def _ail_struct_check_count(items, values, what: str) -> None:
     need = _ail_struct_count(items)
     if len(values) != need:
-        raise error("pack expected " + str(need) + " items for packing (got " + str(len(values)) + ")")
+        raise error(what + " expected " + str(need) + " items for packing (got " + str(len(values)) + ")")
+
+
+def _ail_struct_pack_items(items, size: int, values, what: str = "pack") -> bytes:
+    _ail_struct_check_count(items, values, what)
     out = bytearray(size)
     k = 0
     for code, count, unit, offset in items:
@@ -489,7 +522,7 @@ def _ail_struct_pack_items(items, size: int, values) -> bytes:
         if code == "s" or code == "p":
             v = values[k]
             k = k + 1
-            v = _ail_struct_bytes(v)
+            v = _ail_struct_bytes(v, code)
             if code == "p":
                 n = len(v)
                 if n > count - 1:
@@ -633,8 +666,7 @@ def _ail_struct_unpack_items(items, size: int, data, start: int):
             continue
         if code == "p":
             if count == 0:
-                out.append(b"")
-                continue
+                raise error("Negative size passed to PyBytes_FromStringAndSize")
             n = data[pos]
             if n > count - 1:
                 n = count - 1
@@ -704,9 +736,9 @@ def _ail_struct_big_of(fmt) -> bool:
 
 def _ail_struct_native_of(fmt) -> bool:
     fmt = _ail_struct_format_text(fmt)
-    if len(fmt) == 0 or fmt[0] == "@":
+    if len(fmt) == 0:
         return True
-    return False
+    return fmt[0] not in "<>=!"
 
 
 def _ail_struct_calcsize(fmt) -> int:
@@ -736,6 +768,9 @@ def _ail_struct_unpack_from(fmt, data, offset: int = 0):
 
 def _ail_struct_pack_into_values(fmt, buffer, offset: int, values) -> None:
     items, size = _ail_struct_parse(fmt)
+    _ail_struct_check_count(items, values, "pack_into")
+    if not isinstance(buffer, bytearray):
+        raise TypeError("argument must be read-write bytes-like object, not " + _ail_struct_tname(buffer))
     if offset < 0:
         original = offset
         offset = offset + len(buffer)
@@ -749,7 +784,7 @@ def _ail_struct_pack_into_values(fmt, buffer, offset: int, values) -> None:
                     + " (actual buffer size is " + str(len(buffer)) + ")")
     _ail_struct_set_big(items, _ail_struct_big_of(fmt))
     _NATIVE_MODE[-1] = _ail_struct_native_of(fmt)
-    packed = _ail_struct_pack_items(items, size, values)
+    packed = _ail_struct_pack_items(items, size, values, "pack_into")
     k = 0
     while k < size:
         buffer[offset + k] = packed[k]
@@ -806,6 +841,9 @@ class _AilStruct:
         return _ail_struct_unpack_items(self._items, self.size, data, 0)
 
     def pack_into(self, buffer, offset: int, *values) -> None:
+        _ail_struct_check_count(self._items, values, "pack_into")
+        if not isinstance(buffer, bytearray):
+            raise TypeError("argument must be read-write bytes-like object, not " + _ail_struct_tname(buffer))
         if offset < 0:
             original = offset
             offset = offset + len(buffer)
@@ -819,7 +857,7 @@ class _AilStruct:
                                   + " (actual buffer size is " + str(len(buffer)) + ")")
         _ail_struct_set_big(self._items, self._big)
         _NATIVE_MODE[-1] = self._native
-        packed = _ail_struct_pack_items(self._items, self.size, values)
+        packed = _ail_struct_pack_items(self._items, self.size, values, "pack_into")
         k = 0
         while k < self.size:
             buffer[offset + k] = packed[k]
