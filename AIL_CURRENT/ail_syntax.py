@@ -1040,10 +1040,11 @@ _MATH_HELPERS = {
 ''',
     'ceil': '''def _ail_math_ceil(x):
     y = x + 0
-    lo = -9223372036854775807 - 1
-    hi = 9223372036854775807
-    if y - y == 0 and (y > hi or y < lo):
-        raise OverflowError("integer overflow in math.ceil() (ints are 64-bit; --exact-int gives exact ints)")
+    if isinstance(y, float):
+        lo = -9223372036854775807 - 1
+        hi = 9223372036854775807
+        if y - y == 0 and (y > hi or y < lo):
+            raise OverflowError("integer overflow in math.ceil() (ints are 64-bit; --exact-int gives exact ints)")
     i = int(y)
     if i < y:
         return i + 1
@@ -1051,10 +1052,11 @@ _MATH_HELPERS = {
 ''',
     'floor': '''def _ail_math_floor(x):
     y = x + 0
-    lo = -9223372036854775807 - 1
-    hi = 9223372036854775807
-    if y - y == 0 and (y > hi or y < lo):
-        raise OverflowError("integer overflow in math.floor() (ints are 64-bit; --exact-int gives exact ints)")
+    if isinstance(y, float):
+        lo = -9223372036854775807 - 1
+        hi = 9223372036854775807
+        if y - y == 0 and (y > hi or y < lo):
+            raise OverflowError("integer overflow in math.floor() (ints are 64-bit; --exact-int gives exact ints)")
     i = int(y)
     if i > y:
         return i - 1
