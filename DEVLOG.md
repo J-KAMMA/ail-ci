@@ -1,3 +1,13 @@
+## 2026-11-01 -- stdlib random coverage: review fixes (job-std_random-11011523)
+
+Review follow-up on `26c4101`. `choices` no longer copies `cum_weights` into a list in either prelude: it
+uses the object as given, so a dict raises `KeyError -1`, and a set or int raises `TypeError` exactly as
+CPython does, while list, tuple, range and bytes inputs keep matching (the earlier `list()` accepted or
+reworded those errors). `test_ail_std_random` now pins those cases in the `choices` program and the
+prelude unit test. `docs/spec/DIFFERENCES.md` A51(7) now says `getrandbits(k)` needs `k <= 63` and
+A61(5) records `normalvariate` as built; a new `C?-job-std_random-11011523-1` row records the 63-bit
+`getrandbits` limit and the `cum_weights` behaviour.
+
 ## 2026-11-01 -- stdlib random coverage: real programs (job-std_random-11011523)
 
 Added 12 realistic `random` programs under `lab/stdlib/random/`. In the default build, 11 build and

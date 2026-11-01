@@ -111,6 +111,18 @@ def main() -> None:
     except ValueError as error:
         print("ValueError", error)
     try:
+        random.choices(p, cum_weights={0: 1, 1: 3, 2: 6, 3: 10}, k=2)
+    except KeyError as error:
+        print("KeyError", error)
+    try:
+        random.choices(p, cum_weights={1, 2, 3, 4}, k=2)
+    except TypeError as error:
+        print("TypeError", error)
+    try:
+        random.choices(p, cum_weights=4, k=2)
+    except TypeError as error:
+        print("TypeError", error)
+    try:
         random.choices(p, weights=[0, 0, 0, 0])
     except ValueError as error:
         print("ValueError", error)
@@ -235,6 +247,11 @@ class PreludeRandomNewMethods(unittest.TestCase):
                 k = rnd.randint(0, 6)
                 self.assertEqual(a.choices(list(range(n)), cum_weights=cum, k=k),
                                  b.choices(list(range(n)), cum_weights=cum, k=k), (seed, cum, k))
+        for bad, kind in (({0: 1, 1: 2}, KeyError), ({1, 2}, TypeError), (2, TypeError)):
+            with self.assertRaises(kind):
+                P.Random(1).choices(list(range(2)), cum_weights=bad, k=1)
+            with self.assertRaises(kind):
+                random.Random(1).choices(list(range(2)), cum_weights=bad, k=1)
 
 
 if __name__ == "__main__":

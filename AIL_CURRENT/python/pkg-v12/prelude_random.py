@@ -280,7 +280,7 @@ class Random:
         else:
             if weights is not None:
                 raise TypeError("Cannot specify both weights and cumulative weights")
-            cum = list(cum_weights)
+            cum = cum_weights
         if len(cum) != n:
             raise ValueError("The number of weights does not match the population")
         total = cum[-1] + 0.0
