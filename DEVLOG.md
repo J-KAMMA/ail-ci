@@ -1,3 +1,22 @@
+## 2026-11-01 -- std_string review: Template method values and the bytes-template message
+
+The review found two defects in the `string.Template` lowering.  A method read as a value
+(`f = t.substitute`, `f = t.get_identifiers`) compiled and then crashed with `AttributeError`; the
+prelude object now carries real `substitute` / `safe_substitute` / `is_valid` / `get_identifiers`
+methods (so `getattr(t, "substitute")(...)` still works as a direct call), and a plain attribute
+read of one of those methods is refused by name at build time, which this subset cannot represent
+as a bound method (exact refusal in RESULTS.md).  A bytes template also gave the wrong TypeError
+text; `_ail_tpl_text` now raises CPython's `cannot use a string pattern on a bytes-like object` for
+both bytes and bytearray while every other non-str type keeps `expected string or bytes-like
+object, got '<type>'`.  `test_ail_std_string.py` gained `test_template_methods_and_bad_templates`
+(direct and `getattr` calls, list/dict/argument/attribute receivers, bytes/bytearray/int/None/list/
+float templates) and `test_template_method_value_is_refused_by_name`; both build modes pass.
+Probes `/tmp/probes/p_tpl_value.py` and `p_tpl_value2.py` are refused by name, `p_tpl_getattr_value.py`
+is refused by name, and `p_tpl_getattr_call.py`, `p_tpl_badtext_direct.py` and
+`p_tpl_methods_all.py` match CPython on the default and forced-general paths.  Final-state tests:
+test_ail_std_string, test_ail_stdlib1, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-11-01 -- std_string: `string` coverage: capwords keywords and Template (job-std_string-11011434)
 
 Added the 12-program `lab/stdlib/string/` coverage set and `RESULTS.md`.  Before the fix 6 built and

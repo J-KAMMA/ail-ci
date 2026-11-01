@@ -44,16 +44,24 @@ the default build falls back to the general path for those programs.
   (`s=` / `sep=`), including `sep=None`, runtime separators and the existing error cases.
 - `string.Template` is lowered to a small prelude object: `substitute`, `safe_substitute`,
   `is_valid`, `get_identifiers`, the `template` attribute and `$$` / `$name` / `${name}` are
-  built.  Missing keys raise `KeyError`, invalid placeholders raise CPython's
+  built.  The methods also exist on the prelude object, so `getattr(t, "substitute")(...)` is
+  built as a direct call.  Missing keys raise `KeyError`, invalid placeholders raise CPython's
   `ValueError: Invalid placeholder in string: line L, col C`, and `safe_substitute` keeps invalid
   or missing placeholders as written.  Keyword substitution values override a positional mapping,
-  as CPython's `ChainMap` does.  A subclass of `string.Template` is still refused by name, and
-  using the `string.Template` class itself as a plain value (for example `print(string.Template)`)
-  is refused by name rather than printing a different class repr; call it directly instead.
+  as CPython's `ChainMap` does.  A bytes or bytearray template raises CPython's exact
+  `TypeError: cannot use a string pattern on a bytes-like object`; other non-str templates keep
+  `TypeError: expected string or bytes-like object, got '<type>'`.  A subclass of
+  `string.Template` is still refused by name, and using the `string.Template` class itself as a
+  plain value (for example `print(string.Template)`) is refused by name rather than printing a
+  different class repr; call it directly instead.
+- Reading one of the four Template methods as a value (a bound method) is refused by name at
+  build time instead of compiling to a run-time `AttributeError`; see the follow-up below.
 - `test_ail_stdlib1.py`'s old "string template is refused" case now checks `string.Formatter`
   instead.
 
-## Follow-up (out of scope: a new class)
+## Follow-ups (out of scope: big new features)
+
+### `string.Formatter`
 
 `string.Formatter` is not built.  The exact refusal is:
 
@@ -65,3 +73,18 @@ note: formatter_table.py:5: string.Formatter() with these arguments is not built
 Implementing `Formatter` means its `parse` / `format` / `vformat` / `get_field` / `get_value` /
 `convert_field` / `format_field` protocol (nested fields, conversion flags, format specs) as a new
 class; that is a larger feature than the Template lowering above.
+
+### Template method read as a value (bound method)
+
+`f = t.substitute` / `f = t.get_identifiers` (and the same read through a list item, a dict value,
+an argument or an attribute) is not built: this subset has no representation for a bound method
+value.  It is refused by name, not compiled to a crash.  The exact refusal is:
+
+```
+bound_method.py:4:5: not in the subset: string.Template.substitute used as a value (a bound method is not built)
+  write instead: call it directly (t.substitute(...)); a Template built with string.Template(...) can also be called through getattr(t, "substitute")(...)
+```
+
+`getattr(t, "substitute")` used as a value is likewise refused by name
+(`not in the subset: getattr() of the method substitute as a value (getattr(obj, "substitute")(...)
+is built)`).  Building real bound methods is a compiler/runtime feature larger than this task.

@@ -1479,6 +1479,8 @@ def _ail_tpl_invalid(template, index):
 
 def _ail_tpl_text(obj):
     text = obj.template
+    if isinstance(text, bytes) or isinstance(text, bytearray):
+        raise TypeError("cannot use a string pattern on a bytes-like object")
     if not isinstance(text, str):
         raise TypeError("expected string or bytes-like object, got '%s'" % type(text).__name__)
     return text
@@ -1595,6 +1597,18 @@ class _AilStringTemplate:
 
     def __init__(self, template):
         self.template = template
+
+    def substitute(self, mapping):
+        return _ail_tpl_substitute(self, mapping, {}, True)
+
+    def safe_substitute(self, mapping):
+        return _ail_tpl_safe_substitute(self, mapping, {}, True)
+
+    def is_valid(self):
+        return _ail_tpl_is_valid(self)
+
+    def get_identifiers(self):
+        return _ail_tpl_get_identifiers(self)
 '''
 _MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',),
              'tw_wrap': ('tw_wrap_more',), 'tw_shorten': ('tw_wrap_more',)}
@@ -1828,6 +1842,14 @@ class _SurfaceExpr(ast.NodeTransformer):
         if path is not None:
             new = surface.value(node, path)
             return node if new is None else self.replaced(new, node)
+        if (surface.template_used and node.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers')
+                and node.attr not in surface.user_methods):
+            raise SyntaxErrorAIL(
+                'not in the subset: string.Template.%s used as a value (a bound method is not built)\n'
+                '  write instead: call it directly (t.%s(...)); a Template built with '
+                'string.Template(...) can also be called through getattr(t, "%s")(...)' % (
+                    node.attr, node.attr, node.attr),
+                lineno=node.lineno, offset=node.col_offset + 1)
         if (isinstance(node.value, ast.Name) and node.value.id in surface.re_patterns and node.attr == 'pattern'
                 and not surface.re_lib.programs[surface.re_patterns[node.value.id]].is_bytes):
             return self.replaced(ast.Constant(value=surface.re_lib.programs[surface.re_patterns[node.value.id]].pattern),
