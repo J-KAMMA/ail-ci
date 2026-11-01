@@ -56,15 +56,20 @@ the default build falls back to the general path for those programs.
   different class repr; call it directly instead.
 - Reading one of the four Template methods as a value (a bound method) is refused by name at
   build time instead of compiling to a run-time `AttributeError`; see the follow-up below.
-- The Template method lowering is restricted to receivers that are not known to be something else.
-  The classification is per scope (a parameter or local in another function is not confused with a
-  same-named variable elsewhere) and a parameter is classified from its call-site arguments.
-  An unrelated `.is_valid` / `.substitute` attribute on a dataclass field, an instance attribute or
-  a class attribute is an ordinary attribute read/call again, so a Template elsewhere in the program
-  no longer hijacks it.  Reading one of the four methods as a value from a receiver not known to be
-  non-Template (a parameter, a call result, a list/dict item) is refused by name.  The two remaining
-  collisions (a `setattr`-installed method on a class without `__init__`, and a class attribute
-  holding a lambda) are named compile-time refusals, not run-time crashes.
+- The Template method lowering is restricted to receivers actually known to be a
+  `string.Template`.  The classification is per scope (a parameter or local in another function is
+  not confused with a same-named variable elsewhere) and a parameter is classified from its
+  call-site arguments.  An unrelated `.is_valid` / `.substitute` attribute on a dataclass field, an
+  instance attribute or a class attribute is an ordinary attribute read/call again, so a Template
+  elsewhere in the program no longer hijacks it.  When the receiver's kind is unknown (a parameter
+  with no resolved call site, a call result, a list/dict item, a loop or unpacking target, an
+  attribute chain), a call in the form the prelude object's own method supports exactly (one
+  positional mapping, or no arguments for `is_valid` / `get_identifiers`) stays an ordinary method
+  call and matches CPython for non-Templates; the keyword/optional forms are refused by name,
+  because only a known Template can be lowered to the helper.  Reading one of the four methods as a
+  value from a receiver not known to be non-Template is likewise refused by name.  The two
+  remaining collisions (a `setattr`-installed method on a class without `__init__`, and a class
+  attribute holding a lambda) are named compile-time refusals, not run-time crashes.
 - `test_ail_stdlib1.py`'s old "string template is refused" case now checks `string.Formatter`
   instead.
 

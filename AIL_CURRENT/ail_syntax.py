@@ -1795,10 +1795,10 @@ class _SurfaceExpr(ast.NodeTransformer):
                 and not isinstance(node.func.value, ast.Name)):
             node.func.value = self.visit(node.func.value)      # re.search(...).start(): the inner call too
         node.args = [self.visit(arg) for arg in node.args]
-        if (path is None and surface.template_used and isinstance(node.func, ast.Attribute)
-                and node.func.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers')
-                and node.func.attr not in surface.user_methods
-                and surface.receiver_kind(node.func.value) != 'other'):
+        template_call = (path is None and surface.template_used and isinstance(node.func, ast.Attribute)
+                         and node.func.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers'))
+        template_kind = surface.receiver_kind(node.func.value) if template_call else 'other'
+        if template_kind == 'template':
             node.func.value = self.visit(node.func.value)
         for item in node.keywords:
             item.value = self.visit(item.value)
@@ -1811,11 +1811,15 @@ class _SurfaceExpr(ast.NodeTransformer):
                     body=ast.Subscript(value=item.value.value, slice=ast.Name(id='_ail_key', ctx=ast.Load()),
                                        ctx=ast.Load()))
                 self.changed = True
-        new = surface.call(node, path)
+        new = surface.call(node, path, template_kind)
         if new is not None:
             return self.replaced(new, node)
         if path is None:
-            node.func = self.visit(node.func)
+            if template_call and template_kind is None:
+                # The receiver is not known to be a Template: the call stays an ordinary method call.
+                node.func.value = self.visit(node.func.value)
+            else:
+                node.func = self.visit(node.func)
         return node
 
     def visit_Dict(self, node):
@@ -2654,13 +2658,23 @@ class _Surface:
         if name not in self.helpers:
             self.helpers.append(name)
 
-    def call(self, node, path):
+    def call(self, node, path, template_kind=None):
         func = node.func
         if path is None and self.template_used and isinstance(func, ast.Attribute) \
-                and func.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers') \
-                and func.attr not in self.user_methods \
-                and self.receiver_kind(func.value) != 'other':
-            return self.template_method(node, func.attr)
+                and func.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers'):
+            kind = self.receiver_kind(func.value) if template_kind is None else template_kind
+            if kind == 'template':
+                return self.template_method(node, func.attr)
+            if kind is None:
+                if self.template_direct_call(node, func.attr):
+                    return None
+                raise SyntaxErrorAIL(
+                    'not in the subset: string.Template.%s(...) on a receiver that is not known to be a '
+                    'string.Template cannot be lowered with these arguments (keyword or optional forms are '
+                    'built only for a receiver known to be a Template)\n'
+                    '  write instead: call it directly with one mapping argument (t.%s(mapping)), or make '
+                    'the receiver a local string.Template' % (func.attr, func.attr),
+                    lineno=node.lineno, offset=node.col_offset + 1)
         if (isinstance(func, ast.Name) and func.id in ('max', 'min') and func.id not in self.names
                 and func.id not in self.def_names and len(node.args) >= 2 and not node.keywords
                 and isinstance(node.args[-1], ast.Starred)
@@ -2803,6 +2817,14 @@ class _Surface:
             parts = [f'{each} = {receiver}.group({index})' for index, each in enumerate(names, 1)]
         self.replace(node, '; '.join(parts), True)
         return True
+
+    def template_direct_call(self, node, name):
+        """Whether the prelude object's own method has exactly CPython's behaviour for this call form."""
+        if any(isinstance(arg, ast.Starred) for arg in node.args) or node.keywords:
+            return False
+        if name in ('is_valid', 'get_identifiers'):
+            return not node.args
+        return len(node.args) == 1
 
     def template_method(self, node, name):
         """Template.substitute / safe_substitute / is_valid / get_identifiers on the prelude object."""

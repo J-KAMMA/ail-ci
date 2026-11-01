@@ -1,3 +1,23 @@
+## 2026-11-01 -- std_string review 4: Template lowering only on known Templates
+
+The review found that `_Surface.call` still lowered `.substitute` / `.safe_substitute` / `.is_valid` /
+`.get_identifiers` when the receiver's kind was unknown, so `self.substitute(5)`, `d["b"].substitute(5)`,
+`make().substitute(5)`, `h.b.substitute(5)`, a loop variable and a tuple-unpack target were sent to the
+Template helper and crashed with `AttributeError: 'Box' object has no attribute 'template'` where CPython
+printed `SUB5`.  Lowering now happens only for a receiver known to be a `string.Template` (and the
+`user_methods` name check is gone, so a program that also defines a `substitute` method still lowers its
+real Templates).  An unknown receiver stays an ordinary method call when the call has the form the prelude
+object's own method implements exactly (one positional mapping, or no arguments for `is_valid` /
+`get_identifiers`), which matches CPython for non-Templates and for Templates reached through a list item,
+dict value or attribute; the keyword/optional forms are named compile-time refusals, since only a known
+Template can be lowered.  All six review probes (`p_self_attr`, `p_dict_sub`, `p_call_result`,
+`p_attr_chain`, `p_tuple_unpack`, `p_for_loop`) no longer crash: the five without a lambda match CPython on
+both paths, and `p_self_attr` is refused by name for its lambda-as-value.  Added
+`test_template_method_names_on_unknown_receivers` and
+`test_unknown_receiver_keyword_form_is_refused_by_name` to `test_ail_std_string.py`; the twelve lab
+programs and the earlier receiver/scope probes are unchanged.  Final-state tests: test_ail_std_string,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed).
+
 ## 2026-11-01 -- std_string review 3: Template receivers resolved per scope
 
 The review found the new receiver test was still too coarse.  The binding map was keyed by name

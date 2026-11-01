@@ -195,6 +195,50 @@ main()
 """,
 ]
 
+UNKNOWN_RECEIVERS = r"""import string
+
+class Box:
+    def __init__(self):
+        self.tag = "box"
+    def substitute(self, v):
+        return "SUB" + str(v)
+    def is_valid(self):
+        return "VALID"
+
+class Holder:
+    def __init__(self, box):
+        self.b = box
+
+def make():
+    return Box()
+
+def main():
+    t = string.Template("$x")
+    print(t.substitute(x=1))
+    b = Box()
+    print(b.substitute(5))
+    print(b.is_valid())
+    boxes = {"b": b}
+    print(boxes["b"].substitute(6))
+    print(make().substitute(7))
+    print(Holder(b).b.substitute(8))
+    for item in [b]:
+        print(item.substitute(9))
+    first, second = b, 1
+    print(first.substitute(10))
+main()
+"""
+
+UNKNOWN_KEYWORD_REFUSED = r"""import string
+
+def main():
+    t = string.Template("$x")
+    print(t.substitute(x=1))
+    values = [string.Template("$a")]
+    print(values[0].substitute(a=2))
+main()
+"""
+
 COLLISION_REFUSED = [
     r"""import string
 class Box: pass
@@ -296,6 +340,22 @@ class StringPrograms(unittest.TestCase):
                     self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
                     self.assertIn("string.Template.is_valid used as a value", built.stdout + built.stderr)
                     self.assertFalse(exe.exists())
+
+    def test_template_method_names_on_unknown_receivers(self):
+        for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
+            with self.subTest(env=env):
+                self.compare_text("unknown_receivers", UNKNOWN_RECEIVERS, **env)
+
+    def test_unknown_receiver_keyword_form_is_refused_by_name(self):
+        for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
+            with self.subTest(env=env), tempfile.TemporaryDirectory() as directory:
+                source = Path(directory, "unknown_keyword.py")
+                source.write_text(UNKNOWN_KEYWORD_REFUSED, encoding="utf-8")
+                built, exe = compile_python(directory, source, "unknown_keyword", **env)
+                self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
+                self.assertIn("not in the subset", built.stdout + built.stderr)
+                self.assertIn("not known to be a string.Template", built.stdout + built.stderr)
+                self.assertFalse(exe.exists())
 
     def test_template_method_name_collisions_are_refused_by_name(self):
         for text in COLLISION_REFUSED:
