@@ -1,3 +1,19 @@
+## 2026-11-01 -- stdlib csv: 12 real programs (job-std_csv-11011522)
+
+Added `lab/stdlib/csv/` with 12 ordinary Python programs using csv; 9 build on the default
+`--syntax python` path and match CPython 3.12 stdout and exit code (all 9 on the general path), 3 are
+refused by name for `field_size_limit`, `register_dialect` and `Sniffer` (recorded in
+`lab/stdlib/csv/RESULTS.md`). Fixes: smalllib5's `io.StringIO` csv-source lowering now splits on
+`"\n"` only (literal text becomes a literal list, runtime text a comprehension), so a lone `"\r"`
+reaches the parser and raises CPython's `csv.Error`; `csvlib` refuses a direct `next(reader, None)`
+value use so the general path returns `None` instead of `[]`; the general path's `_AilTextIO` gains a
+generator `__iter__` (injected by filelower only on that path) so its csv reader can read an open text
+file, while `list(file)` in user code stays the existing `readlines(-1)` lowering. New
+`test_ail_std_csv.py` compares the 9 programs
+with CPython. Probes in `/tmp/probes` (newlines through literal/argument/list item/attribute/dict
+value, next None routes, file iteration, StringIO variables, writer quoting modes) match on both
+builds.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use

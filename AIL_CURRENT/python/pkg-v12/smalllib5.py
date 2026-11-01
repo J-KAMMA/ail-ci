@@ -227,22 +227,60 @@ def run_io(tree, text):
     def lines_of(call):
         if len(call.args) != 1 or any(k.arg != 'newline' for k in call.keywords):
             refuse(call, 'io.StringIO(text) with the text is the form that is built for csv.reader')
-        return ast.Call(func=ast.Attribute(value=call.args[0], attr='splitlines', ctx=ast.Load()),
-                        args=[ast.Constant(value=True)], keywords=[])
+        text = call.args[0]
+        if isinstance(text, ast.Constant) and isinstance(text.value, str):
+            # StringIO's iteration splits after each '\n' only; splitlines(True) would also break a lone
+            # '\r', which the csv parser must see (CPython reports it as a new-line in an unquoted field).
+            parts = text.value.split("\n")
+            lines = [part + "\n" for part in parts[:-1]]
+            if parts[-1] != "":
+                lines.append(parts[-1])
+            return ast.List(elts=[ast.Constant(value=line) for line in lines], ctx=ast.Load())
+        # The same split for a text expression known only at run time:
+        #   [part + ("\n" if i < len(parts) - 1 else "")
+        #    for parts in [text.split("\n")] for i, part in enumerate(parts)
+        #    if i < len(parts) - 1 or part != ""]
+        def name(ident, ctx=ast.Load()):
+            return ast.Name(id=ident, ctx=ctx)
+        parts_name, index_name, part_name = "_ail_csv_parts", "_ail_csv_i", "_ail_csv_part"
+        last = ast.Compare(left=name(index_name), ops=[ast.Lt()],
+                           comparators=[ast.BinOp(left=ast.Call(func=name("len"), args=[name(parts_name)], keywords=[]),
+                                                  op=ast.Sub(), right=ast.Constant(value=1))])
+        split = ast.Call(func=ast.Attribute(value=text, attr="split", ctx=ast.Load()),
+                         args=[ast.Constant(value="\n")], keywords=[])
+        return ast.ListComp(elt=ast.IfExp(test=last, body=ast.BinOp(left=name(part_name), op=ast.Add(),
+                                                                   right=ast.Constant(value="\n")),
+                                          orelse=name(part_name)),
+                            generators=[
+                                ast.comprehension(target=name(parts_name, ast.Store()),
+                                                  iter=ast.List(elts=[split], ctx=ast.Load()), ifs=[], is_async=0),
+                                ast.comprehension(target=ast.Tuple(elts=[name(index_name, ast.Store()),
+                                                                         name(part_name, ast.Store())],
+                                                                   ctx=ast.Store()),
+                                                  iter=ast.Call(func=name("enumerate"), args=[name(parts_name)],
+                                                                keywords=[]),
+                                                  ifs=[ast.BoolOp(op=ast.Or(), values=[
+                                                      ast.Compare(left=name(index_name), ops=[ast.Lt()],
+                                                                  comparators=[ast.BinOp(
+                                                                      left=ast.Call(func=name("len"), args=[name(parts_name)],
+                                                                                    keywords=[]), op=ast.Sub(),
+                                                                      right=ast.Constant(value=1))]),
+                                                      ast.Compare(left=name(part_name), ops=[ast.NotEq()],
+                                                                  comparators=[ast.Constant(value="")])])],
+                                                  is_async=0)])
 
     class Lower(ast.NodeTransformer):
         used_class = False
 
         def visit_Assign(self, node):
             if len(node.targets) == 1 and isinstance(node.targets[0], ast.Name) and node.targets[0].id in csv_only:
-                node.value = lines_of(node.value)
+                node.value = self.visit(lines_of(node.value))
                 return node
             return self.generic_visit(node)
 
         def visit_Call(self, node):
             if csv_reader_call(node) and node.args and is_stringio(node.args[0]):
-                first = lines_of(node.args[0])
-                first.func.value = self.visit(first.func.value)
+                first = self.visit(lines_of(node.args[0]))
                 node.args = [first] + [self.visit(a) for a in node.args[1:]]
                 node.keywords = [self.visit(k) for k in node.keywords]
                 return node

@@ -889,6 +889,12 @@ class Csv:
                 # next(reader[, default])
                 if isinstance(func, ast.Name) and func.id == 'next' and node.args:
                     info = lower.reader_of(node.args[0], state)
+                    if info is not None and len(node.args) == 2 \
+                            and isinstance(node.args[1], ast.Constant) and node.args[1].value is None:
+                        # an exhausted reader is the empty list in this lowering; a value use would print
+                        # [] where CPython returns None. `X = next(reader, None)` is handled below.
+                        lower.refuse(node, 'next(%s, None) used as a value is not built: assign it to a name '
+                                     'and test `is None` (the general path returns None)' % info.name)
                     if info is not None:
                         self.guard(node, 'next(%s)' % info.name)
                         return lower.next_call(node, info, pre)

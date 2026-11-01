@@ -980,7 +980,10 @@ class _Lowerer(ast.NodeTransformer):
             add(name)
         statements = []
         for name in order:
-            source = self.surface(filelib_prelude.SNIPPETS[name][0])
+            raw = filelib_prelude.SNIPPETS[name][0]
+            if name == 'text_io' and self.general:
+                raw = filelib_prelude.TEXT_IO_GENERAL
+            source = self.surface(raw)
             parsed = ast.parse(source)
             for each in ast.walk(parsed):
                 if 'lineno' in getattr(each, '_attributes', ()):
