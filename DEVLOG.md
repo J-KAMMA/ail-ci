@@ -1,3 +1,19 @@
+## 2026-11-01 -- tuple reach review: do not type a reassigned parameter or a mixed-return function (job-tup1-11011230)
+
+The review found two programs the new call-site inference broke. `def f(n): n = "x"; return n, (1, "a")`
+was given `n: int` from `f(1)`, so the reassignment stored a `str` in an int field and the tuple printed
+`(x, ...)`; the pass now ignores a call-site type for any parameter the body assigns to itself (ordinary,
+augmented, loop target and tuple reassignment all checked). A method returning `"none"` on one path and
+`t[0], t[1]` on another was pulled onto the typed path by an inferred tuple parameter, but its return type
+cannot be settled, so the caller printed `<_AilT_i_s object>`; a function with a tuple return that is not
+settled now keeps its parameters unannotated and stays on the general path, as before the inference.
+Probes p07, r06, v01-v11 (argument, list item, dict value, attribute, keyword, branch, augmented and loop
+reassignment, mixed scalar/tuple and mixed tuple-shape returns) all match CPython on the default and
+forced-general builds. `test_ail_tuple_reach` gained 3 regression tests (21 total). Generated C of the
+`lab/compare` tasks is unchanged: all 10 `.ail`, the 5 default `.py` and the 2 `--exact-int` `.py` builds are
+byte-identical (17 builds); the other 3 `.py` programs fail identically on both revisions.  All 10 `.py`
+tuple rewrites are identical in text; one diagnostic note differs and does not affect the C.
+
 ## 2026-11-01 -- heterogeneous tuple reach: unannotated signatures take the typed path (job-tup1-11011230)
 
 Measured 25 heterogeneous-tuple probes (`/tmp/probes/t01`..`t25`) on the default build: 9 typed, 16 general,

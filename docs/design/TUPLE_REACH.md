@@ -81,7 +81,15 @@ type that settles a later call.
 
 Conservative rules: an unknown call site, two different tuple shapes, or a tuple beside a scalar leaves the
 parameter unannotated, so the program stays on the general path.  This is what `b02`-`b03` and `b12` below
-check.  No C runtime code changed.
+check.  Two further rules keep an inferred type from changing a program that was already correct:
+
+- a parameter the function body assigns to itself is never given a call-site type, because the assignment
+  (possibly of another type) would be hidden by the inferred field type;
+- a function that returns a tuple on one path and another type or tuple shape on another is not pulled onto
+  the typed path by a parameter hint: its return type cannot be settled, so callers could print the tuple
+  class instead of the tuple.  It stays on the general path, exactly as before the inference.
+
+No C runtime code changed.
 
 ## Boundary probes for the change
 
@@ -104,11 +112,16 @@ check.  No C runtime code changed.
 | b03 tuple and scalar at one parameter | general, same as CPython |
 | b12 int and float at one scalar parameter | general, same as CPython |
 | b01, b06, b07, b08 | general for independent typed-path limits (unannotated class field, class without `__init__`, tuple default, two tuple shapes), same as CPython |
+| b19 scalar parameter reassigned to a `str` in the body | general, same as CPython |
+| b20 mixed-return method with an inferred tuple parameter (`str` or tuple) | general, same as CPython |
 
 ## Acceptance checks
 
-- `test_ail_tuple_reach` (new, 18 tests) asserts the typed path for the 15 positive programs and the general
-  path plus CPython parity for the 3 conservative ones.
+- `test_ail_tuple_reach` (new, 21 tests) asserts the typed path for the 15 positive programs and the general
+  path plus CPython parity for the 6 conservative ones.
 - `test_ail_tuples` (26 tests) and `test_ail_typed_tuples` (10 tests) still pass.
-- Generated C for the 10 `lab/compare` tasks, both `main.ail` and `main.py` (20 builds), is byte-identical
-  between the base commit and this change (319,833 .. 2,223,464 bytes per build).
+- Generated C for the 10 `lab/compare` tasks is byte-identical between the base commit and this change for
+  every build that succeeds: all 10 `main.ail`, the 5 `main.py` that build by default, and the 2 that need
+  `--exact-int` (17 builds, 199,155 .. 2,223,464 bytes each).  The other 3 `main.py` programs fail
+  identically on both revisions.  All 10 `main.py` tuple rewrites are identical in text; one diagnostic note
+  differs and does not affect the generated C.

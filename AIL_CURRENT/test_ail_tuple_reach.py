@@ -264,6 +264,40 @@ def main():
 main()
 '''
 
+SCALAR_REASSIGNED = '''def f(n):
+    n = "x"
+    return n, (1, "a")
+
+def main():
+    print(f(1))
+
+main()
+'''
+
+TUPLE_PARAM_REASSIGNED = '''def g(t):
+    t = (1, 2)
+    return t[0], t[1]
+
+def main():
+    print(g((3, "a")))
+
+main()
+'''
+
+MIXED_RETURN_METHOD = '''class C:
+    def m(self, t=None):
+        if t is None:
+            return "none"
+        return t[0], t[1]
+
+def main():
+    c = C()
+    print(c.m())
+    print(c.m((1, "a")))
+
+main()
+'''
+
 SCALAR_CONFLICT = '''def f(n):
     return n, str(n), n / 2
 
@@ -321,6 +355,9 @@ class TypedReach(Reach):
     def test_all_routes(self):
         self.assert_typed('tr_routes', ROUTES_ANNOTATED)
 
+    def test_reassigned_scalar_parameter(self):
+        self.assert_general('tr_reassign', SCALAR_REASSIGNED)
+
 
 class Conservative(Reach):
     def test_different_shapes_stay_general(self):
@@ -331,6 +368,12 @@ class Conservative(Reach):
 
     def test_scalar_types_stay_general(self):
         self.assert_general('tr_scalars', SCALAR_CONFLICT)
+
+    def test_reassigned_tuple_parameter_stays_general(self):
+        self.assert_general('tr_reassign_t', TUPLE_PARAM_REASSIGNED)
+
+    def test_mixed_return_method_stays_general(self):
+        self.assert_general('tr_mixed_ret', MIXED_RETURN_METHOD)
 
 
 if __name__ == '__main__':

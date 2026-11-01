@@ -60,6 +60,7 @@ class Lower(Stmts, Calls, Lams, Exprs):
         self.params_in = {} if params is None else params
         self.params_out = {}
         self.param_seen = {}
+        self.mixed_ret = set()  # functions returning a tuple on one path and something else on another
         self.forced = False
         self.quiet = 0
         self.nohoist = 0
@@ -125,6 +126,8 @@ class Lower(Stmts, Calls, Lams, Exprs):
         plain = [*args.posonlyargs, *args.args]
         ndef = len(args.defaults)
         given = []
+        rebound = {n.id for n in ast.walk(fn) if isinstance(n, ast.Name)
+                   and isinstance(n.ctx, (ast.Store, ast.Del))}
         for i, a in enumerate(plain):
             if owner and i == 0:
                 t = ('cls', owner)
@@ -141,6 +144,7 @@ class Lower(Stmts, Calls, Lams, Exprs):
                     if hint is not None:
                         t = hint
             sig.params.append((a.arg, t, i >= len(plain) - ndef))
+            sig.rebound.append(a.arg in rebound)
         for a, dflt in zip(args.kwonlyargs, args.kw_defaults):
             index = len(sig.params)
             given.append(a.annotation is not None)
@@ -154,6 +158,7 @@ class Lower(Stmts, Calls, Lams, Exprs):
                 if hint is not None:
                     t = hint
             sig.params.append((a.arg, t, dflt is not None))
+            sig.rebound.append(a.arg in rebound)
         sig.given = given
         try:
             sig.ret = self.sig_ann(fn.returns) if fn.returns is not None else None
@@ -169,6 +174,8 @@ class Lower(Stmts, Calls, Lams, Exprs):
         """A call site's argument type for an unannotated parameter (a later pass may use it)."""
         if self.quiet or index < 0 or index >= len(sig.given) or sig.given[index]:
             return
+        if index < len(sig.rebound) and sig.rebound[index]:
+            return                  # the body assigns the parameter again: a call-site type would be wrong
         t = deep(t)
         if t is None or t == 'none' or not known(t):
             t = None
@@ -178,6 +185,8 @@ class Lower(Stmts, Calls, Lams, Exprs):
     def finish_params(self):
         """Keep a parameter type every call site agrees on; an unknown or differing one stays unannotated."""
         for key, seen in self.param_seen.items():
+            if (key[0] + '.' + key[1]) in self.mixed_ret:
+                continue            # the return mixes a tuple with another type or shape (see function)
             if not seen or any(t is None for t in seen):
                 continue
             if all(t == seen[0] for t in seen):
@@ -270,6 +279,10 @@ class Lower(Stmts, Calls, Lams, Exprs):
                     self.use_type(seen[0])
                     fn.returns = ast.parse(ann_text(seen[0]), mode='eval').body
                     self.force()
+            elif any(is_tuple(deep(t)) for t in self.rets):
+                # a tuple on one return path, another type or shape on another: the caller cannot be told
+                # the return type, so no parameter hint may pull this function onto the typed path
+                self.mixed_ret.add(self.fnkey)
         for key, t in self.pending:
             dt = deep(t)
             if dt is not None and known(dt):
