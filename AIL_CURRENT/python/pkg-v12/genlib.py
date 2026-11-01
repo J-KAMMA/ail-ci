@@ -41,6 +41,13 @@ TABLE = {
     'itertools.dropwhile': '_ail_dropwhile',
     'itertools.filterfalse': '_ail_filterfalse',
     'itertools.batched': '_ail_batched',
+    'pprint.pprint': '_ail_pprint',
+    'pprint.pformat': '_ail_pformat',
+    'pprint.pp': '_ail_pp',
+    'pprint.saferepr': '_ail_saferepr',
+    'pprint.isreadable': '_ail_isreadable',
+    'pprint.isrecursive': '_ail_isrecursive',
+    'pprint.PrettyPrinter': '_ail_PrettyPrinter',
     'math.isclose': '_ail_isclose',
     'statistics.mean': '_ail_st_mean',
     'statistics.fmean': '_ail_st_fmean',
@@ -70,6 +77,10 @@ for _name in ('seed', 'random', 'randint', 'randrange', 'uniform', 'gauss', 'cho
 
 # names whose calls take only these keyword arguments (others are refused by name)
 KEYWORDS = {
+    '_ail_pprint': {'stream', 'indent', 'width', 'depth', 'compact', 'sort_dicts', 'underscore_numbers'},
+    '_ail_pformat': {'indent', 'width', 'depth', 'compact', 'sort_dicts', 'underscore_numbers'},
+    '_ail_pp': {'stream', 'indent', 'width', 'depth', 'compact', 'sort_dicts', 'underscore_numbers'},
+    '_ail_PrettyPrinter': {'indent', 'width', 'depth', 'stream', 'compact', 'sort_dicts', 'underscore_numbers'},
     '_ail_json_dumps': {'skipkeys', 'ensure_ascii', 'check_circular', 'allow_nan', 'indent', 'separators',
                         'default', 'sort_keys'},
     '_ail_json_loads': {'object_hook', 'parse_float', 'parse_int', 'parse_constant', 'object_pairs_hook'},

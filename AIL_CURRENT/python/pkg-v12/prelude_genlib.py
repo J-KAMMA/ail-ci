@@ -2131,3 +2131,365 @@ def _ail_dt_format(v, spec):
         return v.strftime(spec)
     raise ValueError('Invalid format specifier')
 
+
+
+class _ail_safe_key:
+    def __init__(self, obj):
+        self.obj = obj
+
+    def __lt__(self, other):
+        try:
+            return self.obj < other.obj
+        except TypeError:
+            return type(self.obj).__name__ < type(other.obj).__name__
+
+
+def _ail_safe_tuple(t):
+    return _ail_safe_key(t[0]), _ail_safe_key(t[1])
+
+
+class _ail_pp_writer:
+    def __init__(self):
+        self.parts = []
+
+    def write(self, text):
+        self.parts.append(text)
+
+    def getvalue(self):
+        return ''.join(self.parts)
+
+
+def _ail_pp_underscore(n):
+    s = str(n)
+    sign = ''
+    if s[0] == '-':
+        sign = '-'
+        s = s[1:]
+    out = ''
+    i = len(s)
+    while i > 0:
+        start = i - 3
+        if start < 0:
+            start = 0
+        if out:
+            out = s[start:i] + '_' + out
+        else:
+            out = s[start:i]
+        i = start
+    return sign + out
+
+
+class _ail_PrettyPrinter:
+    def __init__(self, indent=1, width=80, depth=None, stream=None, compact=False, sort_dicts=True,
+                 underscore_numbers=False):
+        indent = int(indent)
+        width = int(width)
+        if indent < 0:
+            raise ValueError('indent must be >= 0')
+        if depth is not None and depth <= 0:
+            raise ValueError('depth must be > 0')
+        if not width:
+            raise ValueError('width must be != 0')
+        self._depth = depth
+        self._indent_per_level = indent
+        self._width = width
+        self._stream = stream
+        self._compact = bool(compact)
+        self._sort_dicts = sort_dicts
+        self._underscore_numbers = underscore_numbers
+        self._recursive = False
+        self._readable = True
+
+    def pprint(self, object):
+        if self._stream is None:
+            text = self.pformat(object)
+            print(text)
+        else:
+            self._format(object, self._stream, 0, 0, {}, 0)
+            self._stream.write('\n')
+
+    def pformat(self, object):
+        stream = _ail_pp_writer()
+        self._format(object, stream, 0, 0, {}, 0)
+        return stream.getvalue()
+
+    def isrecursive(self, object):
+        return self.format(object, {}, 0, 0)[2]
+
+    def isreadable(self, object):
+        s, readable, recursive = self.format(object, {}, 0, 0)
+        return readable and not recursive
+
+    def _format(self, object, stream, indent, allowance, context, level):
+        rep = self._repr(object, context, level)
+        max_width = self._width - indent - allowance
+        if len(rep) > max_width:
+            if type(object) is dict:
+                self._pprint_dict(object, stream, indent, allowance, context, level + 1)
+                return
+            if type(object) is list:
+                self._pprint_list(object, stream, indent, allowance, context, level + 1)
+                return
+            if type(object) is tuple:
+                self._pprint_tuple(object, stream, indent, allowance, context, level + 1)
+                return
+            if type(object) is set or type(object) is frozenset:
+                self._pprint_set(object, stream, indent, allowance, context, level + 1)
+                return
+            if type(object) is str:
+                self._pprint_str(object, stream, indent, allowance, context, level + 1)
+                return
+        stream.write(rep)
+
+    def _pprint_dict(self, object, stream, indent, allowance, context, level):
+        stream.write('{')
+        if self._indent_per_level > 1:
+            stream.write((self._indent_per_level - 1) * ' ')
+        length = len(object)
+        if length:
+            if self._sort_dicts:
+                items = sorted(object.items(), key=_ail_safe_tuple)
+            else:
+                items = list(object.items())
+            self._format_dict_items(items, stream, indent, allowance + 1, context, level)
+        stream.write('}')
+
+    def _pprint_list(self, object, stream, indent, allowance, context, level):
+        stream.write('[')
+        self._format_items(object, stream, indent, allowance + 1, context, level)
+        stream.write(']')
+
+    def _pprint_tuple(self, object, stream, indent, allowance, context, level):
+        stream.write('(')
+        if len(object) == 1:
+            endchar = ',)'
+        else:
+            endchar = ')'
+        self._format_items(object, stream, indent, allowance + len(endchar), context, level)
+        stream.write(endchar)
+
+    def _pprint_set(self, object, stream, indent, allowance, context, level):
+        if not len(object):
+            stream.write(repr(object))
+            return
+        if type(object) is set:
+            stream.write('{')
+            endchar = '}'
+        else:
+            stream.write('frozenset({')
+            endchar = '})'
+            indent += len('frozenset') + 1
+        items = sorted(object, key=_ail_safe_key)
+        self._format_items(items, stream, indent, allowance + len(endchar), context, level)
+        stream.write(endchar)
+
+    def _pprint_str(self, object, stream, indent, allowance, context, level):
+        if not len(object):
+            stream.write(repr(object))
+            return
+        chunks = []
+        lines = object.splitlines(True)
+        if level == 1:
+            indent += 1
+            allowance += 1
+        max_width1 = max_width = self._width - indent
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            rep = repr(line)
+            if i == len(lines) - 1:
+                max_width1 -= allowance
+            if len(rep) <= max_width1:
+                chunks.append(rep)
+            else:
+                parts = []
+                j = 0
+                while j < len(line):
+                    k = j
+                    while k < len(line) and not line[k].isspace():
+                        k += 1
+                    while k < len(line) and line[k].isspace():
+                        k += 1
+                    parts.append(line[j:k])
+                    j = k
+                max_width2 = max_width
+                current = ''
+                j = 0
+                while j < len(parts):
+                    part = parts[j]
+                    candidate = current + part
+                    if j == len(parts) - 1 and i == len(lines) - 1:
+                        max_width2 -= allowance
+                    if len(repr(candidate)) > max_width2:
+                        if current:
+                            chunks.append(repr(current))
+                        current = part
+                    else:
+                        current = candidate
+                    j += 1
+                if current:
+                    chunks.append(repr(current))
+            i += 1
+        if len(chunks) == 1:
+            stream.write(rep)
+            return
+        if level == 1:
+            stream.write('(')
+        i = 0
+        while i < len(chunks):
+            if i > 0:
+                stream.write('\n' + ' ' * indent)
+            stream.write(chunks[i])
+            i += 1
+        if level == 1:
+            stream.write(')')
+
+    def _format_dict_items(self, items, stream, indent, allowance, context, level):
+        items = list(items)
+        indent += self._indent_per_level
+        delimnl = ',\n' + ' ' * indent
+        last_index = len(items) - 1
+        i = 0
+        while i < len(items):
+            key = items[i][0]
+            ent = items[i][1]
+            last = i == last_index
+            rep = self._repr(key, context, level)
+            stream.write(rep)
+            stream.write(': ')
+            self._format(ent, stream, indent + len(rep) + 2, allowance if last else 1, context, level)
+            if not last:
+                stream.write(delimnl)
+            i += 1
+
+    def _format_items(self, items, stream, indent, allowance, context, level):
+        indent += self._indent_per_level
+        if self._indent_per_level > 1:
+            stream.write((self._indent_per_level - 1) * ' ')
+        delimnl = ',\n' + ' ' * indent
+        delim = ''
+        width = max_width = self._width - indent + 1
+        n = len(items)
+        if n == 0:
+            return
+        i = 0
+        while i < n:
+            ent = items[i]
+            i += 1
+            last = i == n
+            if last:
+                max_width -= allowance
+                width -= allowance
+            if self._compact:
+                rep = self._repr(ent, context, level)
+                w = len(rep) + 2
+                if width < w:
+                    width = max_width
+                    if delim:
+                        delim = delimnl
+                if width >= w:
+                    width -= w
+                    stream.write(delim)
+                    delim = ', '
+                    stream.write(rep)
+                    continue
+            stream.write(delim)
+            delim = delimnl
+            self._format(ent, stream, indent, allowance if last else 1, context, level)
+
+    def _repr(self, object, context, level):
+        rep, readable, recursive = self.format(object, context, self._depth, level)
+        if not readable:
+            self._readable = False
+        if recursive:
+            self._recursive = True
+        return rep
+
+    def format(self, object, context, maxlevels, level):
+        return self._safe_repr(object, context, maxlevels, level)
+
+    def _safe_repr(self, object, context, maxlevels, level):
+        if type(object) is str or type(object) is float or type(object) is bool or object is None:
+            return repr(object), True, False
+        if type(object) is int:
+            if self._underscore_numbers:
+                return _ail_pp_underscore(object), True, False
+            return repr(object), True, False
+        if type(object) is dict:
+            if not object:
+                return '{}', True, False
+            if maxlevels and level >= maxlevels:
+                return '{...}', False, False
+            readable = True
+            recursive = False
+            components = []
+            level += 1
+            if self._sort_dicts:
+                items = sorted(object.items(), key=_ail_safe_tuple)
+            else:
+                items = object.items()
+            for k, v in items:
+                krepr, kreadable, krecur = self.format(k, context, maxlevels, level)
+                vrepr, vreadable, vrecur = self.format(v, context, maxlevels, level)
+                components.append(krepr + ': ' + vrepr)
+                readable = readable and kreadable and vreadable
+                if krecur or vrecur:
+                    recursive = True
+            return '{' + ', '.join(components) + '}', readable, recursive
+        if type(object) is list or type(object) is tuple:
+            if type(object) is list:
+                if not object:
+                    return '[]', True, False
+                fmt = '[%s]'
+            elif len(object) == 1:
+                fmt = '(%s,)'
+            else:
+                if not object:
+                    return '()', True, False
+                fmt = '(%s)'
+            if maxlevels and level >= maxlevels:
+                return fmt % '...', False, False
+            readable = True
+            recursive = False
+            components = []
+            level += 1
+            for o in object:
+                orepr, oreadable, orecur = self.format(o, context, maxlevels, level)
+                components.append(orepr)
+                if not oreadable:
+                    readable = False
+                if orecur:
+                    recursive = True
+            return fmt % ', '.join(components), readable, recursive
+        rep = repr(object)
+        return rep, (rep and not rep.startswith('<')), False
+
+
+def _ail_pprint(object, stream=None, indent=1, width=80, depth=None, compact=False, sort_dicts=True,
+                underscore_numbers=False):
+    printer = _ail_PrettyPrinter(stream=stream, indent=indent, width=width, depth=depth, compact=compact,
+                                 sort_dicts=sort_dicts, underscore_numbers=underscore_numbers)
+    printer.pprint(object)
+
+
+def _ail_pformat(object, indent=1, width=80, depth=None, compact=False, sort_dicts=True,
+                 underscore_numbers=False):
+    return _ail_PrettyPrinter(indent=indent, width=width, depth=depth, compact=compact,
+                              sort_dicts=sort_dicts, underscore_numbers=underscore_numbers).pformat(object)
+
+
+def _ail_pp(object, stream=None, indent=1, width=80, depth=None, compact=False, sort_dicts=False,
+            underscore_numbers=False):
+    _ail_pprint(object, stream, indent, width, depth, compact, sort_dicts, underscore_numbers)
+
+
+def _ail_saferepr(object):
+    return _ail_PrettyPrinter()._safe_repr(object, {}, None, 0)[0]
+
+
+def _ail_isreadable(object):
+    return _ail_PrettyPrinter()._safe_repr(object, {}, None, 0)[1]
+
+
+def _ail_isrecursive(object):
+    return _ail_PrettyPrinter()._safe_repr(object, {}, None, 0)[2]

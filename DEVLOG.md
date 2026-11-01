@@ -1,3 +1,27 @@
+## 2026-11-01 -- CPython `pprint` on the general path (job-std_pprint-11011616)
+
+Added `pprint` to the general-path library lowering (`python/pkg-v12/genlib.py` and
+`prelude_genlib.py`): `pprint`, `pformat`, `pp`, `saferepr`, `isreadable`, `isrecursive` and
+`PrettyPrinter`, with `stream`, `indent`, `width`, `depth`, `compact`, `sort_dicts` and
+`underscore_numbers`. The pieces follow CPython 3.12's `pprint.py` for dict / list / tuple / set /
+frozenset / str / int / float / bool / None, including compact wrapping, depth limits, sorted or
+insertion-order dicts, singleton tuples, empty containers and the `ValueError`s for `indent < 0`,
+`depth <= 0` and `width == 0`.
+
+All 12 programs in `lab/stdlib/pprint` build on the default (general) path and match CPython 3.12
+stdout and exit status, also with `AIL_IR=1`; the typed path still refuses `import pprint` by name.
+`lab/stdlib/pprint/RESULTS.md` records each result and first refusal. The probes in `/tmp/probes`
+(`pp_types`, `pp_sources`, `pp_stream`, `pp_errors`, `pp_numbers`, `pp_strings`,
+`pp_sets_deterministic`) match CPython on both `cmp.sh` builds; `pp_star_refused` is refused by name
+(`with the keyword argument **`). Known limits (documented in RESULTS.md): no dataclass /
+OrderedDict / Counter / defaultdict / ChainMap / deque / User* / mappingproxy / SimpleNamespace
+dispatch, no `id()`-based recursion text, no long `bytes` / `bytearray` wrapping, and a short
+non-singleton set keeps CPython's per-process hash order.
+
+Added `AIL_CURRENT/test_ail_std_pprint.py` (registered through `tests.d/test_ail_std_pprint.txt`),
+ran `test_ail_std_pprint`, `test_ail_genlib`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`, and refreshed the manifest.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
