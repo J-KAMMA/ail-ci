@@ -26693,6 +26693,51 @@ def _for_inner_impl(node, ctx, ind):
                 head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.p[%s];\n' % (
                     pad, i, i, c, i, pad, v, c, i)
                 return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+            if _is_str_expr(it.args[0], ctx):
+                # `for i, ch in enumerate(text):` -- the pair form of the plain `for c in s`
+                # branch further down. The walk is the same UTF-8 byte walk (one code point per
+                # step via `ail_str_index`'s view), and `i` counts CHARACTERS, not bytes, so a
+                # non-ASCII character advances it by one exactly as CPython's enumerate does.
+                # The iterable is evaluated once into a private temp, and `i` is bound from a
+                # private counter each step so a body that rebinds the index cannot disturb the
+                # next step.
+                sval = _str_value(it.args[0], ctx)
+                ctx.parts.add('STR')
+                stmp, _ = ctx.temp(STR)
+                v = ctx.declare(vname, STR)
+                pre = _flush(ctx, pad)
+                pre += '%s%s = %s;\n' % (pad, stmp, sval)
+                if ctx.rebound is not None and vname not in ctx.rebound:
+                    ctx.onecp.add(vname)
+                byte0 = '%s_b0' % idx
+                counter = '%s_i' % idx
+                pre += '%s{\n%s    const uint8_t *%s_p = %s.p; const int64_t %s_n = %s.n;\n' % (
+                    pad, pad, idx, stmp, idx, stmp)
+                head = ('%s    for (int64_t %s_k = 0, %s_w = 0, %s_i = 0; %s_k < %s_n; '
+                        '%s_k += %s_w, %s_i++) {\n'
+                        '%s        const uint8_t %s = %s_p[%s_k];\n'
+                        '%s        %s_w = %s < 0x80 ? 1 : ail__utf8_w(%s, %s_n - %s_k);\n'
+                        '%s        %s = (ail_str){%s_p + %s_k, %s_w, %s < 0x80};\n'
+                        '%s        %s = %s;\n') % (
+                    pad, idx, idx, idx, idx, idx,
+                    idx, idx, idx,
+                    pad, byte0, idx, idx,
+                    pad, idx, byte0, byte0, idx, idx,
+                    pad, v, idx, idx, idx, byte0,
+                    pad, i, counter)
+                _saved_b0 = dict(getattr(ctx, 'byte0_names', {}))
+                if vname in ctx.onecp:
+                    ctx.byte0_names = dict(_saved_b0, **{vname: byte0})
+                _saved = set(ctx.len1_names)
+                ctx.len1_names.add(vname)
+                for _s in node.body:
+                    for _n in ast.walk(_s):
+                        if isinstance(_n, ast.Name) and isinstance(_n.ctx, ast.Store):
+                            ctx.len1_names.add(_n.id)
+                _body = _loop_stmts(node.body, ctx, ind + 2)
+                ctx.len1_names = _saved
+                ctx.byte0_names = _saved_b0
+                return pre + head + _body + pad + '    }' + chr(10) + pad + '}' + chr(10)
             p, n = _seq(it.args[0], ctx)
             if _seq_yields_handles(it.args[0], ctx):
                 # `for i, v in enumerate(g):` -- `v` inherits the handle-ness of `g`'s elements,
