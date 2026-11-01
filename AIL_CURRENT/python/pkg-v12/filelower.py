@@ -905,13 +905,13 @@ class _Lowerer(ast.NodeTransformer):
             return self.call('_ail_makedirs', n, mode, exist_ok)
         if name == 'os.getenv' or name == 'os.environ.get':
             self.need.add('environ')
-            if name == 'os.environ.get':
-                key, default = self.bind(node, ('key', 'default'), {}, required=1)
-            else:
-                key, default = self.bind(node, ('key', 'default'), {}, required=1)
+            key, default = self.bind(node, ('key', 'default'), {}, required=1)
             if default is None:
-                self.refuse(node, '%s(key) without a default returns None, and there is no None str.\n'
-                                  '  write instead: %s(key, "") and test for the empty string' % (name, name))
+                if not self.general:
+                    self.refuse(node, '%s(key) without a default returns None; this use is left to the general '
+                                      'path' % name)
+                self.need.add('environ_optional')
+                return self.call('_ail_environ_get_or_none', key)
             return self.call('_ail_environ_get', key, default)
 
 

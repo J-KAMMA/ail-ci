@@ -28,7 +28,7 @@ import copy
 
 import iterlower
 
-BUILT = ('Path(...), Path.cwd(), p / x, str(p), repr(p), p == q, p.name .stem .suffix .suffixes .parent .parts '
+BUILT = ('Path(...), Path.home(), Path.cwd(), p / x, str(p), repr(p), p == q, p.name .stem .suffix .suffixes .parent .parts '
          '.root .anchor .drive, exists is_file is_dir is_absolute as_posix joinpath with_name with_stem '
          'with_suffix resolve absolute read_text write_text read_bytes write_bytes open mkdir iterdir glob '
          'rglob unlink rmdir rename replace')
@@ -40,7 +40,7 @@ _WRITE_INSTEAD = {
     'lstat': 'os.path.islink(str(p)) for a link test',
     'touch': 'open(str(p), "a").close() creates the file when it is missing (it does not set the time)',
     'chmod': 'os.chmod(str(p), mode)',
-    'home': 'os.getenv("HOME", "")',
+    'home': 'Path.home()',
     'expanduser': 'expand "~" yourself',
     'relative_to': 'os.path.relpath(str(p), str(base))',
     'is_relative_to': 'str(p).startswith(str(base) + "/")',
@@ -294,7 +294,7 @@ class _Lowerer(ast.NodeTransformer):
             if self.is_path_class(f):
                 return True
             if isinstance(f, ast.Attribute):
-                if self.is_path_class(f.value) and f.attr == 'cwd':
+                if self.is_path_class(f.value) and f.attr in ('cwd', 'home'):
                     return True
                 if f.attr in _P_METHODS and self.isP(f.value):
                     return True
@@ -570,7 +570,7 @@ class _Lowerer(ast.NodeTransformer):
             if self.is_path_class(f):
                 return True
             if isinstance(f, ast.Attribute):
-                if self.is_path_class(f.value) and f.attr == 'cwd':
+                if self.is_path_class(f.value) and f.attr in ('cwd', 'home'):
                     return True
                 return f.attr in _P_METHODS and self.isP(f.value)
             return False
@@ -598,10 +598,12 @@ class _Lowerer(ast.NodeTransformer):
             f = e.func
             if self.is_path_class(f):
                 return self.at(self.path_ctor(e), e)
-            if isinstance(f, ast.Attribute) and self.is_path_class(f.value) and f.attr == 'cwd':
+            if isinstance(f, ast.Attribute) and self.is_path_class(f.value) and f.attr in ('cwd', 'home'):
                 if e.args or e.keywords:
-                    self.refuse(e, 'Path.cwd() takes no arguments')
-                return self.at(self.call('_ail_os_getcwd'), e)
+                    self.refuse(e, 'Path.%s() takes no arguments' % f.attr)
+                if f.attr == 'cwd':
+                    return self.at(self.call('_ail_os_getcwd'), e)
+                return self.at(self.call('_ail_pl_home'), e)
             if isinstance(f, ast.Attribute) and f.attr in _P_METHODS and self.isP(f.value):
                 return self.at(self.p_method(e, f.attr), e)
         elif isinstance(e, ast.BinOp) and isinstance(e.op, ast.Div):
@@ -683,8 +685,8 @@ class _Lowerer(ast.NodeTransformer):
     # ---- expression visitors -------------------------------------------------------------------
     def visit_Name(self, node):
         if isinstance(node.ctx, ast.Load) and node.id in self.cls_names:
-            self.refuse(node, 'the class Path used as a value is not built: it is built for Path(...), Path.cwd() '
-                              'and annotations.\n  write instead: call Path(...) where you need a path')
+            self.refuse(node, 'the class Path used as a value is not built: it is built for Path(...), Path.home(), '
+                              'Path.cwd() and annotations.\n  write instead: call Path(...) where you need a path')
         return node
 
     def visit_BinOp(self, node):
@@ -818,7 +820,7 @@ class _Lowerer(ast.NodeTransformer):
         if self.makes_path(node):
             return self.pobj(node)
         if isinstance(f, ast.Attribute) and self.is_path_class(f.value):
-            self.refuse(node, 'Path.%s() is not built. Built: Path(...) and Path.cwd()%s' % (
+            self.refuse(node, 'Path.%s() is not built. Built: Path(...), Path.home() and Path.cwd()%s' % (
                 f.attr, '\n  write instead: %s' % _WRITE_INSTEAD[f.attr] if f.attr in _WRITE_INSTEAD else ''))
         if isinstance(f, ast.Attribute) and self.isP(f.value):
             return self.at(self.method_value(node), node)

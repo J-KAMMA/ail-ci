@@ -85,6 +85,40 @@ the existing int64 policy. Final-state tests: test_ail_int_base, test_ail_pre192
 test_ail_pre212, test_ail_pre253, test_ail_int64_default, test_ail_ir_s0, test_ail_exc_str,
 test_ail_stdlib_batch1, test_ail_cmp_classname, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3.
+## 2026-11-01 -- covenv2 review: `Path.home()` rejects a `~` result (job-covenv2-11011011)
+
+The review found `Path.home()` printed `~` (also `~/x`, `~~`, `~//`) and exited 0 when HOME
+began with `~`, where CPython's `Path.home()` is `cls("~").expanduser()` and raises
+`RuntimeError: Could not determine home directory.` (exit 1, empty stdout).  pathlower now calls
+a new prelude helper `_ail_pl_home`, which reads `_ail_pp_home()` and raises when the text still
+starts with `~` before normalising it.  Probes over HOME `~`, `~/x`, `~~`, `~//`, `/~`, `.`, `..`,
+`/`, empty and unset, plus `Path.home() / "a"` and f-string uses, match CPython stdout and exit
+code on the default and general builds; the typed path is covered by the new tilde cases in
+`test_ail_covenv`.  The env probes (key present/absent/empty, `or`, `is None`, direct uses) still
+match, and all 10 lab/compare `main.ail` C hashes are byte-identical to base.  `test_ail_covenv`,
+`test_ail_pathlib`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+No new DIFFERENCES row: the result now matches CPython.
+
+## 2026-11-01 -- covenv2: `os.environ.get(key)` without a default and `Path.home()` (job-covenv2-11011011)
+
+`os.environ.get(key)` with no default is now a str-or-None value on the typed path (optlib): a present flag
+and the `_ail_os_hasenv` / `_ail_os_getenv` pair, with the key evaluated once.  `is None`, truth tests,
+`v or default`, `print`/`str`/f-strings, assignments, returns and Optional parameters/calls are built;
+uses that cannot follow the pair keep the old route, and the general path lowers the same call to the
+`_ail_environ_get_or_none` prelude function (`hasenv ? getenv : None`) instead of refusing.  The prelude
+call keeps the key evaluated once without a hoisted temporary, so a key that names a loop variable is
+still read inside the loop (the first cut hoisted it before the `for` and read the variable unbound).
+`Path.home()` is a new `_ail_pp_home` primitive
+(ailpath_core.h), wrapped by pathlower: HOME is used even when empty, otherwise the passwd entry, trailing
+slashes are removed and an empty result is `/`, matching CPython's `os.path.expanduser("~")`.
+
+CPython 3.12 stdout and exit code match on the typed, default and general builds for HOME set/unset/empty,
+key present/absent/empty, `or`, direct `if`/`is None`/`print`/`str`/f-string uses, keys through a
+variable, a list item and an attribute, and env gets inside a loop, a list and a dict.  `test_ail_covenv.py`
+covers them (registered in `tests.d`);
+`test_ail_safetynet`, `test_ail_files`, `test_ail_pathlib`, `test_ail_optional_locals` and
+`test_ail_corpus_findings3` pass.  All 10 lab/compare `main.ail` C hashes are unchanged.  No new
+DIFFERENCES row: both spellings now match CPython.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
