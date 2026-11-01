@@ -26,9 +26,11 @@ Initial: 1 typed, 8 general, 3 refused. Final: 11 build (1 typed, 10 general), 1
 
 `heapq.merge` was the blocker shared by the three refused programs. The general path now publishes
 `heapq.merge` through `genlib.py` / `prelude_genlib.py` (`_ail_merge`): `key=` and `reverse=`, any
-number of positional streams, empty and infinite inputs, and CPython's stable tie-break for equal
-keys (the earlier iterable first, also when reversed). The typed path still falls back to the
-general path for it, as it already did for `nlargest` / `nsmallest`.
+number of positional streams, empty and infinite inputs. It uses CPython's heap algorithm and list
+comparison, so equal keys keep the earlier iterable first (also when reversed), `key` is not called
+again once only one stream remains, and `__lt__`-only objects and NaNs order as CPython does. The
+typed path still falls back to the general path for it, as it already did for `nlargest` /
+`nsmallest`.
 
 ## Follow-up (out of scope)
 

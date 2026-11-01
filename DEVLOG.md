@@ -1,3 +1,16 @@
+## 2026-11-01 -- stdlib heapq: review fixes for merge (job-std_heapq-11011434)
+
+The review found two defects in `_ail_merge`. It now follows CPython's `Lib/heapq.py` merge exactly:
+the heads are kept in a real heap (`_ail_merge_siftup` / `_ail_merge_siftdown` / `_ail_merge_heapify`
+/ `_ail_merge_heapreplace` / `_ail_merge_heappop`) with the list comparison of
+`[key, order * direction, ...]` entries (identity first, then `==`; the order field is consulted only
+for equal keys), and the single-stream fast path relays the remaining values without calling `key`
+again. This fixes the extra key calls / the `ValueError` that CPython never raises after one stream
+is left, and the heap order for `__lt__`-only objects and NaNs. `test_ail_genlib` now covers those
+cases in both directions; the reviewer probes `p_keyraise`, `p_keycalls`, `p_lt_only`, `p_nan`,
+`p_tie`, `p_mutate`, `p_routes` and a new `/tmp/probes/p_merge_edges` (empty/no streams, later key
+error, infinite and mutated streams, identical and distinct NaNs) match CPython on both builds.
+
 ## 2026-11-01 -- stdlib heapq: merge on the general path, twelve lab programs (job-std_heapq-11011434)
 
 The new `lab/stdlib/heapq/` programs exercise heappush / heappop / heapify / heappushpop /
