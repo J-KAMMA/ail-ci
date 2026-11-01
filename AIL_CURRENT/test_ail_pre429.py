@@ -5,7 +5,7 @@ float outside int64 stopped through `ail_hit_limit` (AIL_LIMIT), which no `try` 
 while the typed path's `integer overflow` stop is catchable as OverflowError once the program
 has an active handler.  On today's tree the exact-int (BIGINT) arm returns CPython's full
 integer, so the accepted change is kept on the other side of the big-int gate: with
-`AIL_BIGINT=off`, `ail_bi_round` raises the same `OverflowError("integer overflow")` through
+`AIL_BIGINT=off`, `ail_bi_round` raises the same named `OverflowError("integer overflow in round()")` through
 the ordinary exception path.
 
 Both int64 builds therefore catch the wide value in `except OverflowError`, `except Exception`
@@ -249,7 +249,7 @@ class Pre429Tests(unittest.TestCase):
                     self.assertEqual(got.returncode, want_rc, (name, mode, got.stderr[-1500:]))
 
     def test_overflow_error_is_catchable_on_both_builds(self):
-        self.caught('catch', CATCH, "caught OverflowError 'integer overflow'\nafter\n")
+        self.caught('catch', CATCH, "caught OverflowError 'integer overflow in round()'\nafter\n")
 
     def test_except_exception_and_bare_except_catch_it(self):
         self.caught('exception', EXCEPTION, 'exception caught\nafter\n')
@@ -260,7 +260,7 @@ class Pre429Tests(unittest.TestCase):
         self.caught('routes', ROUTES, '-1\n' + 'caught\n' * 5)
 
     def test_negative_and_computed_wide_values_are_caught(self):
-        self.caught('negative', NEGATIVE, "neg caught 'integer overflow'\nafter\n")
+        self.caught('negative', NEGATIVE, "neg caught 'integer overflow in round()'\nafter\n")
         self.caught('dynamic', DYNAMIC, 'dynamic caught\nafter\n')
 
     def test_unmatched_and_uncaught_stop_is_the_declared_int64_one(self):
