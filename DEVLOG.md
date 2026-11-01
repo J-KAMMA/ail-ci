@@ -1,3 +1,36 @@
+## 2026-11-01 -- int(text, base) lowers through the typed IR path (job-i64base1-11011226)
+
+The IR lowering refused `int(text, base)` outside the exact mode, so a Python-syntax function that
+parsed a number kept its whole body on the legacy emitter. `lower.int_text` now evaluates the text
+and base expressions, requires a str first argument (bytes with an explicit base stays on the
+legacy emitter), and in the default int64 mode emits the existing
+`ail_str_to_int_base(text, base)` runtime through a new `str_to_int_base` RTC entry
+(`parts=('STR', 'INTBASE')`). That runtime already implements CPython's `PyLong_FromString` rules:
+ASCII/Unicode whitespace and decimal digits, an optional sign, single underscores, `0x`/`0o`/`0b`
+prefixes for base 0 or a matching explicit base, base 0's leading-zero rule, the catchable
+ValueError messages and the 4300-digit limit. A value outside int64 stops loudly with
+`OverflowError: integer overflow in int() (ints are 64-bit; --exact-int gives exact ints)`, the
+same policy as the other int operations. The exact (`--exact-int`) mode keeps the `tint` parser.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `int_base_smoke`, `int_base_ir`,
+`int_base_typed`, `int_base_rules`, `int_base_shapes`, `int_base_types`, `int_base_main` and
+`int_base_errors_ir` cover every rule above, direct/keyword calls, values and bases through a
+parameter, a list item, an attribute, a dict value and an alias, invalid literals/bases and the
+int64 boundaries; all match CPython. `int_base_overflow_pos`, `_neg`, `_hex` and `_base0` print the
+boundary value and then stop loudly on both builds as intended; the test module's digit-limit case
+matches CPython's caught 4300-digit ValueError. `AIL_IR=verify` plus `AIL_IR_STATS` shows `main` on the `ir` path
+and the kept C contains `ail_str_to_int_base`. The generated C of the 10 `lab/compare/src/*/main.ail`
+tasks is byte-identical to the pre-change baseline (bytes parsing and the general path are
+untouched).
+
+Added `AIL_CURRENT/test_ail_int_base.py` (6 cases) and registered it through
+`AIL_CURRENT/tests.d/test_ail_int_base.txt`; `tools/ci_shards.py --update` placed it and
+`tools/update_manifest.py` refreshed the pins. No new `DIFFERENCES.md` row: the loud overflow is
+the existing int64 policy. Final-state tests: test_ail_int_base, test_ail_pre192,
+test_ail_pre212, test_ail_pre253, test_ail_int64_default, test_ail_ir_s0, test_ail_exc_str,
+test_ail_stdlib_batch1, test_ail_cmp_classname, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
