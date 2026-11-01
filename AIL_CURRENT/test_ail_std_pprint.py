@@ -4,6 +4,7 @@ Each program is ordinary Python. CPython runs it as the oracle; the compiled pro
 bytes and exits with the same status. The default build and AIL_IR=1 are both checked.
 """
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -45,6 +46,23 @@ class PprintPrograms(unittest.TestCase):
                                   % (source.name, n + 1, x, y))
                 self.fail("%s: %d lines against %d" % (source.name, len(a), len(b)))
 
+    def check_recursive(self, source, ir):
+        name = source.stem + ("_ir" if ir else "")
+        with tempfile.TemporaryDirectory() as directory:
+            env = {"AIL_IR": "1"} if ir else {}
+            built, exe = compile_python(directory, source, name, **env)
+            self.assertEqual(built.returncode, 0, "%s\n%s%s" % (source.name, built.stdout, built.stderr))
+            want = subprocess.run([sys.executable, "-X", "utf8", str(source)],
+                                  capture_output=True, timeout=300)
+            got = subprocess.run([str(exe)], capture_output=True, timeout=300)
+            self.assertEqual(got.returncode, want.returncode,
+                             "%s: %s" % (source.name, got.stderr[-500:].decode(errors="replace")))
+            # The number in CPython's "<Recursion ... id=N>" is that process's object address;
+            # the compiled process has its own address, so only the number is normalised.
+            pattern = rb"id=\d+"
+            self.assertEqual(re.sub(pattern, b"id=ADDR", got.stdout),
+                             re.sub(pattern, b"id=ADDR", want.stdout), source.name)
+
     def test_programs_match_cpython(self):
         sources = sorted(PROGRAMS.glob("p*.py"))
         self.assertGreaterEqual(len(sources), 12)
@@ -52,6 +70,25 @@ class PprintPrograms(unittest.TestCase):
             for ir in (False, True):
                 with self.subTest(program=source.name, ir=ir):
                     self.check(source, ir)
+
+    def test_recursive_containers(self):
+        text = """import pprint
+a = []
+a.append(a)
+d = {}
+d["self"] = d
+print(pprint.saferepr(a))
+print(pprint.pformat(a, width=20))
+print(pprint.isrecursive(a), pprint.isreadable(a))
+print(pprint.saferepr(d))
+print(pprint.isrecursive([a, d]), pprint.saferepr([1, 2]))
+"""
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory, "recursive.py")
+            source.write_text(text)
+            for ir in (False, True):
+                with self.subTest(ir=ir):
+                    self.check_recursive(source, ir)
 
 
 if __name__ == "__main__":

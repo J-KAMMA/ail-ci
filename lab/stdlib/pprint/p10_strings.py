@@ -13,3 +13,7 @@ for text in texts:
 
 print(pprint.pformat(["alpha beta gamma delta epsilon zeta eta theta"], width=30))
 print(pprint.pformat(("one two three four five six seven",), width=20))
+print(pprint.pformat(b"abcdefghijklmnopqrstuvwxyz0123456789", width=20))
+print(pprint.pformat(bytearray(b"abcdefghijklmnopqrstuvwxyz0123456789"), width=20))
+print(pprint.pformat({"payload": b"0123456789abcdef"}, width=25))
+print(pprint.pformat([b"0123456789abcdef"], width=20))

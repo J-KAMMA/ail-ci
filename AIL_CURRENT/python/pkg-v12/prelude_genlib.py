@@ -2179,8 +2179,62 @@ def _ail_pp_underscore(n):
     return sign + out
 
 
+def _ail_pp_recursion(object):
+    return '<Recursion on %s with id=%s>' % (type(object).__name__, _ail_pp_identity(object))
+
+
+def _ail_pp_wrap_bytes(object, width, allowance):
+    current = None
+    last = len(object) // 4 * 4
+    i = 0
+    while i < len(object):
+        part = object[i:i + 4]
+        if current is None:
+            candidate = part
+        else:
+            candidate = current + part
+        if i == last:
+            width -= allowance
+        if len(repr(candidate)) > width:
+            if current is not None:
+                yield repr(current)
+            current = part
+        else:
+            current = candidate
+        i += 4
+    if current is not None:
+        yield repr(current)
+
+
+def _ail_pp_ba_repr(object):
+    return 'b' + _ail_b_repr(_ail_b_from_ints(object._a))
+
+
+def _ail_pp_wrap_bytearray(object, width, allowance):
+    current = None
+    last = len(object) // 4 * 4
+    i = 0
+    while i < len(object):
+        part = object[i:i + 4]
+        if current is None:
+            candidate = part
+        else:
+            candidate = current + part
+        if i == last:
+            width -= allowance
+        if len(_ail_pp_ba_repr(candidate)) > width:
+            if current is not None:
+                yield _ail_pp_ba_repr(current)
+            current = part
+        else:
+            current = candidate
+        i += 4
+    if current is not None:
+        yield _ail_pp_ba_repr(current)
+
+
 class _ail_PrettyPrinter:
-    def __init__(self, indent=1, width=80, depth=None, stream=None, compact=False, sort_dicts=True,
+    def __init__(self, indent=1, width=80, depth=None, stream=None, *, compact=False, sort_dicts=True,
                  underscore_numbers=False):
         indent = int(indent)
         width = int(width)
@@ -2221,23 +2275,49 @@ class _ail_PrettyPrinter:
         return readable and not recursive
 
     def _format(self, object, stream, indent, allowance, context, level):
+        objid = _ail_pp_identity(object)
+        if objid in context:
+            stream.write(_ail_pp_recursion(object))
+            self._recursive = True
+            self._readable = False
+            return
         rep = self._repr(object, context, level)
         max_width = self._width - indent - allowance
         if len(rep) > max_width:
             if type(object) is dict:
+                context[objid] = 1
                 self._pprint_dict(object, stream, indent, allowance, context, level + 1)
+                del context[objid]
                 return
             if type(object) is list:
+                context[objid] = 1
                 self._pprint_list(object, stream, indent, allowance, context, level + 1)
+                del context[objid]
                 return
             if type(object) is tuple:
+                context[objid] = 1
                 self._pprint_tuple(object, stream, indent, allowance, context, level + 1)
+                del context[objid]
                 return
             if type(object) is set or type(object) is frozenset:
+                context[objid] = 1
                 self._pprint_set(object, stream, indent, allowance, context, level + 1)
+                del context[objid]
                 return
             if type(object) is str:
+                context[objid] = 1
                 self._pprint_str(object, stream, indent, allowance, context, level + 1)
+                del context[objid]
+                return
+            if type(object) is bytes:
+                context[objid] = 1
+                self._pprint_bytes(object, stream, indent, allowance, context, level + 1)
+                del context[objid]
+                return
+            if type(object) is bytearray:
+                context[objid] = 1
+                self._pprint_bytearray(object, stream, indent, allowance, context, level + 1)
+                del context[objid]
                 return
         stream.write(rep)
 
@@ -2282,6 +2362,46 @@ class _ail_PrettyPrinter:
         items = sorted(object, key=_ail_safe_key)
         self._format_items(items, stream, indent, allowance + len(endchar), context, level)
         stream.write(endchar)
+
+    def _pprint_bytes(self, object, stream, indent, allowance, context, level):
+        if len(object) <= 4:
+            stream.write(repr(object))
+            return
+        parens = level == 1
+        if parens:
+            indent += 1
+            allowance += 1
+            stream.write('(')
+        delim = ''
+        for rep in _ail_pp_wrap_bytes(object, self._width - indent, allowance):
+            stream.write(delim)
+            stream.write(rep)
+            if not delim:
+                delim = '\n' + ' ' * indent
+        if parens:
+            stream.write(')')
+
+    def _pprint_bytearray(self, object, stream, indent, allowance, context, level):
+        stream.write('bytearray(')
+        if len(object) <= 4:
+            stream.write(_ail_pp_ba_repr(object))
+        else:
+            parens = level + 1 == 1
+            inner_indent = indent + 10
+            inner_allowance = allowance + 1
+            if parens:
+                inner_indent += 1
+                inner_allowance += 1
+                stream.write('(')
+            delim = ''
+            for rep in _ail_pp_wrap_bytearray(object, self._width - inner_indent, inner_allowance):
+                stream.write(delim)
+                stream.write(rep)
+                if not delim:
+                    delim = '\n' + ' ' * inner_indent
+            if parens:
+                stream.write(')')
+        stream.write(')')
 
     def _pprint_str(self, object, stream, indent, allowance, context, level):
         if not len(object):
@@ -2418,8 +2538,12 @@ class _ail_PrettyPrinter:
         if type(object) is dict:
             if not object:
                 return '{}', True, False
+            objid = _ail_pp_identity(object)
             if maxlevels and level >= maxlevels:
-                return '{...}', False, False
+                return '{...}', False, objid in context
+            if objid in context:
+                return _ail_pp_recursion(object), False, True
+            context[objid] = 1
             readable = True
             recursive = False
             components = []
@@ -2435,6 +2559,7 @@ class _ail_PrettyPrinter:
                 readable = readable and kreadable and vreadable
                 if krecur or vrecur:
                     recursive = True
+            del context[objid]
             return '{' + ', '.join(components) + '}', readable, recursive
         if type(object) is list or type(object) is tuple:
             if type(object) is list:
@@ -2447,8 +2572,12 @@ class _ail_PrettyPrinter:
                 if not object:
                     return '()', True, False
                 fmt = '(%s)'
+            objid = _ail_pp_identity(object)
             if maxlevels and level >= maxlevels:
-                return fmt % '...', False, False
+                return fmt % '...', False, objid in context
+            if objid in context:
+                return _ail_pp_recursion(object), False, True
+            context[objid] = 1
             readable = True
             recursive = False
             components = []
@@ -2460,27 +2589,29 @@ class _ail_PrettyPrinter:
                     readable = False
                 if orecur:
                     recursive = True
+            del context[objid]
             return fmt % ', '.join(components), readable, recursive
         rep = repr(object)
         return rep, (rep and not rep.startswith('<')), False
 
 
-def _ail_pprint(object, stream=None, indent=1, width=80, depth=None, compact=False, sort_dicts=True,
+def _ail_pprint(object, stream=None, indent=1, width=80, depth=None, *, compact=False, sort_dicts=True,
                 underscore_numbers=False):
     printer = _ail_PrettyPrinter(stream=stream, indent=indent, width=width, depth=depth, compact=compact,
                                  sort_dicts=sort_dicts, underscore_numbers=underscore_numbers)
     printer.pprint(object)
 
 
-def _ail_pformat(object, indent=1, width=80, depth=None, compact=False, sort_dicts=True,
+def _ail_pformat(object, indent=1, width=80, depth=None, *, compact=False, sort_dicts=True,
                  underscore_numbers=False):
     return _ail_PrettyPrinter(indent=indent, width=width, depth=depth, compact=compact,
                               sort_dicts=sort_dicts, underscore_numbers=underscore_numbers).pformat(object)
 
 
-def _ail_pp(object, stream=None, indent=1, width=80, depth=None, compact=False, sort_dicts=False,
+def _ail_pp(object, stream=None, indent=1, width=80, depth=None, *, compact=False, sort_dicts=False,
             underscore_numbers=False):
-    _ail_pprint(object, stream, indent, width, depth, compact, sort_dicts, underscore_numbers)
+    _ail_pprint(object, stream=stream, indent=indent, width=width, depth=depth, compact=compact,
+                sort_dicts=sort_dicts, underscore_numbers=underscore_numbers)
 
 
 def _ail_saferepr(object):

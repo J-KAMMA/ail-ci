@@ -32,13 +32,20 @@ Every refusal above continues with the same hint:
 `pprint` is lowered on the general path (`python/pkg-v12/genlib.py`, `prelude_genlib.py`), like `json`,
 `statistics`, `datetime` and `itertools`: `pprint`, `pformat`, `pp`, `saferepr`, `isreadable`,
 `isrecursive` and `PrettyPrinter` are renamed to Python-source pieces that reproduce CPython 3.12's
-`pprint.py` for dict / list / tuple / set / frozenset / str / int / float / bool / None.  Supported
-keyword arguments: `stream`, `indent`, `width`, `depth`, `compact`, `sort_dicts`, `underscore_numbers`.
-The programs also exercise empty containers, singleton tuples, depth limits, compact wrapping, insertion
-order, `io.StringIO` streams, and the `ValueError`s from `indent < 0`, `depth <= 0` and `width == 0`.
+`pprint.py` for dict / list / tuple / set / frozenset / str / bytes / bytearray / int / float / bool /
+None.  Supported keyword arguments: `stream`, `indent`, `width`, `depth`, `compact`, `sort_dicts`,
+`underscore_numbers`.  The signatures match CPython's: `compact` and the keywords after it are
+keyword-only, so an extra positional argument is refused by name instead of silently accepted.  Recursive
+containers use the same active-object context as CPython and print `<Recursion on ... with id=N>` instead
+of recursing until the process crashes; the number is the compiled process's own address, so it cannot
+equal the address CPython printed.  Long `bytes` / `bytearray` values wrap in four-byte chunks like
+CPython.  The programs also exercise empty containers, singleton tuples, depth limits, compact wrapping,
+insertion order, `io.StringIO` streams, long `bytes` / `bytearray` wrapping, and the `ValueError`s from
+`indent < 0`, `depth <= 0` and `width == 0`.
 
-All 12 programs build and match; the new `test_ail_std_pprint` test checks all 12 with both the default
-build and `AIL_IR=1`.
+All 12 programs build and match; the `test_ail_std_pprint` test checks all 12 with both the default
+build and `AIL_IR=1`, plus a recursive-container case whose CPython/compiled `id=` numbers are
+normalised by the test.
 
 ## Follow-up (needs a larger feature, not fixed here)
 
@@ -50,6 +57,7 @@ build and `AIL_IR=1`.
 
 * The prelude reproduces pprint for the built-in containers above.  It does not implement CPython's
   dispatch for dataclasses, `OrderedDict`, `Counter`, `defaultdict`, `ChainMap`, `deque`, `UserDict`,
-  `UserList`, `UserString`, `types.MappingProxyType`, `types.SimpleNamespace`, the `id()`-based
-  `<Recursion on ...>` text, or long `bytes` / `bytearray` wrapping.  A program using those would need
-  the identity/recursion and extra-type dispatch that the general path does not provide.
+  `UserList`, `UserString`, `types.MappingProxyType` or `types.SimpleNamespace`.  A program using those
+  would need the extra-type dispatch that the general path does not provide.  Recursive containers and
+  long `bytes` / `bytearray` are handled; the only difference in the `<Recursion ... id=N>` text is the
+  address itself, which is process-specific in CPython too.

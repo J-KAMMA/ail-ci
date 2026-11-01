@@ -1,3 +1,19 @@
+## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
+
+Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
+context and print `<Recursion on ... with id=N>` instead of segfaulting (the identity comes from a new
+`ppid` safetyrt fragment, so programs that do not use pprint keep their C). Long `bytes` and
+`bytearray` values wrap in CPython's four-byte chunks. `pprint`, `pformat`, `pp` and `PrettyPrinter`
+now have CPython 3.12's signatures, with `compact` / `sort_dicts` / `underscore_numbers` keyword-only,
+so extra positional arguments are refused by name rather than accepted.
+
+`lab/stdlib/pprint/p10_strings.py` gained the long-bytes cases; `test_ail_std_pprint` gained a
+recursive-container case (normalising only the process-specific `id=` number) and still passes all 12
+programs on the default and `AIL_IR=1` builds. Probes `/tmp/probes/pp_rec*.py`, `pp_bytes*.py`,
+`pp_arity_ok.py` and `pp_arity_bad_*.py` cover recursion through arguments / list items / dict values,
+aliasing, depth limits, empty and short bytes, narrow widths, invalid widths, and valid/invalid argument
+forms on both `cmp.sh` builds.
+
 ## 2026-11-01 -- CPython `pprint` on the general path (job-std_pprint-11011616)
 
 Added `pprint` to the general-path library lowering (`python/pkg-v12/genlib.py` and
