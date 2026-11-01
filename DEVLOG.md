@@ -1,3 +1,18 @@
+## 2026-11-01 -- stdlib `fnmatch` on the general path (job-std_fnmatch-11011617)
+
+Added `fnmatch` to the stdlib quick check (`ail_syntax.py`), the module set and prelude routing in
+`stdlib5.py`, and `run_fnmatch` in `stdtop.py`. `prelude_fnmatch.py` is CPython 3.12's
+`translate` character for character plus the same star-backtracking match, so `fnmatch`,
+`fnmatchcase`, `filter` and `translate` are plain Python source: str and bytes patterns, the empty
+pattern and name, `*` / `?` / bracket classes / ranges / negations / `[]]` / `[!]` / `[-a]` /
+`[a-]`, translated-regexp output, and the `TypeError`s for non-string arguments (including the
+`lru_cache` unhashable-pattern error and bytes-like names). The 12 real programs in
+`lab/stdlib/fnmatch` all build on the general path and match CPython's stdout and exit status
+(`RESULTS.md`); all 12 are compiled by `test_ail_std_fnmatch.py` with the default build and with
+`AIL_UNIFIED_FORCE=1`, and the prelude is fuzzed against the real module. Nothing is refused and no
+new feature is needed. The 10 `lab/compare` sources contain no `fnmatch`, so their generated C is
+unchanged.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use

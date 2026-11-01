@@ -96,6 +96,8 @@ def run(tree, text, mods):
         run_ipaddress(tree, text)
     if 'html' in mods:
         run_html(tree, text)
+    if 'fnmatch' in mods:
+        run_fnmatch(tree, text)
 
 
 # ---------------------------------------------------------------------------------------------------------------
@@ -511,3 +513,20 @@ def run_html(tree, text):
     lower_module(tree, text, 'html', {'escape': '_ail_html_escape'},
                  lambda name: HTML_HINTS.get(name, 'html.escape(s, quote=True), which is built, or str.replace'), 'html',
                  tuple(roots))
+
+
+FNM_HINTS = {
+    'fnmatch': 'fnmatch.fnmatch(name, pat), which is built, or fnmatch.fnmatchcase for no case normalisation',
+    'fnmatchcase': 'fnmatch.fnmatchcase(name, pat), which is built',
+    'filter': 'fnmatch.filter(names, pat), which is built, or a list comprehension with fnmatch.fnmatch',
+    'translate': 'fnmatch.translate(pat), which is built, or write the shell pattern by hand',
+}
+
+
+def run_fnmatch(tree, text):
+    lower_module(tree, text, 'fnmatch',
+                 {'fnmatch': '_ail_fnmatch_fn', 'fnmatchcase': '_ail_fnmatch_case',
+                  'filter': '_ail_fnmatch_filter', 'translate': '_ail_fnmatch_translate'},
+                 lambda name: FNM_HINTS.get(name, 'fnmatch.fnmatch, fnmatch.fnmatchcase, fnmatch.filter and '
+                                             'fnmatch.translate are built'), 'fnmatch',
+                 ('_ail_fnmatch_fn', '_ail_fnmatch_case', '_ail_fnmatch_filter', '_ail_fnmatch_translate'))
