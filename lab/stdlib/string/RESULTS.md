@@ -57,11 +57,14 @@ the default build falls back to the general path for those programs.
 - Reading one of the four Template methods as a value (a bound method) is refused by name at
   build time instead of compiling to a run-time `AttributeError`; see the follow-up below.
 - The Template method lowering is restricted to receivers that are not known to be something else.
+  The classification is per scope (a parameter or local in another function is not confused with a
+  same-named variable elsewhere) and a parameter is classified from its call-site arguments.
   An unrelated `.is_valid` / `.substitute` attribute on a dataclass field, an instance attribute or
   a class attribute is an ordinary attribute read/call again, so a Template elsewhere in the program
-  no longer hijacks it.  The two remaining collisions (a `setattr`-installed method on a class
-  without `__init__`, and a class attribute holding a lambda) are named compile-time refusals, not
-  run-time crashes.
+  no longer hijacks it.  Reading one of the four methods as a value from a receiver not known to be
+  non-Template (a parameter, a call result, a list/dict item) is refused by name.  The two remaining
+  collisions (a `setattr`-installed method on a class without `__init__`, and a class attribute
+  holding a lambda) are named compile-time refusals, not run-time crashes.
 - `test_ail_stdlib1.py`'s old "string template is refused" case now checks `string.Formatter`
   instead.
 

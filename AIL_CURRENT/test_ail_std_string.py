@@ -125,6 +125,76 @@ def main():
 main()
 """
 
+SCOPE_PARAMETER = r"""import string
+
+class Box:
+    def __init__(self):
+        self.tag = "box"
+
+def render(t):
+    return t.substitute(x=1)
+
+def main():
+    t = Box()
+    print(t.tag)
+    tpl = string.Template("$x")
+    print(render(tpl))
+main()
+"""
+
+PARAMETER_RECEIVER_CALL = r"""import string
+
+class Validator:
+    def __call__(self):
+        return "BOX"
+
+class Box:
+    def __init__(self):
+        self.is_valid = Validator()
+
+def run(b):
+    return b.is_valid()
+
+def main():
+    t = string.Template("$x")
+    print(t.substitute(x=1))
+    print(run(Box()))
+main()
+"""
+
+VALUE_THROUGH_UNKNOWN = [
+    r"""import string
+
+def get_valid(x):
+    return x.is_valid
+
+def main():
+    t = string.Template("$x")
+    f = get_valid(t)
+    print(f())
+main()
+""",
+    r"""import string
+
+def make():
+    return string.Template("$x")
+
+def main():
+    f = make().is_valid
+    print(f())
+main()
+""",
+    r"""import string
+
+def main():
+    t = string.Template("$x")
+    m = {"t": t}
+    f = m["t"].is_valid
+    print(f())
+main()
+""",
+]
+
 COLLISION_REFUSED = [
     r"""import string
 class Box: pass
@@ -208,6 +278,24 @@ class StringPrograms(unittest.TestCase):
         for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
             with self.subTest(env=env):
                 self.compare_text("other_receivers", OTHER_RECEIVERS, **env)
+
+    def test_template_receiver_is_resolved_in_its_own_scope(self):
+        for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
+            with self.subTest(program="scope_parameter", env=env):
+                self.compare_text("scope_parameter", SCOPE_PARAMETER, **env)
+            with self.subTest(program="parameter_receiver", env=env):
+                self.compare_text("parameter_receiver", PARAMETER_RECEIVER_CALL, **env)
+
+    def test_template_method_value_through_unknown_receiver_is_refused(self):
+        for text in VALUE_THROUGH_UNKNOWN:
+            for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
+                with self.subTest(env=env), tempfile.TemporaryDirectory() as directory:
+                    source = Path(directory, "unknown_value.py")
+                    source.write_text(text, encoding="utf-8")
+                    built, exe = compile_python(directory, source, "unknown_value", **env)
+                    self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
+                    self.assertIn("string.Template.is_valid used as a value", built.stdout + built.stderr)
+                    self.assertFalse(exe.exists())
 
     def test_template_method_name_collisions_are_refused_by_name(self):
         for text in COLLISION_REFUSED:

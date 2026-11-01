@@ -1,3 +1,22 @@
+## 2026-11-01 -- std_string review 3: Template receivers resolved per scope
+
+The review found the new receiver test was still too coarse.  The binding map was keyed by name
+globally, so a Template parameter `t` in one function was classified from an unrelated local
+`t = Box()` in another (the call was then refused, `pN_false_other`); and the method-as-value gate
+only refused a receiver known to be a Template, so a parameter, call result or dict value skipped
+the refusal and crashed with `AttributeError` (`pE2_value_arg`, `pF_value_call`, `pH_value_ok`,
+`pJ_dict_value`).  `_Surface` now records assignments, parameters and enclosing scopes separately
+(`collect_template_scopes` / `scope_of` / `kind_of_name`), resolves a name in the scope where it is
+used (falling back to enclosing function scopes and then the module), and infers a parameter's kind
+from the arguments at its call sites, so `run(Box())` is known non-Template and `render(tpl)` is
+known Template.  The value gate now refuses any receiver not known to be non-Template, and applies
+only to attribute reads (an assignment target such as `self.substitute = "S"` is not a value use).
+`pN_false_other`, `pI_call_param`, `pA_arg_call`, `pK_call_unknown` and `pM_call_unknown` now match
+CPython on both paths; `pE2`/`pF`/`pH`/`pJ` are named value refusals like the base; `p3_collision2`,
+`p7_dataclass_flag`, `p9b_class_method`, `p_template_ok` and `pG_direct` still match.  Added
+`test_template_receiver_is_resolved_in_its_own_scope` and
+`test_template_method_value_through_unknown_receiver_is_refused` to `test_ail_std_string.py`.
+
 ## 2026-11-01 -- std_string review 2: Template method names only on Template receivers
 
 The review found that `_Surface.call` lowered every `.substitute` / `.safe_substitute` / `.is_valid` /

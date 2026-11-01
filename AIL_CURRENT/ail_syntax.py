@@ -1845,9 +1845,10 @@ class _SurfaceExpr(ast.NodeTransformer):
         if path is not None:
             new = surface.value(node, path)
             return node if new is None else self.replaced(new, node)
-        if (surface.template_used and node.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers')
+        if (surface.template_used and isinstance(node.ctx, ast.Load)
+                and node.attr in ('substitute', 'safe_substitute', 'is_valid', 'get_identifiers')
                 and node.attr not in surface.user_methods
-                and surface.receiver_kind(node.value) == 'template'):
+                and surface.receiver_kind(node.value) != 'other'):
             raise SyntaxErrorAIL(
                 'not in the subset: string.Template.%s used as a value (a bound method is not built)\n'
                 '  write instead: call it directly (t.%s(...)); a Template built with '
@@ -1935,8 +1936,12 @@ class _Surface:
         self.void = set()
         self.re_on = False             # `import re` seen
         self.template_used = False     # the program builds a string.Template: its methods are lowered
-        self.template_bindings = {}    # local name -> the values assigned to it (for the Template receiver test)
-        self.name_kind = {}            # local name -> 'template' / 'other' (never a Template)
+        self.template_bindings = {}    # scope -> {local name -> the values assigned to it} (the Template receiver test)
+        self.template_params = {}      # scope -> its parameter names (a parameter is not told to be a Template)
+        self.template_parents = {}     # scope -> the scope that encloses it
+        self.template_classes = set()  # the scopes that are class bodies (a method does not see them)
+        self.template_ranges = []      # (first line, last line, scope): the innermost scope of a node
+        self.scope_kind = {}           # (scope, local name) -> 'template' / 'other' (never a Template)
         self.re_patterns = {}          # NAME -> (library index) for NAME = re.compile(literal)
         self.re_nodes = set()          # those assignment statements
         self.def_names = {node.name for node in ast.walk(self.tree)
@@ -2077,32 +2082,141 @@ class _Surface:
                     self.alias_nodes.add(node)
         self.template_used = any(self.path(node) == 'string.Template' for node in ast.walk(self.tree)
                                  if isinstance(node, (ast.Attribute, ast.Name)))
-        self.template_bindings = {}
-        for node in ast.walk(self.tree):
+        self.collect_template_scopes()
+
+    def collect_template_scopes(self):
+        """Record, per scope, the values assigned to each local name, so a receiver is classified in the scope
+        where it is used (a parameter or a local in another function is not told by a same-named variable)."""
+        bindings, params, parents, classes, ranges = {}, {}, {}, set(), []
+
+        def walk(node, scope):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                key = node
+                ranges.append((node.lineno, getattr(node, 'end_lineno', node.lineno), key))
+                args = node.args
+                names = {each.arg for each in args.posonlyargs + args.args + args.kwonlyargs}
+                if args.vararg is not None:
+                    names.add(args.vararg.arg)
+                if args.kwarg is not None:
+                    names.add(args.kwarg.arg)
+                params[key] = names
+                bindings.setdefault(key, {})
+                parents[key] = scope
+                if isinstance(node, ast.Lambda):
+                    for each in list(args.defaults) + [each for each in args.kw_defaults if each is not None]:
+                        walk(each, scope)
+                    walk(node.body, key)
+                    return
+                for each in node.decorator_list:
+                    walk(each, scope)
+                for each in list(args.defaults) + [each for each in args.kw_defaults if each is not None]:
+                    walk(each, scope)
+                for each in args.posonlyargs + args.args + args.kwonlyargs:
+                    if each.annotation is not None:
+                        walk(each.annotation, scope)
+                if args.vararg is not None and args.vararg.annotation is not None:
+                    walk(args.vararg.annotation, scope)
+                if args.kwarg is not None and args.kwarg.annotation is not None:
+                    walk(args.kwarg.annotation, scope)
+                if node.returns is not None:
+                    walk(node.returns, scope)
+                for each in node.body:
+                    walk(each, key)
+                return
+            if isinstance(node, ast.ClassDef):
+                key = node
+                ranges.append((node.lineno, getattr(node, 'end_lineno', node.lineno), key))
+                bindings.setdefault(key, {})
+                parents[key] = scope
+                classes.add(key)
+                for each in node.decorator_list + node.bases + [each.value for each in node.keywords]:
+                    walk(each, scope)
+                for each in node.body:
+                    walk(each, key)
+                return
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
-                        self.template_bindings.setdefault(target.id, []).append(node.value)
+                        bindings.setdefault(scope, {}).setdefault(target.id, []).append(node.value)
             elif isinstance(node, ast.AnnAssign) and node.value is not None and isinstance(node.target, ast.Name):
-                self.template_bindings.setdefault(node.target.id, []).append(node.value)
+                bindings.setdefault(scope, {}).setdefault(node.target.id, []).append(node.value)
             elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
-                self.template_bindings.setdefault(node.target.id, []).append(node.value)
-        self.name_kind = {}
-        for name in self.template_bindings:
-            self.kind_of_name(name, set())
+                bindings.setdefault(scope, {}).setdefault(node.target.id, []).append(node.value)
+            for each in ast.iter_child_nodes(node):
+                walk(each, scope)
 
-    def kind_of_name(self, name, seen):
-        """'template' / 'other' (a value that is never a Template) / None (not told) for a local name."""
-        if name in self.name_kind:
-            return self.name_kind[name]
+        walk(self.tree, None)
+        self.template_bindings = bindings
+        self.template_params = params
+        self.template_parents = parents
+        self.template_classes = classes
+        self.template_ranges = ranges
+        self.template_param_args = {}
+        top_defs = {node.name: node for node in self.tree.body
+                    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))}
+        for node in ast.walk(self.tree):
+            if not isinstance(node, ast.Call) or not isinstance(node.func, ast.Name):
+                continue
+            func = top_defs.get(node.func.id)
+            if func is None:
+                continue
+            names = [each.arg for each in func.args.posonlyargs + func.args.args]
+            for index, arg in enumerate(node.args):
+                if index < len(names) and not isinstance(arg, ast.Starred):
+                    self.template_param_args.setdefault((id(func), names[index]), []).append(arg)
+            for item in node.keywords:
+                if item.arg is not None and not isinstance(item.value, ast.Starred):
+                    self.template_param_args.setdefault((id(func), item.arg), []).append(item.value)
+
+    def scope_of(self, node):
+        """The innermost function, lambda or class body that holds the node (None is the module)."""
+        line = getattr(node, 'lineno', None)
+        if line is None:
+            return None
+        found, span = None, None
+        for start, end, key in self.template_ranges:
+            if start <= line <= end:
+                size = end - start
+                if found is None or size < span:
+                    found, span = key, size
+        return found
+
+    def kind_of_name(self, name, seen, scope=None):
+        """'template' / 'other' (a value that is never a Template) / None (not told) for a name in a scope."""
+        cache = (id(scope), name)
+        if cache in self.scope_kind:
+            return self.scope_kind[cache]
+        if cache in seen:
+            return None
+        local = self.template_bindings.get(scope, {})
+        if name in local:
+            kinds = {self.kind_of_value(value, seen | {cache}) for value in local[name]}
+            kind = 'template' if kinds == {'template'} else 'other' if kinds == {'other'} else None
+            self.scope_kind[cache] = kind
+            return kind
+        if scope is not None and name in self.template_params.get(scope, set()):
+            args = self.template_param_args.get((id(scope), name))
+            if args:
+                kinds = {self.kind_of_value(value, seen | {cache}) for value in args}
+                kind = 'template' if kinds == {'template'} else 'other' if kinds == {'other'} else None
+                self.scope_kind[cache] = kind
+                return kind
+            return None
+        parent = self.template_parents.get(scope) if scope is not None else None
+        while parent is not None:
+            if parent not in self.template_classes:
+                local = self.template_bindings.get(parent, {})
+                if name in local:
+                    return self.kind_of_name(name, seen | {cache}, parent)
+                if name in self.template_params.get(parent, set()):
+                    return None
+            parent = self.template_parents.get(parent)
+        if scope is not None:
+            if name in self.template_bindings.get(None, {}):
+                return self.kind_of_name(name, seen | {cache}, None)
         if name in self.classes or name in self.def_names or name in _NON_TEMPLATE_TYPES:
             return 'other'
-        if name in seen or name not in self.template_bindings:
-            return None
-        kinds = {self.kind_of_value(value, seen | {name}) for value in self.template_bindings[name]}
-        kind = 'template' if kinds == {'template'} else 'other' if kinds == {'other'} else None
-        self.name_kind[name] = kind
-        return kind
+        return None
 
     def kind_of_value(self, node, seen):
         if isinstance(node, ast.Call):
@@ -2113,7 +2227,7 @@ class _Surface:
                 return 'other'
             return None
         if isinstance(node, ast.Name):
-            return self.kind_of_name(node.id, seen)
+            return self.kind_of_name(node.id, seen, self.scope_of(node))
         if isinstance(node, (ast.Constant, ast.List, ast.Dict, ast.Set, ast.Tuple)):
             return 'other'
         return None
