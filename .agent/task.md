@@ -7,78 +7,45 @@
 --- LAST REVIEW ---
 ## review 1
 [model opencode-go/deepseek-v4.1-flash]
-Review of `work..HEAD` (8eb3b05 + 01cf961), no edits made.
+Review of `work..HEAD` (78e47ce + 5870fc0 + b3458ec), no edits made.
 
-**What the change does.** Adds `Counter.subtract` lowering (typed helpers in `collib.py`, boxed runtime in `pyboxed2.py`), a tuple-keyed-mapping route for `Counter(...)` in the tuple pass, annotated `self` fields in `collib`, plus 12 lab programs and a test. This matches the report except that the subtract lowering is far broader than the two reported forms.
+**What the change does.** Extends the `Counter.subtract` fixes: infers plain dicts/comprehensions and their `keys()/values()/items()`, keeps module-level dicts and unannotated `self.field` dicts in the type environment, routes ChainMap arguments through `items()` (typed `for` loop or new `ail__counter_subtract_pairs`), adds key/value checks for Counter/defaultdict/OrderedDict stores and `update`, and sends untypable `subtract` arguments to a named refusal. The report describes this, but omits the new `chainmap_call` name-binding logic and the new refusals for previously buildable unknown-argument calls.
 
-**Probes** (`/tmp/rprobes`, `cmp.sh`, both `g` and `d`):
+**Probes** (`/tmp/rprobes`, `cmp.sh`, g+d). HEAD matches CPython on both builds: p_review (r3/r7/r9/r10), p_chainmap (direct, duplicate maps, empty), p_cmname, p_cmtuple, p_cmalias, p_cmfloat, p_argdict, p_container, p_selfattr, p_views, p_emptyctr, p_alias, p_negempty, p_float, p_bool, p_dictcompname, p_stores, p_keyrepr*/p_storerepr*/p_updaterepr*, q_listdict/q_values/q_items/q_dictcomp/q_mutate. Named refusals (acceptable): p_argcm (base silently wrong), p_dictcall, p_unkmap, p_unkiter, p_unkdrop, p_unkexpr, p_argplain.
 
-| probe | CPython | AIL | base |
-|---|---|---|---|
-| r1 zero-arg subtract, caught | matches | matches | refused |
-| r2 two-arg subtract | — | refused by name | refused |
-| r3 `subtract({k:2 for k in ["a","b"]})` | correct | **wrong** | refused |
-| r5 tuple-keyed dict via attr/list/dict value | correct | matches | refused |
-| r6 `Counter` of dict comprehensions | correct | matches | built |
-| r7 `for d in [{"a":2}]: c.subtract(d)` | correct | **wrong** | refused |
-| r9 module-level `G` subtract | correct | **wrong** | refused |
-| r10 tuple-keyed dict comprehension subtract | correct | **wrong** | refused |
-| r11 `Counter(OrderedDict/defaultdict)` | — | refused by name | refused |
-| r12 `Counter(tuple-keyed table via attr/list/dict value)` | correct | matches | built |
-| r15 `c.subtract(ChainMap(...))` | correct | **wrong** | refused |
+New refusals where base built and matched: p_unkiter (`c.subtract(ident([...]))`), p_unkexpr (`c.subtract("aab".split("b"))`, `c.subtract(tuple("aab"))`). These are named refusals, so not blocking, but they falsify the report's "left to the general path" claim.
 
-Base refuses every subtract probe that HEAD now gets wrong, so these are introduced.
-
-**Defects**
-
-1. `subtract` of a mapping that is not a dict display or a simple dict-bound name is treated as an iterable (subtract 1 per key instead of per value).
-```python
-from collections import Counter
-def main() -> int:
-    c = Counter("aab")
-    c.subtract({k: 2 for k in ["a", "b"]})
-    print(sorted(c.items()))
-    return 0
-main()
-```
-expected `[('a', 0), ('b', -1)]`; actual `[('a', 1), ('b', 0)]` (both builds). Same defect for a loop variable (`r7`: expected `[('a', 0), ('b', 1)]`, actual `[('a', 1), ('b', 1)]`), a module-level dict (`r9`: expected `[('a', 0), ('b', 0)]`, actual `[('a', 1), ('b', 0)]`), and a tuple-keyed dict comprehension (`r10`: expected `[((1,1),-2),((1,2),5),((2,2),-2)]`, actual `[((1,1),-1),((1,2),5),((2,2),-1)]`). `mapping_arg` only recognises `ast.Dict`/a name whose own assignments are all dict literals; other mapping expressions fall through to the iterable helper. Base refused these by name, so either handle or refuse them.
-
-2. `subtract` of a `ChainMap` iterates its keys:
+**Defect (new).** A ChainMap reaching the newly lowered name path through more than one assignment is checked against the *last* assignment but executed with the runtime value. In a branch, the check passes on int keys while the runtime map has str keys, and the raw `subtract_chainmap` loop stores a str key in an int-typed Counter, printing it unquoted:
 ```python
 from collections import Counter, ChainMap
 def main() -> int:
-    c = Counter("aab")
-    c.subtract(ChainMap({"a": 2}, {"b": 3}))
-    print(sorted(c.items()))
+    c = Counter({1: 2})
+    cm = ChainMap({"a": 3})
+    if len(c) == 2:
+        cm = ChainMap({1: 4})
+    c.subtract(cm)
+    print(c)
     return 0
 main()
 ```
-expected `[('a', 0), ('b', -2)]`; actual `[('a', 1), ('b', 0)]` (both builds). Base refused.
+expected `Counter({1: 2, 'a': -3})`; actual `Counter({1: 2, a: -3})` (both builds). Base gives `Counter({1: 2, 'a': -1})`, also wrong but differently, so this is not a pre-existing identical difference; the new name lowering introduced the unquoted-key output. Same with a plain reassignment after the call (`p_cmreassign`). `chainmap_call` should refuse when a name has more than one binding (or the binding is not the immediate one).
 
-**Report claims**
-- Defect 1 (dict displays, unannotated names, `dict()`, attributes, list items, dict values): verified for those forms.
-- Defect 2 (tuple-keyed tables): verified for literals, names, attributes, list items and dict values; `Counter(...)` and `subtract` both match.
-- "23/24 probes match, p21 refused": consistent, but the probe set does not cover the failing mapping forms above.
-- Compare C: spot-checked `berth_sim`, `chain_relax --exact-int`, `ticket_audit` — byte-identical to `/tmp/base`.
-- Tests: `test_ail_std_collections`, `test_ail_safetynet`, `test_ail_collections`, `test_ail_tuples` all pass on HEAD. Manifest `--check` exits 0.
+**Report claims.** Defect 1/2 fixed: verified by p_review/p_chainmap. "Key switches are named refusals": not observed — `Counter({1:2})` with a str key via `subtract`/`update`/`c[k]=v` builds and matches CPython's quoted repr (outcome correct, wording false). "Only pre-existing q25/l4 differ": false (p_cmbranch, plus the new refusals above). Tests: `test_ail_std_collections`, `test_ail_safetynet`, `test_ail_collections`, `test_ail_tuples` all pass on HEAD under `-j 2`; manifest `--check` exits 0. Compare C spot-checked `berth_sim`, `term_rank`, `ticket_audit`: `program.c` byte-identical to `/tmp/base` (other 7 unverified).
 
-**Pre-existing** (identical on base): `Counter(ChainMap)` and `Counter(module-level dict)` count keys instead of values (`r13`, `r14`).
-
-**Unverified:** the other 4 compare tasks, `test_ail_deqctr`/`test_ail_files`/`test_ail_corpus_findings3`, and speed (no hot path is touched; helpers are emitted only when used).
+**Pre-existing** (same on base): p_argplain refusal. **Unverified:** the other 7 compare tasks, `test_ail_deqctr`/`test_ail_files`/`test_ail_corpus_findings3`, and speed (no hot runtime path added; helpers are emitted only when used).
 
 VERDICT: FIX
-1. Newly built `Counter.subtract` silently drops mapping values for dict comprehensions, loop variables and module-level dicts (`r3`, `r7`, `r9`, `r10`): handle them as mappings or refuse by name.
-2. Newly built `Counter.subtract(ChainMap)` iterates keys (`r15`): treat every mapping type as a mapping or refuse by name.
-[cost $0.0262, opencode tokens {"total": 1377479, "input": 54862, "output": 6068, "reasoning": 17349, "cache.write": 0, "cache.read": 1299200}]
-    tool time: bash 10.9 min
-        242s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && python3 ../tools/par_check.py -j 2 test_ail_collections test
-        173s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && python3 ../tools/par_check.py -j 2 test_ail_std_collections 
-        143s bash   cd /tmp && rm -rf rcdbg && mkdir -p rcdbg/head rcdbg/base for task in berth_sim chain_relax ticket_audit; do  
-         32s bash   cd /tmp/rprobes && cat > r6.py <<'PY' from collections import Counter from typing import Dict def main() -> in
-         20s bash   cd /tmp/rprobes && for p in r1 r2 r3 r4 r5; do echo "######## $p"; bash ~/tools/cmp.sh /tmp/rprobes/$p.py /hom
-         19s bash   cd /tmp/rprobes && cat > r13.py <<'PY' from collections import Counter, ChainMap def main() -> int:     cm = C
-          7s bash   cd /tmp/rprobes && cat > r15.py <<'PY' from collections import Counter, ChainMap def main() -> int:     c = Co
-          6s bash   cd /tmp/rprobes && cat > r11.py <<'PY' from collections import Counter, ChainMap, OrderedDict, defaultdict def
+1. `Counter.subtract(cm)` silently stores a str key in an int-typed Counter when `cm` has multiple assignments and the last one matches the Counter but the runtime one does not (`p_cmbranch`, `p_cmreassign`): expected `Counter({1: 2, 'a': -3})`, actual `Counter({1: 2, a: -3})`; refuse such a name by name or bind only a single assignment.
+[cost $0.0369, opencode tokens {"total": 1652894, "input": 70754, "output": 10469, "reasoning": 25687, "cache.write": 0, "cache.read": 1545984}]
+    tool time: bash 9.1 min, write 0.0 min
+        186s bash   date; cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 1400 python3 ../tools/par_check.py -j 2 test_a
+        128s bash   date; cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 1500 python3 ../tools/par_check.py -j 2 test_a
+         65s bash   cd /tmp/rprobes && for f in p_*.py; do echo "######## $f"; bash ~/tools/cmp.sh /tmp/rprobes/$f /home/runner/wo
+         25s bash   cd /tmp/rprobes && for f in q_listdict.py q_values.py q_items.py q_dictcomp.py q_mutate.py; do echo "######## 
+         19s bash   cd /tmp && rm -rf cdiff && mkdir -p cdiff/h cdiff/b for t in berth_sim term_rank ticket_audit; do   python3 /h
+         17s bash   cd /tmp/rprobes && for f in p_emptyctr.py p_dictcall.py p_updatekey.py p_bool.py p_dictcompname.py; do echo "#
+         16s bash   cd /tmp/rprobes && for f in p_unkiter.py p_unkmap.py; do echo "#### $f"; for wt in /home/runner/work/ail-ci/ai
+         14s bash   cd /tmp/rprobes && for f in p_cmfloat.py p_cmtuple.py p_cmname.py p_cmalias.py; do echo "######## $f"; bash ~/
 
 
 --- ORIGINAL TASK ---
