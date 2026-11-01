@@ -314,8 +314,11 @@ def _ail_hl_alt_enc_dyn(data):
     return _ail_hl_alt_bytes(data, 0)
 
 
-def _ail_hl_b64e_alt(data: bytes, altchars: bytes) -> bytes:
+def _ail_hl_b64e_alt(data: bytes, altchars) -> bytes:
     e = _ail_hl_b64e(data, 0)
+    if altchars is None:
+        return e
+    altchars = _ail_hl_alt_bytes(altchars, 0)
     out = bytearray()
     for c in e:
         if c == 43:
@@ -327,7 +330,11 @@ def _ail_hl_b64e_alt(data: bytes, altchars: bytes) -> bytes:
     return bytes(out)
 
 
-def _ail_hl_b64d_alt(data: bytes, altchars: bytes, mode: int) -> bytes:
+def _ail_hl_b64d_alt(data, altchars, mode: int) -> bytes:
+    data = _ail_hl_need_bytes(data, 3)
+    if altchars is None:
+        return _ail_hl_b64d(data, mode)
+    altchars = _ail_hl_alt_dyn(altchars)
     out = bytearray()
     for c in data:
         if c == altchars[1]:
@@ -339,7 +346,7 @@ def _ail_hl_b64d_alt(data: bytes, altchars: bytes, mode: int) -> bytes:
     return _ail_hl_b64d(bytes(out), mode)
 
 
-def _ail_hl_b64d_alt_str(text: str, altchars: bytes, mode: int) -> bytes:
+def _ail_hl_b64d_alt_str(text: str, altchars, mode: int) -> bytes:
     if not _ail_hl_ascii(text):
         raise ValueError("string argument should contain only ASCII characters")
     return _ail_hl_b64d_alt(text.encode(), altchars, mode)
@@ -350,7 +357,6 @@ def _ail_hl_b64d_alt_dyn(data, altchars, mode):
         if not _ail_hl_ascii(data):
             raise ValueError("string argument should contain only ASCII characters")
         data = data.encode()
-    altchars = _ail_hl_alt_dyn(altchars)
     return _ail_hl_b64d_alt(data, altchars, mode)
 
 

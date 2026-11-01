@@ -565,20 +565,18 @@ class _Lowerer(ast.NodeTransformer):
         return self.fn('_ail_hl_flag', arg)
 
     def base64_altchars(self, node, arg, allow_str):
+        # The helper validates altchars after it has validated the data, as CPython does; the lowerer only
+        # refuses the constant forms that can never work.
         if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
             if not allow_str:
                 self.refuse(node, 'base64.b64encode(altchars=) takes bytes, not str')
             try:
-                return self.fn('_ail_hl_alt_bytes', self.C(arg.value.encode('ascii')), self.C(3))
+                return self.C(arg.value.encode('ascii'))
             except UnicodeEncodeError:
                 self.refuse(node, 'base64 altchars must contain only ASCII characters')
-        if self.general:
-            return self.fn('_ail_hl_alt_dyn' if allow_str else '_ail_hl_alt_enc_dyn', arg)
-        if _strish(arg, self.scope[-1]):
-            if not allow_str:
-                self.refuse(node, 'base64.b64encode(altchars=) takes bytes, not str')
-            return self.fn('_ail_hl_alt_str', arg)
-        return self.fn('_ail_hl_alt_bytes', arg, self.C(3 if allow_str else 0))
+        if not allow_str and not self.general and _strish(arg, self.scope[-1]):
+            self.refuse(node, 'base64.b64encode(altchars=) takes bytes, not str')
+        return arg
 
     def base64_call(self, node, q, name):
         if 'Error' in self.user_defs and name in ('b64decode', 'standard_b64decode', 'urlsafe_b64decode',

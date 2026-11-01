@@ -1,3 +1,18 @@
+## 2026-11-01 -- std_base64 review 2 follow-up: altchars validated after the data (job-std_base64-11011521)
+
+`b64encode(data, altchars=...)` validates and encodes `data` before it looks at `altchars`, matching
+CPython's `binascii.b2a_base64` call before the length assert and `bytes.maketrans`. The same order
+now holds on the decode side, so an invalid data argument reports its own type even when `altchars`
+is also invalid. A run-time `altchars=None` behaves like CPython's omitted altchars. Constant
+`str` altchars for `b64encode` and non-ASCII constant `str` altchars for `b64decode` remain named
+compile-time refusals.
+
+Probes `/tmp/probes/order_literal.py`, `order_static.py`, `order_alts.py`, `order_containers.py`
+and `/tmp/rprobes/p_order.py`, `r_badtypes.py`, `r_alt.py`, `r_b16.py`, `r_b16b.py`, `p_len.py`
+match CPython on both builds; `/tmp/rprobes2/p_mv.py` is refused identically on both. Tests:
+`test_ail_std_base64`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
 ## 2026-11-01 -- std_base64 review 2: b16decode type check, altchars type check (job-std_base64-11011521)
 
 `base64.b16decode` on a non-bytes/non-str argument now raises CPython's
