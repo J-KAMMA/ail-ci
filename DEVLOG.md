@@ -1,3 +1,28 @@
+## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
+
+Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten
+`lab/compare` tasks, without changing any default. The C compiler is 17-47% of a cold build (median 33%):
+the AIL front end is 1.2-4.2 s and the Amdahl bound from a free C compiler is only 1.21-1.86x. tcc 0.9.28rc
+(tinycc `e23dabe`) compiles the generated C in 5-12 ms and links in 2-4 ms, against 0.35-1.34 s for `gcc -c`,
+so the sum of the ten medians falls from 24.48 s to 19.56 s (2.03 s -> 1.64 s per median task). Every tcc
+binary matched the gcc binary's stdout and exit code and passed all 511 public/hidden task checks, but ran
+1.71-8.24x slower. The resident server with tcc is warm 1.25-4.97 s (best tasks 1.25-1.43 s), still about
+2-3x Rust's 0.4-0.5 s. Only `__builtin_{add,sub,mul}_overflow` fails in tcc (unresolved link reference); the
+measurement-only `lab/tccdev/tcc_prelude.h` guards it, at a measured 0 to +11.8% run time when forced onto
+gcc. Statement expressions, `__typeof__`, `_Generic` and `__attribute__` are accepted; the SIMD/intrinsic and
+fast-setjmp blocks are already under `defined(__GNUC__)`, which tcc does not define. Recommendation: do not
+build `--dev` tcc for the 0.5 s goal; cut the front end (warm server plus a source/flag-keyed front-end
+cache) first, then tcc only for the 5-12 ms C stage. Full tables, spreads, runner noise and scripts are in
+`docs/design/TCC_DEV.md` and `lab/tccdev/` (`measure.py`, `cc_wrap.py`, `tcc_prelude.h`, `results.json`).
+
+Probes: `/tmp/probes/tcc_ok.py` matches CPython 3.12 on both `cmp.sh` builds and on the tcc build;
+`/tmp/probes/tcc_overflow.py` gives identical stdout/stderr/exit on gcc and tcc (both raise the documented
+int64 `OverflowError`, where CPython's exact int differs by design);
+`/tmp/probes/tcc_overflow_alias.py` is refused by name on both builds (constant expression outside int64);
+the C probe `/tmp/probes/tcc_overflow.c` gives identical output for gcc builtins, gcc with the forced
+`__TINYC__` prelude, and tcc with the prelude (add/sub/mul at `INT64_MIN`/`MAX`, zero, `-1`, aliasing,
+list/struct/argument values). No default compiler or test expectation was changed.
+
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
