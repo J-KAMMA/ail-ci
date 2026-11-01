@@ -101,6 +101,52 @@ main()
 '''
 
 
+RANGE_BYTES_KEY_PROGRAM = r'''import bisect
+
+
+class Box:
+    def __init__(self):
+        self.s = b"aceg"
+
+
+def by_str(v):
+    return str(v)
+
+
+def main():
+    print(bisect.bisect_left(range(10), "5", key=by_str))
+    print(bisect.bisect_right(range(10), "5", key=by_str))
+    print(bisect.bisect_left(range(0), "5", key=by_str))
+    print(bisect.bisect_right(range(10, 0, -1), "5", 2, 8, key=by_str))
+    print(bisect.bisect_left(b"aceg", 100, key=int))
+    print(bisect.bisect_right(bytearray(b"aceg"), 101, key=int))
+    print(bisect.bisect_left(b"", 1, key=int))
+    box = Box()
+    print(bisect.bisect_left(box.s, 99, key=int))
+    table = {"s": b"aceg"}
+    print(bisect.bisect_right(table["s"], 100, 1, 3, key=int))
+    try:
+        bisect.bisect_left(range(10), "5", -1, key=by_str)
+    except ValueError as e:
+        print(type(e).__name__, e)
+    try:
+        bisect.bisect_right(b"aceg", 1, 0, 9, key=int)
+    except IndexError as e:
+        print(type(e).__name__, e)
+    try:
+        bisect.insort(range(10), 5, key=by_str)
+    except AttributeError as e:
+        print(type(e).__name__, e)
+    try:
+        bisect.insort(b"aceg", 100, key=int)
+    except AttributeError as e:
+        print(type(e).__name__, e)
+
+
+main()
+'''
+
+
 def build_and_run(directory, source):
     local = Path(directory) / source.name
     shutil.copyfile(source, local)
@@ -148,6 +194,12 @@ class StdlibBisect(unittest.TestCase):
             source = Path(directory) / "str_key.py"
             source.write_text(STR_KEY_PROGRAM, encoding="utf-8")
             self.check(source, "str_key")
+
+    def test_key_on_range_and_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "range_bytes_key.py"
+            source.write_text(RANGE_BYTES_KEY_PROGRAM, encoding="utf-8")
+            self.check(source, "range_bytes_key")
 
 
 if __name__ == "__main__":

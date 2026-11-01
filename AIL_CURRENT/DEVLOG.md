@@ -1,3 +1,14 @@
+## 2026-11-01 -- bisect(key=) on every sequence: range, bytes and bytearray
+
+The general path's `key=` lowering for `bisect_left/right/bisect/insort*` measured the sequence with a manual
+list/tuple/str switch, so `key=` on a `range`, `bytes` or `bytearray` raised the wrong
+`TypeError: object of type ... has no len()` (a range/bytes that CPython accepts, and bytes already worked in
+the default build). `ail__bisect_len` now asks the runtime's own `ail_op_len`, which covers range counts,
+instance `__len__` (bytes/bytearray) and deques; indexing still goes through `ail_op_getitem`. Probes
+`/tmp/probes/v_range.py` and `/tmp/probes/v_bytes.py` match CPython on both builds, including lo/hi, hi=None,
+negative lo, empty sequences, out-of-range hi, and `insort` AttributeError. `test_ail_std_bisect` gains a
+range/bytes/bytearray key program. No non-key bisect codegen changed.
+
 ## 2026-11-01 -- int64 constant census: refusals named, safe folds kept
 
 `docs/design/I64_CONSTANTS.md` records the first int64-constant refusal of all 34 modules in the compiler census and

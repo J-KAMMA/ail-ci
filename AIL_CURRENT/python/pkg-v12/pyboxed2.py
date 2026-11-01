@@ -691,15 +691,14 @@ static inline ail_st ail__bisect_key(ail_ctx *cx, ail_obj *out, ail_obj key, ail
     return f->fn(cx, out, item, f->cells);
 }
 static inline ail_st ail__bisect_len(ail_ctx *cx, int64_t *out, ail_obj a) {
-    switch (a.tag) {
-        case AIL_T_LIST: case AIL_T_TUPLE: *out = ((ail_vecobj *)a.o)->n; return AIL_OK;
-        case AIL_T_STR: *out = a.sv.len; return AIL_OK;
-        default: {
-            char buf[96];
-            snprintf(buf, sizeof buf, "object of type '%s' has no len()", ail__tname_c(a));
-            return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
-        }
-    }
+    /* CPython's _bisect accepts any sequence, so every sequence type the runtime knows must
+       answer len(): range/bytes/bytearray/deque are not vector-backed and the old manual
+       list/tuple/str switch raised the wrong TypeError for them. */
+    ail_obj n;
+    ail_st st = ail_op_len(cx, &n, a);
+    if (st != AIL_OK) return st;
+    *out = n.i;
+    return AIL_OK;
 }
 static inline ail_st ail__bisect_at(ail_ctx *cx, ail_obj *out, ail_obj a, int64_t i) {
     return ail_op_getitem(cx, out, a, ail_box_int(i));
