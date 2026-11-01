@@ -34,6 +34,12 @@ def _ail_struct_tname(x) -> str:
     return "object"
 
 
+def _ail_struct_rw_tname(x) -> str:
+    if x is None:
+        return "None"
+    return type(x).__name__
+
+
 # ---- the format ---------------------------------------------------------------------------------------------------
 _STRUCT_NATIVE = {"b": (1, 1, "i"), "B": (1, 1, "i"), "?": (1, 1, "?"), "h": (2, 2, "i"), "H": (2, 2, "i"),
                   "i": (4, 4, "i"), "I": (4, 4, "i"), "l": (8, 8, "i"), "L": (8, 8, "i"),
@@ -770,7 +776,7 @@ def _ail_struct_pack_into_values(fmt, buffer, offset: int, values) -> None:
     items, size = _ail_struct_parse(fmt)
     _ail_struct_check_count(items, values, "pack_into")
     if not isinstance(buffer, bytearray):
-        raise TypeError("argument must be read-write bytes-like object, not " + _ail_struct_tname(buffer))
+        raise TypeError("argument must be read-write bytes-like object, not " + _ail_struct_rw_tname(buffer))
     if offset < 0:
         original = offset
         offset = offset + len(buffer)
@@ -843,7 +849,7 @@ class _AilStruct:
     def pack_into(self, buffer, offset: int, *values) -> None:
         _ail_struct_check_count(self._items, values, "pack_into")
         if not isinstance(buffer, bytearray):
-            raise TypeError("argument must be read-write bytes-like object, not " + _ail_struct_tname(buffer))
+            raise TypeError("argument must be read-write bytes-like object, not " + _ail_struct_rw_tname(buffer))
         if offset < 0:
             original = offset
             offset = offset + len(buffer)

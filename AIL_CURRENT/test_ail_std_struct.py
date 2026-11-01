@@ -169,6 +169,40 @@ for fmt in ['999999999999999999999i', '2305843009213693951i',
     except Exception as exc:
         print('size', fmt, type(exc).__name__, exc)
 """,
+    "pack_into_buffer_type": """import struct
+
+class Foo:
+    pass
+
+class Box:
+    def __init__(self, b):
+        self.b = b
+        self.items = [b]
+        self.table = {'k': b}
+
+def through_arg(b):
+    return b
+
+for buffer in [None, Foo(), Foo, 1, 1.0, True, 'x', b'0123', [], (), {},
+               bytearray(8)]:
+    for call in ['module', 'class']:
+        try:
+            if call == 'module':
+                struct.pack_into('<i', buffer, 0, 7)
+            else:
+                struct.Struct('<i').pack_into(buffer, 0, 7)
+            print(call, 'ok')
+        except Exception as exc:
+            print(call, type(exc).__name__, exc)
+    if isinstance(buffer, bytearray):
+        try:
+            struct.pack_into('<i', through_arg(buffer), 0, 7)
+            struct.pack_into('<i', Box(buffer).items[0], 0, 7)
+            struct.Struct('<i').pack_into(Box(buffer).table['k'], 0, 7)
+            print('routes ok', buffer.hex())
+        except Exception as exc:
+            print('routes', type(exc).__name__, exc)
+""",
     "negative_offsets": """import struct
 for offset in [-20, -11, -10, -5, -4, -1, 0, 6, 7]:
     try:

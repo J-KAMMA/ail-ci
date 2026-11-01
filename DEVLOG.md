@@ -1,3 +1,14 @@
+## 2026-11-01 -- stdlib `struct`: pack_into buffer type names (job-std_struct-11020025)
+
+Fixed the remaining review defect: `pack_into` (module and `Struct`) named the buffer type with the prelude's
+generic `_ail_struct_tname`, so `None` said `NoneType` and a user instance/class said `object`. The writable-buffer
+error now uses CPython's buffer name (the class name, with `None` rather than `NoneType`), so `None`, `Foo()`,
+`Foo`, the builtin types and `bytes` all match CPython. Added a `pack_into_buffer_type` edge program to
+`test_ail_std_struct.py` covering module/`Struct`, the literal and argument/list-item/dict-value routes, and a
+successful `bytearray`. Re-ran the review probes (`c_packinto`, `j_buffer_routes`, `a_native`, `d_calcsize` and
+`i_declared`, the last showing only the two declared rows), `test_ail_std_struct`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3`; refreshed the manifest.
+
 ## 2026-11-01 -- stdlib `struct`: second review fixes (job-std_struct-11020025)
 
 Fixed the five remaining defects from the second review. The default (unprefixed) float mode is now native like
