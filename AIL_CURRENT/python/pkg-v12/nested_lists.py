@@ -25,7 +25,7 @@ import ast
 import copy
 
 ROW_PREFIX = '_AilRow_'
-SCALARS = ('int', 'float', 'str')
+SCALARS = ('int', 'float', 'str', 'bool')
 _STR_METHODS = {'strip', 'lstrip', 'rstrip', 'lower', 'upper', 'replace', 'join', 'format',
                 'title', 'capitalize', 'zfill', 'ljust', 'rjust', 'center', 'decode', 'casefold'}
 _INT_METHODS = {'index', 'count', 'find', 'rfind', 'startswith', 'endswith', 'isdigit', 'isalpha',
@@ -113,7 +113,7 @@ class NestedLists:
             name = node.id
             if name.startswith('__ail_checked_') and name.endswith('__'):
                 name = name[len('__ail_checked_'):-2]
-            if name in ('int', 'float', 'str', 'bytes'):
+            if name in ('int', 'float', 'str', 'bytes', 'bool'):
                 return name
             if name == 'flist':
                 return ('list', 'float')

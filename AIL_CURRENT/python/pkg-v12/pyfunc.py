@@ -975,9 +975,9 @@ def _is_flist_name(node, ctx):
     while isinstance(literal, ast.Subscript) and isinstance(literal.slice, ast.Slice):
         literal = literal.value
     return (isinstance(literal, ast.List) and _etype(literal, ctx) == FLIST
-            or isinstance(node, ast.Name) and ctx.type_of(node.id) == FLIST
-            or isinstance(node, ast.Attribute) and _numeric_field_kind(node, ctx) == FLIST
-            or _is_map_snapshot(node, ctx, 'values') and _mvk(_map_kind(node.func.value, ctx)) == FLT)
+            or isinstance(literal, ast.Name) and ctx.type_of(literal.id) == FLIST
+            or isinstance(literal, ast.Attribute) and _numeric_field_kind(literal, ctx) == FLIST
+            or _is_map_snapshot(literal, ctx, 'values') and _mvk(_map_kind(literal.func.value, ctx)) == FLT)
 
 
 def _field_kind(node, ctx):
@@ -17807,13 +17807,10 @@ def _inline_fold_inner(f, arg, ctx):
     # is the single source of truth for whether the raw element read off it is a `double`. See
     # `_is_flist_name` for named FLISTs and direct float-map values() snapshots.
     elem_is_flist = _is_flist_name(src, ctx)
-    if isinstance(src, ast.Subscript) and isinstance(src.slice, ast.Slice):
-        base = src
-        while isinstance(base, ast.Subscript) and isinstance(base.slice, ast.Slice):
-            base = base.value
-        if not isinstance(base, ast.List) and _is_flist_name(base, ctx):
-            # the sequence machinery below reads int64 elements; a float slice would be truncated
-            raise Unsupported('%s() over a slice of a list of floats; not implemented' % f)
+    # A slice of a list of floats is walked by `_iter_plan`'s slice branch, whose element read
+    # comes from `_iter_plan(node.value)` -- a `double` for a FLIST name, exactly the same read a
+    # bare `sum(xs)` uses below. `elem_is_flist` still decides the accumulator type, so the
+    # elements are never truncated to int64.
     elem_is_str = _iter_elem_is_str(src, ctx)
     if elem_is_flist and (isinstance(src, ast.Name) or _is_map_snapshot(src, ctx, 'values')):
         # Bypass `_iter_plan` -> `_seq`, which still refuses a bare FLIST outside this one path:
@@ -26693,6 +26690,46 @@ def _for_inner_impl(node, ctx, ind):
                 head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.p[%s];\n' % (
                     pad, i, i, c, i, pad, v, c, i)
                 return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+            if _is_str_expr(it.args[0], ctx):
+                # `for index, ch in enumerate(text):` -- the same UTF-8 walk the plain
+                # `for ch in text:` branch below already builds (one code-point `ail_str` view per
+                # step), with a separate counter so the index counts CHARACTERS, as CPython does,
+                # rather than the byte offset the walk advances by.
+                sval = _str_value(it.args[0], ctx)
+                ctx.parts.add('STR')
+                stmp, _ = ctx.temp(STR)
+                pre = _flush(ctx, pad)
+                pre += '%s%s = %s;\n' % (pad, stmp, sval)
+                v = ctx.declare(vname, STR)
+                if ctx.rebound is not None and vname not in ctx.rebound:
+                    ctx.onecp.add(vname)
+                byte0 = '%s_b0' % idx
+                count = '%s_c' % idx
+                pre += ('%s{\n%s    const uint8_t *%s_p = %s.p; const int64_t %s_n = %s.n;\n'
+                        '%s    int64_t %s = 0;\n') % (pad, pad, idx, stmp, idx, stmp, pad, count)
+                head = ('%s    for (int64_t %s_k = 0, %s_w = 0; %s_k < %s_n; %s_k += %s_w, %s++) {\n'
+                        '%s        const uint8_t %s = %s_p[%s_k];\n'
+                        '%s        %s_w = %s < 0x80 ? 1 : ail__utf8_w(%s, %s_n - %s_k);\n'
+                        '%s        %s = %s;\n'
+                        '%s        %s = (ail_str){%s_p + %s_k, %s_w, %s < 0x80};\n') % (
+                    pad, idx, idx, idx, idx, idx, idx, count,
+                    pad, byte0, idx, idx,
+                    pad, idx, byte0, byte0, idx, idx,
+                    pad, i, count,
+                    pad, v, idx, idx, idx, byte0)
+                _saved_b0 = dict(getattr(ctx, 'byte0_names', {}))
+                if vname in ctx.onecp:
+                    ctx.byte0_names = dict(_saved_b0, **{vname: byte0})
+                _saved = set(ctx.len1_names)
+                ctx.len1_names.add(vname)
+                for _s in node.body:
+                    for _n in ast.walk(_s):
+                        if isinstance(_n, ast.Name) and isinstance(_n.ctx, ast.Store):
+                            ctx.len1_names.add(_n.id)
+                _body = _loop_stmts(node.body, ctx, ind + 2)
+                ctx.len1_names = _saved
+                ctx.byte0_names = _saved_b0
+                return pre + head + _body + pad + '    }' + chr(10) + pad + '}' + chr(10)
             p, n = _seq(it.args[0], ctx)
             if _seq_yields_handles(it.args[0], ctx):
                 # `for i, v in enumerate(g):` -- `v` inherits the handle-ness of `g`'s elements,

@@ -1,3 +1,30 @@
+## 2026-11-01 -- typed reach: nested bool lists for the hot palindrome DP (job-prog8-11020731)
+
+Profiled the eight prog8 programs with CPython 3.12 `cProfile` (own time; `main()` repeated so the
+sub-millisecond runs have a stable profile) and recorded the functions covering 80% plus their
+first typed-path refusal in `lab/progfix/prog8.md`. Seven programs either already type their hot
+functions (`g03_020`, `g05_014`, `knuth_gaps` in `g04_010`) or are blocked by a big new feature
+(the `random.Random` method surface, exact-ratio `statistics.pstdev`, the `fractions.Fraction`
+dunder surface, mutating a list parameter, `json.loads` result typing). The hot
+`count_palindromic_substrings` of `g09_012` (81% of its own time) was blocked by
+`dp: list[list[bool]]`: `nested_lists.py` only knew int/float/str/struct rows, and without the
+annotation boolkind refused the bool/int mix.
+
+`nested_lists.py` now accepts a `bool` row element and emits a hidden `_AilRow_bool` whose field is
+`list[bool]`; boolkind rewrites that field to the int spelling and tracks it as a bool list, so an
+element read still prints `True`/`False`, a number stored into a bool row is still refused or keeps
+the general path, and indexing/aliasing/empty rows match CPython. Probes `/tmp/probes/b1.py`,
+`b2.py`, `b3.py`, `b6_empty.py` (local, argument, result, row alias, negative index, comprehension,
+empty grid, printing a row/element) matched CPython on both `cmp.sh` builds;
+`/tmp/probes/b4_bad.py` (an int stored in a bool row) and `b5_unannotated.py` keep the general path
+and still match CPython; the g09 source now builds typed and matches CPython. The generated C of
+all ten `lab/compare` tasks is byte-identical to the pre-change tree (`main.ail` and `main.py`).
+
+Added `test_ail_prog8.py` (registered in `tests.d/`), covering the g09 program, a nested-bool-row
+boundary program and the int-in-bool-row fallback. Passed: `test_ail_prog8`,
+`test_ail_nested_lists`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_boolfield`, `test_ail_spec_fixes`, `test_ail_tuples`, `test_ail_cpython_hybrid`.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten
