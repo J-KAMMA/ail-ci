@@ -16,7 +16,7 @@ named beside them, not separate units.
 | `lab/census/programs/gdev/g10_032.py` | `largest_region` 77.4%, `main` 9.0% (86.4%) | no | first `field \`v\` is a list or dict that gets bools and numbers (Python keeps each element's own type)`, then `_AilDeque_tup2_int_int.buf has unsupported field type array; fields require a known nonnullable scalar, container or managed struct type` (the tuple lowering refused `for dr, dc in directions`). **Fixed** below. |
 | `lab/census/programs/gdev/g23_038.py` | `matmul` 31.7%, `main` 17.8%, `diagonal_sum` 10.4% (module/import own time 36.7%) | yes (whole program) | -- |
 
-Result after the fixes in this job: six of the eight programs take the typed path; `t018`, `g15_018`,
+Result after the fixes in this job: five of the eight programs take the typed path; `t018`, `g15_018`,
 `t474`, `g23_038` already did, and `g10_032` now does. `g12_034`, `g14_038` and `t184` remain general /
 CPython because their hot functions need the new features listed as follow-ups.
 
