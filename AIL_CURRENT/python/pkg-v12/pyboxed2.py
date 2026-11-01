@@ -7880,13 +7880,16 @@ class Compiler(boxclosure.ClosureMixin):
             import safetyrt
             if name in safetyrt.PRIMS:
                 return self._call_safety_prim(name, args, kwargs, ctx)
-        if (name in self.classes and name not in ctx.slot_of and name not in ctx.ptr_names
+        if (name in self.classes and name not in self.module_names
+                and name not in ctx.slot_of and name not in ctx.ptr_names
                 and name not in ctx.clo_index and name not in ctx.free_names
                 and name not in ctx.cell_slots):
             # a parameter, local, cell or closure binding of the same name shadows the class in
             # CPython for the WHOLE activation: U() then calls that value, not the class (an
             # unbound local is UnboundLocalError, an instance is TypeError), exactly as expr_Name
             # already reads it. Without this the constructor-call path silently called the class.
+            # A module-level assignment to the class name rebinds the module slot (`A = B`), so
+            # the call goes through that slot like expr_Name does, not the class definition.
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
@@ -8572,6 +8575,10 @@ class Compiler(boxclosure.ClosureMixin):
         if not isinstance(tnode, ast.Name):
             return None
         tname = tnode.id
+        if tname in self.classes and tname in self.module_names:
+            # a module-level assignment to the class name rebinds the module slot (`A = B`): the
+            # test must read that value at run time, not the class definition
+            return None
         if tname in self.classes:
             self._check_class_name_bound(tname, ctx)
         if tname == 'int':

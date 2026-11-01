@@ -84,6 +84,18 @@ class IsinstanceTypeForms(unittest.TestCase):
     def test_builtin_tuple_shadowed_by_parameter(self):
         self.compare({'p.py': BUILTIN_SHADOW}, ('general',))
 
+    def test_constant_value_is_snapshotted_at_assignment(self):
+        self.compare({'p.py': SNAPSHOTS}, ('general',))
+
+    def test_forward_alias_constant_is_name_error(self):
+        self.compare({'p.py': FORWARD_ALIAS}, ('general',), failure=True)
+
+    def test_forward_tuple_constant_is_name_error(self):
+        self.compare({'p.py': FORWARD_TUPLE}, ('general',), failure=True)
+
+    def test_exception_type_constant(self):
+        self.compare({'p.py': EXCEPTION_CONST}, ('general',))
+
 
 STATIC = r'''class A: pass
 class B(A): pass
@@ -285,6 +297,56 @@ def f(TYPES):
 f((A,))
 f((B,))
 print("module", isinstance(1, TYPES), isinstance("s", TYPES), isinstance(1.0, TYPES))
+'''
+
+SNAPSHOTS = r'''class A: pass
+class B: pass
+class Box: pass
+
+box = Box()
+box.t = A
+T = box.t
+box.t = B
+print(isinstance(A(), T), isinstance(B(), T))
+
+U = (A,)
+A = B
+print(isinstance(A(), U), isinstance(B(), U), isinstance(A(), A), isinstance(B(), A))
+
+TYPES = (A,)
+
+
+def shadow(A):
+    print(isinstance(A, TYPES), isinstance(B(), TYPES))
+
+
+shadow(B)
+'''
+
+FORWARD_ALIAS = r'''K = C
+class C: pass
+print(isinstance(C(), K))
+'''
+
+FORWARD_TUPLE = r'''T = (K,)
+print(isinstance(1, T))
+K = str
+'''
+
+EXCEPTION_CONST = r'''T = (ValueError, KeyError)
+
+
+def f(k):
+    try:
+        if k == 0:
+            raise ValueError("v")
+        raise KeyError("k")
+    except Exception as e:
+        print(isinstance(e, T), isinstance(e, TypeError))
+
+
+f(0)
+f(1)
 '''
 
 if __name__ == '__main__':

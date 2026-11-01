@@ -1,3 +1,25 @@
+## 2026-11-01 -- covisin1 review: snapshot a type constant's value, and follow a rebound class (job-covisin1-11011014)
+
+The review found three wrong answers from expanding a module type constant by name alone: a constant
+whose value was read from an attribute kept the name, so a later attribute store changed the answer
+(`T = box.t; box.t = B`); a module assignment that rebinds a class name (`A = B`) still called the
+class definition as a constructor and still tested `isinstance(..., A)` against the definition; and a
+constant assigned before its class/name was bound was replaced by a name that did not exist yet, so
+CPython's `NameError` became `False`.  `tuplib` now snapshots a constant whose module binding can
+change, or whose leaf names are shadowed at an `isinstance()` use, into hidden `_ail_snap_*` names at
+the assignment, and drops the original only when every read was replaced.  A forward leaf gets a
+hidden `_ail_defined_*` marker after its later binding, so the earlier snapshot raises `NameError`.
+Builtin exception names are type constants too.  `pyboxed2._call_name` and `_static_isinstance_check`
+now read a class name that was rebound at module level through the module slot instead of the class
+definition.
+
+Probes (`bash ~/tools/cmp.sh`, default + general) all match CPython: the review's `p11_attr_snapshot`
+(`True False`), `p8_rebind_class` (`False False`), `p4_forward_alias` and `p5_nested_forward` (exit 1,
+empty stdout), plus `p8b_rebind_call`, `p8c_rebind_isinstance`, `p1e_exc_const`, `p2_classbody_const`
+and `p6_tuple_basic`.  Added five snapshot/forward/exception regression tests to
+`test_ail_covisin1`.  Final-state tests: `test_ail_covisin1`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` (0 failed).
+
 ## 2026-11-01 -- covisin1 review: expand a type constant only where the name and the binding are the module's (job-covisin1-11011014)
 
 The review found three wrong answers from `tuplib._expand_isinstance_type_constants` inlining a
