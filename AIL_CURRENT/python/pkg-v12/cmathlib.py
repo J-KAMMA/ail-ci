@@ -142,6 +142,20 @@ def rewrite(tree, text):
                 and not user_complex:
             node.args[1] = _name('_AilComplex')
             return stdlib5.Replace(fix).visit(node)
+        if isinstance(node, ast.Call):
+            found = binder.attr(node.func)
+            if found in FUNCTIONS and any(k.arg is None for k in node.keywords):
+                parts = []
+                for k in node.keywords:
+                    if k.arg is None:
+                        parts.append(k.value)
+                    else:
+                        parts.append(ast.Tuple(elts=[ast.Constant(value='kw'),
+                                                     ast.Constant(value=k.arg), k.value],
+                                               ctx=ast.Load()))
+                args = ast.Tuple(elts=list(node.args), ctx=ast.Load())
+                lowered = _call('_ail_cm_kw', [ast.Constant(value=found), args] + parts)
+                return stdlib5.Replace(fix).visit(lowered)
         if isinstance(node, ast.Call) and not any(isinstance(a, ast.Starred) for a in node.args):
             found = binder.attr(node.func)
             if found in FUNCTIONS:

@@ -91,9 +91,12 @@ The review's eight counterexamples in `/tmp/rprobes` were re-run and all now mat
   arguments combine as CPython does (`complex(1+2j, 3)` is `(1+5j)`, `complex(1+2j, 3+4j)` is `(-3+5j)`),
   with the constructor's own messages (`first argument ...`, `can't take second arg if first is a string`,
   `second arg can't be a string`). Signed zeros are preserved exactly.
-* `z ** n` only takes the integer power path for a finite integral `n`; an infinite or NaN exponent goes
-  through the general power (CPython's `(nan+nanj)`), and a zero base with a negative or complex exponent
-  raises `ZeroDivisionError: 0.0 to a negative or complex power`.
+* `z ** n` only takes the integer power path for a finite integral `n`; every other exponent uses
+  CPython's `_Py_c_pow` algorithm with its errno mapping: a domain error in `cos`/`sin` (an infinite
+  phase) raises `ZeroDivisionError: 0.0 to a negative or complex power`, a non-finite result raises
+  `OverflowError: complex exponentiation`, and NaN results such as `2j ** nan` are `(nan+nanj)`. A zero
+  base with a negative or complex exponent raises `ZeroDivisionError: 0.0 to a negative or complex
+  power`; small non-negative integer exponents preserve the signed zeros CPython's `c_powi` does.
 * `cmath.log(z, base)` raises `ValueError: math domain error` when the base's logarithm is zero, as CPython
   does, before dividing.
 * `cmath.rect` takes real arguments only, so a complex `r`/`phi` raises `TypeError: must be real number,
@@ -104,6 +107,10 @@ The review's eight counterexamples in `/tmp/rprobes` were re-run and all now mat
   rejects a third positional argument (tolerances stay keyword-only) and an unknown keyword.
 * The complex string parser routes every numeric part through the malformed-string check, so `complex("++1j")`
   and `complex("1++2j")` raise `ValueError: complex() arg is a malformed string`.
+* A `cmath` call with `**mapping` is lowered to `_ail_cm_kw`, which merges the mapping in call order and
+  applies CPython's argument parsing, including duplicate keywords, non-string keys, missing or extra
+  positional arguments and `isclose`'s keyword names. `cmath.isclose(1.0, 1.0, **{})` is `True`, and
+  `cmath.sqrt(**{})` raises CPython's `TypeError: cmath.sqrt() takes exactly one argument (0 given)`.
 
 The regression cases are checked by `test_ail_std_cmath.py` (`test_review_regressions`) against CPython.
 
@@ -112,6 +119,9 @@ The regression cases are checked by `test_ail_std_cmath.py` (`test_review_regres
 | probe | what it covers | result |
 | --- | --- | --- |
 | `p_pow.py` | infinite/NaN exponents, zero base with negative/complex exponents, integer exponents 100 and 101, reflected power | g, d match |
+| `p_pow2.py`, `p_powgrid.py` | the review's five non-finite-exponent counterexamples; a 15 x 20 grid over zeros, signed zeros, infinities, NaNs and huge values, including signed-zero bases | g, d match |
+| `p_kw2.py` | `**mapping` for every `cmath` function: empty and non-empty mappings, `a`/`b`/`rel_tol`/`abs_tol`, duplicates, non-string keys, unknown keywords, missing/extra positional arguments, `*args` with `**` | g, d match |
+| `p_star.py` | `cmath.isclose(1.0, 1.0, **{})` and `cmath.sqrt(**{})` | g, d match |
 | `p_special.py` | `log` with bases `0`, `1`, `1j`, `-1`, `e`, plus `log(0)`, `atanh(±1)`, infinite imaginary `exp` | g, d match |
 | `p_complex2.py` | every `complex(...)` form, malformed strings, `rect`/`sqrt`/`phase` argument types, `isclose` arity/keywords | g, d match |
 | `p_forms.py` | keyword arguments to `log`, `exp`, `rect`, `sqrt`, `phase` (CPython's `cmath.<name>() takes no keyword arguments`) | g, d match |

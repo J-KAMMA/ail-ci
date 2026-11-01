@@ -1,3 +1,17 @@
+## 2026-11-01 -- stdlib cmath review fixes: non-finite powers and **mapping (job-std_cmath-11020402)
+
+Fixed the two remaining review defects. Complex `**` now follows CPython 3.12's `_Py_c_pow` errno
+mapping: an infinite phase (from an infinite exponent or `0 * inf`) raises `ZeroDivisionError: 0.0 to
+a negative or complex power`, a non-finite result raises `OverflowError: complex exponentiation`, and
+NaN results stay `(nan+nanj)`. The small-integer path also applies CPython's overflow and zero-divisor
+checks, and a zero base preserves `c_powi`'s signed zeros. A `cmath` call with `**mapping` is lowered
+to `_ail_cm_kw`, which merges the mapping in call order and reproduces CPython's argument parsing for
+every function (`cmath.isclose(1.0, 1.0, **{})` is `True`; `cmath.sqrt(**{})` raises `cmath.sqrt()
+takes exactly one argument (0 given)`).
+
+Probes `p_pow2`, `p_powgrid`, `p_kw2` and `p_star` match CPython on both `cmp.sh` builds;
+`test_ail_std_cmath` gained the new regressions. `lab/stdlib/cmath/RESULTS.md` records the fixes.
+
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object

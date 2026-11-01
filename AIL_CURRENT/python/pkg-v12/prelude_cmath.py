@@ -295,11 +295,13 @@ class _AilComplex:
 
     def __pow__(self, other):
         b = _ail_cm_as(other)
-        if self.real == 0.0 and self.imag == 0.0:
-            return _ail_cm_pow(self, b)
         if b.imag == 0.0 and math.isfinite(b.real) and b.real == math.floor(b.real) \
-                and abs(b.real) <= 100.0:
-            return _ail_cm_powi(self, int(b.real))
+                and abs(b.real) <= 100.0 \
+                and (self.real != 0.0 or self.imag != 0.0 or b.real >= 0.0):
+            r = _ail_cm_powi(self, int(b.real))
+            if math.isinf(r.real) or math.isinf(r.imag):
+                raise OverflowError("complex exponentiation")
+            return r
         return _ail_cm_cpow(self, b)
 
     def __rpow__(self, other):
@@ -343,6 +345,128 @@ def _ail_cm_tname(x) -> str:
 
 def _ail_cm_raise(message: str, *values) -> None:
     raise TypeError(message)
+
+
+def _ail_cm_kw(name: str, args, *parts):
+    kw = {}
+    for part in parts:
+        if isinstance(part, dict):
+            for key in part:
+                if not isinstance(key, str):
+                    raise TypeError("keywords must be strings")
+                if key in kw:
+                    raise TypeError("cmath.%s() got multiple values for keyword argument '%s'" % (name, key))
+                kw[key] = part[key]
+        else:
+            key = part[1]
+            if key in kw:
+                raise TypeError("cmath.%s() got multiple values for keyword argument '%s'" % (name, key))
+            kw[key] = part[2]
+    if name == 'isclose':
+        return _ail_cm_kw_isclose(args, kw)
+    if name == 'log':
+        return _ail_cm_kw_log(args, kw)
+    if name == 'rect':
+        return _ail_cm_kw_rect(args, kw)
+    return _ail_cm_kw_one(name, args, kw)
+
+
+def _ail_cm_kw_one(name: str, args, kw):
+    if kw:
+        raise TypeError("cmath.%s() takes no keyword arguments" % name)
+    if len(args) != 1:
+        raise TypeError("cmath.%s() takes exactly one argument (%d given)" % (name, len(args)))
+    z = args[0]
+    if name == 'acos':
+        return _ail_cm_acos(z)
+    if name == 'acosh':
+        return _ail_cm_acosh(z)
+    if name == 'asin':
+        return _ail_cm_asin(z)
+    if name == 'asinh':
+        return _ail_cm_asinh(z)
+    if name == 'atan':
+        return _ail_cm_atan(z)
+    if name == 'atanh':
+        return _ail_cm_atanh(z)
+    if name == 'cos':
+        return _ail_cm_cos(z)
+    if name == 'cosh':
+        return _ail_cm_cosh(z)
+    if name == 'exp':
+        return _ail_cm_exp(z)
+    if name == 'isfinite':
+        return _ail_cm_isfinite(z)
+    if name == 'isinf':
+        return _ail_cm_isinf(z)
+    if name == 'isnan':
+        return _ail_cm_isnan(z)
+    if name == 'log10':
+        return _ail_cm_log10(z)
+    if name == 'phase':
+        return _ail_cm_phase(z)
+    if name == 'polar':
+        return _ail_cm_polar(z)
+    if name == 'sin':
+        return _ail_cm_sin(z)
+    if name == 'sinh':
+        return _ail_cm_sinh(z)
+    if name == 'sqrt':
+        return _ail_cm_sqrt(z)
+    if name == 'tan':
+        return _ail_cm_tan(z)
+    return _ail_cm_tanh(z)
+
+
+def _ail_cm_kw_log(args, kw):
+    if kw:
+        raise TypeError("cmath.log() takes no keyword arguments")
+    if len(args) < 1:
+        raise TypeError("log expected at least 1 argument, got 0")
+    if len(args) > 2:
+        raise TypeError("log expected at most 2 arguments, got %d" % len(args))
+    if len(args) == 2:
+        return _ail_cm_log(args[0], args[1])
+    return _ail_cm_log(args[0])
+
+
+def _ail_cm_kw_rect(args, kw):
+    if kw:
+        raise TypeError("cmath.rect() takes no keyword arguments")
+    if len(args) != 2:
+        raise TypeError("rect expected 2 arguments, got %d" % len(args))
+    return _ail_cm_rect(args[0], args[1])
+
+
+def _ail_cm_kw_isclose(args, kw):
+    if len(args) > 2:
+        raise TypeError("isclose() takes exactly 2 positional arguments (%d given)" % len(args))
+    if len(args) >= 1:
+        if 'a' in kw:
+            raise TypeError("argument for isclose() given by name ('a') and position (1)")
+        a = args[0]
+    elif 'a' in kw:
+        a = kw['a']
+    else:
+        raise TypeError("isclose() missing required argument 'a' (pos 1)")
+    if len(args) >= 2:
+        if 'b' in kw:
+            raise TypeError("argument for isclose() given by name ('b') and position (2)")
+        b = args[1]
+    elif 'b' in kw:
+        b = kw['b']
+    else:
+        raise TypeError("isclose() missing required argument 'b' (pos 2)")
+    for key in kw:
+        if key not in ('a', 'b', 'rel_tol', 'abs_tol'):
+            raise TypeError("'%s' is an invalid keyword argument for isclose()" % key)
+    rel_tol = 1e-09
+    abs_tol = 0.0
+    if 'rel_tol' in kw:
+        rel_tol = kw['rel_tol']
+    if 'abs_tol' in kw:
+        abs_tol = kw['abs_tol']
+    return _ail_cm_isclose(a, b, rel_tol, abs_tol)
 
 
 def _ail_cm_arg(x):
@@ -507,7 +631,54 @@ def _ail_cm_powu(x, n: int):
 def _ail_cm_powi(x, n: int):
     if n > 0:
         return _ail_cm_powu(x, n)
-    return _ail_cm_div(_AilComplex(1.0, 0.0), _ail_cm_powu(x, -n))
+    d = _ail_cm_powu(x, -n)
+    if d.real == 0.0 and d.imag == 0.0:
+        raise ZeroDivisionError("0.0 to a negative or complex power")
+    return _ail_cm_div(_AilComplex(1.0, 0.0), d)
+
+
+def _ail_cm_fpow(x: float, y: float) -> float:
+    if math.isnan(x) or math.isnan(y):
+        if x == 1.0 or y == 0.0:
+            return 1.0
+        return _AIL_CM_NAN
+    try:
+        return math.pow(x, y)
+    except OverflowError:
+        return _AIL_CM_INF
+    except ValueError:
+        if x == 0.0 and y < 0.0:
+            return _AIL_CM_INF
+        return _AIL_CM_NAN
+
+
+def _ail_cm_fexp(x: float) -> float:
+    if math.isnan(x):
+        return _AIL_CM_NAN
+    try:
+        return math.exp(x)
+    except OverflowError:
+        return _AIL_CM_INF
+
+
+def _ail_cm_flog(x: float) -> float:
+    if math.isnan(x):
+        return _AIL_CM_NAN
+    if x == 0.0:
+        return -_AIL_CM_INF
+    if x < 0.0:
+        return _AIL_CM_NAN
+    return math.log(x)
+
+
+def _ail_cm_fdiv(a: float, b: float) -> float:
+    if math.isnan(a) or math.isnan(b):
+        return _AIL_CM_NAN
+    if b == 0.0:
+        if a == 0.0:
+            return _AIL_CM_NAN
+        return math.copysign(_AIL_CM_INF, a) * math.copysign(1.0, b)
+    return a / b
 
 
 def _ail_cm_pow(a, b):
@@ -518,13 +689,24 @@ def _ail_cm_pow(a, b):
             raise ZeroDivisionError("0.0 to a negative or complex power")
         return _AilComplex(0.0, 0.0)
     vabs = math.hypot(a.real, a.imag)
-    length = math.pow(vabs, b.real)
+    length = _ail_cm_fpow(vabs, b.real)
     at = math.atan2(a.imag, a.real)
     phase = at * b.real
     if b.imag != 0.0:
-        length = length / math.exp(at * b.imag)
-        phase = phase + b.imag * math.log(vabs)
-    return _AilComplex(length * math.cos(phase), length * math.sin(phase))
+        length = _ail_cm_fdiv(length, _ail_cm_fexp(at * b.imag))
+        phase = phase + b.imag * _ail_cm_flog(vabs)
+    edom = math.isinf(phase)
+    if math.isnan(phase) or edom:
+        real = _AIL_CM_NAN
+        imag = _AIL_CM_NAN
+    else:
+        real = length * math.cos(phase)
+        imag = length * math.sin(phase)
+    if edom:
+        raise ZeroDivisionError("0.0 to a negative or complex power")
+    if math.isinf(real) or math.isinf(imag):
+        raise OverflowError("complex exponentiation")
+    return _AilComplex(real, imag)
 
 
 def _ail_cm_cpow(a, b):
