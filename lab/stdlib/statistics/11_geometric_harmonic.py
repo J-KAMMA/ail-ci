@@ -9,6 +9,9 @@ def main() -> None:
     print(statistics.harmonic_mean(speeds))
     print(f"{statistics.geometric_mean(growth):.6f}")
     print(f"{statistics.harmonic_mean(growth):.6f}")
+    distances: list[int] = [5, 15, 30]
+    print(statistics.geometric_mean(distances))
+    print(statistics.harmonic_mean(distances))
 
 
 main()

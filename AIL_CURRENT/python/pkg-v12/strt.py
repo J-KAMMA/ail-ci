@@ -538,7 +538,7 @@ def quantiles_int(xs: list[int], n: int, method: str) -> list[float]:
     if ld < 2:
         raise ValueError("must have at least two data points")
     if method != "inclusive" and method != "exclusive":
-        raise ValueError("Unknown method: '" + method + "'")
+        raise ValueError("Unknown method: " + repr(method))
     out: list[float] = []
     if method == "inclusive":
         m = ld - 1
@@ -567,7 +567,7 @@ def quantiles_f(xs: list[float], n: int, method: str) -> list[float]:
     if ld < 2:
         raise ValueError("must have at least two data points")
     if method != "inclusive" and method != "exclusive":
-        raise ValueError("Unknown method: '" + method + "'")
+        raise ValueError("Unknown method: " + repr(method))
     out: list[float] = []
     if method == "inclusive":
         m = ld - 1
@@ -588,25 +588,107 @@ def quantiles_f(xs: list[float], n: int, method: str) -> list[float]:
     return out
 
 
-def sumprod_floats(xs: list[float], ys: list[float]) -> float:
-    """math.sumprod over floats: every product is split into its rounded value and its exact
-    error (Dekker's two-product), and the pieces are summed once with fsum."""
-    parts: list[float] = []
+def dl_sum(a: float, b: float) -> list[float]:
+    """CPython's error-free two-sum: [rounded a + b, exact error]."""
+    x = a + b
+    z = x - a
+    y = (a - (x - z)) + (b - z)
+    return [x, y]
+
+
+def dl_product(a: float, b: float) -> list[float]:
+    """The rounded product and its exact error (CPython's dl_mul with fma).  The Dekker split is
+    done on operands scaled by a power of two, so neither the split nor the product overflows or
+    loses the low bits when a or b is near the ends of the double range."""
+    p = a * b
+    if p - p != 0.0:
+        return [p, 0.0]
+    aa = a
+    ea = 0
+    if aa != 0.0:
+        while abs(aa) >= 1.0:
+            aa = aa * 0.5
+            ea += 1
+        while abs(aa) < 0.5:
+            aa = aa * 2.0
+            ea -= 1
+    bb = b
+    eb = 0
+    if bb != 0.0:
+        while abs(bb) >= 1.0:
+            bb = bb * 0.5
+            eb += 1
+        while abs(bb) < 0.5:
+            bb = bb * 2.0
+            eb -= 1
+    ps = aa * bb
     split = 134217729.0
+    ca = split * aa
+    ahi = ca - (ca - aa)
+    alo = aa - ahi
+    cb = split * bb
+    bhi = cb - (cb - bb)
+    blo = bb - bhi
+    es = ((ahi * bhi - ps) + ahi * blo + alo * bhi) + alo * blo
+    shift = ea + eb
+    pscaled = p
+    if shift > 0:
+        for _ in range(shift):
+            pscaled = pscaled * 0.5
+    else:
+        for _ in range(-shift):
+            pscaled = pscaled * 2.0
+    err = (ps - pscaled) + es
+    if shift > 0:
+        for _ in range(shift):
+            err = err * 2.0
+    else:
+        for _ in range(-shift):
+            err = err * 0.5
+    return [p, err]
+
+
+def tl_to_d(hi: float, lo: float, tiny: float) -> float:
+    last = dl_sum(lo, hi)
+    return tiny + last[1] + last[0]
+
+
+def sumprod_floats(xs: list[float], ys: list[float]) -> float:
+    """math.sumprod over floats: CPython's TripleLength compensated sum of error-free products.
+    A non-finite product stops the compensated path, as in CPython, and the rest is ordinary
+    float multiplication and addition (so an overflowing product gives inf or nan, not nan from
+    an overflowing Dekker split)."""
+    total_hi = 0.0
+    total_lo = 0.0
+    total_tiny = 0.0
+    naive = 0.0
+    exact = True
     for i in range(len(xs)):
         a = xs[i]
         b = ys[i]
-        p = a * b
-        ca = split * a
-        ahi = ca - (ca - a)
-        alo = a - ahi
-        cb = split * b
-        bhi = cb - (cb - b)
-        blo = b - bhi
-        err = ((ahi * bhi - p) + ahi * blo + alo * bhi) + alo * blo
-        parts.append(p)
-        parts.append(err)
-    return fsum_floats(parts)
+        if exact:
+            pr = dl_product(a, b)
+            p = pr[0]
+            err = pr[1]
+            if p - p != 0.0:
+                naive = tl_to_d(total_hi, total_lo, total_tiny)
+                exact = False
+            else:
+                sm = dl_sum(total_hi, p)
+                r1 = dl_sum(total_lo, err)
+                r2 = dl_sum(r1[0], sm[1])
+                if sm[0] - sm[0] != 0.0:
+                    naive = tl_to_d(total_hi, total_lo, total_tiny)
+                    exact = False
+                else:
+                    total_hi = sm[0]
+                    total_lo = r2[0]
+                    total_tiny = total_tiny + r1[1] + r2[1]
+        if not exact:
+            naive = naive + a * b
+    if exact:
+        return tl_to_d(total_hi, total_lo, total_tiny)
+    return naive
 
 
 def covariance_f(xs: list[float], ys: list[float]) -> float:
@@ -632,7 +714,7 @@ def correlation_f(xs: list[float], ys: list[float], method: str) -> float:
     if n < 2:
         raise ValueError("correlation requires at least two data points")
     if method != "linear":
-        raise ValueError("Unknown method: '" + method + "'")
+        raise ValueError("Unknown method: " + repr(method))
     xbar = fsum_floats(xs) / n
     ybar = fsum_floats(ys) / n
     dx: list[float] = []

@@ -1,4 +1,4 @@
-# `statistics` coverage (job-std_statistics-11011523)
+# `statistics` coverage (job-std_statistics-11011831)
 
 Environment: CPython 3.12.3, the default build `python3 AIL_CURRENT/ail_chatgpt.py compile X.py --syntax python`
 (typed path first, general path as the fallback). Date: 2026-11-01.
@@ -49,9 +49,14 @@ passing program in the default mode, runs it and compares both exit code and std
   (`strt.quantiles_int` / `quantiles_f`, lowered by `statlib`). Error messages and their precedence follow
   CPython (`n < 1`, fewer than two points, then an unknown method).
 * `statistics.covariance` and `statistics.correlation(..., method="linear")` over two int or float lists.
-  The product sum is CPython's `math.sumprod` semantics: every float product is split with Dekker's
-  two-product and the pieces are summed once by the existing `fsum`, which matters for ordinary data
+  The product sum is CPython's `math.sumprod` semantics: every float product is split into its rounded
+  value and exact error with Dekker's two-product, and the pieces go through CPython's TripleLength
+  compensated sum, which matters for ordinary data
   (`covariance([60, 83, 48, 100, 26], [12, 62, 3, 49, 55])` is `216.15`, not `216.14999999999998`).
+  The Dekker split is done on power-of-two-scaled operands, so magnitudes near either end of the double
+  range do not overflow the split or lose the low product bits; a genuinely overflowing product stops
+  the compensated path and the rest is ordinary float multiplication and addition, exactly as CPython
+  does, so `covariance([-1e200, 1e200], [-1e200, 1e200])` is `inf` rather than `nan`.
   A non-literal `method=` is refused by name at compile time; only the literal `"linear"` is built
   (literal `"ranked"` keeps its own refusal), so a computed method cannot leak into a runtime error.
 * `statistics.fmean(data, weights=...)` and the second positional weights argument, over int/float lists,
@@ -84,6 +89,20 @@ The review found two defects in the first commit; both are fixed in the follow-u
   (`p_fmean_int_overflow.py`), never with a wrapped value; exact big-integer products are a larger
   feature, recorded below.
 
+## Second review fixes
+
+The second review found three defects; all are fixed in this commit.
+
+* The float product sum returned `nan` where CPython returns a finite value: the unscaled Dekker split
+  overflowed for `|x| > ~1.3e300`, and an ordinary product overflow turned into `nan` at the first split
+  instead of CPython's `inf`/`nan` fallback (`k_split_overflow.py`, `j_float_overflow.py`,
+  `p_st_extremes.py` now match CPython, including subnormal products).
+* The unknown-method errors concatenated the method instead of using `repr`, so `method="a'b"` printed
+  `Unknown method: 'a'b'`. `quantiles_int`, `quantiles_f` and `correlation_f` now use `repr`
+  (`c2_q_quote.py`, `l_corr_quote.py`, `p_method_literals.py` match CPython, including `'a"b'` and
+  backslashes).
+* `11_geometric_harmonic.py` was 14 lines; it is now 17 and still matches CPython on the general path.
+
 ## Follow-ups (out of scope here)
 
 * `07_regression.py` needs the named-tuple result of `statistics.linear_regression` and `proportional=`.
@@ -111,6 +130,12 @@ The review found two defects in the first commit; both are fixed in the follow-u
 | p_fmean_badkw.py (unknown keyword) | refused by name (`statistics.fmean does not take the keyword argument extra here`) | refused by name |
 | p_st_values_refused.py (data through an attribute, a list item and a dict value) | refused by name (`statistics.quantiles: the element type ... is not known here`) | refused by name |
 | p_st_correlation_ranked.py (`method="ranked"`) | refused by name (`statistics.correlation(..., method='ranked') is not built`) | refused by name |
+| k_split_overflow.py (1e301 covariance and weighted fmean, CPython `15.0` / `2.4285714285714285e+301`) | same stdout/exit as CPython | refused by name (`statistics ... not yet published`) |
+| j_float_overflow.py (overflowing covariance/fmean: `inf`, `inf`, `nan`) | same | refused by name |
+| c2_q_quote.py (quantiles unknown method with `'`, `"`, `\`) | same | refused by name (`statistics.quantiles ... not yet published`) |
+| l_corr_quote.py (correlation unknown method with `'`, `"`, `\`) | same | refused by name (`statistics.correlation ... not yet published`) |
+| p_method_literals.py (literal `"linear"`, `"bogus"`, `"a'b"`, `""`) | same | refused by name (`statistics.correlation ... not yet published`) |
+| p_st_extremes.py (tiny subnormal products/covariance, huge covariance/correlation/fmean) | same | refused by name (`fmean ... weights ... general path`) |
 
 Review probes (also run with `bash .agent/cmp.sh <probe> $PWD`):
 

@@ -1,3 +1,16 @@
+## 2026-11-01 -- `statistics` second review fixes: scaled product sum, `repr` methods, longer lab program (job-std_statistics-11011831)
+
+Fixed the three defects from the second review. `strt.sumprod_floats` now uses CPython's TripleLength
+compensated sum of error-free products, with the Dekker split done on power-of-two-scaled operands, so
+`covariance([1e301, 2e301, 3e301], [1e-300, 2e-300, 4e-300])` is `15.0` and weighted `fmean` is
+`2.4285714285714285e+301` instead of `nan`; a genuinely overflowing product stops the compensated path
+and the rest is ordinary float multiplication and addition, matching CPython's `inf`/`nan`.
+The unknown-method messages in `quantiles_int`, `quantiles_f` and `correlation_f` use `repr`, so
+`method="a'b"` prints `Unknown method: "a'b"`. `lab/stdlib/statistics/11_geometric_harmonic.py` is now
+17 lines and still matches CPython. `RESULTS.md` and `DIFFERENCES.md` record the fixes; probes
+`k_split_overflow`, `j_float_overflow`, `c2_q_quote`, `l_corr_quote`, `p_method_literals` and
+`p_st_extremes` match CPython (the forced general path refuses these names by name).
+
 ## 2026-11-01 -- `statistics` review fixes: computed correlation method and exact weighted fmean (job-std_statistics-11011523)
 
 Fixed the two review defects in the `statistics` work. `correlation(..., method=...)` now requires the
