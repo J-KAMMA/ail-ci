@@ -22,6 +22,7 @@ sys.path.insert(0, str(SRC))
 import ail_manifest  # noqa: E402
 
 LEGACY_KEYS = ("sha256", "files", "sdk_files")
+COMPILER_SUFFIXES = (".py", ".h", ".c")
 
 
 def sha(name):
@@ -32,6 +33,15 @@ def sdk_source(name):
     """A compiler source that the wheel and an exported SDK must carry."""
     return (name.startswith(("python/pkg-v12/", "stdlib/")) and name.endswith((".py", ".h", ".c"))
             and "__pycache__" not in name.split("/"))
+
+
+def is_compiler_source(name):
+    """The files test_ail_packaging selects: pkg-v12 sources (recursively) and stdlib sources."""
+    if not name.endswith(COMPILER_SUFFIXES):
+        return False
+    if name.startswith("python/pkg-v12/"):
+        return True
+    return name.startswith("stdlib/") and "/" not in name[len("stdlib/"):]
 
 
 def main():
@@ -80,6 +90,8 @@ def main():
     must |= {n for n in names if n.startswith("tests.d/") and n.endswith(".txt")}
     must |= {n for n in names if n.endswith(".py") and (n.startswith("python/pkg-v12/") or n[:-3] in registered)}
     must |= {n for n in names if sdk_source(n)}
+    compiler = {n for n in names if is_compiler_source(n)}
+    must |= compiler
     unpinned = sorted(n for n in must if n in names and not pins.get(n, ("",))[0])
     for name in unpinned:
         print(("unpinned " if check else "pinned ") + name)
@@ -92,6 +104,11 @@ def main():
     for name, digest in stale.items():
         print(("stale " if check else "updated ") + name)
         pins[name] = (digest, pins[name][1])
+    # Every compiler source must be in sdk_files (the packaging test checks the same set).
+    unselected = sorted(n for n in compiler if "s" not in pins.get(n, ("", ""))[1])
+    for name in unselected:
+        print(("unselected " if check else "selected ") + name)
+        pins[name] = (pins[name][0], "".join(sorted(set(pins[name][1]) | {"s"})))
     # An sdk_files entry with no digest and no tracked file cannot be pinned: ail_check would refuse it.
     unpinnable = sorted(n for n, (digest, _) in pins.items() if not digest)
     for name in unpinnable:
@@ -100,11 +117,11 @@ def main():
     texts = ail_manifest.render(pins)
     directory = SRC / ail_manifest.SHARD_DIR
     on_disk = {p.name: p.read_bytes() for p in directory.glob("*") if p.is_file()} if directory.is_dir() else {}
-    if not (stale or unpinned or unpinnable) and on_disk != {file: text.encode("utf-8") for file, text in texts.items()}:
+    if not (stale or unpinned or unpinnable or unselected) and on_disk != {file: text.encode("utf-8") for file, text in texts.items()}:
         problems.append("manifest.d is not in canonical form (sorted, one pin per line, one shard per name bucket)")
     for problem in problems:
         print(problem)
-    changed = bool(stale or unpinned or unpinnable or problems)
+    changed = bool(stale or unpinned or unpinnable or unselected or problems)
     if changed and not check:
         ail_manifest.write_pins(SRC, pins)
         if legacy:
