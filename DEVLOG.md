@@ -1,3 +1,18 @@
+## 2026-11-01 -- manifest tooling: new compiler sources join sdk_files (job-manifs1-11012059)
+
+`tools/update_manifest.py` now puts the `s` flag on every `.py`, `.h` and `.c` source under
+`python/pkg-v12/` (recursively) and directly under `stdlib/`, the set
+`test_ail_packaging.test_every_compiler_file_is_selected` checks. Other flags are kept and no other
+file gets `s`. `--check` reports any such compiler source that is pinned without `s` ("unselected
+<name>"), so a job fails in its own pipeline instead of at the integration gate.
+
+Added `test_ail_manifest_compiler` (registered in `tests.d/`): it copies the tree to a temporary
+repository, adds `python/pkg-v12/zz_manifest_compiler_probe.py`, checks that `--check` reports it,
+runs the tool, asserts its pin carries `s`, re-checks clean, and runs the packaging selection check
+on the copy. Probes under `/tmp/probes` also covered `.py`/`.h`/`.c`, a nested pkg-v12 module, stdlib,
+non-compiler files left untouched, an existing `f` flag kept, and a pinned compiler source with `s`
+removed reported by `--check`.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
