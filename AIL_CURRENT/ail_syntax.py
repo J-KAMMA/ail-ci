@@ -2150,17 +2150,13 @@ class _Surface:
             return call('_ail_re_do' + sfx, table, subject, ast.Constant(value=_RE_MODES[name]))
         if name == 'findall':
             if program.ngroups > 1:
-                self.re_refuse(node, name, 'a pattern with several groups returns tuples, which are not built '
-                               '(use finditer and m.group(i))')
-                return None
+                return call(lib.findall_tuples(index), subject)
             return call('_ail_re_findall' + sfx, table, subject)
         if name == 'finditer':
             return call('_ail_re_finditer' + sfx, table, subject)
         if name == 'split':
             if program.ngroups:
-                self.re_refuse(node, name, 'split with groups returns None for a group that did not match, which '
-                               'is not built; use a pattern without groups')
-                return None
+                return call(lib.split_groups(index), subject, given.get('maxsplit', ast.Constant(value=0)))
             return call('_ail_re_split' + sfx, table, subject, given.get('maxsplit', ast.Constant(value=0)))
         if name in ('sub', 'subn'):
             count = given.get('count', ast.Constant(value=0))
@@ -2172,11 +2168,8 @@ class _Surface:
                 return None
             if text is not None:
                 if (b'\\' if program.is_bytes else '\\') in text:
-                    if counted:
-                        self.re_refuse(node, name, 'subn with a replacement template that has a backslash is not built')
-                        return None
                     try:
-                        function = lib.sub_function(index, text)
+                        function = lib.sub_function(index, text, counted)
                     except _relib().ReRefused as exc:
                         self.re_refuse(node, name, f'the replacement {text!r} is not built: {exc}')
                         return None
@@ -2259,6 +2252,32 @@ class _Surface:
         name = func.attr
         if node.keywords or any(isinstance(arg, ast.Starred) for arg in node.args):
             return None
+
+        def group_arg(arg):
+            if isinstance(arg, ast.Constant) and isinstance(arg.value, str):
+                start = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='startn', ctx=ast.Load()),
+                                 args=[copy.deepcopy(arg)], keywords=[])
+                get = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='groupn', ctx=ast.Load()),
+                               args=[copy.deepcopy(arg)], keywords=[])
+            else:
+                start = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='start', ctx=ast.Load()),
+                                 args=[copy.deepcopy(arg)], keywords=[])
+                get = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='group', ctx=ast.Load()),
+                               args=[copy.deepcopy(arg)], keywords=[])
+            return ast.IfExp(test=ast.Compare(left=start, ops=[ast.GtE()],
+                                              comparators=[ast.Constant(value=0)]),
+                             body=get, orelse=ast.Constant(value=None))
+
+        if name == 'span' and len(node.args) <= 1 and all(
+                isinstance(arg, ast.Constant) and isinstance(arg.value, (int, str))
+                and not isinstance(arg.value, bool) for arg in node.args):
+            arg = node.args[0] if node.args else ast.Constant(value=0)
+            attr = 'n' if isinstance(arg.value, str) else ''
+            start = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='start' + attr, ctx=ast.Load()),
+                             args=[copy.deepcopy(arg)], keywords=[])
+            end = ast.Call(func=ast.Attribute(value=copy.deepcopy(func.value), attr='end' + attr, ctx=ast.Load()),
+                           args=[copy.deepcopy(arg)], keywords=[])
+            return ast.Tuple(elts=[start, end], ctx=ast.Load())
         if name in ('group', 'start', 'end'):
             if not node.args:
                 return ast.Call(func=func, args=[ast.Constant(value=0)], keywords=[])
@@ -2266,6 +2285,10 @@ class _Surface:
                     and isinstance(node.args[0].value, str)):
                 return ast.Call(func=ast.Attribute(value=func.value, attr=name + 'n', ctx=ast.Load()),
                                 args=node.args, keywords=[])
+            if name == 'group' and len(node.args) > 1 and all(
+                    isinstance(arg, ast.Constant) and isinstance(arg.value, (int, str))
+                    and not isinstance(arg.value, bool) for arg in node.args):
+                return ast.Tuple(elts=[group_arg(arg) for arg in node.args], ctx=ast.Load())
             if name == 'group' and len(node.args) > 1:
                 self.keep.add('re')
                 self.note(node, 'm.group(a, b) returns a tuple, which is not built; call m.group(i) once per group')

@@ -1827,9 +1827,10 @@ class Library:
     def table_name(self, index):
         return '_ail_re_p%d' % index
 
-    def sub_function(self, index, repl):
-        """Name of the generated function for a literal template with escapes (count is its 2nd argument)."""
-        key = (index, repl)
+    def sub_function(self, index, repl, counted=False):
+        """Name of the generated function for a literal template with escapes (count is its 2nd argument).
+        With `counted` (subn) it returns (text, number of replacements) instead of just the text."""
+        key = (index, 'tmpl', repl, counted)
         if key not in self.sub_keys:
             program = self.programs[index]
             parts = parse_template(repl, program)
@@ -1862,7 +1863,68 @@ class Library:
             if program.is_bytes:
                 text = (text.replace('s: str', 's: bytes').replace('list[str]', 'list[bytes]').replace('count: int) -> str:', 'count: int) -> bytes:')
                         .replace('"".join(out)', 'b"".join(out)'))
+            if counted:
+                text = text.replace('count: int) -> bytes:', 'count: int) -> tuple[bytes, int]:')
+                text = text.replace('count: int) -> str:', 'count: int) -> tuple[str, int]:')
+                text = text.replace('    return b"".join(out)', '    return (b"".join(out), cnt)')
+                text = text.replace('    return "".join(out)', '    return ("".join(out), cnt)')
             self.subs.append(text)
+        return self.sub_keys[key]
+
+    def findall_tuples(self, index):
+        """Name of the generated function for findall on a pattern with several groups: a list of tuples, as
+        CPython returns; a group that did not take part is the empty string (CPython's findall rule)."""
+        key = (index, 'tuples')
+        if key not in self.sub_keys:
+            program = self.programs[index]
+            k = len(self.sub_keys)
+            name = '_ail_re_findallT%d' % k
+            self.sub_keys[key] = name
+            sfx = 'B' if program.is_bytes else ''
+            kind = 'bytes' if program.is_bytes else 'str'
+            cols = ', '.join('m.gs(%d)' % i for i in range(1, program.ngroups + 1))
+            item = 'tuple[%s]' % ', '.join([kind] * program.ngroups)
+            self.subs.append("""
+
+def %(name)s(s: %(kind)s) -> list[%(item)s]:
+    out: list[%(item)s] = []
+    for m in _ail_re_finditer%(sfx)s(%(table)s, s):
+        out.append((%(cols)s))
+    return out
+""" % {'name': name, 'kind': kind, 'item': item, 'sfx': sfx, 'table': self.table_name(index), 'cols': cols})
+        return self.sub_keys[key]
+
+    def split_groups(self, index):
+        """Name of the generated function for split on a pattern with groups: the pieces and, between them, every
+        group's text (None for a group that did not take part), as CPython returns."""
+        key = (index, 'splitg')
+        if key not in self.sub_keys:
+            program = self.programs[index]
+            k = len(self.sub_keys)
+            name = '_ail_re_splitG%d' % k
+            self.sub_keys[key] = name
+            sfx = 'B' if program.is_bytes else ''
+            kind = 'bytes' if program.is_bytes else 'str'
+            parts = []
+            for i in range(1, program.ngroups + 1):
+                parts += ['        if m.start(%d) < 0:' % i, '            out.append(None)',
+                          '        else:', '            out.append(m.group(%d))' % i]
+            self.subs.append("""
+
+def %(name)s(s: %(kind)s, maxsplit: int) -> list:
+    out = []
+    last = 0
+    cnt = 0
+    for m in _ail_re_finditer%(sfx)s(%(table)s, s):
+        if maxsplit != 0 and cnt >= maxsplit:
+            break
+        a = m.start(0)
+        out.append(s[last:a])
+%(parts)s        last = m.end(0)
+        cnt += 1
+    out.append(s[last:])
+    return out
+""" % {'name': name, 'kind': kind, 'sfx': sfx, 'table': self.table_name(index), 'parts': '\n'.join(parts) + '\n'})
         return self.sub_keys[key]
 
     def sub_callable(self, index, counted=False, literal=False):

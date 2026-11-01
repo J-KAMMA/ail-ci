@@ -1,3 +1,29 @@
+## 2026-11-01 -- std_re: findall tuples, split groups, subn templates and match tuple values (job-std_re-11011833)
+
+Added 12 real `re` programs in `lab/stdlib/re/` (log parsing, validation, templating, CSV fields,
+tokenizing, phone/date normalisation, redaction and URL rewriting).  Before the fixes 8 were refused;
+now 11 build on the typed path and every one matches CPython 3.12 stdout and exit code on both
+`AIL_IR=0` and `AIL_IR=1`.  `log_summary.py` stays a named refusal because it uses `m.groupdict()`
+(a dict result with `None` for a group that did not take part), recorded as a follow-up with its exact
+message in `lab/stdlib/re/RESULTS.md`.
+
+The four reasons fixed, most blocking first: `re.findall` with several groups now returns a list of
+tuples (`""` for a group that did not take part); `re.subn` accepts a replacement template with a
+backslash (the template helper has a counted form); `re.split` with groups inserts each group's text
+between the pieces (`None` when it did not take part); and `m.span()` / `m.group(1, 2)` used as values
+lower to tuples of `m.start` / `m.end` / `m.group` calls (`None` for a group that did not take part).
+The stale refusal entries in `test_ail_re` for findall-with-groups, split-with-groups and subn
+templates were removed.
+
+Probes in `/tmp/probes` (`re_findall_tuples`, `re_split_groups`, `re_subn_templates`,
+`re_span_group_values`) cover str and bytes, empty subjects, optional and three-group patterns,
+maxsplit/count, compiled patterns, values through a function argument, a list item, an attribute and
+a dict value; all match CPython on both builds.  All 10 `lab/compare/src/*/main.ail` generated
+`program.c` files are byte-identical to base.  Added `AIL_CURRENT/test_ail_std_re.py`, registered
+through `AIL_CURRENT/tests.d/test_ail_std_re.txt`; it compares the 11 built programs with CPython on
+both IR builds.  Final-state tests: test_ail_std_re, test_ail_re, test_ail_safetynet, test_ail_files
+and test_ail_corpus_findings3.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
