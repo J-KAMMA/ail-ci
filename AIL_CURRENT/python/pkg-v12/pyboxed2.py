@@ -2703,6 +2703,10 @@ class Compiler(boxclosure.ClosureMixin):
         called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
         self.class_values = sorted({n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in self.classes
                                     and isinstance(n.ctx, ast.Load) and id(n) not in called} | {
+            # A class name bound anywhere at module level is read through its module slot (a
+            # rebinding may not have run), so a call must construct whatever class the slot
+            # holds, exactly as a call through a class value does.
+            c for c in self.classes if c in self.module_names} | {
             c for c in self.classes if any(i.get('is_classmethod') for i in self.classes[c]['methods'].values())
             or any(self._is_subclass_of(c, k) for k in self.classes
                    if any(i.get('is_classmethod') for i in self.classes[k]['methods'].values()))})

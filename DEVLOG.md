@@ -1,3 +1,23 @@
+## 2026-11-01 -- covisin1 review: a module-bound class name keeps its constructor when the binding did not run (job-covisin1-11020702)
+
+The review found that routing a module-rebound class name through its module slot also sent the
+call through the dynamic value path, which knew how to call functions but not a class held in the
+slot.  Every module-level binding of a class name -- even an unexecuted `if False: A = B`, an empty
+`for A in []`, an unexecuted `try`/`else`, an unpacking target, or an annotation -- therefore lost
+the constructor and raised `TypeError: 'type' object is not callable`.  `pyboxed2` now adds every
+class that has a module binding to `class_values`, so the value path can construct the class object
+the slot actually holds (the class definition, a rebound class, or a class passed through a
+function, list, attribute or dict) and still raises CPython's `TypeError` when the slot holds a
+non-callable.
+
+Probes (`bash ~/tools/cmp.sh`, default + general) match CPython: the review's `p29_rebind_conditional`
+and `p43_for_rebind`, `p53_try_rebind`, `p54_unpack_rebind`, `p56_annotation_rebind`,
+`p57_cond_ann`, `p59_func_cond_call` (all print `A`, exit 0), the executed-rebinding probes `p30`,
+`p31`, `p55`, and new ones for an executed `if`, a non-class rebinding (`TypeError`), a function
+rebinding, and class values passed through a parameter, list item, attribute and dict value.  All
+ten `lab/compare` AIL sources still generate byte-identical C.  Added a regression test to
+`test_ail_covisin1`.
+
 ## 2026-11-01 -- covisin1 review: snapshot a type constant's value, and follow a rebound class (job-covisin1-11011014)
 
 The review found three wrong answers from expanding a module type constant by name alone: a constant

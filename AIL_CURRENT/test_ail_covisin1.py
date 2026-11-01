@@ -96,6 +96,9 @@ class IsinstanceTypeForms(unittest.TestCase):
     def test_exception_type_constant(self):
         self.compare({'p.py': EXCEPTION_CONST}, ('general',))
 
+    def test_unexecuted_class_binding_keeps_constructor(self):
+        self.compare({'p.py': CONDITIONAL_REBIND}, ('default', 'general'))
+
 
 STATIC = r'''class A: pass
 class B(A): pass
@@ -331,6 +334,36 @@ print(isinstance(C(), K))
 FORWARD_TUPLE = r'''T = (K,)
 print(isinstance(1, T))
 K = str
+'''
+
+CONDITIONAL_REBIND = r'''class A: pass
+class B: pass
+if False:
+    A = B
+for A in []:
+    pass
+try:
+    raise KeyError
+except KeyError:
+    pass
+else:
+    A = B
+if False:
+    A, = (B,)
+A: int
+if False:
+    A: int
+print(type(A()).__name__)
+
+
+def make():
+    return A()
+
+
+print(type(make()).__name__)
+if True:
+    A = B
+print(type(A()).__name__)
 '''
 
 EXCEPTION_CONST = r'''T = (ValueError, KeyError)
