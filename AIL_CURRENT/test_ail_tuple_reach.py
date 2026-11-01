@@ -308,6 +308,82 @@ def main():
 main()
 '''
 
+DEFAULT_STR = '''def g(t="x"):
+    return t
+
+def main():
+    print(g((1, "a")))
+    print(g())
+
+main()
+'''
+
+DEFAULT_NONE = '''def g(t=None):
+    return t
+
+def main():
+    print(g((1, "a")))
+    print(g())
+
+main()
+'''
+
+DEFAULT_INT = '''def g(t=7):
+    return t
+
+def main():
+    print(g((1, "a")))
+    print(g())
+
+main()
+'''
+
+DEFAULT_TUPLE = '''def g(t=(0, "z")):
+    return t[0], t[1]
+
+def main():
+    print(g((1, "a")))
+    print(g())
+
+main()
+'''
+
+RETURN_NONE = '''def g(t, flag):
+    if flag:
+        return t
+    return None
+
+def main():
+    print(g((1, "a"), True))
+    print(g((1, "a"), False))
+
+main()
+'''
+
+BARE_RETURN = '''def g(t, flag):
+    if flag:
+        return t
+    return
+
+def main():
+    print(g((1, "a"), True))
+    print(g((1, "a"), False))
+
+main()
+'''
+
+RETURN_NONE_FIRST = '''def g(t, flag):
+    if flag:
+        return None
+    return t
+
+def main():
+    print(g((1, "a"), True))
+    print(g((1, "a"), False))
+
+main()
+'''
+
 
 class TypedReach(Reach):
     def test_return_from_parameter(self):
@@ -374,6 +450,27 @@ class Conservative(Reach):
 
     def test_mixed_return_method_stays_general(self):
         self.assert_general('tr_mixed_ret', MIXED_RETURN_METHOD)
+
+    def test_default_str_stays_general(self):
+        self.assert_general('tr_def_str', DEFAULT_STR)
+
+    def test_default_none_stays_general(self):
+        self.assert_general('tr_def_none', DEFAULT_NONE)
+
+    def test_default_int_stays_general(self):
+        self.assert_general('tr_def_int', DEFAULT_INT)
+
+    def test_default_tuple_stays_general(self):
+        self.assert_general('tr_def_tup', DEFAULT_TUPLE)
+
+    def test_return_none_stays_general(self):
+        self.assert_general('tr_ret_none', RETURN_NONE)
+
+    def test_bare_return_stays_general(self):
+        self.assert_general('tr_ret_bare', BARE_RETURN)
+
+    def test_return_none_first_stays_general(self):
+        self.assert_general('tr_ret_none_first', RETURN_NONE_FIRST)
 
 
 if __name__ == '__main__':

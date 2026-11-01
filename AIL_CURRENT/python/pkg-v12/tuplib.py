@@ -174,6 +174,8 @@ class Lower(Stmts, Calls, Lams, Exprs):
         """A call site's argument type for an unannotated parameter (a later pass may use it)."""
         if self.quiet or index < 0 or index >= len(sig.given) or sig.given[index]:
             return
+        if index < len(sig.params) and sig.params[index][2]:
+            return                  # a default value has its own type: a call-site type would misread it
         if index < len(sig.rebound) and sig.rebound[index]:
             return                  # the body assigns the parameter again: a call-site type would be wrong
         t = deep(t)
@@ -272,16 +274,17 @@ class Lower(Stmts, Calls, Lams, Exprs):
                 self.errors.append(exc.args[0])
         fn.body = self.stmts(fn.body)
         if fn.returns is None:
-            seen = [t for t in self.rets if t not in (None, 'none')]
-            if seen and all(known(t) for t in seen) and len({code(t) for t in seen}) == 1 and has_tuple(seen[0]):
+            seen = [t for t in self.rets if t is not None]
+            if (seen and all(known(t) for t in seen) and all(t == seen[0] for t in seen)
+                    and has_tuple(seen[0])):
                 self.rets_out[self.fnkey] = seen[0]
                 if self.fnkey in self.rets_in:
                     self.use_type(seen[0])
                     fn.returns = ast.parse(ann_text(seen[0]), mode='eval').body
                     self.force()
-            elif any(is_tuple(deep(t)) for t in self.rets):
-                # a tuple on one return path, another type or shape on another: the caller cannot be told
-                # the return type, so no parameter hint may pull this function onto the typed path
+            elif any(is_tuple(deep(t)) for t in seen):
+                # a tuple on one return path, another type, shape or None on another: the caller cannot be
+                # told the return type, so no parameter hint may pull this function onto the typed path
                 self.mixed_ret.add(self.fnkey)
         for key, t in self.pending:
             dt = deep(t)

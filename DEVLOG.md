@@ -1,3 +1,22 @@
+## 2026-11-01 -- tuple reach review 2: defaults and `None` returns stay general (job-tup1-11020552)
+
+The second review found two more programs the call-site inference broke. A parameter with a default was
+given the tuple type of its call sites, so `def g(t="x")` returned the default as a tuple class (the same
+for `None`, `int`, `float`, `bool` and tuple defaults); a parameter with a default is now never given a
+call-site type, so the compiler's own refusal of a non-numeric default or of a conflicting call site keeps
+the program on the general path. A `return None` or bare `return` was dropped from the return list before
+the mixed-return guard, so a function returning a tuple on one path and `None` on another still settled a
+tuple return type; `None` (and a bare return) now counts as a return type on its path, the function's
+return type is not settled, and it stays on the general path as before the inference. Probes c1, c2, c4,
+c6 (None / bare return, before and after the tuple path, keyword-only) and d1-d5, e1-e8 (str / None / int /
+float / bool / tuple / list defaults, same and different shapes, positional-only, defaults that mention
+another parameter, a default overwritten in the body) all match CPython on the default and forced-general
+builds; c3, c5, c7 and the d4/d5 tuple defaults keep their previous results. `test_ail_tuple_reach` gained
+7 regression tests (28 total); `test_ail_tuple_reach`, `test_ail_tuples`, `test_ail_typed_tuples`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass (6 modules, 0 failed). Generated
+C of the 10 `lab/compare` tasks is unchanged: the 17 builds that succeed are byte-identical between HEAD
+and this change, and the 3 `main.py` failures are identical on both.
+
 ## 2026-11-01 -- tuple reach review: do not type a reassigned parameter or a mixed-return function (job-tup1-11011230)
 
 The review found two programs the new call-site inference broke. `def f(n): n = "x"; return n, (1, "a")`
