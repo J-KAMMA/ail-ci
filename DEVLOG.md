@@ -1,3 +1,20 @@
+## 2026-11-01 -- std_string review 5: shadowed names are not known Templates
+
+The review found the receiver classifier still treated a name as a known `string.Template` when a
+`for`/comprehension/walrus/`with`/`except`/tuple-unpack target rebound it, so lowering sent the call on
+the non-Template value to the Template helper (`p_loop_shadow`, `p_unpack_shadow`, `p_comp_shadow`,
+`p_walrus_shadow` crashed with `AttributeError: 'Box' object has no attribute 'template'`; the silent
+variant with `Box.template`/`delimiter` printed `WRONG`).  `collect_template_scopes` now records every
+binding target (including the names inside `Tuple`/`List`/`Starred` targets and a non-`Name` assignment
+target) in `template_rebindings`; `kind_of_name` returns "not told" for such a name in its scope and in
+an enclosing scope, so it is never classified as a Template.  The isolated shadow programs now match
+CPython on both builds (the for target, tuple unpack, comprehension target, walrus target and the silent
+`Box.template` variant); the reviewer's exact programs, which call a keyword form earlier in the same
+scope, are named compile-time refusals instead of crashes.  Added
+`test_template_method_names_shadowed_by_other_bindings`.  Probes: the full `/tmp/rprobes` and
+`/tmp/probes` sets match CPython or are refused by name.  Final-state tests: test_ail_std_string,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed).
+
 ## 2026-11-01 -- std_string review 4: Template lowering only on known Templates
 
 The review found that `_Surface.call` still lowered `.substitute` / `.safe_substitute` / `.is_valid` /

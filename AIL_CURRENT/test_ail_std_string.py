@@ -229,6 +229,62 @@ def main():
 main()
 """
 
+SHADOWED_RECEIVERS = [
+    r"""import string
+class Box:
+    def substitute(self, v):
+        return "B" + str(v)
+def main():
+    t = string.Template("$x")
+    for t in [Box()]:
+        print(t.substitute(5))
+main()
+""",
+    r"""import string
+class Box:
+    def substitute(self, v):
+        return "B" + str(v)
+def main():
+    t = string.Template("$x")
+    t, other = Box(), 1
+    print(t.substitute(5))
+    print(other)
+main()
+""",
+    r"""import string
+class Box:
+    def substitute(self, v):
+        return "B" + str(v)
+def main():
+    t = string.Template("$x")
+    print([t.substitute(5) for t in [Box()]])
+main()
+""",
+    r"""import string
+class Box:
+    def substitute(self, v):
+        return "B" + str(v)
+def main():
+    t = string.Template("$x")
+    if (t := Box()):
+        print(t.substitute(5))
+main()
+""",
+    r"""import string
+class Box:
+    def __init__(self):
+        self.template = "$y"
+        self.delimiter = "$"
+    def substitute(self, v):
+        return "B" + str(v)
+def main():
+    t = string.Template("$x")
+    for t in [Box()]:
+        print(t.substitute({"y": "WRONG"}))
+main()
+""",
+]
+
 UNKNOWN_KEYWORD_REFUSED = r"""import string
 
 def main():
@@ -345,6 +401,12 @@ class StringPrograms(unittest.TestCase):
         for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
             with self.subTest(env=env):
                 self.compare_text("unknown_receivers", UNKNOWN_RECEIVERS, **env)
+
+    def test_template_method_names_shadowed_by_other_bindings(self):
+        for index, text in enumerate(SHADOWED_RECEIVERS):
+            for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
+                with self.subTest(program=index, env=env):
+                    self.compare_text("shadowed_%d" % index, text, **env)
 
     def test_unknown_receiver_keyword_form_is_refused_by_name(self):
         for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):

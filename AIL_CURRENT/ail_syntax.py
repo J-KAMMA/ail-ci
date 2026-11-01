@@ -1941,6 +1941,7 @@ class _Surface:
         self.re_on = False             # `import re` seen
         self.template_used = False     # the program builds a string.Template: its methods are lowered
         self.template_bindings = {}    # scope -> {local name -> the values assigned to it} (the Template receiver test)
+        self.template_rebindings = {}  # scope -> names bound by a for/comprehension/walrus/with/except/tuple target
         self.template_params = {}      # scope -> its parameter names (a parameter is not told to be a Template)
         self.template_parents = {}     # scope -> the scope that encloses it
         self.template_classes = set()  # the scopes that are class bodies (a method does not see them)
@@ -2092,6 +2093,17 @@ class _Surface:
         """Record, per scope, the values assigned to each local name, so a receiver is classified in the scope
         where it is used (a parameter or a local in another function is not told by a same-named variable)."""
         bindings, params, parents, classes, ranges = {}, {}, {}, set(), []
+        rebindings = {}
+
+        def add_target(target, scope):
+            """Record the names a binding target rebinds; its value is not told, so it is never a known Template."""
+            if isinstance(target, ast.Name):
+                rebindings.setdefault(scope, set()).add(target.id)
+            elif isinstance(target, (ast.Tuple, ast.List)):
+                for each in target.elts:
+                    add_target(each, scope)
+            elif isinstance(target, ast.Starred):
+                add_target(target.value, scope)
 
         def walk(node, scope):
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
@@ -2138,10 +2150,24 @@ class _Surface:
                 for each in node.body:
                     walk(each, key)
                 return
+            if isinstance(node, (ast.For, ast.AsyncFor)):
+                add_target(node.target, scope)
+            elif isinstance(node, ast.comprehension):
+                add_target(node.target, scope)
+            elif isinstance(node, ast.NamedExpr):
+                add_target(node.target, scope)
+            elif isinstance(node, (ast.With, ast.AsyncWith)):
+                for item in node.items:
+                    if item.optional_vars is not None:
+                        add_target(item.optional_vars, scope)
+            elif isinstance(node, ast.ExceptHandler) and node.name is not None:
+                rebindings.setdefault(scope, set()).add(node.name)
             if isinstance(node, ast.Assign):
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         bindings.setdefault(scope, {}).setdefault(target.id, []).append(node.value)
+                    else:
+                        add_target(target, scope)
             elif isinstance(node, ast.AnnAssign) and node.value is not None and isinstance(node.target, ast.Name):
                 bindings.setdefault(scope, {}).setdefault(node.target.id, []).append(node.value)
             elif isinstance(node, ast.AugAssign) and isinstance(node.target, ast.Name):
@@ -2151,6 +2177,7 @@ class _Surface:
 
         walk(self.tree, None)
         self.template_bindings = bindings
+        self.template_rebindings = rebindings
         self.template_params = params
         self.template_parents = parents
         self.template_classes = classes
@@ -2192,6 +2219,9 @@ class _Surface:
             return self.scope_kind[cache]
         if cache in seen:
             return None
+        if name in self.template_rebindings.get(scope, ()):
+            self.scope_kind[cache] = None
+            return None
         local = self.template_bindings.get(scope, {})
         if name in local:
             kinds = {self.kind_of_value(value, seen | {cache}) for value in local[name]}
@@ -2209,6 +2239,8 @@ class _Surface:
         parent = self.template_parents.get(scope) if scope is not None else None
         while parent is not None:
             if parent not in self.template_classes:
+                if name in self.template_rebindings.get(parent, ()):
+                    return None
                 local = self.template_bindings.get(parent, {})
                 if name in local:
                     return self.kind_of_name(name, seen | {cache}, parent)
@@ -2216,7 +2248,7 @@ class _Surface:
                     return None
             parent = self.template_parents.get(parent)
         if scope is not None:
-            if name in self.template_bindings.get(None, {}):
+            if name in self.template_bindings.get(None, {}) or name in self.template_rebindings.get(None, ()):
                 return self.kind_of_name(name, seen | {cache}, None)
         if name in self.classes or name in self.def_names or name in _NON_TEMPLATE_TYPES:
             return 'other'
