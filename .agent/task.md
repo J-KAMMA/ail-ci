@@ -1,3 +1,18 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model qoder/DeepSeek-Flash]
+The completed background task was the Decimal probe I already used (`/tmp/probe4.log`): it confirms defect 2 — base `g` matched CPython for `C.B * Decimal("2")` / `C.B + Decimal("2")` while HEAD fails both builds.
+
+No new findings; the verdict stands: **VERDICT: FIX** (sequence repetition with IntEnum/IntFlag, and `IntEnum * / + Decimal` regressions caused by `_ail_en_num` returning `NotImplemented`).
+
+
+--- ORIGINAL TASK ---
 **IntEnum / IntFlag leftovers: `**`, cross-kind equality, ordering and divmod dispatch.**
 
 Background: an old job (`intenum4`, accepted but its diff no longer applies) fixed these silent differences. On integ, `_AilIntEnum` in `python/pkg-v12/prelude_enum.py` has no `__pow__`/`__rpow__`, and its `__eq__` accepts any `_AilEnum` operand, so an IntEnum member equals a plain Enum member with the same value. Re-check each on today's integ first and fix only what still differs.
@@ -37,7 +52,9 @@ Add a CPython-compared test module `AIL_CURRENT/test_ail_reintenum4.py` register
 - **Records:**
   - New DIFFERENCES rows use placeholder ids `C?-<your branch>-N`.
   - Add a DEVLOG entry at the top with today's date.
-  - Run `python3 tools/update_manifest.py`, then `--check`.
+  - Register a new test module: if `AIL_CURRENT/tests.d/` exists, add `AIL_CURRENT/tests.d/<module>.txt` containing the module
+    name and do NOT edit the tuple in `ail_check.py`; otherwise append it to the `MODULES` tuple.
+  - `git add` new files, run `python3 tools/update_manifest.py`, then `--check`. Do not hand-edit `MANIFEST.json` or `manifest.d/`.
 - **Required tests:** the targeted modules for what you touch, plus test_ail_safetynet, test_ail_files and test_ail_corpus_findings3. Run them on your final commit, not an earlier one.
 - **Mandatory self-check before you report.** A reviewer will repeat it, and past reports were wrong about half the time.
   1. Write probe programs in /tmp/probes/ for every behaviour you changed. Cover the boundaries your implementation implies, not only the example: types, widths, empty, negative, aliasing, values reaching the code through an argument, a list item, an attribute and a dict value, and both builds.
