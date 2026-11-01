@@ -1861,7 +1861,8 @@ class _Surface:
             for name in sorted(self.dc_fields_used):
                 items = ', '.join(f'_AilField({field!r})' for field in self.dc_all.get(name, []))
                 text += f'\n\ndef _ail_dc_fields_{name}():\n    return [{items}]\n'
-        if self.re_lib is not None and (self.re_lib.programs or self.re_lib.uses_escape):
+        if self.re_lib is not None and (self.re_lib.programs or self.re_lib.uses_escape
+                                         or self.re_lib.uses_any):
             text = text.rstrip('\n') + '\n\n' + python_surface(self.re_lib.text())
         return text
 
@@ -2254,12 +2255,18 @@ class _Surface:
             return None
 
         def bind(body):
-            # (lambda _ail_m: body)(receiver): the receiver is evaluated once, as CPython does, and each
-            # element of the tuple reads the bound match
+            # (lambda _ail_m: body)(_ail_re_any(receiver)): the receiver is evaluated once, as CPython does,
+            # and each element of the tuple reads the bound match.  The `object` parameter of _ail_re_any
+            # keeps a receiver that is not statically a Match (None, a str, an argument ...) from making
+            # the typed front end loop: the calls then raise what CPython raises, at run time.
+            if not self.re_lib.programs:
+                return None                 # no re pattern: there is no Match class to bind through
+            self.re_lib.uses_any = True
             return ast.Call(func=ast.Lambda(
                 args=ast.arguments(posonlyargs=[], args=[ast.arg(arg='_ail_m')], vararg=None,
                                    kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]), body=body),
-                args=[copy.deepcopy(func.value)], keywords=[])
+                args=[ast.Call(func=ast.Name(id='_ail_re_any', ctx=ast.Load()),
+                               args=[copy.deepcopy(func.value)], keywords=[])], keywords=[])
 
         def group_arg(arg):
             match = ast.Name(id='_ail_m', ctx=ast.Load())

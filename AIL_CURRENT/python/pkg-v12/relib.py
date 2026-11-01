@@ -1815,6 +1815,7 @@ class Library:
         self.subs = []               # text of generated sub functions
         self.sub_keys = {}
         self.uses_escape = False
+        self.uses_any = False        # a span()/group(a, b) tuple binds its receiver through _ail_re_any
 
     def pattern(self, pattern, flags, is_bytes=False):
         key = (pattern, flags, is_bytes)
@@ -2035,4 +2036,8 @@ def %(name)s(s: %(kind)s, repl, count: int) -> %(kind)s:
             data = program.pack(index)
             rows = [', '.join(str(v) for v in data[i:i + 24]) for i in range(0, len(data), 24)]
             tables.append('%s = [\n    %s]\n' % (self.table_name(index), ',\n    '.join(rows)))
-        return '\n\n\n'.join(parts) + '\n\n' + '\n'.join(tables) + ''.join(self.subs)
+        text = '\n\n\n'.join(parts) + '\n\n' + '\n'.join(tables) + ''.join(self.subs)
+        if self.uses_any:
+            text += ('\n\n\ndef _ail_re_any(x: _ail_re_Match) -> _ail_re_Match:\n'
+                     '    return x\n')
+        return text

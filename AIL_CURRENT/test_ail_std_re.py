@@ -102,5 +102,36 @@ class StdRePrograms(unittest.TestCase):
                 self.assertEqual(got.stdout, want.stdout, "side effect (AIL_IR=%s)" % ir)
 
 
+    def test_tuple_on_non_match_receiver(self):
+        # a span()/group(a, b) tuple on a receiver that is not a Match: the build must terminate and the
+        # program must raise what CPython raises (AttributeError), not hang the typed front end.
+        text = (
+            "import re\n"
+            "print(re.search(r\"(a)\", \"a\").span(0))\n"
+            "print(re.search(r\"(a)\", \"a\").group(0, 1))\n"
+            "n = None\n"
+            "try:\n"
+            "    print(n.span())\n"
+            "except AttributeError:\n"
+            "    print(\"AttributeError\")\n"
+            "try:\n"
+            "    print(n.group(0, 0))\n"
+            "except AttributeError:\n"
+            "    print(\"AttributeError\")\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            oracle = Path(directory, "oracle.py")
+            oracle.write_text(text, encoding="utf-8")
+            want = subprocess.run([sys.executable, "-X", "utf8", str(oracle)], capture_output=True,
+                                  timeout=300)
+            for ir in ("0", "1"):
+                built, _, exe = compile_python(directory, text, "nonmatch" + ir, AIL_IR=ir)
+                self.assertEqual(built.returncode, 0, "non-match (AIL_IR=%s)\n%s%s" % (
+                    ir, built.stdout, built.stderr))
+                got = subprocess.run([str(exe)], capture_output=True, timeout=300)
+                self.assertEqual(got.returncode, want.returncode, got.stderr.decode("utf-8", "replace"))
+                self.assertEqual(got.stdout, want.stdout, "non-match (AIL_IR=%s)" % ir)
+
+
 if __name__ == "__main__":
     unittest.main()
