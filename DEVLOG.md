@@ -1,3 +1,22 @@
+## 2026-11-01 -- stdlib `struct`: pack / unpack / Struct (job-std_struct-11012058)
+
+Added `python/pkg-v12/structlib.py` and `prelude_struct.py`, called from the batch-5 pass in
+`stdlib5.py` / `ail_syntax.python_surface`. `struct.pack`, `unpack`, `calcsize`, `pack_into`,
+`unpack_from`, `iter_unpack`, `Struct` (format/size and all four pack methods) and `struct.error`
+are built from CPython-compatible Python source. The prelude parses `@ = < > !` orders, native
+alignment and trailing `@` padding, whitespace and repeat counts, empty/zero-length fields, and the
+format characters `x c b B ? h H i I l L q Q n N e f d s p`; float16/32/64 bits are made with
+integer arithmetic and exact rounding. Module calls with `*values` are lowered to an expanded
+argument list so the general path models them.
+
+`lab/stdlib/struct/` has 12 programs (all 15–60 lines) using headers, network packets, records,
+strings, flags, floats, buffers, byte orders, `Struct`, imports/aliases and caught errors. All 12
+build in default mode on the general path and match CPython 3.12 stdout and exit code; the typed
+path names the prelude's module-level table and falls back (recorded in
+`lab/stdlib/struct/RESULTS.md`). Added `test_ail_std_struct.py` (registered through
+`tests.d/test_ail_std_struct.txt`) and refreshed the manifest. Ran `test_ail_std_struct`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and the targeted stdlib tests.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
