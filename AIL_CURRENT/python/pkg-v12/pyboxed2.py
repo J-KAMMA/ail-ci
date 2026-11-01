@@ -4262,10 +4262,15 @@ class Compiler(boxclosure.ClosureMixin):
             _enter = '    AIL_FRAME_ENTER(cx, f, %d);\n' % n_slots
             full = full.replace(_enter, _enter + '    ail_exact_enter(cx);\n', 1)
             full = full.replace('AIL_FRAME_LEAVE(cx, f);', 'ail_exact_leave(cx); AIL_FRAME_LEAVE(cx, f);')
-            _ok = '    ail_exact_leave(cx); AIL_FRAME_LEAVE(cx, f);\n    return AIL_OK;'
-            _guard = ('    if (cx->exact_depth == 1) { ail_st _vst = ail_exact_visible(cx, out); '
+            # Every successful return must check the value it hands back, not only the tail return: a
+            # source-level `return` inside an `if` leaves through its own AIL_FRAME_LEAVE.  The rewrite
+            # above already put `ail_exact_leave` in front of every frame leave; match that prefix with
+            # any indentation (and on one line, e.g. the finally COMPLETE_RETURN arm).
+            _guard = ('if (cx->exact_depth == 1) { ail_st _vst = ail_exact_visible(cx, out); '
                       'if (_vst != AIL_OK) { ail_exact_leave(cx); AIL_FRAME_LEAVE(cx, f); return _vst; } }\n')
-            full = full.replace(_ok, _guard + _ok)
+            full = re.sub(r'(?m)([ \t]*)ail_exact_leave\(cx\); AIL_FRAME_LEAVE\(cx, f\);(\s*)return AIL_OK;',
+                          lambda m: '%s%s%sail_exact_leave(cx); AIL_FRAME_LEAVE(cx, f);%sreturn AIL_OK;'
+                          % (m.group(1), _guard, m.group(1), m.group(2)), full)
         self.top_defs.append(full)
         if info['lru_cache']:
             self._emit_lru_wrapper(info)
@@ -11608,16 +11613,27 @@ class Compiler(boxclosure.ClosureMixin):
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
             setters = [c for c in self.class_order if '__ail_set_' + target.attr in self.classes[c]['methods']]
-            if setters:
-                # obj.NAME = v where a class has a property setter for NAME
+            getters = [c for c in self.class_order
+                       if self.classes[c]['methods'].get(target.attr, {}).get('is_property')]
+            read_only = [c for c in getters
+                         if '__ail_set_' + target.attr not in self.classes[c]['methods']]
+            special = sorted(set(setters) | set(read_only),
+                             key=lambda c: -sum(1 for k in self.classes if self._is_subclass_of(c, k)))
+            if special:
+                # obj.NAME = v: a property setter runs it; a property with no setter raises
+                # AttributeError, as CPython does, instead of silently shadowing the property.
                 first = True
-                for c in setters:
-                    info = self.classes[c]['methods']['__ail_set_' + target.attr]
+                for c in special:
                     ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
                     first = False
                     ctx.indent += 1
-                    dummy = ctx.tmp()
-                    ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], dummy, obj, value_c))
+                    if c in setters:
+                        info = self.classes[c]['methods']['__ail_set_' + target.attr]
+                        dummy = ctx.tmp()
+                        ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], dummy, obj, value_c))
+                    else:
+                        ctx.emit('st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, "property \'%s\' of \'%s\' '
+                                 'object has no setter");' % (target.attr, c))
                     ctx.check()
                     ctx.indent -= 1
                 ctx.emit('} else {')

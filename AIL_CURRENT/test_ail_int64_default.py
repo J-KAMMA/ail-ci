@@ -436,6 +436,11 @@ print(Fraction(2, 1) ** 100)
             ('(Fraction(1, 2) ** 200).denominator', 'from fractions import Fraction\n'),
             ('round(Decimal(2) ** 100)', 'from decimal import Decimal\n'),
             ('(Decimal(2) ** 100).__trunc__()', 'from decimal import Decimal\n'),
+            ('round(Fraction(2) ** 100)', 'from fractions import Fraction\n'),
+            ('(Fraction(2) ** 100) // 1', 'from fractions import Fraction\n'),
+            ('math.floor(Decimal(2) ** 100)', 'import math\nfrom decimal import Decimal\n'),
+            ('math.ceil(Decimal(2) ** 100)', 'import math\nfrom decimal import Decimal\n'),
+            ('hash(Fraction(2) ** 100)', 'from fractions import Fraction\n'),
         )
         for expr, setup in snippets:
             with self.subTest(expr=expr), tempfile.TemporaryDirectory() as tmp:
@@ -444,6 +449,17 @@ print(Fraction(2, 1) ** 100)
                 code, out, err = run(exe, '')
                 self.assertEqual((code, out), (1, ''))
                 self.assertEqual(err, 'OverflowError: integer overflow in int()%s\n' % SUFFIX)
+
+    def test_read_only_property_assignment_stops(self):
+        text = ('from fractions import Fraction\n'
+                'f = Fraction(1, 2)\n'
+                'f.numerator = 3\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            made, exe = build(tmp, text, 'roprop')
+            self.assertEqual(made.returncode, 0, made.stderr)
+            code, out, err = run(exe, '')
+            self.assertEqual((code, out), (1, ''))
+            self.assertIn("AttributeError: property 'numerator' of 'Fraction' object has no setter", err)
 
     def test_exact_mode_hands_back_exact_ints(self):
         text = ('from decimal import Decimal\n'

@@ -1,3 +1,19 @@
+## 2026-11-01 -- Decimal/Fraction exact-return check covers every exit; property stores stop (job-decexact2-11020111)
+
+The review found the outermost-return check was inserted only before a prelude function's final `return AIL_OK`, so a
+source-level `return` inside an `if` handed a big int back to the program: `round(Fraction(2) ** 100)`,
+`(Fraction(2) ** 100) // 1` and `math.floor/ceil(Decimal(2) ** 100)` printed the big value, and user code then computed
+with it exactly in int64 mode. `_emit_function` now applies the `exact_depth == 1` check before every successful
+`return AIL_OK` of an exact prelude function (including the finally COMPLETE_RETURN arm); each such exit stops with
+`integer overflow in int()` while internal calls (depth > 1) still pass exact values. Storing to a property with no
+setter (`Fraction(1, 2).numerator = 3`) now raises CPython's `AttributeError: property 'numerator' of 'Fraction' object
+has no setter` instead of silently shadowing it. Probes in `/tmp/probes`: `p_roundfrac`, `p_floordivfrac`,
+`p_dec_mathfloor`, `p_leaktyped` and `p_hashfrac` stop loudly on both builds; `p_numassign` and `p_prop` match CPython;
+`p_accept` and `p_frac_small` match CPython; `p_exact_ret` matches CPython with `AIL_EXACT_INT=1`. The 6 `lab/compare`
+`main.py` that build keep byte-identical `program.c` (the other 4 refuse identically). `test_ail_int64_default` gained
+the new return and property cases; `test_ail_int64_default`, `test_ail_stdtop1`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` pass (542 s, 0 failed).
+
 ## 2026-11-01 -- Decimal/Fraction review: an exact int cannot escape through a returned value (job-decexact2-11011010)
 
 The review found that big ints still escaped the library into the program: `(Decimal(2) ** 100).as_integer_ratio()`
