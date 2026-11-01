@@ -1,3 +1,16 @@
+## 2026-11-01 -- stdlib `operator`: capture bound arguments at construction (job-std_operator-11011752)
+
+Review fix. `itemgetter(k, ...)` and `methodcaller(name, ...)` are lowered to the immediate call
+`(lambda c0, c1: lambda arg: ...)(k0, k1)`, so the keys and bound arguments are evaluated once,
+left to right, when the callable is built (CPython's behaviour) and a later loop rebinding no
+longer changes them. Single-argument `itemgetter(k)` had the same late binding and is fixed too.
+`attrgetter` needs no change: its arguments are constant attribute names. The returned callable
+still takes exactly one argument, so an extra positional argument is CPython's `TypeError`.
+An immediate `key=` / `map()` / `filter()` argument keeps the plain one-argument lambda those
+lowerings inline (the callable is used at once), and a key / map callable stored and then used is
+still the captured form. `test_ail_std_operator` now pins the loop / rebinding capture for
+`itemgetter` and `methodcaller`, plus direct key/map/filter and a stored key callable.
+
 ## 2026-11-01 -- stdlib `operator`: real programs and surface coverage (job-std_operator-11011752)
 
 Added 12 realistic programs under `lab/stdlib/operator/` and built each with the default

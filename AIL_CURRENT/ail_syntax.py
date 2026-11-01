@@ -1669,8 +1669,45 @@ class _SurfaceExpr(ast.NodeTransformer):
         if (surface.re_on and path is None and isinstance(node.func, ast.Attribute)
                 and not isinstance(node.func.value, ast.Name)):
             node.func.value = self.visit(node.func.value)      # re.search(...).start(): the inner call too
+        if (path is None and isinstance(node.func, ast.Name) and node.func.id in ('map', 'filter')
+                and node.func.id not in surface.names and node.func.id not in surface.def_names
+                and node.args and isinstance(node.args[0], ast.Call)):
+            # map(itemgetter(...), xs) / filter(methodcaller(...), xs): the callable is used at
+            # once, so the plain one-argument lambda is the form the iterator lowering inlines.
+            call = node.args[0]
+            inner_path = surface.path(call.func)
+            inline = None
+            if inner_path == 'operator.itemgetter' and not call.keywords:
+                call.args = [self.visit(arg) for arg in call.args]
+                inline = surface.operator_itemgetter(call.args, capture=False)
+            elif inner_path == 'operator.methodcaller':
+                call.args = [self.visit(arg) for arg in call.args]
+                for keyword in call.keywords:
+                    keyword.value = self.visit(keyword.value)
+                inline = surface.operator_methodcaller(call, capture=False)
+            if inline is not None:
+                node.args[0] = inline
+                self.changed = True
         node.args = [self.visit(arg) for arg in node.args]
         for item in node.keywords:
+            if item.arg == 'key' and isinstance(item.value, ast.Call):
+                # A key= is called once, immediately: the plain one-argument lambda (no captured
+                # temporaries) is the form the sort-key lowering inlines.
+                call = item.value
+                key_path = surface.path(call.func)
+                inline = None
+                if key_path == 'operator.itemgetter' and not call.keywords:
+                    call.args = [self.visit(arg) for arg in call.args]
+                    inline = surface.operator_itemgetter(call.args, capture=False)
+                elif key_path == 'operator.methodcaller':
+                    call.args = [self.visit(arg) for arg in call.args]
+                    for keyword in call.keywords:
+                        keyword.value = self.visit(keyword.value)
+                    inline = surface.operator_methodcaller(call, capture=False)
+                if inline is not None:
+                    item.value = inline
+                    self.changed = True
+                    continue
             item.value = self.visit(item.value)
             if (item.arg == 'key' and isinstance(item.value, ast.Attribute) and item.value.attr == '__getitem__'
                     and isinstance(item.value.value, (ast.Name, ast.Attribute))):
@@ -2592,17 +2629,37 @@ class _Surface:
             args=ast.arguments(posonlyargs=[], args=[ast.arg(arg=each) for each in params], vararg=None,
                                kwonlyargs=[], kw_defaults=[], kwarg=None, defaults=[]), body=body)
 
-    def operator_itemgetter(self, args):
+    def _operator_capture_lambda(self, captured, params, body):
+        """`(lambda c0, c1: lambda params: body)(captured...)` -- CPython evaluates the
+        itemgetter / methodcaller arguments once, when the callable is built, while the
+        returned callable still takes exactly the one argument.  The immediate outer call
+        binds those values, so a later loop rebinding cannot change them."""
+        names = ['_ail_cap%d' % index for index in range(len(captured))]
+        outer = self._operator_lambda(names, self._operator_lambda(params, body))
+        return ast.Call(func=outer, args=list(captured), keywords=[])
+
+    def operator_itemgetter(self, args, capture=True):
         """`itemgetter(k)` / `itemgetter(k, j)` as the one-argument lambda the key= lowering inlines."""
         if not args:
             return None
+        if not capture:
+            def plain(index):
+                return ast.Subscript(value=ast.Name(id='_ail_item', ctx=ast.Load()), slice=index,
+                                     ctx=ast.Load())
+            if len(args) == 1:
+                body = plain(args[0])
+            else:
+                body = ast.Tuple(elts=[plain(each) for each in args], ctx=ast.Load())
+            return self._operator_lambda(['_ail_item'], body)
+        names = ['_ail_cap%d' % index for index in range(len(args))]
         def at(index):
-            return ast.Subscript(value=ast.Name(id='_ail_item', ctx=ast.Load()), slice=index, ctx=ast.Load())
-        if len(args) == 1:
-            body = at(args[0])
+            return ast.Subscript(value=ast.Name(id='_ail_item', ctx=ast.Load()),
+                                 slice=ast.Name(id=index, ctx=ast.Load()), ctx=ast.Load())
+        if len(names) == 1:
+            body = at(names[0])
         else:
-            body = ast.Tuple(elts=[at(each) for each in args], ctx=ast.Load())
-        return self._operator_lambda(['_ail_item'], body)
+            body = ast.Tuple(elts=[at(each) for each in names], ctx=ast.Load())
+        return self._operator_capture_lambda(args, ['_ail_item'], body)
 
     def operator_attrgetter(self, args):
         """`attrgetter('a')` / `attrgetter('a', 'b.c')` as a one-argument lambda (dotted names traverse)."""
@@ -2624,16 +2681,28 @@ class _Surface:
             body = ast.Tuple(elts=parts, ctx=ast.Load())
         return self._operator_lambda(['_ail_attr'], body)
 
-    def operator_methodcaller(self, node):
+    def operator_methodcaller(self, node, capture=True):
         """`methodcaller('strip')` / `methodcaller('replace', 'a', 'b')` as a one-argument lambda."""
         args = node.args
         if not args or not (isinstance(args[0], ast.Constant) and isinstance(args[0].value, str)
                             and args[0].value.isidentifier()):
             return None
+        if not capture:
+            call = ast.Call(func=ast.Attribute(value=ast.Name(id='_ail_mc', ctx=ast.Load()),
+                                               attr=args[0].value, ctx=ast.Load()),
+                            args=args[1:], keywords=node.keywords)
+            return self._operator_lambda(['_ail_mc'], call)
+        if any(keyword.arg is None for keyword in node.keywords):
+            return None
+        captured = [*args[1:], *(keyword.value for keyword in node.keywords)]
+        names = ['_ail_cap%d' % index for index in range(len(captured))]
+        positional = [ast.Name(id=each, ctx=ast.Load()) for each in names[:len(args) - 1]]
+        keywords = [ast.keyword(arg=keyword.arg, value=ast.Name(id=each, ctx=ast.Load()))
+                    for keyword, each in zip(node.keywords, names[len(args) - 1:])]
         call = ast.Call(func=ast.Attribute(value=ast.Name(id='_ail_mc', ctx=ast.Load()),
                                            attr=args[0].value, ctx=ast.Load()),
-                        args=args[1:], keywords=node.keywords)
-        return self._operator_lambda(['_ail_mc'], call)
+                        args=positional, keywords=keywords)
+        return self._operator_capture_lambda(captured, ['_ail_mc'], call)
 
     def math_call(self, node, name):
         args = node.args

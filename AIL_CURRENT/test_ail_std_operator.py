@@ -30,6 +30,56 @@ PROGRAMS = (
 )
 REFUSED = "sequence_concat"
 
+CAPTURE = {
+    "capture_methodcaller": r"""from operator import methodcaller
+old, new = "a", "A"
+f = methodcaller("replace", old, new)
+old, new = "n", "N"
+print(f("banana"))
+sep = ","
+s = methodcaller("split", sep)
+sep = ";"
+print(s("a,b;c"))
+n = 6
+pad = methodcaller("rjust", n, ".")
+n = 3
+print(pad("x"))
+checkers = []
+for suffix in [".txt", ".md"]:
+    checkers.append(methodcaller("endswith", suffix))
+print([f("notes.txt") for f in checkers])
+""",
+    "capture_itemgetter": r"""from operator import itemgetter
+rows = [("a", 10, 100), ("b", 20, 200), ("c", 30, 300)]
+i, j = 1, 2
+g = itemgetter(i, j)
+i, j = 2, 0
+print(g(rows[0]))
+getters = []
+for p in [0, 2]:
+    getters.append(itemgetter(p))
+print([each(rows[0]) for each in getters])
+""",
+    "immediate_key_and_map": r"""from operator import itemgetter, methodcaller
+rows = [("b", 2), ("a", 1), ("c", 3)]
+i = 0
+print(sorted(rows, key=itemgetter(i)))
+i = 1
+print(max(rows, key=itemgetter(i)), min(rows, key=itemgetter(i)))
+print(list(map(itemgetter(1), rows)))
+i = 0
+g = itemgetter(i)
+i = 1
+print(sorted(rows, key=g))
+names = ["a.md", "b.txt", "c.md"]
+s = ".md"
+print(list(filter(methodcaller("endswith", s), names)))
+f = methodcaller("endswith", s)
+s = ".txt"
+print(list(filter(f, names)))
+""",
+}
+
 
 def compile_python(directory, text, name, **env):
     source, exe = Path(directory, name + ".ail"), Path(directory, name)
@@ -73,6 +123,15 @@ class OperatorTests(unittest.TestCase):
             self.skipTest("lab/stdlib/operator is not part of this tree: " + ", ".join(missing))
         for name in PROGRAMS:
             text = (LAB / (name + ".py")).read_text(encoding="utf-8")
+            for general in (False, True):
+                for ir in (False, True):
+                    if general and not ir:
+                        continue
+                    with self.subTest(program=name, ir=ir, general=general):
+                        self.check(name, text, ir, general)
+
+    def test_arguments_are_captured_at_construction(self):
+        for name, text in CAPTURE.items():
             for general in (False, True):
                 for ir in (False, True):
                     if general and not ir:
