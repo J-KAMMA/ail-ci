@@ -151,6 +151,19 @@ LAYOUTS = {
                   'def item(x=ITEMS[0]):\n'
                   '    return x\n',
     },
+    'computed_rebind': {
+        'main.py': 'def g():\n'
+                   '    import lib\n'
+                   '    return lib.f(), lib.SIZE\n'
+                   '\n'
+                   'print(g())\n',
+        'lib.py': 'print("lib start")\n'
+                  'SIZE = 1\n'
+                  'SIZE = 2\n'
+                  '\n'
+                  'def f(a=SIZE):\n'
+                  '    return a\n',
+    },
     'computed_package': {
         'main.py': 'def run():\n'
                    '    import pkg.leaf\n'
@@ -194,6 +207,9 @@ class ComputedValues(ModulesBase):
 
     def test_zero_negative_empty_and_item_boundaries(self):
         self.assertEqual(self.check("computed_boundaries"), 'bounds\n(1, -5, 0, 7)\n')
+
+    def test_an_earlier_binding_of_the_same_name_keeps_its_place(self):
+        self.assertEqual(self.check("computed_rebind"), 'lib start\n(2, 2)\n')
 
     def test_computed_values_in_a_package_submodule(self):
         self.assertEqual(self.check("computed_package"), 'pkg\nleaf\n(16, 16)\n')
@@ -256,6 +272,16 @@ class EffectfulValues(ModulesBase):
                                 "d = D()\nN = d.get('x')\n\n\ndef f(x=N):\n    return x\n",
                       "main.py": "print('start')\ndef g():\n    import lib\n    return lib.f()\n\n"
                                  "print(g())\n"},
+                     "function-level `import lib`", "write instead")
+
+    def test_a_subscript_over_an_unfoldable_call_is_refused(self):
+        lib = ("print('before')\ndef base():\n    return {}\nD = base()\nX = D['b']\n\n\n"
+               "def f(a=X):\n    return a\n")
+        main = "def g():\n    import lib\n    return lib.f()\n\nprint('calling')\nprint(g())\n"
+        self.refused({"lib.py": lib, "main.py": main},
+                     "function-level `import lib`", "write instead")
+        self.refused({"lib.py": lib.replace("X = D['b']\n", "").replace("a=X", "a=D['b']"),
+                      "main.py": main},
                      "function-level `import lib`", "write instead")
 
     def test_a_container_mutated_before_the_definition_is_refused(self):

@@ -2306,18 +2306,22 @@ class Program:
             return node
         return node
 
-    def move_bad_expr(self, mod, node, seen):
+    def move_bad_expr(self, mod, node, seen, annotation=False):
         if node is None:
             return None
         env = getattr(self, '_move_env', None)
+        folded = False
         if env is not None:
             try:
                 self.fold(mod, node, env)
+                folded = True
             except _Raises as exc:
                 return exc.node
             except _Unfoldable:
                 pass
         kind = type(node)
+        if kind is ast.Subscript and not annotation and not folded:
+            return node
         if kind is ast.Constant:
             return None
         if kind is ast.Name:
@@ -2335,14 +2339,14 @@ class Program:
                 bad = self.move_bad_attr(mod, node, seen)
                 if bad is not None:
                     return bad
-            return self.move_bad_expr(mod, node.value, seen)
+            return self.move_bad_expr(mod, node.value, seen, annotation)
         if kind is ast.Call:
             for a in node.args:
-                bad = self.move_bad_expr(mod, a, seen)
+                bad = self.move_bad_expr(mod, a, seen, annotation)
                 if bad is not None:
                     return bad
             for k in node.keywords:
-                bad = self.move_bad_expr(mod, k.value, seen)
+                bad = self.move_bad_expr(mod, k.value, seen, annotation)
                 if bad is not None:
                     return bad
             return self.move_bad_call(mod, node, seen)
@@ -2358,7 +2362,7 @@ class Program:
             return node
         for c in ast.iter_child_nodes(node):
             if isinstance(c, ast.expr):
-                bad = self.move_bad_expr(mod, c, seen)
+                bad = self.move_bad_expr(mod, c, seen, annotation)
                 if bad is not None:
                     return bad
         return None
@@ -2427,7 +2431,7 @@ class Program:
         if kind is ast.AnnAssign:
             if not isinstance(node.target, ast.Name):
                 return node.target
-            bad = self.move_bad_expr(mod, node.annotation, seen)
+            bad = self.move_bad_expr(mod, node.annotation, seen, True)
             if bad is not None:
                 return bad
             return self.move_bad_expr(mod, node.value, seen)
@@ -2654,6 +2658,18 @@ class Program:
                     if any(effectful(j) for j in range(start + 1, before)):
                         unresolved.append(use)
                         return
+                for j in bindings.get(name, ()):
+                    if j >= i:
+                        break
+                    earlier = order[j]
+                    if isinstance(earlier, definitions) or id(earlier) in needed:
+                        continue
+                    if effectful(j):
+                        unresolved.append(use)
+                        return
+                    needed.add(id(earlier))
+                    for inner in read_names(earlier):
+                        need_name(inner, j, earlier)
             if isinstance(stmt, definitions) or id(stmt) in needed:
                 return
             needed.add(id(stmt))
@@ -2697,10 +2713,10 @@ class Program:
                         return bad
                 for arg in node.args.posonlyargs + node.args.args + node.args.kwonlyargs + [node.args.vararg, node.args.kwarg]:
                     if arg is not None and arg.annotation is not None:
-                        bad = self.move_bad_expr(mod, arg.annotation, set())
+                        bad = self.move_bad_expr(mod, arg.annotation, set(), True)
                         if bad is not None:
                             return bad
-                return self.move_bad_expr(mod, node.returns, set())
+                return self.move_bad_expr(mod, node.returns, set(), True)
             if isinstance(node, ast.ClassDef):
                 for d in node.decorator_list:
                     bad = self.decorator_bad(mod, d)

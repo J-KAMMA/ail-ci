@@ -1,3 +1,25 @@
+## 2026-11-01 -- lazymod1 review: earlier rebindings move too; unfoldable subscripts are refused (job-lazymod1-11020054)
+
+The review found two ways the lazy-module split still differed from CPython. First, needing a later
+binding of a name left an earlier binding of the same name in `_ail_init_<mod>`, where it ran after
+the hoisted later value and overwrote it (`SIZE = 1; SIZE = 2; def f(a=SIZE)` returned `(2, 1)`).
+`need_name` now also places every earlier binding of that name with the definitions, recursively
+following its own reads; if such an earlier binding acts or may raise it is refused by name instead.
+Second, a subscript whose container could not be folded (`D = base(); X = D["b"]`) was treated as
+pure, so it was hoisted and raised before the module's (and the caller's) earlier prints.
+`move_bad_expr` now treats an unfoldable subscript as potentially raising and refuses the definition
+that needs it; annotations (`list[int]`) keep their existing treatment.
+
+Probes compare stdout and exit with CPython on the default and general builds: `p1_rebind` (`(2, 2)`
+now), `p1_three`, `p1_unpack`, `p1_aug`, `p1_ann`, `p1_def_before`, `p5_control`,
+`p2_subscript_safe` and `p2_subscript_annotation` match; `p1_effectful`, `p3_raise`,
+`p_direct_subscript`, `p2_subscript_list` and `p2_subscript_arg` are refused by name. Added a
+`computed_rebind` layout and a two-program subscript-refusal case to `test_ail_lazymod1`. The change
+is confined to the lazy-module split and `move_bad_expr`, so the C of the ten lab/compare tasks is
+unchanged (`merge_program` is not entered for their standard imports). Final-state tests:
+test_ail_lazymod1, test_ail_modsys, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-11-01 -- lazymod1 review: only genuinely pure values move with the definitions (job-lazymod1-11011234)
 
 The review found three ways the previous walk moved an effect ahead of the module's own statements:
