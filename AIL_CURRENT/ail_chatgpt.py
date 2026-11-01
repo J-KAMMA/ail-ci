@@ -1,8 +1,9 @@
 """Portable entry for the AIL source snapshot; no implicit model calls."""
 import os as _os, sys as _sys
-if __name__ == "__main__" and _os.environ.get("AIL_SERVER") == "1" and _sys.argv[1:2] in (["compile"], ["check"]):
-    # Opt-in resident compile server (ail_server.py): it has the compiler imported already. Any problem before the
-    # build starts on the server means the normal path below;  is that answer.
+if __name__ == "__main__" and _os.environ.get("AIL_SERVER", "").strip().lower() not in ("0", "off", "false", "no") \
+        and _sys.argv[1:2] in (["compile"], ["check"]):
+    # Resident compile server (ail_server.py), on by default on POSIX: it has the compiler imported already. The first
+    # build starts it in the background and runs below; a missing, slow or crashed server also means the normal path.
     try:
         import ail_server as _ail_server
         _served = _ail_server.client(_sys.argv[1:])

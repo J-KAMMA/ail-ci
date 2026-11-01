@@ -1,12 +1,13 @@
-"""Resident compile server, opt-in with AIL_SERVER=1.  POSIX with SO_PEERCRED (Linux) only; everywhere else, and whenever
-anything goes wrong before a build starts, `ail_chatgpt.py compile|check` runs the normal way.
+"""Resident compile server, on by default on POSIX with SO_PEERCRED (Linux); AIL_SERVER=0 turns it off.  Windows, and
+everywhere else, and whenever anything goes wrong before or during a build, `ail_chatgpt.py compile|check` runs the
+normal way.
 
 Why: a build pays about 0.25 s to import the compiler (the CLI front end, then the `pyc.py` child).  A server imports it
 once.  Every request is a fork of that template process, so no state leaks between builds and a crash kills one build.
 
     client (ail_chatgpt.py, at the very top)         server (python ail_server.py serve SOCKET IDLE_SECONDS)
     ------------------------------------------       ---------------------------------------------------------
-    connect, or start a server and connect           template: imported ail_chatgpt, pyc, ... once
+    connect, or start a server in the background     template: imported ail_chatgpt, pyc, ... once
     send argv, cwd, env, umask, rlimits + fds 0,1,2   per connection fork M (own session; checks SO_PEERCRED uid)
     wait; forward SIGINT/SIGTERM/SIGHUP/SIGQUIT       M forks A (own process group): ail_chatgpt.main(argv) with the
     exit like the build did (also death by signal)    client's fds, cwd, env, umask; M relays signals to A's group,
@@ -14,14 +15,19 @@ once.  Every request is a fork of that template process, so no state leaks betwe
                                                       A runs `python pyc.py ...` as a fork B running pyc.main, with the
                                                       same capture, env and timeout as subprocess.run gave it
 
-The socket lives in a private per-user directory (0700, owned by the user, checked) and its name carries a hash of what the
-template process froze at import: the interpreter, every compiler source file, the environment variables the compiler reads
-while it is imported (IMPORT_ENV), PYTHON*/LANG/LC_* and the memory limits.  Another value of any of them means another
-server; an old one exits after AIL_SERVER_IDLE seconds (default 600) without a request.  The server refuses a request
-whose hash differs from its own (the client then builds the normal way), so a source file that changed between the
-client's check and the fork is never served stale.
+The first build has no server yet: it starts one in the background (a starter child holds the lock until the socket is
+ready) and compiles in-process exactly as it did without a server.  Later builds connect to it.  If the server is missing,
+takes more than two seconds to answer the start of a request, or dies, the client compiles in-process without a note.
 
-Environment: AIL_SERVER=1 turns the client on; AIL_SERVER_IDLE=seconds; AIL_SERVER_DIR=directory (tests)."""
+The socket lives in a private per-user directory (0700, owned by the user, checked) and its name carries a hash of what the
+template process froze at import: the interpreter, every compiler source file (including pkg-v12), the environment
+variables the compiler reads while it is imported (IMPORT_ENV), PYTHON*/LANG/LC_* and the memory limits.  Another value of
+any of them means another server; an old one exits after AIL_SERVER_IDLE seconds (default 600) without a request.  The
+server refuses a request whose hash differs from its own (the client then builds the normal way), so a source file that
+changed between the client's check and the fork is never served stale.  Everything else in the request environment (AIL_*
+knobs, --exact-int, flags) is applied per request, never frozen at the server's start.
+
+Environment: AIL_SERVER=0 turns the client off; AIL_SERVER_IDLE=seconds; AIL_SERVER_DIR=directory (tests)."""
 import os
 import sys
 
@@ -34,8 +40,9 @@ IMPORT_ENV = ('AIL_EXTRA_CFLAGS', 'AIL_FASTWALK', 'AIL_G7_FORCE', 'AIL_QUERY_CAC
 LIMITS = ('RLIMIT_AS', 'RLIMIT_DATA', 'RLIMIT_STACK', 'RLIMIT_NOFILE', 'RLIMIT_CPU', 'RLIMIT_FSIZE', 'RLIMIT_CORE')
 KEYED_LIMITS = ('RLIMIT_AS', 'RLIMIT_DATA', 'RLIMIT_STACK', 'RLIMIT_NOFILE')   # fixed when the template is made
 FORWARD = ('SIGINT', 'SIGTERM', 'SIGHUP', 'SIGQUIT')
-START_WAIT = 30.0           # seconds a client waits for a server it started
-ACK_WAIT = 10.0             # seconds from sending a request to the server's "started" answer
+START_WAIT = 30.0           # seconds a starter waits for the server it starts
+LOCK_WAIT = 2.0             # seconds a later client waits for a starter before it builds in-process
+ACK_WAIT = 2.0              # seconds from sending a request to the server's "started" answer
 
 
 # ----------------------------------------------------------------------------------------------- identity
@@ -126,6 +133,12 @@ def supported():
     return os.name == 'posix' and hasattr(socket, 'AF_UNIX') and hasattr(socket, 'SO_PEERCRED') and hasattr(socket, 'send_fds')
 
 
+def enabled(env=None):
+    """The resident server is the default; only an explicit AIL_SERVER=0 (or off/false/no) turns it off."""
+    value = (os.environ if env is None else env).get('AIL_SERVER', '')
+    return supported() and value.strip().lower() not in ('0', 'off', 'false', 'no')
+
+
 # ----------------------------------------------------------------------------------------------- client
 
 def _connect(path):
@@ -142,12 +155,17 @@ def _connect(path):
         raise
 
 
+def _lock_path(path):
+    """One starter lock per user, in the runtime directory beside the sockets, never one per repository."""
+    return os.path.join(os.path.dirname(path), 'start.lock')
+
+
 def _start(path, root, flags):
     """Start a server (once, whatever the number of clients that want one), then connect."""
     import fcntl
     import subprocess
     import time
-    with open(path + '.lock', 'a+') as lock:
+    with open(_lock_path(path), 'a+') as lock:
         deadline = time.monotonic() + START_WAIT
         while True:
             try:
@@ -180,14 +198,61 @@ def _start(path, root, flags):
         raise OSError('compile server did not start')
 
 
+def _lock_is_busy(path):
+    """Is a starter already bringing a server up?  The lock is released as soon as its socket answers."""
+    import fcntl
+    with open(_lock_path(path), 'a+') as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return True
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        return False
+
+
+def _start_background(path, root, flags):
+    """First build: let a detached starter hold the lock until the socket is ready, and compile in-process meanwhile."""
+    import subprocess
+    try:
+        subprocess.Popen([sys.executable, *flags, os.path.join(root, 'ail_server.py'), 'start', path, root],
+                         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, cwd='/',
+                         close_fds=True, start_new_session=True)
+    except OSError:
+        pass
+
+
+def _connect_or_start(path, root, flags):
+    """A connected socket, or None when this build should run in-process."""
+    import time
+    try:
+        return _connect(path)
+    except OSError:
+        pass
+    try:
+        busy = _lock_is_busy(path)
+    except OSError:
+        return None
+    if busy:                      # a starter is already working: wait at most two seconds for its socket
+        deadline = time.monotonic() + LOCK_WAIT
+        while time.monotonic() < deadline:
+            try:
+                return _connect(path)
+            except OSError:
+                time.sleep(0.02)
+        return None
+    _start_background(path, root, flags)
+    return None
+
+
 def client(argv):
     """Run `ail_chatgpt.py ARGV` on the server and return its exit code, or None when the caller should run it itself."""
-    if os.environ.get('AIL_SERVER') != '1' or not argv or argv[0] not in SERVED_COMMANDS or not supported():
+    if not enabled() or not argv or argv[0] not in SERVED_COMMANDS:
         return None
     import json
     import array
     import socket
     root = os.path.dirname(os.path.realpath(__file__))
+    sock = None
     try:
         for descriptor in (0, 1, 2):
             os.fstat(descriptor)
@@ -196,10 +261,9 @@ def client(argv):
         key = identity(root, env, limits)
         path = os.path.join(runtime_directory(), 'ail-%s.sock' % key)
         flags = ['-X', 'utf8'] if sys.flags.utf8_mode else []
-        try:
-            sock = _connect(path)
-        except OSError:
-            sock = _start(path, root, flags)
+        sock = _connect_or_start(path, root, flags)
+        if sock is None:
+            return None
         request = json.dumps({'v': PROTOCOL, 'key': key, 'argv': list(argv), 'cwd': os.getcwd(), 'env': env,
                               'umask': _umask(), 'limits': limits}).encode('ascii')
         framed = len(request).to_bytes(4, 'big') + request
@@ -210,6 +274,11 @@ def client(argv):
             sock.close()
             return None
     except (OSError, ValueError, TypeError, UnicodeError, OverflowError):
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
         return None
     return _wait(sock)
 
@@ -266,8 +335,7 @@ def _wait(sock):
     for number, handler in saved.items():
         signal.signal(number, handler)
     if answer is None:
-        sys.stderr.write('ail: the compile server stopped during the build\n')
-        return 1
+        return None                    # the server died: build in-process, without a note
     if 'sig' in answer:
         number = answer['sig']
         try:
@@ -659,3 +727,8 @@ def serve(path, idle, root):
 if __name__ == '__main__':
     if len(sys.argv) == 4 and sys.argv[1] == "serve":
         serve(sys.argv[2], float(sys.argv[3]), os.path.dirname(os.path.realpath(__file__)))
+    elif len(sys.argv) == 4 and sys.argv[1] == "start":
+        try:
+            _start(sys.argv[2], sys.argv[3], ['-X', 'utf8'] if sys.flags.utf8_mode else [])
+        except BaseException:
+            pass
