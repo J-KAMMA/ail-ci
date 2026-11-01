@@ -150,6 +150,14 @@ T_CTR_ELEMS = '''def _ail_ctr_elems_@K(c: dict[@KA, int]) -> list[@KA]:
             out.append(k)
     return out
 '''
+T_CTR_SUBTRACT_MAP = '''def _ail_ctr_subtract_map_@K(c: dict[@KA, int], other: dict[@KA, int]) -> None:
+    for k in other:
+        c[k] = c.get(k, 0) - other[k]
+'''
+T_CTR_SUBTRACT_ITER = '''def _ail_ctr_subtract_iter_@K(c: dict[@KA, int], xs: list[@KA]) -> None:
+    for k in xs:
+        c[k] = c.get(k, 0) - 1
+'''
 T_CTR_ARITH = {
     '+': '''def _ail_ctr_add_@K(a: dict[@KA, int], b: dict[@KA, int]) -> dict[@KA, int]:
     r: dict[@KA, int] = {}
@@ -2022,6 +2030,8 @@ class Scope:
                 recv = call.func.value
                 if c.kind == 'ctr' and m == 'update':
                     return self.ctr_update(st, c, call)
+                if c.kind == 'ctr' and m == 'subtract':
+                    return self.ctr_subtract(st, c, call)
                 if c.kind == 'od' and m == 'move_to_end':
                     return self.move_to_end(st, c, call)
                 if c.kind in ('od', 'dds', 'ctr') and m == 'popitem':
@@ -2101,6 +2111,34 @@ class Scope:
                 it = self.iter_expr(arg)
                 text = 'for %s in %s: %s[%s] = %s.get(%s, 0) + 1' % (tmp, ast.unparse(it), name, tmp, name, tmp)
         self.put_stmt(st, text)
+
+    def ctr_subtract(self, st, c, call):
+        r = self.r
+        recv = call.func.value
+        if call.keywords or len(call.args) != 1:
+            r.refuse(st, 'Counter.subtract takes one iterable or mapping')
+        arg = call.args[0]
+        t = r.infer(arg, self.env)
+        if (isinstance(t, C) and t.kind in ('ctr', 'dds', 'od')) or (isinstance(t, tuple) and t[0] == 'dict'):
+            if not isinstance(arg, ast.Name):
+                r.refuse(st, 'Counter.subtract(mapping) needs the mapping in a name')
+            helper = r.ctr(c.K, 'subtract_map', T_CTR_SUBTRACT_MAP)
+            new = ast.Expr(value=ast.Call(func=ast.Name(id=helper, ctx=ast.Load()),
+                                          args=[recv, ast.Name(id=arg.id, ctx=ast.Load())], keywords=[]))
+            return self.put_stmt(st, ast.unparse(new))
+        helper = r.ctr(c.K, 'subtract_iter', T_CTR_SUBTRACT_ITER)
+        if is_tup(c.K) and isinstance(arg, ast.List) and not arg.elts:
+            return self.put_stmt(st, 'pass')
+        if is_tup(c.K) and not isinstance(arg, ast.Name):
+            lst = r.new_name('l')
+            it = _X(self).as_list(arg, t)
+            new = ast.Expr(value=ast.Call(func=ast.Name(id=helper, ctx=ast.Load()),
+                                          args=[recv, ast.Name(id=lst, ctx=ast.Load())], keywords=[]))
+            return self.put_stmt(st, '%s = %s' % (lst, ast.unparse(it)) + chr(10) + ' ' * st.col_offset
+                                 + ast.unparse(new))
+        it = self.iter_expr(arg)
+        new = ast.Expr(value=ast.Call(func=ast.Name(id=helper, ctx=ast.Load()), args=[recv, it], keywords=[]))
+        self.put_stmt(st, ast.unparse(new))
 
     def iter_expr(self, node):
         """An iterable expression, a bare collection read as its snapshot / keys."""
@@ -2860,8 +2898,7 @@ class _X(ast.NodeTransformer):
                                 'c.most_common(n):`, comprehensions of that form, most_common(n)[i][0|1], len(), '
                                 'dict() and print()')
                 if m in ('update', 'subtract'):
-                    self.refuse(node, 'Counter.%s is built only as a statement on its own line%s' % (
-                        m, '' if m == 'update' else ' (subtract is not built)'))
+                    self.refuse(node, 'Counter.%s is built only as a statement on its own line' % m)
             if c.kind == 'od' and m in ('move_to_end', 'popitem'):
                 self.refuse(node, 'OrderedDict.%s is built only as a statement (`d.move_to_end(k)`, '
                             '`k, v = d.popitem(last=False)`)' % m)

@@ -307,6 +307,7 @@ _METHOD_KWARGS = {
     'splitlines': {'keepends'},
     'sort': {'key', 'reverse'},
     'update': None,
+    'subtract': set(),
     'format': None,
     'expandtabs': {'tabsize'},
 }
@@ -337,7 +338,7 @@ _METHOD_MAXARGS = {
     'isdigit': 0, 'isalpha': 0, 'title': 0, 'capitalize': 0, 'swapcase': 0,
     'isupper': 0, 'islower': 0, 'isalnum': 0, 'isspace': 0, 'isnumeric': 0,
     'isdecimal': 0, 'isascii': 0, 'isidentifier': 0, 'istitle': 0, 'fromkeys': 2, 'rfind': 3, 'symmetric_difference_update': 1, 'keys': 0, 'values': 0, 'items': 0, 'clear': 0,
-    'copy': 0, 'reverse': 0, 'total': 0, 'elements': 0, 'get': 2,
+    'copy': 0, 'reverse': 0, 'total': 0, 'elements': 0, 'get': 2, 'subtract': 1,
     'setdefault': 2, 'most_common': 1, 'sort': 0, 'pop': 2,
     'startswith': 3, 'endswith': 3, 'find': 3, 'index': 3, 'count': 3,
     'replace': 3, 'ljust': 2, 'rjust': 2, 'center': 2,
@@ -420,6 +421,7 @@ _METHOD_OWNERS = {
     'splitlines': 'str',
     'startswith': 'str',
     'strip': 'str',
+    'subtract': 'counter',
     'swapcase': 'str',
     'symmetric_difference': 'set frozenset',
     'symmetric_difference_update': 'set',
@@ -10925,6 +10927,65 @@ class Compiler(boxclosure.ClosureMixin):
             return 'ail_box_none()'
         self._tag_branch(ctx, recv, kind, {'dict': do_dict, 'set': do_set},
                          "object has no attribute 'update'")
+        return 'ail_box_none()'
+
+    def _need_counter_subtract(self):
+        """Counter.subtract's two loops, emitted only for a program that calls it (an unused
+        runtime helper would change the generated C of every other program)."""
+        if getattr(self, 'has_counter_subtract', False):
+            return
+        self.has_counter_subtract = True
+        self.top_decls.append('static inline ail_st ail__counter_subtract(ail_ctx *cx, ail_obj counter, ail_obj iterable);\n')
+        self.top_decls.append('static inline ail_st ail__counter_subtract_map(ail_ctx *cx, ail_obj counter, ail_obj map);\n')
+        self.top_defs.append(
+            'static inline ail_st ail__counter_subtract(ail_ctx *cx, ail_obj counter, ail_obj iterable) {\n'
+            '    AIL_FRAME_ENTER(cx, fr, 2);\n'
+            '    ail_st st = ail_iter(cx, &fr.slots[0], iterable);\n'
+            '    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }\n'
+            '    for (;;) {\n'
+            '        st = ail_next(cx, &fr.slots[1], fr.slots[0]);\n'
+            '        if (st == AIL_STOP) { st = AIL_OK; break; }\n'
+            '        if (st != AIL_OK) break;\n'
+            '        ail_obj cur; st = ail_dict_get(cx, &cur, counter, fr.slots[1], ail_box_int(0)); if (st != AIL_OK) break;\n'
+            '        ail_obj nv; st = ail_op_sub(cx, &nv, cur, ail_box_int(1)); if (st != AIL_OK) break;\n'
+            '        st = ail_dict_set(cx, counter, fr.slots[1], nv); if (st != AIL_OK) break;\n'
+            '    }\n'
+            '    AIL_FRAME_LEAVE(cx, fr);\n'
+            '    return st;\n'
+            '}\n'
+            'static inline ail_st ail__counter_subtract_map(ail_ctx *cx, ail_obj counter, ail_obj map) {\n'
+            '    AIL_FRAME_ENTER(cx, fr, 1);\n'
+            '    fr.slots[0] = map;\n'
+            '    ail_st st = AIL_OK;\n'
+            '    for (int64_t i = 0; i < ((ail_mapobj *)fr.slots[0].o)->n; i++) {\n'
+            '        ail_obj key = ((ail_mapobj *)fr.slots[0].o)->entries[i].key;\n'
+            '        ail_obj val = ((ail_mapobj *)fr.slots[0].o)->entries[i].val;\n'
+            '        ail_obj cur; st = ail_dict_get(cx, &cur, counter, key, ail_box_int(0));\n'
+            '        if (st != AIL_OK) break;\n'
+            '        ail_obj nv; st = ail_op_sub(cx, &nv, cur, val);\n'
+            '        if (st != AIL_OK) break;\n'
+            '        st = ail_dict_set(cx, counter, key, nv);\n'
+            '        if (st != AIL_OK) break;\n'
+            '    }\n'
+            '    AIL_FRAME_LEAVE(cx, fr);\n'
+            '    return st;\n'
+            '}\n\n')
+
+    def _m_subtract(self, recv, kind, args, kwargs, ctx):
+        if kind != 'counter':
+            raise Unsupported('.subtract() (on a %s)' % kind)
+        if kwargs:
+            raise Unsupported('.subtract() with keyword arguments')
+        if len(args) > 1:
+            raise Unsupported('.subtract() with more than one positional argument')
+        self._need_counter_subtract()
+        if args:
+            sv = ctx.new_cvar('cs')
+            ctx.emit('ail_obj %s = %s;' % (sv, self._resolve_iter_src(args[0], ctx)))
+            ctx.emit('if (%s.tag == AIL_T_DICT) { st = ail__counter_subtract_map(cx, %s, %s); } '
+                     'else { st = ail__counter_subtract(cx, %s, %s); } '
+                     'if (st != AIL_OK) goto %s;' % (sv, recv, sv, recv, sv, ctx.cur_err_target()))
+            ctx.uses_st = True
         return 'ail_box_none()'
 
     _SETISH = ('set', 'frozenset', None)

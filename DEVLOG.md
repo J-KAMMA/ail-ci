@@ -1,3 +1,23 @@
+## 2026-11-01 -- std_collections lab: 9 of 12 collections programs build and match CPython (job-std_collections-11011436)
+
+Added `lab/stdlib/collections/` (12 realistic Python programs using Counter, defaultdict, OrderedDict,
+deque, ChainMap and namedtuple) plus `RESULTS.md` with the default-build result for each.  9 build and
+match CPython's stdout and exit code; 3 stay refused by name with the exact text recorded there.
+The shared blockers fixed are `Counter.subtract` (typed helpers in `collib.py` and the general-path
+`ail__counter_subtract` / `_map` runtime) and `Counter(mapping)` over a tuple-keyed mapping: the tuple
+pass turns that mapping into a table class, which the general path's Counter could not read, stopping
+with `TypeError: '_AilD_Pi_iQ__i' object is not iterable`.  A Counter mapping display now stays a plain
+dict, and another table-typed mapping is converted back through its `items` helper before the call.
+Probes `q1`-`q8` in `/tmp/probes/collections/` cover literals, function arguments and returns, list
+items, instance attributes, dict values, empty mappings and zero/negative counts on both builds.
+
+Added `AIL_CURRENT/test_ail_std_collections.py` (registered in `tests.d/`) which compiles the nine
+passing programs with the default pipeline and compares stdout and exit code with CPython.  The
+generated C of the compare tasks is unchanged (five default builds, `chain_relax` and `rail_transfer`
+with `--exact-int`, and the three regex tasks refuse identically; checked against HEAD).  Final-state
+tests: test_ail_std_collections, test_ail_collections, test_ail_tuples, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
