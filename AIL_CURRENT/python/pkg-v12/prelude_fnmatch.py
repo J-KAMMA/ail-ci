@@ -207,10 +207,17 @@ def _ail_fnmatch_case(name, pat):
         except TypeError:
             raise TypeError("unhashable type: %r" % type(pat).__name__)
         try:
-            pat = list(pat)
+            seq = list(pat)
         except TypeError:
             raise TypeError("object of type %r has no len()" % _ail_fnm_tname(pat))
-    if isinstance(name, (bytearray, memoryview)):
+        if type(name).__name__ in ("bytearray", "memoryview"):
+            raise TypeError("cannot use a string pattern on a bytes-like object")
+        if not isinstance(name, (str, bytes)):
+            raise TypeError("expected string or bytes-like object, got %r" % _ail_fnm_tname(name))
+        if isinstance(name, bytes):
+            raise TypeError("cannot use a string pattern on a bytes-like object")
+        return _ail_fnm_match(name, seq)
+    if type(name).__name__ in ("bytearray", "memoryview"):
         if not isinstance(pat, bytes):
             raise TypeError("cannot use a string pattern on a bytes-like object")
         name = bytes(name)
