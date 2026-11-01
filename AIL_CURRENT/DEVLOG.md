@@ -6,11 +6,14 @@ inlined a one-argument lambda that re-read the index or bound argument per eleme
 when the callable is built. The Python surface now wraps those inlined callables in a lambda applied to the arguments at
 the construction site (and passes any non-pure earlier arguments through in order), so `sorted(rows, key=itemgetter(idx(), 1))`
 calls `idx()` once, and `m = map(itemgetter(i), rows); i = 1; list(m)` uses the old `i`. `countOf` / `indexOf` used
-`for item in seq`, which crashed on a `__getitem__`-only sequence; the helpers now use the indexing protocol when the
-object is not a dict/set (the same choice CPython's `PySequence_Count` / `PySequence_Index` make) and fall back to
-iteration, keeping the exact `ValueError` text. `test_ail_std_operator.py` adds the review probes; the 11 lab programs,
-the capture cases, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass, and the generated C of
-the 10 `lab/compare/src` tasks is unchanged.
+`for item in seq`, which crashed on a `__getitem__`-only sequence. The helpers now follow CPython's
+`PySequence_Count` / `PySequence_Index`: they iterate when `iter(seq)` is available (so `__iter__` wins over
+`__getitem__`, and mappings/sets/generators keep their own order) and otherwise use the old `__getitem__` protocol,
+indexing until `IndexError`, so a sequence with no `__len__` works too. The exact `ValueError` text is unchanged.
+`test_ail_std_operator.py` adds the review probes, including an object with both `__iter__` and `__getitem__`, a
+`__getitem__`-only object with no `__len__`, and a mapping-like object; the 11 lab programs, the capture cases,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass, and the generated C of the 10
+`lab/compare/src` tasks is unchanged.
 
 ## 2026-11-01 -- int64 constant census: refusals named, safe folds kept
 

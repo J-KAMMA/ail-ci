@@ -126,6 +126,65 @@ except ValueError as exc:
 """,
 }
 
+SCAN = {
+    "scan_prefers_iter_over_getitem": r"""from operator import countOf, indexOf
+class Both:
+    def __init__(self):
+        self.data = [1, 2, 3]
+    def __len__(self):
+        return len(self.data)
+    def __getitem__(self, i):
+        return self.data[i]
+    def __iter__(self):
+        return iter([4, 4, 9])
+b = Both()
+print("count4", countOf(b, 4))
+print("count9", countOf(b, 9))
+print("idx9", indexOf(b, 9))
+print("count1", countOf(b, 1))
+try:
+    print("idx1", indexOf(b, 1))
+except ValueError as exc:
+    print("VE", str(exc))
+""",
+    "scan_getitem_without_len": r"""from operator import countOf, indexOf
+class G:
+    def __init__(self):
+        self.data = [10, 20, 10]
+    def __getitem__(self, i):
+        if i >= len(self.data):
+            raise IndexError
+        return self.data[i]
+g = G()
+print("count10", countOf(g, 10))
+print("idx10", indexOf(g, 10))
+print("count20", countOf(g, 20))
+try:
+    print("idx99", indexOf(g, 99))
+except ValueError as exc:
+    print("VE", str(exc))
+""",
+    "scan_mapping_like_iter": r"""from operator import countOf, indexOf
+class M:
+    def __init__(self):
+        self.d = {"a": 1, "b": 2, "a2": 3}
+    def __len__(self):
+        return len(self.d)
+    def __iter__(self):
+        return iter(self.d)
+    def __getitem__(self, k):
+        return self.d[k]
+m = M()
+print("ca", countOf(m, "a"))
+print("ib", indexOf(m, "b"))
+print("cz", countOf(m, "z"))
+try:
+    print(indexOf(m, "z"))
+except ValueError as exc:
+    print("VE", str(exc))
+""",
+}
+
 
 def compile_python(directory, text, name, **env):
     source, exe = Path(directory, name + ".ail"), Path(directory, name)
@@ -178,6 +237,15 @@ class OperatorTests(unittest.TestCase):
 
     def test_arguments_are_captured_at_construction(self):
         for name, text in CAPTURE.items():
+            for general in (False, True):
+                for ir in (False, True):
+                    if general and not ir:
+                        continue
+                    with self.subTest(program=name, ir=ir, general=general):
+                        self.check(name, text, ir, general)
+
+    def test_scan_follows_the_sequence_protocol(self):
+        for name, text in SCAN.items():
             for general in (False, True):
                 for ir in (False, True):
                     if general and not ir:
