@@ -679,6 +679,157 @@ __attribute__((noinline, cold)) static ail_st ail2_bisect_bound(ail_ctx *cx, ail
 }
 '''
 
+BISECTKEY_C = r'''
+/* bisect(key=...) / insort(key=...). CPython's C _bisect calls the key on each element the
+   binary search actually visits; insort computes key(x) once and then compares it with
+   key(element), so it reuses the same loop with the keyed value. A key result is rooted
+   because the key function or a user __lt__ may allocate while it is still live.
+   The sequence is not necessarily a list: CPython's _bisect accepts any sequence, so a str
+   or tuple reads its elements through the same indexing helper (the old unconditional
+   ail_vecobj cast read a str's payload as a vector and crashed). */
+static inline ail_st ail__bisect_key(ail_ctx *cx, ail_obj *out, ail_obj key, ail_obj item) {
+    ail_funcobj *f = (ail_funcobj *)key.o;
+    return f->fn(cx, out, item, f->cells);
+}
+static inline int ail__bisect_is_seq(ail_ctx *cx, ail_obj a) {
+    /* CPython's _bisect asks for sq_item before the loop even when hi= is given: a mapping
+       is "is not a sequence", a set or a __len__-only instance "does not support indexing".
+       A Counter is dict-shaped but indexable (CPython's PySequence_Size accepts it), so it
+       stays a sequence; a plain dict and defaultdict do not. */
+    switch (a.tag) {
+        case AIL_T_STR: case AIL_T_LIST: case AIL_T_TUPLE: case AIL_T_RANGE: return 1;
+        case AIL_T_DICT: return ((ail_gcobj *)a.o)->flags == 1;   /* Counter */
+        case AIL_T_INST: case AIL_T_EXC: {
+            int64_t nid = ail_intern(cx, "__getitem__");
+            for (ail_obj k = ((ail_instobj *)a.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+                ail_classobj *kc = (ail_classobj *)k.o;
+                for (int64_t i = 0; i < kc->n; i++) if (kc->attrs[i].name_id == nid) return 1;
+                for (int64_t i = kc->ca_n - 1; i >= 0; i--) if (kc->ca[i].name_id == nid) return 1;
+            }
+            return 0;
+        }
+        default: return 0;
+    }
+}
+static inline ail_st ail__bisect_seq_chk(ail_ctx *cx, ail_obj a) {
+    if (ail__bisect_is_seq(cx, a)) return AIL_OK;
+    char buf[160];
+    if (a.tag == AIL_T_DICT) snprintf(buf, sizeof buf, "%s is not a sequence", ail__tname_c(a));
+    else snprintf(buf, sizeof buf, "'%s' object does not support indexing", ail__tname_c(a));
+    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+}
+static inline ail_st ail__bisect_len(ail_ctx *cx, int64_t *out, ail_obj a) {
+    /* CPython's _bisect accepts any sequence, so every sequence type the runtime knows must
+       answer len(): range/bytes/bytearray/deque are not vector-backed and the old manual
+       list/tuple/str switch raised the wrong TypeError for them. A plain dict is rejected
+       by PySequence_Size itself, before sq_item is looked up. */
+    if (a.tag == AIL_T_DICT && ((ail_gcobj *)a.o)->flags != 1) {   /* not a Counter */
+        char buf[128];
+        snprintf(buf, sizeof buf, "%s is not a sequence", ail__tname_c(a));
+        return ail_raise_c(cx, AIL_B_TYPEERROR, buf);
+    }
+    ail_obj n;
+    ail_st st = ail_op_len(cx, &n, a);
+    if (st != AIL_OK) return st;
+    *out = n.i;
+    return AIL_OK;
+}
+static inline ail_st ail__bisect_at(ail_ctx *cx, ail_obj *out, ail_obj a, int64_t i) {
+    return ail_op_getitem(cx, out, a, ail_box_int(i));
+}
+static inline ail_st ail__bisect_insert(ail_ctx *cx, ail_obj a, int64_t pos, ail_obj x) {
+    if (a.tag != AIL_T_LIST) {   /* CPython's insort calls a.insert, so a str/tuple is an AttributeError */
+        char buf[96];
+        snprintf(buf, sizeof buf, "'%s' object has no attribute 'insert'", ail__tname_c(a));
+        return ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, buf);
+    }
+    ail_list_insert(cx, a, pos, x);
+    return AIL_OK;
+}
+static inline ail_st ail_bisect_left_key(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj x,
+                                         int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
+    int64_t l = has_lo ? lo : 0;
+    if (l < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "lo must be non-negative");
+    int64_t h;
+    ail_st st;
+    if (!has_hi || hi == -1) {
+        int64_t n;
+        st = ail__bisect_len(cx, &n, a);
+        if (st != AIL_OK) return st;
+        h = n;
+    } else h = hi;
+    st = ail__bisect_seq_chk(cx, a);
+    if (st != AIL_OK) return st;
+    while (l < h) {
+        int64_t mid = (l + h) / 2, c;
+        ail_obj item, k;
+        st = ail__bisect_at(cx, &item, a, mid);
+        if (st != AIL_OK) return st;
+        st = ail__bisect_key(cx, &k, key, item);
+        if (st != AIL_OK) return st;
+        AIL_ROOT1(cx, frk, k);
+        st = ail_obj_cmp(cx, &c, k, x);
+        AIL_FRAME_LEAVE(cx, frk);
+        if (st != AIL_OK) return st;
+        if (c < 0) l = mid + 1; else h = mid;
+    }
+    *out = l; return AIL_OK;
+}
+static inline ail_st ail_bisect_right_key(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj x,
+                                          int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
+    int64_t l = has_lo ? lo : 0;
+    if (l < 0) return ail_raise_c(cx, AIL_B_VALUEERROR, "lo must be non-negative");
+    int64_t h;
+    ail_st st;
+    if (!has_hi || hi == -1) {
+        int64_t n;
+        st = ail__bisect_len(cx, &n, a);
+        if (st != AIL_OK) return st;
+        h = n;
+    } else h = hi;
+    st = ail__bisect_seq_chk(cx, a);
+    if (st != AIL_OK) return st;
+    while (l < h) {
+        int64_t mid = (l + h) / 2, c;
+        ail_obj item, k;
+        st = ail__bisect_at(cx, &item, a, mid);
+        if (st != AIL_OK) return st;
+        st = ail__bisect_key(cx, &k, key, item);
+        if (st != AIL_OK) return st;
+        AIL_ROOT1(cx, frk, k);
+        st = ail_obj_cmp(cx, &c, x, k);
+        AIL_FRAME_LEAVE(cx, frk);
+        if (st != AIL_OK) return st;
+        if (c < 0) h = mid; else l = mid + 1;
+    }
+    *out = l; return AIL_OK;
+}
+static inline ail_st ail_bisect_insort_left_key(ail_ctx *cx, ail_obj a, ail_obj x,
+                                                int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
+    ail_obj kx;
+    ail_st st = ail__bisect_key(cx, &kx, key, x);
+    if (st != AIL_OK) return st;
+    AIL_ROOT1(cx, frx, kx);
+    int64_t pos;
+    st = ail_bisect_left_key(cx, &pos, a, kx, has_lo, lo, has_hi, hi, key);
+    if (st == AIL_OK) st = ail__bisect_insert(cx, a, pos, x);
+    AIL_FRAME_LEAVE(cx, frx);
+    return st;
+}
+static inline ail_st ail_bisect_insort_right_key(ail_ctx *cx, ail_obj a, ail_obj x,
+                                                 int has_lo, int64_t lo, int has_hi, int64_t hi, ail_obj key) {
+    ail_obj kx;
+    ail_st st = ail__bisect_key(cx, &kx, key, x);
+    if (st != AIL_OK) return st;
+    AIL_ROOT1(cx, frx, kx);
+    int64_t pos;
+    st = ail_bisect_right_key(cx, &pos, a, kx, has_lo, lo, has_hi, hi, key);
+    if (st == AIL_OK) st = ail__bisect_insert(cx, a, pos, x);
+    AIL_FRAME_LEAVE(cx, frx);
+    return st;
+}
+'''
+
 TYPE_NAME_C = '''
 static inline ail_st ail_type_name_of(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC) {
@@ -2888,6 +3039,8 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append(ARGCHK_C)
         if getattr(self, 'needs_bisect_bound', False):
             parts.append(BISECTBOUND_C)
+        if getattr(self, 'needs_bisect_key', False):
+            parts.append(BISECTKEY_C)
         if getattr(self, 'needs_stararity', False):
             parts.append(stararity.C)
         if 'SYSINFO' in self.rt_needs:
@@ -9010,7 +9163,7 @@ class Compiler(boxclosure.ClosureMixin):
     def _bisect_call(self, fn, args, kwargs, ctx, has_out):
         if len(args) < 2 or len(args) > 4:
             raise Unsupported('%s() with other than (a, x[, lo[, hi]])' % fn)
-        extra = set(kwargs) - {'lo', 'hi'}
+        extra = set(kwargs) - {'lo', 'hi', 'key'}
         if extra:
             raise Unsupported('%s(): %s is not supported; the bounds are lo= and hi='
                               % (fn, ', '.join(sorted(extra))))
@@ -9044,17 +9197,30 @@ class Compiler(boxclosure.ClosureMixin):
             ctx.emit('int64_t %s = (%s.tag != AIL_T_NONE);' % (hv, ht))
             self._bisect_bound_check(ht, ctx, True, hv)
             has_hi, hi = hv, '(%s ? %s.i : 0)' % (hv, ht)
+        keyfn = None
+        if 'key' in kwargs:
+            keyfn = self._wrap_cfunc(ctx, self._func_pointer_of(kwargs['key'], ctx))
+            self.needs_bisect_key = True
+            fn += '_key'
         if has_out:
             iv = ctx.new_cvar('bi')
             ctx.emit('int64_t %s;' % iv)
-            ctx.emit('st = %s(cx, &%s, %s, %s, %s, %s, %s, %s);' %
-                    (fn, iv, a, x, has_lo, lo, has_hi, hi))
+            if keyfn is None:
+                ctx.emit('st = %s(cx, &%s, %s, %s, %s, %s, %s, %s);' %
+                        (fn, iv, a, x, has_lo, lo, has_hi, hi))
+            else:
+                ctx.emit('st = %s(cx, &%s, %s, %s, %s, %s, %s, %s, %s);' %
+                        (fn, iv, a, x, has_lo, lo, has_hi, hi, keyfn))
             ctx.check()
             t = ctx.tmp()
             ctx.emit('%s = ail_box_int(%s);' % (t, iv))
             return t
-        ctx.emit('st = %s(cx, %s, %s, %s, %s, %s, %s); if (st != AIL_OK) goto %s;' %
-                (fn, a, x, has_lo, lo, has_hi, hi, ctx.cur_err_target()))
+        if keyfn is None:
+            ctx.emit('st = %s(cx, %s, %s, %s, %s, %s, %s); if (st != AIL_OK) goto %s;' %
+                    (fn, a, x, has_lo, lo, has_hi, hi, ctx.cur_err_target()))
+        else:
+            ctx.emit('st = %s(cx, %s, %s, %s, %s, %s, %s, %s); if (st != AIL_OK) goto %s;' %
+                    (fn, a, x, has_lo, lo, has_hi, hi, keyfn, ctx.cur_err_target()))
         ctx.uses_st = True
         return 'ail_box_none()'
 

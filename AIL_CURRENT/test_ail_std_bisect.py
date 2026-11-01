@@ -1,0 +1,267 @@
+"""Real programs that use the CPython stdlib module `bisect`, compared with CPython.
+
+The twelve programs in lab/stdlib/bisect/ cover the common calls (bisect_left,
+bisect_right, bisect, insort, insort_left, insort_right), the positional and keyword
+lo=/hi= bounds (including hi=None), int, float and str lists, empty lists, duplicate
+runs, insertion, and the ValueError/IndexError edges the programs catch.  key= on a list
+of rows is built by the general path (the typed path does not model a tuple row); its key
+function is called on exactly the elements the binary search visits, as CPython does.
+
+Each program is built in the default mode (`--syntax python` without --strict) and its
+stdout and exit status are compared byte for byte with CPython's.
+"""
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+LAB = ROOT.parent / "lab" / "stdlib" / "bisect"
+
+PROGRAMS = [
+    "grade_report",
+    "price_tiers",
+    "word_index",
+    "leaderboard",
+    "event_log",
+    "interval_lookup",
+    "sparse_ids",
+    "alias_import",
+    "star_import",
+    "key_records",
+    "error_edges",
+    "lookup_helper",
+]
+
+KEY_PROGRAM = r'''import bisect
+
+calls = []
+
+
+def key(row):
+    calls.append(row[0])
+    return row[0]
+
+
+def main():
+    rows = [(1, "a"), (2, "b"), (4, "d"), (8, "h")]
+    print(bisect.bisect_left(rows, 3, key=key), calls)
+    calls.clear()
+    print(bisect.bisect_right(rows, 4, key=key), calls)
+    calls.clear()
+    bisect.insort_left(rows, (3, "c"), key=key)
+    print(rows, calls)
+    calls.clear()
+    bisect.insort_right(rows, (4, "e"), key=key)
+    print(rows, calls)
+    print(bisect.bisect_left([], 1, key=key), calls)
+
+
+main()
+'''
+
+
+STR_KEY_PROGRAM = r'''import bisect
+
+
+class Box:
+    def __init__(self):
+        self.s = "abcd"
+
+
+def main():
+    print(bisect.bisect_left("abcd", "b", key=str))
+    print(bisect.bisect_right("abcd", "c", key=str.lower))
+    print(bisect.bisect_left("", "a", key=str))
+    box = Box()
+    print(bisect.bisect(box.s, "d", key=str))
+    table = {"k": "abcd"}
+    print(bisect.bisect_left(table["k"], "a", key=str))
+    t = ("a", "b", "d")
+    print(bisect.bisect_left(t, "c", key=str))
+    print(bisect.bisect_right(t, "b", key=str))
+    try:
+        bisect.bisect_left("abc", "b", 0, 10, key=str)
+    except IndexError as e:
+        print(type(e).__name__, e)
+    try:
+        bisect.insort("abc", "b", key=str)
+    except AttributeError as e:
+        print(type(e).__name__, e)
+    try:
+        bisect.insort_left(t, "c", key=str)
+    except AttributeError as e:
+        print(type(e).__name__, e)
+
+
+main()
+'''
+
+
+RANGE_BYTES_KEY_PROGRAM = r'''import bisect
+
+
+class Box:
+    def __init__(self):
+        self.s = b"aceg"
+
+
+def by_str(v):
+    return str(v)
+
+
+def main():
+    print(bisect.bisect_left(range(10), "5", key=by_str))
+    print(bisect.bisect_right(range(10), "5", key=by_str))
+    print(bisect.bisect_left(range(0), "5", key=by_str))
+    print(bisect.bisect_right(range(10, 0, -1), "5", 2, 8, key=by_str))
+    print(bisect.bisect_left(b"aceg", 100, key=int))
+    print(bisect.bisect_right(bytearray(b"aceg"), 101, key=int))
+    print(bisect.bisect_left(b"", 1, key=int))
+    box = Box()
+    print(bisect.bisect_left(box.s, 99, key=int))
+    table = {"s": b"aceg"}
+    print(bisect.bisect_right(table["s"], 100, 1, 3, key=int))
+    try:
+        bisect.bisect_left(range(10), "5", -1, key=by_str)
+    except ValueError as e:
+        print(type(e).__name__, e)
+    try:
+        bisect.bisect_right(b"aceg", 1, 0, 9, key=int)
+    except IndexError as e:
+        print(type(e).__name__, e)
+    try:
+        bisect.insort(range(10), 5, key=by_str)
+    except AttributeError as e:
+        print(type(e).__name__, e)
+    try:
+        bisect.insort(b"aceg", 100, key=int)
+    except AttributeError as e:
+        print(type(e).__name__, e)
+
+
+main()
+'''
+
+
+NON_SEQUENCE_KEY_PROGRAM = r'''import bisect
+
+
+class NoGet:
+    def __init__(self):
+        self.n = 0
+
+    def __len__(self):
+        return self.n
+
+
+class GetOnly:
+    def __init__(self):
+        self.n = 0
+
+    def __getitem__(self, i):
+        return i
+
+
+def ident(v):
+    return v
+
+
+def main():
+    for a in ({}, {0: 10, 1: 20, 2: 30}, set(), frozenset()):
+        try:
+            print("l", bisect.bisect_left(a, 1, key=ident))
+        except TypeError as e:
+            print("l TypeError", e)
+        try:
+            print("r", bisect.bisect_right(a, 1, key=ident))
+        except TypeError as e:
+            print("r TypeError", e)
+    o = NoGet()
+    try:
+        print(bisect.bisect_left(o, 1, key=ident))
+    except TypeError as e:
+        print("lenonly TypeError", e)
+    try:
+        print(bisect.bisect_right(o, 1, 0, 0, key=ident))
+    except TypeError as e:
+        print("lenonly hi TypeError", e)
+    g = GetOnly()
+    print(bisect.bisect_left(g, 1, 0, 0, key=ident))
+    print(bisect.bisect_right(g, 1, 0, 0, key=ident))
+    try:
+        print(bisect.bisect_left(g, 1, key=ident))
+    except TypeError as e:
+        print("getonly TypeError", e)
+
+
+main()
+'''
+
+
+def build_and_run(directory, source):
+    local = Path(directory) / source.name
+    shutil.copyfile(source, local)
+    exe = Path(directory) / "prog"
+    env = dict(os.environ, AIL_NO_CACHE="1")
+    built = subprocess.run(
+        [sys.executable, "-B", str(ROOT / "ail_chatgpt.py"), "compile", local.name,
+         "--syntax", "python", "-o", exe.name],
+        cwd=directory, capture_output=True, text=True, timeout=900, env=env)
+    return built, local, exe
+
+
+@unittest.skipUnless(LAB.is_dir(), "lab/stdlib/bisect is not part of this tree")
+class StdlibBisect(unittest.TestCase):
+    def check(self, source, label):
+        with tempfile.TemporaryDirectory() as directory:
+            built, local, exe = build_and_run(directory, source)
+            self.assertEqual(built.returncode, 0, "%s\n%s%s" % (label, built.stdout[-2000:], built.stderr[-3000:]))
+            want = subprocess.run([sys.executable, "-X", "utf8", str(local)],
+                                  capture_output=True, timeout=120)
+            got = subprocess.run([str(exe)], capture_output=True, timeout=120)
+            self.assertEqual(got.returncode, want.returncode,
+                             "%s: exit %d against CPython's %d\n%s"
+                             % (label, got.returncode, want.returncode, got.stderr.decode("utf-8", "replace")[-1000:]))
+            self.assertEqual(got.stdout, want.stdout,
+                             "%s:\n compiled: %r\n CPython:  %r"
+                             % (label, got.stdout.decode("utf-8", "replace"),
+                                want.stdout.decode("utf-8", "replace")))
+
+    def test_lab_programs_match_cpython(self):
+        for name in PROGRAMS:
+            with self.subTest(program=name):
+                source = LAB / (name + ".py")
+                self.assertTrue(source.is_file(), source)
+                self.check(source, name)
+
+    def test_key_calls_and_insort(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "key_calls.py"
+            source.write_text(KEY_PROGRAM, encoding="utf-8")
+            self.check(source, "key_calls")
+
+    def test_key_on_str_and_tuple(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "str_key.py"
+            source.write_text(STR_KEY_PROGRAM, encoding="utf-8")
+            self.check(source, "str_key")
+
+    def test_key_on_range_and_bytes(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "range_bytes_key.py"
+            source.write_text(RANGE_BYTES_KEY_PROGRAM, encoding="utf-8")
+            self.check(source, "range_bytes_key")
+
+    def test_key_rejects_non_sequences(self):
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "non_sequence_key.py"
+            source.write_text(NON_SEQUENCE_KEY_PROGRAM, encoding="utf-8")
+            self.check(source, "non_sequence_key")
+
+
+if __name__ == "__main__":
+    unittest.main()
