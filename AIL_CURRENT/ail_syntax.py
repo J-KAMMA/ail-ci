@@ -959,19 +959,21 @@ _MATH_VALUES = {'pi': repr(math.pi), 'e': repr(math.e), 'tau': repr(math.tau),
 _MATH_ONE = {'sin': False, 'cos': False, 'tan': False, 'asin': False, 'acos': False, 'atan': False,
              'sinh': True, 'cosh': True, 'tanh': False, 'asinh': False, 'acosh': False, 'atanh': False,
              'exp': True, 'exp2': True, 'expm1': True, 'log': False, 'log1p': False, 'log2': False,
-             'log10': False, 'cbrt': False}
-_MATH_PLAIN_TWO = ('atan2', 'copysign', 'hypot')
+             'log10': False, 'cbrt': False, 'erf': False, 'erfc': False}
+_MATH_PLAIN_TWO = ('atan2', 'copysign', 'hypot', 'nextafter')
 _MATH_PREDICATES = ('isnan', 'isinf', 'isfinite')
 _MATH_INT_TWO = ('comb', 'perm', 'lcm')
 _MATH_LIST_ONE = ('fsum', 'prod')
 _MATH_CALLS = ('sqrt', 'floor', 'ceil', 'isqrt', 'gcd', 'fabs', 'trunc', 'degrees', 'radians', 'factorial',
-               'pow', 'fmod', *_MATH_INT_TWO, *_MATH_LIST_ONE, *_MATH_ONE, *_MATH_PLAIN_TWO, *_MATH_PREDICATES)
+               'pow', 'fmod', 'remainder', 'dist', *_MATH_INT_TWO, *_MATH_LIST_ONE, *_MATH_ONE, *_MATH_PLAIN_TWO,
+               *_MATH_PREDICATES)
 _MATH_BUILT = ('math.sqrt, floor, ceil, trunc, isqrt, gcd and lcm (two arguments), comb, perm (two arguments), '
                'fabs, factorial, pow, fmod, hypot, '
                'copysign, atan2, degrees, radians, isnan, isinf, isfinite, sin, cos, tan, asin, acos, atan, '
                'sinh, cosh, tanh, asinh, acosh, atanh, exp, exp2, expm1, log (one or two arguments), log1p, '
-               'log2, log10, cbrt and the constants math.pi, math.e, math.tau, math.inf, math.nan; '
-               'fsum (a list of floats), prod (a list of ints), modf; dist, erf, gamma and the rest are not built')
+               'log2, log10, cbrt, erf, erfc, nextafter, remainder, dist and the constants math.pi, math.e, '
+               'math.tau, math.inf, math.nan; fsum (a list of floats), prod (a list of ints or floats, with '
+               'start=), modf; frexp, ldexp, ulp, gamma and the rest are not built')
 # Exact CPython results: sqrt keeps -0.0 and raises ValueError below zero, isqrt and gcd are
 # integer-only (no float rounding reaches the answer).
 _MATH_HELPERS = {
@@ -1165,6 +1167,32 @@ _MATH_HELPERS['lcm'] = (
     '        return 0\n'
     '    return abs(a // _ail_math_gcd(a, b) * b)\n')
 
+_MATH_HELPERS['remainder'] = (
+    'def _ail_math_remainder(x: float, y: float) -> float:\n'
+    '    r = _ail_c_remainder(x, y)\n'
+    '    if r != r and x == x and y == y:\n'
+    '        raise ValueError("math domain error")\n'
+    '    return r\n')
+_MATH_HELPERS['dist'] = (
+    'def _ail_math_dist(p: list[float], q: list[float]) -> float:\n'
+    '    if len(p) != len(q):\n'
+    '        raise ValueError("both points must have the same number of dimensions")\n'
+    '    top = 0.0\n'
+    '    for i in range(len(p)):\n'
+    '        d = _ail_c_fabs(float(p[i]) - float(q[i]))\n'
+    '        if d != d:\n'
+    '            return d\n'
+    '        if d > top:\n'
+    '            top = d\n'
+    '    if top == 0.0:\n'
+    '        return 0.0\n'
+    '    if top - top != 0.0:\n'
+    '        return top\n'
+    '    total = 0.0\n'
+    '    for i in range(len(p)):\n'
+    '        d = _ail_c_fabs(float(p[i]) - float(q[i])) / top\n'
+    '        total = total + d * d\n'
+    '    return top * _ail_math_sqrt(total)\n')
 # math.fsum (CPython's Shewchuk partials, its non-finite bookkeeping and its final rounding step),
 # math.prod of ints, and textwrap.wrap / fill / dedent for the default options (CPython's own chunking:
 # expandtabs(8), its whitespace/em-dash/hyphen word split and _handle_long_word's hyphen break).
@@ -1231,8 +1259,8 @@ _MATH_HELPERS['fsum'] = (
     '                hi = x\n'
     '    return hi\n')
 _MATH_HELPERS['prod'] = (
-    'def _ail_math_prod(xs: list[int]) -> int:\n'
-    '    r = 1\n'
+    'def _ail_math_prod(xs: list[int], start: int) -> int:\n'
+    '    r = start\n'
     '    for v in xs:\n'
     '        r = r * v\n'
     '    return r\n')
@@ -1465,8 +1493,8 @@ _MATH_HELPERS['string_capwords'] = (
     '    if sep:\n'
     '        return sep.join(out)\n'
     '    return " ".join(out)\n')
-_MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'tw_fill': ('tw_wrap',),
-             'tw_wrap': ('tw_wrap_more',), 'tw_shorten': ('tw_wrap_more',)}
+_MATH_DEPS = {'log2args': ('log',), 'comb': ('gcd',), 'lcm': ('gcd',), 'dist': ('sqrt',),
+             'tw_fill': ('tw_wrap',), 'tw_wrap': ('tw_wrap_more',), 'tw_shorten': ('tw_wrap_more',)}
 import string as _string_module
 
 _STRING_CONSTANTS = {name: getattr(_string_module, name) for name in (
@@ -2536,14 +2564,29 @@ class _Surface:
 
     def math_call(self, node, name):
         args = node.args
-        if not node.keywords and not any(isinstance(arg, ast.Starred) for arg in args):
+        star = any(isinstance(arg, ast.Starred) for arg in args)
+        if name == 'prod' and not star and len(args) == 1:
+            start = ast.Constant(value=1)
+            if node.keywords:
+                if len(node.keywords) == 1 and node.keywords[0].arg == 'start':
+                    start = node.keywords[0].value
+                else:
+                    self.note(node, 'math.prod() takes the iterable and the keyword start= only')
+                    return None
+            for each in (*_MATH_DEPS.get('prod', ()), 'prod'):
+                if each not in self.helpers:
+                    self.helpers.append(each)
+            return ast.Call(func=ast.Name(id='_ail_math_prod', ctx=ast.Load()), args=[args[0], start],
+                            keywords=[])
+        if not node.keywords and not star:
             helper = None
             if name in ('sqrt', 'isqrt') and len(args) == 1 or name == 'gcd' and len(args) == 2:
                 helper = name
             elif len(args) == 1 and (name in _MATH_ONE or name in _MATH_PREDICATES
                                      or name in ('degrees', 'radians', 'factorial')):
                 helper = name
-            elif len(args) == 2 and (name in _MATH_PLAIN_TWO or name in ('pow', 'fmod') or name in _MATH_INT_TWO):
+            elif len(args) == 2 and (name in _MATH_PLAIN_TWO or name in ('pow', 'fmod', 'remainder', 'dist')
+                                     or name in _MATH_INT_TWO):
                 helper = name
             elif len(args) == 1 and name in _MATH_LIST_ONE:
                 helper = name

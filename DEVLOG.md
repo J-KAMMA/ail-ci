@@ -1,3 +1,19 @@
+## 2026-11-01 -- `math` real-program coverage (job-std_math-11020038)
+
+Added twelve realistic `math` programs in `lab/stdlib/math/` and built them in the default mode: ten
+build (one typed, nine general) and all ten match CPython 3.12.3 stdout and exit status; each also
+matches on the forced general path. Four missing common calls were added to the lowering and prelude:
+`math.prod(..., start=...)`, `math.dist`, `math.erf` / `math.erfc`, and
+`math.nextafter` / `math.remainder`, including `math.dist`'s scaled norm and same-length `ValueError`,
+and `math.remainder`'s domain `ValueError`. `math.gamma` / `math.lgamma` and
+`math.frexp` / `math.ldexp` / `math.ulp` remain named refusals and are recorded as follow-ups in
+`lab/stdlib/math/RESULTS.md`; no program was changed to avoid a missing math name. Added
+`test_ail_std_math.py` (registered through `tests.d/test_ail_std_math.txt`), which builds the ten
+passing programs and compares them with CPython. Probes in `/tmp/probes/math/` and `/tmp/probes/feat/`
+cover empty, negative, huge, `inf` / `nan`, signed-zero and unequal-length values, keyword `start=`,
+and values reaching the calls through an argument, a list item, an attribute and a dict value on both
+builds.
+
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
