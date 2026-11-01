@@ -9767,19 +9767,23 @@ class Compiler(boxclosure.ClosureMixin):
         pos = list(args)
         if len(pos) > 2 or (kwargs and set(kwargs) - {'number', 'ndigits'}):
             raise Unsupported('round() with other than (number[, ndigits])')
-        if 'number' in kwargs:
-            if pos:
-                raise Unsupported('round() got multiple values for argument number')
-            pos.append(kwargs['number'])
-        if not pos:
+        if 'number' in kwargs and pos:
+            raise Unsupported('round() got multiple values for argument number')
+        if not pos and 'number' not in kwargs:
             raise Unsupported('round() missing required argument number')
-        if 'ndigits' in kwargs:
-            if len(pos) > 1:
-                raise Unsupported('round() got multiple values for argument ndigits')
-            pos.append(kwargs['ndigits'])
-        v = self.expr(pos[0], ctx)
-        has_n = len(pos) == 2
-        n = self.expr(pos[1], ctx) if has_n else 'ail_box_none()'
+        if 'ndigits' in kwargs and len(pos) > 1:
+            raise Unsupported('round() got multiple values for argument ndigits')
+        # Lower in source order: positional arguments first, then keywords as written.
+        # CPython evaluates them left-to-right, so round(ndigits=dig(), number=num())
+        # must call dig() before num(); binding keywords by name here used to reorder them.
+        bound = {}
+        for i, node in enumerate(pos):
+            bound['number' if i == 0 else 'ndigits'] = self.expr(node, ctx)
+        for key, node in kwargs.items():
+            bound[key] = self.expr(node, ctx)
+        v = bound['number']
+        has_n = 'ndigits' in bound
+        n = bound['ndigits'] if has_n else 'ail_box_none()'
         t = ctx.tmp()
         ctx.emit('st = ail_bi_round(cx, &%s, %s, %d, %s);' % (t, v, has_n, n))
         ctx.check()

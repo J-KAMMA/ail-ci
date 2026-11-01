@@ -58,9 +58,24 @@ class FractionsPrograms(unittest.TestCase):
 
     def test_round_keyword_boundaries(self):
         source = r"""from fractions import Fraction
+
+
+def num():
+    print("eval number")
+    return 2.5
+
+
+def dig():
+    print("eval ndigits")
+    return 1
+
+
 f = Fraction(1, 3)
 print(round(number=f), round(number=f, ndigits=2), round(ndigits=3, number=f))
 print(round(12345, ndigits=-2), round(number=2.5, ndigits=1))
+print(round(number=num(), ndigits=dig()))
+print(round(ndigits=dig(), number=num()))
+print(round(num(), ndigits=dig()))
 """
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
