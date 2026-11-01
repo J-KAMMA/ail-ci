@@ -41,15 +41,18 @@ Result: 9 of 12 build and match CPython; 3 are refusals.
 
 * `functools.reduce` without an initializer over an empty iterable raised `IndexError` (typed tuple
   lowering) or `RuntimeError` (stream lowering) instead of CPython's `TypeError`; both now raise it.
-* The general path's `@lru_cache` wrapper now has `cache_info()` / `cache_clear()` /
-  `cache_parameters()`, real `hits` / `misses`, the decorator's `maxsize`, `typed=True` keys, the
-  lone-int/str fast-path key rule, and CPython's unhashable-argument `TypeError`. A program that reads
-  these keeps every call on the wrapper (mixed-mode typed clones bypass the cache). Programs that do
-  not call them emit exactly the previous C.
+* The general path's `@lru_cache` / `@cache` wrapper now has `cache_info()` / `cache_clear()` /
+  `cache_parameters()`, real `hits` / `misses`, the decorator's `maxsize` (including a run-time
+  expression and the unbounded `@cache`), `typed=True` keys, the lone-int/str fast-path key rule, and
+  CPython's unhashable-argument `TypeError` for nested values too. Keys use the call's own shape, so
+  defaults are not part of the key and `f()`, `f(1)` and `f(m=2)` are different misses. A program that
+  reads these keeps every call on the wrapper (mixed-mode typed clones bypass the cache). The result
+  type is named `CacheInfo`.
 * `functools.cmp_to_key` is lowered on the general path to a stable merge sort in the prelude, for
   `sorted`, `list.sort`, `min` and `max`, with a function or lambda comparator.
 * `functools.partialmethod` with keyword-bound arguments is rewritten into an ordinary method of the
-  class on the general path.
+  class on the general path; a call-site keyword overrides the bound keyword, while a positional
+  argument that would rebind one raises CPython's `got multiple values for argument` `TypeError`.
 
 ## Verification
 

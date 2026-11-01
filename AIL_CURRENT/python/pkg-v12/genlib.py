@@ -381,32 +381,66 @@ class _Renamer(ast.NodeTransformer):
                 extra = [k for k in bound if k[0] not in names]
                 if extra:
                     raise Unsupported('functools.partialmethod() has no parameter named %s' % extra[0][0])
-                call_args = []
-                call_kws = []
-                pre = []
-                after_keyword = False
-                call = copy.deepcopy(info.args)
-                first_default = len(call.args) - len(call.defaults)
                 sentinel = '__AIL_PARTIALMETHOD_UNSET__'
-                for pname in names[1:]:
-                    match = [v for n, v in bound if n == pname]
-                    if match:
-                        idx = names.index(pname)
-                        if idx < first_default:
-                            raise Unsupported('functools.partialmethod() binding the required parameter %s '
-                                              'is not built on the general path' % pname)
-                        call.defaults[idx - first_default] = ast.Constant(value=sentinel)
-                        pre.append(ast.If(
-                            test=ast.Compare(left=ast.Name(id=pname, ctx=ast.Load()), ops=[ast.Eq()],
-                                             comparators=[ast.Constant(value=sentinel)]),
-                            body=[ast.Assign(targets=[ast.Name(id=pname, ctx=ast.Store())], value=match[0])],
-                            orelse=[]))
-                        call_kws.append(ast.keyword(arg=pname, value=ast.Name(id=pname, ctx=ast.Load())))
-                        after_keyword = True
-                    elif after_keyword:
-                        call_kws.append(ast.keyword(arg=pname, value=ast.Name(id=pname, ctx=ast.Load())))
-                    else:
-                        call_args.append(ast.Name(id=pname, ctx=ast.Load()))
+                bound_map = {n: v for n, v in bound}
+                orig_defaults = {}
+                if info.args.defaults:
+                    for pname, dexpr in zip(names[len(names) - len(info.args.defaults):],
+                                            info.args.defaults):
+                        orig_defaults[pname] = dexpr
+                first_default = len(names) - len(info.args.defaults)
+                for pname in bound_map:
+                    if names.index(pname) < first_default:
+                        raise Unsupported('functools.partialmethod() binding the required parameter %s '
+                                          'is not built on the general path' % pname)
+                bound_at = [names.index(n) for n in bound_map if names.index(n) > 0]
+                pre = []
+                if bound_at:
+                    first = min(bound_at)
+                    pos_names = names[:first]
+                    kw_names = names[first:]
+                    vname = '_ail_partialmethod_extra'
+                    while vname in names:
+                        vname = '_' + vname
+                    call_args = [ast.Name(id=p, ctx=ast.Load()) for p in pos_names[1:]]
+                    call_kws = [ast.keyword(arg=p, value=ast.Name(id=p, ctx=ast.Load()))
+                                for p in kw_names]
+                    pre.append(ast.If(
+                        test=ast.Call(func=ast.Name(id='len', ctx=ast.Load()),
+                                      args=[ast.Name(id=vname, ctx=ast.Load())], keywords=[]),
+                        body=[ast.Raise(exc=ast.Call(
+                                  func=ast.Name(id='TypeError', ctx=ast.Load()),
+                                  args=[ast.Constant(value="%s.%s() got multiple values for argument '%s'"
+                                                     % (node.name, target.id, names[first]))],
+                                  keywords=[]), cause=None)],
+                        orelse=[]))
+                    for pname in kw_names:
+                        if pname in bound_map:
+                            pre.append(ast.If(
+                                test=ast.Compare(left=ast.Name(id=pname, ctx=ast.Load()),
+                                                 ops=[ast.Eq()],
+                                                 comparators=[ast.Constant(value=sentinel)]),
+                                body=[ast.Assign(targets=[ast.Name(id=pname, ctx=ast.Store())],
+                                                 value=bound_map[pname])],
+                                orelse=[]))
+                    call = ast.arguments(
+                        posonlyargs=[], args=[ast.arg(arg=p) for p in pos_names],
+                        vararg=ast.arg(arg=vname),
+                        kwonlyargs=[ast.arg(arg=p) for p in kw_names],
+                        kw_defaults=[ast.Constant(value=sentinel) if p in bound_map
+                                     else copy.deepcopy(orig_defaults[p]) if p in orig_defaults
+                                     else None for p in kw_names],
+                        kwarg=None,
+                        defaults=[copy.deepcopy(orig_defaults[p]) for p in pos_names
+                                  if p in orig_defaults])
+                else:
+                    call = copy.deepcopy(info.args)
+                    call_args = [ast.Name(id=p, ctx=ast.Load()) for p in names[1:]]
+                    call_kws = []
+                    for pname in names[1:]:
+                        if pname in bound_map:
+                            call_args.remove(ast.Name(id=pname, ctx=ast.Load()))
+                            call_kws.append(ast.keyword(arg=pname, value=ast.Name(id=pname, ctx=ast.Load())))
                 pre.append(ast.Return(value=ast.Call(
                     func=ast.Attribute(value=ast.Name(id='self', ctx=ast.Load()),
                                        attr=target.id, ctx=ast.Load()),

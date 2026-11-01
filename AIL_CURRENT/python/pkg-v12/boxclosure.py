@@ -344,15 +344,16 @@ class ClosureMixin:
         adapter = 'pfv_%s' % info['cname']
         if adapter not in getattr(self, 'value_adapters', set()):
             self.value_adapters = getattr(self, 'value_adapters', set()) | {adapter}
+            extra = ', ail_box_none()' if name in getattr(self, 'lru_data', {}) else ''
             if n == 1:
-                call = '%s(cx, out, arg)' % info['cname']
+                call = '%s(cx, out, arg%s)' % (info['cname'], extra)
                 pre = ''
             elif n == 0:
-                call = '%s(cx, out)' % info['cname']
+                call = '%s(cx, out%s)' % (info['cname'], extra)
                 pre = '(void)arg; '
             else:
                 pre = 'ail_vecobj *v = (ail_vecobj *)arg.o; '
-                call = '%s(cx, out%s)' % (info['cname'], ''.join(', v->p[%d]' % i for i in range(n)))
+                call = '%s(cx, out%s%s)' % (info['cname'], ''.join(', v->p[%d]' % i for i in range(n)), extra)
             self.top_decls.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, void *closure);\n' % adapter)
             self.top_defs.append('static ail_st %s(ail_ctx *cx, ail_obj *out, ail_obj arg, void *closure) {\n'
                                  '    (void)closure; %sreturn %s;\n}\n\n' % (adapter, pre, call))

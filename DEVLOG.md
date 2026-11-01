@@ -1,3 +1,31 @@
+## 2026-11-01 -- std_functools review: unbounded @cache, call-shape keys, runtime maxsize, nested unhashable, partialmethod duplicates (job-std_functools-11011436)
+
+Fixed the six review findings. The general `@lru_cache`/`@cache` wrapper now keeps its entries in a
+module dict and is given the call's CPython `_make_key` shape (positional-only vs keyword keys, and the
+lone untyped int/str fast path) as an extra argument; defaults are no longer part of the key, so `f()`,
+`f(1)` and `f(m=2)` are three misses. `@cache` is unbounded (20000 distinct keys stay 20000), a
+`maxsize` expression is evaluated once when the decorator would run and is read at run time, negative
+maxsize behaves as 0, and `maxsize=0` skips hashing as CPython does. Every key is hashed, so a list,
+dict or set nested inside a tuple argument raises CPython's `TypeError` before any miss is counted. The
+result class is named `CacheInfo`; `cache_clear` clears the dict; eviction deletes the oldest key.
+`partialmethod` now turns the parameters from the first keyword-bound one into keyword-only parameters
+with a `*extra` catcher: a positional argument that would rebind one raises CPython's
+`Class.method() got multiple values for argument 'name'`, while a call-site keyword overrides the bound
+keyword as CPython does. Values reach the cache and the methods through arguments, list items, dict
+values and attributes in the probes. The ten lab/compare programs still emit byte-identical C where
+they build (`berth_sim`, `echo_pack`, `ledger_bin`, `term_rank`, `ticket_audit`); the other five refuse
+with the same text as before.
+
+Probes (`bash ~/tools/cmp.sh`, default and `AIL_UNIFIED_FORCE=1`, all match CPython 3.12.3):
+`p_fx_cache_unbounded.py`, `p_fx_cache_defaults.py`, `p_fx_lru_defaults.py`, `p_fx_lru_maxvar.py`,
+`p_fx_lru_neg.py`, `p_fx_lru_kwargs.py`, `p_fx_lru_nested_unhash.py`, `p_fx_lru_zero_unhash.py`,
+`p_fx_lru_clear_reuse.py`, `p_fx_lru_shapes.py`, `p_fx_cacheinfo_name.py`, `p_fx_pmethod.py`,
+`p_fx_pmethod_shapes.py`.
+
+`test_ail_std_functools` gained `test_review_regressions` for the six findings. Final-state tests:
+test_ail_std_functools, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules,
+0 failed).
+
 ## 2026-11-01 -- stdlib functools: 9 of 12 real programs build and match CPython (job-std_functools-11011436)
 
 Added `lab/stdlib/functools/` with twelve 20-40-line Python programs using `functools` the way ordinary
