@@ -34,7 +34,7 @@ def run(tree, text, mods):
     if 'calendar' in mods:
         run_calendar(tree, text)
     if 'abc' in mods:
-        run_abc(tree)
+        run_abc(tree, text)
     if 'array' in mods:
         run_array(tree, text)
     if 'io' in mods:
@@ -133,15 +133,57 @@ def run_calendar(tree, text):
 
 
 # ---------------------------------------------------------------------------------------------------------------
-def run_abc(tree):
-    b = stdlib5.take_imports(tree, 'abc', {'ABC', 'ABCMeta', 'abstractmethod'},
-                             unknown='ABC, ABCMeta and abstractmethod are built (as plain classes and methods)')
+def run_abc(tree, text):
+    b = stdlib5.take_imports(tree, 'abc', {'ABC', 'ABCMeta', 'abstractmethod', 'abstractclassmethod',
+                                           'abstractstaticmethod', 'abstractproperty', 'get_cache_token'},
+                             unknown='ABC, ABCMeta, abstractmethod, abstractclassmethod, abstractstaticmethod, '
+                                     'abstractproperty and get_cache_token are built')
     if not b:
         return
 
+    abstract_decorators = {'abstractmethod', 'abstractclassmethod', 'abstractstaticmethod', 'abstractproperty'}
+    decorator_replacement = {'abstractclassmethod': 'classmethod', 'abstractstaticmethod': 'staticmethod',
+                             'abstractproperty': 'property'}
+
+    def is_abstract(decorator):
+        return b.attr(decorator) in abstract_decorators
+
+    def defined_methods(cls):
+        methods = set()
+        abstract = set()
+        for item in cls.body:
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                if any(is_abstract(d) for d in item.decorator_list):
+                    abstract.add(item.name)
+                else:
+                    methods.add(item.name)
+        return methods, abstract
+
+    classes = [stmt for stmt in tree.body if isinstance(stmt, ast.ClassDef)]
+    heritage = {}
+    abstract = {}
+    for cls in classes:
+        direct = False
+        bases = []
+        for base in cls.bases:
+            found = b.attr(base)
+            if found in ('ABC', 'ABCMeta'):
+                direct = True
+            elif isinstance(base, ast.Name) and base.id in abstract:
+                bases.append(base.id)
+        for keyword in cls.keywords:
+            if keyword.arg == 'metaclass' and b.attr(keyword.value) == 'ABCMeta':
+                direct = True
+        inherited = set()
+        for base in bases:
+            inherited.update(abstract[base])
+        methods, declared = defined_methods(cls)
+        heritage[cls.name] = direct or bool(bases)
+        abstract[cls.name] = (inherited - methods) | declared
+
     class Strip(ast.NodeTransformer):
         def visit_ClassDef(self, node):
-            node.bases = [x for x in node.bases if b.attr(x) not in ('ABC',)]
+            node.bases = [x for x in node.bases if b.attr(x) not in ('ABC', 'ABCMeta')]
             keep = []
             for kw in node.keywords:
                 if kw.arg == 'metaclass' and b.attr(kw.value) == 'ABCMeta':
@@ -152,14 +194,67 @@ def run_abc(tree):
             return node
 
         def visit_FunctionDef(self, node):
-            node.decorator_list = [d for d in node.decorator_list if b.attr(d) != 'abstractmethod']
+            decorators = []
+            for decorator in node.decorator_list:
+                found = b.attr(decorator)
+                if found in abstract_decorators:
+                    replacement = decorator_replacement.get(found)
+                    if replacement is not None:
+                        decorators.append(stdlib5.name(replacement))
+                    continue
+                decorators.append(decorator)
+            node.decorator_list = decorators
             node.body = [ast.Pass() if isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant)
                          and s.value.value is Ellipsis else s for s in node.body]
             self.generic_visit(node)
             return node
     tree.body = [Strip().visit(s) for s in tree.body]
+
+    guards = []
+    for cls in classes:
+        if not heritage.get(cls.name) or not abstract.get(cls.name):
+            continue
+        guards.append(cls.name)
+        marker = ast.parse('def _ail_abc_guard__(self) -> None:\n    _ail_abc_check(self)\n').body[0]
+        cls.body.append(marker)
+
+    used_token = [False]
+
+    def fix(node):
+        if isinstance(node, ast.Call) and b.attr(node.func) == 'get_cache_token' and not node.args and not node.keywords:
+            used_token[0] = True
+            return stdlib5.call(stdlib5.name('_ail_abc_cache_token'), [])
+        return None
+    tree.body = [stdlib5.Replace(fix).visit(s) for s in tree.body]
+
     b.names.clear()
-    stdlib5.leftover(tree, b, 'ABC, ABCMeta and abstractmethod are the names that are built')
+    stdlib5.leftover(tree, b, 'ABC, ABCMeta, abstractmethod, abstractclassmethod, abstractstaticmethod, '
+                     'abstractproperty and get_cache_token are the names that are built')
+    if guards:
+        missing = {}
+        for cls in classes:
+            if heritage.get(cls.name) and abstract.get(cls.name):
+                missing[cls.name] = tuple(sorted(abstract[cls.name]))
+        lines = ['def _ail_abc_check_name(name: str) -> None:']
+        first = True
+        for cname in sorted(missing):
+            names = missing[cname]
+            if len(names) == 1:
+                message = ("Can't instantiate abstract class %s without an implementation for abstract method '%s'"
+                           % (cname, names[0]))
+            else:
+                message = ("Can't instantiate abstract class %s without an implementation for abstract methods '%s'"
+                           % (cname, "', '".join(names)))
+            lines.append('    %s name == %r:' % ('if' if first else 'elif', cname))
+            lines.append('        raise TypeError(%r)' % message)
+            first = False
+        if first:
+            lines.append('    pass')
+        lines.extend(['', 'def _ail_abc_check(obj) -> None:',
+                      '    _ail_abc_check_name(type(obj).__name__)', ''])
+        text.append('\n'.join(lines))
+    if used_token[0]:
+        text.append('def _ail_abc_cache_token() -> int:\n    return 0\n')
 
 
 # ---------------------------------------------------------------------------------------------------------------

@@ -397,6 +397,8 @@ class ClosureMixin:
                                                                   self.global_slots['class:' + cname]))
                 first = False
                 ctx.indent += 1
+                if self._resolve_method(cname, '_ail_abc_guard__') is not None:
+                    self._call_user_function('_ail_abc_check_name', [ast.Constant(value=cname)], {}, ctx)
                 mark = len(ctx.lines)
                 try:
                     r = self._call_class(cname, [_PreC(x) for x in slots], {}, ctx)

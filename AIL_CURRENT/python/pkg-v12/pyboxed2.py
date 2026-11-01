@@ -7664,6 +7664,11 @@ class Compiler(boxclosure.ClosureMixin):
             k = self.classes[k]['base']
         for kls in reversed(chain):
             self._ensure_class_attrs(kls, ctx)
+        guard = self._resolve_method(name, '_ail_abc_guard__')
+        if guard:
+            dummy = ctx.tmp()
+            ctx.emit('st = %s(cx, &%s, %s);' % (guard['cname'], dummy, t))
+            ctx.check()
         if info:
             argcs = self._bind_args(name, info, args, kwargs, ctx)
             dummy = ctx.tmp()

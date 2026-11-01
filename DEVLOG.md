@@ -1,3 +1,27 @@
+## 2026-11-01 -- abc real-program coverage (job-std_abc-11020026)
+
+Added twelve realistic `abc` programs in `lab/stdlib/abc/` and made nine of them build and match
+CPython 3.12 stdout and exit code on `AIL_IR=0` and `AIL_IR=1`. The `abc` pass (`smalllib5.py`) now
+handles `ABC`, `abc.ABC`, `ABCMeta`, `metaclass=abc.ABCMeta`, `abstractmethod`,
+`abstractclassmethod`, `abstractstaticmethod`, `abstractproperty` and `get_cache_token`; it computes
+each class's remaining abstract methods, strips the abstractness, and adds a guard that
+`pyboxed2.py` / `boxclosure.py` call before constructor argument binding, so an incomplete class
+raises CPython's exact `Can't instantiate abstract class ...` text (method names sorted) instead of
+being instantiated or reporting an arity error. Three programs remain refused by name:
+`virtual_subclass` (`ABC.register`, `not in the subset: the method .register() ...`),
+`subclasshook` (`not in the subset: the name 'issubclass' is not a known function/class/builtin`)
+and `update_abstractmethods` (`not in the subset: class Job bases on ABC, defined after it or
+unknown`); they are recorded as follow-ups in `lab/stdlib/abc/RESULTS.md`. `get_cache_token()`
+returns a stable `0`, so only its type and stability are modelled.
+
+`test_ail_std_abc.py` (registered in `tests.d/`) builds the nine passing programs and compares them
+with CPython. Probes `/tmp/probes/abc_probe_{single,multi,none,chain,decorators,attrs,routes,override,args,empty}.py`
+cover sorted messages, inheritance, overrides, all abstract decorators, attribute spellings, empty
+ABCs, wrong arities, aliases/list items/dict values/attributes/arguments, on both `cmp.sh` builds;
+all match or are refused by name. The ten `lab/compare` tasks were rebuilt against the base tree:
+the six that build are byte-identical and the other four fail identically on both.
+
+---
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
