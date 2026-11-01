@@ -65,6 +65,38 @@ class Empty(Enum):
 print(Empty(1))
 """
 
+FLAG_CONTAINS = """\
+from enum import Flag, IntFlag
+
+class F(Flag):
+    A = 1
+    B = 2
+    C = 4
+
+class IF(IntFlag):
+    A = 1
+    B = 2
+    C = 4
+
+print(1.0 in F, 1.0 in IF, IF.A in F, F.A in IF)
+print(F(1.0), IF(1.0), F(IF.A))
+print(2.0 in F, True in F, 1.5 in F)
+xs = [1.0]
+print(xs[0] in F, F(xs[0]))
+class Box:
+    pass
+b = Box()
+b.v = 1.0
+print(b.v in F, F(b.v))
+d = {'v': 1.0}
+print(d['v'] in F, F(d['v']))
+def contains(v):
+    return v in F
+def lookup(v):
+    return F(v)
+print(contains(1.0), contains(IF.A), lookup(1.0), lookup(IF.A))
+"""
+
 
 def compile_python(directory, text, name):
     source, exe = Path(directory, name + ".py"), Path(directory, name)
@@ -101,6 +133,9 @@ class LabPrograms(unittest.TestCase):
 
     def test_edge_cases_match_cpython(self):
         self.check_program("enum_edges.py", EDGE_PROGRAM, "edge_")
+
+    def test_flag_contains_matches_cpython(self):
+        self.check_program("enum_flag_contains.py", FLAG_CONTAINS, "flag_")
 
     def test_empty_enum_call_is_refused_by_name(self):
         with tempfile.TemporaryDirectory() as directory:

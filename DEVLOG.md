@@ -1,3 +1,20 @@
+## 2026-11-01 -- stdlib enum: Flag value lookup before the int check (job-std_enum-11020119)
+
+The review of the 3.12 containment change found two regressions on 3.12.10+: `1.0 in F` / `1.0 in IF`
+and `IF.A in F` returned `False` where CPython 3.12.15 returns `True`, because the new `_ail_en_<class>_has`
+routed through the generated Flag `_call`, whose `if not isinstance(v, int)` rejected a float or another
+IntFlag member before looking the value up. CPython's `Flag.__new__` consults `_value2member_map_` first,
+using hash and equality, so `1.0` and an `IntFlag` member with value `1` find `F.A`.
+
+The generated Flag `_call` now tries `_ail_en_<class>_v2m[v]` before the int check (catching `KeyError`
+and `TypeError`), then keeps the existing not-int `ValueError` and `_missing` path. This fixes the
+containment results and also aligns direct `F(1.0)` / `F(IF.A)` with CPython; `1.5`, `'1'`, `None` and
+unhashable values keep their previous results, and the empty-enum `TypeError`, unhashable-`in` `False`
+and new Flag composites are unchanged. `test_ail_std_enum` gains `test_flag_contains_matches_cpython`.
+
+Verified on 3.12.3 and 3.12.15, both builds: `/tmp/probes/{flags_full,flag_direct,reg_float2,flag_equal_routes}.py`
+plus the existing `enum_contains_{core,kinds,flags}.py` all match CPython (14/14 build comparisons).
+
 ## 2026-11-01 -- stdlib enum: `in` follows the running 3.12 patch (job-std_enum-11020119)
 
 `test_ail_std_enum` passed with the system Python 3.12.3 but failed on CI, whose `actions/setup-python`
