@@ -1,3 +1,28 @@
+## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
+
+Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten
+`lab/compare` tasks, without changing any default. The C compiler is 17-47% of a cold build (median 33%):
+the AIL front end is 1.2-4.2 s and the Amdahl bound from a free C compiler is only 1.21-1.86x. tcc 0.9.28rc
+(tinycc `e23dabe`) compiles the generated C in 5-12 ms and links in 2-4 ms, against 0.35-1.34 s for `gcc -c`,
+so the sum of the ten medians falls from 24.48 s to 19.56 s (2.03 s -> 1.64 s per median task). Every tcc
+binary matched the gcc binary's stdout and exit code and passed all 511 public/hidden task checks, but ran
+1.71-8.24x slower. The resident server with tcc is warm 1.25-4.97 s (best tasks 1.25-1.43 s), still about
+2-3x Rust's 0.4-0.5 s. Only `__builtin_{add,sub,mul}_overflow` fails in tcc (unresolved link reference); the
+measurement-only `lab/tccdev/tcc_prelude.h` guards it, at a measured 0 to +11.8% run time when forced onto
+gcc. Statement expressions, `__typeof__`, `_Generic` and `__attribute__` are accepted; the SIMD/intrinsic and
+fast-setjmp blocks are already under `defined(__GNUC__)`, which tcc does not define. Recommendation: do not
+build `--dev` tcc for the 0.5 s goal; cut the front end (warm server plus a source/flag-keyed front-end
+cache) first, then tcc only for the 5-12 ms C stage. Full tables, spreads, runner noise and scripts are in
+`docs/design/TCC_DEV.md` and `lab/tccdev/` (`measure.py`, `cc_wrap.py`, `tcc_prelude.h`, `results.json`).
+
+Probes: `/tmp/probes/tcc_ok.py` matches CPython 3.12 on both `cmp.sh` builds and on the tcc build;
+`/tmp/probes/tcc_overflow.py` gives identical stdout/stderr/exit on gcc and tcc (both raise the documented
+int64 `OverflowError`, where CPython's exact int differs by design);
+`/tmp/probes/tcc_overflow_alias.py` is refused by name on both builds (constant expression outside int64);
+the C probe `/tmp/probes/tcc_overflow.c` gives identical output for gcc builtins, gcc with the forced
+`__TINYC__` prelude, and tcc with the prelude (add/sub/mul at `INT64_MIN`/`MAX`, zero, `-1`, aliasing,
+list/struct/argument values). No default compiler or test expectation was changed.
+
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
@@ -353,6 +378,99 @@ legacy `base64.encode` / `base64.decode` stream API). `test_ail_std_base64.py` c
 `AIL_IR` builds and pins the two refusals. `test_ail_crypto.py` now pins `b85encode` as the refused
 base64 name instead of the now-built `b32encode`.
 
+## 2026-11-01 -- rbi64edge1 review follow-up: str-list comprehension call-site kind (job-rbi64edge1-11012213)
+
+The review of `cfab295` found that `_comp_element_kind` asked `_is_str_expr` for str-ness, but
+that helper only recognises a str VALUE, so a `list[str]` Name (or a slice of one) was read as int.
+On the typed-only path (`AIL_NO_GENERAL=1`) `[f(w) for w in words]` and `[f(w) for w in words[1:]]`
+were therefore refused as `'s' is annotated str ... caller also supplies int`, while the base tree
+compiled them. The element kind now comes from `_iter_elem_is_str` (the same question `_iter_plan`
+and `_listcomp_kind` ask), looking through a slice, with the float check kept as `_is_flist_call` /
+`_is_flist_name`; `_comprehension_claims` now also walks a `DictComp`'s key and value in its own
+scope. `test_ail_i64edge1` gains a typed-only case covering a `list[str]` name, a str-list slice,
+a `list[float]` floor comprehension and an empty list.
+
+Probes in `/tmp/probes`, compared with CPython on the typed-only, forced-general and default
+builds: `d1_slist_name`, `d2_slist_slice`, `d6_slist_literal`, `d7_flist_name`, `d8_flist_slice`,
+`d9_int_name`, `d10_shadow_reuse`, `e1_slist_local`, `e2_slist_local_slice`, `e5_slist_empty`,
+`e9_slist_arg_func`, `e10_int_and_str_same_comp`, `c1_float_param`, `c2_float_attr`,
+`c4_str_slice`, `c5_float_literal`, `c6_shadow_reuse`, `c13_slist_name_strparam` match on all
+three builds. Remaining typed-path refusals (`c3_str_dict`, `c7_dict_values_float`, `c8_two_gens`,
+`c9_nested_comp`, `c10_strkeys_floor`, `c11_strslice_floor`, `c12_strvalues_floor`,
+`c14_slist_name_ident`, `d3_slist_dict_values`, `d4_slist_dict_keys`, `d5_slist_set`,
+`e3_slist_genexp`, `e4_slist_setcomp`, `e6_str_dict_values_local`, `e7_dictcomp_key`,
+`e8_nested_gen_source`) are refusals on the base tree too; their forced-general and default
+builds still match CPython. Final-state tests: test_ail_i64edge1, test_ail_gpu_g1,
+test_ail_str_comprehension_move, test_ail_float_argument_widening, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
+## 2026-11-01 -- i64edge1 suite fix: GPU floor/ceil helpers, comprehension call-site kinds (job-rbi64edge1-11012213)
+
+The i64edge change lowered a non-constant `math.floor` / `math.ceil` to `_ail_math_floor` /
+`_ail_math_ceil`, which broke `test_ail_gpu_g1` two ways. The GPU eligibility proof only knew the
+`math.floor` / `math.ceil` surface call, so it refused the helper by name; it now lowers
+`_ail_math_floor` / `_ail_math_ceil` (and `_ail_math_trunc`) exactly like the surface call (an int
+argument is the identity, a float one is the kernel's `cvt i floor/ceil/trunc`, whose range flag
+replays the CPU loop). The typed call-site pass also read a comprehension target as int, so the
+unannotated helper was claimed int64 from `[math.floor(x) for x in xs]` and the float `x` was then
+refused; `_claim` now reads a per-node comprehension scope (`_comprehension_claims`), so each
+comprehension keeps its own element kind. Two comprehensions that reuse a name, an int64 list
+above 2**53, shadowed locals, strings and float widening are covered by the probes below. No
+language semantics changed; a program without the marker or without `--gpu` is unaffected.
+
+Probes in `/tmp/probes` with `cmp.sh` on the general and default builds:
+`rbi_comp_floor_float`, `rbi_comp_floor_int`, `rbi_comp_str`, `rbi_floor_attr_dict`,
+`rbi_comp_shadow`, `rbi_comp_mixed_types` (all match CPython on both) and `rbi_gpu_floor_ceil`
+(both match, and its `--gpu` binary with `AIL_GPU=emu` and `AIL_GPU=0` matches too). Final-state
+tests: test_ail_gpu_g1, test_ail_i64edge1, test_ail_gpu_g2, test_ail_str_comprehension_move,
+test_ail_float_argument_widening, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+## 2026-11-01 -- int64 edges: gcd/lcm at INT64_MIN, ceil/floor at +-2**63, named round (job-i64edge1-11011134)
+
+`math.gcd(INT64_MIN, 2)` took `abs(INT64_MIN)` and stopped with `unary - or abs()` even though
+the answer `2` fits; `math.lcm(INT64_MIN, k)` took `abs` of an overflowing intermediate; and
+`math.ceil(-2.0**63)` stopped in the inner `int(float)` conversion. The typed gcd helper now uses
+signed Euclid (no `abs` of an input), stops `math.gcd()` only for `gcd(MIN, 0)` / `gcd(0, MIN)` /
+`gcd(MIN, MIN)` where CPython's answer is `2**63`, and the exact mode keeps the old
+arbitrary-precision body. The lcm helper returns `0` before touching an argument, stops
+`math.lcm()` for a nonzero `INT64_MIN` operand, and the exact mode keeps `abs` over the big
+product. `ceil` and `floor` have their own helpers (the ceil argument is evaluated once), each
+taking the argument's own int or float value (`y = x + 0`), checking a finite value at or beyond
+`+-2**63` against int bounds before the integer conversion, so an int argument larger than 2**53
+keeps every digit; an int constant keeps the old direct lowering. `trunc` still lowers to `int(x)`.
+The exact mode keeps the direct `int(x // 1)` lowering for ceil/floor, so CPython's huge integers
+still print. On the general path, `ail__float_to_int_checked` now takes the operation name, so
+floor/ceil/trunc stop as `math.floor()` / `math.ceil()` / `math.trunc()`, and `ail_bi_round` stops
+as `integer overflow in round()` (no int64 suffix, matching the pre429 text's style). B| gcd/lcm
+also stop by name for the INT64_MIN cases; an lcm whose product leaves int64 stops in the helper's
+multiplication as `*` (or as `math.lcm()` in the runtime arm), never wrapping.
+
+Probes in `/tmp/probes` with `cmp.sh` on the default and forced-general builds: `gcd_min0_var`,
+`gcd_minmin_var`, `gcd_min1`, `gcd_min2`, `gcd_min4_var`, `gcd_minodd_var`, `gcd_minm2_var`,
+`gcd_var`, `gcd_intvar`, `lcm_min0_var`, `lcm_min1_var`, `lcm_minm1_var`, `lcm_min2_var`,
+`lcm_min3_var`, `lcm_min4_var`, `ceil_below_m2p63`, `ceil_min_float`, `ceil_over_float`,
+`ceil_below_p2p63`, `floor_below_m2p63`, `floor_min_float`, `floor_over_float`,
+`floor_below_p2p63`, `int_below_m2p63`, `int_below_p2p63`, `int_over_float`, `int_min_float`,
+`round_below_m2p63`, `round_min_float`, `round_over_float`, `round_below_p2p63`,
+`trunc_below_m2p63`, `trunc_min_float`, `trunc_over_float`, `floordiv_minm1_var`,
+`mod_minm1_var`, `divmod_minm1_var`, `neg_min_var`, `abs_min_var`, `pow_m2_63_var`,
+`pow_m2_64_var`, `pow_m3_39_var`, `pow_m3_40_var`, `int_text_over_var`, `int_text_below_var`,
+`int_text_min_var`, `int_base_over_var2`, `int_base_below_var2`, `int_base_min_var2` and
+`int_base_max_var2`: in-range values match CPython byte for byte; beyond-int64 values stop exit
+1 naming the operation. The pure `pyboxed2` general path was checked with
+`AIL_UNIFIED_FORCE=1 AIL_UNIFIED=0`; the exact mode still prints the big values. The remaining
+divmod/pow/int(text) cases already stopped by name and needed no code change (static big-int
+literals stay compile-time refusals by design). Extra `rev_*` probes build the same values from
+loops and pass them through a function argument, a list item, an attribute and a dict value, so
+the run-time arms (not the constant folders) are the ones exercised; they also check that
+`math.floor`/`ceil` keep an int64 int's digits (9007199254740993).
+
+Added `AIL_CURRENT/test_ail_i64edge1.py` (69 cases, default / forced general / exact) and
+registered it through `AIL_CURRENT/tests.d/test_ail_i64edge1.txt`. `test_ail_int64_default` now
+expects the named general round text, and `test_ail_pre429` expects
+`OverflowError: integer overflow in round()`. `tools/update_manifest.py` was run and `--check`
+passes. Final-state tests: test_ail_i64edge1, test_ail_int64_default, test_ail_pre429,
+test_ail_bigint, test_ail_python_syntax, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
@@ -701,6 +819,68 @@ function body does enough work; a C callable type is the next step for the closu
 
 Added `AIL_CURRENT/ail_cpython_hybrid.py`, `AIL_CURRENT/test_ail_cpython_hybrid.py` and
 `AIL_CURRENT/tests.d/test_ail_cpython_hybrid.txt`. Final-state tests: test_ail_cpython_hybrid,
+## 2026-11-01 -- std_bisect review 2: key= must reject non-sequences (job-std_bisect-11012338)
+
+The reviewer found that `BISECTKEY_C`'s `ail__bisect_len` used `ail_op_len`, which accepts
+mappings and sets: `bisect_left({}, 1, key=ident)` returned 0 where CPython raises
+`TypeError: dict is not a sequence`, and `set()` / a `__len__`-only instance returned 0
+instead of `'set' object does not support indexing` / `'NoGet' object does not support
+indexing`. The keyed search now mirrors CPython's `_bisect`: `PySequence_Size` semantics
+first when `hi` is defaulted (a non-Counter dict is rejected there), then a sequence check
+before the loop even when `hi` is supplied, so a `__getitem__`-only instance with `hi=0`
+still returns 0 while a `__len__`-only instance is rejected. Counters stay indexable;
+plain dicts and defaultdicts are refused with CPython's text.
+
+Probes `/tmp/rprobes/v_dict_empty.py`, `v_dict_full.py`, `v_lenonly.py`,
+`v_getonly_hi.py`, `v_range.py`, `v_bytes.py`, `v_custom.py` and `v_deque.py` match CPython
+on both the general and default builds. `test_ail_std_bisect` gained
+`test_key_rejects_non_sequences`. Final-state tests: test_ail_std_bisect,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
+
+## 2026-11-01 -- std_bisect review: key= on a str/tuple sequence crashed (job-std_bisect-11011433)
+
+The review found that `bisect_left("abcd", "b", key=str)` segfaulted: `key=` forces the
+general path, and `BISECTKEY_C` cast the sequence to `ail_vecobj *` unconditionally, reading
+a str's payload as a vector. `BISECTKEY_C` now reads the length and each visited element
+through the general indexing helpers for lists, tuples and strs, so the key searches match
+CPython (`1`/`3` for the reviewer's probe) while the list path is unchanged. `insort*` with
+`key=` on a non-list now raises CPython's `AttributeError: 'str' object has no attribute
+'insert'` after the search instead of writing through the cast.
+
+Probes `p1_review`, `p2_str_paths`, `p3_tuple_paths`, `p4_insort_str` and `p5_list_key`
+in `/tmp/probes` (str through an argument, a list item, an attribute and a dict value; empty
+str, lo/hi bounds, IndexError/ValueError, tuple key, insort on str/tuple, list regression)
+match CPython on both the general and default builds. The ten `lab/compare` tasks' generated
+C is unchanged: 17 buildable task/language pairs are byte-identical to the base revision, and
+the same three Python-column pairs are refused by both. `test_ail_std_bisect` gained
+`test_key_on_str_and_tuple`. Final-state tests: test_ail_std_bisect, test_ail_heapq_bisect,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed).
+
+## 2026-11-01 -- std_bisect: key= for bisect/insort on the general path (job-std_bisect-11011433)
+
+Added twelve realistic `bisect` programs under `lab/stdlib/bisect/` (grade bands, price tiers,
+word indexes, leaderboards, event windows, float intervals, sparse ids, alias/star imports,
+keyed rows, caught edges). Eleven built before any change; the twelfth, `key_records`, was
+refused because the typed path does not model a tuple row and the general path rejected
+`key=`. The general path now accepts `key=` on `bisect_left`, `bisect_right`, `bisect`,
+`insort`, `insort_left` and `insort_right`: the key is called on exactly the elements the
+binary search visits, `insort` computes `key(x)` once, and key results are rooted across
+allocating comparisons. The new C fragment is emitted only for a program that uses `key=`
+(`python/pkg-v12/pyboxed2.py`, `BISECTKEY_C`), so programs without it emit the same C.
+All twelve now build in the default mode and match CPython 3.12 stdout and exit status.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `p_bisect_key_tuples` (all six calls,
+duplicates, empty, lo/hi positional and keyword, `hi=None`, negative hi), `p_bisect_key_calls`
+(key called only on visited elements; insort key-once), `p_bisect_key_types` (int, float,
+str, `key=abs/int/float/len/str.lower`), `p_bisect_key_routes` (argument, list item,
+attribute, dict value, alias) and `p_bisect_key_errors` (a raising key and bound errors);
+all match CPython or stop with CPython's exception. The generated C of the ten `lab/compare`
+tasks was compared with `HEAD`: 17 task/language pairs byte-identical, and the three
+Python-column pairs `scar_life`/`tally_lang`/`tree_fold` are refused by both revisions.
+
+Added `AIL_CURRENT/test_ail_std_bisect.py` (12 programs plus a key-call/insort program) and
+its `AIL_CURRENT/tests.d/test_ail_std_bisect.txt` registration. `tools/update_manifest.py`
+was run and `--check` passes. Final-state tests: test_ail_std_bisect, test_ail_heapq_bisect,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)

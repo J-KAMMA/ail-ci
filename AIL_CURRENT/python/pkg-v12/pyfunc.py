@@ -30003,6 +30003,74 @@ CLONE_CAP = 4
 # needs five real specialisations. See SEMANTICS.md section 26.
 
 
+def _comp_element_kind(iter_node, ctx, scope):
+    """The element kind a comprehension's source yields, for the call-site claim of `_claim`.
+
+    Mirrors `_listcomp_kind`'s own element inference: a slice yields the element of the sequence
+    it wraps (`_iter_elem_is_str` and `_is_flist_name` both look through it), an enclosing
+    comprehension target is answered from this walk's own scope, and str-ness comes from
+    `_iter_elem_is_str` -- the same question `_iter_plan` asks -- rather than `_is_str_expr`,
+    which only recognises a str VALUE and so read a `list[str]` Name (or a slice of one) as int.
+    """
+    source = iter_node
+    while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
+        source = source.value
+    if isinstance(source, ast.Name) and source.id in scope:
+        return scope[source.id]
+    if _iter_elem_is_str(source, ctx):
+        return STR
+    if _is_flist_call(source, ctx) or _is_flist_name(source, ctx):
+        return FLT
+    try:
+        source_kind = _etype(source, ctx)
+    except Unsupported:
+        return None
+    if _is_olist_kind(source_kind):
+        return None                 # a struct-instance list says nothing about a scalar claim
+    return INT if source_kind == LIST else None
+
+
+def _comprehension_claims(fn, ctx):
+    """`id(Name node) -> kind` for every comprehension target read, by its own scope.
+
+    A comprehension target is not a local a `for` statement declares, so `ctx.type_of` cannot
+    answer it. `_claim` then read every element as int, and an unannotated helper such as
+    `_ail_math_floor` was claimed int from `[math.floor(x) for x in xs]` before the float `x` was
+    refused. Mapping each read NODE, not just its name, keeps two comprehensions that reuse a name
+    (or shadow an enclosing int) on their own element kinds.
+    """
+    claims = {}
+
+    def walk(node, scope):
+        if isinstance(node, ast.Name):
+            if node.id in scope:
+                claims[id(node)] = scope[node.id]
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            local = dict(scope)
+            for g in node.generators:
+                walk(g.iter, local)                 # the source still sees an enclosing binding
+                if isinstance(g.target, ast.Name):
+                    local[g.target.id] = _comp_element_kind(g.iter, ctx, local)
+                else:
+                    for e in ast.walk(g.target):
+                        if isinstance(e, ast.Name):
+                            local.pop(e.id, None)
+                for c in g.ifs:
+                    walk(c, local)
+            if isinstance(node, ast.DictComp):
+                walk(node.key, local)
+                walk(node.value, local)
+            else:
+                walk(node.elt, local)
+            return
+        for child in ast.iter_child_nodes(node):
+            walk(child, scope)
+
+    walk(fn, {})
+    return claims
+
+
 def _caller_ctx(f, sigs, arity_seed=None, classes=None, owned_str_fns=None, owned_bytes_fns=None):
     """The caller's own fully-typed `Ctx` -- locals included, promoted to float exactly where
     `Ctx.declare` already promotes them, containers marked exactly as `_one_function` marks them --
@@ -30051,6 +30119,7 @@ def _caller_ctx(f, sigs, arity_seed=None, classes=None, owned_str_fns=None, owne
         _settle_module_vars(f, ctx)
         _bind_container_types(f, ctx)
         _bind_object_types(f, ctx)
+        ctx.comp_claims = _comprehension_claims(f, ctx)
     except Unsupported:
         pass
     return ctx
@@ -30144,6 +30213,9 @@ def _claim(arg, ctx):
     covering parameters and locals a `.append()`/read/copy pattern established) because `_etype`
     has no notion of a row's WIDTH at all -- it only ever answers int/float/bytes/array.
     """
+    claim = getattr(ctx, 'comp_claims', {}).get(id(arg)) if isinstance(arg, ast.Name) else None
+    if claim is not None:
+        return claim
     if isinstance(arg, ast.Name) and arg.id in ctx.tstride:
         return ('rows', ctx.tstride[arg.id])
     if _is_handle_producing(arg, ctx):
