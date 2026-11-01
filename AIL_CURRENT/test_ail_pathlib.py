@@ -1096,6 +1096,23 @@ def fs_program(seed, count, binary=True):
 
 
 class FuzzTests(Base):
+    def test_home(self):
+        text = """from pathlib import Path
+
+
+def main() -> None:
+    h = Path.home()
+    print(str(h))
+    print(str(Path.home()))
+    print(str(h / "a"))
+    print(str(Path.home() / "a"))
+    print(h.name, h.is_absolute())
+
+
+main()
+"""
+        self.compare("home", text)
+
     def test_path_arithmetic_fuzz(self):
         inputs = [pure_input(seed, 400) for seed in (1, 2, 3, 4)]
         self.compare("pure", PURE, irs=("1",), inputs=inputs)
@@ -1142,7 +1159,6 @@ class RefusalTests(Base):
         self.one("print(p.relative_to(q))", "relative_to")
         self.one("print(p.is_symlink())", "is_symlink")
         self.one("p.chmod(0o600)", "chmod")
-        self.one("print(Path.home())", "home")
         self.one("print(p.samefile(q))", "samefile")
         self.one("print(p.expanduser())", "expanduser")
         self.one("print(p.readlink())", "readlink")

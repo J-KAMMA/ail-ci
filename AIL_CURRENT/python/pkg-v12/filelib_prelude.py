@@ -442,6 +442,13 @@ def _ail_environ_has(k: str) -> bool:
     return _ail_os_hasenv(k) != 0
 ''')
 
+snippet('environ_optional', '''
+def _ail_environ_get_or_none(k: str) -> str | None:
+    if _ail_os_hasenv(k) != 0:
+        return _ail_os_getenv(k)
+    return None
+''', ('environ',))
+
 snippet('walk', '''
 class _AilWalk:
     def __init__(self, top: str):

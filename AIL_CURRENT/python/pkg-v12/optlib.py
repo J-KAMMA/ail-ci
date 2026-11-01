@@ -45,6 +45,15 @@ def _is_none(e):
     return isinstance(e, ast.Constant) and e.value is None
 
 
+def _is_environ_get(e):
+    """`os.environ.get(key)` with no default: a str-or-None expression."""
+    return (isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute) and e.func.attr == 'get'
+            and isinstance(e.func.value, ast.Attribute) and e.func.value.attr == 'environ'
+            and isinstance(e.func.value.value, ast.Name) and e.func.value.value.id == 'os'
+            and len(e.args) == 1 and not e.keywords
+            and not isinstance(e.args[0], ast.Starred))
+
+
 def _name(i, ctx=None):
     return ast.Name(id=i, ctx=ctx or ast.Load())
 
@@ -280,7 +289,8 @@ class Lowerer:
                         changed = True
         uses_opt_call = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in self.opt_funcs
                             for n in ast.walk(node))
-        if not opt and not uses_opt_call and not (info and info.ret):
+        uses_env_get = any(_is_environ_get(n) for n in ast.walk(node))
+        if not opt and not uses_opt_call and not uses_env_get and not (info and info.ret):
             return node
         if nested_reads & set(opt):
             raise Refused(node, '%s() has a nested function or lambda that reads an Optional variable (%s); not built'
@@ -445,11 +455,14 @@ class Lowerer:
             return opt[e.id]
         if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in self.funcs:
             return self.funcs[e.func.id].ret
+        if _is_environ_get(e):
+            return 'str'
         return None
 
     def optish(self, e):
         """Is `e` a None, an Optional name or a call of an Optional-returning function?"""
         return (_is_none(e) or (isinstance(e, ast.Name) and e.id in self.opt)
+                or _is_environ_get(e)
                 or (isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in self.funcs
                     and self.funcs[e.func.id].ret is not None))
 
@@ -462,6 +475,38 @@ class Lowerer:
                 return base
             self.counter += 1
 
+    def environ_pair(self, e, facts):
+        """`os.environ.get(key)` as a present flag and its value (the key is evaluated once).  The two
+        parts are named and annotated so the tuple pass can type a `return` of the pair."""
+        key = self.ex(e.args[0], facts)
+        base = self.temp()
+        self.pre.append(ast.AnnAssign(target=_name(base + 'k', ast.Store()), annotation=_name('str'),
+                                      value=key, simple=1))
+        k = _name(base + 'k')
+        p = ast.Compare(left=ast.Call(func=_name('_ail_os_hasenv'), args=[copy.deepcopy(k)], keywords=[]),
+                        ops=[ast.NotEq()], comparators=[_const(0)])
+        v = ast.Call(func=_name('_ail_os_getenv'), args=[_name(base + 'k')], keywords=[])
+        self.pre.append(ast.AnnAssign(target=_name(base + 'p', ast.Store()), annotation=_name('bool'),
+                                      value=p, simple=1))
+        self.pre.append(ast.AnnAssign(target=_name(base + 'v', ast.Store()), annotation=_name('str'),
+                                      value=v, simple=1))
+        return _name(base + 'p'), _name(base + 'v')
+
+    def pair_truth(self, kind, p, v):
+        if kind is None:
+            return _const(False)
+        if kind == 'bool':
+            body = v
+        elif kind == 'str':
+            body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const('')])
+        elif kind == 'bytes':
+            body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const(b'')])
+        elif kind == 'float':
+            body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const(0.0)])
+        else:
+            body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const(0)])
+        return ast.BoolOp(op=ast.And(), values=[p, body])
+
     def opt_of(self, e, facts):
         """(kind, p expr, v expr) for an Optional-typed expression; ('none', False, 0) for None. A call is
         hoisted into a pair of temporaries ahead of the statement."""
@@ -469,6 +514,13 @@ class Lowerer:
             return None, _const(False), _const(0)
         if isinstance(e, ast.Name):
             return self.opt[e.id], _name(self.pn(e.id)), _name(self.vn(e.id))
+        if _is_environ_get(e):
+            if not self.hoist_ok:
+                raise Refused(e, 'the Optional result of os.environ.get() is used where it cannot be evaluated '
+                              'ahead of the statement (inside and / or, a conditional expression, a comprehension, '
+                              'a while test, or beside another call); assign it to a name first')
+            p, v = self.environ_pair(e, facts)
+            return 'str', p, v
         if not self.hoist_ok:
             raise Refused(e, 'the Optional result of %s() is used where it cannot be evaluated ahead of the '
                           'statement (inside and / or, a conditional expression, a comprehension, a while test, or '
@@ -531,9 +583,9 @@ class Lowerer:
         """Lower one statement-level expression; its hoisted statements are returned in front."""
         saved_pre, self.pre = self.pre, []
         saved_ok = self.hoist_ok
-        others = [c for c in _calls(e) if not (isinstance(c.func, ast.Name)
+        others = [c for c in _calls(e) if not (self.optish(c) or (isinstance(c.func, ast.Name)
                                                and (c.func.id in SAFE_CALLS or c.func.id in self.opt_funcs
-                                                    or c.func.id in self.funcs and self.funcs[c.func.id].ret))]
+                                                    or c.func.id in self.funcs and self.funcs[c.func.id].ret)))]
         self.hoist_ok = hoist and not others
         try:
             result = self.ex(e, facts, test)
@@ -824,17 +876,7 @@ class Lowerer:
 
     def truth(self, e, facts):
         kind, p, v = self.opt_of(e, facts)
-        if kind == 'bool':
-            body = v
-        elif kind == 'str':
-            body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const('')])
-        elif kind == 'bytes':
-            body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const(b'')])
-        elif kind == 'float':
-            body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const(0.0)])
-        else:
-            body = ast.Compare(left=v, ops=[ast.NotEq()], comparators=[_const(0)])
-        return ast.BoolOp(op=ast.And(), values=[p, body])
+        return self.pair_truth(kind, p, v)
 
     def pure(self, e):
         """Free of calls and subscripts, so evaluating it only when needed makes no difference."""
@@ -933,6 +975,16 @@ class Lowerer:
         return self.generic(e, facts)
 
     def ex_BoolOp(self, e, facts, test):
+        if not test and isinstance(e.op, ast.Or) and self.optish(e.values[0]) and not _is_none(e.values[0]):
+            kind, p, v = self.opt_of(e.values[0], facts)
+            condition = self.pair_truth(kind, p, v)
+            if len(e.values) == 2:
+                orelse = self.ex(e.values[1], facts, test)
+            else:
+                rest = ast.BoolOp(op=ast.Or(), values=e.values[1:])
+                ast.copy_location(rest, e)
+                orelse = self.ex(rest, facts, test)
+            return ast.IfExp(test=condition, body=v, orelse=orelse)
         values = []
         acc = facts
         saved = self.hoist_ok
@@ -1027,6 +1079,14 @@ class Lowerer:
 
     def call(self, e, facts, as_value, test=False):
         f = e.func
+        if _is_environ_get(e):
+            p, v = self.environ_pair(e, facts)
+            if test:
+                return self.pair_truth('str', p, v)
+            if not as_value:
+                raise Refused(e, 'os.environ.get(key) without a default returns None here; assign the result to '
+                              'a name and test it with `is None` before using it as a value')
+            return ast.Tuple(elts=[p, v], ctx=ast.Load())
         if isinstance(f, ast.Name):
             name = f.id
             info = self.funcs.get(name)
@@ -1399,6 +1459,8 @@ def _replace_stmt(fn, old, new):
 
 def candidate(tree):
     for node in ast.walk(tree):
+        if _is_environ_get(node):
+            return True
         ann = None
         if isinstance(node, ast.arg):
             ann = node.annotation

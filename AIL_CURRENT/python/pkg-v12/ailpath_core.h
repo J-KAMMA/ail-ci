@@ -3,6 +3,10 @@
 #ifndef AILPATH_CORE_H
 #define AILPATH_CORE_H
 
+#ifndef _WIN32
+#include <pwd.h>
+#endif
+
 /* errno of stat(path): 0 when it works, -1 for a path CPython refuses with ValueError (embedded NUL) */
 static int64_t ailf_stat_errno(const uint8_t *p, int64_t n) {
     ailf_pchar *pp = ailf_path(p, n); if (!pp) return -1;
@@ -39,6 +43,28 @@ static int ailf_readlink(const uint8_t *p, int64_t n, ailf_buf *out) {
     }
     free(pp);
     return 0;
+#endif
+}
+/* Path.home(): the text os.path.expanduser('~') gives (HOME even when empty, else the passwd entry;
+   trailing slashes are removed, and an empty result is "/"). */
+static int ailf_home(ailf_buf *out) {
+    out->p = NULL; out->n = out->cap = 0;
+#ifdef _WIN32
+    const wchar_t *home = _wgetenv(L"HOME");
+    if (!home) home = _wgetenv(L"USERPROFILE");
+    if (!home) return ailf_fail(AILF_E_OS, "Could not determine home directory.");
+    return ailf_put_wide(out, home);
+#else
+    const char *home = getenv("HOME");
+    if (!home) {
+        struct passwd *pw = getpwuid(getuid());
+        if (!pw || !pw->pw_dir) return ailf_fail(AILF_E_OS, "Could not determine home directory.");
+        home = pw->pw_dir;
+    }
+    size_t n = strlen(home);
+    while (n > 0 && home[n - 1] == '/') n--;
+    if (n == 0) { home = "/"; n = 1; }
+    return ailf_buf_put(out, (const uint8_t *)home, (int64_t)n) ? -1 : 0;
 #endif
 }
 /* repr() of a str, as a buffer (pathlib's PosixPath('...') and its ValueError messages) */

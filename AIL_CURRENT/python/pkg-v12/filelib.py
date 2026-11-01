@@ -68,6 +68,7 @@ PRIMS.update(proclib.PROCS)        # stage G8: the process primitives (ailproc_c
 PATHS = {
     '_ail_pp_staterr': ('int', ('str',)),          # errno of stat(path): 0 works, -1 a path CPython refuses with ValueError
     '_ail_pp_readlink': ('str', ('str',)),
+    '_ail_pp_home': ('str', ()),                   # Path.home()
     '_ail_pp_repr': ('str', ('str',)),             # repr() of a str
 }
 PRIMS.update(PATHS)
