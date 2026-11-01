@@ -2,9 +2,9 @@
 
 A program compiled by AIL finds this file when its own directory has no `shlex.py`
 (`ail_modules.py` searches the bundled `stdlib/` last).  The tokenizer follows CPython 3.12's
-`shlex.py`; the only representation change is that a POSIX end-of-file is the empty string in
-`get_token()`, `read_token()` and `eof`, because AIL has no `None` value.  `list(lex)` and `for token in lex`
-still stop at the end, and an empty quoted token (`split("''")`) is not mistaken for it.
+`shlex.py`; a POSIX end-of-file is `None` in `get_token()`, `read_token()` and `eof`, as in
+CPython.  `list(lex)`, `for token in lex` and `next(lex)` stop at the end, and an empty quoted
+token (`split("''")`) is not mistaken for it.
 
 Supported: split(s, comments=False, posix=True), quote(s), join(argv), the shlex(instream,
 infile, posix, punctuation_chars) lexer with get_token/read_token/push_token/push_source/
@@ -87,13 +87,15 @@ def _wordchars(posix, punctuation_chars) -> str:
 class shlex:
     """A lexical analyzer class for simple shell-like syntaxes."""
 
-    def __init__(self, instream: str = "", infile: str = "", posix=False, punctuation_chars=False):
+    def __init__(self, instream: str = "", infile: str | None = None, posix=False, punctuation_chars=False):
         self.instream = instream
         self.text = instream
         self.pos = 0
         self.infile = infile
         self.posix = posix
-        self.eof = ""
+        self.eof: str | None = ""
+        if posix:
+            self.eof = None
         self._eof = False
         self._raw_eof = False
         self.commenters = "#"
@@ -103,7 +105,7 @@ class shlex:
         self.quotes = "'\""
         self.escape = "\\"
         self.escapedquotes = '"'
-        self.state = " "
+        self.state: str | None = " "
         self.pushback: list[str] = []
         self._pushback_chars: list[str] = []
         self.lineno = 1
@@ -111,7 +113,7 @@ class shlex:
         self.token = ""
         self.stack_text: list[str] = []
         self.stack_pos: list[int] = []
-        self.stack_file: list[str] = []
+        self.stack_file: list[str | None] = []
         self.stack_line: list[int] = []
         self.source = ""
         self.punctuation_chars = _punctuation(punctuation_chars)
@@ -138,7 +140,7 @@ class shlex:
             print("shlex: pushing token " + repr(tok))
         self.pushback.insert(0, tok)
 
-    def push_source(self, newstream: str, newfile: str = ""):
+    def push_source(self, newstream: str, newfile: str | None = None):
         self.stack_text.insert(0, self.text)
         self.stack_pos.insert(0, self.pos)
         self.stack_file.insert(0, self.infile)
@@ -157,7 +159,7 @@ class shlex:
         self.state = " "
         self._eof = False
 
-    def get_token(self) -> str:
+    def get_token(self) -> str | None:
         if len(self.pushback) > 0:
             tok = self.pushback.pop(0)
             if self.debug >= 1:
@@ -177,7 +179,7 @@ class shlex:
                 print("shlex: token=EOF")
         return raw
 
-    def read_token(self) -> str:
+    def read_token(self) -> str | None:
         quoted = False
         escapedstate = " "
         while True:
@@ -189,12 +191,12 @@ class shlex:
                 self.lineno = self.lineno + 1
             if self.debug >= 3:
                 print("shlex: in state " + repr(self.state) + " I see character: " + repr(nextchar))
-            if self.state == "":
+            if self.state is None:
                 self.token = ""
                 break
             elif self.state == " ":
                 if nextchar == "":
-                    self.state = ""
+                    self.state = None
                     break
                 elif self.whitespace.find(nextchar) >= 0:
                     if self.debug >= 2:
@@ -256,7 +258,7 @@ class shlex:
                 self.state = escapedstate
             elif self.state == "a" or self.state == "c":
                 if nextchar == "":
-                    self.state = ""
+                    self.state = None
                     break
                 elif self.whitespace.find(nextchar) >= 0:
                     if self.debug >= 2:
@@ -302,9 +304,11 @@ class shlex:
                         break
                     else:
                         continue
-        result = self.token
+        result: str | None = self.token
         self.token = ""
-        self._raw_eof = not quoted and result == ""
+        if self.posix and not quoted and result == "":
+            result = None
+        self._raw_eof = result == self.eof
         if self.debug > 1:
             if not self._raw_eof:
                 print("shlex: raw token=" + repr(result))
@@ -315,21 +319,25 @@ class shlex:
     def sourcehook(self, newfile: str) -> str:
         return newfile
 
-    def error_leader(self, infile: str = "", lineno: int = 0) -> str:
-        name = infile
-        line = lineno
-        if name == "":
+    def error_leader(self, infile: str | None = None, lineno: int | None = None) -> str:
+        name: str | None = infile
+        line: int | None = lineno
+        if name is None:
             name = self.infile
-        if line == 0:
+        if line is None:
             line = self.lineno
+        if name is None:
+            return "\"None\", line %d: " % line
         return "\"%s\", line %d: " % (name, line)
 
     def __iter__(self):
-        while True:
-            tok = self.get_token()
-            if self._eof:
-                break
-            yield tok
+        return self
+
+    def __next__(self) -> str:
+        token = self.get_token()
+        if token == self.eof:
+            raise StopIteration
+        return token
 
 
 def split(s: str, comments=False, posix=True) -> list[str]:

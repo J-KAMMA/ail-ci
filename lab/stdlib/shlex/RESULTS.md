@@ -8,7 +8,9 @@ python3 AIL_CURRENT/ail_chatgpt.py compile lab/stdlib/shlex/<program>.py --synta
 
 The oracle is `python3 <program>.py` (CPython 3.12.3). Every listed program is compared by stdout
 and exit code on the default build and on the forced general build (`AIL_UNIFIED_FORCE=1`); all
-twelve agree on both.
+twelve agree on both. At end of input the bundled lexer now returns CPython's `None` (POSIX) for
+`get_token()`/`read_token()`, sets `eof` to `None` and `state` to `None`, supports `next(lex)`,
+and keeps `infile = None` unless a file name is given.
 
 Before the fix every program was refused at the import. The common first-refusal prefix `P` was:
 
@@ -48,8 +50,11 @@ run with --strict to see why
 now resolves before the compiler treats an unknown library name as unavailable. It implements
 `split`, `quote`, `join` and the `shlex` lexer class (attributes, `get_token`/`read_token`,
 `push_token`, `push_source`/`pop_source`, `error_leader`, iteration, punctuation characters and
-`ValueError` for an unclosed quotation or a trailing escape). The programs use those APIs only;
-no program was changed to fit the compiler.
+`ValueError` for an unclosed quotation or a trailing escape). POSIX end of input is `None` in
+`get_token()`, `read_token()`, `eof` and `state`, `__next__` supports `next(lex)`, and the
+`infile`/`error_leader` sentinels follow CPython (`None` means "use the lexer's current value",
+so an explicit `""` or `0` is kept). The programs use those APIs only; no program was changed to
+fit the compiler.
 
 ## Follow-ups (out of scope: a new typed-path feature)
 
@@ -58,10 +63,5 @@ no program was changed to fit the compiler.
   (`instream=None, infile=None, posix=False, punctuation_chars=False`), so every program that
   imports the bundled module uses the general path. Exact fallback text is above. Allowing a
   method default would be a call-convention feature, not a shlex fix.
-* POSIX `get_token()`/`read_token()`/`eof` at end of input is the empty string instead of
-  CPython's `None`, because AIL has no `None` value for `str`. Iteration and `split()` still stop
-  correctly, and an empty quoted token (`split("''")`) is distinct from end of file; a program
-  that prints the `None` itself or compares an empty token to `lex.eof` would differ. Recorded in
-  `DIFFERENCES.md`.
 * The bundled lexer's `source` inclusion hook is not available in a single-file program, and
   `instream` is a string rather than a file object.
