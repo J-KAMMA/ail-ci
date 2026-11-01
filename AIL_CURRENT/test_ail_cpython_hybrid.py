@@ -5,7 +5,9 @@ functions are typed-compilable, the generated extension is loaded and the Python
 equal CPython byte for byte, including the cases that must abandon the native call: an int outside
 int64, an overflow inside the clone, a bool in an int/list[int] position, a missing argument
 (default), None, and a mutated list parameter.  Functions whose body can trap in the typed runtime
-(indexing, division, calls, raise/try) stay in CPython; that includes `first` and `half` here.  A
+(indexing, calls, raise/try) stay in CPython; that includes `first` here.  Division and modulo are
+allowed when `pymix`'s exception rule already proved a trap cannot reach a CPython handler, so
+`half` (`x / 2`) is accelerated while `divide` (`a // b` under a `try`) stays in CPython.  A
 program the compiler cannot analyse at all still runs unchanged in CPython with no extension.
 """
 import json
@@ -119,9 +121,9 @@ class CPythonHybrid(unittest.TestCase):
             for name in ('add1', 'mul', 'isbig', 'join', 'total', 'dflt', 'echo'):
                 self.assertIn(name, accelerated)
             self.assertNotIn('first', accelerated)         # indexing can raise IndexError
-            self.assertNotIn('half', accelerated)           # division can raise ZeroDivisionError
+            self.assertIn('half', accelerated)              # x / 2 cannot trap; pymix proved it
             self.assertNotIn('push', accelerated)          # a list parameter that is mutated
-            self.assertNotIn('divide', accelerated)        # floor division can raise
+            self.assertNotIn('divide', accelerated)        # a // b can trap into the caller's try
             want = run([sys.executable, str(src)], tmp)
             got = run([str(out / 'prog')], tmp)
             self.assertEqual(got.stdout, want.stdout)

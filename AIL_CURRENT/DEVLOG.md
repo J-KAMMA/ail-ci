@@ -1,3 +1,15 @@
+## 2026-11-01 -- typed reach batch 4: division/modulo and safe slices in the hybrid (job-prog4-11020446)
+
+Profiled the eight requested programs and recorded the hot functions and their first typed-path
+refusals in `lab/progfix/prog4.md`.  The hybrid body gate now allows division/modulo (`pymix`
+already rejects a trap that could reach a boxed handler) and a slice only with a constant non-zero
+step; a run-time or zero step stays in CPython.  The analysis also seeds annotated result kinds and
+the missing `str`-slice kind, so annotated `str` helpers reach the clone.  `is_prime` in
+`lab/census/programs/dev/t024.py` is now hybrid-accelerated and matches CPython on all public
+inputs; the other hot functions are `main`/class/`Optional`/recursion-limit cases left as
+follow-ups.  Added `AIL_CURRENT/test_ail_prog4.py`; probes `/tmp/probes/p4_divmod.py` and
+`/tmp/probes/p4_slice.py` match CPython on both `cmp.sh` builds and under `--cpython`.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow

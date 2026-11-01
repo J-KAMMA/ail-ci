@@ -1,3 +1,22 @@
+## 2026-11-01 -- typed reach batch 4: division/modulo and safe slices in the hybrid (job-prog4-11020446)
+
+Profiled the eight requested programs with CPython 3.12 `cProfile` and recorded the hot functions
+and their first typed-path refusals in `lab/progfix/prog4.md`.  Most are `main` (void result, stdin
+and print) or class/`Optional` code and stay as declared follow-ups.  The one small blocker was the
+hybrid body gate refusing every `%`, `//` and subscript: `pymix` already rejects a division whose
+trap could reach a boxed handler, so the gate now allows division/modulo and a slice only when its
+step is a constant non-zero integer (a run-time or zero step can raise and stays in CPython).  The
+hybrid analysis also seeds an annotated result kind and fills `pymix`'s missing `str`-slice kind,
+so annotated `str` helpers such as `def head(s: str) -> str: return s[:2]` reach the clone.
+
+The hot helper this moves onto the typed path is `is_prime` in `lab/census/programs/dev/t024.py`
+(`accelerated: ["is_prime"]`); its three public inputs match CPython.  The other seven programs keep
+their previous typed/whole-program or CPython status (no program was edited).  Added
+`AIL_CURRENT/test_ail_prog4.py` (registered in `tests.d`) for `is_prime`, division/modulo
+boundaries (zero, negative, bool, int64 edges, argument/list/attribute/dict routes) and slice-step
+safety.  Probes `/tmp/probes/p4_divmod.py` and `/tmp/probes/p4_slice.py` match CPython on both
+`cmp.sh` builds and under `ail build --cpython`; `zero_step`/`variable_step` stay in CPython.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten

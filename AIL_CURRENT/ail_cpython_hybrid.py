@@ -62,17 +62,37 @@ def _own_nodes(fn):
             stack.extend(ast.iter_child_nodes(node))
 
 
+def _safe_slice_step(sl):
+    """Python raises only for a slice whose step is zero; no step means 1.  A step that is not a
+    constant integer is left to CPython: it could be zero (or a non-integer) at run time."""
+    step = sl.step
+    if step is None:
+        return True
+    if (isinstance(step, ast.UnaryOp) and isinstance(step.op, (ast.USub, ast.UAdd))
+            and isinstance(step.operand, ast.Constant)
+            and isinstance(step.operand.value, int)):
+        value = -step.operand.value if isinstance(step.op, ast.USub) else step.operand.value
+        return value != 0
+    return (isinstance(step, ast.Constant) and isinstance(step.value, int)
+            and step.value != 0)
+
+
 def _unsafe_body(fn):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
-    subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), a
-    call (an arbitrary side effect or exception), and `raise`/`assert`/`try`/`with`/import are all
-    outside this pass.  This is deliberately conservative; a missed speed-up is safe."""
+    subscript (IndexError/KeyError), a slice whose step is not a non-zero integer literal
+    (ValueError/TypeError), power (complex results, 0 ** negative), a call (an arbitrary side
+    effect or exception), and `raise`/`assert`/`try`/`with`/import are all outside this pass.
+    Division and modulo are allowed here because `pymix`'s exception rule already refuses a
+    candidate whose division could trap into a boxed handler, and the hybrid only sees units that
+    passed it.  This is deliberately conservative; a missed speed-up is safe."""
     for node in _own_nodes(fn):
-        if isinstance(node, ast.Subscript):
+        if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
             return 'indexing can raise'
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
-            return 'division or power can raise'
+        if isinstance(node, ast.Subscript) and not _safe_slice_step(node.slice):
+            return 'a slice step can be zero or non-integer'
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            return 'power can raise or produce a complex result'
         if isinstance(node, ast.Call):
             return 'a call can raise or have side effects'
         if isinstance(node, (ast.Raise, ast.Assert)):
@@ -136,8 +156,8 @@ def _analysis(src):
     Details loosened only in that subprocess: the entry prototype regex requires a word boundary
     (`ail_unwind_<name>` must not match), the documented str ABI's `uint8_t *_out` result
     parameter is accepted by the existing validator (which writes through `int32_t *`), and
-    parameter annotations seed `pymix`'s kinds.  The selection pass below still requires the body
-    to have no operation that can trap.
+    parameter and return annotations seed `pymix`'s kinds.  The selection pass below still requires
+    the body to have no operation that can trap.
     """
     import tempfile
     fd, name = tempfile.mkstemp(prefix='ail-hybrid-src-', suffix='.py')
@@ -167,8 +187,9 @@ def _to_c(source, *args, **kwargs):
 pyfunc.to_c = _to_c
 # CPython does not enforce annotations, but they are useful hints: the boundary still checks every
 # value (a non-int for `x: int` falls back before the native call), and the existing emitter is
-# asked to compile the function as usual.  Seeding only the parameter kinds lets a helper such as
-# `def byte_length(word: str) -> int` reach to_c, whose own acceptance test remains the gate.
+# asked to compile the function as usual.  Seeding the parameter and result kinds lets a helper
+# such as `def byte_length(word: str) -> int` reach to_c, whose own acceptance test remains the
+# gate; `analyze` still refuses a result whose branches do not all have the annotated kind.
 _old_fn_init = pymix._FnFacts.__init__
 def _ann_kind(node):
     if isinstance(node, ast.Name):
@@ -189,7 +210,23 @@ def _fn_init(self, node):
         kind = _ann_kind(arg.annotation)
         if kind is not None:
             self.params[arg.arg] = kind
+    kind = _ann_kind(node.returns)
+    if kind is not None:
+        self.ret = kind
+        self.is_bool_ret = kind == pymix.BOOL
 pymix._FnFacts.__init__ = _fn_init
+# A str slice is a str, but pymix's kind table only maps list element kinds; without this a helper
+# `def head(s: str) -> str: return s[:2]` looks like a branch whose kind disagrees with its
+# annotation.  Only the missing str case is filled in, so every other inference is unchanged.
+_old_expr_kind = pymix._expr_kind
+def _expr_kind(e, facts, rets):
+    kind = _old_expr_kind(e, facts, rets)
+    if kind is None and isinstance(e, ast.Subscript):
+        base = _old_expr_kind(e.value, facts, rets)
+        if base in (pymix.STR, pymix.LIST_STR):
+            return pymix.STR
+    return kind
+pymix._expr_kind = _expr_kind
 _old_extract = pyboxed2._mix_extract_signature
 _old_validate = pyboxed2._mix_validate_signature
 _old_build = pyboxed2.build
