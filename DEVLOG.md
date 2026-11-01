@@ -1,3 +1,13 @@
+## 2026-11-01 -- cls1 review: `None` is an instance of `object` (job-cls1-11011231)
+
+The review found that a nullable class value (`x: A | None`) tested with a tuple containing
+`object` (`isinstance(x, (B, object))`) printed `False` for `None`, where CPython prints `True`:
+`_isinstance_value` treated `object` like a class target and returned the non-null pointer test.
+An `object` target is now an unconditional true (after evaluating the pointer expression), so
+`None` matches too. Added the regression case `test_nullable_object_is_an_instance` to
+`AIL_CURRENT/test_ail_class_reach.py`; the general path still refuses the program by name. The
+thirty-program counts are unchanged (16 typed, 10 general, 4 refused).
+
 ## 2026-11-01 -- cls1: static `issubclass` and mixed `isinstance` tuples on the typed path (job-cls1-11011231)
 
 Measured 30 class-hierarchy programs (`/tmp/probes/hier/h01.py`..`h30.py`): before the change

@@ -66,7 +66,8 @@ base as a field). The two class-test programs are now typed:
   of the hierarchy, builtin type names, or `object`; the answer is a bool, so `print` shows
   `True` / `False`.
 * `isinstance(x, (C, int, ...))` with at least one class of the hierarchy now reaches the existing
-  class-id test; builtin targets that cannot match a class instance are false, and `object` is true.
+  class-id test; builtin targets that cannot match a class instance are false, and `object` is true
+  (including for `None`, which is an instance of `object`).
   The receiver keeps its existing requirement: a name or an attribute.
 
 The general path still refuses `issubclass` by name (`the name 'issubclass' is not a known

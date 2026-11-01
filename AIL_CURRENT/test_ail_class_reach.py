@@ -155,6 +155,28 @@ def main() -> None:
 main()
 '''
 
+NULLABLE_OBJECT = '''class A:
+    def __init__(self, x: int) -> None:
+        self.x = x
+
+
+class B(A):
+    pass
+
+
+def f(x: A | None) -> None:
+    print(isinstance(x, (B, object)))
+
+
+def main() -> None:
+    f(B(1))
+    f(None)
+    f(A(2))
+
+
+main()
+'''
+
 UNKNOWN = '''class A:
     def __init__(self, x: int) -> None:
         self.x = x
@@ -248,6 +270,16 @@ class ClassReachTests(unittest.TestCase):
             gres, _ = build(d, OBJECT, 'object', False)
             self.assertNotEqual(gres.returncode, 0)
             self.assertIn('isinstance', gres.stdout + gres.stderr)
+
+    def test_nullable_object_is_an_instance(self):
+        # None is an instance of object, so a nullable class value is always one for a tuple with object.
+        with tempfile.TemporaryDirectory(prefix='ail-clsreach-') as d:
+            ref = run_cpython(d, NULLABLE_OBJECT, 'nullable_object_cp')
+            self.assertEqual(ref.returncode, 0, ref.stderr)
+            res, exe = build(d, NULLABLE_OBJECT, 'nullable_object', True)
+            self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+            out = run_exe(exe)
+            self.assertEqual((out.returncode, out.stdout), (0, ref.stdout))
 
     def test_user_issubclass_is_not_folded(self):
         self.three_way(SHADOW, 'shadow')

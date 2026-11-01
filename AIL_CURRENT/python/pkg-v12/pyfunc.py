@@ -16787,9 +16787,11 @@ def _isinstance_value(node, ctx):
     targets = [n.id for n in (spec.elts if isinstance(spec, ast.Tuple) else [spec])]
     static = kind[1]
     tests = []
+    always = False
     for t in targets:
         if t == 'object':
-            tests = None                 # every class instance is an object (unless None)
+            always = True                # every class instance, and None, is an object
+            tests = None
             break
         if t in _class_chain(static) or t == static:
             tests = None                 # always an instance (unless None)
@@ -16800,6 +16802,8 @@ def _isinstance_value(node, ctx):
                          if hi > lo else '((ail_obj_header *)_ail_io)->drop == %d' % lo)
     pointer = _null_test_pointer(value, ctx)
     nullable = static in _NULLABLE
+    if always:
+        return '((void)(%s), (int64_t)1)' % pointer
     if tests is None:
         return '(int64_t)((%s) != 0)' % pointer if nullable else '((void)(%s), (int64_t)1)' % pointer
     if not tests:
