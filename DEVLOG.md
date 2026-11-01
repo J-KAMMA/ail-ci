@@ -1,3 +1,49 @@
+## 2026-11-01 -- CPython hybrid prototype: typed helpers in an extension, CPython for the rest (job-cpyhyb1-11011403)
+
+Added an explicit `ail build --cpython prog.py -o DIR` mode. The output is a normal CPython program
+with a generated extension module: scalar and list-int/list-float helpers the real typed emitter
+accepts are called natively, and every call whose values do not fit the ABI, whose int overflows,
+or whose typed clone is absent runs the original Python function. The standalone build is
+untouched; the flag, the design (`docs/design/CPYTHON_HYBRID.md` and its `AIL_CURRENT/docs/design`
+copy) and the fallback rules are new.
+
+The analysis reuses `pymix.analyze` and `pyboxed2`'s mixed-mode units rather than a second
+selection rule. It runs the real CLI general build in a subprocess with a temporary
+`sitecustomize.py`, captures the units, and retries a direct `pyboxed2.build` on the original
+source when the CLI refuses the program. Annotations only seed parameter kinds (the boundary still
+checks the actual value); the CLI's `__ail_checked_*__` return markers are stripped for the unit
+emission because `to_c` otherwise refuses a checked `str` helper. Units use the int64 mixed-mode
+ABI even when the surround build uses exact ints: the existing overflow flag sends a value that
+does not fit back to Python, so no `ail_tint` crosses the extension boundary. Two mixed-mode
+details are loosened only in the analysis process: the entry regex has a word boundary so
+`ail_unwind_<name>` cannot be taken for the entry, and the str ABI's `uint8_t *_out` is accepted
+by the validator. The wrapper defines `ail_mix_drain_out` so a unit's trap path links. A
+conservative body gate then keeps any function with a possible typed trap in CPython: indexing,
+division/power, a call, `raise`/`assert`, `try`/`with`/import, `global`/`nonlocal`, deletes and
+attribute/index stores. A missed speed-up is safe; an IndexError that exits instead of reaching
+the caller's handler is not.
+
+Packaging: `prog.py` is the original source plus a preamble and a rebinding after each accelerated
+def, `prog.orig.py` is the untouched source, `prog` is the launcher, and
+`_ail_<stem>_fast.<ext>.so` plus `build.json` name the native side. A missing extension makes the
+preamble return the original functions. Every native call releases the GIL; typed parallel clones
+are linked with `-pthread`; free-threaded CPython is explicitly not claimed or tested.
+
+Results: `lab/compare` `berth_sim` and `term_rank` are general today and matched CPython on all
+26 and 43 public+hidden cases (hybrid vs CPython: 0.249 s vs 0.246 s and 0.067 s vs 0.065 s on
+medium inputs; standalone general 0.528 s / 0.126 s). Five refused corpus programs (`t440`,
+`t447`, `t472`, `t437`, `t456`) built and matched CPython on every input; they have no wrappable
+unit, so they run as CPython. The accelerated corpus example `t264` (`classify`) was also built
+and compared; the other candidates examined (`t081` `is_palindrome`, `t139` `fmt`, `t211`
+`evaluate`, `t314` `longest_non_decreasing`) index or call and now stay in CPython under the body
+gate. The boundary microbenchmark (`inc(n)=n+1`, 2M calls) is 32.5 ns/call plain,
+67.7 ns native-direct and 115.4 ns through the generated wrapper, so the mode pays only when the
+function body does enough work; a C callable type is the next step for the closure overhead.
+
+Added `AIL_CURRENT/ail_cpython_hybrid.py`, `AIL_CURRENT/test_ail_cpython_hybrid.py` and
+`AIL_CURRENT/tests.d/test_ail_cpython_hybrid.txt`. Final-state tests: test_ail_cpython_hybrid,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
