@@ -1,3 +1,24 @@
+## 2026-11-01 -- i64edge1 suite fix: GPU floor/ceil helpers, comprehension call-site kinds (job-rbi64edge1-11012213)
+
+The i64edge change lowered a non-constant `math.floor` / `math.ceil` to `_ail_math_floor` /
+`_ail_math_ceil`, which broke `test_ail_gpu_g1` two ways. The GPU eligibility proof only knew the
+`math.floor` / `math.ceil` surface call, so it refused the helper by name; it now lowers
+`_ail_math_floor` / `_ail_math_ceil` (and `_ail_math_trunc`) exactly like the surface call (an int
+argument is the identity, a float one is the kernel's `cvt i floor/ceil/trunc`, whose range flag
+replays the CPU loop). The typed call-site pass also read a comprehension target as int, so the
+unannotated helper was claimed int64 from `[math.floor(x) for x in xs]` and the float `x` was then
+refused; `_claim` now reads a per-node comprehension scope (`_comprehension_claims`), so each
+comprehension keeps its own element kind. Two comprehensions that reuse a name, an int64 list
+above 2**53, shadowed locals, strings and float widening are covered by the probes below. No
+language semantics changed; a program without the marker or without `--gpu` is unaffected.
+
+Probes in `/tmp/probes` with `cmp.sh` on the general and default builds:
+`rbi_comp_floor_float`, `rbi_comp_floor_int`, `rbi_comp_str`, `rbi_floor_attr_dict`,
+`rbi_comp_shadow`, `rbi_comp_mixed_types` (all match CPython on both) and `rbi_gpu_floor_ceil`
+(both match, and its `--gpu` binary with `AIL_GPU=emu` and `AIL_GPU=0` matches too). Final-state
+tests: test_ail_gpu_g1, test_ail_i64edge1, test_ail_gpu_g2, test_ail_str_comprehension_move,
+test_ail_float_argument_widening, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 ## 2026-11-01 -- int64 edges: gcd/lcm at INT64_MIN, ceil/floor at +-2**63, named round (job-i64edge1-11011134)
 
 `math.gcd(INT64_MIN, 2)` took `abs(INT64_MIN)` and stopped with `unary - or abs()` even though
