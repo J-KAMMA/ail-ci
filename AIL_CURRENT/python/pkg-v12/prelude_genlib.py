@@ -2154,6 +2154,10 @@ class _ail_difflib_Match:
         return 3
 
     def __getitem__(self, index):
+        if type(index).__name__ == 'slice':
+            return (self.a, self.b, self.size)[index]
+        if not isinstance(index, int):
+            raise TypeError('tuple indices must be integers or slices, not ' + type(index).__name__)
         if index < 0:
             index = index + 3
         if index == 0:
@@ -2167,12 +2171,15 @@ class _ail_difflib_Match:
     def __eq__(self, other):
         if isinstance(other, _ail_difflib_Match):
             return self.a == other.a and self.b == other.b and self.size == other.size
-        if isinstance(other, (tuple, list)):
-            return self.a == other[0] and self.b == other[1] and self.size == other[2]
+        if isinstance(other, tuple):
+            return len(other) == 3 and self.a == other[0] and self.b == other[1] and self.size == other[2]
         return False
 
     def __ne__(self, other):
         return not self.__eq__(other)
+
+    def __hash__(self):
+        return hash((self.a, self.b, self.size))
 
     def __repr__(self):
         return 'Match(a=' + repr(self.a) + ', b=' + repr(self.b) + ', size=' + repr(self.size) + ')'

@@ -4,7 +4,9 @@ Added `difflib` to the general-path prelude (`python/pkg-v12/prelude_genlib.py`,
 `python/pkg-v12/genlib.py`): `get_close_matches`, `SequenceMatcher`, `Differ`, `Match`,
 `unified_diff`, `context_diff`, `ndiff`, `restore`, `diff_bytes`, `IS_LINE_JUNK` and
 `IS_CHARACTER_JUNK`, with CPython 3.12's matching blocks, opcodes, grouped opcodes and output
-formatting. `difflib.diff_bytes(difflib.unified_diff|context_diff, ...)` gets a targeted rewrite
+formatting. `Match` follows the namedtuple it is in CPython for indexing, slicing, equality and
+hashing (a plain tuple lookup of a `Match` key is the one remaining limit: it is a class, not a
+tuple subclass). `difflib.diff_bytes(difflib.unified_diff|context_diff, ...)` gets a targeted rewrite
 because the general path cannot pass a function with defaults as a value. The typed path still
 refuses the import and falls back to the general path.
 
