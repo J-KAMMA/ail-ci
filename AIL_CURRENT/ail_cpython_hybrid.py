@@ -79,13 +79,152 @@ def _nonzero_constant(node):
     return value is not None and value != 0
 
 
-def _unsafe_body(fn):
+_SAFE_STR_NOARGS = frozenset({
+    'upper', 'lower', 'casefold', 'strip', 'lstrip', 'rstrip', 'capitalize', 'title',
+    'swapcase', 'split', 'rsplit', 'splitlines', 'isdigit', 'isalpha', 'isalnum',
+    'isspace', 'isupper', 'islower', 'istitle', 'isdecimal', 'isnumeric', 'isidentifier',
+    'isprintable', 'isascii',
+})
+_SAFE_STR_LITERAL_ARGS = frozenset({
+    'strip', 'lstrip', 'rstrip', 'split', 'rsplit', 'replace', 'removeprefix',
+    'removesuffix', 'find', 'rfind', 'count', 'startswith', 'endswith',
+})
+_STR_RESULT_NOARGS = frozenset({
+    'upper', 'lower', 'casefold', 'strip', 'lstrip', 'rstrip', 'capitalize', 'title',
+    'swapcase',
+})
+_STR_RESULT_ARGS = frozenset({
+    'strip', 'lstrip', 'rstrip', 'replace', 'removeprefix', 'removesuffix',
+})
+_STR_LIST_METHODS = frozenset({'split', 'rsplit', 'splitlines'})
+
+
+def _str_literal(node):
+    return isinstance(node, ast.Constant) and isinstance(node.value, str)
+
+
+def _int_literal(node):
+    if isinstance(node, ast.Constant):
+        return isinstance(node.value, int) and not isinstance(node.value, bool)
+    return (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub))
+            and isinstance(node.operand, ast.Constant)
+            and isinstance(node.operand.value, int)
+            and not isinstance(node.operand.value, bool))
+
+
+def _safe_str_method_args(method, args):
+    """Argument shapes that cannot make a str method raise: only the exact types CPython wants."""
+    if method in ('strip', 'lstrip', 'rstrip'):
+        return len(args) <= 1 and (not args or _str_literal(args[0])
+                                   or (isinstance(args[0], ast.Constant) and args[0].value is None))
+    if method in ('split', 'rsplit'):
+        if not args:
+            return True
+        sep = args[0]
+        if not ((_str_literal(sep) and sep.value != '')
+                or (isinstance(sep, ast.Constant) and sep.value is None)):
+            return False
+        return len(args) <= 2 and (len(args) < 2 or _int_literal(args[1]))
+    if method == 'replace':
+        return (1 <= len(args) <= 3 and _str_literal(args[0]) and _str_literal(args[1])
+                and (len(args) < 3 or _int_literal(args[2])))
+    if method in ('removeprefix', 'removesuffix'):
+        return len(args) == 1 and _str_literal(args[0])
+    if method in ('find', 'rfind', 'count', 'startswith', 'endswith'):
+        return (1 <= len(args) <= 3 and _str_literal(args[0])
+                and all(_int_literal(a) for a in args[1:]))
+    return False
+
+
+def _provably_str(node, str_names):
+    """A str result proved from a str parameter, a str literal, and the str methods that always
+    return str.  CPython does not enforce annotations, so only the body's own evidence counts."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return True
+    if isinstance(node, ast.Name):
+        return node.id in str_names
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _provably_str(node.left, str_names) and _provably_str(node.right, str_names)
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Attribute):
+            attr = node.func.attr
+            if not _provably_str(node.func.value, str_names) or node.keywords:
+                return False
+            if attr == 'join':
+                return len(node.args) == 1 and _provably_str_seq(node.args[0], str_names)
+            if attr in _STR_RESULT_NOARGS and not node.args:
+                return True
+            if attr in _STR_RESULT_ARGS and _safe_str_method_args(attr, node.args):
+                return True
+    return False
+
+
+def _provably_str_seq(node, str_names):
+    """An iterable whose elements are all str, so `join`/`sorted`/`reversed` cannot raise."""
+    if _provably_str(node, str_names):
+        return True
+    if isinstance(node, ast.List):
+        return all(_provably_str(e, str_names) for e in node.elts)
+    if isinstance(node, ast.Call):
+        if isinstance(node.func, ast.Name) and node.func.id == 'reversed' \
+                and len(node.args) == 1 and not node.keywords:
+            return _provably_str_seq(node.args[0], str_names)
+        if isinstance(node.func, ast.Attribute) and node.func.attr in _STR_LIST_METHODS \
+                and not node.keywords and _provably_str(node.func.value, str_names):
+            return _safe_str_method_args(node.func.attr, node.args)
+    return False
+
+
+def _provably_list(node, list_names):
+    if isinstance(node, ast.Name):
+        return node.id in list_names
+    if isinstance(node, ast.List):
+        return True
+    return False
+
+
+def _safe_call(node, str_names, list_names):
+    """A call this pass can prove cannot raise and has no side effect.  Everything else stays a
+    refusal: the hybrid must return CPython's value or fall back, never a partial answer."""
+    func = node.func
+    if isinstance(func, ast.Attribute):
+        receiver = func.value
+        if _provably_str(receiver, str_names):
+            if not node.keywords:
+                if not node.args and func.attr in _SAFE_STR_NOARGS:
+                    return True
+                if func.attr in _SAFE_STR_LITERAL_ARGS and \
+                        _safe_str_method_args(func.attr, node.args):
+                    return True
+                if func.attr == 'join' and len(node.args) == 1 \
+                        and _provably_str_seq(node.args[0], str_names):
+                    return True
+            return False
+        if _provably_list(receiver, list_names) and func.attr == 'copy' \
+                and not node.args and not node.keywords:
+            return True
+        return False
+    if not isinstance(func, ast.Name) or node.keywords:
+        return False
+    args = node.args
+    if func.id == 'len' and len(args) == 1:
+        return (_provably_str(args[0], str_names) or _provably_list(args[0], list_names)
+                or isinstance(args[0], ast.List))
+    if func.id == 'reversed' and len(args) == 1:
+        return _provably_str_seq(args[0], str_names) or _provably_list(args[0], list_names)
+    return False
+
+
+def _unsafe_body(fn, params=()):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
-    subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), a
-    call (an arbitrary side effect or exception), and `raise`/`assert`/`try`/`with`/import are all
-    outside this pass.  A division, floor division or modulo by a literal nonzero divisor cannot
-    raise, so it stays eligible.  This is deliberately conservative; a missed speed-up is safe."""
+    subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), an
+    arbitrary call, and `raise`/`assert`/`try`/`with`/import are all outside this pass.  A division
+    by a literal nonzero divisor cannot raise, and a call to a pure str method (or `len`,
+    `reversed`) whose receiver and arguments are provably the right type cannot raise either, so
+    both stay eligible.  This is deliberately conservative; a missed speed-up is safe."""
+    str_names = {p for p, kind in params if kind == 'str'}
+    list_names = {p for p, kind in params if kind in _LIST}
     for node in _own_nodes(fn):
         if isinstance(node, ast.Subscript):
             return 'indexing can raise'
@@ -94,7 +233,7 @@ def _unsafe_body(fn):
                     and _nonzero_constant(node.right)):
                 continue
             return 'division or power can raise'
-        if isinstance(node, ast.Call):
+        if isinstance(node, ast.Call) and not _safe_call(node, str_names, list_names):
             return 'a call can raise or have side effects'
         if isinstance(node, (ast.Raise, ast.Assert)):
             return 'the function can raise'
@@ -348,7 +487,7 @@ def _select(src, tree, report, facts):
         if bad:
             rejected[pyname] = 'parameter kind %s stays in CPython' % bad[0]
             continue
-        unsafe = _unsafe_body(funcs[pyname])
+        unsafe = _unsafe_body(funcs[pyname], params)
         if unsafe:
             rejected[pyname] = unsafe
             continue
