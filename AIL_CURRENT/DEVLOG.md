@@ -1,3 +1,15 @@
+## 2026-11-01 -- docs: integers are int64 by default; exact big ints are opt-in
+
+Documented the rule the compiler already implements (job-docints1-11011229, #284): `int` is signed
+64-bit by default and an out-of-range result stops with `OverflowError: integer overflow in <op>
+(ints are 64-bit; --exact-int gives exact ints)` (exit 1, stdout kept); a source value that needs a
+big int statically is refused at compile time, naming the line and the flag; `--exact-int` /
+`AIL_EXACT_INT=1` gives CPython's exact ints. Rewrote the tutorial's integer section and its
+examples, the quick reference, the Numbers/FFI/Fraction/Decimal notes, A1/C171 and the related
+declared rows, and added the current row to `DIFFERENCES.md`. `test_ail_tutorial.py` now runs
+runtime-stop, static-refusal and exact-mode samples as well as the default ones. No compiler
+behaviour changed.
+
 ## 2026-10-31 -- ints are 64-bit by default; exact big ints are opt-in
 
 Owner decision: "strongest" over "identical to CPython". A Python-syntax program now gets int64: an operation that leaves int64

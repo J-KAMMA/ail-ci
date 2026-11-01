@@ -169,13 +169,8 @@ packages such as `numpy`. The list of what is built is in `AIL_CURRENT/AIL_REFER
 
 ## 4. Integers
 
-> **Upcoming; this section will change.** The owner has decided that `int` is a 64-bit
-> integer by default, that an overflow stops the program with an error instead of wrapping, and
-> that exact big integers become opt-in. This is being implemented and is not in the compiler yet.
-> Until it lands, AIL keeps exact (arbitrary size) integers like CPython, which is why a program
-> that can need a value beyond 64 bits is built on the general path (the note says "can need an
-> int beyond int64"). The sample below stays inside 64 bits, so it behaves the same before and
-> after. When the change is released this section will say how to opt in to big integers.
+`int` is a signed 64-bit integer by default. A program whose values fit prints what CPython
+prints; `//` and `%` floor like Python (`-7 // 2` is `-4`), and `/` always gives a float.
 
 <!-- sample: ints -->
 ```python
@@ -197,7 +192,59 @@ print(7 / 2, 7 // 2, 7 % 2)
 3.5 3 1
 ```
 
-`//` and `%` floor like Python (`-7 // 2` is `-4`), and `/` always gives a float.
+A result that leaves int64 stops the program; it never wraps silently. Standard output written
+before the stop is kept, the exit status is 1, and the error names the operation and the opt-in:
+
+<!-- sample: int_stop stop args=9223372036854775807 -->
+```python
+import sys
+
+n: int = int(sys.argv[1])
+print("before")
+print(n + 1)
+```
+
+```stdout
+before
+```
+
+```stderr
+OverflowError: integer overflow in + (ints are 64-bit; --exact-int gives exact ints)
+```
+
+A value the *source* needs beyond int64, such as a literal or a constant expression, is refused
+at compile time instead. The message names the file, line and column, and says how to opt in:
+
+<!-- sample: int_static static -->
+```python
+def main() -> None:
+    print(10 ** 30)
+
+
+main()
+```
+
+```refusal
+int_static.py:2:11: int64 constant out of range: 1000000000000000000000000000000
+  write instead: keep the value inside int64, or compile with --exact-int (or AIL_EXACT_INT=1) for exact big ints, about 20x slower
+```
+
+Build with `ail build --exact-int` (in a checkout, `python3 AIL_CURRENT/ail_chatgpt.py compile
+--exact-int`) or set `AIL_EXACT_INT=1` to get CPython's exact (arbitrary size) integers. That is
+the old behaviour, about 20x slower, and it makes these values print exactly as CPython does:
+
+<!-- sample: int_exact exact -->
+```python
+print(9223372036854775808)
+print(1 << 100)
+print(10 ** 30)
+```
+
+```output
+9223372036854775808
+1267650600228229401496703205376
+1000000000000000000000000000000
+```
 
 ## 5. Lists, dicts and strings
 
