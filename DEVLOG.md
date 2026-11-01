@@ -1,4 +1,19 @@
-## 2026-11-01 -- lazymod1 review: raising non-subscript values stay out of the hoist (job-lazymod1-11020209)
+## 2026-11-01 -- lazymod1 review: imported helpers are not folded with the caller's namespace (job-lazymod1-11020209)
+
+The review found that a call to a helper imported from another module was folded with the importing
+module's values (`lib.X = 1`) instead of the helper's own module values (`other.X = 0`), so
+`SIZE = make()` looked safe and was hoisted, and the exception fired at program start instead of after
+the caller's and module's earlier prints. `fold_function_call` now folds only functions owned by the
+module being split, and `move_bad_call`/`move_bad_function`/`move_bad_class_call` treat a function or
+class owned by another module as unsafe rather than evaluating its body in the caller's environment.
+A module-level binding that needs an imported helper is therefore refused by name, as it was before
+helper folding was added; local single-`return` helpers still fold, so `computed_helper` keeps working.
+
+Probes on both builds: `p_xmod_raise`, `p_xmod_raise2`, `p_xmod_raise3` and `p_xmod_safe` are refused
+by name (CPython prints `calling\nbefore\n[mid\n]` before the exception or succeeds); all `p_safe_*`
+probes still match CPython and all `p_*_unfold` probes are still refused. Added a two-program
+regression test to `test_ail_lazymod1`.
+
 
 The review found that an earlier binding whose non-subscript expression raises (`Z = zero(); SIZE = 1 // Z;
 SIZE = 2; def f(a=SIZE)`) was still moved with the definitions, so the exception fired at program start

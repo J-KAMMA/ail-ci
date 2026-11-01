@@ -243,6 +243,20 @@ class EffectfulValues(ModulesBase):
                       "main.py": main},
                      "function-level `import lib`", "write instead")
 
+    def test_an_imported_helper_is_not_folded_with_the_caller_namespace(self):
+        main = "def g():\n    import lib\n    return lib.f()\n\nprint('calling')\nprint(g())\n"
+        other = "X = 0\ndef make():\n    return 1 // X\n"
+        self.refused({"other.py": other,
+                      "lib.py": "print('before')\nfrom other import make\nX = 1\nprint('mid')\n"
+                                "SIZE = make()\n\ndef f(a=SIZE):\n    return a\n",
+                      "main.py": main},
+                     "function-level `import lib`", "write instead")
+        self.refused({"other.py": other,
+                      "lib.py": "print('before')\nfrom other import make\nX = 1\n"
+                                "SIZE = make()\n\ndef f(a=SIZE):\n    return a\n",
+                      "main.py": main},
+                     "function-level `import lib`", "write instead")
+
     def test_a_value_read_from_state_that_changes_is_refused(self):
         self.refused({"cfg.py": "level = 1\n",
                       "lib.py": "import cfg\ndef f(x=cfg.level):\n    return x\n",

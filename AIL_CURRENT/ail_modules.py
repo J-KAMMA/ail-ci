@@ -1466,7 +1466,7 @@ class Program:
             func = node.func
             if getattr(self, '_fold_local', False) and isinstance(func, ast.Name):
                 found = self.function_node(mod, func.id)
-                if found is not None:
+                if found is not None and found[0] is mod:
                     return self.fold_function_call(mod, found[0], found[1], node, env)
             if (not isinstance(func, ast.Name) or func.id not in self.FOLD_CALLS or func.id in env
                     or func.id in mod.kinds or func.id in mod.alias or func.id in mod.std):
@@ -2076,6 +2076,8 @@ class Program:
         return ('std', '.'.join([base] + list(reversed(chain))))
 
     def move_bad_function(self, mod, owner, fn, seen):
+        if owner is not mod:
+            return fn
         key = (id(owner), id(fn))
         if key in seen:
             return None
@@ -2089,6 +2091,8 @@ class Program:
     def move_bad_class_call(self, mod, owner, cls, seen):
         """Constructing a class defined here runs its `__init__`; accept a constructor that only binds
         names and attributes of its first parameter (the new instance) from values that are safe."""
+        if owner is not mod:
+            return cls
         key = ('classcall', id(owner), id(cls))
         if key in seen:
             return None
@@ -2325,13 +2329,17 @@ class Program:
             name = func.id
             found = self.function_node(mod, name)
             if found is not None:
+                if found[0] is not mod:
+                    return node
                 return self.move_bad_function(mod, found[0], found[1], seen)
             resolved = self.resolve_def(mod, name)
             if resolved is not None:
                 kind, owner, item = resolved
+                if owner is not mod:
+                    return node
                 if kind == 'func':
-                    return self.move_bad_function(owner, owner, item, seen)
-                return self.move_bad_class_call(owner, owner, item, seen)
+                    return self.move_bad_function(mod, owner, item, seen)
+                return self.move_bad_class_call(mod, owner, item, seen)
             if name in mod.std and name not in mod.kinds:
                 sig = mod.std[name]
                 dotted = ((sig[1] if sig[0] == 'import' else (sig[1] or '') + '.' + sig[2])
