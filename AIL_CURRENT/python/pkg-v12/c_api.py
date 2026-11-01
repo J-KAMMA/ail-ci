@@ -13,7 +13,7 @@ import tempfile
 from c_api_runtime import PRELUDE
 from module_object import (FLAGS, digest, identity, typed_module, load_objects,
                            _constant_source, _check_external_names, _binding_references)
-from pipeline import PipelineError, compiler
+from pipeline import PipelineError, compiler, STRICT_DECL_FLAGS
 import native_diagnostics
 from pyfront import Unsupported
 from pyfunc import to_c
@@ -259,7 +259,7 @@ def build(source, output, name, public=None, objects=(), internal=(), pic=False)
         cfile, obj = root / 'library.c', root / (name + '.o')
         cfile.write_text(code, encoding='utf8')
         native_diagnostics.generated(cfile, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-        command = [compiler(), *FLAGS, *(['-fPIC', '-fvisibility=hidden'] if pic else []), '-std=gnu11', '-c', str(cfile), '-o', str(obj)]
+        command = [compiler(), *FLAGS, *STRICT_DECL_FLAGS, *(['-fPIC', '-fvisibility=hidden'] if pic else []), '-std=gnu11', '-c', str(cfile), '-o', str(obj)]
         result = native_diagnostics.run(command, phase='compile', capture_output=True, timeout=180)
         if result.returncode:
             raise PipelineError('C library compile failed: ' + result.stderr.decode(errors='replace')[-4000:])

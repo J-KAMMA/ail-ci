@@ -16,7 +16,7 @@ POSIX only: it uses mmap.
 """
 import pathlib, subprocess, sys
 
-from pipeline import PipelineError, compiler, link_flags, emit, parse
+from pipeline import PipelineError, compiler, link_flags, emit, parse, STRICT_DECL_FLAGS
 
 MAIN = r'''
 #include <stdio.h>
@@ -62,7 +62,7 @@ def build(text, out):
     out = pathlib.Path(out)
     c = out.with_suffix('.c')
     c.write_text(source(text))
-    r = subprocess.run([compiler(), '-O2', '-ffp-contract=off', *link_flags(), '-o', str(out), str(c)],
+    r = subprocess.run([compiler(), '-O2', '-ffp-contract=off', *STRICT_DECL_FLAGS, *link_flags(), '-o', str(out), str(c)],
                        capture_output=True, text=True)
     if r.returncode:
         raise PipelineError('the C compiler rejected this:\n%s' % r.stderr[-800:])
