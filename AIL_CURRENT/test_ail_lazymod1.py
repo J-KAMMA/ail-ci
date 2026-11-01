@@ -228,6 +228,21 @@ class EffectfulValues(ModulesBase):
                       "main.py": "def g():\n    import lib\n    return lib.f()\n\nprint(g())\n"},
                      "function-level `import lib`", "write instead")
 
+    def test_a_non_subscript_computation_that_would_raise_is_refused(self):
+        main = "def g():\n    import lib\n    return lib.f()\n\nprint('calling')\nprint(g())\n"
+        self.refused({"lib.py": "print('before')\ndef zero():\n    return 0\nZ = zero()\n"
+                                "SIZE = 1 // Z\nSIZE = 2\n\n\ndef f(a=SIZE):\n    return a\n",
+                      "main.py": main},
+                     "function-level `import lib`", "write instead")
+        self.refused({"lib.py": "print('before')\ndef text():\n    return 'x'\nT = text()\n"
+                                "SIZE = 1 + T\nSIZE = 2\n\n\ndef f(a=SIZE):\n    return a\n",
+                      "main.py": main},
+                     "function-level `import lib`", "write instead")
+        self.refused({"lib.py": "print('before')\ndef zero():\n    return 0\nZ = zero()\n"
+                                "SIZE = 1 // Z\n\n\ndef f(a=SIZE):\n    return a\n",
+                      "main.py": main},
+                     "function-level `import lib`", "write instead")
+
     def test_a_value_read_from_state_that_changes_is_refused(self):
         self.refused({"cfg.py": "level = 1\n",
                       "lib.py": "import cfg\ndef f(x=cfg.level):\n    return x\n",

@@ -1,4 +1,22 @@
-## 2026-11-01 -- lazymod1 review: a read or mutation between earlier rebindings is refused (job-lazymod1-11030055)
+## 2026-11-01 -- lazymod1 review: raising non-subscript values stay out of the hoist (job-lazymod1-11020209)
+
+The review found that an earlier binding whose non-subscript expression raises (`Z = zero(); SIZE = 1 // Z;
+SIZE = 2; def f(a=SIZE)`) was still moved with the definitions, so the exception fired at program start
+and the module's and caller's earlier prints were lost. `init_split` now folds calls to local helpers
+whose body is a single `return` (so `def make(): return 3` gives `SIZE = 1 << N` a value and keeps the
+existing computed-helper case), and a new `raising_bad_expr` treats an unfoldable `BinOp`, `UnaryOp`,
+`Compare`, f-string or subscript in a module-level statement as potentially raising. Both the earlier
+bindings and the binding a definition needs are checked, so the program is refused by name rather than
+raising at the wrong time. Only the lazy-module split is affected; `merge_program` is still `None` for
+all ten `lab/compare/src/*/main.ail`, so their C is unchanged.
+
+Probes on both builds: `p_safe_shift`, `p_safe_default_arg`, `p_safe_earlier`, `p_safe_neg_empty`,
+`p_safe_complex_helper` and `p_safe_attr_dict_list` match CPython; `p_div_unfold`, `p_binop_unfold`,
+`p_mod_unfold`, `p_shift_unfold`, `p_pow_unfold`, `p_compare_unfold`, `p_unary_unfold` and
+`p_call_arg_raise` are refused by name (CPython exits 1 after `calling\nbefore\n`). Added a
+three-program refusal test to `test_ail_lazymod1`. Final-state tests: test_ail_lazymod1,
+test_ail_modsys, test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (5/5, 0 failed).
+
 
 The review found that hoisting an earlier binding of a name past a statement that reads or mutates
 that name changes what the statement sees: `SIZE = 1; print("mid", SIZE); SIZE = 2; def f(a=SIZE)`

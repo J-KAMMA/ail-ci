@@ -1464,6 +1464,10 @@ class Program:
             return self.fold_check(''.join(out))
         if kind is ast.Call:
             func = node.func
+            if getattr(self, '_fold_local', False) and isinstance(func, ast.Name):
+                found = self.function_node(mod, func.id)
+                if found is not None:
+                    return self.fold_function_call(mod, found[0], found[1], node, env)
             if (not isinstance(func, ast.Name) or func.id not in self.FOLD_CALLS or func.id in env
                     or func.id in mod.kinds or func.id in mod.alias or func.id in mod.std):
                 raise _Unfoldable()
@@ -1484,6 +1488,57 @@ class Program:
                 self.fold_apply(node, result.__setitem__, k, v)
             return result
         raise _Unfoldable()
+
+    def fold_function_call(self, mod, owner, fn, node, env):
+        """Evaluate a call to a local function whose body is a single `return` of a foldable expression.
+        Only used while splitting a lazily started module, so a value built by a helper (`def make():
+        return 3`) is known when deciding whether a later computation can raise."""
+        key = ('foldcall', id(owner), id(fn))
+        seen = getattr(self, '_fold_seen', None)
+        if seen is None:
+            seen = self._fold_seen = set()
+        if key in seen or isinstance(fn, ast.AsyncFunctionDef) or fn.decorator_list:
+            raise _Unfoldable()
+        body = [s for s in fn.body if not (isinstance(s, ast.Expr) and isinstance(s.value, ast.Constant)
+                                           and isinstance(s.value.value, str))]
+        if len(body) != 1 or not isinstance(body[0], ast.Return) or body[0].value is None:
+            raise _Unfoldable()
+        a = fn.args
+        if a.vararg is not None or a.kwarg is not None:
+            raise _Unfoldable()
+        if any(isinstance(x, ast.Starred) for x in node.args) or any(k.arg is None for k in node.keywords):
+            raise _Unfoldable()
+        params = a.posonlyargs + a.args
+        if len(node.args) > len(params):
+            raise _Unfoldable()
+        keywords = {k.arg: k.value for k in node.keywords}
+        child = env.new_child()
+        defaults = a.defaults
+        first_default = len(params) - len(defaults)
+        for index, param in enumerate(params):
+            if index < len(node.args):
+                value = self.fold(owner, node.args[index], env)
+            elif param.arg in keywords:
+                value = self.fold(owner, keywords.pop(param.arg), env)
+            elif index >= first_default:
+                value = self.fold(owner, defaults[index - first_default], env)
+            else:
+                raise _Unfoldable()
+            child[param.arg] = value
+        for param, default in zip(a.kwonlyargs, a.kw_defaults):
+            if param.arg in keywords:
+                child[param.arg] = self.fold(owner, keywords.pop(param.arg), env)
+            elif default is not None:
+                child[param.arg] = self.fold(owner, default, env)
+            else:
+                raise _Unfoldable()
+        if keywords:
+            raise _Unfoldable()
+        seen.add(key)
+        try:
+            return self.fold(owner, body[0].value, child)
+        finally:
+            seen.discard(key)
 
     def fold_generators(self, mod, node, generators, depth, env, out):
         if depth == len(generators):
@@ -2367,6 +2422,27 @@ class Program:
                     return bad
         return None
 
+    def raising_bad_expr(self, mod, node, env):
+        """The first part of a module-level statement that may raise when the module starts but whose value
+        cannot be folded, or None. A call is left to `move_bad_expr`, which knows the safe helpers."""
+        if node is None:
+            return None
+        try:
+            self.fold(mod, node, env)
+            return None
+        except _Raises as exc:
+            return exc.node
+        except _Unfoldable:
+            pass
+        if isinstance(node, (ast.BinOp, ast.UnaryOp, ast.Compare, ast.JoinedStr, ast.Subscript)):
+            return node
+        for c in ast.iter_child_nodes(node):
+            if isinstance(c, ast.expr):
+                bad = self.raising_bad_expr(mod, c, env)
+                if bad is not None:
+                    return bad
+        return None
+
     def decorator_bad(self, mod, d):
         bad = self.impure_decorator(mod, d)
         if bad is None:
@@ -2496,6 +2572,14 @@ class Program:
         return node
 
     def init_split(self, mod, where, orig):
+        old = getattr(self, '_fold_local', False)
+        self._fold_local = True
+        try:
+            return self._init_split(mod, where, orig)
+        finally:
+            self._fold_local = old
+
+    def _init_split(self, mod, where, orig):
         """For a module that a function starts when it runs (see `merge_program`): the top-level statements that go
         into the start function. Definitions (def, class) and imports are placed where the module is spliced in;
         every other statement goes into a function that runs when the import statement runs. A value a definition
@@ -2615,7 +2699,8 @@ class Program:
                 result = not immutable(before) or after is _UNKNOWN
             if not result:
                 self._move_env = collections.ChainMap(dict(envs[i]))
-                result = self.move_bad_stmt(mod, node, set()) is not None
+                result = (self.move_bad_stmt(mod, node, set()) is not None
+                          or self.raising_bad_expr(mod, node, self._move_env) is not None)
             effect_cache[i] = result
             return result
 
@@ -2707,6 +2792,8 @@ class Program:
             if id(node) in needed:
                 self._move_env = collections.ChainMap(dict(envs[i]))
                 bad = self.move_bad_stmt(mod, node, set())
+                if bad is None:
+                    bad = self.raising_bad_expr(mod, node, self._move_env)
                 if bad is not None:
                     self.refuse(where, orig, "function-level `%s`: %s defines %s at import time (line %d), which uses a "
                                 "value the module only computes when it runs, or does something when it is defined; the "
