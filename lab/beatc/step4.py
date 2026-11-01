@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""Step 4 evidence: hand-edit generated C for the two chosen mechanism/task pairs.
+"""Step 4 evidence: hand-edit generated C for the chosen mechanism/task pairs.
 
     python3 lab/beatc/step4.py --out /tmp/step4.json --runs 5
 
 Pair A, automatic parallelism / scar_life: add one OpenMP `parallel for` with reductions to
 the generation loop of the generated C. Pair B, restrict / berth_sim: add `restrict` to the
-parameters of the already-specialized int64 key-sort helper. The compiler is not changed; the
-edit exists only in a /tmp copy of program.c. Both builds are compiled with the same flags.
+parameters of the already-specialized int64 key-sort helper. Pair C, specialization /
+tally_lang: replace the generated 64-bit loop that counts set bits with the specialized
+`__builtin_popcountll`; tally's `#` operand is a u32, so the two agree. The compiler is not
+changed; the edit exists only in a /tmp copy of program.c. All builds are compiled with the same
+flags.
 
 Base and edited runs are interleaved (their order alternates each round) so a slow patch on the
 shared runner does not bias one side; `paired_gain_*` is the median of the per-round base/edited
@@ -43,9 +46,38 @@ def berth_restrict(src):
     return src.replace(old, new), []
 
 
+def tally_specialize(src):
+    old = '''int64_t popcnt(int64_t v_x) {
+    int64_t ir1 = 0;
+    int64_t ir2 = 0LL;
+    int64_t ir3 = v_x;
+    for (;;) {
+        int64_t ir4 = (ir3 != 0LL);
+        if (!(ir4)) {
+            ir1 = ir2;
+            break;
+        }
+        int64_t ir5 = (ir3 & 1LL);
+        int64_t ir6 = ck_add(ir2, ir5);
+        int64_t ir7 = ck_shr(ir3, 1LL);
+        int64_t ir8 = ir6;
+        int64_t ir9 = ir7;
+        ir2 = ir8;
+        ir3 = ir9;
+    }
+    return ir1;
+}'''
+    new = '''int64_t popcnt(int64_t v_x) {
+    return (int64_t)__builtin_popcountll((unsigned long long)v_x);
+}'''
+    assert src.count(old) == 1, 'tally_lang popcnt helper not found'
+    return src.replace(old, new), []
+
+
 PAIRS = {
     'scar_life': dict(mechanism='A automatic parallelism', edit=scar_omp),
     'berth_sim': dict(mechanism='B restrict', edit=berth_restrict),
+    'tally_lang': dict(mechanism='C specialization/inlining', edit=tally_specialize),
 }
 
 

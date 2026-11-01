@@ -4,7 +4,10 @@ Status: measurement and pricing only. **No compiler behaviour changed**; no file
 `AIL_CURRENT/` was edited, so the default build and its generated C are the same as at the base
 commit.
 
-Base: `staging:integ`, HEAD `5394a49` (`job-beatc1-11011753`). Machine: GitHub Actions runner,
+Base: `staging:integ`, base commit `5394a49`; first-pass HEAD `e4b0541`
+(`job-beatc1-11011753`). This revision fixes the review of that pass: it adds the highest-bound
+mechanism/task pair (C / `tally_lang`) to the pricing and to the Step-4 evidence, and moves the
+ranked list to the end. Machine: GitHub Actions runner,
 4 logical x86-64 cores, 16 GB, gcc 13.3.0, CPython 3.12.3. Timings are from a runner that also
 hosted up to five agents; medians are medians of 5 runs and `±` is **half the min-max range**, not
 a standard deviation. A difference below 3% is called a tie.
@@ -94,10 +97,13 @@ marks the generic hash probe `always_inline`, so C is charged only the generic r
 | ticket_audit | 0.10 | 1.08× | 0.20 | 1.25× | 0.35 | 1.54× | 0.10 | 1.11× |
 | tree_fold | 0.30 | 1.29× | 0.35 | 1.54× | 0.30 | 1.43× | 0.35 | 1.54× |
 
-Only three cells have a bound above the measured gap they would have to close: **A on
-scar_life** (1.60× bound vs 1.53× needed), **B on berth_sim** (1.47× vs 1.31×) and **C on
-echo_pack** (1.82× vs 1.65×). Every other cell is below the gap on its own. That is the central
-result: most of the deficit is not in one removable phase.
+Four cells have a bound above the measured gap they would have to close: **A on scar_life**
+(1.60× bound vs 1.53× needed), **B on berth_sim** (1.47× vs 1.31×), **C on echo_pack**
+(1.82× vs 1.65×) and **C on tally_lang** (2.86× vs 1.49×). C / tally_lang has by far the largest
+margin. Every other cell is below the gap on its own, so for those tasks most of the deficit is
+not in one removable phase. tally_lang is the exception: its 0.65 share is the whole `ev`
+interpreter loop, not one generic helper, so the removal bound is large but the reach is the open
+question (see the Step-4 result below).
 
 Reachable fractions and why:
 
@@ -115,27 +121,34 @@ Reachable fractions and why:
   specialized: `ail__keysort_i64` is a dedicated int64 merge sort and `ail_tab_hslot` is
   `static inline __attribute__((always_inline))`. What remains is the generic dict/bytes/compare
   tail and callbacks in the interpreter-like tasks. 40% allows for a better specialized string
-  hash/bytes path and inlining, but assumes no algorithmic change.
+  hash/bytes path and inlining, but assumes no algorithmic change. On tally_lang the 0.65 share
+  is the entire `ev` evaluator, so 40% assumes a real opcode-specialized evaluator, not a one-line
+  helper swap; the cheap `popcnt` specialization in section 4 reached only about 1.03× paired,
+  which does not support the 40% reach. The 1.74× below is therefore an upper assumption.
 - **D, arenas/regions: 50% of the removal bound.** An arena removes allocator metadata and
   `free` work, not the live working set; the C RSS is a floor, not zero. The tree_fold gap is
   603 MiB vs 194 MiB, so even a perfect lifetime grouping has to keep the live tree. 50% is the
   share of the allocation cost (not the whole RSS gap) assumed removable.
 
 Realistic gains under those fractions are therefore about 1.36× for A on scar_life (close to the
-1.40–1.45× measured), 1.33× for C on echo_pack, 1.27× for D on tree_fold and 1.12× for B on
-berth_sim (measured 1.00–1.03×).
+1.40–1.45× measured), **1.74× for C on tally_lang** (the only priced single-mechanism gain above
+its 1.49× gap, but see the weak Step-4 support), 1.33× for C on echo_pack, 1.27× for D on
+tree_fold and 1.12× for B on berth_sim (measured 1.00–1.03×).
 
-## 4. Cheap evidence: two hand-edited builds
+## 4. Cheap evidence: three hand-edited builds
 
-Both builds are AIL's own generated C with the same `-O2` flags; the edit exists only under
-`/tmp`. Base and edited runs were interleaved and their order alternated each round, so a loaded
-patch of the shared runner hits both sides. `paired gain` is the median of the per-round
+The first pass tested A / scar_life and B / berth_sim. The review then pointed out that C /
+tally_lang has the highest priced bound, so it was added here as the third pair rather than left
+untested. All builds are AIL's own generated C with the same `-O2` flags; the edit exists only
+under `/tmp`. Base and edited runs were interleaved and their order alternated each round, so a
+loaded patch of the shared runner hits both sides. `paired gain` is the median of the per-round
 base/edited ratio; it is the number to trust when the load drifts.
 
 | pair | byte-identical output | 1 core base → edited | 1 core gain | all cores base → edited | all cores gain (paired) | peak RSS base → edited |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | A / scar_life: `#pragma omp parallel for reduction(+:alive,scars)` on the cell-update outer loop | **yes** | 24748.9 → 25309.4 ms | 0.978× (2.2% slower, tie) | 24822.7 → 17788.2 ms | **1.395× (paired 1.449×)** | 17.3 → 18.0 MiB |
 | B / berth_sim: `restrict` on `perm`, `buf`, `key` in `AIL_KEYSORT_I64` | **yes** | 3136.8 → 3050.3 ms | 1.028× | 2934.6 → 2955.1 ms | 0.993× (paired 1.031×) | 238.9 → 238.9 MiB |
+| C / tally_lang: specialized `__builtin_popcountll` instead of the generated bit-count loop | **yes** | 1676.6 → 1981.6 ms | 0.846× (paired 1.029×) | 2011.7 → 1874.6 ms | 1.073× (paired 1.090×) | 1.93 → 1.93 MiB |
 
 A / scar_life: the edited all-core runs were bimodal, 10.63, 10.89, 17.79, 20.74 and 20.95 s
 (median 17.79 s, spread 10.32 s), because the runner was shared. The best edited run is 2.33×
@@ -149,10 +162,33 @@ B / berth_sim: the base and edited medians are 3136.8 and 3050.3 ms on one core 
 `restrict` produced **no measurable gain** on this already-specialized sort. The byte-identical
 output confirms the `restrict` promise is true for these arrays, not that it pays.
 
-Step 4 ran under heavier load than Step 1 (berth base 3.14 s here vs 2.15 s in section 1). Only
-the paired ratios and the scar base, which matched its section-1 time, are used for conclusions.
+C / tally_lang: the edit replaces the whole `popcnt` helper (a 64-bit loop with checked add and
+shift) by `__builtin_popcountll`; tally's `#` operand is always a u32, so the two agree. Output was
+byte-identical on every run. The one-core medians are inverted (1676.6 vs 1981.6 ms) because this
+run was heavily loaded and bimodal; the paired median is 1.029× on one core and 1.090× on all
+cores. The all-core number cannot be a real parallel gain (the edit is single-threaded), so treat
+it as noise around a **small, roughly 3% gain**, not the 1.74× priced reach. This is the key
+negative result: the 0.65 share is the evaluator's dispatch and list access, not a single generic
+helper, and a cheap specialization does not remove it.
 
-## 5. Ranked list
+Step 4 ran under heavier load than Step 1 (berth base 3.14 s here vs 2.15 s in section 1; tally
+base 1.68 s here vs 1.27 s in section 1). Only the paired ratios and the scar base, which matched
+its section-1 time, are used for conclusions.
+
+## 5. Checks and limitations
+
+- The ten tasks build with the default compiler; no `--strict`, no flag changes, no compiler
+  patch. Generated C for all ten is the same as the base commit.
+- Output was compared with each task's `reference.py` on the perf input for every measured run;
+  all AIL and C runs were byte-identical. The Step-4 edited builds were also checked on every run.
+- Wall time on this runner moves by up to about 30% between runs (see the spreads); all
+  conclusions use medians, paired ratios, and the 3% tie rule.
+- Instruction counts and `perf record` are unavailable on this runner; profiles are `gprof`
+  samples and instructions are not claimed.
+- `tools/roofcheck_v1.py` is absent, so the only roof used is the 4-core count for A; B/C/D are
+  removal bounds, stated as such.
+
+## 6. Ranked list
 
 1. **A — automatic parallelism.** Tasks: `scar_life` first; possibly `tree_fold` sort/fold and
    `berth_sim` key construction. Measured 1.40× all-core on scar_life (paired 1.45×, best 2.33×);
@@ -160,12 +196,15 @@ the paired ratios and the scar base, which matched its section-1 time, are used 
    selection, OpenMP/task emission, scheduling, a serial fallback). Risk: float reduction order
    changes (`chain_relax` must not be parallelised), data races if the dependence test is wrong,
    output order, memory bandwidth. At the median it still does not beat C on scar_life.
-2. **C — specialization and inlining.** Tasks: `echo_pack` (generic hash/bytes path, 45% share),
-   then `ticket_audit`, `ledger_bin`, `rail_transfer`. Priced bound 1.82× on echo_pack, realistic
-   about 1.33×; **not measured** in Step 4. Implementation: medium-large, about 1.5–3k lines
-   (specialized dict/str/bytes routines, callback devirtualisation, controlled inlining). Risk:
-   a specialized path that is subtly different from the generic one, code bloat and icache
-   pressure; no float-order risk in these tasks.
+2. **C — specialization and inlining.** Tasks: `tally_lang` first (highest priced bound, 2.86×;
+   at the assumed 40% reach, 1.74× vs 1.49× needed, the only priced single-mechanism win, but the
+   cheap `popcnt` edit measured only about 1.03× paired, so that win needs a real
+   opcode-specialized evaluator and is not yet evidence); then `echo_pack` (generic hash/bytes
+   path, 45% share; bound 1.82×, realistic about 1.33×; not measured in Step 4), then
+   `ticket_audit`, `ledger_bin`, `rail_transfer`. Implementation: medium-large, about 1.5–3k lines
+   (specialized dict/str/bytes routines, an opcode-specialized evaluator, callback
+   devirtualisation, controlled inlining). Risk: a specialized path that is subtly different from
+   the generic one, code bloat and icache pressure; no float-order risk in these tasks.
 3. **D — arenas/regions.** Tasks: `tree_fold` (RSS 3.1× C, 35% priced share), then `echo_pack`
    and `ledger_bin`. Priced speed bound 1.54× on tree_fold, realistic about 1.27× — below the
    1.70× speed gap, but the memory side is the real win (603 MiB toward C's 194 MiB).
@@ -178,19 +217,10 @@ the paired ratios and the scar base, which matched its section-1 time, are used 
    low if the analysis is right, but a wrong `restrict` is undefined behaviour; the measured
    payoff does not justify it before a broader alias study.
 
-No single mechanism closes the measured AIL→C gap on its own at a realistic reach. A is the only
-one with direct evidence of a large gain; C has the next best priced ceiling; D is primarily a
-memory answer; B is a tie on the task with the most to gain from it.
-
-## 6. Checks and limitations
-
-- The ten tasks build with the default compiler; no `--strict`, no flag changes, no compiler
-  patch. Generated C for all ten is the same as the base commit.
-- Output was compared with each task's `reference.py` on the perf input for every measured run;
-  all AIL and C runs were byte-identical. The Step-4 edited builds were also checked on every run.
-- Wall time on this runner moves by up to about 30% between runs (see the spreads); all
-  conclusions use medians, paired ratios, and the 3% tie rule.
-- Instruction counts and `perf record` are unavailable on this runner; profiles are `gprof`
-  samples and instructions are not claimed.
-- `tools/roofcheck_v1.py` is absent, so the only roof used is the 4-core count for A; B/C/D are
-  removal bounds, stated as such.
+At the priced 40% reach, **C / tally_lang is the only single mechanism whose gain closes its
+measured gap** (1.74× vs 1.49×). Its cheap Step-4 edit did not approach that, so the win depends
+on a real opcode-specialized evaluator and is an upper bound, not a demonstrated result.
+A / scar_life has the only direct large measured gain (1.40–1.45×) and comes close to its 1.60×
+bound but still does not beat C at the median. C / echo_pack, D / tree_fold and B / berth_sim stay
+below their gaps at the assumed reach. D is primarily a memory answer; B is a tie on the task with
+the most to gain from it.

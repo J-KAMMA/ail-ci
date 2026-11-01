@@ -207,6 +207,108 @@
    "paired_gain_one_core": 1.003,
    "paired_gain_all_cores": 1.031,
    "rss_ratio": 1.0
+  },
+  {
+   "task": "tally_lang",
+   "mechanism": "C specialization/inlining",
+   "edit_added_flags": [],
+   "output_sha256": "4f689e4993d434b383d2d0a16e98ed1fd9250fbac22473964bdc494405fb5f90",
+   "builds": {},
+   "base": {
+    "one_core": {
+     "runs": 5,
+     "wall_ms": 1676.6,
+     "min_ms": 1272.9,
+     "max_ms": 2069.3,
+     "spread_ms": 796.4,
+     "all_ms": [
+      1272.9,
+      1322.7,
+      1676.6,
+      2050.7,
+      2069.3
+     ],
+     "rss_kib": 1976,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "4f689e4993d434b383d2d0a16e98ed1fd9250fbac22473964bdc494405fb5f90"
+     ]
+    },
+    "all_cores": {
+     "runs": 5,
+     "wall_ms": 2011.7,
+     "min_ms": 1326.1,
+     "max_ms": 2162.1,
+     "spread_ms": 835.9,
+     "all_ms": [
+      1326.1,
+      1729.5,
+      2011.7,
+      2044.2,
+      2162.1
+     ],
+     "rss_kib": 1976,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "4f689e4993d434b383d2d0a16e98ed1fd9250fbac22473964bdc494405fb5f90"
+     ]
+    },
+    "byte_identical": true
+   },
+   "edited": {
+    "one_core": {
+     "runs": 5,
+     "wall_ms": 1981.6,
+     "min_ms": 1240.9,
+     "max_ms": 1994.3,
+     "spread_ms": 753.4,
+     "all_ms": [
+      1240.9,
+      1415.6,
+      1981.6,
+      1993.8,
+      1994.3
+     ],
+     "rss_kib": 1976,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "4f689e4993d434b383d2d0a16e98ed1fd9250fbac22473964bdc494405fb5f90"
+     ]
+    },
+    "all_cores": {
+     "runs": 5,
+     "wall_ms": 1874.6,
+     "min_ms": 1248.5,
+     "max_ms": 1985.9,
+     "spread_ms": 737.4,
+     "all_ms": [
+      1248.5,
+      1258.4,
+      1874.6,
+      1972.1,
+      1985.9
+     ],
+     "rss_kib": 1976,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "4f689e4993d434b383d2d0a16e98ed1fd9250fbac22473964bdc494405fb5f90"
+     ]
+    },
+    "byte_identical": true
+   },
+   "gain_one_core": 0.846,
+   "gain_all_cores": 1.073,
+   "paired_gain_one_core": 1.029,
+   "paired_gain_all_cores": 1.09,
+   "rss_ratio": 1.0
   }
  ]
 }

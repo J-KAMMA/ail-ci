@@ -1,3 +1,19 @@
+## 2026-11-01 -- BEAT_C review fix: add C/tally_lang (job-beatc1-11011753)
+
+Fixed the review of `e4b0541`. The pricing table already carried C / `tally_lang` at `s=0.65`,
+bound 2.86x, but the text said only three cells were above their gap and concluded that no single
+mechanism closes the AIL-to-C gap. Corrected: C / `tally_lang` (2.86x bound vs 1.49x needed) is
+the fourth cell, and at the assumed 40% reach gives 1.74x, the only priced single-mechanism win;
+it is now in section 3, the realistic-gain discussion and the ranked list ahead of `echo_pack`.
+Re-checked Step 4 by adding the highest-bound pair: hand-specialized tally's `popcnt` helper to
+`__builtin_popcountll`; output was byte-identical, paired gain 1.029x one-core and 1.090x
+all-core (the latter is noise for a single-threaded edit), so the 1.74x remains an upper bound,
+not evidence. Added `tally_specialize` to `lab/beatc/step4.py`, merged the result into
+`results/step4.json`, and moved the ranked list to the end of `BEAT_C.md` (section 6, after the
+checks). No compiler, runtime or test changed, so no behaviour probes apply. Required tests
+(`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`) were run on the final
+commit; see the job report.
+
 ## 2026-11-01 -- BEAT_C: where AIL can beat C at equal effort (job-beatc1-11011753)
 
 Measurement and pricing only; no compiler code changed and the default output is untouched.
@@ -15,9 +31,11 @@ Profiled the nine non-wins with `gprof` on `-pg` generated C: the hot work is sc
 (86% in `solve`), and tally's interpreter `ev` (67.6%). Priced A automatic parallelism, B
 `restrict`, C specialization/inlining and D arenas per task with the `speed-claims` rule. Only
 A/scar_life (1.60x bound vs 1.53x needed), B/berth_sim (1.47x vs 1.31x) and C/echo_pack (1.82x vs
-1.65x) have a removal bound above their gap; `tools/roofcheck_v1.py` is not in this tree.
+1.65x) have a removal bound above their gap; C/tally_lang (2.86x vs 1.49x) also qualifies and was
+added in the review fix above. `tools/roofcheck_v1.py` is not in this tree.
 
-Hand-edited generated C for the two pairs, interleaving base and edited runs: OpenMP on scar's
+Hand-edited generated C for the two pairs (a third, C/tally_lang, was added in the review fix
+above), interleaving base and edited runs: OpenMP on scar's
 cell loop kept output byte-identical and gave 1.395x all-core (paired 1.449x; best run 2.33x, but
 the median 17.8 s is still slower than C's 16.2 s); `restrict` on berth's keysort also kept output
 byte-identical but gave 1.00-1.03x, a tie. Report and raw JSON are in `docs/design/BEAT_C.md` and
