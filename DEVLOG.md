@@ -11,10 +11,14 @@ the Counter; the general path's `Counter.subtract` now also dispatches a `ChainM
 `items()` values (a new helper emitted only when used).  Every mismatch is a named refusal, never a
 silent repr difference.
 
-Probes `/tmp/probes/k1`-`k9` cover int-key Counter subtract/update with int and str mappings,
-direct assignment, ChainMap with int/str keys both written out and through a variable, and the
-matching int-key ChainMap form; all match CPython on both builds or are refused by name (the
-default build falls back to the general path and still matches).  `test_ail_std_collections`,
+An unannotated `self.field = {...}` dict in `__init__` now feeds the class field table, so a
+mapping reached through an instance attribute is lowered as a mapping (and key-checked) instead of
+being left on a typed dict as a missing `subtract` method.  Probes `/tmp/probes/k1`-`k9` and
+`m2`/`m4` cover int-key Counter subtract/update with int and str mappings, direct assignment,
+ChainMap with int/str keys both written out and through a variable, the matching int-key ChainMap
+form, and a mapping reached through an instance attribute; all match CPython on both builds or are
+refused by name (the default build falls back to the general path and still matches).
+`test_ail_std_collections`,
 `test_ail_collections`, `test_ail_tuples`, `test_ail_deqctr`, `test_ail_safetynet`, `test_ail_files`
 and `test_ail_corpus_findings3` pass (7 modules, 0 failed).  Generated C of the ten compare tasks
 is unchanged (seven byte-identical, three refuse identically).

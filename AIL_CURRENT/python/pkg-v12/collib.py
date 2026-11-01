@@ -1359,6 +1359,8 @@ class Rewriter:
                         v = st.value
                         if isinstance(v, ast.Name) and v.id in params:
                             fields[st.targets[0].attr] = self.ann_type(params[v.id])
+                        elif isinstance(v, (ast.Dict, ast.DictComp)):
+                            fields[st.targets[0].attr] = self.infer(v, {})
         return fields
 
     def mentions_collection(self, node):
