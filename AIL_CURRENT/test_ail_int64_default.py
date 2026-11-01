@@ -154,8 +154,8 @@ main()"""
 
 # the operation that must be named when the result leaves int64 (None: any OverflowError text is accepted)
 NAMES = {0: '+', 1: '-', 2: '*', 3: 'unary - or abs()', 4: 'unary - or abs()', 5: '//', 7: '**', 8: '<<', 10: '**', 11: 'int()',
-         12: '+', 14: '*', 15: '*', 16: '*', 17: '*', 18: ('*', 'unary - or abs()'), 19: 'int(float)', 20: 'round()', 21: '+', 22: '*', 23: '+',
-         24: 'int()', 26: '*', 36: '+', 37: '+'}
+         12: '+', 14: '*', 15: '*', 16: '*', 17: '*', 18: ('*', 'unary - or abs()', 'math.lcm()'), 19: 'int(float)', 20: 'round()', 21: '+', 22: '*', 23: '+',
+         24: 'int()', 26: '*', 31: 'math.gcd()', 36: '+', 37: '+'}
 GENERAL_ONLY = (7, 10, 28, 29)
 PAIRS = [(0, 0), (1, 2), (MAXV, 1), (MAXV, 2), (MINV, 1), (MINV, -1), (MAXV, MAXV), (MINV, MINV), (3037000500, 3037000500),
          (3037000499, 3037000499), (2, 62), (2, 63), (2, 64), (-2, 63), (1, 62), (1, 63), (1, 64), (MAXV, 0), (5, 3), (-7, 2),
@@ -280,9 +280,9 @@ class Boundaries(unittest.TestCase):
                 for mode in ('default', 'force'):
                     code, out, err = got[mode]
                     self.assertEqual((code, out), (1, ''), (mode, label, err))
-                    if op == 20 and mode == 'force':
-                        # (the general path's wide round() raises the ordinary OverflowError of integ's pre429, text unchanged)
-                        self.assertEqual(err, 'OverflowError: integer overflow\n', label)
+                    if op == 20:
+                        # (round() names the operation but, like integ's pre429, keeps its text free of the int64 hint)
+                        self.assertEqual(err, 'OverflowError: integer overflow in round()\n', label)
                         continue
                     self.assertTrue(err.startswith('OverflowError: integer overflow in '), (mode, label, err))
                     self.assertTrue(err.endswith(SUFFIX + '\n'), (mode, label, err))
