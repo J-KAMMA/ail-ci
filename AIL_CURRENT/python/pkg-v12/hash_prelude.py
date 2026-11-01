@@ -210,6 +210,10 @@ def _ail_hl_index(n: int) -> int:
 
 # ------------------------------------------------------------------------------------------ base64
 
+class Error(ValueError):
+    pass
+
+
 def _ail_hl_b64msg(code: int, n: int) -> str:
     if code == 1:
         return "Incorrect padding"
@@ -232,7 +236,7 @@ def _ail_hl_b64d(data: bytes, mode: int) -> bytes:
     r = _ail_hs_b64d(data, mode)
     e = _ail_hs_b64err()
     if e != 0:
-        raise ValueError(_ail_hl_b64msg(e, _ail_hs_b64n()))
+        raise Error(_ail_hl_b64msg(e, _ail_hs_b64n()))
     return r
 
 
@@ -246,6 +250,305 @@ def _ail_hl_b64d_dyn(data, mode):
     if isinstance(data, str):
         return _ail_hl_b64d_str(data, mode)
     return _ail_hl_b64d(data, mode)
+
+
+def _ail_hl_flag(flag: bool) -> int:
+    if flag:
+        return 1
+    return 0
+
+
+def _ail_hl_b64_mode(urlsafe: int, validate: bool) -> int:
+    if validate:
+        return urlsafe + 2
+    return urlsafe
+
+
+def _ail_hl_typefail(data, kind: int) -> None:
+    name = type(data).__name__
+    if kind == 0:
+        raise TypeError("a bytes-like object is required, not '" + name + "'")
+    if kind == 1:
+        raise TypeError("memoryview: a bytes-like object is required, not '" + name + "'")
+    if kind == 3:
+        raise TypeError("argument should be a bytes-like object or ASCII string, not '" + name + "'")
+    raise TypeError("expected bytes-like object, not " + name)
+
+
+def _ail_hl_need_bytes(data, kind: int):
+    if isinstance(data, bytes) or isinstance(data, bytearray):
+        return data
+    _ail_hl_typefail(data, kind)
+    return data
+
+
+def _ail_hl_bs_in(data: bytes) -> bytes:
+    if isinstance(data, bytearray):
+        return bytes(data)
+    return data
+
+
+def _ail_hl_alt_bytes(data: bytes, kind: int) -> bytes:
+    assert len(data) == 2, repr(data)
+    return _ail_hl_need_bytes(data, kind)
+
+
+def _ail_hl_alt_str(text: str) -> bytes:
+    if not _ail_hl_ascii(text):
+        raise ValueError("string argument should contain only ASCII characters")
+    return _ail_hl_alt_bytes(text.encode(), 3)
+
+
+def _ail_hl_alt_dyn(data):
+    if isinstance(data, str):
+        return _ail_hl_alt_str(data)
+    _ail_hl_need_bytes(data, 3)
+    return _ail_hl_alt_bytes(data, 3)
+
+
+def _ail_hl_alt_enc_dyn(data):
+    if isinstance(data, str):
+        if len(data) != 2:
+            raise AssertionError(repr(data))
+        raise TypeError("a bytes-like object is required, not 'str'")
+    return _ail_hl_alt_bytes(data, 0)
+
+
+def _ail_hl_b64e_alt(data: bytes, altchars) -> bytes:
+    e = _ail_hl_b64e(data, 0)
+    if altchars is None:
+        return e
+    altchars = _ail_hl_alt_bytes(altchars, 0)
+    out = bytearray()
+    for c in e:
+        if c == 43:
+            out.append(altchars[0])
+        elif c == 47:
+            out.append(altchars[1])
+        else:
+            out.append(c)
+    return bytes(out)
+
+
+def _ail_hl_b64d_alt(data, altchars, mode: int) -> bytes:
+    data = _ail_hl_need_bytes(data, 3)
+    if altchars is None:
+        return _ail_hl_b64d(data, mode)
+    altchars = _ail_hl_alt_dyn(altchars)
+    out = bytearray()
+    for c in data:
+        if c == altchars[1]:
+            out.append(47)
+        elif c == altchars[0]:
+            out.append(43)
+        else:
+            out.append(c)
+    return _ail_hl_b64d(bytes(out), mode)
+
+
+def _ail_hl_b64d_alt_str(text: str, altchars, mode: int) -> bytes:
+    if not _ail_hl_ascii(text):
+        raise ValueError("string argument should contain only ASCII characters")
+    return _ail_hl_b64d_alt(text.encode(), altchars, mode)
+
+
+def _ail_hl_b64d_alt_dyn(data, altchars, mode):
+    if isinstance(data, str):
+        if not _ail_hl_ascii(data):
+            raise ValueError("string argument should contain only ASCII characters")
+        data = data.encode()
+    return _ail_hl_b64d_alt(data, altchars, mode)
+
+
+def _ail_hl_b16val(c: int, casefold: int) -> int:
+    if c >= 48 and c <= 57:
+        return c - 48
+    if c >= 65 and c <= 70:
+        return c - 55
+    if casefold != 0 and c >= 97 and c <= 102:
+        return c - 87
+    return -1
+
+
+def _ail_hl_b16e(data: bytes) -> bytes:
+    data = _ail_hl_need_bytes(data, 0)
+    out = bytearray()
+    for c in data:
+        hi = c >> 4
+        lo = c & 15
+        if hi < 10:
+            out.append(48 + hi)
+        else:
+            out.append(65 + hi - 10)
+        if lo < 10:
+            out.append(48 + lo)
+        else:
+            out.append(65 + lo - 10)
+    return bytes(out)
+
+
+def _ail_hl_b16d(data: bytes, casefold: int) -> bytes:
+    i = 0
+    while i < len(data):
+        if _ail_hl_b16val(data[i], casefold) < 0:
+            raise Error("Non-base16 digit found")
+        i += 1
+    if len(data) % 2 != 0:
+        raise Error("Odd-length string")
+    out = bytearray()
+    i = 0
+    while i < len(data):
+        out.append(_ail_hl_b16val(data[i], casefold) * 16 + _ail_hl_b16val(data[i + 1], casefold))
+        i += 2
+    return bytes(out)
+
+
+def _ail_hl_b16d_str(text: str, casefold: int) -> bytes:
+    if not _ail_hl_ascii(text):
+        raise ValueError("string argument should contain only ASCII characters")
+    return _ail_hl_b16d(text.encode(), casefold)
+
+
+def _ail_hl_b16d_dyn(data, casefold):
+    if isinstance(data, str):
+        return _ail_hl_b16d_str(data, casefold)
+    _ail_hl_need_bytes(data, 3)
+    return _ail_hl_b16d(data, casefold)
+
+
+def _ail_hl_b32val(c: int) -> int:
+    if c >= 65 and c <= 90:
+        return c - 65
+    if c >= 50 and c <= 55:
+        return c - 24
+    return -1
+
+
+def _ail_hl_b32e(data: bytes) -> bytes:
+    data = _ail_hl_need_bytes(data, 1)
+    alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567"
+    out = bytearray()
+    n = len(data)
+    rem = 0
+    i = 0
+    while i < n:
+        rem = n - i
+        b0 = data[i]
+        b1 = data[i + 1] if rem > 1 else 0
+        b2 = data[i + 2] if rem > 2 else 0
+        b3 = data[i + 3] if rem > 3 else 0
+        b4 = data[i + 4] if rem > 4 else 0
+        out.append(alphabet[b0 >> 3])
+        out.append(alphabet[((b0 & 7) << 2) | (b1 >> 6)])
+        out.append(alphabet[(b1 >> 1) & 31])
+        out.append(alphabet[((b1 & 1) << 4) | (b2 >> 4)])
+        out.append(alphabet[((b2 & 15) << 1) | (b3 >> 7)])
+        out.append(alphabet[(b3 >> 2) & 31])
+        out.append(alphabet[((b3 & 3) << 3) | (b4 >> 5)])
+        out.append(alphabet[b4 & 31])
+        i += 5
+    pad = 0
+    if rem == 1:
+        pad = 6
+    elif rem == 2:
+        pad = 4
+    elif rem == 3:
+        pad = 3
+    elif rem == 4:
+        pad = 1
+    j = 0
+    while j < pad:
+        out[len(out) - 1 - j] = 61
+        j += 1
+    return bytes(out)
+
+
+def _ail_hl_b32d(data: bytes, casefold: int) -> bytes:
+    data = _ail_hl_bs_in(data)
+    s = data
+    if casefold != 0:
+        up = bytearray()
+        for c in s:
+            if c >= 97 and c <= 122:
+                up.append(c - 32)
+            else:
+                up.append(c)
+        s = bytes(up)
+    if len(s) % 8 != 0:
+        raise Error("Incorrect padding")
+    total = len(s)
+    k = total
+    while k > 0 and s[k - 1] == 61:
+        k -= 1
+    padchars = total - k
+    decoded = bytearray()
+    acc = 0
+    i = 0
+    while i < k:
+        acc = 0
+        j = 0
+        while j < 8 and i + j < k:
+            v = _ail_hl_b32val(s[i + j])
+            if v < 0:
+                raise Error("Non-base32 digit found")
+            acc = (acc << 5) + v
+            j += 1
+        while j < 8:
+            acc = acc << 5
+            j += 1
+        decoded.append((acc >> 32) & 255)
+        decoded.append((acc >> 24) & 255)
+        decoded.append((acc >> 16) & 255)
+        decoded.append((acc >> 8) & 255)
+        decoded.append(acc & 255)
+        i += 8
+    if padchars != 0 and padchars != 1 and padchars != 3 and padchars != 4 and padchars != 6:
+        raise Error("Incorrect padding")
+    if padchars > 0 and len(decoded) > 0:
+        leftover = (43 - 5 * padchars) // 8
+        del decoded[len(decoded) - (5 - leftover):]
+    return bytes(decoded)
+
+
+def _ail_hl_b32d_str(text: str, casefold: int) -> bytes:
+    if not _ail_hl_ascii(text):
+        raise ValueError("string argument should contain only ASCII characters")
+    return _ail_hl_b32d(text.encode(), casefold)
+
+
+def _ail_hl_b32d_dyn(data, casefold):
+    if isinstance(data, str):
+        return _ail_hl_b32d_str(data, casefold)
+    _ail_hl_need_bytes(data, 3)
+    return _ail_hl_b32d(data, casefold)
+
+
+def _ail_hl_encodebytes(data: bytes) -> bytes:
+    data = _ail_hl_need_bytes(data, 2)
+    out = bytearray()
+    i = 0
+    while i < len(data):
+        piece = _ail_hl_b64e(data[i:i + 57], 0)
+        for c in piece:
+            out.append(c)
+        out.append(10)
+        i += 57
+    return bytes(out)
+
+
+def _ail_hl_decodebytes(data: bytes) -> bytes:
+    data = _ail_hl_need_bytes(data, 2)
+    return _ail_hl_b64d(data, 0)
+
+
+def _ail_hl_decodebytes_str(text: str) -> bytes:
+    _ail_hl_typefail(text, 2)
+    return _ail_hl_b64d(text.encode(), 0)
+
+
+def _ail_hl_decodebytes_dyn(data):
+    data = _ail_hl_need_bytes(data, 2)
+    return _ail_hl_b64d(data, 0)
 
 
 # ------------------------------------------------------------------------------------------ int <-> bytes

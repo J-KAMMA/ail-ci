@@ -292,6 +292,66 @@ result and the one typed-path follow-up (method defaults keep the bundled lexer 
 path). `test_ail_std_shlex.py` compiles and compares all twelve. `read_token()` no longer leaks
 an internal sentinel. No compiler or runtime source changed, so generated C for existing programs
 is unchanged. The review follow-up below fixes the end-of-input and source-stack sentinels.
+## 2026-11-01 -- std_base64 review 2 follow-up: altchars validated after the data (job-std_base64-11011521)
+
+`b64encode(data, altchars=...)` validates and encodes `data` before it looks at `altchars`, matching
+CPython's `binascii.b2a_base64` call before the length assert and `bytes.maketrans`. The same order
+now holds on the decode side, so an invalid data argument reports its own type even when `altchars`
+is also invalid. A run-time `altchars=None` behaves like CPython's omitted altchars. Constant
+`str` altchars for `b64encode` and non-ASCII constant `str` altchars for `b64decode` remain named
+compile-time refusals.
+
+Probes `/tmp/probes/order_literal.py`, `order_static.py`, `order_alts.py`, `order_containers.py`
+and `/tmp/rprobes/p_order.py`, `r_badtypes.py`, `r_alt.py`, `r_b16.py`, `r_b16b.py`, `p_len.py`
+match CPython on both builds; `/tmp/rprobes2/p_mv.py` is refused identically on both. Tests:
+`test_ail_std_base64`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
+## 2026-11-01 -- std_base64 review 2: b16decode type check, altchars type check (job-std_base64-11011521)
+
+`base64.b16decode` on a non-bytes/non-str argument now raises CPython's
+`TypeError: argument should be a bytes-like object or ASCII string, not '<type>'` instead of
+`object of type '<type>' has no len()`. `b64encode(..., altchars=...)` now rejects a non-bytes-like
+altchars after the length assert (`TypeError: a bytes-like object is required, not '<type>'`) instead
+of using its items as character codes; bytes, bytearray and str altchars keep their behaviour, and the
+decode-side `argument should be a bytes-like object or ASCII string` message is unchanged.
+
+Probes `/tmp/rprobes/r_b16.py`, `r_badtypes.py`, `r_alt.py`, `r_b16b.py` match CPython on both
+builds. Tests: `test_ail_std_base64`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
+## 2026-11-01 -- std_base64 review fixes: altchars assert, decodebytes/encoder type errors, b32 bytearray (job-std_base64-11011521)
+
+Follow-up to the `std_base64` review. `b64encode`/`b64decode` now assert `len(altchars) == 2`
+with `repr(altchars)` (CPython's `AssertionError`), including a constant `str` altchars on the
+typed path, and a dynamic `str` altchars for `b64encode` raises CPython's bytes-like `TypeError`.
+`decodebytes` no longer accepts `str`: it raises `TypeError: expected bytes-like object, not str`
+(also for non-ASCII text). `b16encode`, `b32encode` and `encodebytes` check their input first and
+raise CPython's own messages (`a bytes-like object is required...`, `memoryview: ...`,
+`expected bytes-like object...`). `b32decode` converts a `bytearray` to bytes before indexing, so
+it returns the decoded value instead of reading the prelude's `_s`. The type-check helper keeps a
+real `TypeError` on the injected prelude, so the default build falls back to the general path for
+the exact text; `chunked_stream.py` is therefore general in `lab/stdlib/base64/RESULTS.md` now.
+
+Probes in `/tmp/probes/fix_*.py` (both builds) cover altchars lengths 0/1/2/3 as bytes,
+bytearray and str, direct/argument/list/attribute/dict values, decoder and encoder type errors,
+and `b32decode`/`b16decode` on bytearray. All match CPython or are refused by name. Required tests:
+`test_ail_std_base64`, `test_ail_crypto`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
+## 2026-11-01 -- std_base64: `base64` codecs, altchars and line wrapping (job-std_base64-11011521)
+
+Added `base64.b16encode` / `b16decode`, `b32encode` / `b32decode`, `encodebytes` / `decodebytes`,
+`b64encode(altchars=)` and `b64decode(altchars=)` to `hashlower.py` and `hash_prelude.py`, plus a
+run-time `validate=` flag for `b64decode`. The decoders now raise a `ValueError` subclass named
+`Error` (CPython's `binascii.Error` name); a user binding named `Error` is refused by name. `_strish`
+now keeps `bytes.lower()` / `bytes.upper()` bytes-typed.
+
+`lab/stdlib/base64/` holds 12 realistic programs; 10 build and match CPython 3.12.3 stdout and exit
+code, 2 are refused with the follow-up texts in `lab/stdlib/base64/RESULTS.md` (`b85`/`a85` and the
+legacy `base64.encode` / `base64.decode` stream API). `test_ail_std_base64.py` checks the ten on both
+`AIL_IR` builds and pins the two refusals. `test_ail_crypto.py` now pins `b85encode` as the refused
+base64 name instead of the now-built `b32encode`.
 
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
