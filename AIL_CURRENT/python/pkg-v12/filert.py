@@ -376,6 +376,7 @@ static ail_str ailt_sp_reprb(ail_sarena *A, ail_bytes d) { ailf_buf b; AILT_CHEC
 TYPED_PATH = r'''
 /* ---- G10 typed adapters: the pathlib primitives of filelib.PATHS over ailpath_core.h ---- */
 static int64_t ailt_pp_staterr(ail_str p) { return ailf_stat_errno(p.p, p.n); }
+static ail_str ailt_pp_home(ail_sarena *A) { ailf_buf b; AILT_CHECK(ailf_home(&b)); return ailt_adopt_str(A, &b); }
 static ail_str ailt_pp_readlink(ail_sarena *A, ail_str p) { ailf_buf b; AILT_CHECK(ailf_readlink(p.p, p.n, &b)); return ailt_adopt_str(A, &b); }
 static ail_str ailt_pp_repr(ail_sarena *A, ail_str s) { ailf_buf b; AILT_CHECK(ailf_repr_buf(s.p, s.n, &b)); return ailt_adopt_str(A, &b); }
 '''
@@ -686,6 +687,7 @@ GENERAL_SPEC_PROC = {
 
 GENERAL_SPEC_PATH = {
     'pp_staterr': ('plain', 'ailf_stat_errno({s0})'),
+    'pp_home': ('buf', 'ailf_home(&b)'),
     'pp_readlink': ('buf', 'ailf_readlink({s0}, &b)'),
     'pp_repr': ('buf', 'ailf_repr_buf({s0}, &b)'),
 }

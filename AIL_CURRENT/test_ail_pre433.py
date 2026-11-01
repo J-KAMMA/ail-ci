@@ -7,17 +7,18 @@ to the parameter's default, so a call that omitted it stayed unknown.  The defau
 evaluated in the defining scope and used when a call omits the parameter; in the int64 era that
 made the power refuse by name at compile time (``int64 constant expression out of range``).
 
-Integers are now exact by default (ail-ci#198), so a Python-syntax build prints the same
-integer CPython does and the fix is no longer needed there.  It still applies where int64 is
-enforced, such as ``ail check`` for Python syntax, so it is kept.  Covered on both builds: a
-positional, leading or keyword-only default; a negative default; a default read from a module
-alias, a list item, a class attribute or a dict value; the width boundaries around 10**18 and
-2**63; an explicit argument at the same call; and a constant ``*`` argument.  In-range defaults,
-a call that passes an in-range value, bases 0/1/-1, bool and float defaults, and a function that
-is never called also match CPython.
+Integers are int64 by default (ail-ci#198), so a Python-syntax default build refuses the
+out-of-range power by name at compile time; ``--exact-int`` / ``AIL_EXACT_INT=1`` prints the
+same integer CPython does and never overflows.  Covered on both builds: a positional, leading
+or keyword-only default; a negative default; a default read from a module alias, a list item, a
+class attribute or a dict value; the width boundaries around 10**18 and 2**63; an explicit
+argument at the same call; and a constant ``*`` argument.  In-range defaults, a call that passes
+an in-range value, bases 0/1/-1, bool and float defaults, and a function that is never called
+also match CPython.
 
-The test probes the compiler's integer mode with ``10 ** 40``.  In exact mode every case must
-build and match CPython; in int64 mode the out-of-range cases must keep the named refusal.
+The test probes the compiler's integer mode with ``10 ** 40``.  In the int64 default the
+out-of-range cases must keep the named refusal; the explicit exact-mode tests build them and
+compare with CPython.
 """
 import os
 import subprocess
@@ -38,12 +39,16 @@ def cpython(directory, name, text):
     return done.stdout.replace(b'\r\n', b'\n'), done.returncode
 
 
-def build(directory, name, text, general):
+def build(directory, name, text, general, exact=False):
     src = Path(directory) / (name + '.py')
     src.write_text(text, encoding='utf-8')
-    exe = Path(directory) / ('exe_' + name + ('_g' if general else '_d'))
+    exe = Path(directory) / ('exe_' + name + ('_g' if general else '_d') + ('e' if exact else 'i'))
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
     env.pop('AIL_NO_GENERAL', None)
+    if exact:
+        env['AIL_EXACT_INT'] = '1'
+    else:
+        env.pop('AIL_EXACT_INT', None)
     if general:
         env['AIL_UNIFIED_FORCE'] = '1'
     else:
@@ -278,6 +283,21 @@ class Pre433(unittest.TestCase):
                                          (name, general, got.stderr[-800:]))
                         self.assertEqual(got.returncode, want[1], (name, general, got.stderr[-800:]))
 
+    def test_default_power_with_exact_ints_matches_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre433-exact-') as directory:
+            for name, text in REFUSED.items():
+                want = cpython(directory, name, text)
+                for general in (True, False):
+                    with self.subTest(case=name, general=general):
+                        exe, built = build(directory, name + ('g' if general else 'd'), text,
+                                           general, exact=True)
+                        self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                        got = subprocess.run([str(exe)], capture_output=True, timeout=120,
+                                             cwd=directory)
+                        self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want[0],
+                                         (name, general, got.stderr[-800:]))
+                        self.assertEqual(got.returncode, want[1], (name, general, got.stderr[-800:]))
+
     def test_in_range_and_explicit_routes_match_cpython(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre433-') as directory:
             for name, text in MATCH.items():
@@ -298,6 +318,7 @@ class Pre433(unittest.TestCase):
                 src.write_text(REFUSED['default'], encoding='utf-8')
                 env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
                 env.pop('AIL_NO_GENERAL', None)
+                env.pop('AIL_EXACT_INT', None)
                 if general:
                     env['AIL_UNIFIED_FORCE'] = '1'
                 else:
@@ -307,25 +328,6 @@ class Pre433(unittest.TestCase):
                                          text=True, timeout=900, env=env)
                 self.assertIn('int64 constant expression out of range',
                               checked.stdout + checked.stderr)
-
-
-import os as _os_exact_int
-
-_SAVED_EXACT_INT = None
-
-
-def setUpModule():
-    # these tests are about exact (arbitrary precision) ints: the opt-in mode (intmode.py, `--exact-int`)
-    global _SAVED_EXACT_INT
-    _SAVED_EXACT_INT = _os_exact_int.environ.get('AIL_EXACT_INT')
-    _os_exact_int.environ['AIL_EXACT_INT'] = '1'
-
-
-def tearDownModule():
-    if _SAVED_EXACT_INT is None:
-        _os_exact_int.environ.pop('AIL_EXACT_INT', None)
-    else:
-        _os_exact_int.environ['AIL_EXACT_INT'] = _SAVED_EXACT_INT
 
 
 if __name__ == '__main__':

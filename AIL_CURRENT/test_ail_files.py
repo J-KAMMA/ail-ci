@@ -1226,8 +1226,6 @@ class FileRefusalAndRuntimeTests(ProgramBase):
         self.refused("def main() -> int:\n    with open('x', 'w', errors='surrogateescape') as f:\n        f.write('a')\n    print(1)\n    return 0\n\n\nmain()\n",
                      "only 'strict', 'replace' and 'ignore'")
         self.refused("import os\n\n\ndef main() -> int:\n    print(os.popen('ls'))\n    return 0\n\n\nmain()\n", "os.popen is not built")
-        self.refused("import os\n\n\ndef main() -> int:\n    x = os.environ.get('HOME')\n    print(1)\n    return 0\n\n\nmain()\n",
-                     "without a default")
         self.refused("import os\n\n\ndef main() -> int:\n    for r, d, f in os.walk('.', topdown=False):\n        print(r)\n    return 0\n\n\nmain()\n",
                      "os.walk(top) takes the top directory only")
         self.refused("def main() -> int:\n    with open('x', 'w', closefd=False) as f:\n        f.write('a')\n    print(1)\n    return 0\n\n\nmain()\n",

@@ -6,9 +6,13 @@ check folded only parameterless straight-line statements, so a parameter bound b
 call, or a list/dict/attribute route holding a wide constant expression, was not seen.  The
 call graph is now followed from module-scope calls for augmented powers too, and the
 straight-line folder can read a list item, a dict value or an attribute the body assigned.
-The check path names the out-of-range result at compile time; a build falls back to the
-general path, which computes the exact big integer, so both builds match CPython.  In-range,
-dynamic, rebound and mutated values keep matching CPython.
+The check path names the out-of-range result at compile time.
+
+Integers are int64 by default (ail-ci#198): a default build refuses every routed wide
+``b **= e`` by name (``int64 constant expression out of range``), on the typed and forced
+general paths alike, so nothing reaches a run-time overflow.  With ``--exact-int`` /
+``AIL_EXACT_INT=1`` the wide result is computed exactly and both builds match CPython.
+In-range, dynamic, rebound and mutated values keep matching CPython in both modes.
 """
 import os
 import subprocess
@@ -103,14 +107,19 @@ main()
 '''
 
 
-def build_run(directory, text, name, general):
+def build_run(directory, text, name, general, exact=False):
     src = Path(directory) / ('%s.py' % name)
-    exe = Path(directory) / ('%s_%s' % (name, 'g' if general else 'd'))
+    suffix = ('g' if general else 'd') + ('e' if exact else 'i')
+    exe = Path(directory) / ('%s_%s' % (name, suffix))
     src.write_text(text, encoding='utf-8')
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
     env.pop('AIL_NO_GENERAL', None)
     env.pop('AIL_UNIFIED_FORCE', None)
     env.pop('AIL_GENERAL', None)
+    if exact:
+        env['AIL_EXACT_INT'] = '1'
+    else:
+        env.pop('AIL_EXACT_INT', None)
     if general:
         env['AIL_UNIFIED_FORCE'] = '1'
     built = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', src.name,
@@ -139,14 +148,26 @@ def check_run(directory, text, name):
 
 
 class Pre425(unittest.TestCase):
-    def test_routed_augmented_power_matches_cpython(self):
+    def test_routed_augmented_power_is_refused_in_the_int64_default(self):
+        with tempfile.TemporaryDirectory(prefix='ail-pre425-') as directory:
+            for name, text in REFUSED:
+                for general in (False, True):
+                    with self.subTest(case=name, general=general):
+                        status, got, output = build_run(directory, text, name, general)
+                        self.assertNotEqual(status, 0, output)
+                        self.assertIn('int64 constant expression out of range', output)
+                        self.assertNotIn('integer overflow', output)
+                        self.assertNotIn('Traceback', output)
+                        self.assertEqual(got, b'', output)
+
+    def test_routed_augmented_power_matches_cpython_with_exact_ints(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre425-') as directory:
             for name, text in REFUSED:
                 want = run_cpython(directory, text, name)
                 self.assertEqual(want.returncode, 0, want.stderr)
                 for general in (False, True):
                     with self.subTest(case=name, general=general):
-                        status, got, output = build_run(directory, text, name, general)
+                        status, got, output = build_run(directory, text, name, general, exact=True)
                         self.assertEqual(status, 0, output)
                         self.assertEqual(got, want.stdout.replace(b'\r\n', b'\n'), output)
                         self.assertNotIn('integer overflow', output)
@@ -161,34 +182,16 @@ class Pre425(unittest.TestCase):
                     self.assertIn('int64 constant expression out of range',
                                   checked.stdout + checked.stderr)
 
-    def test_safe_values_still_match_cpython(self):
+    def test_safe_values_match_cpython_in_both_modes(self):
         with tempfile.TemporaryDirectory(prefix='ail-pre425-') as directory:
             want = run_cpython(directory, SAFE, 'safe')
             self.assertEqual(want.returncode, 0, want.stderr)
-            for general in (False, True):
-                with self.subTest(general=general):
-                    status, got, output = build_run(directory, SAFE, 'safe', general)
-                    self.assertEqual(status, 0, output)
-                    self.assertEqual(got, want.stdout.replace(b'\r\n', b'\n'), output)
-
-
-import os as _os_exact_int
-
-_SAVED_EXACT_INT = None
-
-
-def setUpModule():
-    # these tests are about exact (arbitrary precision) ints: the opt-in mode (intmode.py, `--exact-int`)
-    global _SAVED_EXACT_INT
-    _SAVED_EXACT_INT = _os_exact_int.environ.get('AIL_EXACT_INT')
-    _os_exact_int.environ['AIL_EXACT_INT'] = '1'
-
-
-def tearDownModule():
-    if _SAVED_EXACT_INT is None:
-        _os_exact_int.environ.pop('AIL_EXACT_INT', None)
-    else:
-        _os_exact_int.environ['AIL_EXACT_INT'] = _SAVED_EXACT_INT
+            for exact in (False, True):
+                for general in (False, True):
+                    with self.subTest(general=general, exact=exact):
+                        status, got, output = build_run(directory, SAFE, 'safe', general, exact=exact)
+                        self.assertEqual(status, 0, output)
+                        self.assertEqual(got, want.stdout.replace(b'\r\n', b'\n'), output)
 
 
 if __name__ == '__main__':
