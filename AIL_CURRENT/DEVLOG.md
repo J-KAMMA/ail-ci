@@ -1,3 +1,12 @@
+## 2026-11-01 -- manifest merge: a regenerated compiler pin keeps its SDK flag
+
+`tools/update_manifest.py` recomputes pins after a manifest.d merge, but a new compiler source whose pin the kept
+side did not have was re-added without the `s` flag, so the wheel's `sdk_files` lost it and `test_ail_packaging`
+failed on the integration branch (`ccsplit.py` after the cc-split change). The tool now treats every `.py`/`.h`/`.c`
+under `python/pkg-v12/` or `stdlib/` as a compiler source: a missing pin is restored as an SDK pin (`s`), and every
+compiler source is pinned even when the kept side dropped it. `test_ail_registry` covers the dropped-pin merge, and
+`test_ail_packaging` passes after taking either side of the manifest.d conflict.
+
 ## 2026-11-01 -- gcc time: one body per identical clone (default), parallel units and one exit cleanup (opt-in)
 
 The typed program's C (runtime, user prototypes, user functions) is one gcc run. OFF BY DEFAULT (they cost up to +0.4%
