@@ -256,6 +256,42 @@ through the general path (`AIL_UNIFIED_FORCE=1`) and, where it builds, the typed
 (`AIL_NO_GENERAL=1`). `test_ail_std_random.py` pins the 11 programs plus the new feature paths;
 `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and the targeted random tests
 were run on the final commit.
+## 2026-11-01 -- shlex review 1 fixes (job-std_shlex-11011956)
+
+Fixed the three defects from review 1. `split(None)` now raises CPython's
+`ValueError: s argument must not be None` (it previously reached `len(None)` and raised
+`TypeError`); `quote` tests truthiness (`if not s`) so `quote(None)`, `quote(0)` and
+`join([None])` return `"''"` as CPython does; and the lexer's `source` attribute is `None`
+instead of `""`. Probes cover `split(None)`, `quote(None)`/`quote(0)`/falsy values,
+`join([None])`, and `source` with and without `infile` on both builds. No compiler or runtime
+source changed; `test_ail_std_shlex` still builds and matches all twelve programs.
+
+## 2026-11-01 -- shlex review fixes (job-std_shlex-11011615)
+
+Review follow-up on the `shlex` coverage change. POSIX `get_token()`, `read_token()`, `eof` and
+`state` now return CPython's `None` at end of input instead of the empty string, so the common
+`tok = lex.get_token(); if tok is None` pattern works. `__iter__` returns the lexer and a new
+`__next__` makes `next(lex)` and `for token in lex` match CPython. `infile` now defaults to `None`
+(and `push_source` sets `None` when `newfile` is omitted); `error_leader(infile=None, lineno=None)`
+uses those sentinels, so an explicit `""`/`0` is kept and an omitted `infile` renders `None` as
+CPython does. Probes cover posix/non-posix EOF, `read_token`, `state`, `next()`, source push/pop,
+and `error_leader` defaults and explicit values through arguments, list items, attributes and dict
+values on both builds. No compiler or runtime source changed; `test_ail_std_shlex` still builds
+and matches all twelve programs.
+
+## 2026-11-01 -- shlex stdlib coverage (job-std_shlex-11011615)
+
+Added `AIL_CURRENT/stdlib/shlex.py`, a bundled `shlex` module (`split`, `quote`, `join`, and the
+`shlex` lexer: comments, posix/non-posix quoting, punctuation characters, custom delimiters,
+wordchars, pushback, source stack, iteration and the `ValueError` cases). Before it, every shlex
+use was refused at the import (`not in the subset: import of 'shlex' is not available`, with
+`general path: shlex.split` / `shlex.shlex` / `shlex.join`). The twelve programs in
+`lab/stdlib/shlex/` now all build in the default mode and match CPython's stdout and exit status
+on the default and forced-general builds; `lab/stdlib/shlex/RESULTS.md` records the typed/general
+result and the one typed-path follow-up (method defaults keep the bundled lexer on the general
+path). `test_ail_std_shlex.py` compiles and compares all twelve. `read_token()` no longer leaks
+an internal sentinel. No compiler or runtime source changed, so generated C for existing programs
+is unchanged. The review follow-up below fixes the end-of-input and source-stack sentinels.
 
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
