@@ -6,69 +6,52 @@
 
 --- LAST REVIEW ---
 ## review 1
-[model opencode-go/deepseek-v4.1-flash]
-**What the change does.** Adds a new `struct` implementation (`python/pkg-v12/prelude_struct.py` + `structlib.py`) wired into the batch-5 stdlib rewriter, 12 lab programs and a test; the second commit changes five prelude behaviours and declares two differences. This matches the report, though the report understates that the whole module is new.
+[model opencode/deepseek-v4.1-flash-free]
+**What the change does.** Fixes the five review-1 `struct` defects: default/unprefixed float mode is now native, `_ail_struct_scale`'s negative branch loops over the full exponent, `pack_into` checks item count before offset and says `pack_into expected …`, `p` names itself in its wrong-type error, and non-`bytearray` buffers get CPython's read-write-buffer text. Adds three edge programs, DEVLOG/DIFFERENCES rows and refreshes the manifest. This matches the report, except the buffer guard is broader than "non-writable buffers" (below).
 
-**Defects**
+**Defect (caused by this change)**
 
-1. **Default (unprefixed) `f` float mode is wrong.** Probe:
+1. `pack_into` now rejects writable `array.array` buffers. The new guard `isinstance(buffer, bytearray)` at `AIL_CURRENT/python/pkg-v12/prelude_struct.py:778` (module) and `:851` (`Struct.pack_into`) rejects `array.array`, which CPython accepts and which the base `work` accepted.
+   Probe `/tmp/rprobes/q9_arr.py`:
    ```python
-   import struct
-   print(struct.pack('f', 1e40).hex())
-   print(struct.Struct('f').pack(1e40).hex())
+   import array, struct
+   a = array.array('B', [0, 0, 0, 0])
+   struct.pack_into('<i', a, 0, 7); print(list(a))
+   # same via Struct.pack_into, argument, attribute, list item, dict value
    ```
-   Expected both `0000807f`; actual both `OverflowError: float too large to pack with f format` on `g` and `d`. `' f'`, `'10f'`, `'2f'` fail likewise. `_ail_struct_native_of` treats only empty/`@` as native, but CPython's default order is `@`. The report's "pack_into native float mode" fix covers explicit `@` only.
+   Expected (CPython and base): `[7, 0, 0, 0]` for every route.
+   Actual (HEAD, both `g` and `d`): `TypeError argument must be read-write bytes-like object, not _AilArray`.
+   The test's `pack_into_buffer_type` edge program does not include `array.array`, so it missed this.
 
-2. **Double subnormal unpack is off by 2^51.** Probe:
-   ```python
-   import struct
-   d = b'\x01' + b'\x00' * 7
-   print(struct.unpack('<d', d))
-   print(struct.pack('<d', struct.unpack('<d', d)[0]).hex())
-   ```
-   Expected `(5e-324,)` / `0100000000000000`; actual `(1.1125369292536007e-308,)` / `0000000000000800`. `_ail_struct_scale`'s negative branch subtracts only `512+256+...+1 = 1023`, so exponent `-1074` keeps a residue of 51. All subnormal doubles are affected. Copying the helper into a probe gives the same wrong value under CPython too, so it is the prelude algorithm, not an AIL float limitation.
+**Verified**
+- Default float: `q1_fmt`, `q7_float` match CPython on `g` and `d` for `'f'`, `' f'`, `'2f'`, `'10f'`, `@/=/</>/!` and `Struct`; only the declared NaN-payload rows differ.
+- Subnormal: `q4_sub` matches for subnormal/normal/boundary doubles, f32 and f16; only the declared NaN-payload rows differ.
+- Errors: `q5_errs` matches `pack_into expected …`, `p`/`s` wrong-type text, and count-before-offset; only the declared `0p` `SystemError`→`struct.error` row differs.
+- Precedence and buffer names: `q6_prec` matches bad-format > count > buffer-type > offset, and names `None`/`Foo`/`type`/builtins/`bytes` correctly.
+- `calcsize` boundary: `q2_size` matches CPython at the int64 boundary and for 20-digit counts.
+- Non-struct C: `g_nostruct` `--debug-dir` `program.c` is byte-identical to `/tmp/base`.
+- Tests on HEAD: `test_ail_std_struct` + `test_ail_safetynet` 2/2 pass (545 s); `update_manifest.py --check` exit 0.
+- Worker probes `n_rwtype`, `n_review`, `c_packinto`, `j_buffer_routes`, `a_native`, `d_calcsize` match on both builds; `i_declared` differs only on the declared rows.
 
-3. **`pack_into` wrong item-count text.** Probe:
-   ```python
-   import struct
-   for call in (lambda: struct.pack_into('<i', bytearray(4), 0),
-                lambda: struct.Struct('<i').pack_into(bytearray(4), 0)):
-       try: call()
-       except Exception as e: print(type(e).__name__, e)
-   ```
-   Expected `error pack_into expected 1 items for packing (got 0)` (both); actual `error pack expected 1 items for packing (got 0)` (both). Also, with an invalid negative offset plus a wrong count, CPython reports the count first, AIL reports the offset.
+**Pre-existing (same on base)**
+- `memoryview` + `struct` does not compile (type-inference refusal) on base and HEAD.
+- `struct.unpack`/`unpack_from`/`Struct.unpack` reject `array.array` on base and HEAD (`q11_unpackarr`).
 
-4. **`p` wrong-type error names `s`.** Probe `struct.pack('4p', 'abc')`; expected `error argument for 'p' must be a bytes object`, actual `error argument for 's' must be a bytes object`.
-
-5. **`pack_into` into immutable bytes text (minor).** Probe `struct.Struct('<i').pack_into(b'0123', 0, 1)`; expected `TypeError argument must be read-write bytes-like object, not bytes`, actual `TypeError 'bytes' object does not support item assignment`.
-
-Also noted: `unpack('0p', b'')` returns `(b'',)` where CPython 3.12 raises `SystemError`; `calcsize('999999999999999999999i')` raises `OverflowError` where CPython raises `struct.error: total struct size too long`.
-
-**Report claims**
-- `p` clamp, negative-zero sign, repeat-count whitespace, deep negative-offset messages: **verified** (`p3`, `p4`, `p1`, `p8`).
-- Declared uint64 difference: **verified**; `AIL_EXACT_INT=1` matches CPython (`p9`).
-- 12 programs build and match: **verified** by `test_ail_std_struct`.
-- `test_ail_std_struct` + `test_ail_safetynet` on HEAD: **verified**, 2/2 passed, 372 s.
-- `update_manifest.py --check`: **verified**, exit 0.
-- "probes match CPython": **unverified** (not re-run) and **contradicted** on the boundaries above.
-- "pack_into native float fix": **incomplete** (defect 1).
-- No `lab/compare` source imports `struct`: **verified**; generated C for a non-struct program, including one with `struct` in the source text, is byte-identical to base `work`.
-
-**Pre-existing:** none observed. The base has no `struct`, and plain float arithmetic matches on both base and HEAD.
-
-**Unverified:** `test_ail_stdlib5`, `test_ail_files`, `test_ail_corpus_findings3` (not re-run); exact `lab/compare` builds (`src/main.py` is not standalone-buildable); gdev instruction counts (no runtime hot path for non-struct programs).
+**Unverified:** `test_ail_files`, `test_ail_corpus_findings3` (worker claims pass), exhaustive subnormal sweep beyond the tested boundaries.
 
 VERDICT: FIX
-[cost $0.0468, opencode tokens {"total": 2293657, "input": 86673, "output": 14720, "reasoning": 30856, "cache.write": 0, "cache.read": 2161408}]
-    tool time: bash 11.8 min, read 0.0 min
-        373s bash   cd /home/runner/work/_temp/w2/AIL_CURRENT && timeout 1500 python3 ../tools/par_check.py -j 2 test_ail_std_stru
-        119s bash   python3 - <<'EOF' p='/tmp/rprobes/p3_offsets.py' s=open(p).read() s=s.replace("""            if fmt.endswith('
-         43s bash   cd /tmp/rprobes && for p in p1_floats p2_ints p3_offsets p4_parser; do echo "===== $p"; bash ~/tools/cmp.sh /t
-         34s bash   cat > /tmp/rprobes/p7_subnorm.py <<'EOF' import struct  def scale(m: float, ex: int) -> float:     r = m     k
-         33s bash   cd /tmp && rm -rf cH cB && mkdir cH cB && cd /home/runner/work/_temp/w2 && AIL_NO_CACHE=1 python3 AIL_CURRENT/
-         32s bash   cd /tmp/cmpIePw && cat > /tmp/rprobes/p6_minsub.py <<'EOF' import math import struct  data = b'\x01' + b'\x00'
-         31s bash   python3 - <<'EOF' p='/tmp/rprobes/p8_offsets2.py' s=open(p).read() s=s.replace("""        b2 = bytearray(10)  
-         14s bash   cat > /tmp/rprobes/p9_uint64.py <<'EOF' import struct for fmt in ['Q', 'L', 'N', 'P']:     data = b'\x00' * 7 
+
+1. `pack_into` rejects `array.array`: accept `_AilArray` (or any AIL writable buffer) in both `_ail_struct_pack_into_values` and `_AilStruct.pack_into`, while still naming `bytes`/other non-writable types like CPython. Probe `/tmp/rprobes/q9_arr.py`, expected `[7, 0, 0, 0]` per route, actual `TypeError … not _AilArray`.
+[cost $0.0000, opencode tokens {"total": 2159944, "input": 96994, "output": 10129, "reasoning": 18517, "cache.write": 0, "cache.read": 2034304}]
+    tool time: bash 21.7 min
+        547s bash   date; cd /home/runner/work/ail-ci/ail-ci && timeout 2400 python3 tools/par_check.py -j 2 --timeout 2400 test_a
+        164s bash   date; cd /tmp/rprobes && for p in n_rwtype n_review c_packinto j_buffer_routes a_native d_calcsize i_declared;
+         71s bash   cd /tmp/rprobes && cat > q11_unpackarr.py <<'EOF' import array import struct a = array.array('B', [7, 0, 0, 0]
+         69s bash   cd /tmp/rprobes && cat > q9_arr.py <<'EOF' import array import struct  def via(b):     return b  class Box:   
+         62s bash   cd /tmp/rprobes && echo "=== i_declared diff"; cat /tmp/cmp*/diff_g.txt 2>/dev/null | tail -0; ls -td /tmp/cmp
+         39s bash   date; cd /tmp/rprobes && bash ~/tools/cmp.sh q4_sub.py /home/runner/work/ail-ci/ail-ci 2>&1 | tail -40
+         35s bash   date; cd /tmp/rprobes && bash ~/tools/cmp.sh q5_errs.py /home/runner/work/ail-ci/ail-ci 2>&1 | tail -40
+         34s bash   cd /tmp/rprobes && cat > q7_float.py <<'EOF' import struct vals = [1e40,1e308,float('inf'),float('-inf'),float
 
 
 --- ORIGINAL TASK ---
