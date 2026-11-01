@@ -1,3 +1,14 @@
+## 2026-11-01 -- stdlib copy: review fixes (job-std_copy-11011617)
+
+Generators are refused by both copiers with CPython's `TypeError: cannot pickle 'generator' object` (also when
+they sit inside a deep-copied list or dict). The typed tuple-keyed table classes (`_AilD_...`) and tuple-element
+sets (`_AilS_...`) are rebuilt by both copiers as plain `dict` / `set` from their `ks` / `vs` / `live` lists, so a
+copy is iterable instead of raising `TypeError: '_AilD_...' object is not iterable`. A program that calls
+`copy.copy` / `copy.deepcopy` and defines `__copy__`, `__deepcopy__`, `__reduce__` or `__reduce_ex__` is now
+refused by name ("the copy protocol needs method dispatch and _reconstruct") instead of silently copying the
+instance (recorded as a follow-up in lab/stdlib/copy/RESULTS.md). `test_ail_std_copy` adds generator and
+tuple-table edges plus the protocol refusal.
+
 ## 2026-11-01 -- stdlib copy: `copy.copy` and `copy.deepcopy` on the general path (job-std_copy-11011617)
 
 The general path now publishes `copy.copy` and `copy.deepcopy` (`genlib.py` names with their keyword sets) and

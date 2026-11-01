@@ -29,6 +29,16 @@ Summary: 12 built / 12 compared, 0 refused. The compiler change is `copy.copy` a
 `genlib.py` (names and keyword checking), `prelude_genlib.py` (CPython call signatures) and `safetyrt.py`
 (the boxed shallow/deep copier, memo and keep-alive lists).
 
+## Review fixes (2026-11-01)
+
+- A generator now raises CPython's `TypeError: cannot pickle 'generator' object` from `copy.copy` and
+  `copy.deepcopy` (also through a list or dict value), instead of being copied silently.
+- Copying a typed tuple-keyed table (`_AilD_...`) or tuple-element set (`_AilS_...`) now rebuilds a plain
+  `dict` / `set`, as CPython returns, so generic iteration of the copy works instead of failing with
+  `TypeError: '_AilD_...' object is not iterable`.
+- A class that defines the copy protocol is now refused by name instead of being copied as a plain instance
+  (see the follow-up below).
+
 ## Follow-ups (not needed by these programs)
 
 - Typed-path `copy`: the typed path has no model of `copy.copy` / `copy.deepcopy` over arbitrary object graphs;
@@ -36,4 +46,6 @@ Summary: 12 built / 12 compared, 0 refused. The compiler change is `copy.copy` a
 - Copy protocol: the general-path copier copies list/dict/tuple/set/frozenset/bytearray/bytes/atomic values and
   plain instance attributes. A user class's `__copy__`, `__deepcopy__`, `__reduce__` / `__reduce_ex__` and
   `copy.dispatch_table` entries are not called; supporting them needs method dispatch and `_reconstruct`
-  semantics (a new feature). None of the twelve programs rely on them.
+  semantics (a new feature). A program that calls `copy.copy` / `copy.deepcopy` and defines any of those
+  methods is now refused by name, for example:
+  `not in the subset: copy.copy()/copy.deepcopy() with WithCopy.__copy__ is not built on the general path: the copy protocol needs method dispatch and _reconstruct`.

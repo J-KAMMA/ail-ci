@@ -18,6 +18,9 @@ PROGRAMS = ROOT.parent / "lab" / "stdlib" / "copy"
 EDGES = r"""import copy
 from copy import copy as cp, deepcopy as dc
 
+def gen():
+    yield 1
+
 def main() -> None:
     for value in (5, 2.5, "text", b"raw", (1, 2), frozenset({1, 2}), None, True):
         a = cp(value)
@@ -49,6 +52,22 @@ def main() -> None:
     pair[0].append(pair)
     back = dc(pair)
     print(back[0][0] is back)
+    table = {("a", 1): [1]}
+    shallow_table = cp(table)
+    for key in shallow_table:
+        print("table", key)
+    deep_table = dc({("b", 2): [2]})
+    for key in deep_table:
+        print("deep", key)
+    g = gen()
+    try:
+        cp(g)
+    except Exception as exc:
+        print(type(exc).__name__, exc)
+    try:
+        dc({"g": g})
+    except Exception as exc:
+        print(type(exc).__name__, exc)
     for bad in (5, [], "x"):
         try:
             dc([], bad)
@@ -101,6 +120,28 @@ class CompiledPrograms(unittest.TestCase):
         for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
             with self.subTest(env=env):
                 self.compare("copy_edges", EDGES, **env)
+
+    def test_copy_protocol_is_refused(self):
+        text = """import copy
+class WithCopy:
+    def __init__(self):
+        self.v = [1]
+    def __copy__(self):
+        return "copied"
+    def __deepcopy__(self, memo):
+        return "deep"
+def main():
+    print(copy.copy(WithCopy()))
+main()
+"""
+        for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
+            with self.subTest(env=env):
+                with tempfile.TemporaryDirectory() as directory:
+                    built, _, _ = compile_python(directory, text, "copy_protocol", **env)
+                    self.assertNotEqual(built.returncode, 0, "%s %r\n%s%s" % (
+                        "copy_protocol", env, built.stdout, built.stderr))
+                    self.assertIn("copy protocol needs method dispatch and _reconstruct",
+                                  built.stdout + built.stderr)
 
 
 if __name__ == "__main__":

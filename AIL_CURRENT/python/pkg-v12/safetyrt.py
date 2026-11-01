@@ -2171,12 +2171,91 @@ static inline int ail2c_sameobj(ail_obj a, ail_obj b) {
         default: return a.o == b.o;
     }
 }
+static ail_st ail2c_deep(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj memo);
+static ail_st ail2c_keep(ail_ctx *cx, ail_obj x, ail_obj memo);
+/* The typed lowering of a tuple-keyed dict / tuple-element set is a plain class (_AilD_... / _AilS_...)
+   with parallel ks / vs / live lists.  Copying it as an ordinary instance hands back an object the general
+   path's generic iteration cannot read, so the copier rebuilds the plain dict / set CPython returns. */
+static inline int ail2c_table_kind(ail_obj x) {
+    if (x.tag != AIL_T_INST) return 0;
+    char cn[64];
+    ail_class_name_c(((ail_instobj *)x.o)->cls, cn, sizeof cn);
+    if (strncmp(cn, "_AilD_", 6) == 0) return 1;
+    if (strncmp(cn, "_AilS_", 6) == 0) return 2;
+    return 0;
+}
+static ail_st ail2c_table_shallow(ail_ctx *cx, ail_obj *out, ail_obj x, int is_set) {
+    AIL_FRAME_ENTER(cx, fr, 6);
+    fr.slots[0] = x;
+    ail_st st = ail_meth_inst_getattr_by_name(cx, &fr.slots[1], x, "ks");
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    st = ail_meth_inst_getattr_by_name(cx, &fr.slots[2], x, "live");
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    if (!is_set) {
+        st = ail_meth_inst_getattr_by_name(cx, &fr.slots[3], x, "vs");
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    }
+    ail_vecobj *ks = (ail_vecobj *)fr.slots[1].o;
+    ail_vecobj *live = (ail_vecobj *)fr.slots[2].o;
+    ail_vecobj *vs = is_set ? NULL : (ail_vecobj *)fr.slots[3].o;
+    fr.slots[4] = is_set ? ail_set_new(cx) : ail_dict_new(cx);
+    int64_t n = ks->n < live->n ? ks->n : live->n;
+    for (int64_t i = 0; i < n; i++) {
+        if (!ail_obj_truthy(live->p[i])) continue;
+        if (is_set) st = ail_setx_add_key(cx, AIL_SETOBJ(fr.slots[4]), ks->p[i]);
+        else st = ail_dict_set(cx, fr.slots[4], ks->p[i], vs->p[i]);
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    }
+    *out = fr.slots[4];
+    AIL_FRAME_LEAVE(cx, fr);
+    return AIL_OK;
+}
+static ail_st ail2c_table_deep(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj memo, ail_obj key, int is_set) {
+    AIL_FRAME_ENTER(cx, fr, 8);
+    fr.slots[0] = x; fr.slots[1] = memo; fr.slots[2] = key;
+    ail_st st = ail_meth_inst_getattr_by_name(cx, &fr.slots[3], x, "ks");
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    st = ail_meth_inst_getattr_by_name(cx, &fr.slots[4], x, "live");
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    if (!is_set) {
+        st = ail_meth_inst_getattr_by_name(cx, &fr.slots[5], x, "vs");
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    }
+    fr.slots[6] = is_set ? ail_set_new(cx) : ail_dict_new(cx);
+    st = ail_dict_set(cx, fr.slots[1], fr.slots[2], fr.slots[6]);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    ail_vecobj *ks = (ail_vecobj *)fr.slots[3].o;
+    ail_vecobj *live = (ail_vecobj *)fr.slots[4].o;
+    ail_vecobj *vs = is_set ? NULL : (ail_vecobj *)fr.slots[5].o;
+    int64_t n = ks->n < live->n ? ks->n : live->n;
+    for (int64_t i = 0; i < n; i++) {
+        if (!ail_obj_truthy(live->p[i])) continue;
+        st = ail2c_deep(cx, &fr.slots[7], ks->p[i], fr.slots[1]);
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+        if (is_set) {
+            st = ail_setx_add_key(cx, AIL_SETOBJ(fr.slots[6]), fr.slots[7]);
+        } else {
+            st = ail2c_deep(cx, &fr.slots[3], vs->p[i], fr.slots[1]);
+            if (st == AIL_OK) st = ail_dict_set(cx, fr.slots[6], fr.slots[7], fr.slots[3]);
+        }
+        if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    }
+    st = ail2c_keep(cx, x, fr.slots[1]);
+    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }
+    *out = fr.slots[6];
+    AIL_FRAME_LEAVE(cx, fr);
+    return AIL_OK;
+}
 static inline ail_st ail2c_shallow(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (x.tag == AIL_T_INST) {
         ail_instobj *ii = (ail_instobj *)x.o;
         char cn[64];
         ail_class_name_c(ii->cls, cn, sizeof cn);
         if (strcmp(cn, "bytes") == 0) { *out = x; return AIL_OK; }
+        if (strcmp(cn, "generator") == 0)
+            return ail_raise_c(cx, AIL_B_TYPEERROR, "cannot pickle 'generator' object");
+        int tk = ail2c_table_kind(x);
+        if (tk) return ail2c_table_shallow(cx, out, x, tk == 2);
         if (strcmp(cn, "bytearray") == 0) {
             ail_obj r = ail_inst_new(cx, ii->cls);
             AIL_FRAME_ENTER(cx, fr, 2);
@@ -2338,6 +2417,10 @@ static ail_st ail2c_deep_new(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj memo,
                 char cn[64];
                 ail_class_name_c(ii->cls, cn, sizeof cn);
                 if (strcmp(cn, "bytes") == 0) { *out = x; return AIL_OK; }
+                if (strcmp(cn, "generator") == 0)
+                    return ail_raise_c(cx, AIL_B_TYPEERROR, "cannot pickle 'generator' object");
+                int tk = ail2c_table_kind(x);
+                if (tk) return ail2c_table_deep(cx, out, x, memo, key, tk == 2);
             }
             ail_obj r = ail_inst_new(cx, ii->cls);
             if (x.tag == AIL_T_EXC) r.tag = AIL_T_EXC;

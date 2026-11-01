@@ -482,6 +482,24 @@ def _module_names(tree):
     return out
 
 
+_COPY_PROTOCOL = frozenset(('__copy__', '__deepcopy__', '__reduce__', '__reduce_ex__'))
+
+
+def _refuse_copy_protocol(tree, used):
+    """A class that defines the copy protocol would be copied silently as a plain instance: refuse by name
+    instead (the protocol needs method dispatch and CPython's _reconstruct, which the general path does not
+    have).  Only programs that actually reach copy.copy / copy.deepcopy are affected."""
+    if not ({'_ail_copy_copy', '_ail_copy_deepcopy'} & used):
+        return
+    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+        for stmt in cls.body:
+            if (isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and stmt.name in _COPY_PROTOCOL):
+                raise Unsupported('copy.copy()/copy.deepcopy() with %s.%s is not built on the general '
+                                  'path: the copy protocol needs method dispatch and _reconstruct'
+                                  % (cls.name, stmt.name))
+
+
 def rewrite(tree):
     """Rename the library names of TABLE in `tree` (in place). Returns (prelude source text or '', names added)."""
     aliases, names = _imports(tree)
@@ -504,6 +522,7 @@ def rewrite(tree):
     tree.body = [r.visit(n) for n in tree.body]
     if not r.used:
         return '', set()
+    _refuse_copy_protocol(tree, r.used)
     for each in ast.walk(tree):
         # `import datetime` next to the class datetime: a use of the module that was not renamed would read the class
         if (isinstance(each, ast.Attribute) and isinstance(each.value, ast.Name) and each.value.id in aliases
