@@ -18,7 +18,7 @@ runtime).
 | --- | --- | --- | --- |
 | 1 | `abstract_instantiation.py` | general | match (incomplete classes raise `TypeError`, complete class runs) |
 | 2 | `animal.py` | general | match |
-| 3 | `cache_token.py` | general | match (token type and stability) |
+| 3 | `cache_token.py` | general | match (exact positive token, stable) |
 | 4 | `codec.py` | general | match (`abstractstaticmethod`, `abstractclassmethod`, `abstractproperty`) |
 | 5 | `metaclass_abcm.py` | general | match |
 | 6 | `notifications.py` | general | match |
@@ -51,8 +51,10 @@ The first build of these programs had 6 matching, 1 built with different stdout 
 * `python/pkg-v12/smalllib5.py`: the `abc` pass now accepts the deprecated abstract decorators
   (`abstractclassmethod`, `abstractstaticmethod`, `abstractproperty`) as well as `abstractmethod`,
   handles `abc.ABC` as a base and `metaclass=abc.ABCMeta`, and works out which abstract methods
-  each class in the hierarchy still has to implement. It strips the abstractness and adds a marker
-  method plus a generated `_ail_abc_check_name`, which raises CPython 3.12's exact
+  each class in the hierarchy still has to implement. A metaclass that is a subclass of `ABCMeta`
+  (`class Meta(ABCMeta)`, `metaclass=Meta`) is recognised too, so its users get the same
+  abstractness. It strips the abstractness and adds a marker method plus a generated
+  `_ail_abc_check_name`, which raises CPython 3.12's exact
   `Can't instantiate abstract class ...` text with the method names sorted.
 * `python/pkg-v12/smalllib5.py`: only a class with ABC ancestry (`ABC`/`ABCMeta` or an ABC base)
   gets abstractness. `@abstractmethod` on a plain class still does nothing, and a plain subclass of
@@ -66,9 +68,14 @@ The first build of these programs had 6 matching, 1 built with different stdout 
   arguments, for a direct class call and for a class held in a value. `Incomplete(1, 2, 3, 4)`
   therefore reports the abstract-class `TypeError` when a custom `__init__` exists, and
   `Shape(1)` with no `__init__` reports `Shape() takes no arguments`, both as CPython does.
-* `python/pkg-v12/smalllib5.py`: `abc.get_cache_token()` is built as a stable `int` (`0`). Programs
-  that compare the token around ordinary code match CPython; the absolute value and the change on
-  `register()` are not modelled (the latter is part of the `register` follow-up).
+  Only a class's OWN guard always raises: a concrete subclass that merely inherits the guard no
+  longer has its constructor binding errors swallowed. Those errors are a named compile refusal
+  on the general path (`not in the subset: B() called without a required argument x`), never a
+  silently constructed object.
+* `python/pkg-v12/smalllib5.py`: `abc.get_cache_token()` returns CPython's own starting token,
+  read from a fresh interpreter of the same build at compile time (a positive `int` that stays
+  constant for the supported subset, because `register()`/`update_abstractmethods()` -- the only
+  operations that invalidate it -- are refused by name).
 
 ## Follow-ups
 
@@ -81,8 +88,6 @@ The first build of these programs had 6 matching, 1 built with different stdout 
   method after the class body). Exact refusal:
   `not in the subset: class Job bases on ABC, defined after it or unknown`, with the note
   `abc.update_abstractmethods is not built: ...` .
-* `get_cache_token` returns `0` and does not change after `register()`; only its type and stability
-  are modelled.
 * Multiple inheritance (a concrete mixin before an ABC, or a diamond): the general path still
   refuses it by name. Exact refusal: `not in the subset: multiple inheritance in class C`.
 * A class definition nested inside a function: exact refusal
@@ -98,12 +103,12 @@ The first build of these programs had 6 matching, 1 built with different stdout 
 ## Verification
 
 `test_ail_std_abc.py` builds the nine passing programs on both `AIL_IR` modes and compares stdout
-and exit code with CPython. It also has three review-regression sources: plain (non-ABC)
-inheritance, an assignment/lambda override of an abstract method, and the no-`__init__` versus
-custom-`__init__` guard ordering. Probes in `/tmp/probes/abc_probe_*.py` and the review probes
-`/tmp/rprobes/{plain_inherit,p3_attr_override,p8_lambda_override,alias_call2,arity_init}.py`
-cover sorted messages, inheritance, overrides, all abstract decorators, attribute spellings, empty
-ABCs, wrong arities, and classes reached as an alias, a list item, a dict value, an attribute and a
-function argument, on both `cmp.sh` builds. The ten `lab/compare` tasks were rebuilt with the base
-tree and the changed compiler: the six that build are byte-identical; the other four fail
-identically on both.
+and exit code with CPython. It also has review-regression sources for plain (non-ABC) inheritance,
+an assignment/lambda override of an abstract method, the no-`__init__` versus custom-`__init__`
+guard ordering, an `ABCMeta` subclass used as a metaclass, and the exact cache-token value; a
+concrete subclass's arity error is asserted to be a named refusal. Probes in `/tmp/probes/` and
+`/tmp/rprobes2/{arity_concrete,arity_custom_own_init,routes_arity,cache_value,meta_sub}.py` cover
+sorted messages, inheritance, overrides, all abstract decorators, attribute spellings, empty ABCs,
+wrong arities, and classes reached as an alias, a list item, a dict value and a function argument,
+on both `cmp.sh` builds. The ten `lab/compare` tasks were rebuilt with the base tree and the changed
+compiler: the five that build are byte-identical; the other five fail identically on both.

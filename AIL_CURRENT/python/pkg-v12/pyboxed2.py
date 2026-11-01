@@ -7665,17 +7665,20 @@ class Compiler(boxclosure.ClosureMixin):
         for kls in reversed(chain):
             self._ensure_class_attrs(kls, ctx)
         guard = self._resolve_method(name, '_ail_abc_guard__')
+        # An inherited guard is a no-op for a concrete subclass (it checks the run-time class
+        # name), so only the class's OWN guard always raises here.
+        own_guard = bool(guard) and guard.get('owner_class') == name
         if info:
             # CPython's object.__new__ checks abstractness before type.__init__ binds the
             # arguments, so an incomplete class reports the abstract error even for a bad arity.
-            if guard:
+            if own_guard:
                 dummy = ctx.tmp()
                 ctx.emit('st = %s(cx, &%s, %s);' % (guard['cname'], dummy, t))
                 ctx.check()
             try:
                 argcs = self._bind_args(name, info, args, kwargs, ctx)
             except Unsupported as exc:
-                if guard and any(word in str(exc) for word in (
+                if own_guard and any(word in str(exc) for word in (
                         'too many positional arguments', 'unknown keyword argument',
                         'called without a required argument',
                         'called without required keyword-only argument',
@@ -7693,7 +7696,7 @@ class Compiler(boxclosure.ClosureMixin):
             # has no __init__ at all.
             ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes no arguments");' % name)
             ctx.check()
-        elif guard:
+        elif own_guard:
             dummy = ctx.tmp()
             ctx.emit('st = %s(cx, &%s, %s);' % (guard['cname'], dummy, t))
             ctx.check()

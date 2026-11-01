@@ -404,13 +404,19 @@ class ClosureMixin:
                              % (cname, ctx.cur_err_target()))
                     ctx.uses_st = True
                 else:
-                    if info is not None and self._resolve_method(cname, '_ail_abc_guard__') is not None:
+                    guard = self._resolve_method(cname, '_ail_abc_guard__')
+                    own_guard = guard is not None and guard.get('owner_class') == cname
+                    if info is not None and own_guard:
                         self._call_user_function('_ail_abc_check_name', [ast.Constant(value=cname)], {}, ctx)
                     mark = len(ctx.lines)
                     try:
                         r = self._call_class(cname, [_PreC(x) for x in slots], {}, ctx)
                         ctx.emit('%s = %s;' % (t, r))
-                    except Unsupported:
+                    except Unsupported as exc:
+                        if 'still being compiled' not in str(exc):
+                            # an arity/binding refusal for a concrete class is not a runtime
+                            # "takes other arguments": let it stay a named compile refusal.
+                            raise
                         del ctx.lines[mark:]
                         ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "%s() takes other arguments"); goto %s;'
                                  % (cname, ctx.cur_err_target()))

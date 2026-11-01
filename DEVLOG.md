@@ -1,3 +1,19 @@
+## 2026-11-01 -- abc review 2: concrete guards, cache token, ABCMeta subclasses (job-std_abc-11020347)
+
+Fixed the second review's three defects. A guard is now recognised as the called class's OWN guard
+(by the method's `owner_class`), so a concrete subclass that merely inherits an ABC guard no longer
+swallows its constructor binding errors: a wrong arity is a named compile refusal
+(`not in the subset: B() called without a required argument x`) instead of a silently constructed
+object, for a direct call, an alias, a list item, a dict value and a function argument. A metaclass
+that subclasses `ABCMeta` (`class Meta(ABCMeta)`, `metaclass=Meta`, and a subclass of `Meta`) now
+makes its users abstract, with the same exact `Can't instantiate abstract class ...` text.
+`abc.get_cache_token()` no longer returns a fake `0`: it returns CPython's own starting token, read
+from a fresh interpreter of the same build at compile time; it stays constant because the only
+operations that invalidate it (`register`, `update_abstractmethods`) are refused by name.
+`test_ail_std_abc` gains the metaclass, cache-token and concrete-arity regressions and passes on
+both `AIL_IR` modes. `lab/stdlib/abc/RESULTS.md` is updated, including the corrected `lab/compare`
+count (five build byte-identically, five fail identically on both).
+
 ## 2026-11-01 -- abc review fixes: plain hierarchies, non-def overrides, guard order (job-std_abc-11020026)
 
 Fixed the reviewer's three defects in the `abc` pass. Only classes with ABC ancestry are now

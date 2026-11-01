@@ -198,6 +198,9 @@ def run_abc(tree, text):
     abstract = {}
     own_defs = {}
     local_bases = {}
+    # classes that are (subclasses of) ABCMeta itself; `metaclass=Meta` with one of these is an
+    # ABC metaclass just like `metaclass=ABCMeta`.
+    meta_classes = set()
 
     def resolves_abstract(cls, name, seen=()):
         key = (cls, name)
@@ -215,16 +218,24 @@ def run_abc(tree, text):
 
     for cls in classes:
         direct = False
+        meta_direct = False
         bases = []
         for base in cls.bases:
             found = b.attr(base)
             if found in ('ABC', 'ABCMeta'):
                 direct = True
+                if found == 'ABCMeta':
+                    meta_direct = True
             elif isinstance(base, ast.Name):
                 bases.append(base.id)
         for keyword in cls.keywords:
-            if keyword.arg == 'metaclass' and b.attr(keyword.value) == 'ABCMeta':
+            if keyword.arg == 'metaclass' and (
+                    b.attr(keyword.value) == 'ABCMeta'
+                    or (isinstance(keyword.value, ast.Name) and keyword.value.id in meta_classes)):
                 direct = True
+        is_meta = meta_direct or any(base in meta_classes for base in bases)
+        if is_meta:
+            meta_classes.add(cls.name)
         is_abc = direct or any(heritage.get(base) for base in bases)
         heritage[cls.name] = is_abc
         local_bases[cls.name] = bases
@@ -251,7 +262,9 @@ def run_abc(tree, text):
             node.bases = [x for x in node.bases if b.attr(x) not in ('ABC', 'ABCMeta')]
             keep = []
             for kw in node.keywords:
-                if kw.arg == 'metaclass' and b.attr(kw.value) == 'ABCMeta':
+                if kw.arg == 'metaclass' and (
+                        b.attr(kw.value) == 'ABCMeta'
+                        or (isinstance(kw.value, ast.Name) and kw.value.id in meta_classes)):
                     continue
                 keep.append(kw)
             node.keywords = keep
@@ -339,7 +352,25 @@ def run_abc(tree, text):
                       '    _ail_abc_check_name(type(obj).__name__)', ''])
         text.append('\n'.join(lines))
     if used_token[0]:
-        text.append('def _ail_abc_cache_token() -> int:\n    return 0\n')
+        # CPython's cache token is the interpreter's own ABC counter: constant until
+        # register()/update_abstractmethods() invalidate a cache, both of which this pass
+        # refuses. A fresh interpreter of the same build gives that starting value exactly.
+        import subprocess
+        import sys
+        token = None
+        try:
+            probe = subprocess.run([sys.executable, '-B', '-c', 'import abc;print(abc.get_cache_token())'],
+                                   capture_output=True, text=True, timeout=30)
+            if probe.returncode == 0:
+                value = int(probe.stdout.strip())
+                if value >= 0:
+                    token = value
+        except (OSError, ValueError, subprocess.SubprocessError):
+            token = None
+        if token is None:
+            refuse(b.first or tree, 'abc.get_cache_token: the ABC cache token is the CPython '
+                   "interpreter's own counter and this build cannot read it; do not call it")
+        text.append('def _ail_abc_cache_token() -> int:\n    return %d\n' % token)
 
 
 # ---------------------------------------------------------------------------------------------------------------
