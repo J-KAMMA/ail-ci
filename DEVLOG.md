@@ -1,3 +1,26 @@
+## 2026-11-01 -- tree_fold peak memory: reserve string-list spines and free them at last use (job-mem1-11011013)
+
+tree_fold's AIL build peaked at 603.7 MiB against Rust's 314.8 MiB.  An LD_PRELOAD counting
+allocator put 230.0 MiB of the simultaneous live bytes in several 3,000,000-element `list[str]`
+spines (24 bytes an element), grown by doubling as temporaries and kept until the function returned;
+`ail_list_reserve`/`rebuild` held another 137/128 MiB of int vectors.  The runtime now has
+`ail_slist_reserve`, one exact allocation for a string list whose length is known: a `list[str]`
+comprehension, or an append loop after an empty/clear whose `range` bounds are known.  The emitter
+does the same for `list[int]`/`list[float]` append loops, and the IR has a `list.reserve` operation.
+`list[str]` locals now join the numeric lists in last-use release (`_last_use_frees` and the IR
+`drop_after`), so a temporary spine is freed before the next one is built.  No task source changed.
+tree_fold peak RSS is 450.2 MiB (was 603.7), allocator peak 470.3 MiB (was 689.6), allocations
+3,786,111 (was 3,786,368), wall 1.764 s (was 1.875 s); Rust is 314.8 MiB.  All public and hidden
+cases of all ten lab/compare tasks still match the reference, and every other task's RSS is
+unchanged (the five 0/+4 KiB deltas are one page; the C is identical or only differs by the new
+reserve/free).  `tools/icount` cannot run here (`perf_event_open` EACCES, paranoid=4; no valgrind),
+so no instruction-count claim is made.  Measurements and the per-node comparison are in
+`docs/design/MEM_TREEFOLD.md`.  Probes `p_slist_append`, `p_slist_comp`, `p_slist_routes`,
+`p_slist_lastuse`, `p_list_append_reserve` match CPython on the default, general, and IR=0 builds.
+Added `test_ail_slist_reserve` (registered in `tests.d`); final-state tests: test_ail_slist_reserve,
+test_ail_last_use_free, test_ail_memory_shapes, test_ail_list_ops, test_ail_sort_keys,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
