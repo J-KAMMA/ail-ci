@@ -183,6 +183,54 @@ try:
 except ValueError as exc:
     print("VE", str(exc))
 """,
+    "scan_iter_errors_are_not_swallowed": r"""from operator import countOf, indexOf
+class A:
+    def __iter__(self):
+        raise TypeError("boom")
+    def __getitem__(self, i):
+        if i >= 3:
+            raise IndexError
+        return [1, 2, 1][i]
+try:
+    print("count", countOf(A(), 1))
+except TypeError as exc:
+    print("count TypeError", str(exc))
+try:
+    print("index", indexOf(A(), 1))
+except TypeError as exc:
+    print("index TypeError", str(exc))
+class N:
+    def __len__(self):
+        return 3
+    def __getitem__(self, i):
+        if i >= 3:
+            raise IndexError
+        return [1, 2, 1][i]
+    __iter__ = None
+try:
+    countOf(N(), 1)
+except TypeError as exc:
+    print("none TypeError", str(exc))
+class B:
+    def __getitem__(self, i):
+        return 1
+    def __iter__(self):
+        return 5
+try:
+    indexOf(B(), 1)
+except TypeError as exc:
+    print("bad TypeError", str(exc))
+class E:
+    pass
+try:
+    countOf(E(), 1)
+except TypeError as exc:
+    print("empty TypeError", str(exc))
+try:
+    indexOf(5, 1)
+except TypeError as exc:
+    print("int TypeError", str(exc))
+""",
 }
 
 

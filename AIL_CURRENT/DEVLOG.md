@@ -1,3 +1,20 @@
+## 2026-11-01 -- operator: a TypeError from `__iter__` is not swallowed by countOf/indexOf
+
+The second review of `job-std_operator` found that `_ail_op_countof` / `_ail_op_indexof` caught
+every `TypeError` from `iter(seq)` and fell back to `__getitem__`, so an object whose `__iter__`
+raises `TypeError` (or returns a non-iterator, or sets `__iter__ = None`) produced a count/index
+where CPython raises `TypeError: argument of type 'X' is not iterable`. The shared `_ail_op_scan`
+probe now falls back to indexing only for instances of the program's own classes that do not define
+`__iter__` and do define `__getitem__`; every other `iter()` `TypeError` is re-raised with CPython's
+normalized text, while `ValueError` and other exceptions still propagate unchanged. `hasattr` on a
+builtin value raises `NotImplementedError` in the general path, so that is treated as a builtin
+(already not iterable) value. `test_ail_std_operator.py` adds
+`scan_iter_errors_are_not_swallowed` covering the review probe, `__iter__ = None`, a non-iterator
+return, a class with neither protocol, and `int`. Probes in `/tmp/probes/p_iter_*.py`,
+`p_neither.py` and `p_len_raises.py` match CPython on both builds; `test_ail_std_operator`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass. No `lab/compare` source
+imports `operator`, so their generated C is unchanged.
+
 ## 2026-11-01 -- operator: callable arguments captured, countOf/indexOf follow the sequence protocol
 
 The review of `job-std_operator` found three silent differences in the new `operator` lowering. Inline

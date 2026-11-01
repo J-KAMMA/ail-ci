@@ -1457,14 +1457,26 @@ _MATH_HELPERS['op_setitem'] = (
 _MATH_HELPERS['op_delitem'] = (
     'def _ail_op_delitem(o, k):\n'
     '    del o[k]\n')
+_MATH_HELPERS['op_scan'] = (
+    'def _ail_op_scan(seq):\n'
+    '    try:\n'
+    '        return iter(seq)\n'
+    '    except TypeError:\n'
+    '        is_program = True\n'
+    '        try:\n'
+    '            has_iter = hasattr(seq, "__iter__")\n'
+    '        except NotImplementedError:\n'
+    '            is_program = False\n'
+    '            has_iter = False\n'
+    '        if not is_program or has_iter:\n'
+    '            raise TypeError("argument of type \'" + seq.__class__.__name__ + "\' is not iterable")\n'
+    '        if not hasattr(seq, "__getitem__"):\n'
+    '            raise TypeError("argument of type \'" + seq.__class__.__name__ + "\' is not iterable")\n'
+    '        return None\n')
 _MATH_HELPERS['op_countof'] = (
     'def _ail_op_countof(seq, value):\n'
     '    n = 0\n'
-    '    it = None\n'
-    '    try:\n'
-    '        it = iter(seq)\n'
-    '    except TypeError:\n'
-    '        it = None\n'
+    '    it = _ail_op_scan(seq)\n'
     '    if it is not None:\n'
     '        for item in it:\n'
     '            if item == value:\n'
@@ -1481,11 +1493,7 @@ _MATH_HELPERS['op_countof'] = (
     '        index += 1\n')
 _MATH_HELPERS['op_indexof'] = (
     'def _ail_op_indexof(seq, value):\n'
-    '    it = None\n'
-    '    try:\n'
-    '        it = iter(seq)\n'
-    '    except TypeError:\n'
-    '        it = None\n'
+    '    it = _ail_op_scan(seq)\n'
     '    if it is not None:\n'
     '        index = 0\n'
     '        for item in it:\n'
@@ -2738,10 +2746,12 @@ class _Surface:
             if name == 'contains' and len(args) == 2:
                 return ast.Compare(left=args[1], ops=[ast.In()], comparators=[args[0]])
             if name == 'countOf' and len(args) == 2:
+                self.helper('op_scan')
                 self.helper('op_countof')
                 return ast.Call(func=ast.Name(id='_ail_op_countof', ctx=ast.Load()),
                                 args=args, keywords=[])
             if name == 'indexOf' and len(args) == 2:
+                self.helper('op_scan')
                 self.helper('op_indexof')
                 return ast.Call(func=ast.Name(id='_ail_op_indexof', ctx=ast.Load()),
                                 args=args, keywords=[])
