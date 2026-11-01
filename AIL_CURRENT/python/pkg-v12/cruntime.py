@@ -29486,6 +29486,14 @@ static double ail_rand_normalvariate(double mu, double sigma) {
     volatile double scaled = z * sigma;
     return mu + scaled;
 }
+/* random.expovariate(lambd): -log(1 - random()) / lambd.  lambd == 0 is CPython's
+   ZeroDivisionError from the float division (a negative lambd is fine). */
+static double ail_rand_expovariate(double lambd) {
+    double r = 1.0 - ail_rand_random();
+    if (lambd == 0.0) ail_rand_fail(AIL_EXC_ZERODIV, "float division by zero");
+    volatile double value = -log(r) / lambd;
+    return value;
+}
 /* sample()'s switch between the pool list and the selected set: 21 + 4 ** ceil(log(3k) / log(4)) for k > 5. */
 static int64_t ail_rand_setsize(int64_t k) {
     int64_t size = 21;
