@@ -1112,9 +1112,10 @@ print(m, get_i32(e, 0))                              # 0.75 6
   ints, `c_float`, `c_double`, `c_bool`, `c_void_p`; `c_mut_void_p` / `c_const_void_p` for a struct; fields are read and written at the C
   offsets with `get_i32 get_u32 get_i64 get_f64 put_i32 put_i64 put_f64 ...`.
 - `trust=True` for a prototype that names a struct (`struct tm *`, `sqlite3 *`): the header is included, its prototype is not compared.
-- Unsigned 64-bit values (`c_uint64 c_ulong c_ulonglong c_size_t`) take `0 .. 2**64 - 1`; an argument may use `2**63 .. 2**64 - 1` too (also as a
-  literal at the call). A result above `2**63 - 1` is the loud stop `OverflowError: integer overflow in ... (ints are 64-bit; --exact-int gives
-  exact ints)` (exit 1, never a negative number). `--exact-int` gives exactly CPython's big positive int (a hash, `SIZE_MAX`).
+- Unsigned 64-bit values (`c_uint64 c_ulong c_ulonglong c_size_t`) take `0 .. 2**64 - 1` in C. An argument above `2**63 - 1` is
+  refused or stops at run time unless `--exact-int`, with `OverflowError: integer overflow in ... (ints are 64-bit; --exact-int gives
+  exact ints)` (exit 1); a literal at the call is this run-time stop. A result above `2**63 - 1` is the same loud stop (exit 1, never
+  a negative number). `--exact-int` gives exactly CPython's big positive int (a hash, `SIZE_MAX`), for arguments and results.
   Anything else is the shim's `OverflowError("NAME: PARAM does not fit TYPE")`. `check="allones"` fails on the unsigned `(T)-1` (`(size_t)-1` is
   `18446744073709551615`); `check="minus1"` and `"negative"` on an unsigned result can never fire and are refused at compile time
   (`write instead: check="allones"`).

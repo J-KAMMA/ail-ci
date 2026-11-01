@@ -1,3 +1,16 @@
+## 2026-11-01 -- docs review: FFI u64 arguments above int64 also stop by default (job-docints1-11011229)
+
+The review found that the reference still said an unsigned 64-bit FFI argument may use
+`2**63 .. 2**64 - 1` by default, while the default build stops at the call. The Native libraries
+paragraph now says an argument above `2**63 - 1` is refused or stops unless `--exact-int` (a literal
+at the call is the run-time stop), just like a result; A1 and the current `DIFFERENCES.md` row say
+"argument or result". Probes `/tmp/probes/p_ffi_arglit.py`, `p_ffi_argdyn*`, `p_ffi_boundary.py`,
+`p_ffi_negative.py` and `p_ffi_result.py` cover literals, a value through an argument/list
+item/attribute/dict value, the int64 boundary, negative values and u64 results on the default,
+forced-general and exact builds: the default and general builds match CPython at the int64 boundary
+and stop with the documented `OverflowError` above it; `--exact-int` matches CPython. No compiler
+behaviour changed.
+
 ## 2026-11-01 -- docs: integers are int64 by default; exact big ints are opt-in
 
 Documented the rule the compiler already implements (job-docints1-11011229, #284): `int` is signed
