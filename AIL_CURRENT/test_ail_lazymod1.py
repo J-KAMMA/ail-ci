@@ -284,6 +284,22 @@ class EffectfulValues(ModulesBase):
                       "main.py": main},
                      "function-level `import lib`", "write instead")
 
+    def test_a_read_between_an_earlier_binding_and_the_needed_one_is_refused(self):
+        self.refused({"lib.py": "print('lib start')\nSIZE = 1\nprint('mid', SIZE)\nSIZE = 2\n\n\n"
+                                "def f(a=SIZE):\n    return a\n",
+                      "main.py": "def g():\n    import lib\n    return lib.f(), lib.SIZE\n\nprint(g())\n"},
+                     "function-level `import lib`", "write instead")
+        self.refused({"lib.py": "SIZE = 10\n\n\ndef show():\n    print('show', SIZE)\n\n\nshow()\n"
+                                "SIZE = 20\n\n\ndef f(a=SIZE):\n    return a\n",
+                      "main.py": "def g():\n    import lib\n    return lib.f(), lib.SIZE\n\nprint(g())\n"},
+                     "function-level `import lib`", "write instead")
+
+    def test_a_mutation_between_an_earlier_binding_and_the_needed_one_is_refused(self):
+        self.refused({"lib.py": "SIZE = [1]\nSIZE.append(2)\nSIZE = [3]\n\n\n"
+                                "def f(a=len(SIZE)):\n    return a\n",
+                      "main.py": "def g():\n    import lib\n    return lib.f(), lib.SIZE\n\nprint(g())\n"},
+                     "function-level `import lib`", "write instead")
+
     def test_a_container_mutated_before_the_definition_is_refused(self):
         self.refused({"lib.py": "L = [1]\n\n\ndef add():\n    L.append(2)\n\n\nadd()\n\n\n"
                                 "def f(a=len(L)):\n    return a\n",

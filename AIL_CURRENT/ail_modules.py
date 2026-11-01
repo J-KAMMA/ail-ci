@@ -2680,6 +2680,29 @@ class Program:
             if isinstance(node, definitions):
                 for name in read_names(node):
                     need_name(name, i, node)
+
+        def statement_reads(node):
+            names = set(self.exec_reads(node))
+            extra = set()
+            for name in names:
+                extra |= self.call_reads(mod, name, set())
+            return names | extra
+
+        hoisted_bindings = {}
+        for i, node in enumerate(order):
+            if id(node) in needed and not isinstance(node, definitions):
+                for name in _scan_scope([node])[0]:
+                    hoisted_bindings.setdefault(name, []).append(i)
+
+        for i, node in enumerate(order):
+            if isinstance(node, definitions) or id(node) in needed:
+                continue
+            touched = statement_reads(node) | _scan_scope([node])[0]
+            if any(hoisted_bindings.get(name) and hoisted_bindings[name][-1] > i
+                   for name in touched):
+                unresolved.append(node)
+                break
+
         for i, node in enumerate(order):
             if id(node) in needed:
                 self._move_env = collections.ChainMap(dict(envs[i]))

@@ -1,3 +1,23 @@
+## 2026-11-01 -- lazymod1 review: a read or mutation between earlier rebindings is refused (job-lazymod1-11030055)
+
+The review found that hoisting an earlier binding of a name past a statement that reads or mutates
+that name changes what the statement sees: `SIZE = 1; print("mid", SIZE); SIZE = 2; def f(a=SIZE)`
+printed `mid 2`, and `SIZE = [1]; SIZE.append(2); SIZE = [3]; def f(a=len(SIZE))` left `[3, 2]`.
+The statements that read or write a name between its earlier bindings and the binding a definition
+needs cannot stay in `_ail_init_<mod>` (they would then run after every hoisted value), so `init_split`
+now refuses them by name. Bindings with no such statement between them (including the existing
+`computed_rebind` case) still move with the definitions. The check resolves calls, so `show()` that
+prints the name is also refused. Only the lazy-module split changed.
+
+Probes on both builds: `p_rebind_print`, `p_rebind_call`, `p_rebind_mutate` and `p_rebind_cond_read`
+are refused by name; `p1_rebind`, `p1_three`, `p1_aug`, `p1_unpack`, `p1_ann`, `p1_def_before`,
+`p5_control`, `p_sub_safe`, `p_sub_annot`, `p_sub_negative` match CPython; `p1_effectful`, `p3_raise`,
+`p_direct_subscript`, `p_sub_default`, `p_sub_in_dict`, `p_sub_in_list`, `p_sub_call`, `p_sub_attr`
+and `p_sub_class` stay refused. Added two refusal tests (three programs) to `test_ail_lazymod1`.
+The lab/compare sources have no local import, so `merge_program` is not entered for them and their C
+is unchanged. Final-state tests: test_ail_lazymod1, test_ail_modsys, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3 (5/5, 0 failed).
+
 ## 2026-11-01 -- lazymod1 review: earlier rebindings move too; unfoldable subscripts are refused (job-lazymod1-11020054)
 
 The review found two ways the lazy-module split still differed from CPython. First, needing a later
