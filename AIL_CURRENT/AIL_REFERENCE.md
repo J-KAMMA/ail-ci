@@ -51,7 +51,7 @@ sys.exit(main())
 - Top level: imports, constants, read-only tables (`N = 10`, `STOP = {"a"}`),
   `@dataclass` classes (methods; inheritance on the general path), functions, `sys.exit(main())`.
   No other globals you change (an int/float `global` works), nested `def`, own exception classes (MORE).
-- `int` is 64-bit (`OverflowError`, no big ints). Types: int, float, str, bool, bytes, `list`,
+- `int` is int64 (`OverflowError`; exact: MORE). Types: int, float, str, bool, bytes, `list`,
   `dict`, `set`, `tuple[int, str]` (`return a, b`; `a, b = f()`), dataclasses. `None` for a class
   or int/float/str/bytes (`int | None`; `Optional["Node"]`); else a sentinel (-1, "").
 - List/dict/set params are read-only (typed): change a dataclass field
@@ -69,4 +69,4 @@ sys.exit(main())
   `itertools`, `functools`, `random` (after `random.seed(n)`).
 - Speed: fix `slow:` hints (`x in list`, `.pop(0)`: set, deque).
 
-MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 8-48, Text I/O 50-88, Bytes 90-153, Syntax 155-169, Local names 171-196, Numbers 198-212, Structs 214-249, Trees 251-294, Lists 296-309, Sort keys 311-318, Nested lists 320-337, Dicts 339-348, Sets 350-368, Strings 370-396, Regex 398-455, Collections 457-537, Tuples, lambdas (Python syntax) 539-598, Libraries 600-703, Heaps 705-720, Loops 722-730, Exceptions 732-747, Refused 749-790, Word count 792-824, Dijkstra 826-868, BFS 870-914, Modules 916-944, Speed 946-965, Parallel 967-1118, Export 1121-1153.
+MORE (`sed -n A,Bp AIL_REFERENCE_MORE.md`): Commands 8-48, Text I/O 50-88, Bytes 90-153, Syntax 155-169, Local names 171-196, Numbers 198-217, Structs 219-254, Trees 256-299, Lists 301-314, Sort keys 316-323, Nested lists 325-342, Dicts 344-353, Sets 355-373, Strings 375-401, Regex 403-460, Collections 462-542, Tuples, lambdas (Python syntax) 544-603, Libraries 605-708, Heaps 710-725, Loops 727-735, Exceptions 737-752, Refused 754-795, Word count 797-829, Dijkstra 831-873, BFS 875-919, Modules 921-949, Speed 951-970, Parallel 972-1125, Export 1128-1160.

@@ -2,7 +2,7 @@
 
 The tutorial marks a sample with an HTML comment right before its ```python block:
 
-    <!-- sample: NAME [general] [refuse] [gpu] [args=A,B] -->
+    <!-- sample: NAME [general] [refuse] [static] [gpu] [exact] [stop] [args=A,B] -->
 
 and attaches what it shows to the sample with the blocks that follow it:
 
@@ -10,11 +10,17 @@ and attaches what it shows to the sample with the blocks that follow it:
     ```note      lines that appear in the compiler's messages for a normal build (the "built on the general path" note)
     ```strict    lines that appear in the messages of the same build with --strict
     ```refusal   lines that appear in the messages of a build the compiler refuses
+    ```stdout    what the AIL executable prints for a stop sample
+    ```stderr    lines that appear in the AIL executable's stderr for a stop sample
 
 Rules checked for each sample (the mode is in the comment):
 * default (typed path): builds with --strict, no "general path" note, stdout and exit code equal CPython's;
 * general: builds without --strict and says so in a note, refuses with --strict (exit 3), output equals CPython's;
 * refuse: the compiler exits 3 and builds nothing;
+* static: the compiler exits 2 and builds nothing (a static big-int refusal);
+* exact: builds with --exact-int, stdout and exit code equal CPython's;
+* stop: builds with --strict, runs, prints the ```stdout block, exits 1, and its stderr contains the
+  ```stderr lines; the sample's CPython exit status is not compared;
 * gpu: built with --gpu (a CPU replay where no Vulkan device exists), output equals CPython's.
 
 Two ways to run it:
@@ -52,7 +58,8 @@ def parse(text):
                     args = flag[5:].split(",")
                     flags.remove(flag)
             current = {"name": found.group(1), "flags": set(flags), "args": args, "code": None,
-                       "output": None, "note": None, "strict": None, "refusal": None}
+                       "output": None, "note": None, "strict": None, "refusal": None,
+                       "stdout": None, "stderr": None}
             samples.append(current)
             continue
         kind, body = found.group(3), found.group(4)
@@ -60,7 +67,7 @@ def parse(text):
             continue
         if kind == "python" and current["code"] is None:
             current["code"] = body
-        elif kind in ("output", "note", "strict", "refusal") and current["code"] is not None:
+        elif kind in ("output", "note", "strict", "refusal", "stdout", "stderr") and current["code"] is not None:
             current[kind] = body
     return samples
 
@@ -101,7 +108,7 @@ class Tutorial(unittest.TestCase):
     def run_sample(self, sample):
         name, flags = sample["name"], sample["flags"]
         env = dict(os.environ, PYTHONPATH=str(source_root()), PYTHONDONTWRITEBYTECODE="1")
-        for var in ("AIL_STRICT", "AIL_UNIFIED_FORCE", "AIL_NO_GENERAL"):
+        for var in ("AIL_STRICT", "AIL_UNIFIED_FORCE", "AIL_NO_GENERAL", "AIL_EXACT_INT"):
             env.pop(var, None)
         with tempfile.TemporaryDirectory(prefix="ail-tutorial-") as work:
             Path(work, name + ".py").write_text(sample["code"], encoding="utf-8")
@@ -110,11 +117,34 @@ class Tutorial(unittest.TestCase):
                                     capture_output=True, text=True, timeout=300)
             if sample["output"] is not None:
                 self.assertEqual(oracle.stdout, sample["output"], name + ": the tutorial's output is not what CPython prints")
+            if "static" in flags:
+                done = self.compile(work, name, extra + ["--strict"], name + ".bin")
+                self.assertEqual(done.returncode, 2, name + ": " + done.stderr)
+                self.assertFalse(Path(work, name + ".bin").exists())
+                self.check_lines(sample["refusal"], done.stdout + done.stderr, name)
+                return
             if "refuse" in flags:
                 done = self.compile(work, name, extra, name + ".bin")
                 self.assertEqual(done.returncode, 3, name + ": " + done.stderr)
                 self.assertFalse(Path(work, name + ".bin").exists())
                 self.check_lines(sample["refusal"], done.stdout + done.stderr, name)
+                return
+            if "stop" in flags:
+                done = self.compile(work, name, extra + ["--strict"], name + ".bin")
+                self.assertEqual(done.returncode, 0, name + ": " + done.stderr)
+                ran = subprocess.run(["./" + name + ".bin"] + sample["args"], cwd=work,
+                                     capture_output=True, text=True, timeout=300)
+                self.assertEqual(ran.stdout, sample["stdout"], name + ": stop stdout")
+                self.assertEqual(ran.returncode, 1, name + ": stop exit status")
+                self.check_lines(sample["stderr"], ran.stderr, name)
+                return
+            if "exact" in flags:
+                done = self.compile(work, name, extra + ["--exact-int"], name + ".bin")
+                self.assertEqual(done.returncode, 0, name + ": " + done.stderr)
+                ran = subprocess.run(["./" + name + ".bin"] + sample["args"], cwd=work,
+                                     capture_output=True, text=True, timeout=300)
+                self.assertEqual(ran.stdout, oracle.stdout, name + ": exact stdout differs from CPython")
+                self.assertEqual(ran.returncode, oracle.returncode, name + ": exact exit status")
                 return
             if "general" in flags:
                 done = self.compile(work, name, extra, name + ".bin")
@@ -155,7 +185,7 @@ class Structure(unittest.TestCase):
 
     def test_the_tutorial_covers_the_promised_topics(self):
         text = TUTORIAL.read_text(encoding="utf-8")
-        for word in ("--strict", "general path", "ail_ffi", "# ail: gpu", "upcoming"):
+        for word in ("--strict", "general path", "ail_ffi", "# ail: gpu", "--exact-int"):
             self.assertTrue(word.lower() in text.lower(), "the tutorial no longer mentions " + word)
 
 
