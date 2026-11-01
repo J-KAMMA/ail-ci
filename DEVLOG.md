@@ -8,12 +8,17 @@ the tuple before any class test, wherever it appears, including self and ancesto
 (`def f(A: int): print(issubclass(B, A))`, a local `A = 7`, or a shadowed left operand). It now returns
 "unknown" for a shadowed call name or operand, so the typed path refuses `issubclass` by name as
 the general path does; CPython raises `TypeError` there, so this is a named refusal, not a silent
-answer. Added `test_object_settles_the_tuple_before_a_matching_class` and
-`test_shadowed_issubclass_operands_are_not_folded` (4 cases) to
+answer. The same boundary in `isinstance` (a parameter or local target such as `(B, A)` or a
+shadowed `object`) was also printing the class answer on both paths; the typed predicates and the
+general emitters now refuse it by name too. Added
+`test_object_settles_the_tuple_before_a_matching_class`,
+`test_shadowed_issubclass_operands_are_not_folded` (4 cases) and
+`test_shadowed_isinstance_targets_are_not_folded` (3 cases, typed and general) to
 `AIL_CURRENT/test_ail_class_reach.py`, and noted both boundaries in
-`docs/design/CLASS_REACH.md`. Probes `/tmp/probes/objancestor.py`, `objorder.py`,
-`objshadow_cls.py`, `objshadow_local.py`, `objshadow_left.py`, `objshadow_builtin.py`: default
-build matches CPython where the general path is refused by name, or is refused by name itself.
+`docs/design/CLASS_REACH.md`. Probes `/tmp/probes/objancestor.py`, `objorder.py`, `objpaths.py`,
+`objshadow_cls.py`, `objshadow_local.py`, `objshadow_left.py`, `objshadow_builtin.py`,
+`isinst_shadow_cls.py`, `isinst_shadow_local.py`, `isinst_shadow_obj.py`: default build matches
+CPython where the general path is refused by name, or is refused by name itself.
 
 ## 2026-11-01 -- cls1 review: `None` is an instance of `object` (job-cls1-11011231)
 

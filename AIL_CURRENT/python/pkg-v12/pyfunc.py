@@ -16622,6 +16622,18 @@ def _mixed_class_isinstance(node, ctx):
     return _is_obj_kind(kind)
 
 
+def _isinstance_targets_shadowed(node, ctx):
+    """True when a target name of `isinstance(x, (...))` is a local or parameter: it is that value,
+    not the class or builtin type name, so CPython raises TypeError instead of testing the type."""
+    local = getattr(ctx, 'local_bindings', ())
+    if not local or not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                         and len(node.args) == 2):
+        return False
+    spec = node.args[1]
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    return any(isinstance(n, ast.Name) and n.id in local for n in names)
+
+
 def _static_issubclass(node, ctx):
     """True or False when `issubclass(C, D)` (or a tuple of Ds) is settled when the program is built:
     C and every D a class of this program or a builtin type name. None otherwise. A local or
@@ -16698,6 +16710,8 @@ def _static_isinstance(node, ctx):
     if not names or not all(isinstance(n, ast.Name) for n in names):
         return None
     targets = {n.id for n in names}
+    if any(n.id in getattr(ctx, 'local_bindings', ()) for n in names):
+        return None
     user = targets & set(ctx.classes)
     if not targets <= (_STATIC_TYPES | user) or (user and _HIER):
         return None
@@ -16826,6 +16840,12 @@ def _call(node, ctx):
         raise Unsupported('%s has no value; use a statement' % node.func.id)
     if _is_tcp_poll_call(node, ctx):
         return _tcp_poll_value(node, ctx)[0]
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'isinstance' and len(node.args) == 2 and not node.keywords
+            and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))
+            and _isinstance_targets_shadowed(node, ctx)):
+        raise Unsupported('isinstance() target is a local or parameter that shadows a class or builtin '
+                          'type name; CPython raises TypeError for a value that is not a type')
     if _is_class_isinstance(node, ctx):
         return _isinstance_value(node, ctx)
     if _mixed_class_isinstance(node, ctx):

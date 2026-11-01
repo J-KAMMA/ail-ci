@@ -292,6 +292,66 @@ def main() -> None:
 main()
 '''
 
+ISINST_SHADOW_TARGET_PARAM = '''class A:
+    def __init__(self) -> None:
+        self.x = 1
+
+
+class B(A):
+    pass
+
+
+def f(A: int, x: A | None) -> None:
+    print(isinstance(x, (B, A)))
+
+
+def main() -> None:
+    f(1, None)
+    f(1, A())
+
+
+main()
+'''
+
+ISINST_SHADOW_TARGET_LOCAL = '''class A:
+    def __init__(self) -> None:
+        self.x = 1
+
+
+class B(A):
+    pass
+
+
+def f(x: A | None) -> None:
+    B = 7
+    print(isinstance(x, (B, A)))
+
+
+def main() -> None:
+    f(None)
+    f(A())
+
+
+main()
+'''
+
+ISINST_SHADOW_OBJECT = '''class A:
+    def __init__(self) -> None:
+        self.x = 1
+
+
+def f(object: int, x: A | None) -> None:
+    print(isinstance(x, (A, object)))
+
+
+def main() -> None:
+    f(1, None)
+    f(1, A())
+
+
+main()
+'''
+
 
 def run_cpython(directory, text, name):
     source = Path(directory, name + '.py')
@@ -402,6 +462,18 @@ class ClassReachTests(unittest.TestCase):
                 self.assertNotEqual(res.returncode, 0)
                 self.assertIn('issubclass', res.stdout + res.stderr)
                 self.assertFalse(exe.exists())
+
+    def test_shadowed_isinstance_targets_are_not_folded(self):
+        # A parameter or local target name is a value; CPython raises TypeError. Both paths refuse.
+        for name, text in (('target_param', ISINST_SHADOW_TARGET_PARAM),
+                           ('target_local', ISINST_SHADOW_TARGET_LOCAL),
+                           ('object', ISINST_SHADOW_OBJECT)):
+            with self.subTest(case=name), tempfile.TemporaryDirectory(prefix='ail-clsreach-') as d:
+                for typed in (True, False):
+                    res, exe = build(d, text, 'isinst_shadow_' + name, typed)
+                    self.assertNotEqual(res.returncode, 0)
+                    self.assertIn('isinstance', res.stdout + res.stderr)
+                    self.assertFalse(exe.exists())
 
     def test_user_issubclass_is_not_folded(self):
         self.three_way(SHADOW, 'shadow')

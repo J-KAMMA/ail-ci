@@ -71,8 +71,9 @@ base as a field). The two class-test programs are now typed:
   after a class that already matches the value.
   The receiver keeps its existing requirement: a name or an attribute.
 * A parameter or local that shadows a class or builtin type name is a value, not that class; the
-  fold sees the shadow and refuses `issubclass` by name rather than printing an answer that
-  CPython raises `TypeError` for. A user-defined `issubclass` (a `def`) is likewise not folded.
+  fold sees the shadow and refuses the class test (`isinstance` or `issubclass`) by name rather
+  than printing an answer that CPython raises `TypeError` for. A user-defined `issubclass` (a
+  `def`) is likewise not folded.
 
 The general path still refuses `issubclass` by name (`the name 'issubclass' is not a known
 function/class/builtin`) and refuses `isinstance(..., (C, object))` by name; the default build is
