@@ -85,6 +85,95 @@ the existing int64 policy. Final-state tests: test_ail_int_base, test_ail_pre192
 test_ail_pre212, test_ail_pre253, test_ail_int64_default, test_ail_ir_s0, test_ail_exc_str,
 test_ail_stdlib_batch1, test_ail_cmp_classname, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3.
+## 2026-11-01 -- covenv2 review: `Path.home()` rejects a `~` result (job-covenv2-11011011)
+
+The review found `Path.home()` printed `~` (also `~/x`, `~~`, `~//`) and exited 0 when HOME
+began with `~`, where CPython's `Path.home()` is `cls("~").expanduser()` and raises
+`RuntimeError: Could not determine home directory.` (exit 1, empty stdout).  pathlower now calls
+a new prelude helper `_ail_pl_home`, which reads `_ail_pp_home()` and raises when the text still
+starts with `~` before normalising it.  Probes over HOME `~`, `~/x`, `~~`, `~//`, `/~`, `.`, `..`,
+`/`, empty and unset, plus `Path.home() / "a"` and f-string uses, match CPython stdout and exit
+code on the default and general builds; the typed path is covered by the new tilde cases in
+`test_ail_covenv`.  The env probes (key present/absent/empty, `or`, `is None`, direct uses) still
+match, and all 10 lab/compare `main.ail` C hashes are byte-identical to base.  `test_ail_covenv`,
+`test_ail_pathlib`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+No new DIFFERENCES row: the result now matches CPython.
+
+## 2026-11-01 -- covenv2: `os.environ.get(key)` without a default and `Path.home()` (job-covenv2-11011011)
+
+`os.environ.get(key)` with no default is now a str-or-None value on the typed path (optlib): a present flag
+and the `_ail_os_hasenv` / `_ail_os_getenv` pair, with the key evaluated once.  `is None`, truth tests,
+`v or default`, `print`/`str`/f-strings, assignments, returns and Optional parameters/calls are built;
+uses that cannot follow the pair keep the old route, and the general path lowers the same call to the
+`_ail_environ_get_or_none` prelude function (`hasenv ? getenv : None`) instead of refusing.  The prelude
+call keeps the key evaluated once without a hoisted temporary, so a key that names a loop variable is
+still read inside the loop (the first cut hoisted it before the `for` and read the variable unbound).
+`Path.home()` is a new `_ail_pp_home` primitive
+(ailpath_core.h), wrapped by pathlower: HOME is used even when empty, otherwise the passwd entry, trailing
+slashes are removed and an empty result is `/`, matching CPython's `os.path.expanduser("~")`.
+
+CPython 3.12 stdout and exit code match on the typed, default and general builds for HOME set/unset/empty,
+key present/absent/empty, `or`, direct `if`/`is None`/`print`/`str`/f-string uses, keys through a
+variable, a list item and an attribute, and env gets inside a loop, a list and a dict.  `test_ail_covenv.py`
+covers them (registered in `tests.d`);
+`test_ail_safetynet`, `test_ail_files`, `test_ail_pathlib`, `test_ail_optional_locals` and
+`test_ail_corpus_findings3` pass.  All 10 lab/compare `main.ail` C hashes are unchanged.  No new
+DIFFERENCES row: both spellings now match CPython.
+## 2026-11-01 -- int64 tests exercise the default again (job-i64tests1-11011225)
+
+`test_ail_pre425`, `test_ail_pre429`, `test_ail_pre433` and `test_ail_overflow_uncatchable`
+still carried `setUpModule` blocks that set `AIL_EXACT_INT=1`, so their int64 expectations never
+ran after ints became 64-bit by default. The exact mark is gone from all four. The int64 cases
+now assert the default behaviour and a separate explicit `AIL_EXACT_INT=1` case keeps the
+CPython-value coverage: pre425 refuses routed wide augmented powers by name at build time and
+compares the same programs with CPython in exact mode; pre429 checks the typed wide `round()`
+loud stop, the forced general path's catchable `OverflowError("integer overflow")`, the build
+refusal of a constant wide round, and CPython equality in exact mode; pre433 keeps the adaptive
+int64 refusal and adds exact-mode builds; overflow_uncatchable tunes its runtime operands through
+`sys.argv` so the default build reaches the overflow instead of refusing the constant, and adds
+one exact-mode equality case. No product code changed.
+
+Added `test_ail_int64_edges` (7 tests) for values only known at run time: power at 2**62,
+-2**63, 0**0, negative exponents, 0/1/-1 bases, wide 2**63/-2**64/10**19, and round just inside
+and just outside int64 (nan/inf kept), on the typed default, its IR arm, the forced general path
+and exact mode. Registered through `tests.d/test_ail_int64_edges.txt`.
+## 2026-11-01 -- resident compile server on by default, started in the background (job-srvdef1-11011011)
+
+The resident compile server (`AIL_CURRENT/ail_server.py`) is now the default on POSIX with
+`SO_PEERCRED`; only an explicit `AIL_SERVER=0` (or `off`/`false`/`no`) turns it off, and Windows
+keeps it off. `ail_chatgpt.py` takes the same default at its entry. The first build no longer waits
+for a server: a detached starter holds one per-user lock (`<runtime dir>/start.lock`; the runtime
+directory is mode 0700, never inside a repository), starts the server, and the first build compiles
+in-process as before. Later builds connect to the warm server. A build that finds a starter already
+running waits at most 2 s for its socket; a server that takes more than 2 s to answer the start of a
+request, is unreachable, or dies during a build falls back to the in-process path with no extra
+output. The server still exits after `AIL_SERVER_IDLE` seconds (default 600). The identity hash
+covers the whole compiler tree including `python/pkg-v12`, so a source change means a new server.
+Request argv, cwd, umask and the full environment are applied per request: `--exact-int`,
+`AIL_EXACT_INT=1` and the other `AIL_*` knobs are never frozen from the server's start.
+
+Acceptance: built the 10 `lab/compare/src` tasks, the first 100 `lab/corpus/programs` files, and
+`--exact-int` builds of `rail_transfer` and `chain_relax` with the server and with
+`AIL_SERVER=0` (112 builds): return code, concatenated generated C sha256 and executable sha256
+all identical. `rail_transfer`/`chain_relax` exact-int C and exe also match for
+`PYTHONHASHSEED=0..5`. Median of 5 warm vs 5 in-process builds: `chain_relax` without the build
+cache 2.293 s vs 3.047 s; a hello program without the cache 0.368 s vs 0.481 s (with a warm build
+cache the compile itself is already cached: 0.275 s vs 0.282 s).
+
+Probes in `/tmp/probes` (`bash ~/tools/cmp.sh`, default server and `AIL_SERVER=0`):
+`p_srv_arith` (int64 boundaries, negative/zero, pow/mul/mod/div, values through a function),
+`p_srv_routes` (argument, list item, attribute, dict value, aliasing, empty slice/reverse),
+`p_srv_edges` (bool/zero/negative, int64 bounds, empty string, negative indices, dict get/default)
+and `p_srv_functions` (clamps, a counter object, composed arithmetic) all match CPython on both
+builds. The exact-int probe `p_srv_exact` reaches big values through an argument, a list, an
+attribute and a dict; with `PYTHONHASHSEED=1` its generated C and exe sha256 are identical with and
+without the server and its stdout matches CPython.
+
+Tests on the final commit: `test_ail_server`, `test_ail_build_cache`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` with the server on, and `test_ail_build_cache` and
+`test_ail_safetynet` with `AIL_SERVER=0`; all passed with `-j 2`. `tools/update_manifest.py` was run
+and `--check` passed. No new DIFFERENCES rows. The test modules were already registered through
+`AIL_CURRENT/tests.d/`; no `ail_check.py` tuple change.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 

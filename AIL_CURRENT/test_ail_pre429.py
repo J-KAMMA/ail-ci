@@ -1,20 +1,19 @@
-"""pre429: the int64 path's wide one-argument round() is catchable, like the typed path.
+"""pre429: the wide one-argument round() on the int64 default, and the opt-in exact mode.
 
-The fz2 review recorded, as pre-existing then, that the general path's `round()` of a finite
-float outside int64 stopped through `ail_hit_limit` (AIL_LIMIT), which no `try` could see,
-while the typed path's `integer overflow` stop is catchable as OverflowError once the program
-has an active handler.  On today's tree the exact-int (BIGINT) arm returns CPython's full
-integer, so the accepted change is kept on the other side of the big-int gate: with
-`AIL_BIGINT=off`, `ail_bi_round` raises the same `OverflowError("integer overflow")` through
-the ordinary exception path.
+The fz2 review recorded that the general path's `round()` of a finite float outside int64
+stopped through `ail_hit_limit` (AIL_LIMIT), which no `try` could see; `ail_bi_round` now
+raises the ordinary `OverflowError("integer overflow")` on the int64 general runtime, so
+`except OverflowError`, `except Exception`, a bare `except` and a handler's `finally` all see
+it, and an uncaught wide value keeps the output written so far (exit 1).
 
-Both int64 builds therefore catch the wide value in `except OverflowError`, `except Exception`
-and a bare `except`, run an `except` clause's `finally`, and report the same uncaught class
-when a handler was active but did not match.  In-range floats, int/bool, NaN and infinity keep
-CPython's answers.  With exact ints the wide value matches CPython exactly; the int64 finite
-big integer is the declared 64-bit difference (DIFFERENCES C74/A1), so an uncaught wide round
-there is checked as exit 1 + "integer overflow" + a stdout prefix rather than against CPython's
-exact value.
+Integers are int64 by default (ail-ci#198), so the typed path is now the default route: its
+checked round stops the program loudly ("integer overflow in round()", exit 1) and no handler
+runs, exactly like the other int64 arithmetic stops (test_ail_overflow_uncatchable).  The
+forced general path keeps the catchable behaviour above.  In-range floats, int/bool, NaN and
+infinity keep CPython's answers on every path.  A constant wide round is refused at build time
+in the int64 mode.  With `--exact-int` / `AIL_EXACT_INT=1` the wide value matches CPython
+exactly and never overflows; the int64 finite big integer is the declared 64-bit difference
+(DIFFERENCES C74/A1).
 """
 import os
 import subprocess
@@ -25,18 +24,21 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 
-MODES = (
-    ('int64_default', {'AIL_BIGINT': 'off'}),
-    ('int64_default_ir', {'AIL_BIGINT': 'off', 'AIL_IR': '1'}),
-    ('int64_general', {'AIL_BIGINT': 'off', 'AIL_UNIFIED_FORCE': '1', 'AIL_IR': '0'}),
-    ('int64_general_ir', {'AIL_BIGINT': 'off', 'AIL_UNIFIED_FORCE': '1', 'AIL_IR': '1'}),
+INT64_MODES = (
+    ('int64_default', {}),
+    ('int64_default_ir', {'AIL_IR': '1'}),
+    ('int64_general', {'AIL_UNIFIED_FORCE': '1', 'AIL_IR': '0'}),
+    ('int64_general_ir', {'AIL_UNIFIED_FORCE': '1', 'AIL_IR': '1'}),
 )
 
+INT64_TYPED = tuple(mode for mode in INT64_MODES if 'AIL_UNIFIED_FORCE' not in mode[1])
+INT64_GENERAL = tuple(mode for mode in INT64_MODES if 'AIL_UNIFIED_FORCE' in mode[1])
+
 EXACT_MODES = (
-    ('default', {}),
-    ('default_ir', {'AIL_IR': '1'}),
-    ('general', {'AIL_UNIFIED_FORCE': '1', 'AIL_IR': '0'}),
-    ('general_ir', {'AIL_UNIFIED_FORCE': '1', 'AIL_IR': '1'}),
+    ('exact_default', {'AIL_EXACT_INT': '1'}),
+    ('exact_default_ir', {'AIL_EXACT_INT': '1', 'AIL_IR': '1'}),
+    ('exact_general', {'AIL_EXACT_INT': '1', 'AIL_UNIFIED_FORCE': '1', 'AIL_IR': '0'}),
+    ('exact_general_ir', {'AIL_EXACT_INT': '1', 'AIL_UNIFIED_FORCE': '1', 'AIL_IR': '1'}),
 )
 
 CATCH = '''\
@@ -194,7 +196,7 @@ def _build_and_run(directory, name, text, extra):
     src.write_text(text, encoding='utf-8')
     exe = Path(directory) / ('exe_' + name)
     env = dict(os.environ, AIL_NO_CACHE='1', AIL_QUIET_FALLBACK='1')
-    for key in ('AIL_NO_GENERAL', 'AIL_UNIFIED_FORCE', 'AIL_IR'):
+    for key in ('AIL_NO_GENERAL', 'AIL_UNIFIED_FORCE', 'AIL_IR', 'AIL_EXACT_INT'):
         env.pop(key, None)
     env.update(extra)
     built = subprocess.run([sys.executable, '-B', str(ROOT / 'ail_chatgpt.py'), 'compile', src.name,
@@ -207,10 +209,10 @@ def _build_and_run(directory, name, text, extra):
 
 
 class Pre429Tests(unittest.TestCase):
-    def caught(self, name, text, expected):
+    def caught(self, name, text, expected, modes=INT64_GENERAL):
         want = expected.encode()
         with tempfile.TemporaryDirectory(prefix='ail-pre429-') as directory:
-            for mode, extra in MODES:
+            for mode, extra in modes:
                 with self.subTest(name=name, mode=mode):
                     got, build_rc, err = _build_and_run(directory, name + '_' + mode, text, extra)
                     self.assertIsNotNone(got, '%s %s\n%s' % (name, mode, err[-3000:]))
@@ -219,25 +221,44 @@ class Pre429Tests(unittest.TestCase):
                     self.assertEqual(got.returncode, 0, (name, mode, got.stderr[-1500:]))
                     self.assertEqual(got.stderr, b'', (name, mode))
 
-    def stopped(self, name, text, expected, prefix=True):
-        want = expected.encode()
+    def typed_stop(self, name, text, expected=b''):
+        want = expected
         with tempfile.TemporaryDirectory(prefix='ail-pre429-') as directory:
-            cpy, cpy_rc, cpy_err = _cpython(directory, name, text)
-            self.assertEqual(cpy_rc, 0, cpy_err)
-            for mode, extra in MODES:
+            for mode, extra in INT64_TYPED:
                 with self.subTest(name=name, mode=mode):
                     got, build_rc, err = _build_and_run(directory, name + '_' + mode, text, extra)
                     self.assertIsNotNone(got, '%s %s\n%s' % (name, mode, err[-3000:]))
                     self.assertEqual(build_rc, 0, err[-3000:])
-                    out = got.stdout.replace(b'\r\n', b'\n')
-                    self.assertEqual(out, want, (name, mode))
-                    if prefix:
-                        self.assertTrue(cpy.startswith(out), (name, mode))
+                    self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want, (name, mode))
                     self.assertEqual(got.returncode, 1, (name, mode, got.stderr[-1500:]))
                     self.assertIn(b'integer overflow', got.stderr, (name, mode))
                     self.assertNotIn(b'AIL limit', got.stderr, (name, mode))
 
-    def same(self, name, text, modes=MODES):
+    def general_stop(self, name, text, expected):
+        want = expected
+        with tempfile.TemporaryDirectory(prefix='ail-pre429-') as directory:
+            for mode, extra in INT64_GENERAL:
+                with self.subTest(name=name, mode=mode):
+                    got, build_rc, err = _build_and_run(directory, name + '_' + mode, text, extra)
+                    self.assertIsNotNone(got, '%s %s\n%s' % (name, mode, err[-3000:]))
+                    self.assertEqual(build_rc, 0, err[-3000:])
+                    self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want, (name, mode))
+                    self.assertEqual(got.returncode, 1, (name, mode, got.stderr[-1500:]))
+                    self.assertIn(b'integer overflow', got.stderr, (name, mode))
+                    self.assertNotIn(b'AIL limit', got.stderr, (name, mode))
+
+    def refused(self, name, text, modes):
+        with tempfile.TemporaryDirectory(prefix='ail-pre429-') as directory:
+            for mode, extra in modes:
+                with self.subTest(name=name, mode=mode):
+                    got, build_rc, err = _build_and_run(directory, name + '_' + mode, text, extra)
+                    self.assertIsNone(got, (name, mode))
+                    self.assertNotEqual(build_rc, 0, (name, mode))
+                    self.assertIn('not in the subset', err, (name, mode))
+                    self.assertIn('round()', err, (name, mode))
+                    self.assertNotIn('Traceback', err, (name, mode))
+
+    def same(self, name, text, modes):
         with tempfile.TemporaryDirectory(prefix='ail-pre429-') as directory:
             want, want_rc, cpy_err = _cpython(directory, name, text)
             for mode, extra in modes:
@@ -248,57 +269,39 @@ class Pre429Tests(unittest.TestCase):
                     self.assertEqual(got.stdout.replace(b'\r\n', b'\n'), want, (name, mode))
                     self.assertEqual(got.returncode, want_rc, (name, mode, got.stderr[-1500:]))
 
-    def test_overflow_error_is_catchable_on_both_builds(self):
-        self.caught('catch', CATCH, "caught OverflowError 'integer overflow'\nafter\n")
+    def test_int64_typed_wide_round_is_a_loud_stop(self):
+        for name, text in (('catch', CATCH), ('catch_finally', CATCH_FINALLY), ('bare', BARE),
+                           ('exception', EXCEPTION), ('finally_only', FINALLY_ONLY),
+                           ('value_only', VALUE_ONLY), ('negative', NEGATIVE), ('dynamic', DYNAMIC)):
+            self.typed_stop(name, text)
+        self.typed_stop('uncaught', UNCAUGHT, b'before\n')
 
-    def test_except_exception_and_bare_except_catch_it(self):
+    def test_int64_general_wide_round_is_catchable(self):
+        self.caught('catch', CATCH, "caught OverflowError 'integer overflow'\nafter\n")
         self.caught('exception', EXCEPTION, 'exception caught\nafter\n')
         self.caught('bare', BARE, 'bare caught\nafter\n')
-
-    def test_handler_finally_runs_and_wide_value_through_routes_is_caught(self):
         self.caught('catch_finally', CATCH_FINALLY, 'caught\nfinally ran\nafter\n')
-        self.caught('routes', ROUTES, '-1\n' + 'caught\n' * 5)
-
-    def test_negative_and_computed_wide_values_are_caught(self):
         self.caught('negative', NEGATIVE, "neg caught 'integer overflow'\nafter\n")
         self.caught('dynamic', DYNAMIC, 'dynamic caught\nafter\n')
+        self.general_stop('finally_only', FINALLY_ONLY, b'finally ran\n')
+        self.general_stop('value_only', VALUE_ONLY, b'')
+        self.general_stop('uncaught', UNCAUGHT, b'before\n')
 
-    def test_unmatched_and_uncaught_stop_is_the_declared_int64_one(self):
-        self.stopped('value_only', VALUE_ONLY, '')
-        # A handler that only has `finally` runs it and then lets the OverflowError go: CPython
-        # printed its (unrepresentable) big integer first, so this stdout is not a prefix.
-        self.stopped('finally_only', FINALLY_ONLY, 'finally ran\n', prefix=False)
-        self.stopped('uncaught', UNCAUGHT, 'before\n')
+    def test_int64_routes_and_containers_keep_the_declared_stop(self):
+        self.caught('routes', ROUTES, '-1\n' + 'caught\n' * 5, INT64_MODES)
 
     def test_in_range_and_non_finite_values_match_cpython(self):
-        self.same('in_range', IN_RANGE)
-        self.same('non_finite', NON_FINITE)
+        self.same('in_range', IN_RANGE, INT64_MODES + EXACT_MODES)
+        self.same('non_finite', NON_FINITE, INT64_MODES + EXACT_MODES)
 
-    def test_constant_wide_round_stops_on_int64_and_matches_with_exact_ints(self):
-        self.stopped('constant', CONSTANT, '')
-        self.same('constant_exact', CONSTANT, EXACT_MODES)
+    def test_constant_wide_round_is_refused_in_int64(self):
+        self.refused('constant', CONSTANT, INT64_MODES)
 
     def test_exact_ints_keep_cpython_value_and_never_overflow(self):
         self.same('catch_exact', CATCH, EXACT_MODES)
-
-
-import os as _os_exact_int
-
-_SAVED_EXACT_INT = None
-
-
-def setUpModule():
-    # these tests are about exact (arbitrary precision) ints: the opt-in mode (intmode.py, `--exact-int`)
-    global _SAVED_EXACT_INT
-    _SAVED_EXACT_INT = _os_exact_int.environ.get('AIL_EXACT_INT')
-    _os_exact_int.environ['AIL_EXACT_INT'] = '1'
-
-
-def tearDownModule():
-    if _SAVED_EXACT_INT is None:
-        _os_exact_int.environ.pop('AIL_EXACT_INT', None)
-    else:
-        _os_exact_int.environ['AIL_EXACT_INT'] = _SAVED_EXACT_INT
+        self.same('routes_exact', ROUTES, EXACT_MODES)
+        self.same('uncaught_exact', UNCAUGHT, EXACT_MODES)
+        self.same('constant_exact', CONSTANT, EXACT_MODES)
 
 
 if __name__ == '__main__':

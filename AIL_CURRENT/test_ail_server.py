@@ -1,12 +1,14 @@
-"""The resident compile server (ail_server.py, opt-in with AIL_SERVER=1): the same builds, errors and exit codes as the
-normal path, and the process rules around it.
+"""The resident compile server (ail_server.py, on by default on POSIX, AIL_SERVER=0 turns it off): the same builds,
+errors and exit codes as the normal path, and the process rules around it.
 
-Every build here runs twice, once the normal way and once with AIL_SERVER=1 in a private runtime directory, each with a
+Every build here runs twice, once with AIL_SERVER=0 and once with AIL_SERVER=1 in a private runtime directory, each with a
 fresh AIL_CACHE and TMPDIR and a recording C compiler wrapper, and the two are compared: exit code, stdout, stderr and
-every C file handed to the C compiler.  Tests that change the compiler run on a copy of the source tree.
+every C file handed to the C compiler.  The first served build only starts the server in the background, so the tests
+that need a warm server wait for its socket.  Tests that change the compiler run on a copy of the source tree.
 """
 import concurrent.futures
 import itertools
+import json
 import os
 from pathlib import Path
 import re
@@ -17,6 +19,7 @@ import stat
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 
@@ -96,8 +99,10 @@ class ServerBase(unittest.TestCase):
         env = {key: value for key, value in os.environ.items() if not key.startswith('AIL_')}
         env.update(AIL_CACHE=str(base / 'cache'), TMPDIR=str(base / 'tmp'), PIPE_CC=str(cls.wrapper), CC_SAVE=str(base / 'cc'),
                    AIL_SERVER_DIR=str(runtime or cls.runtime), AIL_SERVER_IDLE='120')
-        if server:
+        if server is True:
             env['AIL_SERVER'] = '1'
+        elif server is False:
+            env['AIL_SERVER'] = '0'
         env.update(extra or {})
         return env, base
 
@@ -135,6 +140,13 @@ class ServerBase(unittest.TestCase):
     def sockets(cls, runtime=None):
         return sorted((runtime or cls.runtime).glob('*.sock'))
 
+    @classmethod
+    def wait_for_sockets(cls, count, runtime=None, seconds=20):
+        runtime = runtime or cls.runtime
+        if not wait_for(lambda: len(cls.sockets(runtime)) == count, seconds):
+            found = cls.describe() if runtime == cls.runtime else cls.sockets(runtime)
+            raise AssertionError('expected %d socket(s), found %r' % (count, found))
+
 
 class SameBuilds(ServerBase):
     def test_compare_lab_tasks(self):
@@ -145,7 +157,7 @@ class SameBuilds(ServerBase):
             with self.subTest(task=task.name):
                 plain, served = self.same(['compile', task / 'main.ail', '-o', '{OUT}'], expect=0)
                 self.assertTrue(plain[3] and served[3])
-        self.assertEqual(len(self.sockets()), 1)
+        self.wait_for_sockets(1)
 
     def test_python_syntax_corpus_sample(self):
         names = sorted(path for path in CORPUS.glob('*/t0*.py'))[:5] if CORPUS.is_dir() else []
@@ -155,6 +167,61 @@ class SameBuilds(ServerBase):
             with self.subTest(program=name.name):
                 self.same(['compile', name, '--syntax', 'python', '-o', '{OUT}'])
 
+    def test_default_on_and_zero_off(self):
+        (self.work / 'hello.py').write_text(HELLO)
+        plain = self.build(['compile', 'hello.py', '-o', '{OUT}'], False)
+        runtime = Path(tempfile.mkdtemp(prefix='ails'))
+        self.addCleanup(shutil.rmtree, runtime, True)
+        default = self.build(['compile', 'hello.py', '-o', '{OUT}'], None, runtime=runtime)
+        self.assertEqual(plain[:3], default[:3])
+        self.assertEqual(plain[3], default[3])
+        self.wait_for_sockets(1, runtime)                 # no AIL_SERVER means the default, which starts one
+        for path in self.sockets(runtime):
+            path.unlink()
+        off = Path(tempfile.mkdtemp(prefix='ails'))
+        self.addCleanup(shutil.rmtree, off, True)
+        self.assertEqual(plain[:3], self.build(['compile', 'hello.py', '-o', '{OUT}'], False, runtime=off)[:3])
+        time.sleep(0.5)
+        self.assertEqual(self.sockets(off), [], 'AIL_SERVER=0 started a server')
+
+    def test_first_build_starts_the_server_in_the_background(self):
+        (self.work / 'hello.py').write_text(HELLO)
+        slow = self.work / 'slow-site'
+        slow.mkdir()
+        (slow / 'sitecustomize.py').write_text('import sys, time\nif "serve" in sys.argv:\n    time.sleep(4)\n')
+        runtime = Path(tempfile.mkdtemp(prefix='ails'))
+        self.addCleanup(shutil.rmtree, runtime, True)
+        env, base = self.environment(None, {'PYTHONPATH': str(slow)}, runtime=runtime)
+        started = time.monotonic()
+        done = subprocess.run(self.command('compile', 'hello.py', '-o', str(base / 'prog')), capture_output=True, text=True,
+                              env=env, cwd=self.work, timeout=30)
+        elapsed = time.monotonic() - started
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertLess(elapsed, 3.5, 'the first build waited for the slow server')
+        self.assertEqual(self.sockets(runtime), [], 'the first build did not run in-process')
+        self.wait_for_sockets(1, runtime, seconds=20)
+        for path in self.sockets(runtime):
+            path.unlink()
+
+    def test_exact_int_is_per_request(self):
+        (self.work / 'hello.py').write_text(HELLO)
+        if not self.sockets():
+            self.build(['compile', 'hello.py', '-o', '{OUT}'], True)
+            self.wait_for_sockets(1)
+        for name in ('rail_transfer', 'chain_relax'):
+            source = LAB / name / 'main.ail'
+            if not source.is_file():
+                continue
+            with self.subTest(task=name):
+                plain = self.build(['compile', source, '--exact-int', '-o', '{OUT}'], False)
+                served = self.build(['compile', source, '--exact-int', '-o', '{OUT}'], True)
+                self.assertEqual(plain[:3], served[:3])
+                self.assertEqual(plain[3], served[3])
+                default_plain = self.build(['compile', source, '-o', '{OUT}'], False)
+                default_served = self.build(['compile', source, '-o', '{OUT}'], True)
+                self.assertEqual(default_plain[:3], default_served[:3])
+                self.assertEqual(default_plain[3], default_served[3])
+
     def test_per_build_environment(self):
         source = LAB / 'chain_relax' / 'main.ail'
         if not source.is_file():
@@ -163,7 +230,7 @@ class SameBuilds(ServerBase):
         default = self.same(['compile', source, '-o', '{OUT}'], expect=0)
         self.same(['compile', source, '-o', '{OUT}'], extra={'AIL_UNIFIED_FORCE': '1', 'AIL_NO_GENERAL': '1'})
         self.assertNotEqual(forced[0][:2], default[0][:2])   # the variable changes the build, and the server followed it
-        self.assertEqual(len(self.sockets()), 1, self.describe())             # one server answered every one of them
+        self.wait_for_sockets(1)                              # one server answered every one of them
 
     def test_errors_and_usage(self):
         (self.work / 'bad.ail').write_text('fn main() -> int {\n    return nope(\n')
@@ -193,7 +260,7 @@ class SameBuilds(ServerBase):
         with concurrent.futures.ThreadPoolExecutor(len(jobs)) as pool:
             got = list(pool.map(lambda job: self.build(job, True), jobs))
         self.assertEqual(expected, got)
-        self.assertEqual(len(self.sockets()), 1)
+        self.wait_for_sockets(1)
 
     def test_fallback_when_the_server_cannot_start(self):
         (self.work / 'hello.py').write_text(HELLO)
@@ -212,6 +279,13 @@ class SameBuilds(ServerBase):
 
 
 class Process(ServerBase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        (cls.work / 'hello.py').write_text(HELLO)
+        cls.build(['compile', 'hello.py', '-o', '{OUT}'], True)      # the first build starts the server in-process
+        cls.wait_for_sockets(1)
+
     def test_runtime_directory_and_socket_permissions(self):
         (self.work / 'hello.py').write_text(HELLO)
         loose = Path(tempfile.mkdtemp(prefix='ailp'))
@@ -219,8 +293,8 @@ class Process(ServerBase):
         self.addCleanup(shutil.rmtree, loose, True)
         self.assertEqual(self.build(['compile', 'hello.py', '-o', '{OUT}'], True, runtime=loose)[0], 0)
         self.assertEqual(stat.S_IMODE(loose.stat().st_mode), 0o700)
+        self.wait_for_sockets(1, loose)
         sockets = self.sockets(loose)
-        self.assertEqual(len(sockets), 1)
         self.assertEqual(stat.S_IMODE(sockets[0].stat().st_mode), 0o600)
         self.assertTrue(stat.S_ISSOCK(sockets[0].stat().st_mode))
         left, right = socket.socketpair()
@@ -231,13 +305,70 @@ class Process(ServerBase):
             path.unlink()
         time.sleep(1.5)
 
+    def fake_server(self, runtime, env, mode):
+        probe = ('import json, sys\n'
+                 'sys.path.insert(0, sys.argv[1])\n'
+                 'import ail_server\n'
+                 'print(ail_server.identity(sys.argv[1], json.loads(sys.argv[2]), ail_server.current_limits()))\n')
+        key = subprocess.run([sys.executable, '-X', 'utf8', '-B', '-c', probe, str(ROOT), json.dumps(env)],
+                             capture_output=True, text=True, timeout=120).stdout.strip()
+        path = Path(runtime) / ('ail-%s.sock' % key)
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(str(path))
+        listener.listen(1)
+        def answer():
+            conn, _ = listener.accept()
+            try:
+                if mode == 'slow':
+                    time.sleep(3)
+                else:
+                    data = b''
+                    while len(data) < 4 or len(data) < 4 + int.from_bytes(data[:4], 'big'):
+                        chunk = conn.recv(1 << 16)
+                        if not chunk:
+                            return
+                        data += chunk
+                    conn.sendall(b'S\n')
+            finally:
+                conn.close()
+                listener.close()
+        thread = threading.Thread(target=answer, daemon=True)
+        thread.start()
+        self.addCleanup(listener.close)
+        self.addCleanup(lambda: path.unlink() if path.exists() else None)
+        return thread
+
+    def test_slow_server_falls_back_silently(self):
+        runtime = Path(tempfile.mkdtemp(prefix='ails'))
+        self.addCleanup(shutil.rmtree, runtime, True)
+        env, base = self.environment(True, runtime=runtime)
+        thread = self.fake_server(runtime, env, 'slow')
+        started = time.monotonic()
+        done = subprocess.run(self.command('compile', 'hello.py', '-o', str(base / 'prog')), capture_output=True, text=True,
+                              env=env, cwd=self.work, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stderr, '')
+        self.assertLess(time.monotonic() - started, 6)
+        thread.join(10)
+
+    def test_server_death_falls_back_silently(self):
+        runtime = Path(tempfile.mkdtemp(prefix='ails'))
+        self.addCleanup(shutil.rmtree, runtime, True)
+        env, base = self.environment(True, runtime=runtime)
+        thread = self.fake_server(runtime, env, 'crash')
+        done = subprocess.run(self.command('compile', 'hello.py', '-o', str(base / 'prog')), capture_output=True, text=True,
+                              env=env, cwd=self.work, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertEqual(done.stderr, '')
+        thread.join(10)
+
     def test_idle_exit(self):
         (self.work / 'hello.py').write_text(HELLO)
         runtime = Path(tempfile.mkdtemp(prefix='ails'))
         self.addCleanup(shutil.rmtree, runtime, True)
         self.assertEqual(self.build(['compile', 'hello.py', '-o', '{OUT}'], True, {'AIL_SERVER_IDLE': '2'}, runtime=runtime)[0], 0)
+        self.wait_for_sockets(1, runtime)
         sockets = self.sockets(runtime)
-        self.assertEqual(len(sockets), 1)
         self.assertTrue(wait_for(lambda: not sockets[0].exists(), 20), 'the idle server did not exit')
 
     def test_identity_names_what_the_template_froze(self):
@@ -285,6 +416,7 @@ class CopiedTree(ServerBase):
                                                                       'array_t2_cases', 'bigint_cases', 'tests.d', 'tests'))
         (cls.work / 'hello.py').write_text(HELLO)
         cls.first = cls.build(['compile', 'hello.py', '-o', '{OUT}'], True)       # starts the server of the unmodified copy
+        cls.wait_for_sockets(1)
         cls.sockets_before = cls.sockets()
         pyc = cls.tree / 'python/pkg-v12/pyc.py'
         text = pyc.read_text(encoding='utf-8')
@@ -293,13 +425,13 @@ class CopiedTree(ServerBase):
         chat.write_text(chat.read_text(encoding='utf-8').replace(
             'timeout=660, env=environment', 'timeout=float(os.environ.get("AIL_TEST_TIMEOUT", "660")), env=environment'), encoding='utf-8')
 
-    def test_0_unmodified_copy_was_served(self):
+    def test_0_unmodified_copy_started_the_server(self):
         self.assertEqual(self.first[0], 0)
         self.assertEqual(len(self.sockets_before), 1)
 
     def test_source_change_means_a_new_server(self):
         self.assertEqual(self.build(['compile', 'hello.py', '-o', '{OUT}'], True)[0], 0)
-        self.assertEqual(len(self.sockets()), 2)
+        self.wait_for_sockets(2)
         self.assertNotEqual(self.sockets()[0], self.sockets()[1])
         # and the new one runs the new code
         plain, _ = self.same(['compile', 'hello.py', '-o', '{OUT}'], extra={'AIL_TEST_PYC': 'crash'})
