@@ -106,6 +106,28 @@ def _merge(a, b):
     return UNKNOWN
 
 
+_ANNOTATION_KINDS = {INT: INT, FLOAT: FLOAT, STR: STR, BOOL: BOOL}
+_LIST_ANNOTATION_KINDS = {'int': LIST_INT, 'float': LIST_FLOAT, 'str': LIST_STR}
+
+
+def _annotation_kind(node):
+    """The kind a return annotation names, for the four scalar spellings and `list[T]`.
+
+    An annotation is only a hint -- CPython does not enforce it -- so this only fills a slot the
+    body's own evidence left UNKNOWN; `_merge` still turns a contradiction into UNKNOWN.  Nested
+    and tuple-shaped annotations have no kind in this pass's vocabulary and stay UNKNOWN."""
+    if isinstance(node, ast.Name):
+        return _ANNOTATION_KINDS.get(node.id, UNKNOWN)
+    if isinstance(node, ast.Subscript):
+        base = node.value
+        base_name = (base.id if isinstance(base, ast.Name)
+                     else base.attr if isinstance(base, ast.Attribute) else None)
+        item = node.slice
+        if base_name in ('list', 'List') and isinstance(item, ast.Name):
+            return _LIST_ANNOTATION_KINDS.get(item.id, UNKNOWN)
+    return UNKNOWN
+
+
 class _FnFacts:
     __slots__ = ('node', 'params', 'locals', 'ret', 'is_bool_ret', 'exc_capable', 'exc_reason')
 
@@ -113,8 +135,9 @@ class _FnFacts:
         self.node = node
         self.params = {a.arg: UNKNOWN for a in node.args.args}
         self.locals = {}
-        self.ret = UNKNOWN
-        self.is_bool_ret = False
+        ret = _annotation_kind(node.returns) if node.returns is not None else UNKNOWN
+        self.ret = ret
+        self.is_bool_ret = ret == BOOL
         self.exc_capable = False
         self.exc_reason = None
 
@@ -150,12 +173,25 @@ _TRAP_EXC = {ast.Div: 'ZeroDivisionError', ast.FloorDiv: 'ZeroDivisionError', as
 _SHIFT_EXC = {ast.LShift: 'ValueError', ast.RShift: 'ValueError'}
 
 
+def _numeric_constant(node):
+    """A numeric literal's value, including a unary sign (`-3`, `+2`)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _numeric_constant(node.operand)
+        if value is not None:
+            return -value if isinstance(node.op, ast.USub) else value
+    return None
+
+
 def _provably_nonzero(node):
-    return isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and node.value != 0
+    value = _numeric_constant(node)
+    return value is not None and value != 0
 
 
 def _provably_nonnegative(node):
-    return isinstance(node, ast.Constant) and isinstance(node.value, int) and node.value >= 0
+    value = _numeric_constant(node)
+    return isinstance(value, int) and value >= 0
 
 
 def _build_parents(tree):
@@ -746,10 +782,16 @@ def analyze(source, classes=()):
     indirect |= _indirect_names(tree, fn_facts, parents)
     report = MixReport()
     rets = {name: f.ret for name, f in fn_facts.items()}
-    # One C return ABI cannot preserve distinct Python tags on different branches.
+    # One C return ABI cannot preserve distinct Python tags on different branches.  A return whose
+    # own expression the pass cannot type takes the function's annotation instead: the annotation
+    # is only a hypothesis and `to_c` still has the final say, while a branch whose inferred kind
+    # contradicts the annotation stays a refusal.
+    def _return_kind(n, f):
+        kind = _expr_kind(n.value, f, rets) if n.value is not None else UNKNOWN
+        return f.ret if kind is UNKNOWN and f.ret is not UNKNOWN else kind
     unsafe_returns = {
         name for name, f in fn_facts.items() if name != MODULE_SCOPE
-        and {_expr_kind(n.value, f, rets) for n in ast.walk(f.node)
+        and {_return_kind(n, f) for n in ast.walk(f.node)
              if isinstance(n, ast.Return)} != {f.ret}
     }
     # A typed caller also compiles its callees, so leaving only the callee boxed is insufficient.

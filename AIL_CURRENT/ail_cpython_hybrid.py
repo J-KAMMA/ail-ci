@@ -62,16 +62,37 @@ def _own_nodes(fn):
             stack.extend(ast.iter_child_nodes(node))
 
 
+def _constant_value(node):
+    """The value of a numeric literal, including its unary sign (`-3`, `+2`)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _constant_value(node.operand)
+        if value is not None:
+            return -value if isinstance(node.op, ast.USub) else value
+    return None
+
+
+def _nonzero_constant(node):
+    """A literal divisor this pass can prove nonzero (`t % 8`, `x // -3`)."""
+    value = _constant_value(node)
+    return value is not None and value != 0
+
+
 def _unsafe_body(fn):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
     subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), a
     call (an arbitrary side effect or exception), and `raise`/`assert`/`try`/`with`/import are all
-    outside this pass.  This is deliberately conservative; a missed speed-up is safe."""
+    outside this pass.  A division, floor division or modulo by a literal nonzero divisor cannot
+    raise, so it stays eligible.  This is deliberately conservative; a missed speed-up is safe."""
     for node in _own_nodes(fn):
         if isinstance(node, ast.Subscript):
             return 'indexing can raise'
         if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
+            if (isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod))
+                    and _nonzero_constant(node.right)):
+                continue
             return 'division or power can raise'
         if isinstance(node, ast.Call):
             return 'a call can raise or have side effects'

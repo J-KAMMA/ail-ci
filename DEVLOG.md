@@ -1,3 +1,20 @@
+## 2026-11-01 -- typed reach for eight real programs (job-prog2-11020344)
+
+Profiled the eight programs in `lab/progfix/prog2.md` and closed the two smallest blockers found
+there. `pymix` now lets a return annotation fill a return kind the body's evidence left unknown
+(a branch contradicting the annotation still refuses), which puts `t079.reverse_words` on the typed
+path. The CPython hybrid now accepts `/`, `//` and `%` by a literal nonzero constant, since those
+cannot raise `ZeroDivisionError`, so `t408.state_at` (`t % 8`) is accelerated; a variable divisor
+still stays in CPython. `pymix._provably_nonzero` reads a unary sign too, so `t // -3` is no longer
+mistaken for a possible `ZeroDivisionError` when the helper is used as a value or under a boxed
+`try/except`. The remaining hot functions need nested `list[list[T]]` /
+`list[tuple[...]]` parameters, a `dict`/tuple result, a scalar `int | None` local or a set
+comprehension of `str`; each is recorded with its exact message in `lab/progfix/prog2.md`.
+`test_ail_prog2.py` (registered through `tests.d/test_ail_prog2.txt`) compares the typed and general
+`reverse_words` builds with CPython over seven inputs, checks the annotation-contradiction refusal,
+and verifies the hybrid's `state_at` acceleration and the non-accelerated variable modulo. Probes
+`/tmp/probes/rev.py` and `/tmp/probes/rev.in` matched CPython on both `cmp.sh` builds.
+
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
