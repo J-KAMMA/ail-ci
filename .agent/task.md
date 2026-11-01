@@ -6,46 +6,57 @@
 
 --- LAST REVIEW ---
 ## review 1
+(free quota used up; paid model from here)
 [model opencode-go/deepseek-v4.1-flash]
-## Review: `job decexact2` (Decimal/Fraction exact internals in int64 mode)
+## Review: `job decexact2` (property store follow-up)
 
-**What the change really does.** Adds `exact_depth` to the runtime: overflow in `+ - * unary- // << **` and int-from-string construction promotes to a big int only when `exact_depth > 0` (or in `--exact-int`, where `main` starts it at 1). A program using Decimal/Fraction is forced onto the big-int runtime (`pyboxed2.build`); prelude functions/methods enter/leave the depth and scan their return value for a big int when leaving to user code. Fraction's fields become `_n`/`_d` with `numerator`/`denominator` properties. This matches the report.
+**What the change really does.** Commit `4d02142` rewrites every successful `return AIL_OK` in an exact prelude function to run `ail_exact_visible` before leaving the exact depth, and makes a store to a getter-only property raise `AttributeError` naming the run-time class instead of silently setting an instance attribute. Commit `0c187ff` adds `_class_defines_plain_attr` and uses it, for read and store, to let a subclass's plain class attribute shadow an inherited property. This broadly matches the report, but the shadow test excludes the property owner class itself.
 
-**Verified (probes run with `cmp.sh` on HEAD and `/tmp/base_w2`):**
-- Acceptance values (`p_accept`): both builds match CPython for `1/3`, `sqrt`, `10.50*3`, `2**100`, prec 50, `1e30+1`, Fraction cases.
-- Visible ints: `int()`, `__int__`, `__trunc__`, `__floor__`, `__ceil__`, `as_integer_ratio`, `.numerator`, `.denominator`, `round(Decimal(...))` stop loudly in int64 mode; `int(Decimal(2)**62)` works, `**63` stops, `INT64_MIN` works. `as_tuple` refused by name identically to base (pre-existing).
-- Exact mode: `p_ratio_dec`, `p_num`, `p_int_dec`, `p_userbig2` with `AIL_EXACT_INT=1` match CPython.
-- No depth leak after a Decimal exception; user code still stops on `x**100` after a Decimal call.
-- No-Decimal C: `program.c` byte-identical base vs HEAD for all 10 `lab/compare` `main.ail` and the 6 `main.py` that build; report JSON differs only in temp paths.
-- Tests: `test_ail_int64_default`, `test_ail_stdtop1`, `test_ail_safetynet` all pass (542 s); `update_manifest.py --check` clean.
+**Probes (HEAD, both `g`/`d`; base `/tmp/base` where needed):**
+- Early-return leaks fixed: `p1_roundfrac`, `p2_floordivfrac`, `p3_dec_mathfloor`, `p4_leaktyped`, `p5_hashfrac` all stop with `OverflowError: integer overflow in int()`, exit 1. Verified.
+- Subclass plain attribute: `p14_subplain`, `p15_subplain2`, `p23_annshadow`, `p26_setter_plain_deep` match CPython; `p16_submsg` matches the run-time class name. Verified.
+- `p27_frac_ro_via` (attribute, list item, dict value): matches. `p_prop_setter_inherit`, `p_deeper_prop` match.
+- Non-feature program: `plain.py` `program.c` byte-identical base vs HEAD. Verified.
+- **New defect found:** `/tmp/rprobes/p_sameclass_after.py`:
 
-**Claims / false:** DEVLOG/DIFFERENCES say `int()`, `__trunc__`, `__floor__`, `__ceil__`, `__round__` and `as_integer_ratio` are "covered by the same return check". False: the guard is inserted only before the function's final `return AIL_OK` (`pyboxed2.py:4263-4267`), so source-level early returns bypass it.
+```python
+class A:
+    @property
+    def x(self):
+        return 1
+    x = 0
+a = A()
+print(a.x)
+a.x = 5
+print(a.x)
+```
 
-### Defects
-1. Big ints escape to user code through prelude early returns, enabling arbitrary-precision *user* arithmetic (the behaviour the task forbids).
-   - `p_roundfrac.py`: `print(round(Fraction(2) ** 100))` — expected named stop (base: `OverflowError: integer overflow in **`); actual HEAD: exit 0, prints `1267650600228229401496703205376`.
-   - `p_floordivfrac.py`: `print((Fraction(2) ** 100) // 1)` — expected stop; actual prints the big int, exit 0.
-   - `p_dec_mathfloor.py`: `math.floor(Decimal(2) ** 100)` / `math.ceil(...)` — expected stop; actual prints `1267650600228229401496703205000` (the `_ail_dec_floor` helper's early return leaks it).
-   - `p_leaktyped.py`: leaked `n = (Fraction(2)**100) // 1` then `print(add(n, 1))` — expected stop; actual prints `1267650600228229401496703205377` (base stopped). Same leak works through a list item, dict value and `n+1`, `n*2`, `n%7`.
-   Cause: `Fraction.__floordiv__`/`__round__` (and the stdtop `_ail_dec_floor`/`_ail_dec_ceil` helpers) return from inside `if` branches; only the tail return gets `ail_exact_visible`.
-2. Minor: `Fraction(1,2).numerator = 3` silently succeeds and has no effect; CPython raises `AttributeError`. Base also differed (it allowed it with effect), so this is a new mismatch, not a fixed defect.
+  CPython: `0`, `5`, exit 0. HEAD (both builds): `1`, then `AttributeError: property 'x' of 'A' object has no setter`, exit 1. Base: `1`, `1`, exit 0. So the exit-1 is caused by this change. Same for the subclass form `/tmp/rprobes/p_attr_after_prop2.py` (CPython `4`,`8`; HEAD `3`, then the same AttributeError; base `3`,`3`, exit 0).
 
-**Pre-existing:** `Decimal.as_tuple()` refused by name on both base and HEAD; `Fraction.numerator` assignment was already non-CPython on base.
+**Pre-existing (same on base and HEAD, does not block):**
+- Reading an inherited property when a subclass defines a plain *method* of the same name still returns the property value (e.g. `p_submethod_read`: `B 1` vs CPython's bound method).
+- Reading a class-body attribute assigned after a `@property` of the same name returns the getter (`...+after`: `1`/`3` vs CPython `0`/`4`). Only the read is pre-existing; the new store error above is not.
+- `hash(Fraction(1,3))` differs (`p6_legit`).
+- `del f.numerator` is refused at compile time (`not in the subset: del on a Attribute`).
 
-**Unverified:** gdev `icount` runs (non-Decimal `program.c` is byte-identical, so no run-count change expected); Decimal paths beyond those probed.
+**Claims:** early-return leaks — verified; `Fraction.numerator` assignment — verified by `test_read_only_property_assignment_stops`; subclass plain-attribute shadowing — verified for `p14`/`p15`; run-time type in inherited errors — verified; `p18`/`p19`/`p20` — unverified (files absent); `p_accept`/`p_frac_small`/`p_exact_ret` — unverified directly (acceptance tests pass); "5 modules, 552 s" — I reran only the changed module plus safetynet; `update_manifest.py --check` — verified clean.
+
+**Tests:** `test_ail_int64_default` + `test_ail_safetynet` on HEAD: 2 modules, 407 s, 0 failed. Other three modules were not rerun.
+
+**Unverified:** snapshot/`icount` (non-Decimal C is byte-identical, so no change expected); `p18`–`p20`; the other three test modules.
 
 VERDICT: FIX
-1. Apply the `exact_depth == 1` visibility check to every successful return of a Decimal/Fraction prelude function, not only the final tail return (at minimum `Fraction.__floordiv__`, `Fraction.__round__`, `Fraction.__hash__`, and the stdtop `_ail_dec_floor`/`_ail_dec_ceil` helpers); otherwise `round(Fraction(2)**100)`, `(Fraction(2)**100)//1`, `math.floor/ceil(Decimal(2)**100)` print big ints and user code then computes with them exactly in int64 mode. Expected: loud `OverflowError: integer overflow in int()` (exit 1); actual: exit 0 with the big value printed.
-[cost $0.0400, opencode tokens {"total": 2647079, "input": 99057, "output": 9222, "reasoning": 20144, "cache.write": 0, "cache.read": 2518656}]
-    tool time: bash 51.2 min
-        608s bash   cd /tmp/rprobes && for p in p_accept p_int_dec p_int_frac p_ratio_dec p_ratio_frac p_num p_den p_round p_trunc
-        543s bash   cd /home/runner/work/_temp/w2 && timeout 1500 python3 tools/par_check.py -j 2 test_ail_int64_default test_ail_
-        470s bash   cd /tmp && rm -rf cdiff && mkdir cdiff && cd cdiff && for f in /home/runner/work/_temp/w2/lab/compare/src/*/ma
-        341s bash   cd /tmp/rprobes && for p in p_roundfrac p_mathfloorfrac p_floordivfrac p_intfrac p_num p_floor2 p_ratio_frac p
-        330s bash   cd /tmp/rprobes && cat > p_boundary.py <<'EOF' from decimal import Decimal from fractions import Fraction prin
-        243s bash   cd /tmp/rprobes && cat > p_floor2.py <<'EOF' from fractions import Fraction print((Fraction(2) ** 100).__floor
-        123s bash   cd /tmp/rprobes && for n in p_dec_mathfloor p_decint p_divmodfrac p_roundfrac2; do :; done cat > p_dec_mathflo
-         99s bash   cd /tmp/rprobes && cat > p_leak2.py <<'EOF' import sys from decimal import Decimal try:     Decimal(1) / Decim
+1. A class that assigns a plain class attribute after a getter-only `@property` of the same name no longer stores to the instance: HEAD raises `AttributeError: property 'x' of 'A' object has no setter` (exit 1), while CPython stores and prints (`p_sameclass_after.py`: expected `0\n5\n`, actual HEAD `1\nAttributeError...`; base exits 0). The store blockers only consider more-derived classes (`d != c`), so the owner's own later plain binding is ignored; include the owner when `_class_defines_plain_attr(c, attr)` is true (same for the read path, which already reads the property instead of the class attribute on base too).
+[cost $0.0217, opencode tokens {"total": 947361, "input": 46332, "output": 4993, "reasoning": 15268, "cache.write": 0, "cache.read": 880768}]
+    tool time: bash 11.5 min
+        408s bash   date; cd /home/runner/work/ail-ci/ail-ci && timeout 2400 python3 tools/par_check.py -j 2 test_ail_int64_defaul
+        156s bash   cd /tmp/rprobes && for p in p1_roundfrac p2_floordivfrac p3_dec_mathfloor p4_leaktyped p5_hashfrac p6_legit; d
+         68s bash   cd /tmp/rprobes && cat p6_legit.py; echo ===; timeout 600 bash ~/tools/cmp.sh /tmp/rprobes/p6_legit.py /tmp/ba
+         20s bash   date; cd /tmp/rprobes && for p in p23_annshadow p26_setter_plain_deep p27_frac_ro_via; do echo "##### $p HEAD"
+         17s bash   cd /tmp/rprobes && for p in p_submethod_read p_deeper_prop p_prop_setter_inherit p_del_roprop p_attr_after_pro
+          8s bash   cd /tmp/rprobes && cat > p_attr_after_prop2.py <<'EOF' class A:     @property     def x(self):         return 
+          6s bash   date; cd /tmp/rprobes && for p in p14_subplain p15_subplain2 p16_submsg p18_subplain_mixed p19_subplain_setter
+          4s bash   date; cd /tmp/rprobes && cat > p_sameclass_after.py <<'EOF' class A:     @property     def x(self):         re
 
 
 --- ORIGINAL TASK ---
