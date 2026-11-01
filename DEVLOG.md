@@ -16,6 +16,11 @@ match CPython 3.12 stdout and exit code on `AIL_IR=0` and `AIL_IR=1`.  All 10 `l
 stay byte-identical to base.  Tests on the final commit: test_ail_std_re, test_ail_re, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3.
 
+Follow-up after review 2: the `_ail_re_any` receiver change landed without a manifest update, so
+`update_manifest.py --check` still failed.  The shards for `ail_syntax.py`, `python/pkg-v12/relib.py` and
+`test_ail_std_re.py` are now regenerated; `--check` exits 0.  The stale inline comment that called the
+helper parameter `object` is corrected.
+
 ## 2026-11-01 -- std_re: findall tuples, split groups, subn templates and match tuple values (job-std_re-11011833)
 
 Added 12 real `re` programs in `lab/stdlib/re/` (log parsing, validation, templating, CSV fields,
