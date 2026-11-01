@@ -1,3 +1,20 @@
+## 2026-11-01 -- `numbers` review fixes: subclasses, name collisions, tuples, value use
+
+Fixed the four review defects in `numberslib.py`. The runtime classifier now tests the actual
+injected `Fraction` / `Decimal` classes (only when those modules are imported), so a subclass of
+`fractions.Fraction` is Rational/Real/Number and a user class merely named `Fraction` / `Decimal`
+is not. A class whose base resolves to the real `Fraction` / `Decimal` is classified the same way
+statically. `isinstance` tuples are flattened recursively and left untouched when they contain no
+`numbers.*` element, so an ordinary `(A, B)` works in a numbers program and nested number tuples
+classify. Using `numbers.X` as a plain value is refused by name as the module docstring says;
+class bases and annotations still reference the injected classes.
+
+Probes `/tmp/probes/num_*` (fraction routes and aliases, user-named classes, plain/nested tuples,
+value refusal, bases/annotations, kinds through list/dict, registered subclass) match CPython or
+are refused by name on both `cmp.sh` builds. `test_ail_std_numbers` gained regression cases and
+passes with `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and
+`test_ail_stdlib5`.
+
 ## 2026-11-01 -- CPython `numbers` ABCs on the general path (job-std_numbers-11020026)
 
 Added `numbers` as a library batch-5 module: `prelude_numbers.py` supplies Number, Complex,

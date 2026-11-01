@@ -33,6 +33,61 @@ REFUSED = {
     "complex_literal.py": "a constant of type complex",
 }
 
+REGRESSIONS = {
+    "fraction_subclass.py": """import numbers
+from fractions import Fraction
+
+class Half(Fraction):
+    pass
+
+def main():
+    h = Half(1, 2)
+    print(h, isinstance(h, numbers.Rational), isinstance(h, numbers.Real))
+    print(issubclass(Half, numbers.Rational), issubclass(Half, numbers.Real))
+
+main()
+""",
+    "user_named_fraction.py": """import numbers
+
+class Fraction:
+    def __init__(self, n):
+        self.n = n
+
+class Decimal:
+    def __init__(self, s):
+        self.s = s
+
+def main():
+    f = Fraction(1)
+    d = Decimal("2")
+    print(isinstance(f, numbers.Rational), isinstance(f, numbers.Real))
+    print(isinstance(d, numbers.Number), isinstance(d, numbers.Real))
+    print(issubclass(Fraction, numbers.Rational), issubclass(Decimal, numbers.Number))
+
+main()
+""",
+    "tuple_and_nested.py": """import numbers
+
+class A:
+    pass
+
+class B:
+    pass
+
+def main():
+    a = A()
+    b = B()
+    print(isinstance(a, (A, B)), isinstance(1, (A, B)))
+    print(isinstance(1, ((numbers.Integral,),)))
+    print(isinstance(1.5, (A, (numbers.Real, B))))
+    print(isinstance(b, (A, (numbers.Real, B))))
+
+main()
+""",
+}
+
+VALUE_REFUSED = "numbers.Real used as a plain value is not built"
+
 
 def build(directory, name, env=None):
     exe = name[:-3]
@@ -57,6 +112,28 @@ class NumbersLabTests(unittest.TestCase):
                 self.assertEqual(expected.returncode, 0, expected.stderr)
                 self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout),
                                  ran.stderr[:500])
+
+    def test_review_regressions(self):
+        for name, source in REGRESSIONS.items():
+            with self.subTest(program=name), tempfile.TemporaryDirectory() as directory:
+                path = Path(directory, name)
+                path.write_text(source)
+                built, exe = build(directory, name)
+                self.assertEqual(built.returncode, 0, built.stdout + built.stderr)
+                ran = subprocess.run([str(exe)], capture_output=True, timeout=300)
+                expected = subprocess.run([sys.executable, str(path)], capture_output=True, timeout=300)
+                self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout),
+                                 ran.stderr[:500])
+
+    def test_numbers_value_is_refused_by_name(self):
+        with tempfile.TemporaryDirectory() as directory:
+            name = "value_ref.py"
+            Path(directory, name).write_text(
+                "import numbers\n\ndef main():\n    print(numbers.Real)\n\nmain()\n")
+            built, exe = build(directory, name)
+            self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
+            self.assertIn(VALUE_REFUSED, built.stdout + built.stderr)
+            self.assertFalse(exe.exists())
 
     def test_followups_are_refused_by_name(self):
         for name, wanted in REFUSED.items():

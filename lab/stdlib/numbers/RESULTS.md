@@ -54,7 +54,11 @@ comparison. No refusal remains for those features.
   builtin types, the ABCs, Fraction/Decimal and classes defined in the program (including
   `issubclass(type(x), ABC)`); `numbers.X.register(Cls)` and `@numbers.X.register` add the
   corresponding base to a class defined in the same program and return that class, as CPython's
-  `register` does.
+  `register` does. The runtime classifier tests the actual injected `Fraction` / `Decimal`
+  classes when those modules are imported, so a subclass of `fractions.Fraction` is a
+  Rational/Real/Number and a user class that merely has the same name is not one. `isinstance`
+  tuples are flattened recursively; a tuple with no `numbers.*` element is left to the ordinary
+  `isinstance`, and a `numbers` class used as a plain value is refused by name.
 * `python/pkg-v12/stdlib5.py` and `ail_syntax.py`: `numbers` joined the batch-5 word list and
   the surface gate, so the pass runs before the other source passes.
 

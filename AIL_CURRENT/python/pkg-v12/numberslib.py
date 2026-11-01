@@ -59,7 +59,7 @@ def simple(node):
     return isinstance(node, (ast.Name, ast.Constant))
 
 
-def class_kinds(tree, binder, extra):
+def class_kinds(tree, binder, extra, actual_kind):
     """For every class defined at the top level, the set of numbers kinds it is a subclass of.  `extra`
     maps a class name to kinds added by register()."""
     defs = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
@@ -73,15 +73,12 @@ def class_kinds(tree, binder, extra):
         seen = seen | {name}
         out = set()
         for base in defs[name].bases:
-            k = kind_of(base, binder)
+            k = actual_kind(base)
             if k is not None:
                 out |= ANCESTORS[k]
                 continue
-            if isinstance(base, ast.Name):
-                if base.id in KIND:
-                    out |= ANCESTORS[KIND[base.id]]
-                elif base.id in defs:
-                    out |= of(base.id, seen)
+            if isinstance(base, ast.Name) and base.id in defs:
+                out |= of(base.id, seen)
         out |= extra.get(name, set())
         memo[name] = out
         return out
@@ -102,6 +99,20 @@ def run(tree, text):
 
     defs = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
     extra = {}
+    mods = stdlib5.imported_modules(tree)
+    frac_binder = stdlib5.peek_imports(tree, 'fractions') if 'fractions' in mods else None
+    decimal_binder = stdlib5.peek_imports(tree, 'decimal') if 'decimal' in mods else None
+
+    def actual_kind(node):
+        """The numbers kind a class expression names: an ABC, or the real Fraction / Decimal class."""
+        found = kind_of(node, binder)
+        if found is not None:
+            return found
+        if frac_binder is not None and frac_binder.attr(node) == 'Fraction':
+            return 4
+        if decimal_binder is not None and decimal_binder.attr(node) == 'Decimal':
+            return 1
+        return None
 
     def register_target(node):
         if isinstance(node, ast.Name) and node.id in defs:
@@ -159,12 +170,12 @@ def run(tree, text):
             if target is not None:
                 add_base(target, kind_of(each.func.value, binder))
 
-    kinds_of = class_kinds(tree, binder, extra)
+    kinds_of = class_kinds(tree, binder, extra, actual_kind)
     used = set()
 
     def static_issubclass(first, target_kinds):
         """True/False when the first argument names a class known at compile time, else None."""
-        k = kind_of(first, binder)
+        k = actual_kind(first)
         if k is not None:
             have = ANCESTORS[k]
         elif isinstance(first, ast.Name):
@@ -177,10 +188,6 @@ def run(tree, text):
                 have = ANCESTORS[KIND[name]]
             elif name in defs:
                 have = kinds_of(name)
-            elif name == 'Fraction' and 'fractions' in stdlib5.imported_modules(tree):
-                have = ANCESTORS[4]
-            elif name == 'Decimal' and 'decimal' in stdlib5.imported_modules(tree):
-                have = ANCESTORS[1]
             else:
                 return None
         else:
@@ -201,34 +208,33 @@ def run(tree, text):
                     and not node.keywords:
                 kinds = []
                 rest = []
-                if isinstance(node.args[1], ast.Tuple):
-                    for elt in node.args[1].elts:
-                        k = kind_of(elt, binder)
-                        if k is None:
-                            rest.append(self.visit(elt))
-                        else:
-                            kinds.append(k)
-                else:
-                    k = kind_of(node.args[1], binder)
-                    if k is not None:
-                        kinds.append(k)
+
+                def split(spec):
+                    if isinstance(spec, ast.Tuple):
+                        for elt in spec.elts:
+                            split(elt)
+                        return
+                    k = kind_of(spec, binder)
+                    if k is None:
+                        rest.append(self.visit(spec))
                     else:
-                        rest.append(self.visit(node.args[1]))
+                        kinds.append(k)
+
+                split(node.args[1])
+                if not kinds:
+                    return self.generic_visit(node)
                 value = self.visit(node.args[0])
-                if kinds:
-                    used.add('isinstance')
-                    if not rest:
-                        return ast.copy_location(kinds_expression(kinds, value, node.lineno), node)
-                    if simple(node.args[0]):
-                        other = rest[0] if len(rest) == 1 else ast.Tuple(elts=rest, ctx=ast.Load())
-                        parts = [kinds_expression(kinds, value, node.lineno),
-                                 ast.Call(func=ast.Name(id='isinstance', ctx=ast.Load()), args=[value, other],
-                                          keywords=[])]
-                        return ast.copy_location(ast.BoolOp(op=ast.Or(), values=parts), node)
-                    refuse(node, 'isinstance() with a numbers class mixed with other types needs a plain name as '
-                           'its value here; test the numbers classes in a separate isinstance() call')
-                return ast.copy_location(ast.Call(func=self.visit(node.func), args=[value] + rest,
-                                                  keywords=[self.visit(k) for k in node.keywords]), node)
+                used.add('isinstance')
+                if not rest:
+                    return ast.copy_location(kinds_expression(kinds, value, node.lineno), node)
+                if simple(node.args[0]):
+                    other = rest[0] if len(rest) == 1 else ast.Tuple(elts=rest, ctx=ast.Load())
+                    parts = [kinds_expression(kinds, value, node.lineno),
+                             ast.Call(func=ast.Name(id='isinstance', ctx=ast.Load()), args=[value, other],
+                                      keywords=[])]
+                    return ast.copy_location(ast.BoolOp(op=ast.Or(), values=parts), node)
+                refuse(node, 'isinstance() with a numbers class mixed with other types needs a plain name as '
+                       'its value here; test the numbers classes in a separate isinstance() call')
             # issubclass(first, numbers-kind or a tuple of only them)
             if isinstance(node.func, ast.Name) and node.func.id == 'issubclass' and len(node.args) == 2 \
                     and not node.keywords:
@@ -260,34 +266,98 @@ def run(tree, text):
 
     tree.body = [Fix().visit(stmt) for stmt in tree.body]
 
-    # the remaining names of the module are the injected classes
+    # The injected classes are only the values of class bases and annotations.  Any other use of a
+    # numbers name is refused: the injected classes are plain classes, so their repr and module would not
+    # be CPython's.
     def class_name(node):
         found = binder.attr(node)
         if found in KIND:
             return ast.Name(id=found, ctx=ast.Load())
         return None
-    tree.body = [stdlib5.Replace(lambda n: class_name(n)).visit(stmt) for stmt in tree.body]
-    binder.names.clear()
-    stdlib5.leftover(tree, binder, 'Number, Complex, Real, Rational and Integral are the names that are built')
 
+    def check_values(node):
+        if isinstance(node, ast.ClassDef):
+            for dec in node.decorator_list:
+                check_values(dec)
+            for kw in node.keywords:
+                check_values(kw)
+            for stmt in node.body:
+                check_values(stmt)
+            return
+        if isinstance(node, ast.arg):
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for dec in node.decorator_list:
+                check_values(dec)
+            check_values(node.args)
+            for stmt in node.body:
+                check_values(stmt)
+            return
+        if isinstance(node, ast.AnnAssign):
+            check_values(node.target)
+            if node.value is not None:
+                check_values(node.value)
+            return
+        found = binder.attr(node)
+        if found is not None:
+            refuse(node, 'numbers.%s used as a plain value is not built: use it in isinstance(), issubclass(), '
+                   'register(), a class base or an annotation' % found)
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load) and node.id in binder.aliases:
+            refuse(node, 'numbers used as a value is not built')
+        for child in ast.iter_child_nodes(node):
+            check_values(child)
+
+    class Allowed(ast.NodeTransformer):
+        def fix(self, node):
+            return stdlib5.Replace(lambda n: class_name(n)).visit(node)
+
+        def visit_ClassDef(self, node):
+            node.bases = [self.fix(base) for base in node.bases]
+            self.generic_visit(node)
+            return node
+
+        def visit_arg(self, node):
+            if node.annotation is not None:
+                node.annotation = self.fix(node.annotation)
+            return node
+
+        def visit_FunctionDef(self, node):
+            if node.returns is not None:
+                node.returns = self.fix(node.returns)
+            self.generic_visit(node)
+            return node
+
+        visit_AsyncFunctionDef = visit_FunctionDef
+
+        def visit_AnnAssign(self, node):
+            node.annotation = self.fix(node.annotation)
+            self.generic_visit(node)
+            return node
+
+    for stmt in tree.body:
+        check_values(stmt)
+    tree.body = [Allowed().visit(stmt) for stmt in tree.body]
+
+    fractions_check = ' or isinstance(v, Fraction)' if frac_binder is not None else ''
+    decimal_check = ' or isinstance(v, Decimal)' if decimal_binder is not None else ''
     kinds_helper = (
-        'def %s(v, k: int) -> bool:\n'
+        'def {h}(v, k: int) -> bool:\n'
         '    t = type(v).__name__\n'
         '    if k == 5:\n'
-        '        return t == "bool" or t == "int" or isinstance(v, Integral)\n'
+        '        return isinstance(v, int) or isinstance(v, Integral)\n'
         '    if k == 4:\n'
-        '        return %s(v, 5) or t == "Fraction" or isinstance(v, Rational)\n'
+        '        return {h}(v, 5){frac} or isinstance(v, Rational)\n'
         '    if k == 3:\n'
-        '        return %s(v, 4) or t == "float" or isinstance(v, Real)\n'
+        '        return {h}(v, 4) or isinstance(v, float) or isinstance(v, Real)\n'
         '    if k == 2:\n'
-        '        return %s(v, 3) or t == "complex" or isinstance(v, Complex)\n'
-        '    return %s(v, 2) or t == "Decimal" or isinstance(v, Number)\n\n'
-        'def %s(v, ks: list[int]) -> bool:\n'
+        '        return {h}(v, 3) or t == "complex" or isinstance(v, Complex)\n'
+        '    return {h}(v, 2){dec} or isinstance(v, Number)\n\n'
+        'def {i}(v, ks: list[int]) -> bool:\n'
         '    for k in ks:\n'
-        '        if %s(v, k):\n'
+        '        if {h}(v, k):\n'
         '            return True\n'
         '    return False\n'
-    ) % (HELPER, HELPER, HELPER, HELPER, HELPER, IN_HELPER, HELPER)
+    ).format(h=HELPER, i=IN_HELPER, frac=fractions_check, dec=decimal_check)
     if 'isinstance' not in used:
         # no classification call was lowered: the helper functions would be dead code
         kinds_helper = ''
