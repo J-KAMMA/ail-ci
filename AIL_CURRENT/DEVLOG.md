@@ -1,3 +1,9 @@
+## 2026-11-01 -- re-apply stdlib copy on top of the current tree (job-rbstd_copy-11020210)
+
+Re-applied the accepted `std_copy` change (`job-std_copy-11012212`) onto this tree, keeping the
+pprint keyword sets and identity fragment that landed here alongside the `copy.copy` / `copy.deepcopy`
+names, protocol refusal, `COPY` runtime and tests. The DEVLOG entries from both sides are kept below.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
@@ -79,6 +85,60 @@ function body does enough work; a C callable type is the next step for the closu
 Added `AIL_CURRENT/ail_cpython_hybrid.py`, `AIL_CURRENT/test_ail_cpython_hybrid.py` and
 `AIL_CURRENT/tests.d/test_ail_cpython_hybrid.txt`. Final-state tests: test_ail_cpython_hybrid,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+## 2026-11-01 -- stdlib copy: third review fix (job-std_copy-11012212)
+
+The `set` / `frozenset` deep copier now keeps CPython's original `__reduce_ex__` element list and the
+deep-copied list as two distinct objects: the copied list is memoised under the id of the original, and the
+original is what the keep-alive list holds. Previously one list served both roles, so mutating the memo's
+copied list through the documented `memo` argument also changed the kept-alive original
+(`rv_memo_alias`: `nested 3` instead of CPython's `nested 2`). `test_ail_std_copy` now prints the same
+aliasing check (`frozen alias 2`), and the review probes for memo counts, values and mutation match CPython on
+both builds.
+
+## 2026-11-01 -- stdlib copy: second review fixes (job-std_copy-11011617)
+
+`copy.copy` / `copy.deepcopy` now refuse two more copies-by-name instead of producing a wrong object. A class
+that defines `__getstate__` or `__setstate__` is part of CPython's copy protocol (`_reconstruct` calls them), so
+both names joined `_COPY_PROTOCOL`; the scan also catches hooks assigned after the class statement
+(`C.__copy__ = f`, `C.__deepcopy__: object = f`, `setattr(C, "__reduce__", f)`) and class-body assignments to
+those names, which were previously ignored and copied silently. The deep copier for `set` / `frozenset` now
+follows CPython's `__reduce_ex__` shape: it builds and memoises a temporary element list (and records it in the
+keep-alive list) before constructing the result, so an explicit `memo` reports the same three entries as
+CPython. Probes `rv_state` and `rv_dynamic` now refuse by name on both builds, and `rv_frozen` /
+`rv_frozen_vals` match CPython (`3 False True`, values `['frozenset', 'list', 'list']`); `test_ail_std_copy`
+covers the new refusals and the set/frozenset memo counts.
+
+## 2026-11-01 -- stdlib copy: review fixes (job-std_copy-11011617)
+
+Generators are refused by both copiers with CPython's `TypeError: cannot pickle 'generator' object` (also when
+they sit inside a deep-copied list or dict). The typed tuple-keyed table classes (`_AilD_...`) and tuple-element
+sets (`_AilS_...`) are rebuilt by both copiers as plain `dict` / `set` from their `ks` / `vs` / `live` lists, so a
+copy is iterable instead of raising `TypeError: '_AilD_...' object is not iterable`. A program that calls
+`copy.copy` / `copy.deepcopy` and defines `__copy__`, `__deepcopy__`, `__reduce__` or `__reduce_ex__` is now
+refused by name ("the copy protocol needs method dispatch and _reconstruct") instead of silently copying the
+instance (recorded as a follow-up in lab/stdlib/copy/RESULTS.md). `test_ail_std_copy` adds generator and
+tuple-table edges plus the protocol refusal.
+
+## 2026-11-01 -- stdlib copy: `copy.copy` and `copy.deepcopy` on the general path (job-std_copy-11011617)
+
+The general path now publishes `copy.copy` and `copy.deepcopy` (`genlib.py` names with their keyword sets) and
+implements them in `prelude_genlib.py` + `safetyrt.py` (`COPY`). Shallow copy returns the value itself for the
+immutable kinds (int, float, bool, str, bytes, tuple, frozenset, None) and a fresh list/dict/set/bytearray/instance
+otherwise; deep copy uses a memo plus CPython's keep-alive list keyed by the memo's own id, so shared references
+stay shared, cycles terminate, tuple keys and tuple self-references follow CPython's identity rule, and an explicit
+`memo=` is reused across calls. The wrappers give CPython's `TypeError`/`AttributeError` texts for a missing or
+extra argument, a duplicate keyword, a bad keyword and a non-dict memo; keyword `x=` and `memo=` are accepted. The
+`_bound_names` pass no longer treats a class-body `def` name as a module binding, so a method named like an
+imported library name does not hide the import.
+
+Twelve programs in `lab/stdlib/copy/` cover nested configs, shallow lists/dicts, shared references, cycles,
+plain objects, tuples/sets/frozensets, caught errors, an explicit memo, object lists and tuple dict keys.
+All twelve are recorded in `lab/stdlib/copy/RESULTS.md`: 12/12 build (general path) and match CPython's stdout
+and exit code on the default build and with `AIL_UNIFIED_FORCE=1`. The generated C of all ten `lab/compare`
+tasks (`main.ail`, and `main.py` where it builds) is byte-identical to the base. `test_ail_std_copy.py`
+registers the programs and an edge-case program (immutable scalars, bytes/bytearray, empty containers, aliasing,
+cycles and memo errors) through `tests.d/`. Probes in `/tmp/probes/copy_*.py` compare both builds: types,
+containers, mutation, cycles, memo, caught errors, instances and dict keys/sets all match CPython.
 
 ## 2026-11-01 -- int64 constant census: refusals named, safe folds kept
 

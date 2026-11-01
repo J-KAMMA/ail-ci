@@ -24,6 +24,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 
 # 'module.attr[.attr]' -> the name in the prelude
 TABLE = {
+    'copy.copy': '_ail_copy_copy',
+    'copy.deepcopy': '_ail_copy_deepcopy',
     'json.dumps': '_ail_json_dumps',
     'json.loads': '_ail_json_loads',
     'json.JSONDecodeError': 'JSONDecodeError',
@@ -82,6 +84,8 @@ KEYWORDS = {
     '_ail_pformat': {'indent', 'width', 'depth', 'compact', 'sort_dicts', 'underscore_numbers'},
     '_ail_pp': {'stream', 'indent', 'width', 'depth', 'compact', 'sort_dicts', 'underscore_numbers'},
     '_ail_PrettyPrinter': {'indent', 'width', 'depth', 'stream', 'compact', 'sort_dicts', 'underscore_numbers'},
+    '_ail_copy_copy': {'x'},
+    '_ail_copy_deepcopy': {'x', 'memo'},
     '_ail_json_dumps': {'skipkeys', 'ensure_ascii', 'check_circular', 'allow_nan', 'indent', 'separators',
                         'default', 'sort_keys'},
     '_ail_json_loads': {'object_hook', 'parse_float', 'parse_int', 'parse_constant', 'object_pairs_hook'},
@@ -167,11 +171,14 @@ MODULES = frozenset(k.split('.')[0] for k in TABLE) | {'functools'}
 def _bound_names(tree):
     """Every name the program itself binds (assignments, parameters, defs, classes, imports, loop and with targets)."""
     out = set()
+    in_class = {id(stmt) for c in ast.walk(tree) if isinstance(c, ast.ClassDef)
+                for stmt in c.body}
     for n in ast.walk(tree):
         if isinstance(n, ast.Name) and isinstance(n.ctx, (ast.Store, ast.Del)):
             out.add(n.id)
         elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            out.add(n.name)
+            if id(n) not in in_class:
+                out.add(n.name)
         elif isinstance(n, ast.arg):
             out.add(n.arg)
         elif isinstance(n, ast.ExceptHandler) and n.name:
@@ -488,6 +495,64 @@ def _module_names(tree):
     return out
 
 
+_COPY_PROTOCOL = frozenset(('__copy__', '__deepcopy__', '__reduce__', '__reduce_ex__',
+                            '__getstate__', '__setstate__'))
+
+
+def _copy_hook_label(target):
+    if isinstance(target, ast.Attribute) and target.attr in _COPY_PROTOCOL:
+        return ast.unparse(target)
+    return None
+
+
+def _refuse_copy_protocol(tree, used):
+    """A class that defines the copy protocol would be copied silently as a plain instance: refuse by name
+    instead (the protocol needs method dispatch and CPython's _reconstruct, which the general path does not
+    have).  Only programs that actually reach copy.copy / copy.deepcopy are affected."""
+    if not ({'_ail_copy_copy', '_ail_copy_deepcopy'} & used):
+        return
+
+    def refuse(label):
+        raise Unsupported('copy.copy()/copy.deepcopy() with %s is not built on the general '
+                          'path: the copy protocol needs method dispatch and _reconstruct' % label)
+
+    for cls in (n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)):
+        for stmt in cls.body:
+            if (isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef))
+                    and stmt.name in _COPY_PROTOCOL):
+                refuse('%s.%s' % (cls.name, stmt.name))
+            targets = []
+            if isinstance(stmt, ast.Assign):
+                targets = stmt.targets
+            elif isinstance(stmt, ast.AnnAssign) and stmt.value is not None:
+                targets = [stmt.target]
+            elif isinstance(stmt, ast.AugAssign):
+                targets = [stmt.target]
+            for target in targets:
+                if isinstance(target, ast.Name) and target.id in _COPY_PROTOCOL:
+                    refuse('%s.%s' % (cls.name, target.id))
+    # A hook assigned after the class statement (C.__copy__ = f, C.__deepcopy__: t = f) defines the same
+    # protocol at run time; the copier would ignore it.  setattr with a literal name is the same case.
+    for node in ast.walk(tree):
+        targets = []
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            targets = [node.target]
+        elif isinstance(node, ast.AugAssign):
+            targets = [node.target]
+        for target in targets:
+            label = _copy_hook_label(target)
+            if label is not None:
+                refuse(label)
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'setattr' and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and isinstance(node.args[1].value, str)
+                and node.args[1].value in _COPY_PROTOCOL):
+            refuse('%s' % ast.unparse(node.args[1]))
+
+
 def rewrite(tree):
     """Rename the library names of TABLE in `tree` (in place). Returns (prelude source text or '', names added)."""
     aliases, names = _imports(tree)
@@ -510,6 +575,7 @@ def rewrite(tree):
     tree.body = [r.visit(n) for n in tree.body]
     if not r.used:
         return '', set()
+    _refuse_copy_protocol(tree, r.used)
     for each in ast.walk(tree):
         # `import datetime` next to the class datetime: a use of the module that was not renamed would read the class
         if (isinstance(each, ast.Attribute) and isinstance(each.value, ast.Name) and each.value.id in aliases
