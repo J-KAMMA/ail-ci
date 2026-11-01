@@ -97,7 +97,9 @@ def literal(value):
     try:
         return ast.literal_eval(value)
     except (ValueError, SyntaxError, TypeError):
-        return None
+        pass
+    import pyfunc
+    return pyfunc.fold_int_constant(value)
 
 
 def run(tree, text):
@@ -232,14 +234,15 @@ def lower_class(cls, kind, binder, enums):
                 largest = lit if largest is None else max(largest, lit)
             dump = ast.dump(value)
             for target in targets:
-                for var, other in seen_values:
-                    if other == dump and lit is not None:
+                for var, other, other_lit in seen_values:
+                    if (other == dump and (lit is not None or len(targets) > 1)) or \
+                            (lit is not None and other_lit is not None and other_lit == lit):
                         info.aliases.append((target, var))
                         break
                 else:
                     var = info.var(target)
                     info.members.append((target, var))
-                    seen_values.append((var, dump))
+                    seen_values.append((var, dump, lit))
                     info.values[var] = (copy.deepcopy(value), index)
                     index += 1
                 info.entries.append((target, var))
@@ -407,9 +410,14 @@ def generated_flag(info):
     lines.append('def _ail_en_%s_iter(value):\n    out = []\n    num = value & %d\n    while num:\n'
                  '        b = num & (~num + 1)\n        out.append(_ail_en_%s_v2m.get(b))\n        num = num ^ b\n%s    return out'
                  % (n, fm, n, sort))
-    lines.append('def %s(v):\n    if isinstance(v, %s):\n        return v\n    if not isinstance(v, int):\n'
-                 '        raise ValueError(repr(v) + " is not a valid %s")\n    if v in _ail_en_%s_v2m:\n'
-                 '        return _ail_en_%s_v2m[v]\n    return _ail_en_%s_missing(v)' % (info.call, n, n, n, n, n))
+    if not info.members and not info.aliases:
+        message = ("<flag '%s'> has no members; specify `names=()` if you meant to create a new, empty, enum"
+                   % classname.qualified(info.name))
+        lines.append('def %s(v):\n    raise TypeError(%r)' % (info.call, message))
+    else:
+        lines.append('def %s(v):\n    if isinstance(v, %s):\n        return v\n    if not isinstance(v, int):\n'
+                     '        raise ValueError(repr(v) + " is not a valid %s")\n    if v in _ail_en_%s_v2m:\n'
+                     '        return _ail_en_%s_v2m[v]\n    return _ail_en_%s_missing(v)' % (info.call, n, n, n, n, n))
     if keep:
         boundary = ('    if not (~%d <= value <= %d) or value & %d != 0:\n        if value < 0:\n'
                     '            half = 1 << (value.bit_length() - 1)\n'

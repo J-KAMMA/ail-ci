@@ -269,35 +269,69 @@ class _AilStrEnum(_AilEnum):
     def swapcase(self) -> str:
         return self.value.swapcase()
 
-    def strip(self) -> str:
-        return self.value.strip()
+    def strip(self, chars=None) -> str:
+        if chars is None:
+            return self.value.strip()
+        return self.value.strip(chars)
 
-    def lstrip(self) -> str:
-        return self.value.lstrip()
+    def lstrip(self, chars=None) -> str:
+        if chars is None:
+            return self.value.lstrip()
+        return self.value.lstrip(chars)
 
-    def rstrip(self) -> str:
-        return self.value.rstrip()
+    def rstrip(self, chars=None) -> str:
+        if chars is None:
+            return self.value.rstrip()
+        return self.value.rstrip(chars)
 
-    def startswith(self, prefix: str) -> bool:
-        return self.value.startswith(prefix)
+    def startswith(self, prefix, start=0, end=None) -> bool:
+        if end is None:
+            if start == 0:
+                return self.value.startswith(prefix)
+            return self.value.startswith(prefix, start)
+        return self.value.startswith(prefix, start, end)
 
-    def endswith(self, suffix: str) -> bool:
-        return self.value.endswith(suffix)
+    def endswith(self, suffix, start=0, end=None) -> bool:
+        if end is None:
+            if start == 0:
+                return self.value.endswith(suffix)
+            return self.value.endswith(suffix, start)
+        return self.value.endswith(suffix, start, end)
 
-    def find(self, sub: str) -> int:
-        return self.value.find(sub)
+    def find(self, sub, start=0, end=None) -> int:
+        if end is None:
+            if start == 0:
+                return self.value.find(sub)
+            return self.value.find(sub, start)
+        return self.value.find(sub, start, end)
 
-    def rfind(self, sub: str) -> int:
-        return self.value.rfind(sub)
+    def rfind(self, sub, start=0, end=None) -> int:
+        if end is None:
+            if start == 0:
+                return self.value.rfind(sub)
+            return self.value.rfind(sub, start)
+        return self.value.rfind(sub, start, end)
 
-    def index(self, sub: str) -> int:
-        return self.value.index(sub)
+    def index(self, sub, start=0, end=None) -> int:
+        if end is None:
+            if start == 0:
+                return self.value.index(sub)
+            return self.value.index(sub, start)
+        return self.value.index(sub, start, end)
 
-    def rindex(self, sub: str) -> int:
-        return self.value.rindex(sub)
+    def rindex(self, sub, start=0, end=None) -> int:
+        if end is None:
+            if start == 0:
+                return self.value.rindex(sub)
+            return self.value.rindex(sub, start)
+        return self.value.rindex(sub, start, end)
 
-    def count(self, sub: str) -> int:
-        return self.value.count(sub)
+    def count(self, sub, start=0, end=None) -> int:
+        if end is None:
+            if start == 0:
+                return self.value.count(sub)
+            return self.value.count(sub, start)
+        return self.value.count(sub, start, end)
 
     def replace(self, old: str, new: str, count: int = -1) -> str:
         return self.value.replace(old, new, count)
@@ -308,35 +342,43 @@ class _AilStrEnum(_AilEnum):
     def removesuffix(self, suffix: str) -> str:
         return self.value.removesuffix(suffix)
 
-    def split(self, sep: str) -> list[str]:
-        return self.value.split(sep)
+    def split(self, sep=None, maxsplit: int = -1) -> list[str]:
+        if maxsplit == -1:
+            if sep is None:
+                return self.value.split()
+            return self.value.split(sep)
+        return self.value.split(sep, maxsplit)
 
-    def rsplit(self, sep: str) -> list[str]:
-        return self.value.rsplit(sep)
+    def rsplit(self, sep=None, maxsplit: int = -1) -> list[str]:
+        if maxsplit == -1:
+            if sep is None:
+                return self.value.rsplit()
+            return self.value.rsplit(sep)
+        return self.value.rsplit(sep, maxsplit)
 
-    def splitlines(self) -> list[str]:
-        return self.value.splitlines()
+    def splitlines(self, keepends: bool = False) -> list[str]:
+        return self.value.splitlines(keepends)
 
     def join(self, items: list[str]) -> str:
         return self.value.join(items)
 
-    def partition(self, sep: str) -> list[str]:
-        return list(self.value.partition(sep))
+    def partition(self, sep: str) -> tuple[str, str, str]:
+        return self.value.partition(sep)
 
-    def rpartition(self, sep: str) -> list[str]:
-        return list(self.value.rpartition(sep))
+    def rpartition(self, sep: str) -> tuple[str, str, str]:
+        return self.value.rpartition(sep)
 
     def zfill(self, width: int) -> str:
         return self.value.zfill(width)
 
-    def center(self, width: int) -> str:
-        return self.value.center(width)
+    def center(self, width: int, fillchar: str = " ") -> str:
+        return self.value.center(width, fillchar)
 
-    def ljust(self, width: int) -> str:
-        return self.value.ljust(width)
+    def ljust(self, width: int, fillchar: str = " ") -> str:
+        return self.value.ljust(width, fillchar)
 
-    def rjust(self, width: int) -> str:
-        return self.value.rjust(width)
+    def rjust(self, width: int, fillchar: str = " ") -> str:
+        return self.value.rjust(width, fillchar)
 
     def isdigit(self) -> bool:
         return self.value.isdigit()

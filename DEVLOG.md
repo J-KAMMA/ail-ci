@@ -1,3 +1,25 @@
+## 2026-11-01 -- stdlib enum review fixes (job-std_enum-11011520)
+
+Review follow-up on the enum lowering and prelude:
+* The `StrEnum` string forwarders now take CPython's full argument forms (`split(sep=None, maxsplit=-1)`,
+  `strip(chars=None)`, `startswith(prefix, start, end)`, `index/sub/count` bounds, `center/ljust/rjust`
+  fill characters, `splitlines(keepends)`), so a plain `str`/`bytes` call in a program that also injects
+  `prelude_enum` (e.g. through `calendar`) is no longer narrowed by the added methods.
+* `partition` / `rpartition` return tuples, not lists.
+* An empty `Flag` / `IntFlag` now builds and calling it raises CPython's exact no-members `TypeError`
+  (the compile-time refusal was already removed, but the flag call helper still made a pseudo-member).
+* Dynamic method dispatch skips a class whose declared signature cannot take the call site's arguments.
+  Several prelude classes share names such as `index`/`count`; the receiver belongs to only one of them,
+  so an incompatible method can no longer refuse the whole program.
+* Chained assignment (`A = B = 1 + 1`) aliases the later names even when the RHS is computed; constant
+  integer RHS values also alias a later literal with the same value (`A = 10 - 3; C = 7`).
+
+Verified with probes in `/tmp/probes` (both builds) for StrEnum methods and containers, plain str/bytes
+after enum injection, empty flags, chained computed RHS, and array/calendar dispatch; the ten
+`lab/compare` AIL tasks still generate byte-identical C and executables. Required tests:
+`test_ail_std_enum`, `test_ail_stdlib5`, `test_ail_pre442`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
 ## 2026-11-01 -- stdlib enum: twelve realistic programs (job-std_enum-11011520)
 
 `lab/stdlib/enum/` now holds twelve 16-47 line programs using `Enum`, `IntEnum`, `StrEnum`, `Flag`,

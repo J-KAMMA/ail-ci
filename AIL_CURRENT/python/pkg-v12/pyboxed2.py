@@ -10245,6 +10245,36 @@ class Compiler(boxclosure.ClosureMixin):
             return res
         return self._dynamic_user_method_dispatch(recv_c, f, args, kwargs, ctx, builtin)
 
+    @staticmethod
+    def _method_accepts(info, args, kwargs):
+        """Whether this call site's arguments fit the method's declared parameters. The dynamic
+        dispatch below tests every class in the program that defines the name, but the receiver at
+        run time belongs to only one of them: a method whose signature cannot take this call must
+        not refuse the whole program (prelude classes share names such as index/count with array and
+        namedtuple). The branch for such a class is left out; the built-in handler serves the rest."""
+        if len(args) == 1 and isinstance(args[0], _StarC):
+            return True
+        strip_self = info.get('is_method') and not info.get('is_static')
+        params = info['params'][1:] if strip_self else list(info['params'])
+        kwonly = info.get('kwonly', ())
+        vararg = info.get('vararg')
+        kwarg = info.get('kwarg')
+        if len(args) > len(params) and not vararg:
+            return False
+        allnames = set(params) | set(kwonly)
+        for name in kwargs:
+            if name in info.get('posonly', ()):
+                return False
+            if name not in allnames and not kwarg:
+                return False
+        for pname in params[len(args):]:
+            if pname not in kwargs and pname not in info['defaults']:
+                return False
+        for pname in kwonly:
+            if pname not in kwargs and pname not in info['kw_defaults']:
+                return False
+        return True
+
     def _dynamic_user_method_dispatch(self, recv_c, f, args, kwargs, ctx, builtin):
         """`x.meth(...)` where the receiver's class is not known statically but some user class
         defines `meth`: test the run-time class (most derived first) and call that method; any
@@ -10256,7 +10286,8 @@ class Compiler(boxclosure.ClosureMixin):
                 c = self.classes[c]['base']
                 n += 1
             return n
-        owners = [c for c in self.class_order if f.attr in self.classes[c]['methods']]
+        owners = [c for c in self.class_order if f.attr in self.classes[c]['methods']
+                  and self._method_accepts(self.classes[c]['methods'][f.attr], args, kwargs)]
         if not owners:
             return None
         owners.sort(key=depth, reverse=True)
