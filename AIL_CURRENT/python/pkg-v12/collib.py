@@ -1907,11 +1907,29 @@ class Scope:
             c = self.coll(tg.value)
             if c is not None and c.kind in ('ddl', 'dq'):
                 return self.subscript_store(st, tg, c, value)
+            if c is not None and c.kind in ('ctr', 'dds', 'od'):
+                self.check_store(st, c, tg.slice, value)
             return self.whole(st)
         if isinstance(tg, ast.Tuple) and isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) \
                 and value.func.attr == 'popitem' and self.coll(value.func.value) is not None:
             return self.popitem_unpack(st, tg, value)
         return self.whole(st)
+
+    def check_store(self, st, c, key, value):
+        """Refuse an item store whose key / value type the typed dict cannot hold (a str key in an int Counter
+        would print without quotes)."""
+        r = self.r
+        kt = r.infer(key, self.env)
+        if c.K is not None and kt is not None and kt != c.K:
+            r.refuse(st, 'assigning to a %s with a %s key, but its key type is %s' % (
+                {'ctr': 'Counter', 'dds': 'defaultdict', 'od': 'OrderedDict'}[c.kind], tname(kt), tname(c.K)))
+        vt = r.infer(value, self.env)
+        if c.kind == 'ctr':
+            if vt is not None and vt not in ('int', 'bool'):
+                r.refuse(st, 'Counter values must be int (found %s)' % tname(vt))
+        elif c.V is not None and vt is not None and vt != c.V:
+            r.refuse(st, 'assigning a %s value to a %s with %s values' % (
+                tname(vt), {'dds': 'defaultdict', 'od': 'OrderedDict'}[c.kind], tname(c.V)))
 
     def subscript_store(self, st, tg, c, value):
         r = self.r
@@ -2121,6 +2139,7 @@ class Scope:
         tmp = r.new_name('t')
         name = recv.id
         if (isinstance(t, C) and t.kind in ('ctr', 'dds', 'od')) or (isinstance(t, tuple) and t[0] == 'dict'):
+            self.check_mapping(st, c, t, 'Counter.update(mapping)')
             if not isinstance(arg, ast.Name):
                 r.refuse(st, 'Counter.update(mapping) needs the mapping in a name')
             text = 'for %s in %s: %s[%s] = %s.get(%s, 0) + %s[%s]' % (tmp, arg.id, name, tmp, name, tmp, arg.id, tmp)
@@ -2159,6 +2178,66 @@ class Scope:
             return found
         return False
 
+    def mapping_key(self, t):
+        """The key type of a mapping argument, or None when it cannot be told."""
+        if isinstance(t, C) and t.kind in ('ctr', 'dds', 'od'):
+            return t.K
+        if isinstance(t, tuple) and t[0] == 'dict':
+            return t[1]
+        return None
+
+    def mapping_value(self, t):
+        """The value type of a mapping argument, or None when it cannot be told."""
+        if isinstance(t, C) and t.kind in ('ctr', 'dds', 'od'):
+            return t.V
+        if isinstance(t, tuple) and t[0] == 'dict':
+            return t[2]
+        return None
+
+    def check_mapping(self, st, c, t, what):
+        """A mapping used with a Counter: its key and value types must fit the Counter's typed dict."""
+        r = self.r
+        mk, mv = self.mapping_key(t), self.mapping_value(t)
+        if mk is None:
+            r.refuse(st, '%s: the mapping key type cannot be told; build the mapping in a dict display or '
+                     'annotate its name' % what)
+        if c.K is not None and mk != c.K:
+            r.refuse(st, '%s: the mapping key type is %s, but the Counter key type is %s' % (
+                what, tname(mk), tname(c.K)))
+        if mv is not None and mv not in ('int', 'bool'):
+            r.refuse(st, '%s needs int values (found %s)' % (what, tname(mv)))
+
+    def chainmap_call(self, arg):
+        """The ChainMap(...) call an argument stands for: the call itself or the one assignment that binds it."""
+        def is_call(node):
+            if not isinstance(node, ast.Call):
+                return False
+            name = node.func.id if isinstance(node.func, ast.Name) else (
+                node.func.attr if isinstance(node.func, ast.Attribute) else None)
+            return name == 'ChainMap'
+        if is_call(arg):
+            return arg
+        if isinstance(arg, ast.Name):
+            found = None
+            for st in self.own():
+                if isinstance(st, ast.Assign) and len(st.targets) == 1 \
+                        and isinstance(st.targets[0], ast.Name) and st.targets[0].id == arg.id:
+                    if not is_call(st.value):
+                        return None
+                    found = st.value
+            return found
+        return None
+
+    def chainmap_matches(self, c, arg):
+        """True when every mapping in a ChainMap display has the Counter's key type and int values."""
+        if arg is None or arg.keywords:
+            return False
+        for a in arg.args:
+            t = self.r.infer(a, self.env)
+            if self.mapping_key(t) != c.K or self.mapping_value(t) not in ('int', 'bool'):
+                return False
+        return True
+
     def ctr_subtract(self, st, c, call):
         r = self.r
         recv = call.func.value
@@ -2166,15 +2245,16 @@ class Scope:
             r.refuse(st, 'Counter.subtract takes one iterable or mapping')
         arg = call.args[0]
         t = r.infer(arg, self.env)
-        if isinstance(t, tuple) and t[0] == 'obj' and t[1] == 'ChainMap':
+        cm = self.chainmap_call(arg)
+        if cm is not None or (isinstance(t, tuple) and t[0] == 'obj' and t[1] == 'ChainMap'):
+            if not self.chainmap_matches(c, cm):
+                r.refuse(st, 'Counter.subtract(ChainMap): the ChainMap keys / values must be written out in '
+                         'the call and match the Counter (key %s, int values)' % tname(c.K))
             return self.subtract_chainmap(st, recv, arg)
         if self.mapping_arg(arg, t):
-            if isinstance(t, C) and t.kind in ('dds', 'od') and t.V != 'int':
-                r.refuse(st, 'Counter.subtract(mapping) needs int values')
-            if isinstance(t, tuple) and t[0] == 'dict' and t[2] != 'int':
-                r.refuse(st, 'Counter.subtract(mapping) needs int values')
             if isinstance(arg, ast.Dict) and not arg.keys:
                 return self.put_stmt(st, 'pass')
+            self.check_mapping(st, c, t, 'Counter.subtract(mapping)')
             if isinstance(arg, ast.Name):
                 src, head = arg, ''
             else:

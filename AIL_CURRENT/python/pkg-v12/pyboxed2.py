@@ -10938,6 +10938,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.has_counter_subtract = True
         self.top_decls.append('static inline ail_st ail__counter_subtract(ail_ctx *cx, ail_obj counter, ail_obj iterable);\n')
         self.top_decls.append('static inline ail_st ail__counter_subtract_map(ail_ctx *cx, ail_obj counter, ail_obj map);\n')
+        self.top_decls.append('static inline ail_st ail__counter_subtract_pairs(ail_ctx *cx, ail_obj counter, ail_obj pairs);\n')
         self.top_defs.append(
             'static inline ail_st ail__counter_subtract(ail_ctx *cx, ail_obj counter, ail_obj iterable) {\n'
             '    AIL_FRAME_ENTER(cx, fr, 2);\n'
@@ -10970,6 +10971,23 @@ class Compiler(boxclosure.ClosureMixin):
             '    }\n'
             '    AIL_FRAME_LEAVE(cx, fr);\n'
             '    return st;\n'
+            '}\n'
+            'static inline ail_st ail__counter_subtract_pairs(ail_ctx *cx, ail_obj counter, ail_obj pairs) {\n'
+            '    AIL_FRAME_ENTER(cx, fr, 2);\n'
+            '    ail_st st = ail_iter(cx, &fr.slots[0], pairs);\n'
+            '    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }\n'
+            '    for (;;) {\n'
+            '        st = ail_next(cx, &fr.slots[1], fr.slots[0]);\n'
+            '        if (st == AIL_STOP) { st = AIL_OK; break; }\n'
+            '        if (st != AIL_OK) break;\n'
+            '        ail_obj key; st = ail_op_getitem(cx, &key, fr.slots[1], ail_box_int(0)); if (st != AIL_OK) break;\n'
+            '        ail_obj val; st = ail_op_getitem(cx, &val, fr.slots[1], ail_box_int(1)); if (st != AIL_OK) break;\n'
+            '        ail_obj cur; st = ail_dict_get(cx, &cur, counter, key, ail_box_int(0)); if (st != AIL_OK) break;\n'
+            '        ail_obj nv; st = ail_op_sub(cx, &nv, cur, val); if (st != AIL_OK) break;\n'
+            '        st = ail_dict_set(cx, counter, key, nv); if (st != AIL_OK) break;\n'
+            '    }\n'
+            '    AIL_FRAME_LEAVE(cx, fr);\n'
+            '    return st;\n'
             '}\n\n')
 
     @staticmethod
@@ -10993,6 +11011,15 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported('.subtract() with more than one positional argument')
         self._need_counter_subtract()
         if args:
+            if self._inst_class(args[0], ctx) == 'ChainMap':
+                items = ctx.tmp()
+                get_items = ast.Call(func=ast.Attribute(value=args[0], attr='items', ctx=ast.Load()),
+                                     args=[], keywords=[])
+                ctx.emit('%s = %s;' % (items, self.expr(get_items, ctx)))
+                ctx.emit('st = ail__counter_subtract_pairs(cx, %s, %s); if (st != AIL_OK) goto %s;'
+                         % (recv, items, ctx.cur_err_target()))
+                ctx.uses_st = True
+                return 'ail_box_none()'
             table = self._table_dict_class(args[0], ctx)
             if table is not None:
                 src = self.expr(args[0], ctx)

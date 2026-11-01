@@ -1,3 +1,24 @@
+## 2026-11-01 -- std_collections review 3: refuse key-type switches on a typed Counter
+
+The review found that a `Counter({1: 2})` typed from its dict literal now accepted a `str` key
+later (through `subtract`, `update`, or `c[k] = v`), and its typed Counter / `items()` views then
+printed the key without quotes (`Counter({1: 2, a: -1})`).  `collib.py` now checks the key type of
+a mapping passed to `Counter.update` / `Counter.subtract` and of a subscript store against the
+Counter / defaultdict / OrderedDict key type, and refuses by name when they differ; mapping values
+must still be int for a Counter.  A `ChainMap` argument is recognized both as a direct call and
+through one assigning name, and is lowered through `items()` only when its written-out maps match
+the Counter; the general path's `Counter.subtract` now also dispatches a `ChainMap` through its
+`items()` values (a new helper emitted only when used).  Every mismatch is a named refusal, never a
+silent repr difference.
+
+Probes `/tmp/probes/k1`-`k9` cover int-key Counter subtract/update with int and str mappings,
+direct assignment, ChainMap with int/str keys both written out and through a variable, and the
+matching int-key ChainMap form; all match CPython on both builds or are refused by name (the
+default build falls back to the general path and still matches).  `test_ail_std_collections`,
+`test_ail_collections`, `test_ail_tuples`, `test_ail_deqctr`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` pass (7 modules, 0 failed).  Generated C of the ten compare tasks
+is unchanged (seven byte-identical, three refuse identically).
+
 ## 2026-11-01 -- std_collections review 2: subtract of every mapping form and ChainMap
 
 The review found that `Counter.subtract` still treated a dict comprehension, a loop variable over

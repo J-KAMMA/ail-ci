@@ -56,7 +56,10 @@ Result: **9 of 12 build and match CPython**.  3 are refused by name (follow-ups 
    through `items()`.  The typed helper walks `other.keys()` (a tuple-keyed table has no `__iter__`),
    and the general path reads the `ks` / `vs` / `live` rows of a tuple-keyed table before subtracting.
    A mapping whose value type is not int is refused by name, and an argument whose type cannot be
-   told is left to the general path, which dispatches on the runtime type.
+   told is left to the general path, which dispatches on the runtime type.  A mapping or item store
+   whose key type differs from the Counter's key is refused by name (rather than storing a key the
+   typed repr would print without quotes), and a `ChainMap` is handled through its `items()` values
+   when its maps are written out and match the Counter.
 
 2. `Counter(mapping)` where the mapping has tuple keys (the blocker for `coordinate_freq`, and the
    reason the others could not use tuple-keyed inventory data): the tuple pass makes such a mapping a
