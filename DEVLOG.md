@@ -701,6 +701,68 @@ function body does enough work; a C callable type is the next step for the closu
 
 Added `AIL_CURRENT/ail_cpython_hybrid.py`, `AIL_CURRENT/test_ail_cpython_hybrid.py` and
 `AIL_CURRENT/tests.d/test_ail_cpython_hybrid.txt`. Final-state tests: test_ail_cpython_hybrid,
+## 2026-11-01 -- std_bisect review 2: key= must reject non-sequences (job-std_bisect-11012338)
+
+The reviewer found that `BISECTKEY_C`'s `ail__bisect_len` used `ail_op_len`, which accepts
+mappings and sets: `bisect_left({}, 1, key=ident)` returned 0 where CPython raises
+`TypeError: dict is not a sequence`, and `set()` / a `__len__`-only instance returned 0
+instead of `'set' object does not support indexing` / `'NoGet' object does not support
+indexing`. The keyed search now mirrors CPython's `_bisect`: `PySequence_Size` semantics
+first when `hi` is defaulted (a non-Counter dict is rejected there), then a sequence check
+before the loop even when `hi` is supplied, so a `__getitem__`-only instance with `hi=0`
+still returns 0 while a `__len__`-only instance is rejected. Counters stay indexable;
+plain dicts and defaultdicts are refused with CPython's text.
+
+Probes `/tmp/rprobes/v_dict_empty.py`, `v_dict_full.py`, `v_lenonly.py`,
+`v_getonly_hi.py`, `v_range.py`, `v_bytes.py`, `v_custom.py` and `v_deque.py` match CPython
+on both the general and default builds. `test_ail_std_bisect` gained
+`test_key_rejects_non_sequences`. Final-state tests: test_ail_std_bisect,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (4 modules, 0 failed).
+
+## 2026-11-01 -- std_bisect review: key= on a str/tuple sequence crashed (job-std_bisect-11011433)
+
+The review found that `bisect_left("abcd", "b", key=str)` segfaulted: `key=` forces the
+general path, and `BISECTKEY_C` cast the sequence to `ail_vecobj *` unconditionally, reading
+a str's payload as a vector. `BISECTKEY_C` now reads the length and each visited element
+through the general indexing helpers for lists, tuples and strs, so the key searches match
+CPython (`1`/`3` for the reviewer's probe) while the list path is unchanged. `insort*` with
+`key=` on a non-list now raises CPython's `AttributeError: 'str' object has no attribute
+'insert'` after the search instead of writing through the cast.
+
+Probes `p1_review`, `p2_str_paths`, `p3_tuple_paths`, `p4_insort_str` and `p5_list_key`
+in `/tmp/probes` (str through an argument, a list item, an attribute and a dict value; empty
+str, lo/hi bounds, IndexError/ValueError, tuple key, insort on str/tuple, list regression)
+match CPython on both the general and default builds. The ten `lab/compare` tasks' generated
+C is unchanged: 17 buildable task/language pairs are byte-identical to the base revision, and
+the same three Python-column pairs are refused by both. `test_ail_std_bisect` gained
+`test_key_on_str_and_tuple`. Final-state tests: test_ail_std_bisect, test_ail_heapq_bisect,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (0 failed).
+
+## 2026-11-01 -- std_bisect: key= for bisect/insort on the general path (job-std_bisect-11011433)
+
+Added twelve realistic `bisect` programs under `lab/stdlib/bisect/` (grade bands, price tiers,
+word indexes, leaderboards, event windows, float intervals, sparse ids, alias/star imports,
+keyed rows, caught edges). Eleven built before any change; the twelfth, `key_records`, was
+refused because the typed path does not model a tuple row and the general path rejected
+`key=`. The general path now accepts `key=` on `bisect_left`, `bisect_right`, `bisect`,
+`insort`, `insort_left` and `insort_right`: the key is called on exactly the elements the
+binary search visits, `insort` computes `key(x)` once, and key results are rooted across
+allocating comparisons. The new C fragment is emitted only for a program that uses `key=`
+(`python/pkg-v12/pyboxed2.py`, `BISECTKEY_C`), so programs without it emit the same C.
+All twelve now build in the default mode and match CPython 3.12 stdout and exit status.
+
+Probes in `/tmp/probes` with `cmp.sh` on both builds: `p_bisect_key_tuples` (all six calls,
+duplicates, empty, lo/hi positional and keyword, `hi=None`, negative hi), `p_bisect_key_calls`
+(key called only on visited elements; insort key-once), `p_bisect_key_types` (int, float,
+str, `key=abs/int/float/len/str.lower`), `p_bisect_key_routes` (argument, list item,
+attribute, dict value, alias) and `p_bisect_key_errors` (a raising key and bound errors);
+all match CPython or stop with CPython's exception. The generated C of the ten `lab/compare`
+tasks was compared with `HEAD`: 17 task/language pairs byte-identical, and the three
+Python-column pairs `scar_life`/`tally_lang`/`tree_fold` are refused by both revisions.
+
+Added `AIL_CURRENT/test_ail_std_bisect.py` (12 programs plus a key-call/insort program) and
+its `AIL_CURRENT/tests.d/test_ail_std_bisect.txt` registration. `tools/update_manifest.py`
+was run and `--check` passes. Final-state tests: test_ail_std_bisect, test_ail_heapq_bisect,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
