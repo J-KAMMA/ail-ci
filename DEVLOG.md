@@ -1,3 +1,20 @@
+## 2026-11-01 -- stdlib csv review fixes (job-std_csv-11011522)
+
+Fixed the three review defects. `list(reader)` now takes the remaining rows in a helper whose
+`list[list[str]]` annotation the nested-list pass lowers to row objects, so a literal StringIO source
+(`list(csv.reader(io.StringIO("a,b\n")))`) builds on the default path instead of failing the C
+compile; the same fix also covers a module-level list-variable source. An open text file is refused
+by csvlib's list lowering, so the reader uses the general path and pulls one line at a time: a file
+overwritten before iteration and `f.tell()` before the first row now match CPython (the old eager
+`list(src)` read the whole file at reader construction). The general path's `_AilTextIO.__iter__` is
+now injected only when a csv reader consumes an open text file, so a plain file-only program's
+generated C is byte-identical to the base (probed). All 9 building lab programs still match CPython;
+3 remain refused by name. Probes in `/tmp/probes` cover literal/list-variable/stdin `list(reader)`, StringIO text through a
+literal, a run-time variable, an argument, a list item, an attribute and a dict value, file
+overwrite/`tell()`/empty/missing-final-newline sources through the same routes, plain-file C identity,
+and both builds. `test_ail_std_csv`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` and the csv/nested-list modules pass.
+
 ## 2026-11-01 -- stdlib csv: 12 real programs (job-std_csv-11011522)
 
 Added `lab/stdlib/csv/` with 12 ordinary Python programs using csv; 9 build on the default

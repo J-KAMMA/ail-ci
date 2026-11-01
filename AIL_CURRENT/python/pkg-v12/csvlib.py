@@ -331,8 +331,17 @@ def _ail_csv_join(fields: list[str], delim: str, quote: str, esc: str, lt: str, 
     return out + lt
 '''
 
+TAKE_SOURCE = '''
+def _ail_csv_take(rows: list[list[str]], at: int, count: int) -> list[list[str]]:
+    out: list[list[str]] = []
+    while at < count:
+        out.append(rows[at])
+        at += 1
+    return out
+'''
+
 SOURCES = {'failed': FAILED_SOURCE, 'parse': PARSE_SOURCE, 'lines': LINES_SOURCE, 'col': COL_SOURCE, 'dict': DICT_SOURCE,
-           'join': JOIN_SOURCE}
+           'join': JOIN_SOURCE, 'take': TAKE_SOURCE}
 
 
 class Dialect:
@@ -340,6 +349,35 @@ class Dialect:
         self.__dict__.update(DIALECTS['excel'])
         self.escapechar = None
         self.strict = False
+
+
+def _opens_file(node):
+    return (isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'open')
+
+
+def _file_expr_names(tree):
+    """Names that carry an opened file: bound directly, or held in a list / dict / attribute."""
+    names = set()
+
+    def bind(target, value):
+        if not any(_opens_file(n) for n in ast.walk(value)):
+            return
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+            names.add(target.value.id)
+        elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+            names.add(target.value.id)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            bind(node.targets[0], node.value)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            bind(node.target, node.value or ast.Constant(value=None))
+        elif isinstance(node, ast.With):
+            for item in node.items:
+                bind(item.optional_vars, item.context_expr)
+    return names
 
 
 def const_str(node):
@@ -358,6 +396,7 @@ class Csv:
     def __init__(self, imports, tree, out):
         self.imports = imports
         self.tree = tree
+        self.file_names = _file_expr_names(tree)
         self.out = out                    # the helper function sources to append to the program
         self.used = set()
         self.helpers = []
@@ -459,7 +498,7 @@ class Csv:
 
     def attach(self):
         """The helper functions that were used, to be appended to the program text."""
-        for name in ['parse', 'failed', 'lines', 'col', 'dict', 'join']:
+        for name in ['parse', 'failed', 'lines', 'col', 'dict', 'join', 'take']:
             if name in self.used:
                 self.out.append(SOURCES[name])
 
@@ -550,6 +589,10 @@ class Csv:
                 target=_name(var, True), iter=copy.deepcopy(src), ifs=[], is_async=0)])
             pre.append(_mark(ast.Assign(targets=[_name(lines, True)], value=comp)))
             return _name(lines)
+        source_names = {n.id for n in ast.walk(src) if isinstance(n, ast.Name)}
+        if any(_opens_file(n) for n in ast.walk(src)) or source_names & self.file_names:
+            self.refuse(call, 'csv.%s over an open file is not built by the list lowering: the general path '
+                        'reads the file lazily (the reader pulls one line at a time)' % self.csv_attr(call.func))
         if isinstance(src, ast.Constant):
             self.refuse(call, 'csv.reader over a str: it would walk characters; pass a list of lines '
                         '(text.splitlines(True) / sys.stdin)')
@@ -587,21 +630,12 @@ class Csv:
     def take_rest(self, info, pre):
         """Statements: the rows the reader has not yielded yet in a list of their own, the reader consumed
         (a csv.Error that stopped the parse is raised, as the lazy reader raises it at the end)."""
-        rows, at = self.fresh('rows'), self.fresh('at')
-        # annotated (the compiler walks a list of rows only when it is told the element type)
-        pre.append(_mark(ast.AnnAssign(target=_name(rows, True), annotation=ast.Subscript(
-            value=_name('list'), slice=ast.Subscript(value=_name('list'), slice=_name('str'), ctx=ast.Load()),
-            ctx=ast.Load()), value=ast.List(elts=[], ctx=ast.Load()), simple=1)))
-        pre.append(_mark(ast.Assign(targets=[_name(at, True)], value=_name(info.pos))))
-        copy_row = self.fresh('cp')
-        pre.append(_mark(ast.While(
-            test=ast.Compare(left=_name(at), ops=[ast.Lt()], comparators=[_name(info.count)]),
-            body=[ast.Assign(targets=[_name(copy_row, True)],
-                             value=ast.Subscript(value=_name(info.name), slice=_name(at), ctx=ast.Load())),
-                  ast.Expr(value=_call(ast.Attribute(value=_name(rows), attr='append', ctx=ast.Load()),
-                                       _name(copy_row))),
-                  ast.AugAssign(target=_name(at, True), op=ast.Add(), value=ast.Constant(value=1))],
-            orelse=[])))
+        # in a helper function: the nested-list pass turns its list[list[str]] into a list of row
+        # objects, which works at module scope too (it only rewrites function bodies)
+        self.helper('take')
+        rows = self.fresh('rows')
+        pre.append(_mark(ast.Assign(targets=[_name(rows, True)], value=_call(
+            _name('_ail_csv_take'), _name(info.name), _name(info.pos), _name(info.count)))))
         pre.append(_mark(ast.Assign(targets=[_name(info.pos, True)], value=_name(info.count))))
         pre.append(self.err_check(info.errs))
         return rows

@@ -22,6 +22,31 @@ _OS_CONSTS_POSIX = {'sep': '/', 'linesep': '\n', 'name': 'posix', 'pathsep': ':'
 _OS_CONSTS_NT = {'sep': '\\', 'linesep': '\r\n', 'name': 'nt', 'pathsep': ';', 'curdir': '.', 'pardir': '..',
                  'extsep': '.', 'altsep': '/', 'devnull': 'nul'}
 
+def _file_expr_names(tree, is_open):
+    """Names that carry an opened file: bound directly, or held in a list / dict / attribute."""
+    names = set()
+
+    def bind(target, value):
+        if target is None or not any(isinstance(n, ast.Call) and is_open(n) for n in ast.walk(value)):
+            return
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, ast.Attribute) and isinstance(target.value, ast.Name):
+            names.add(target.value.id)
+        elif isinstance(target, ast.Subscript) and isinstance(target.value, ast.Name):
+            names.add(target.value.id)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            bind(node.targets[0], node.value)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            bind(node.target, node.value or ast.Constant(value=None))
+        elif isinstance(node, ast.With):
+            for item in node.items:
+                bind(item.optional_vars, item.context_expr)
+    return names
+
+
 _PATH_CALLS = {       # os.path.NAME -> (prelude function, snippet, number of arguments)
     'exists': ('_ail_pexists', 'pexists', 1), 'isfile': ('_ail_pisfile', 'pexists', 1),
     'isdir': ('_ail_pisdir', 'pexists', 1), 'islink': ('_ail_pislink', 'pexists', 1),
@@ -46,6 +71,8 @@ class _Lowerer(ast.NodeTransformer):
         self.scopes = [{}]
         self.counter = 0
         self.files_active = False
+        self.csv_file = False          # a general-path csv reader consumes a text file: it needs __iter__
+        self.file_expr_names = set()
         self.walk_dirs = set()         # names bound as the `dirs` of an os.walk loop
         self.hoist = []                # assignments to put before the statement being lowered
         self.windows = filelib.target_windows()
@@ -697,6 +724,14 @@ class _Lowerer(ast.NodeTransformer):
 
     def visit_Call(self, node):
         func = node.func
+        # csvgen.py has already renamed csv.reader / DictReader: a text file source is the one that
+        # needs the general path's _AilTextIO.__iter__ (the prelude's csv reader pulls its lines)
+        if isinstance(func, ast.Name) and func.id in ('_ail_csv_reader', '_ail_csv_DictReader') and node.args:
+            source = node.args[0]
+            source_names = {n.id for n in ast.walk(source) if isinstance(n, ast.Name)}
+            if self.file_kind(source) == 'text' or source_names & self.file_expr_names \
+                    or any(isinstance(n, ast.Call) and self.is_open(n) for n in ast.walk(source)):
+                self.csv_file = True
         # the os family, before the children: the arguments are lowered by the handler
         name = self.qual(func)
         if name is not None and name.startswith(('os.', 'ntpath.', 'posixpath.')) and name != 'os.cpu_count' \
@@ -930,6 +965,7 @@ class _Lowerer(ast.NodeTransformer):
     def run(self):
         self.files_active = any(isinstance(n, ast.Call) and self.is_open(n) for n in ast.walk(self.tree)) \
             or any(self.annotation_kind(getattr(n, 'annotation', None)) for n in ast.walk(self.tree))
+        self.file_expr_names = _file_expr_names(self.tree, self.is_open)
         self.visit(self.tree)
         self.leftovers()
         for node in self.import_nodes:
@@ -981,7 +1017,7 @@ class _Lowerer(ast.NodeTransformer):
         statements = []
         for name in order:
             raw = filelib_prelude.SNIPPETS[name][0]
-            if name == 'text_io' and self.general:
+            if name == 'text_io' and self.csv_file:
                 raw = filelib_prelude.TEXT_IO_GENERAL
             source = self.surface(raw)
             parsed = ast.parse(source)

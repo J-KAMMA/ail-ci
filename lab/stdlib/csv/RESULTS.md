@@ -32,9 +32,17 @@ CPython 3.12.
   `None`, so it would print `[]`; refusing it lets the Python-source csv (the general path) return
   `None` as CPython does. `X = next(reader, None)` with `X is None` tests is unchanged.
 * `filelib_prelude.py` / `filelower.py`: the general path's `_AilTextIO` gains a generator
-  `__iter__` over its lines (injected only when the boxed general path lowers files, so the typed
-  path's class and its dunder check are unchanged), and the general-path csv reader can read an open
-  text file. `list(file)` in user code was already lowered to `readlines(-1)` by `filelower.py`.
+  `__iter__` over its lines, injected only when a csv reader consumes an open text file (a plain
+  file-only program's C is byte-identical to the base). `list(file)` in user code was already
+  lowered to `readlines(-1)` by `filelower.py`.
+* `csvlib.py` refuses an open text file as a reader source (directly or through an argument, a list
+  item, an attribute or a dict value), so the general path's csv reader is used and pulls one line at
+  a time instead of parsing (and reading) the whole file when the reader is created: overwriting the
+  file before iterating and `f.tell()` before the first row now match CPython.
+* `csvlib.py` takes the rest of a reader inside a helper (`_ail_csv_take`), whose `list[list[str]]`
+  the nested-list pass lowers to row objects. This keeps `list(reader)` working at module scope,
+  including `list(csv.reader(io.StringIO("a,b\n")))` on the default build (previously a C type
+  error).
 
 ## Follow-ups (big new features, left refused)
 
