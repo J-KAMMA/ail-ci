@@ -63,6 +63,17 @@ TABLE = {
     'datetime.date.fromordinal': '_ail_date_fromordinal',
     'datetime.datetime.fromisoformat': '_ail_datetime_fromisoformat',
     'datetime.datetime.strptime': '_ail_datetime_strptime',
+    'difflib.get_close_matches': '_ail_difflib_get_close_matches',
+    'difflib.SequenceMatcher': '_ail_difflib_SequenceMatcher',
+    'difflib.Differ': '_ail_difflib_Differ',
+    'difflib.Match': '_ail_difflib_Match',
+    'difflib.unified_diff': '_ail_difflib_unified_diff',
+    'difflib.context_diff': '_ail_difflib_context_diff',
+    'difflib.ndiff': '_ail_difflib_ndiff',
+    'difflib.restore': '_ail_difflib_restore',
+    'difflib.diff_bytes': '_ail_difflib_diff_bytes',
+    'difflib.IS_LINE_JUNK': '_ail_difflib_IS_LINE_JUNK',
+    'difflib.IS_CHARACTER_JUNK': '_ail_difflib_IS_CHARACTER_JUNK',
 }
 for _name in ('seed', 'random', 'randint', 'randrange', 'uniform', 'gauss', 'choice', 'shuffle',
               'sample', 'getrandbits', 'choices', 'expovariate', 'triangular'):
@@ -334,6 +345,20 @@ class _Renamer(ast.NodeTransformer):
         key = self._key(node.func)
         if key == 'functools.partial':
             return self._partial(node)
+        if key == 'difflib.diff_bytes' and node.args:
+            first = self._key(node.args[0]) if isinstance(node.args[0], (ast.Attribute, ast.Name)) else None
+            if first == 'difflib.unified_diff':
+                self.used.add('_ail_difflib_diff_bytes_unified')
+                node.func = ast.copy_location(ast.Name(id='_ail_difflib_diff_bytes_unified', ctx=ast.Load()), node.func)
+                node.args = node.args[1:]
+                self.generic_visit(node)
+                return node
+            if first == 'difflib.context_diff':
+                self.used.add('_ail_difflib_diff_bytes_context')
+                node.func = ast.copy_location(ast.Name(id='_ail_difflib_diff_bytes_context', ctx=ast.Load()), node.func)
+                node.args = node.args[1:]
+                self.generic_visit(node)
+                return node
         if key == 'json.load':
             # json.load(sys.stdin) is json.loads(sys.stdin.read()): the general path has no file object to
             # hand to a helper, and any other file argument stays refused by name (a binary file, which

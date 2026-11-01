@@ -1,3 +1,28 @@
+## 2026-11-01 -- stdlib coverage: `difflib` (job-std_difflib-11011614)
+
+Added `difflib` to the general-path prelude (`python/pkg-v12/prelude_genlib.py`, selected by
+`python/pkg-v12/genlib.py`): `get_close_matches`, `SequenceMatcher`, `Differ`, `Match`,
+`unified_diff`, `context_diff`, `ndiff`, `restore`, `diff_bytes`, `IS_LINE_JUNK` and
+`IS_CHARACTER_JUNK`, with CPython 3.12's matching blocks, opcodes, grouped opcodes and output
+formatting. `difflib.diff_bytes(difflib.unified_diff|context_diff, ...)` gets a targeted rewrite
+because the general path cannot pass a function with defaults as a value. The typed path still
+refuses the import and falls back to the general path.
+
+Twelve programs are in `lab/stdlib/difflib/`; ten build on the default path and match CPython's
+stdout and exit status (`01`, `02`, `03`, `05`-`11`). `RESULTS.md` records the typed/general/refused
+result and the first message for every program. Two are follow-ups: `04_unified_edges.py` is
+refused by a `**kwargs` call argument, and `12_htmldiff.py` needs `HtmlDiff`. `diff_bytes` decodes
+with latin-1 instead of ASCII + `surrogateescape`; the lab byte strings round-trip identically.
+
+Added `test_ail_std_difflib.py` (registered through `tests.d/test_ail_std_difflib.txt`), comparing
+the ten programs with CPython. Probes in `/tmp/probes/dif_*.py` cover matching blocks, opcodes,
+grouped opcodes, ratios, junk predicates, empty and boundary inputs, errors, bytes and all keyword
+forms; they agree with CPython through `cmp.sh` on both builds (two intentionally uncaught-TypeError
+probes agree on stdout and exit 1). The generated C of the ten `lab/compare` tasks is unchanged:
+no task imports `difflib`, and the prelude additions are only emitted for programs that use them.
+Ran `test_ail_std_difflib`, `test_ail_genlib`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`; refreshed the manifest.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
