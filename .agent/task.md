@@ -6,44 +6,47 @@
 
 --- LAST REVIEW ---
 ## review 1
-[model opencode-go/deepseek-v4.1-flash]
-## Review — lazymod1 (work..9f011fd)
+[model opencode/deepseek-v4.1-flash-free]
+## Review — lazymod1 (work..7e14e0a)
 
-**What the change really does:** rewrites `init_split` to resolve, transitively through user functions/aliases/classes, the module values that a lazily started module's definitions need; only statements judged pure and non-raising are emitted with the definitions, the rest stay in `_ail_init_<mod>`; effectful/state/raising cases are refused by name. Adds `test_ail_lazymod1`, edits `test_ail_modsys`, records/manifest.
+**What the change really does:** extends `init_split` so an earlier binding of a name a definition needs is hoisted too (recursively), refuses non-hoisted statements between hoisted bindings that read/write a hoisted name, and refuses unfoldable subscripts (except in annotations).
 
-**Tests (HEAD):** `test_ail_lazymod1 test_ail_modsys test_ail_safetynet test_ail_files test_ail_corpus_findings3` — 5/5 ok, 0 failed (311s). `update_manifest.py --check` exit 0.
+**Prior review defects**
+1. Earlier same-name binding overwriting the hoisted value — **fixed**. `p1_rebind` now matches CPython on both builds: `lib start` / `(2, 2)`.
+2. Raising subscript over an unfoldable call moved to start — **fixed**. `p3_raise` is refused by name on both builds (was base refusal).
 
-**Lab/compare C:** all 10 `.ail` byte-identical to base. `.py`: 5 identical + 5 fail identically (my build; worker says 7+3, minor count difference, no behaviour change).
+**Tests / checks**
+- `test_ail_lazymod1 test_ail_modsys test_ail_safetynet`: 3/3 ok, 0 failed (168s, HEAD).
+- `update_manifest.py --check`: exit 0.
+- Lab/compare: `merge_program` returns `None` for all 10 `lab/compare/src/*/main.ail`, so the merge path and their C are unchanged.
 
-**Claims:** standard-call/property/missing-attr/user-method refusals verified (`p_cwd`, `p_env`, `p_prop`, `p_attr_raise`, `p_method` all refused by name). Pure computed value verified (`p5_control`). Worker's `p_pure`, `p_pure_method`, `p_class_attr`, `p_settled`, `p_mutated`, `p_mutate_list` are not in `/tmp/rprobes` — unverified. Positive boundary probes through attribute/list item/dict value/argument/instance attr/negative shift all matched CPython or refused.
+**Worker claims:** review fixes verified; added refusal tests (3 programs in the final commit) present; manifest and lab/compare claims verified. The wider 5/5 test count and the worker's other probe names were not re-run/absent.
 
-**Defects (introduced by the change; base refused both by name):**
+**New defect (introduced; base matches CPython)**
+1. A raising non-subscript expression in an earlier binding is still hoisted, moving the exception before earlier output. `move_bad_expr` only refuses unfoldable `Subscript`, so `effectful()` judges `SIZE = 1 // Z` (with `Z` from an unfoldable call) pure and `need_name` hoists it to program start.
 
-1. An earlier binding of the same name is deferred and overwrites the hoisted value.
-   `lib.py`: `print("lib start")` / `SIZE = 1` / `SIZE = 2` / `def f(a=SIZE): return a`
-   `main.py`: `def g(): import lib; return lib.f(), lib.SIZE` / `print(g())`
-   Expected CPython (and base refusal): `lib start` then `(2, 2)` (exit 0). Actual HEAD (both builds, exit 0): `lib start` then `(2, 1)` — `SIZE=1` runs later in the init function. `need_name` follows the needed statement's value dependencies only, so the earlier `SIZE=1` is left in the init body and executes after the hoisted `SIZE=2`.
+   Probe `/tmp/rprobes/p_div_unfold` (`lib.py`: `print("before")`, `def zero(): return 0`, `Z = zero()`, `SIZE = 1 // Z`, `SIZE = 2`, `def f(a=SIZE): return a`; main imports `lib` in `g()` after `print("calling")`):
+   - Expected CPython (and base, both builds): stdout `calling\nbefore\n`, `ZeroDivisionError`, exit 1.
+   - Actual HEAD (both builds): stdout empty, `ZeroDivisionError`, exit 1.
 
-2. A raising computation hidden behind an unfoldable user call is hoisted, moving the exception before earlier effects.
-   `lib.py`: `print("before")` / `def base(): return {}` / `D = base()` / `X = D["b"]` / `def f(a=X): return a`
-   `main.py`: `def g(): import lib; return lib.f()` / `print("calling")` / `print(g())`
-   Expected CPython: stdout `calling\nbefore\n`, KeyError, exit 1. Actual HEAD (both builds): stdout empty, KeyError, exit 1 — `D` and `X` are hoisted, so `KeyError` fires at program start before `print("calling")`/`print("before")`. The raise is only detected when `fold` can evaluate the operands; `D = base()` makes `D["b"]` unfoldable, and `move_bad_expr` treats the subscript as safe.
+   Same with `/tmp/rprobes/p_binop_unfold` (`SIZE = 1 + T`, `T = text()` returning `"x"`): expected `calling\nbefore\n` + `TypeError`, exit 1; actual empty stdout + `TypeError`, exit 1 (base matches CPython).
 
-No pre-existing output differences found; the runtime is untouched (change is compile-time; lab C unchanged).
+**Pre-existing (does not block):** `/tmp/rprobes/p_annot_raise` (`def f(a: D["y"] = 0)` with `D = base()`) prints an extra `0` and exits 0 on both HEAD and base, while CPython raises `KeyError`; identical on base.
+
+**Unverified:** `test_ail_files` and `test_ail_corpus_findings3` not re-run; several worker probe names (`p1_three`, `p1_aug`, `p1_unpack`, `p1_ann`, `p1_def_before`, `p5_control`, `p_sub_*`) were not re-run this round.
 
 VERDICT: FIX
-1. Earlier same-name binding before the definition is deferred and overwrites the hoisted later value (`/tmp/rprobes/p1_rebind`): expected `(2, 2)`, actual `(2, 1)`.
-2. Raising subscript over an unfoldable call is moved to program start, dropping earlier stdout (`/tmp/rprobes/p3_raise`): expected `calling\nbefore\n` + exit 1, actual empty stdout + exit 1.
-[cost $0.0443, opencode tokens {"total": 2405384, "input": 107461, "output": 7291, "reasoning": 28360, "cache.write": 0, "cache.read": 2262272}]
-    tool time: bash 11.8 min
-        359s bash   cat > /tmp/labdiff.sh <<'SH' #!/bin/bash set -u HEAD=/home/runner/work/ail-ci/ail-ci BASE=/tmp/base out=/tmp/l
-        312s bash   date; cd AIL_CURRENT && timeout 1500 python3 ../tools/par_check.py -j 2 test_ail_lazymod1 test_ail_modsys test
-         18s bash   for p in p6_attr p7_dict p8_listarg p9_instattr p10_neg p11_mut_after p12_arg; do echo "=== $p HEAD"; /tmp/cmp
-         10s bash   date; for p in p1_rebind p2_aug p3_raise p4_mutable_import p5_control; do echo "=== $p HEAD"; /tmp/cmpdir.sh /
-          5s bash   cat > /tmp/labdiff.sh <<'SH' #!/bin/bash set -u HEAD=/home/runner/work/ail-ci/ail-ci BASE=/tmp/base out=/tmp/l
-          1s bash   date; for p in p1_rebind p2_aug p3_raise p4_mutable_import; do echo "=== $p BASE"; /tmp/cmpdir.sh /tmp/rprobes
-          1s bash   for p in p_cwd p_env p_prop p_method p_attr_raise; do echo "=== $p HEAD"; /tmp/cmpdir.sh /tmp/rprobes/$p /home
-          1s bash   mkdir -p /tmp/rprobes/p13_basehook cat > /tmp/rprobes/p13_basehook/lib.py <<'PY' print("start") class Base:   
+1. Raising non-subscript expressions (e.g. `SIZE = 1 // Z`, `SIZE = 1 + T` where `Z`/`T` come from an unfoldable call) in an earlier binding are hoisted, so the exception fires at program start and earlier stdout (`calling\nbefore\n`) is lost. Probe `/tmp/rprobes/p_div_unfold` (and `p_binop_unfold`): expected `calling\nbefore\n` + exit 1, actual empty stdout + exit 1; base matches CPython. The purity/raise check must cover non-subscript expressions (or refuse such earlier bindings by name).
+[cost $0.0000, opencode tokens {"total": 1611021, "input": 71802, "output": 6097, "reasoning": 27330, "cache.write": 0, "cache.read": 1505792}]
+    tool time: bash 3.6 min
+        170s bash   date; cd AIL_CURRENT && timeout 1200 python3 ../tools/par_check.py -j 2 test_ail_lazymod1 test_ail_safetynet t
+         13s bash   mkdir -p /tmp/rprobes/p_div_unfold /tmp/rprobes/p_binop_unfold cat > /tmp/rprobes/p_div_unfold/lib.py <<'PY' p
+          8s bash   date; for p in p_def_rebind p_after_mutate p_after_alias_mut p_after_read; do echo "##### $p HEAD"; timeout 30
+          5s bash   mkdir -p /tmp/rprobes/p_def_rebind_imp /tmp/rprobes/p_def_rebind_imp2 cat > /tmp/rprobes/p_def_rebind_imp/lib.
+          5s bash   date; for p in p_def_rebind_imp p_def_rebind_imp2; do echo "##### $p BASE"; timeout 300 bash /tmp/cmpdir.sh /t
+          5s bash   echo "=== p_annot_raise lib"; cat /tmp/rprobes/p_annot_raise/lib.py; echo "=== main"; cat /tmp/rprobes/p_annot
+          4s bash   date; for p in p1_rebind p3_raise p_rebind_print p_rebind_call p_rebind_mutate p_rebind_cond_read; do echo "##
+          3s bash   mkdir -p /tmp/rprobes/p_after_wrap /tmp/rprobes/p_after_const_mut cat > /tmp/rprobes/p_after_wrap/lib.py <<'PY
 
 
 --- ORIGINAL TASK ---
