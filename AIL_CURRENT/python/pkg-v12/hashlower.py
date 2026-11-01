@@ -569,7 +569,7 @@ class _Lowerer(ast.NodeTransformer):
             if not allow_str:
                 self.refuse(node, 'base64.b64encode(altchars=) takes bytes, not str')
             try:
-                return self.fn('_ail_hl_alt_bytes', self.C(arg.value.encode('ascii')))
+                return self.fn('_ail_hl_alt_bytes', self.C(arg.value.encode('ascii')), self.C(3))
             except UnicodeEncodeError:
                 self.refuse(node, 'base64 altchars must contain only ASCII characters')
         if self.general:
@@ -578,7 +578,7 @@ class _Lowerer(ast.NodeTransformer):
             if not allow_str:
                 self.refuse(node, 'base64.b64encode(altchars=) takes bytes, not str')
             return self.fn('_ail_hl_alt_str', arg)
-        return self.fn('_ail_hl_alt_bytes', arg)
+        return self.fn('_ail_hl_alt_bytes', arg, self.C(3 if allow_str else 0))
 
     def base64_call(self, node, q, name):
         if 'Error' in self.user_defs and name in ('b64decode', 'standard_b64decode', 'urlsafe_b64decode',

@@ -1,3 +1,16 @@
+## 2026-11-01 -- std_base64 review 2: b16decode type check, altchars type check (job-std_base64-11011521)
+
+`base64.b16decode` on a non-bytes/non-str argument now raises CPython's
+`TypeError: argument should be a bytes-like object or ASCII string, not '<type>'` instead of
+`object of type '<type>' has no len()`. `b64encode(..., altchars=...)` now rejects a non-bytes-like
+altchars after the length assert (`TypeError: a bytes-like object is required, not '<type>'`) instead
+of using its items as character codes; bytes, bytearray and str altchars keep their behaviour, and the
+decode-side `argument should be a bytes-like object or ASCII string` message is unchanged.
+
+Probes `/tmp/rprobes/r_b16.py`, `r_badtypes.py`, `r_alt.py`, `r_b16b.py` match CPython on both
+builds. Tests: `test_ail_std_base64`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
+
 ## 2026-11-01 -- std_base64 review fixes: altchars assert, decodebytes/encoder type errors, b32 bytearray (job-std_base64-11011521)
 
 Follow-up to the `std_base64` review. `b64encode`/`b64decode` now assert `len(altchars) == 2`

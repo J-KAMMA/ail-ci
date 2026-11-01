@@ -288,22 +288,22 @@ def _ail_hl_bs_in(data: bytes) -> bytes:
     return data
 
 
-def _ail_hl_alt_bytes(data: bytes) -> bytes:
+def _ail_hl_alt_bytes(data: bytes, kind: int) -> bytes:
     assert len(data) == 2, repr(data)
-    return data
+    return _ail_hl_need_bytes(data, kind)
 
 
 def _ail_hl_alt_str(text: str) -> bytes:
     if not _ail_hl_ascii(text):
         raise ValueError("string argument should contain only ASCII characters")
-    return _ail_hl_alt_bytes(text.encode())
+    return _ail_hl_alt_bytes(text.encode(), 3)
 
 
 def _ail_hl_alt_dyn(data):
     if isinstance(data, str):
         return _ail_hl_alt_str(data)
     _ail_hl_need_bytes(data, 3)
-    return _ail_hl_alt_bytes(data)
+    return _ail_hl_alt_bytes(data, 3)
 
 
 def _ail_hl_alt_enc_dyn(data):
@@ -311,7 +311,7 @@ def _ail_hl_alt_enc_dyn(data):
         if len(data) != 2:
             raise AssertionError(repr(data))
         raise TypeError("a bytes-like object is required, not 'str'")
-    return _ail_hl_alt_bytes(data)
+    return _ail_hl_alt_bytes(data, 0)
 
 
 def _ail_hl_b64e_alt(data: bytes, altchars: bytes) -> bytes:
@@ -406,6 +406,7 @@ def _ail_hl_b16d_str(text: str, casefold: int) -> bytes:
 def _ail_hl_b16d_dyn(data, casefold):
     if isinstance(data, str):
         return _ail_hl_b16d_str(data, casefold)
+    _ail_hl_need_bytes(data, 3)
     return _ail_hl_b16d(data, casefold)
 
 
