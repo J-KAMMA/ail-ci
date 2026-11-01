@@ -827,8 +827,8 @@ class CryptoTests(unittest.TestCase):
                      "secrets.choice(<expression>)", "write instead")
         self.refused("import hmac\n\ndef main() -> None:\n    print(hmac.new(b'k', b'm').hexdigest())\n\nmain()\n",
                      "without digestmod", "write instead")
-        self.refused("import base64\n\ndef main() -> None:\n    print(base64.b32encode(b'k'))\n\nmain()\n",
-                     "base64.b32encode is not built")
+        self.refused("import base64\n\ndef main() -> None:\n    print(base64.b85encode(b'k'))\n\nmain()\n",
+                     "base64.b85encode is not built")
         self.refused("import hashlib\n\ndef main() -> None:\n    f = hashlib.sha256\n    print(1)\n\nmain()\n",
                      "used as a value is not built")
         self.refused("import hashlib\n\ndef main() -> None:\n    print(hashlib.blake2b(b'x', fanout=2).hexdigest())\n\nmain()\n",

@@ -1,3 +1,17 @@
+## 2026-11-01 -- std_base64: `base64` codecs, altchars and line wrapping (job-std_base64-11011521)
+
+Added `base64.b16encode` / `b16decode`, `b32encode` / `b32decode`, `encodebytes` / `decodebytes`,
+`b64encode(altchars=)` and `b64decode(altchars=)` to `hashlower.py` and `hash_prelude.py`, plus a
+run-time `validate=` flag for `b64decode`. The decoders now raise a `ValueError` subclass named
+`Error` (CPython's `binascii.Error` name); a user binding named `Error` is refused by name. `_strish`
+now keeps `bytes.lower()` / `bytes.upper()` bytes-typed.
+
+`lab/stdlib/base64/` holds 12 realistic programs; 10 build and match CPython 3.12.3 stdout and exit
+code, 2 are refused with the follow-up texts in `lab/stdlib/base64/RESULTS.md` (`b85`/`a85` and the
+legacy `base64.encode` / `base64.decode` stream API). `test_ail_std_base64.py` checks the ten on both
+`AIL_IR` builds and pins the two refusals. `test_ail_crypto.py` now pins `b85encode` as the refused
+base64 name instead of the now-built `b32encode`.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
