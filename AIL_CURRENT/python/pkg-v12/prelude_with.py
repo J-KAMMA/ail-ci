@@ -91,3 +91,210 @@ class _AilNullContext:
 
     def __exit__(self, exc_type, exc, tb):
         return False
+
+
+class _AilMissing:
+    pass
+
+
+_ail_missing = _AilMissing()
+
+_ail_exc_bases = {
+    "BaseException": "",
+    "SystemExit": "BaseException",
+    "KeyboardInterrupt": "BaseException",
+    "GeneratorExit": "BaseException",
+    "Exception": "BaseException",
+    "StopIteration": "Exception",
+    "StopAsyncIteration": "Exception",
+    "ArithmeticError": "Exception",
+    "FloatingPointError": "ArithmeticError",
+    "OverflowError": "ArithmeticError",
+    "ZeroDivisionError": "ArithmeticError",
+    "AssertionError": "Exception",
+    "AttributeError": "Exception",
+    "BufferError": "Exception",
+    "EOFError": "Exception",
+    "ImportError": "Exception",
+    "ModuleNotFoundError": "ImportError",
+    "LookupError": "Exception",
+    "IndexError": "LookupError",
+    "KeyError": "LookupError",
+    "MemoryError": "Exception",
+    "NameError": "Exception",
+    "UnboundLocalError": "NameError",
+    "OSError": "Exception",
+    "BlockingIOError": "OSError",
+    "ChildProcessError": "OSError",
+    "ConnectionError": "OSError",
+    "BrokenPipeError": "ConnectionError",
+    "ConnectionAbortedError": "ConnectionError",
+    "ConnectionRefusedError": "ConnectionError",
+    "ConnectionResetError": "ConnectionError",
+    "FileExistsError": "OSError",
+    "FileNotFoundError": "OSError",
+    "InterruptedError": "OSError",
+    "IsADirectoryError": "OSError",
+    "NotADirectoryError": "OSError",
+    "PermissionError": "OSError",
+    "ProcessLookupError": "OSError",
+    "TimeoutError": "OSError",
+    "ReferenceError": "Exception",
+    "RuntimeError": "Exception",
+    "NotImplementedError": "RuntimeError",
+    "RecursionError": "RuntimeError",
+    "SyntaxError": "Exception",
+    "IndentationError": "SyntaxError",
+    "TabError": "IndentationError",
+    "SystemError": "Exception",
+    "TypeError": "Exception",
+    "ValueError": "Exception",
+    "UnicodeError": "ValueError",
+    "UnicodeDecodeError": "UnicodeError",
+    "UnicodeEncodeError": "UnicodeError",
+    "UnicodeTranslateError": "UnicodeError",
+    "Warning": "Exception",
+}
+
+
+
+def _ail_exc_is(exc, name: str) -> bool:
+    current = _ail_exc_name(exc)
+    while current:
+        if current == name:
+            return True
+        if current in _ail_exc_bases:
+            current = _ail_exc_bases[current]
+        else:
+            current = ""
+    return False
+
+
+class _AilExitStack:
+    def __init__(self):
+        self.kinds: list = []
+        self.managers: list = []
+        self.funcs: list = []
+        self.args1: list = []
+        self.args2: list = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        received = exc_type is not None
+        suppressed = False
+        pending = None
+        while self.kinds:
+            kind = self.kinds.pop()
+            try:
+                if kind == 0:
+                    cm = self.managers.pop()
+                    result = cm.__exit__(exc_type, exc, tb)
+                elif kind == 1:
+                    func = self.funcs.pop()
+                    arg1 = self.args1.pop()
+                    arg2 = self.args2.pop()
+                    if arg1 is _ail_missing:
+                        func()
+                    elif arg2 is _ail_missing:
+                        func(arg1)
+                    else:
+                        func(arg1, arg2)
+                    result = False
+                else:
+                    func = self.funcs.pop()
+                    result = func(exc_type, exc, tb)
+            except Exception as e:
+                pending = e
+                exc_type = _AilExcType(_ail_exc_name(e))
+                exc = e
+                tb = _AilTraceback()
+                result = False
+            if result:
+                suppressed = True
+                pending = None
+                exc_type = None
+                exc = None
+                tb = None
+        if pending is not None:
+            raise pending
+        return received and suppressed
+
+    def enter_context(self, cm):
+        result = cm.__enter__()
+        self.kinds.append(0)
+        self.managers.append(cm)
+        return result
+
+    def push(self, exit):
+        # CPython registers the __exit__ of a manager without entering it; a plain callable is called with the
+        # three __exit__ arguments.
+        if callable(exit):
+            self.kinds.append(2)
+            self.funcs.append(exit)
+        else:
+            self.kinds.append(0)
+            self.managers.append(exit)
+        return exit
+
+    def callback(self, func, arg1=_ail_missing, arg2=_ail_missing):
+        self.kinds.append(1)
+        self.funcs.append(func)
+        self.args1.append(arg1)
+        self.args2.append(arg2)
+        return func
+
+    def pop_all(self):
+        new = _AilExitStack()
+        new.kinds = self.kinds
+        new.managers = self.managers
+        new.funcs = self.funcs
+        new.args1 = self.args1
+        new.args2 = self.args2
+        self.kinds = []
+        self.managers = []
+        self.funcs = []
+        self.args1 = []
+        self.args2 = []
+        return new
+
+    def close(self):
+        pending = None
+        while self.kinds:
+            kind = self.kinds.pop()
+            try:
+                if kind == 0:
+                    cm = self.managers.pop()
+                    cm.__exit__(None, None, None)
+                elif kind == 1:
+                    func = self.funcs.pop()
+                    arg1 = self.args1.pop()
+                    arg2 = self.args2.pop()
+                    if arg1 is _ail_missing:
+                        func()
+                    elif arg2 is _ail_missing:
+                        func(arg1)
+                    else:
+                        func(arg1, arg2)
+                else:
+                    func = self.funcs.pop()
+                    func(None, None, None)
+            except Exception as e:
+                pending = e
+        if pending is not None:
+            raise pending
+
+
+class _AilChdir:
+    def __init__(self, path):
+        self.path = path
+        self.old = ""
+
+    def __enter__(self):
+        self.old = _ail_os_getcwd()
+        _ail_os_chdir(self.path)
+
+    def __exit__(self, exc_type, exc, tb):
+        _ail_os_chdir(self.old)
+        return False

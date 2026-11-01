@@ -24,7 +24,9 @@ unless __exit__ returns true, and several items nest left to right.
   `t = yield v; if t is not None: raise t`, and the def keeps its name and parameters and returns `_AilGenCM(generator)`
   (prelude_with.py), whose __exit__ throws the exception into the generator by `send` (there is no generator.throw):
   a `try: yield ... finally:` or `except` around the yield behaves as in CPython.
-* `closing(x)` and `nullcontext(v)`. Not built, refused by name: ExitStack, redirect_stdout, the other names.
+* `closing(x)`, `nullcontext(v)`, `ExitStack()` (enter_context / push / callback with up to two positional arguments /
+  pop_all / close) and `chdir(path)` (prelude_with.py). Not built, refused by name: redirect_stdout, redirect_stderr,
+  asynccontextmanager, ContextDecorator, the other names.
 
 Differences from CPython (declared in DIFFERENCES.md): __exit__'s first argument is a stand-in object with `__name__`
 that prints as `<class 'X'>` (there are no class values here; `exc_type is X`, `issubclass(exc_type, X)` and
@@ -39,7 +41,7 @@ import os
 import stdlib5
 from stdlib4 import Refused, refuse
 
-HANDLED = {'contextmanager', 'suppress', 'closing', 'nullcontext'}
+HANDLED = {'contextmanager', 'suppress', 'closing', 'nullcontext', 'ExitStack', 'chdir'}
 HERE = os.path.dirname(os.path.abspath(__file__))
 BUILTIN_EXC = {'BaseException', 'Exception', 'ArithmeticError', 'AssertionError', 'AttributeError', 'EOFError',
                'FloatingPointError', 'IndexError', 'KeyError', 'LookupError', 'MemoryError', 'NameError',
@@ -310,6 +312,7 @@ class ExitArgs(ast.NodeTransformer):
 
     def __init__(self, ty, ex, tb, classes):
         self.ty, self.ex, self.tb, self.classes = ty, ex, tb, classes
+        self.uses_exc_is = False
 
     def isclass(self, node):
         return isinstance(node, ast.Name) and (node.id in BUILTIN_EXC or node.id in self.classes)
@@ -325,6 +328,14 @@ class ExitArgs(ast.NodeTransformer):
         return ast.BoolOp(op=ast.And(), values=[
             ast.Compare(left=N(self.ex), ops=[ast.IsNot()], comparators=[ast.Constant(value=None)]), test])
 
+    def subclass_test(self, cls):
+        # a builtin exception name always goes through the name hierarchy: prelude_bytes.py defines
+        # UnicodeError / LookupError itself, and an `isinstance` against that class is not the builtin one.
+        if cls.id in self.classes and cls.id not in BUILTIN_EXC:
+            return call(N('isinstance'), [N(self.ex), cls])
+        self.uses_exc_is = True
+        return call(N('_ail_exc_is'), [N(self.ex), ast.Constant(value=cls.id)])
+
     def visit_Name(self, node):
         if node.id == self.tb and isinstance(node.ctx, ast.Load):
             refuse(node, "__exit__ uses %r other than in `is None` / `is not None`; traceback objects are not "
@@ -336,8 +347,13 @@ class ExitArgs(ast.NodeTransformer):
         if isinstance(node.func, ast.Name) and node.func.id == 'issubclass' and len(node.args) == 2 \
                 and self.is_ty(node.args[0]):
             second = node.args[1]
-            if isinstance(second, ast.Tuple) and all(self.isclass(e) for e in second.elts) or self.isclass(second):
-                return ast.copy_location(self.present(call(N('isinstance'), [N(self.ex), second])), node)
+            if isinstance(second, ast.Tuple) and all(self.isclass(e) for e in second.elts):
+                tests = [self.subclass_test(e) for e in second.elts]
+                test = ast.Constant(value=False) if not tests else (
+                    tests[0] if len(tests) == 1 else ast.BoolOp(op=ast.Or(), values=tests))
+                return ast.copy_location(self.present(test), node)
+            if self.isclass(second):
+                return ast.copy_location(self.present(self.subclass_test(second)), node)
         return node
 
     def visit_Compare(self, node):
@@ -421,7 +437,8 @@ def rewrite(tree):
     if not has_with and not has_cl:
         return ''
     binder = stdlib5.take_imports(tree, 'contextlib', HANDLED,
-                                  unknown='contextmanager, suppress, closing and nullcontext are built')
+                                  unknown='contextmanager, suppress, closing, nullcontext, ExitStack and chdir are '
+                                          'built')
     lower = Lower(tree, binder)
     # closing(x) / nullcontext(v) as a value: the classes of the prelude
     need = set()
@@ -434,6 +451,12 @@ def rewrite(tree):
         if found == 'nullcontext':
             need.add('_AilNullContext')
             return N('_AilNullContext')
+        if found == 'ExitStack':
+            need.add('_AilExitStack')
+            return N('_AilExitStack')
+        if found == 'chdir':
+            need.add('_AilChdir')
+            return N('_AilChdir')
         return None
     tree.body = [stdlib5.Replace(fix).visit(s) for s in tree.body]
     new_body = []
@@ -442,11 +465,14 @@ def rewrite(tree):
         new_body.extend(res if isinstance(res, list) else [res])
     tree.body = new_body
     classes = lower.classes
+    need_exc_is = False
     for node in ast.walk(tree):
         if isinstance(node, ast.FunctionDef) and node.name == '__exit__' and len(node.args.args) >= 4:
             ty, ex, tb = node.args.args[1].arg, node.args.args[2].arg, node.args.args[3].arg
-            node.body = [ExitArgs(ty, ex, tb, classes).visit(s) for s in node.body]
-    stdlib5.leftover(tree, binder, 'contextmanager, suppress, closing and nullcontext are built')
+            walker = ExitArgs(ty, ex, tb, classes)
+            node.body = [walker.visit(s) for s in node.body]
+            need_exc_is = need_exc_is or walker.uses_exc_is
+    stdlib5.leftover(tree, binder, 'contextmanager, suppress, closing, nullcontext, ExitStack and chdir are built')
     if not (lower.used or need):
         return ''
     roots = set(need)
@@ -455,5 +481,7 @@ def rewrite(tree):
         roots.add('_AilTraceback')
     if lower.cm:
         roots.add('_AilGenCM')
+    if need_exc_is:
+        roots.add('_ail_exc_is')
     source = open(os.path.join(HERE, 'prelude_with.py'), encoding='utf-8').read()
     return stdlib5.shake(source, roots)

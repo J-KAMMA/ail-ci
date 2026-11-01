@@ -1,3 +1,18 @@
+## 2026-11-01 -- contextlib coverage: ExitStack, chdir and builtin exception hierarchy (job-std_contextlib-11011755)
+
+Added the twelve-program `lab/stdlib/contextlib` coverage set and its differential test.  Before the change
+six built; now ten build and match CPython, and `redirect_stdout` / `redirect_stderr` stay refused by name as
+the follow-up (they need runtime output-stream redirection).
+
+`prelude_with.py` has `_AilExitStack` (`enter_context`, `push`, `callback` with up to two positional
+arguments, `pop_all`, `close`, `__enter__`/`__exit__`) with CPython's LIFO unwinding, exception arguments for
+manager exits and suppression result, plus `_AilChdir` over the existing `_ail_os_getcwd`/`_ail_os_chdir`
+primitives.  `withlib.py` maps both names, and `issubclass(exc_type, X)` in `__exit__` now follows a builtin
+name hierarchy instead of `isinstance` for `ArithmeticError`, `LookupError`, `UnicodeError` and the other
+names that `prelude_bytes.py` shadows; user exception classes still use `isinstance`.  Probes in
+`/tmp/probes/ctx_*` cover callbacks, push without enter, failing exits, pop_all, chdir through an argument, a
+list item, an attribute and a dict value, and the exception hierarchy on both builds.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
