@@ -1,3 +1,16 @@
+## 2026-11-01 -- typing runtime names: TypedDict, NewType, cast (job-std_typing-11012337)
+
+`typing` was missing from the stdlib-5 gate in `ail_syntax.python_surface`, so a program whose only library
+import was `typing` bypassed `stdlib5.rewrite_text`. The gate now includes it, and the new
+`python/pkg-v12/typinglib.py` lowers the run-time parts of `typing` to ordinary Python: `TypedDict` class,
+inherited and functional declarations become plain dicts (with `total=False`, empty field sets and the
+`Movie(**data)` copy), `NewType("X", Base)` becomes `Base`, and `cast(T, value)` becomes `value`.
+`lab/stdlib/typing/` has 12 realistic programs: 9 build and match CPython 3.12 stdout and exit code; Protocol,
+`get_origin` / `get_args` and `get_type_hints` stay named follow-ups in `RESULTS.md`. The new
+`test_ail_std_typing` is registered through `tests.d/` and also covers TypedDict / NewType / cast boundaries.
+Probes `/tmp/probes/typing_td_values.py`, `typing_td_functional.py`, `typing_newtype_values.py`,
+`typing_cast_values.py` and `typing_extra.py` match CPython on both `cmp.sh` builds.
+
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
