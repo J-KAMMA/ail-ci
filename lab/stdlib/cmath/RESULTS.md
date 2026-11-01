@@ -81,3 +81,38 @@ path (`g`) and the default build (`d`) and compares each with CPython 3.12:
 The programs build on the general path because the complex class uses operator methods; the typed path
 refuses them and the default build falls back, as it does for `fractions.Fraction`. There are no follow-ups:
 no refusal in this set needs a new feature.
+
+## Review follow-up
+
+The review's eight counterexamples in `/tmp/rprobes` were re-run and all now match CPython on both builds
+(`g` forced general and `d` default). The fixes:
+
+* `complex(...)` now follows CPython 3.12's `complex_new`: `real=` alone is the one-argument form, and two
+  arguments combine as CPython does (`complex(1+2j, 3)` is `(1+5j)`, `complex(1+2j, 3+4j)` is `(-3+5j)`),
+  with the constructor's own messages (`first argument ...`, `can't take second arg if first is a string`,
+  `second arg can't be a string`). Signed zeros are preserved exactly.
+* `z ** n` only takes the integer power path for a finite integral `n`; an infinite or NaN exponent goes
+  through the general power (CPython's `(nan+nanj)`), and a zero base with a negative or complex exponent
+  raises `ZeroDivisionError: 0.0 to a negative or complex power`.
+* `cmath.log(z, base)` raises `ValueError: math domain error` when the base's logarithm is zero, as CPython
+  does, before dividing.
+* `cmath.rect` takes real arguments only, so a complex `r`/`phi` raises `TypeError: must be real number,
+  not complex`; every other `cmath` argument raises `must be real number, not <type>` for a non-number,
+  matching CPython.
+* A `cmath` call with an argument the module rejects is lowered to a runtime `TypeError` with CPython's
+  text: `cmath.<name>() takes no keyword arguments` for the positional-only functions, and `isclose()`
+  rejects a third positional argument (tolerances stay keyword-only) and an unknown keyword.
+* The complex string parser routes every numeric part through the malformed-string check, so `complex("++1j")`
+  and `complex("1++2j")` raise `ValueError: complex() arg is a malformed string`.
+
+The regression cases are checked by `test_ail_std_cmath.py` (`test_review_regressions`) against CPython.
+
+### Review probes
+
+| probe | what it covers | result |
+| --- | --- | --- |
+| `p_pow.py` | infinite/NaN exponents, zero base with negative/complex exponents, integer exponents 100 and 101, reflected power | g, d match |
+| `p_special.py` | `log` with bases `0`, `1`, `1j`, `-1`, `e`, plus `log(0)`, `atanh(±1)`, infinite imaginary `exp` | g, d match |
+| `p_complex2.py` | every `complex(...)` form, malformed strings, `rect`/`sqrt`/`phase` argument types, `isclose` arity/keywords | g, d match |
+| `p_forms.py` | keyword arguments to `log`, `exp`, `rect`, `sqrt`, `phase` (CPython's `cmath.<name>() takes no keyword arguments`) | g, d match |
+| `pcm1.py`, `pforms.py`, `pflow.py`, `pnum.py`, `pspecial.py`, `pstrings.py`, `phash.py`, `phash2.py` | the earlier probes, re-run after the fixes (common calls, values through an argument/list item/attribute/dict value, empty inputs, ~220 values through every function, the special table, parsing, hash/dict lookup, both builds) | g, d match |

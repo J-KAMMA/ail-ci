@@ -295,7 +295,10 @@ class _AilComplex:
 
     def __pow__(self, other):
         b = _ail_cm_as(other)
-        if b.imag == 0.0 and b.real == math.floor(b.real) and abs(b.real) <= 100.0:
+        if self.real == 0.0 and self.imag == 0.0:
+            return _ail_cm_pow(self, b)
+        if b.imag == 0.0 and math.isfinite(b.real) and b.real == math.floor(b.real) \
+                and abs(b.real) <= 100.0:
             return _ail_cm_powi(self, int(b.real))
         return _ail_cm_cpow(self, b)
 
@@ -317,6 +320,8 @@ class _AilComplex:
 
 
 def _ail_cm_tname(x) -> str:
+    if x is None:
+        return "NoneType"
     if isinstance(x, bool):
         return "bool"
     if isinstance(x, int):
@@ -327,7 +332,31 @@ def _ail_cm_tname(x) -> str:
         return "str"
     if isinstance(x, _AilComplex):
         return "complex"
+    if isinstance(x, list):
+        return "list"
+    if isinstance(x, tuple):
+        return "tuple"
+    if isinstance(x, dict):
+        return "dict"
     return "object"
+
+
+def _ail_cm_raise(message: str, *values) -> None:
+    raise TypeError(message)
+
+
+def _ail_cm_arg(x):
+    if isinstance(x, _AilComplex):
+        return x
+    if isinstance(x, bool) or isinstance(x, int) or isinstance(x, float):
+        return _AilComplex(float(x), 0.0)
+    raise TypeError("must be real number, not %s" % _ail_cm_tname(x))
+
+
+def _ail_cm_float_arg(x) -> float:
+    if isinstance(x, bool) or isinstance(x, int) or isinstance(x, float):
+        return float(x)
+    raise TypeError("must be real number, not %s" % _ail_cm_tname(x))
 
 
 def _ail_cm_hash(real: float, imag: float) -> int:
@@ -395,7 +424,7 @@ def _ail_cm_parse(s: str):
             re = 0.0
             im = 1.0 if body == "" or body == "+" else (-1.0 if body == "-" else _ail_cm_strfloat(body))
             return _AilComplex(re, im)
-        re = float(body[:pos])
+        re = _ail_cm_strfloat(body[:pos])
         tail = body[pos:]
         im = 1.0 if tail == "+" else (-1.0 if tail == "-" else _ail_cm_strfloat(tail))
         return _AilComplex(re, im)
@@ -407,12 +436,31 @@ def _ail_cm_from_one(x):
         return _AilComplex(x.real, x.imag)
     if isinstance(x, str):
         return _ail_cm_parse(x)
-    return _AilComplex(_ail_cm_real(x), 0.0)
+    if isinstance(x, bool) or isinstance(x, int) or isinstance(x, float):
+        return _AilComplex(float(x), 0.0)
+    raise TypeError("complex() first argument must be a string or a number, not '%s'"
+                    % _ail_cm_tname(x))
 
 
 def _ail_cm_from_two(real, imag):
+    if isinstance(real, str):
+        raise TypeError("complex() can't take second arg if first is a string")
+    if isinstance(imag, str):
+        raise TypeError("complex() second arg can't be a string")
+    if not (isinstance(real, _AilComplex) or isinstance(real, bool)
+            or isinstance(real, int) or isinstance(real, float)):
+        raise TypeError("complex() first argument must be a string or a number, not '%s'"
+                        % _ail_cm_tname(real))
+    if not (isinstance(imag, _AilComplex) or isinstance(imag, bool)
+            or isinstance(imag, int) or isinstance(imag, float)):
+        raise TypeError("complex() second argument must be a number, not '%s'"
+                        % _ail_cm_tname(imag))
     if isinstance(real, _AilComplex):
-        raise TypeError("complex() first argument must not be a complex number")
+        if isinstance(imag, _AilComplex):
+            return _AilComplex(real.real - imag.imag, real.imag + imag.real)
+        return _AilComplex(real.real, real.imag + _ail_cm_real(imag))
+    if isinstance(imag, _AilComplex):
+        return _AilComplex(_ail_cm_real(real) - imag.imag, imag.real)
     return _AilComplex(_ail_cm_real(real), _ail_cm_real(imag))
 
 
@@ -500,7 +548,7 @@ def _ail_cm_atan2(z):
 
 
 def _ail_cm_sqrt(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     hit = _ail_cm_special(_AIL_CM_SQRT_SPECIAL, z)
     if hit is not None:
         return hit
@@ -545,20 +593,22 @@ def _ail_cm_log_value(z):
 
 
 def _ail_cm_log(z, base=None):
-    x = _ail_cm_log_value(_ail_cm_as(z))
+    x = _ail_cm_log_value(_ail_cm_arg(z))
     if base is not None:
-        y = _ail_cm_log_value(_ail_cm_as(base))
+        y = _ail_cm_log_value(_ail_cm_arg(base))
+        if y.real == 0.0 and y.imag == 0.0:
+            raise ValueError("math domain error")
         return _ail_cm_div(x, y)
     return x
 
 
 def _ail_cm_log10(z):
-    r = _ail_cm_log_value(_ail_cm_as(z))
+    r = _ail_cm_log_value(_ail_cm_arg(z))
     return _AilComplex(r.real / _AIL_CM_LN10, r.imag / _AIL_CM_LN10)
 
 
 def _ail_cm_exp(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     if not math.isfinite(z.real) or not math.isfinite(z.imag):
         if math.isinf(z.real) and math.isfinite(z.imag) and z.imag != 0.0:
             if z.real > 0.0:
@@ -581,7 +631,7 @@ def _ail_cm_exp(z):
 
 
 def _ail_cm_cosh(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     if not math.isfinite(z.real) or not math.isfinite(z.imag):
         if math.isinf(z.real) and math.isfinite(z.imag) and z.imag != 0.0:
             if z.real > 0.0:
@@ -606,7 +656,7 @@ def _ail_cm_cosh(z):
 
 
 def _ail_cm_sinh(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     if not math.isfinite(z.real) or not math.isfinite(z.imag):
         if math.isinf(z.real) and math.isfinite(z.imag) and z.imag != 0.0:
             if z.real > 0.0:
@@ -631,7 +681,7 @@ def _ail_cm_sinh(z):
 
 
 def _ail_cm_tanh(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     if not math.isfinite(z.real) or not math.isfinite(z.imag):
         if math.isinf(z.real) and math.isfinite(z.imag) and z.imag != 0.0:
             if z.real > 0.0:
@@ -653,24 +703,24 @@ def _ail_cm_tanh(z):
 
 
 def _ail_cm_sin(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     s = _ail_cm_sinh(_AilComplex(-z.imag, z.real))
     return _AilComplex(s.imag, -s.real)
 
 
 def _ail_cm_cos(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     return _ail_cm_cosh(_AilComplex(-z.imag, z.real))
 
 
 def _ail_cm_tan(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     s = _ail_cm_tanh(_AilComplex(-z.imag, z.real))
     return _AilComplex(s.imag, -s.real)
 
 
 def _ail_cm_asinh(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     hit = _ail_cm_special(_AIL_CM_ASINH_SPECIAL, z)
     if hit is not None:
         return hit
@@ -689,7 +739,7 @@ def _ail_cm_asinh(z):
 
 
 def _ail_cm_acos(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     hit = _ail_cm_special(_AIL_CM_ACOS_SPECIAL, z)
     if hit is not None:
         return hit
@@ -709,7 +759,7 @@ def _ail_cm_acos(z):
 
 
 def _ail_cm_acosh(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     hit = _ail_cm_special(_AIL_CM_ACOSH_SPECIAL, z)
     if hit is not None:
         return hit
@@ -723,19 +773,19 @@ def _ail_cm_acosh(z):
 
 
 def _ail_cm_asin(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     s = _ail_cm_asinh(_AilComplex(-z.imag, z.real))
     return _AilComplex(s.imag, -s.real)
 
 
 def _ail_cm_atan(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     s = _ail_cm_atanh(_AilComplex(-z.imag, z.real))
     return _AilComplex(s.imag, -s.real)
 
 
 def _ail_cm_atanh(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     hit = _ail_cm_special(_AIL_CM_ATANH_SPECIAL, z)
     if hit is not None:
         return hit
@@ -756,11 +806,11 @@ def _ail_cm_atanh(z):
 
 
 def _ail_cm_phase(z):
-    return _ail_cm_atan2(_ail_cm_as(z))
+    return _ail_cm_atan2(_ail_cm_arg(z))
 
 
 def _ail_cm_polar(z):
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     r = _ail_cm_abs(z)
     if math.isinf(r) and math.isfinite(z.real) and math.isfinite(z.imag):
         raise OverflowError("math range error")
@@ -768,8 +818,8 @@ def _ail_cm_polar(z):
 
 
 def _ail_cm_rect(r, phi):
-    r = _ail_cm_real(r)
-    phi = _ail_cm_real(phi)
+    r = _ail_cm_float_arg(r)
+    phi = _ail_cm_float_arg(phi)
     if not math.isfinite(r) or not math.isfinite(phi):
         if math.isinf(r) and math.isfinite(phi) and phi != 0.0:
             if r > 0.0:
@@ -787,23 +837,23 @@ def _ail_cm_rect(r, phi):
 
 
 def _ail_cm_isfinite(z) -> bool:
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     return math.isfinite(z.real) and math.isfinite(z.imag)
 
 
 def _ail_cm_isnan(z) -> bool:
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     return math.isnan(z.real) or math.isnan(z.imag)
 
 
 def _ail_cm_isinf(z) -> bool:
-    z = _ail_cm_as(z)
+    z = _ail_cm_arg(z)
     return math.isinf(z.real) or math.isinf(z.imag)
 
 
 def _ail_cm_isclose(a, b, rel_tol=1e-09, abs_tol=0.0) -> bool:
-    a = _ail_cm_as(a)
-    b = _ail_cm_as(b)
+    a = _ail_cm_arg(a)
+    b = _ail_cm_arg(b)
     if rel_tol < 0.0 or abs_tol < 0.0:
         raise ValueError("tolerances must be non-negative")
     if a.real == b.real and a.imag == b.imag:

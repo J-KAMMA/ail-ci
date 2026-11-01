@@ -1,3 +1,18 @@
+## 2026-11-01 -- cmath review fixes: power, base, constructor, arguments (job-std_cmath-11020039)
+
+Fixed the eight counterexamples from the review. `complex(...)` follows CPython's `complex_new`
+(`real=` alone is the one-argument form; two arguments combine as a real plus an imaginary times `1j`;
+the constructor's own TypeError texts; signed zeros preserved). `z ** n` uses the integer path only
+for a finite integral exponent, so `(2+0j) ** inf` is `(nan+nanj)` and `0j ** -1` raises CPython's
+`0.0 to a negative or complex power`. `cmath.log(z, base)` raises `ValueError: math domain error`
+when the base logarithm is zero. `cmath.rect` takes real arguments only, every other `cmath`
+argument raises `must be real number, not <type>`, and a keyword call to a positional-only function
+is lowered to CPython's `cmath.<name>() takes no keyword arguments` (keyword-only `isclose`
+tolerances and the third-positional-argument error are handled the same way). The complex string
+parser turns every bad numeric part into `complex() arg is a malformed string`. Probes
+`/tmp/probes/p_pow.py`, `p_special.py`, `p_complex2.py`, `p_forms.py` and the earlier eight probes
+match CPython on both builds; `test_ail_std_cmath.py` gained `test_review_regressions`.
+
 ## 2026-11-01 -- cmath coverage: 12 real programs over a complex class (job-std_cmath-11020039)
 
 `cmath` is now modelled for real programs. Twelve 15-60 line programs in `lab/stdlib/cmath/` use the

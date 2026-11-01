@@ -55,6 +55,10 @@ def _call(func, args, keywords=None):
     return ast.Call(func=_name(func), args=list(args), keywords=list(keywords or []))
 
 
+def _raise(message, values):
+    return _call('_ail_cm_raise', [ast.Constant(value=message)] + list(values))
+
+
 def _float(value):
     return ast.Constant(value=float(value))
 
@@ -111,6 +115,8 @@ def _complex_call(node):
         if 'imag' in kw:
             return _call('_ail_cm_from_two', [args[0], kw['imag']])
         return _call('_ail_cm_from_one', args)
+    if 'imag' not in kw and 'real' in kw:
+        return _call('_ail_cm_from_one', [kw['real']])
     if 'real' in kw or 'imag' in kw:
         return _call('_ail_cm_from_two', [kw.get('real', _float(0.0)), kw.get('imag', _float(0.0))])
     return _call('_ail_cm_from_two', [_float(0.0), _float(0.0)])
@@ -136,6 +142,23 @@ def rewrite(tree, text):
                 and not user_complex:
             node.args[1] = _name('_AilComplex')
             return stdlib5.Replace(fix).visit(node)
+        if isinstance(node, ast.Call) and not any(isinstance(a, ast.Starred) for a in node.args):
+            found = binder.attr(node.func)
+            if found in FUNCTIONS:
+                values = list(node.args) + [k.value for k in node.keywords]
+                if found == 'isclose':
+                    if len(node.args) > 2:
+                        lowered = _raise('isclose() takes exactly 2 positional arguments (%d given)'
+                                         % len(node.args), values)
+                        return stdlib5.Replace(fix).visit(lowered)
+                    for k in node.keywords:
+                        if k.arg not in ('a', 'b', 'rel_tol', 'abs_tol'):
+                            lowered = _raise("'%s' is an invalid keyword argument for isclose()" % k.arg,
+                                             values)
+                            return stdlib5.Replace(fix).visit(lowered)
+                elif node.keywords:
+                    lowered = _raise('cmath.%s() takes no keyword arguments' % found, values)
+                    return stdlib5.Replace(fix).visit(lowered)
         found = binder.attr(node)
         if found in FUNCTIONS:
             return _name(FUNCTIONS[found])
