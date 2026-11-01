@@ -24,6 +24,7 @@ PASSING = (
     "07_newtype.py",
     "08_cast.py",
     "09_literal_final.py",
+    "13_errors.py",
 )
 
 REFUSED = {

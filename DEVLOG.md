@@ -1,3 +1,17 @@
+## 2026-11-01 -- typing review: exact NewType errors, lexical shadowing, caught-error program (job-std_typing-11012337)
+
+Review follow-up on `87c6ec9`. A bad NewType call now raises CPython 3.12's exact text, including the runtime
+argument count of a starred call: `_typing._idfunc() takes exactly one argument (0 given)` / `(2 given)` and
+`_typing._idfunc() takes no keyword arguments`. The TypedDict / NewType name lowering in
+`python/pkg-v12/typinglib.py` is now scope-aware: a local variable, parameter, comprehension target, nested
+function or class binding shadows the module declaration, so `nt_shadow` prints `6` / `8` and `td_shadow` prints
+the local titles instead of failing. A module-level rebinding of a declared name, or a `global` / `nonlocal`
+declaration of one, is a named compile-time refusal rather than a silent difference. The new
+`lab/stdlib/typing/13_errors.py` catches and prints bad-call `TypeError`s and a TypedDict `KeyError`; it is in
+`test_ail_std_typing`. Probes `nt_errors`, `nt_shadow`, `td_shadow`, `nt_values`, `td_values`, `nt_scope`,
+`td_scope`, `nt_call_forms`, `nt_module_rebind` and `nt_global` match CPython on both `cmp.sh` builds or are
+refused by name.
+
 ## 2026-11-01 -- typing review fixes: NewType identity, arity, chained base (job-std_typing-11012337)
 
 Review follow-up on `3e1d988`. A NewType call is now identity: `UserId(v)` returns `v` itself instead of

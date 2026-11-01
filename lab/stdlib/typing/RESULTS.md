@@ -38,8 +38,11 @@ Before: 5 of 12 built (all on the general path), 7 refused.
 | 10_protocol.py | refused (follow-up) |
 | 11_introspection.py | refused (follow-up) |
 | 12_get_type_hints.py | refused (follow-up) |
+| 13_errors.py | general (added in the review follow-up) |
 
-After: 9 of 12 build (all on the general path) and all 9 match CPython's stdout and exit code. The test
+After: 9 of the original 12 build (all on the general path) and all 9 match CPython's stdout and exit code.
+The added `13_errors.py` also builds and matches CPython; it catches and prints the `TypeError` texts of bad
+NewType calls and a TypedDict `KeyError`.
 `AIL_CURRENT/test_ail_std_typing.py` (registered by `tests.d/test_ail_std_typing.txt`) compiles every passing
 program in the default mode, runs it and compares both exit code and stdout with CPython. It also has a
 TypedDict / NewType / cast boundary program and checks that the three follow-ups are refused by name.
@@ -53,18 +56,33 @@ TypedDict / NewType / cast boundary program and checks that the three follow-ups
   Python:
   * a `TypedDict` class declaration, a class deriving from one, and the functional
     `X = TypedDict("X", {...})` form (including `total=False` and keyword fields) become plain dicts; every
-    use of the declared name is read as `dict`, and the declaration is dropped.  A constructor call with only
-    `**data` is lowered to `dict(data)`, the copy CPython's `TypedDict(**data)` makes.
+    use of the declared name that resolves to the module-level declaration is read as `dict`, and the
+    declaration is dropped.  A constructor call with only `**data` is lowered to `dict(data)`, the copy
+    CPython's `TypedDict(**data)` makes.  A local variable, parameter or other binding with the same name
+    shadows the declaration, as in CPython.
   * `X = NewType("X", Base)` keeps CPython's call: `UserId(7)` returns the argument `7` itself (identity), a
-    call with another arity or with a keyword raises `TypeError`, and an alias of `X` stays callable. A use of
-    `X` that is not a call reads as an identity function, not CPython's NewType object; the base (including a
-    chain whose base is another NewType) is checked but not evaluated, and the declaration is dropped.
+    call with another arity or with a keyword raises CPython's own `_typing._idfunc()` `TypeError` text (for
+    example `_typing._idfunc() takes exactly one argument (0 given)`), and an alias of `X` stays callable. A
+    use of `X` that is not a call reads as an identity function, not CPython's NewType object; the base
+    (including a chain whose base is another NewType) is checked but not evaluated, and the declaration is
+    dropped.  Lexical shadowing is handled the same way as for TypedDict.
   * `cast(T, value)` becomes `value` (CPython's cast has no run-time effect).
   Only these three names are taken out of `from typing import ...`; every other typing name is left for the
   ordinary annotation handling.
 
 The typed path still refuses a plain `dict` annotation in these programs, so the default build takes the
 general path; there the dicts are boxed and the printed values match CPython.
+
+## Review follow-up
+
+* Bad NewType calls now raise CPython 3.12's exact texts, including the argument count for `*args` calls:
+  `_typing._idfunc() takes exactly one argument (0 given)` / `(2 given)` /
+  `_typing._idfunc() takes no keyword arguments`.  `13_errors.py` catches and prints them.
+* The TypedDict / NewType name lowering is now scope-aware: a local, parameter, comprehension target, nested
+  function or class binding shadows the module declaration, so `nt_shadow` / `td_shadow` print CPython's values
+  instead of failing.  A module-level rebinding of a declared name, or a `global` / `nonlocal` declaration of
+  one, is a named compile-time refusal (`the typing name ... is also assigned at module level`,
+  `a global ... declaration is not lowered here`), never a silent difference.
 
 ## Follow-ups (need a larger feature, not fixed here)
 

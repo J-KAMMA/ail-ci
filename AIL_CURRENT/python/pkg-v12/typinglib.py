@@ -1,12 +1,15 @@
 """typing runtime names that are lowered to ordinary Python (called from stdlib5).
 
-* `TypedDict` class and functional declarations become plain dicts: every use of the declared name is read as
-  `dict`, the declaration itself is dropped.  A TypedDict is a dict at run time in CPython, and the fields are not
-  checked, so a literal, `Movie(title=...)`, `Movie(**data)`, item access and `len` keep CPython's behaviour.
+* `TypedDict` class and functional declarations become plain dicts: every use of the declared name that resolves to
+  the module-level declaration is read as `dict`, the declaration itself is dropped.  A TypedDict is a dict at run
+  time in CPython, and the fields are not checked, so a literal, `Movie(title=...)`, `Movie(**data)`, item access
+  and `len` keep CPython's behaviour.  A local variable, parameter or other binding with the same name shadows the
+  declaration, exactly as it does in CPython.
 * `NewType("Name", Base)` keeps CPython's call behaviour: `Name(v)` is `v` itself (not `Base(v)`), and a call
-  with another arity or with any keyword raises `TypeError` as `NewType.__call__` does.  A use of the name that is
-  not a direct call reads as an identity function of one argument (so an alias keeps working); the base, including
+  with another arity or with any keyword raises CPython's `TypeError` text.  A use of the name that is not a
+  direct call reads as an identity function of one argument (so an alias keeps working); the base, including
   a chain whose base is another NewType, is checked but not evaluated, and the declaration itself is dropped.
+  A shadowing local/parameter is left alone, as for TypedDict.
 * `cast(T, value)` returns `value`; the type expression is not evaluated (it has no run-time effect in CPython).
 
 Only the names in HANDLED are taken out of `from typing import ...`; the other typing names stay for the ordinary
@@ -47,6 +50,77 @@ def _new_type_base(call, binder):
     return base
 
 
+class _Bindings(ast.NodeVisitor):
+    """The names one scope binds (function, class or module), without descending into a nested scope."""
+
+    def __init__(self):
+        self.names = set()
+
+    def visit_Name(self, node):
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
+            self.names.add(node.id)
+
+    def visit_FunctionDef(self, node):
+        self.names.add(node.name)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_ClassDef(self, node):
+        self.names.add(node.name)
+
+    def visit_Lambda(self, node):
+        pass
+
+    def visit_Import(self, node):
+        for alias in node.names:
+            self.names.add(alias.asname or alias.name.split('.')[0])
+
+    def visit_ImportFrom(self, node):
+        for alias in node.names:
+            if alias.name != '*':
+                self.names.add(alias.asname or alias.name)
+
+    def visit_ExceptHandler(self, node):
+        if node.name:
+            self.names.add(node.name)
+        self.generic_visit(node)
+
+    def _comprehension(self, node):
+        for inner in ast.walk(node):
+            if isinstance(inner, ast.NamedExpr) and isinstance(inner.target, ast.Name):
+                self.names.add(inner.target.id)
+
+    visit_ListComp = _comprehension
+    visit_SetComp = _comprehension
+    visit_DictComp = _comprehension
+    visit_GeneratorExp = _comprehension
+
+
+def _params(args):
+    names = {a.arg for a in args.posonlyargs + args.args + args.kwonlyargs}
+    if args.vararg:
+        names.add(args.vararg.arg)
+    if args.kwarg:
+        names.add(args.kwarg.arg)
+    return names
+
+
+def _function_locals(node):
+    names = _params(node.args)
+    collector = _Bindings()
+    for stmt in (node.body if isinstance(node.body, list) else [node.body]):
+        collector.visit(stmt)
+    names |= collector.names
+    return names
+
+
+def _scope_locals(nodes):
+    collector = _Bindings()
+    for node in nodes:
+        collector.visit(node)
+    return collector.names
+
+
 class _Fix(ast.NodeTransformer):
     def __init__(self, binder, typed_dicts, new_types, ident, bad):
         self.binder = binder
@@ -56,29 +130,107 @@ class _Fix(ast.NodeTransformer):
         self.bad = bad
         self.ident_used = False
         self.bad_used = False
+        self.scopes = []
+
+    def _declared(self, name):
+        return name in self.typed_dicts or name in self.new_types
+
+    def _shadowed(self, name):
+        if not self.scopes:
+            return False
+        kind, names = self.scopes[-1]
+        if name in names:
+            return True
+        for kind, names in reversed(self.scopes[:-1]):
+            if kind == 'class':
+                continue
+            if name in names:
+                return True
+        return False
+
+    def _visit_scope(self, kind, locals_, nodes):
+        self.scopes.append((kind, locals_))
+        result = [self.visit(node) for node in nodes]
+        self.scopes.pop()
+        return result
+
+    def visit_FunctionDef(self, node):
+        node.decorator_list = [self.visit(d) for d in node.decorator_list]
+        node.args = self.visit(node.args)
+        node.returns = self.visit(node.returns) if node.returns is not None else None
+        node.body = self._visit_scope('function', _function_locals(node), node.body)
+        return node
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Lambda(self, node):
+        node.args = self.visit(node.args)
+        node.body = self._visit_scope('function', _function_locals(node), [node.body])[0]
+        return node
+
+    def visit_ClassDef(self, node):
+        node.decorator_list = [self.visit(d) for d in node.decorator_list]
+        node.bases = [self.visit(b) for b in node.bases]
+        node.keywords = [self.visit(k) for k in node.keywords]
+        node.body = self._visit_scope('class', _scope_locals(node.body), node.body)
+        return node
+
+    def _visit_comprehension(self, node):
+        first = node.generators[0]
+        first.iter = self.visit(first.iter)
+        targets = set()
+        for gen in node.generators:
+            collector = _Bindings()
+            collector.visit(gen.target)
+            targets |= collector.names
+        self.scopes.append(('function', targets))
+        for i, gen in enumerate(node.generators):
+            if i:
+                gen.iter = self.visit(gen.iter)
+            gen.ifs = [self.visit(cond) for cond in gen.ifs]
+        if isinstance(node, ast.DictComp):
+            node.key = self.visit(node.key)
+            node.value = self.visit(node.value)
+        else:
+            node.elt = self.visit(node.elt)
+        self.scopes.pop()
+        return node
+
+    visit_ListComp = _visit_comprehension
+    visit_SetComp = _visit_comprehension
+    visit_DictComp = _visit_comprehension
+    visit_GeneratorExp = _visit_comprehension
+
+    def visit_Global(self, node):
+        for name in node.names:
+            if self._declared(name):
+                refuse(node, 'a global %s declaration is not lowered here' % name)
+        return node
+
+    def visit_Nonlocal(self, node):
+        for name in node.names:
+            if self._declared(name):
+                refuse(node, 'a nonlocal %s declaration is not lowered here' % name)
+        return node
 
     def visit_Call(self, node):
-        is_new_type = isinstance(node.func, ast.Name) and node.func.id in self.new_types
+        name = node.func.id if isinstance(node.func, ast.Name) else None
+        is_new_type = name in self.new_types and not self._shadowed(name)
+        is_cast = self.binder.attr(node.func) == 'cast'
+        is_typed_dict = name in self.typed_dicts and not self._shadowed(name)
         if is_new_type:
             node.args = [self.visit(a) for a in node.args]
             for keyword in node.keywords:
                 keyword.value = self.visit(keyword.value)
             if not node.keywords and len(node.args) == 1 and not isinstance(node.args[0], ast.Starred):
                 return ast.copy_location(node.args[0], node)
-            if not node.keywords and len(node.args) == 1:
-                self.ident_used = True
-                func = ast.Name(id=self.ident, ctx=ast.Load())
-            else:
-                self.bad_used = True
-                func = ast.Name(id=self.bad, ctx=ast.Load())
-                positional = ast.List(elts=node.args, ctx=ast.Load())
-                keys = [ast.Constant(value=k.arg) if k.arg is not None else None for k in node.keywords]
-                values = [k.value for k in node.keywords]
-                return ast.copy_location(ast.Call(
-                    func=func, args=[positional, ast.Dict(keys=keys, values=values)], keywords=[]), node)
-            return ast.copy_location(ast.Call(func=func, args=node.args, keywords=[]), node)
-        is_cast = self.binder.attr(node.func) == 'cast'
-        is_typed_dict = isinstance(node.func, ast.Name) and node.func.id in self.typed_dicts
+            self.bad_used = True
+            func = ast.Name(id=self.bad, ctx=ast.Load())
+            positional = ast.List(elts=node.args, ctx=ast.Load())
+            keys = [ast.Constant(value=k.arg) if k.arg is not None else None for k in node.keywords]
+            values = [k.value for k in node.keywords]
+            return ast.copy_location(ast.Call(
+                func=func, args=[positional, ast.Dict(keys=keys, values=values)], keywords=[]), node)
         self.generic_visit(node)
         if is_cast:
             if len(node.args) == 2 and not node.keywords:
@@ -91,7 +243,7 @@ class _Fix(ast.NodeTransformer):
         return node
 
     def visit_Name(self, node):
-        if isinstance(node.ctx, ast.Load):
+        if isinstance(node.ctx, ast.Load) and self._declared(node.id) and not self._shadowed(node.id):
             if node.id in self.typed_dicts:
                 return ast.copy_location(ast.Name(id='dict', ctx=ast.Load()), node)
             if node.id in self.new_types:
@@ -128,9 +280,14 @@ def _defs(ident, bad, ident_used, bad_used):
     if ident_used:
         out.append(ast.parse('def %s(obj):\n    return obj\n' % ident, mode='exec').body[0])
     if bad_used:
-        out.append(ast.parse('def %s(positional, keywords):\n'
-                             '    raise TypeError("NewType() takes exactly one positional argument")\n'
-                             % bad, mode='exec').body[0])
+        out.append(ast.parse(
+            'def %s(positional, keywords):\n'
+            '    if keywords:\n'
+            '        raise TypeError("_typing._idfunc() takes no keyword arguments")\n'
+            '    if len(positional) != 1:\n'
+            '        raise TypeError("_typing._idfunc() takes exactly one argument (%%d given)" %% len(positional))\n'
+            '    return positional[0]\n'
+            % bad, mode='exec').body[0])
     return out
 
 
@@ -175,6 +332,13 @@ def run(tree, text):
                 continue
         body.append(stmt)
     tree.body = body
+    declared = typed_dicts | set(new_types)
+    rebound = _scope_locals(body) & declared
+    if rebound:
+        name = sorted(rebound)[0]
+        refuse(tree.body[0] if tree.body else tree,
+               'the typing name %s is also assigned at module level; this lowering needs it to name one declaration'
+               % name)
     new_types = _resolve(new_types)
     ident = _fresh(tree, '_ail_newtype_identity')
     bad = _fresh(tree, '_ail_newtype_bad_call')
