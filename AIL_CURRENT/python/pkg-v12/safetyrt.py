@@ -2158,12 +2158,46 @@ static inline int ail2u_palindrome(ail_obj s) {
 }
 '''
 
+# type-level presence of a special method: CPython's iter()/PySequence_Count look at the TYPE, so an
+# instance attribute named `__iter__` (or `__getitem__`) must not count.  Walks the class chain's
+# own attribute tables (methods are sentinels there) and the __iter__ hook pointers.  Only an
+# instance of a program class (or a program exception) can pass; every builtin value answers 0 so
+# the caller keeps its normalized "argument of type 'X' is not iterable" text.
+TYPEHAS = r'''
+static inline int ail2t_defined(ail_ctx *cx, ail_obj x, const char *name) {
+    if (x.tag != AIL_T_INST && x.tag != AIL_T_EXC) return 0;
+    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_classobj *c = (ail_classobj *)k.o;
+        if (!strcmp(name, "__iter__") && (c->iter_iter || c->iter_next)) return 1;
+        ail_obj v;
+        int ca = ail_class_attr_find_name(cx, k, name, &v);
+        if (ca == 1 || ca == 2) return 1;
+    }
+    return 0;
+}
+static inline ail_st ail2t_has(ail_ctx *cx, ail_obj *out, ail_obj x, ail_obj name) {
+    char buf[128];
+    if (name.tag != AIL_T_STR) { *out = ail_box_bool(0); return AIL_OK; }
+    ail_str s = ail_view_to_str(name);
+    size_t k = 0;
+    for (int64_t i = 0; i < s.n; i++) {
+        uint32_t ch = ail_chr(s, i);
+        if (ch >= 0x80 || k + 1 >= sizeof buf) { *out = ail_box_bool(0); return AIL_OK; }
+        buf[k++] = (char)ch;
+    }
+    buf[k] = 0;
+    *out = ail_box_bool(ail2t_defined(cx, x, buf));
+    return AIL_OK;
+}
+'''
+
 FRAGMENTS = {'strpred': STRPRED2, 'slice': SLICE, 'bytes': BYTES, 'bytesfile': BYTESFILE, 'fmt': FMT, 'gen': GEN,
              'misc': MISC, 'ddict': DDICT, 'attr': ATTR, 'exc': EXC, 'hash': HASH, 'rng': randrt.RNG,
              'rng_u': randrt.RNG_U,      # rng_u: only under AIL_UNIFIED=1 (unified.py)
              'ba_u': BA_U, 'str_u': STR_U,
+             'typend': TYPEHAS,
              'jsn': jsonbrt.JSN, 'sta': statbrt.STA, 'rex': rebrt.REX}
-ORDER = ['strpred', 'slice', 'bytes', 'bytesfile', 'fmt', 'gen', 'misc', 'ddict', 'attr', 'exc', 'hash', 'rng', 'rng_u', 'ba_u', 'str_u', 'jsn', 'sta', 'rex']
+ORDER = ['strpred', 'slice', 'bytes', 'bytesfile', 'fmt', 'gen', 'misc', 'ddict', 'attr', 'typend', 'exc', 'hash', 'rng', 'rng_u', 'ba_u', 'str_u', 'jsn', 'sta', 'rex']
 
 GEN_PRELUDE = '''
 class generator:
@@ -2650,6 +2684,7 @@ PRIMS = {
     '_ail_same_class': ('ail2e_same_class(cx, &{t}, {a0}, {a1})', 2, 'misc'),
     '_ail_exc_name': ('ail2e_exc_name(cx, &{t}, {a0})', 1, 'misc'),
     '_ail_exc_cause_is': ('ail2e_cause_is(cx, &{t}, {a0}, {a1})', 2, 'misc'),
+    '_ail_type_has': ('ail2t_has(cx, &{t}, {a0}, {a1})', 2, 'typend'),
 }
 PRIMS.update({name: (cfn, count, 'rng') for name, (cfn, count) in randrt.PRIMS.items()})   # random.Random (randrt.py)
 PRIMS.update({name: (cfn, count, 'jsn') for name, (cfn, count) in jsonbrt.PRIMS.items()})   # json's loops (jsonbrt.py)

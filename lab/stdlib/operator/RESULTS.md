@@ -44,8 +44,9 @@ adds, as rewrites of the same call (never of the program):
   compare each element.  This is CPython's `PySequence_Count` / `PySequence_Index`, not
   `str.count` / `str.index`: `countOf("banana", "na")` is 0 and `indexOf("abc", "bc")` raises
   `ValueError: sequence.index(x): x not in sequence`, which the programs and probes check.
-  The helpers fall back to `__getitem__` only for instances of the program's own classes that lack
-  `__iter__`; a `TypeError` from a user `__iter__` is re-raised with CPython's
+  The helpers fall back to `__getitem__` only for instances of the program's own classes whose
+  *type* lacks `__iter__` (an instance attribute named `__iter__` does not count, as in CPython) and
+  defines `__getitem__`; a `TypeError` from a user `__iter__` is re-raised with CPython's
   `argument of type 'X' is not iterable` text instead of being swallowed.
 * `truth` -> `bool(a)`, `is_` / `is_not` -> `is` / `is not` (identity on numbers keeps the existing
   named refusal, so these are used on `None` and objects).

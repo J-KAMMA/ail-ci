@@ -1,3 +1,23 @@
+## 2026-11-01 -- operator: countOf/indexOf decide `__iter__`/`__getitem__` on the type, not the instance
+
+The third review of `job-std_operator` found that `_ail_op_scan` tested `hasattr(seq, "__iter__")` and
+`hasattr(seq, "__getitem__")`, which see instance attributes; CPython's `iter()` looks up special
+methods on the type. A class with `__getitem__` whose instances set `self.__iter__` in `__init__`
+was therefore treated as non-iterable and raised `TypeError`, while CPython falls back to
+`__getitem__`. The Python surface now calls a small `_ail_type_has(value, name)` primitive whose C
+helper (`TYPEHAS` in `safetyrt.py`) walks the class chain's own attribute tables plus the generated
+`__iter__` hook pointers, ignoring instance attributes; builtin values answer `0`, so their
+normalized "argument of type 'X' is not iterable" text is unchanged. The previous fix is kept:
+a `TypeError` from a user `__iter__` is still re-raised, and indexing is used only when the type has
+`__getitem__` and no `__iter__`. Program exceptions use the same instance layout and are accepted too.
+`test_ail_std_operator.py` adds `scan_instance_iter_is_not_the_type_iter` covering the review probe,
+a class-level non-callable `__iter__` shadowed by an instance attribute, and an instance-level
+`__getitem__` with no type-level protocol. Probes in `/tmp/probes/p_typehas_*.py` and
+`/tmp/rprobes/r17_instance_iter_attr.py`, `r18_s_instance_iter.py` match CPython on both builds, as do
+the earlier `p_iter_*` and `r*` probes (the only mismatches are the pre-existing `iter()` / builtin
+`hasattr()` / non-callable `__getitem__` cases listed in the previous entries). No `lab/compare`
+source imports `operator`, so their generated C is unchanged.
+
 ## 2026-11-01 -- operator: a TypeError from `__iter__` is not swallowed by countOf/indexOf
 
 The second review of `job-std_operator` found that `_ail_op_countof` / `_ail_op_indexof` caught

@@ -1462,15 +1462,9 @@ _MATH_HELPERS['op_scan'] = (
     '    try:\n'
     '        return iter(seq)\n'
     '    except TypeError:\n'
-    '        is_program = True\n'
-    '        try:\n'
-    '            has_iter = hasattr(seq, "__iter__")\n'
-    '        except NotImplementedError:\n'
-    '            is_program = False\n'
-    '            has_iter = False\n'
-    '        if not is_program or has_iter:\n'
-    '            raise TypeError("argument of type \'" + seq.__class__.__name__ + "\' is not iterable")\n'
-    '        if not hasattr(seq, "__getitem__"):\n'
+    '        has_iter = _ail_type_has(seq, "__iter__")\n'
+    '        has_getitem = _ail_type_has(seq, "__getitem__")\n'
+    '        if has_iter or not has_getitem:\n'
     '            raise TypeError("argument of type \'" + seq.__class__.__name__ + "\' is not iterable")\n'
     '        return None\n')
 _MATH_HELPERS['op_countof'] = (

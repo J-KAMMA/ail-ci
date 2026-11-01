@@ -231,6 +231,37 @@ try:
 except TypeError as exc:
     print("int TypeError", str(exc))
 """,
+    "scan_instance_iter_is_not_the_type_iter": r"""from operator import countOf, indexOf
+class S:
+    def __init__(self):
+        self.__iter__ = iter([9, 8, 9])
+    def __getitem__(self, i):
+        if i >= 3:
+            raise IndexError
+        return [1, 1, 2][i]
+print("count9", countOf(S(), 9))
+print("index2", indexOf(S(), 2))
+print("count1", countOf(S(), 1))
+class T:
+    __iter__ = 5
+    def __init__(self):
+        self.__iter__ = iter([9])
+    def __getitem__(self, i):
+        if i >= 2:
+            raise IndexError
+        return [1, 2][i]
+try:
+    print("class iter", countOf(T(), 1))
+except TypeError as exc:
+    print("class iter TypeError", str(exc))
+class G:
+    def __init__(self):
+        self.__getitem__ = lambda i: 7
+try:
+    print("instance getitem", indexOf(G(), 7))
+except TypeError as exc:
+    print("instance getitem TypeError", str(exc))
+""",
 }
 
 
