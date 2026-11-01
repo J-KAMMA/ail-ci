@@ -905,13 +905,18 @@ class _Lowerer(ast.NodeTransformer):
             return self.call('_ail_makedirs', n, mode, exist_ok)
         if name == 'os.getenv' or name == 'os.environ.get':
             self.need.add('environ')
-            if name == 'os.environ.get':
-                key, default = self.bind(node, ('key', 'default'), {}, required=1)
-            else:
-                key, default = self.bind(node, ('key', 'default'), {}, required=1)
+            key, default = self.bind(node, ('key', 'default'), {}, required=1)
             if default is None:
-                self.refuse(node, '%s(key) without a default returns None, and there is no None str.\n'
-                                  '  write instead: %s(key, "") and test for the empty string' % (name, name))
+                if not self.general:
+                    self.refuse(node, '%s(key) without a default returns None; this use is left to the general '
+                                      'path' % name)
+                keyname = self.fresh('envk')
+                self.hoist.append(ast.Assign(targets=[self.N(keyname, True)], value=key))
+                k = self.N(keyname)
+                has = ast.Compare(left=self.call('_ail_os_hasenv', k), ops=[ast.NotEq()],
+                                  comparators=[self.C(0)])
+                return self.at(ast.IfExp(test=has, body=self.call('_ail_os_getenv', self.N(keyname)),
+                                         orelse=self.C(None)), node)
             return self.call('_ail_environ_get', key, default)
 
 

@@ -3537,7 +3537,7 @@ def python_surface(source, notes=None, library=False):
         source = _stdlib4().rewrite_text(source, notes)
     if "collections" in source:
         source = _collib().rewrite(source, notes)
-    if "None" in source or "Optional" in source:
+    if "None" in source or "Optional" in source or "environ.get" in source:
         source = _optlib().rewrite(source, notes)
     if "(" in source:
         source = _modtables().rewrite_text(source, library, notes)

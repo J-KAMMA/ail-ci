@@ -1,3 +1,20 @@
+## 2026-11-01 -- covenv2: `os.environ.get(key)` without a default and `Path.home()` (job-covenv2-11011011)
+
+`os.environ.get(key)` with no default is now a str-or-None value on the typed path (optlib): a present flag
+and the `_ail_os_hasenv` / `_ail_os_getenv` pair, with the key evaluated once.  `is None`, truth tests,
+`v or default`, `print`/`str`/f-strings, assignments, returns and Optional parameters/calls are built;
+uses that cannot follow the pair keep the old route, and the general path lowers the same call to a
+`hasenv ? getenv : None` expression instead of refusing.  `Path.home()` is a new `_ail_pp_home` primitive
+(ailpath_core.h), wrapped by pathlower: HOME is used even when empty, otherwise the passwd entry, trailing
+slashes are removed and an empty result is `/`, matching CPython's `os.path.expanduser("~")`.
+
+CPython 3.12 stdout and exit code match on the typed, default and general builds for HOME set/unset/empty,
+key present/absent/empty, `or`, direct `if`/`is None`/`print`/`str`/f-string uses, and keys through a
+variable, a list item and an attribute.  `test_ail_covenv.py` covers them (registered in `tests.d`);
+`test_ail_safetynet`, `test_ail_files`, `test_ail_pathlib`, `test_ail_optional_locals` and
+`test_ail_corpus_findings3` pass.  All 10 lab/compare `main.ail` C hashes are unchanged.  No new
+DIFFERENCES row: both spellings now match CPython.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
