@@ -1,3 +1,22 @@
+## 2026-11-01 -- int64 tests exercise the default again (job-i64tests1-11011225)
+
+`test_ail_pre425`, `test_ail_pre429`, `test_ail_pre433` and `test_ail_overflow_uncatchable`
+still carried `setUpModule` blocks that set `AIL_EXACT_INT=1`, so their int64 expectations never
+ran after ints became 64-bit by default. The exact mark is gone from all four. The int64 cases
+now assert the default behaviour and a separate explicit `AIL_EXACT_INT=1` case keeps the
+CPython-value coverage: pre425 refuses routed wide augmented powers by name at build time and
+compares the same programs with CPython in exact mode; pre429 checks the typed wide `round()`
+loud stop, the forced general path's catchable `OverflowError("integer overflow")`, the build
+refusal of a constant wide round, and CPython equality in exact mode; pre433 keeps the adaptive
+int64 refusal and adds exact-mode builds; overflow_uncatchable tunes its runtime operands through
+`sys.argv` so the default build reaches the overflow instead of refusing the constant, and adds
+one exact-mode equality case. No product code changed.
+
+Added `test_ail_int64_edges` (7 tests) for values only known at run time: power at 2**62,
+-2**63, 0**0, negative exponents, 0/1/-1 bases, wide 2**63/-2**64/10**19, and round just inside
+and just outside int64 (nan/inf kept), on the typed default, its IR arm, the forced general path
+and exact mode. Registered through `tests.d/test_ail_int64_edges.txt`.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`

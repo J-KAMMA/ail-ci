@@ -1,13 +1,13 @@
 """A Python-syntax program's int64 overflow is a loud stop that no handler sees (zero silent differences).
 
 CPython ints never overflow, so an `except OverflowError` / `except Exception` / bare `except` around int
-arithmetic must never run for a value CPython computes exactly. On the legacy int64 emitter (AIL_IR=0, the typed-only
-build, an `@extern` program linked typed-only, a function the tagged lowering refuses) the "integer overflow" trap used
-to be mapped to a catchable OverflowError, so the compiled program printed the handler's output and exited 0 where
-CPython printed the exact value. Now it ends the program: "integer overflow" on stderr, exit 1, the output written so
-far kept. The OverflowErrors CPython raises too (int(<inf>), float `**` range error, math.exp, round(<inf>)) stay
+arithmetic must never run for a value CPython computes exactly. On the int64 emitter (the default, AIL_IR=0 or 1, the
+typed-only build, an `@extern` program linked typed-only, a function the tagged lowering refuses) the "integer overflow"
+trap used to be mapped to a catchable OverflowError, so the compiled program printed the handler's output and exited 0
+where CPython printed the exact value. Now it ends the program: "integer overflow" on stderr, exit 1, the output written
+so far kept. The OverflowErrors CPython raises too (int(<inf>), float `**` range error, math.exp, round(<inf>)) stay
 catchable and CPython-identical, and a program in the AIL syntax keeps its catchable int64 OverflowError (A1,
-test_ail_overflow_error).
+test_ail_overflow_error).  `--exact-int` / AIL_EXACT_INT=1 restores CPython's exact value for the same program.
 """
 import os
 import subprocess
@@ -34,12 +34,14 @@ OPS = (
 HANDLERS = ("except OverflowError:", "except Exception:", "except:")
 
 TEMPLATE = """
+import sys
+
 def f(a: int, b: int) -> int:
     return {expr}
 
 def main():
     print("start")
-    big = {big}
+    big = int(sys.argv[1])
     try:
         print(f(big, 2))
     {handler}
@@ -61,8 +63,15 @@ def power(x: float, y: float) -> float:
 def exp(x: float) -> float:
     return math.exp(x)
 
+def grow(n: float) -> float:
+    v: float = n
+    for _ in range(2):
+        v = v * 1e15
+    return v
+
 def main():
     inf = 1e308 * 10.0
+    wide = grow(1.0)
     try:
         print(to_int(inf))
     except OverflowError:
@@ -80,7 +89,7 @@ def main():
     except OverflowError:
         print("caught round")
     try:
-        print(to_int(1e30))
+        print(to_int(wide))
     except ValueError:
         print("no")
     print("end")
@@ -140,7 +149,7 @@ def build_and_run(directory, name, source, env):
                            cwd=directory, capture_output=True, text=True, timeout=600, env=environment)
     if built.returncode:
         return built, None
-    return built, subprocess.run([str(out)], cwd=directory, capture_output=True, text=True, timeout=60)
+    return built, subprocess.run([str(out), BIG], cwd=directory, capture_output=True, text=True, timeout=60)
 
 
 class OverflowUncatchableTests(unittest.TestCase):
@@ -156,7 +165,8 @@ class OverflowUncatchableTests(unittest.TestCase):
     def cpython(self, name, source):
         path = Path(self.dir, name + "_cpy.py")
         path.write_text(source, encoding="utf8")
-        done = run_cpython(self.dir, str(path))
+        done = subprocess.run([sys.executable, "-B", str(path), BIG], capture_output=True, text=True,
+                              timeout=120, env=dict(os.environ, PYTHONPATH=str(ROOT)))
         self.assertEqual(done.returncode, 0, done.stderr)
         return done.stdout
 
@@ -191,24 +201,31 @@ class OverflowUncatchableTests(unittest.TestCase):
             self.assertEqual(built.returncode, 0, built.stderr)
             self.assert_loud_stop(ran, expected, "ir " + op)
 
-    def test_default_build_is_exact_or_loud(self):
+    def test_default_build_is_a_loud_stop(self):
         source = TEMPLATE.format(expr="a * b", big=BIG, handler="except OverflowError:")
         expected = self.cpython("d_mul", source)
         built, ran = build_and_run(self.dir, "d_mul", source, {"AIL_NO_GENERAL": None})
         self.assertEqual(built.returncode, 0, built.stderr)
+        self.assertEqual(ran.returncode, 1, ran.stdout)
         self.assert_loud_stop(ran, expected, "default")
+
+    def test_exact_int_mode_computes_the_value_with_cpython(self):
+        source = TEMPLATE.format(expr="a * b", big=BIG, handler="except OverflowError:")
+        expected = self.cpython("d_mul_exact", source)
+        built, ran = build_and_run(self.dir, "d_mul_exact", source,
+                                   {"AIL_NO_GENERAL": None, "AIL_EXACT_INT": "1"})
+        self.assertEqual(built.returncode, 0, built.stderr)
+        self.assertEqual(ran.returncode, 0, ran.stderr)
+        self.assertEqual(ran.stdout, expected)
 
     def test_function_the_tagged_lowering_refuses(self):
         expected = self.cpython("refused", REFUSED)
         built, ran = build_and_run(self.dir, "refused", REFUSED, {"AIL_NO_GENERAL": None})
         self.assertEqual(built.returncode, 0, built.stderr)
         self.assertNotIn("caught", ran.stdout)
-        if ran.returncode:
-            self.assertEqual(ran.returncode, 1)
-            self.assertIn("integer overflow", ran.stderr)
-            self.assertEqual(ran.stdout, "2\n")
-        else:
-            self.assertEqual(ran.stdout, expected)
+        self.assertEqual(ran.returncode, 1, ran.stdout)
+        self.assertIn("integer overflow", ran.stderr)
+        self.assertEqual(ran.stdout, "2\n")
 
     @unittest.skipUnless(CC, "installed C compiler required")
     def test_ffi_program_linked_typed_only(self):
@@ -225,13 +242,9 @@ class OverflowUncatchableTests(unittest.TestCase):
                 label = "ffi ir=%s %s" % (ir, handler)
                 self.assertTrue(expected.endswith("end\n"), expected)
                 self.assertNotIn("caught", ran.stdout, label)
-                if ran.returncode == 0:
-                    self.assertEqual(ir, "1", label)          # the tagged lowering computed the exact value
-                    self.assertEqual(ran.stdout, expected, label)
-                else:                                          # the legacy int64 emitter: the loud stop
-                    self.assertEqual(ran.returncode, 1, label)
-                    self.assertIn("integer overflow", ran.stderr, label)
-                    self.assertEqual(ran.stdout, "3\n", label)
+                self.assertEqual(ran.returncode, 1, label)
+                self.assertIn("integer overflow", ran.stderr, label)
+                self.assertEqual(ran.stdout, "3\n", label)
 
     def test_overflow_errors_cpython_raises_stay_catchable(self):
         expected = self.cpython("legit", LEGIT)
@@ -242,28 +255,9 @@ class OverflowUncatchableTests(unittest.TestCase):
             self.assertEqual(built.returncode, 0, built.stderr)
             # 1e30 does not fit int64: the declared stop (A1), reached only after the four catchable ones
             self.assertTrue(ran.stdout.startswith("caught int(inf)\ncaught pow\ncaught exp\ncaught round\n"), label + ran.stdout + ran.stderr)
-        built, ran = build_and_run(self.dir, "legit_d", LEGIT.replace("print(to_int(1e30))", "print(1)"), {"AIL_NO_GENERAL": "1", "AIL_IR": "0"})
+        built, ran = build_and_run(self.dir, "legit_d", LEGIT.replace("print(to_int(wide))", "print(1)"), {"AIL_NO_GENERAL": "1", "AIL_IR": "0"})
         self.assertEqual(ran.returncode, 0, ran.stderr)
-        self.assertEqual(ran.stdout, self.cpython("legit_d", LEGIT.replace("print(to_int(1e30))", "print(1)")))
-
-
-import os as _os_exact_int
-
-_SAVED_EXACT_INT = None
-
-
-def setUpModule():
-    # these tests are about exact (arbitrary precision) ints: the opt-in mode (intmode.py, `--exact-int`)
-    global _SAVED_EXACT_INT
-    _SAVED_EXACT_INT = _os_exact_int.environ.get('AIL_EXACT_INT')
-    _os_exact_int.environ['AIL_EXACT_INT'] = '1'
-
-
-def tearDownModule():
-    if _SAVED_EXACT_INT is None:
-        _os_exact_int.environ.pop('AIL_EXACT_INT', None)
-    else:
-        _os_exact_int.environ['AIL_EXACT_INT'] = _SAVED_EXACT_INT
+        self.assertEqual(ran.stdout, self.cpython("legit_d", LEGIT.replace("print(to_int(wide))", "print(1)")))
 
 
 if __name__ == "__main__":
