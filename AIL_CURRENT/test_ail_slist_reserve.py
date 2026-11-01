@@ -66,6 +66,22 @@ def comp(n: int) -> list[str]:
     return xs
 
 
+def boom(i: int) -> str:
+    if i >= 0:
+        raise ValueError("x")
+    return "y"
+
+
+def comp_early() -> list[str]:
+    xs: list[str] = [boom(i) for i in range(100000000000000000)]
+    return xs
+
+
+def comp_early_arg(n: int) -> list[str]:
+    xs: list[str] = [boom(i) for i in range(n)]
+    return xs
+
+
 def stopped() -> list[str]:
     xs: list[str] = []
     for i in range(100000000000000000):
@@ -129,6 +145,14 @@ def main() -> int:
         print("m" + str(n) + ":" + "|".join(comp(n)))
     for n in [0, 1, 5, 8]:
         print("n" + str(n) + ":" + "|".join(nested(n)))
+    try:
+        comp_early()
+    except ValueError:
+        print("comp-caught")
+    try:
+        comp_early_arg(1000000000000)
+    except ValueError:
+        print("comp-caught-arg")
     a = gen(6)
     b = a
     print(both(a, b))

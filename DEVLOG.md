@@ -1,3 +1,17 @@
+## 2026-11-01 -- mem1 review: cap the comprehension reserve too (job-mem1-11020654)
+
+The review found the new `list[str]` comprehension reserve was uncapped: `[boom(i) for i in
+range(10**18)]` emitted `ail_slist_reserve(&v, 10**18 - 0)` and died `list too long` before
+`boom(0)` could raise, where CPython and the base build catch the exception and print `caught`.
+`_listcomp_into_temp` now caps the one-shot reserve at 2^22 elements (shared `_LIST_RESERVE_LIMIT`,
+also used by `_append_loop_reserve`), and the IR `list.reserve` site emits the same
+`min(hi - lo, 2^22)`; both apply to `list[int]`/`list[float]` as well, which fixes the pre-existing
+`list[int]` instance.  Added `comp_early` and `comp_early_arg` regression cases to
+`test_ail_slist_reserve`.  Probes p7/p7b (argument and literal huge bound, 10**12), p7c (`list[int]`)
+and p7d (normal comprehensions) match CPython on the default and general builds and on the typed
+path with AIL_IR=0 and 1.  Tests: test_ail_slist_reserve, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 all pass.
+
 ## 2026-11-01 -- mem1 review: append-loop reserve only when the append is unconditional (job-mem1-11011013)
 
 The review found that the new append-loop reserve was sized to the whole `range()` trip count even

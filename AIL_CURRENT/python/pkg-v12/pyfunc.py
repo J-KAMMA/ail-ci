@@ -19160,6 +19160,9 @@ def _listcomp_simd_safe(node, ctx):
     return True
 
 
+_LIST_RESERVE_LIMIT = 1 << 22
+
+
 def _listcomp_into_temp(node, ctx):
     """`[e for v in seq if c]` as a value: one list, built once, freed with the rest."""
     if len(node.generators) != 1 or node.generators[0].is_async:
@@ -19236,8 +19239,13 @@ def _listcomp_into_temp(node, ctx):
                and _listcomp_index_store_safe(node.elt))
     if (kind in (FLIST, LIST, SLIST) and not g.ifs and not struct_source and not string_source
             and simple.fullmatch(lo) and simple.fullmatch(n)):
-        head = '%s_reserve(&%s, (%s) - (%s)); %s%s' % (
-            'ail_flist' if kind == FLIST else 'ail_slist' if kind == SLIST else 'ail_list', c, n, lo,
+        # A huge range bound must not force a huge allocation before an early exception: cap the
+        # one-shot reserve exactly like `_append_loop_reserve` (a larger list still grows by
+        # doubling from here, so only the preallocation is bounded).
+        trip = '(%s) - (%s)' % (n, lo)
+        sized = '(%s) < %d ? (%s) : %d' % (trip, _LIST_RESERVE_LIMIT, trip, _LIST_RESERVE_LIMIT)
+        head = '%s_reserve(&%s, %s); %s%s' % (
+            'ail_flist' if kind == FLIST else 'ail_slist' if kind == SLIST else 'ail_list', c, sized,
             '\n#pragma omp simd\n' if indexed and _listcomp_simd_safe(node.elt, ctx) else '', head)
     if pre:
         head = '%s %s' % (' '.join(pre), head)
@@ -20179,7 +20187,6 @@ _APPEND_LOOP_SKIPS = tuple(node for node in (
     ast.If, ast.While, ast.For, ast.AsyncFor, ast.Try, getattr(ast, 'TryStar', None),
     getattr(ast, 'Match', None), ast.With, ast.AsyncWith, ast.Assert,
 ) if node is not None)
-_APPEND_LOOP_RESERVE_LIMIT = 1 << 22
 
 
 def _append_loop_reserve(previous, node, ctx, ind):
@@ -20231,7 +20238,7 @@ def _append_loop_reserve(previous, node, ctx, ind):
                 return ''
             appended.add(n.id)
     trip = hi if len(it.args) == 1 else '(%s) - (%s)' % (hi, lo)
-    limit = _APPEND_LOOP_RESERVE_LIMIT
+    limit = _LIST_RESERVE_LIMIT
     if trip.isdigit() and int(trip) <= limit:
         sized = trip
     else:

@@ -44,6 +44,9 @@ LIST_STR = I.T('obj', I.T('list', I.STRV))
 PLIST = I.PLIST
 # list-valued methods the S3a lowering recognises as changing a list's length or contents
 _LIST_MUTATORS = ('append', 'pop', 'clear', 'extend', 'insert', 'remove', 'sort', 'reverse')
+# A one-shot comprehension reserve is bounded like the legacy `_append_loop_reserve`: a huge range
+# bound must not allocate before an early exception, and a larger result still grows by doubling.
+_LIST_RESERVE_LIMIT = 1 << 22
 
 
 def is_list(t):
@@ -1491,8 +1494,12 @@ class Lowering(TextLowering):
                 lo, hi = self.slice_bounds(slice_of, hi)
             nargs = 1
         if reserve is not None and nargs < 3 and not g.ifs:
-            # one allocation for a comprehension of known length (the legacy path reserves too)
-            self.b.emit('list.reserve', [reserve, self.b.value('sub', [hi, lo], I.I64, {'mode': 'nsw'})])
+            # one allocation for a comprehension of known length (the legacy path reserves too),
+            # capped so a huge bound cannot allocate before an early exception
+            trip = self.b.value('sub', [hi, lo], I.I64, {'mode': 'nsw'})
+            limit = self.const(I.I64, _LIST_RESERVE_LIMIT)
+            below = self.b.value('cmp.lt', [trip, limit], I.I1)
+            self.b.emit('list.reserve', [reserve, self.b.value('select', [below, trip, limit], I.I64)])
         index = I.Value(I.I64, hint=name if over_range else 'k')
         body = I.Region([index])
 
