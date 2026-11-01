@@ -247,6 +247,12 @@ def _mix_validate_signature(sig_text, mangled, params, ret):
         if parts[idx:idx + 2] != want:
             return False
         idx += 2
+    elif ret in (pymix.LIST_INT, pymix.LIST_FLOAT):
+        want = ['int64_t *_out' if ret == pymix.LIST_INT else 'double *_out',
+                'int64_t _cap']
+        if parts[idx:idx + 2] != want:
+            return False
+        idx += 2
     return idx == len(parts)
 
 # ---------------------------------------------------------------------------------------------
@@ -2611,6 +2617,61 @@ def _mix_wrap_integer_clone(mangled, inner, inner_sig, params, overflow, state=N
     return ''.join(body), proto
 
 
+def _mix_wrap_list_clone(mangled, inner, inner_sig, params, ret, overflow, state=None):
+    """The length-then-fill ABI wrapper around an int/float-list-returning clone.
+
+    A list result cannot carry an int64 overflow through its element type.  The inner clone is
+    emitted under `inner` and patched by `_mix_overflow_fallback`; this wrapper sets the jump
+    buffer, calls the clone, and returns -1 when the flag was raised so the CPython hybrid runs
+    the original function instead of stopping on a value CPython represents exactly.
+    """
+    inside = inner_sig[inner_sig.index('(') + 1:inner_sig.rindex(')')]
+    tinted_params = set(re.findall(r'\bail_tint\s+(v_\w+)', inside))
+    proto_args = []
+    args = []
+    for pname, kind in params:
+        cn = 'v_' + pname
+        if kind in (pymix.INT, pymix.BOOL):
+            proto_args.append('int64_t ' + cn)
+            args.append('ail_tint_from_int64(%s)' % cn if cn in tinted_params else cn)
+        elif kind == pymix.FLOAT:
+            proto_args.append('double ' + cn)
+            args.append(cn)
+        elif kind == pymix.STR:
+            proto_args.append('ail_str ' + cn)
+            args.append(cn)
+        elif kind in (pymix.LIST_INT, pymix.LIST_FLOAT):
+            elem = 'int64_t' if kind == pymix.LIST_INT else 'double'
+            proto_args.extend(('const %s *%s' % (elem, cn), 'int64_t %s_len' % cn))
+            args.extend((cn, cn + '_len'))
+        else:
+            return None, None
+    elem = 'int64_t' if ret == pymix.LIST_INT else 'double'
+    proto_args.extend(('%s *_out' % elem, 'int64_t _cap'))
+    args.extend(('_out', '_cap'))
+    jmp = mangled + '__mix_jmp'
+    save = mangled + '__mix_save'
+    savep = mangled + '__mix_savep'
+    state = state or {}
+    inits = [name for name in ('ail_depth', 'ail_cleanup_top', 'ail_exc_top') if state.get(name)]
+    proto = 'int64_t %s(%s)' % (mangled, ', '.join(proto_args))
+    body = ['int %s = 0;\n' % overflow, proto + ' {\n',
+            '    %s = 0;\n' % overflow]
+    if inits:
+        body.extend((
+            '    %s saved = {%s};\n' % (save, ', '.join(inits)),
+            '    %s *previous = %s;\n' % (save, savep),
+            '    %s = &saved;\n' % savep,
+            '    if (setjmp(%s) != 0) { %s = previous; return -1; }\n' % (jmp, savep)))
+    else:
+        body.append('    if (setjmp(%s) != 0) return -1;\n' % jmp)
+    body.append('    int64_t result = %s(%s);\n' % (inner, ', '.join(args)))
+    if inits:
+        body.append('    %s = previous;\n' % savep)
+    body.append('    return result;\n}\n')
+    return ''.join(body), proto
+
+
 class Compiler(boxclosure.ClosureMixin):
     def __init__(self, allow_mix=True):
         self.allow_mix = allow_mix
@@ -3063,12 +3124,16 @@ class Compiler(boxclosure.ClosureMixin):
             parts.append('\n/* ---- mixed-mode calling convention (BRIEF_mixed_mode.md) ---- */\n')
             parts.append(_mix_call_h_text())
             parts.append('\n')
-            parts.append(_MIX_DRAIN_DEF)
             for mname, mix in sorted(self.mix_typed.items()):
                 parts.append('/* AIL_MIXED_TYPED: %s */\n' % mname)
                 parts.append('extern %s;\n' % mix['sig'])
                 if mix.get('overflow'):
                     parts.append('extern int %s;\n' % mix['overflow'])
+        if self.mix_typed or self.mix_units:
+            # A clone's trap path calls ail_mix_drain_out().  A list-return unit kept only for the
+            # CPython hybrid is still linked into this boxed unit, so it needs the definition even
+            # when no boxed call site was wired (self.mix_typed stays empty for that case).
+            parts.append(_MIX_DRAIN_DEF)
         parts.append('\n/* ---- interned attribute-name ids ---- */\n')
         for a in sorted(self.attr_names):
             parts.append('static int64_t g_attr_%s;\n' % a)
@@ -7431,8 +7496,8 @@ class Compiler(boxclosure.ClosureMixin):
             if any(k not in _MIX_SCALAR_KINDS and k not in _MIX_LIST_KINDS_OK for _, k in params):
                 continue                                     # e.g. list[str] -- not wired this pass
             ret = cand['ret']
-            if ret not in _MIX_SCALAR_KINDS:
-                continue                                     # a list-returning candidate -- ditto
+            if ret not in _MIX_SCALAR_KINDS + (pymix.LIST_INT, pymix.LIST_FLOAT):
+                continue                                     # only int/float list returns have an ABI
             mangled = pyfunc._mangle_csym(name) + '__typed'
             # An int-returning clone is emitted under an INNER name and wrapped in an int64 ABI
             # function below. The wrapper gives the boxed call site an overflow signal: the inner
@@ -7440,7 +7505,8 @@ class Compiler(boxclosure.ClosureMixin):
             # fit int64 the wrapper sets the flag and `_call_mix_guarded` calls the boxed body
             # instead. Every other result kind already has an ABI both sides agree on.
             integer_ret = ret in (pymix.INT, pymix.BOOL)
-            inner = mangled + '__mix' if integer_ret else mangled
+            list_ret = ret in (pymix.LIST_INT, pymix.LIST_FLOAT)
+            inner = mangled + '__mix' if (integer_ret or list_ret) else mangled
             info2 = {'_checked_arrays': True, '_mixed_clone': True}   # a clone gets its lists from boxed code: every index is checked
             # A clone whose local proof cannot bound its ints uses the tagged-int lowering when the
             # IR can lower it (BIGINT.md rules 2-4). In an AIL_IR=0 build the rest of the program
@@ -7448,7 +7514,9 @@ class Compiler(boxclosure.ClosureMixin):
             # arithmetic takes the exact (tagged) arm instead of the loud int64 stop. When the IR
             # cannot lower the function at all, retry without tagging: a checked-int64 clone still
             # covers everything the old clone did, and a value that overflows there stops loudly.
-            tagged = name in big_local
+            # A list result has no int64 return slot to carry an overflow; the int64 clone plus
+            # `_mix_overflow_fallback`/`_mix_wrap_list_clone` below is the exact fallback.
+            tagged = name in big_local and not list_ret
             attempts = []
             if tagged:
                 attempts.append((dict(info2, _mixed_tagged=True), True))
@@ -7506,7 +7574,7 @@ class Compiler(boxclosure.ClosureMixin):
                 # print()/assert stays boxed.
                 continue
             overflow = None
-            if integer_ret:
+            if integer_ret or list_ret:
                 overflow = mangled + '__mix_overflow'
                 patched = _mix_overflow_fallback(csrc, mangled, overflow)
                 if patched is None:
@@ -7529,6 +7597,12 @@ class Compiler(boxclosure.ClosureMixin):
                 if wrapper is None:
                     continue
                 csrc += wrapper
+            elif list_ret:
+                wrapper, sig_text = _mix_wrap_list_clone(mangled, inner, inner_sig, params, ret, overflow,
+                                                         mix_state)
+                if wrapper is None:
+                    continue
+                csrc += wrapper
             else:
                 sig_text = inner_sig
             if not _mix_validate_signature(sig_text, mangled, params, ret):
@@ -7536,6 +7610,14 @@ class Compiler(boxclosure.ClosureMixin):
             csrc = _mix_drain_before_exit(csrc)
             if csrc is None:
                 continue                                     # a trap path this patch does not know: stay boxed
+            if ret in (pymix.LIST_INT, pymix.LIST_FLOAT):
+                # A list result has the length-then-fill ABI, but the general path's call-site
+                # guard only boxes scalar/str results this pass.  Only the CPython hybrid (which
+                # boxes a list itself in its own wrapper) asks for these units; a plain general
+                # build keeps its previous C, with no unused clone and no boxed caller.
+                if os.environ.get('AIL_HYBRID_CAPTURE'):
+                    self.mix_units.append((mangled, name, '/* AIL_MIXED_TYPED: %s */\n' % name + csrc))
+                continue
             self.mix_typed[name] = {
                 'mangled': mangled, 'params': params, 'ret': ret,
                 'is_bool_ret': bool(cand.get('is_bool_ret')), 'sig': sig_text,

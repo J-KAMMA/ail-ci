@@ -106,15 +106,45 @@ def _merge(a, b):
     return UNKNOWN
 
 
+def _annotation_kind(node):
+    """The typed kind an annotation names, when it names one of this pass's kinds.
+
+    CPython never enforces annotations, so this is only a hint: `to_c` still has to accept the
+    body, and the mixed-mode guard still checks every argument.  Both spellings of a list
+    annotation are recognised (`list[int]` and the `typing.List[int]` the Python surface rewrites
+    to it), plus the `__ail_checked_*__` return markers the surface inserts.
+    """
+    if isinstance(node, ast.Name):
+        name = node.id
+        if name.startswith('__ail_checked_') and name.endswith('__'):
+            name = name[len('__ail_checked_'):-2]
+        return {'int': INT, 'float': FLOAT, 'str': STR, 'bool': BOOL}.get(name)
+    if isinstance(node, ast.Subscript):
+        base = node.value
+        if isinstance(base, ast.Name):
+            name = base.id
+            if name.startswith('__ail_checked_') and name.endswith('__'):
+                name = name[len('__ail_checked_'):-2]
+            if name in ('list', 'List'):
+                item = node.slice
+                if isinstance(item, ast.Name):
+                    return {'int': LIST_INT, 'float': LIST_FLOAT, 'str': LIST_STR}.get(item.id)
+    return UNKNOWN
+
+
 class _FnFacts:
     __slots__ = ('node', 'params', 'locals', 'ret', 'is_bool_ret', 'exc_capable', 'exc_reason')
 
     def __init__(self, node):
         self.node = node
+        # A parameter annotation is only a hint when nothing else says otherwise: seeding it here
+        # would let a lying/over-narrow annotation (CPython never enforces them) survive next to
+        # contradictory call-site evidence.  The fixed point infers parameters from the body and
+        # every call site; `_annotation_kind` is still used for annotated locals and the return.
         self.params = {a.arg: UNKNOWN for a in node.args.args}
         self.locals = {}
-        self.ret = UNKNOWN
-        self.is_bool_ret = False
+        self.ret = _annotation_kind(node.returns) or UNKNOWN
+        self.is_bool_ret = self.ret == BOOL
         self.exc_capable = False
         self.exc_reason = None
 
@@ -451,6 +481,15 @@ def _expr_kind(e, facts, rets):
         l, r = _expr_kind(e.left, facts, rets), _expr_kind(e.right, facts, rets)
         if isinstance(e.op, ast.Add) and l == STR and r == STR:
             return STR
+        if isinstance(e.op, ast.Mult):
+            # `[0] * n` / `n * [0.0]` keeps the list kind, exactly as CPython repeats the list.
+            if l in LIST_KINDS and r in NUMERIC:
+                return l
+            if r in LIST_KINDS and l in NUMERIC:
+                return r
+        if isinstance(e.op, ast.Add):
+            if l in LIST_KINDS and r == l:
+                return l
         if isinstance(e.op, ast.Div):
             return FLOAT if l in NUMERIC and r in NUMERIC else UNKNOWN
         if l in NUMERIC and r in NUMERIC:
@@ -502,6 +541,60 @@ def _assigned_name(t):
     return t.id if isinstance(t, ast.Name) else None
 
 
+def _assign_target_kinds(t, value, facts, rets):
+    """(target name, kind) pairs for an assignment target, including tuple/list unpacking.
+
+    `a, b = 1, 2.0` gives each name the kind of its own element; the whole-value kind is used only
+    for a plain Name target.  An unpacking target whose right side is not a matching tuple/list
+    literal stays unresolved (the boxed emitter still checks the real value at run time).
+    """
+    if isinstance(t, ast.Name):
+        k = _expr_kind(value, facts, rets)
+        return [(t.id, k)] if k is not UNKNOWN else []
+    if isinstance(t, (ast.Tuple, ast.List)) and isinstance(value, (ast.Tuple, ast.List)) \
+            and len(t.elts) == len(value.elts) \
+            and not any(isinstance(x, ast.Starred) for x in t.elts + value.elts):
+        out = []
+        for target, item in zip(t.elts, value.elts):
+            out.extend(_assign_target_kinds(target, item, facts, rets))
+        return out
+    return []
+
+
+def _return_kind(value, facts, rets):
+    """The kind a `return` expression proves; `return []` in a list-returning function is the
+    function's own list kind (an empty literal carries no element evidence of its own)."""
+    k = _expr_kind(value, facts, rets)
+    if k is UNKNOWN and isinstance(value, ast.List) and not value.elts \
+            and facts.ret in LIST_KINDS:
+        return facts.ret
+    return k
+
+
+def _stmt_always_exits(st):
+    """True only when a statement cannot finish normally (it returns, raises, or every branch of
+    its own control flow does).  Conservative: an unhandled loop or try counts as finishing, so a
+    function that might fall off its end is not mistaken for one whose return kind is complete."""
+    if isinstance(st, (ast.Return, ast.Raise)):
+        return True
+    if isinstance(st, ast.If):
+        return bool(st.orelse) and _block_always_exits(st.body) and _block_always_exits(st.orelse)
+    if isinstance(st, ast.With):
+        return _block_always_exits(st.body)
+    if isinstance(st, ast.Try):
+        if _block_always_exits(st.finalbody):
+            return True
+        parts = [st.body] + [h.body for h in st.handlers]
+        if st.orelse:
+            parts.append(st.orelse)
+        return all(_block_always_exits(part) for part in parts)
+    return False
+
+
+def _block_always_exits(stmts):
+    return bool(stmts) and _stmt_always_exits(stmts[-1])
+
+
 def _one_pass(fn_facts, module_calls):
     """One sweep over every function's body plus every call site in the module. Returns True if
     anything changed (the fixed-point driver keeps calling this until it returns False)."""
@@ -530,12 +623,16 @@ def _one_pass(fn_facts, module_calls):
             if isinstance(n, ast.FunctionDef) and n is not f.node:
                 continue
             if isinstance(n, ast.Assign):
-                k = _expr_kind(n.value, f, rets)
-                if k is not UNKNOWN:
-                    for t in n.targets:
-                        nm = _assigned_name(t)
-                        if nm:
-                            set_local(f, nm, k)
+                for t in n.targets:
+                    for nm, k in _assign_target_kinds(t, n.value, f, rets):
+                        set_local(f, nm, k)
+            elif isinstance(n, ast.AnnAssign):
+                if isinstance(n.target, ast.Name):
+                    k = _expr_kind(n.value, f, rets) if n.value is not None else UNKNOWN
+                    if k is UNKNOWN:
+                        k = _annotation_kind(n.annotation)
+                    if k is not UNKNOWN:
+                        set_local(f, n.target.id, k)
             elif isinstance(n, ast.AugAssign):
                 nm = _assigned_name(n.target)
                 if nm:
@@ -582,7 +679,7 @@ def _one_pass(fn_facts, module_calls):
                                             (other_k == STR and isinstance(n.op, ast.Add))):
                         set_local(f, nm, other_k)
             elif isinstance(n, ast.Return) and n.value is not None:
-                k = _expr_kind(n.value, f, rets)
+                k = _return_kind(n.value, f, rets)
                 if k is not UNKNOWN:
                     new = _merge(f.ret, k) if f.ret is not UNKNOWN else k
                     if new != f.ret:
@@ -746,11 +843,14 @@ def analyze(source, classes=()):
     indirect |= _indirect_names(tree, fn_facts, parents)
     report = MixReport()
     rets = {name: f.ret for name, f in fn_facts.items()}
-    # One C return ABI cannot preserve distinct Python tags on different branches.
+    # One C return ABI cannot preserve distinct Python tags on different branches.  A bare
+    # `return` (or falling off the end of the body) is Python's None, which no scalar/list return
+    # slot can carry, so a function with either path is not a candidate.
     unsafe_returns = {
         name for name, f in fn_facts.items() if name != MODULE_SCOPE
-        and {_expr_kind(n.value, f, rets) for n in ast.walk(f.node)
-             if isinstance(n, ast.Return)} != {f.ret}
+        and ({_return_kind(n.value, f, rets) for n in ast.walk(f.node)
+              if isinstance(n, ast.Return)} != {f.ret}
+             or not _block_always_exits(f.node.body))
     }
     # A typed caller also compiles its callees, so leaving only the callee boxed is insufficient.
     while True:

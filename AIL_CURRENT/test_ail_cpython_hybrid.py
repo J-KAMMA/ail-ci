@@ -4,8 +4,10 @@ The hybrid is explicit (the flag is new; the standalone build is untouched).  Fo
 functions are typed-compilable, the generated extension is loaded and the Python module output must
 equal CPython byte for byte, including the cases that must abandon the native call: an int outside
 int64, an overflow inside the clone, a bool in an int/list[int] position, a missing argument
-(default), None, and a mutated list parameter.  Functions whose body can trap in the typed runtime
-(indexing, division, calls, raise/try) stay in CPython; that includes `first` and `half` here.  A
+(default), None, and a mutated list parameter.  A body that can trap may still be a clone when pymix proves the escaping
+exception has no boxed caller handler (an uncaught one exits 1 as CPython does); `first` (indexing)
+and `half` (constant divisor) are accelerated, while `divide` stays boxed because its call sits in
+a `try`.  A function that prints, calls user code, or mutates a list parameter stays in CPython.  A
 program the compiler cannot analyse at all still runs unchanged in CPython with no extension.
 """
 import json
@@ -118,10 +120,12 @@ class CPythonHybrid(unittest.TestCase):
             accelerated = set(report['accelerated'])
             for name in ('add1', 'mul', 'isbig', 'join', 'total', 'dflt', 'echo'):
                 self.assertIn(name, accelerated)
-            self.assertNotIn('first', accelerated)         # indexing can raise IndexError
-            self.assertNotIn('half', accelerated)           # division can raise ZeroDivisionError
+            # Indexing/division are allowed when pymix found no boxed caller handler to bypass;
+            # an uncaught trap exits 1 exactly as CPython's uncaught exception does.
+            self.assertIn('first', accelerated)
+            self.assertIn('half', accelerated)
             self.assertNotIn('push', accelerated)          # a list parameter that is mutated
-            self.assertNotIn('divide', accelerated)        # floor division can raise
+            self.assertNotIn('divide', accelerated)        # its call sits inside a boxed try
             want = run([sys.executable, str(src)], tmp)
             got = run([str(out / 'prog')], tmp)
             self.assertEqual(got.stdout, want.stdout)

@@ -13,9 +13,11 @@ particular call, the call goes back to the original Python function.
 The unit is one top-level function. Selection reuses the existing mixed-mode machinery:
 
 * `pymix.analyze` performs the whole-module kind fixed point and names candidates.
-* In the hybrid analysis only, a parameter with a complete `int`/`bool`/`float`/`str`/`list[int]`/
-  `list[float]` annotation seeds the fixed point. CPython does not enforce annotations, so this is
-  only a hint: the boundary checks every argument and falls back on a different type.
+* Annotated assignments and a return annotation seed the fixed point (`int`/`bool`/`float`/`str`/
+  `list[int]`/`list[float]`). A parameter annotation is deliberately not seeded: CPython does not
+  enforce annotations, and a lying or over-narrow one would otherwise compete with contradictory
+  call-site evidence. Parameters are inferred from the body and every call site; the boundary still
+  checks every argument and falls back on a different type.
 * The CLI's Python-surface pass rewrites return annotations to `__ail_checked_*__` contracts.
   Those markers are stripped only inside the hybrid analysis, because `to_c` otherwise refuses a
   checked `str` entry; the Python wrapper still checks the returned value.
@@ -23,12 +25,15 @@ The unit is one top-level function. Selection reuses the existing mixed-mode mac
   function participates only if the real typed emitter accepts it.
 * `bigcap` marks functions whose ints may leave int64; the mixed-mode overflow wrapper is reused.
 * the existing exception rule keeps a function boxed when a typed exception could escape past a
-  CPython `try`. The prototype adds no second exception mechanism.
-* the prototype additionally refuses a body with any operation that can trap in the typed runtime:
-  subscripting (index/key errors), division or power (zero division, complex results), a call (an
-  arbitrary side effect or exception), `raise`/`assert`, `try`/`with`/import, `global`/`nonlocal`,
-  deletes and attribute/index stores. Those bodies stay in CPython, so a trap cannot bypass the
-  caller's `try/except`. This is conservative by design: a missed speed-up is safe.
+  CPython `try`. The prototype adds no second exception mechanism. Indexing, division/modulo and a
+  tracked `raise Name(...)` are therefore allowed when pymix proves no boxed caller handler can be
+  bypassed; an uncaught trap keeps stdout (it flushes Python's buffer before exiting 1, as CPython
+  does) but writes the typed runtime's one-line message instead of a CPython traceback.
+* the prototype still refuses a body with an arbitrary call or method call, `assert`, an untracked
+  raise expression, `try`/`with`/import, `global`/`nonlocal`, deletes, attribute stores and a
+  subscript store through a list parameter or a local alias of one. Only `range` and `int` among
+  the pure builtins are allowed (`int` is tracked by the exception rule and its infinity case goes
+  through the boxed fallback). A missed speed-up is safe.
 
 The analysis runs the real CLI general path in a temporary subprocess and captures the mixed-mode
 units it already emits. If the CLI refuses the program, a direct `pyboxed2.build` on the original
@@ -38,9 +43,9 @@ unpublished library call. If neither build emits a unit, the hybrid is a plain C
 A candidate is wrapped only when all of these hold:
 
 * every parameter is `int`, `bool`, `float`, `str`, `list[int]` or `list[float]`;
-* the result is `int`, `bool`, `float` or `str`;
-* no list parameter is mutated (directly, by augmented assignment, or by being passed on to another
-  program function that could mutate it);
+* the result is `int`, `bool`, `float`, `str`, `list[int]` or `list[float]`;
+* no list parameter is mutated (directly, through a local alias, by augmented assignment, or by being
+  passed on to another program function that could mutate it);
 * the function does not print (`print`/`assert` I/O is excluded by `_setup_mix`);
 * a function marked as possibly needing a big int is either an int result (the overflow wrapper can
   fall back) or stays in CPython;
@@ -48,12 +53,14 @@ A candidate is wrapped only when all of these hold:
   C102 identity rule).
 
 Everything else stays in CPython. This includes methods, nested functions, classes, generators,
-list/dict/tuple results, and functions with an argument or result kind outside the ABI.
+`list[str]`/dict/tuple results, and functions with an argument or result kind outside the ABI.
 
-The mixed-mode ABI is int64 in and out. The analysis therefore generates the units with int64
-lowering even when the surrounding general build runs with exact ints; the overflow flag sends a
-value that does not fit back to the original Python function. This keeps a large CPython int exact
-without asking the int64 ABI to carry `ail_tint` parameters.
+The mixed-mode ABI is int64 in and out for scalar results; a list result uses the typed emitter's
+length-then-fill `(_out, _cap)` ABI, which the hybrid wrapper boxes into a fresh Python list. The
+analysis therefore generates the units with int64 lowering even when the surrounding general build
+runs with exact ints; the overflow flag sends a value that does not fit back to the original Python
+function. This keeps a large CPython int exact without asking the int64 ABI to carry `ail_tint`
+parameters.
 
 ## 2. The boundary
 
@@ -70,6 +77,8 @@ without asking the int64 ABI to carry `ail_tint` parameters.
 | result `bool` | `int` -> `PyBool_FromLong` | overflow flag -> fallback |
 | result `float` | `double` -> `PyFloat_FromDouble` | direct |
 | result `str` | UTF-8 length + fill -> `PyUnicode_DecodeUTF8` | invalid UTF-8 -> fallback |
+| result `list[int]` | length probe + fill -> fresh `PyList` of `PyLong` | overflow flag -> fallback |
+| result `list[float]` | length probe + fill -> fresh `PyList` of `PyFloat` | direct |
 
 The native function is exposed as a `METH_VARARGS` function. The generated Python module wraps it
 in a closure generated with the original function's parameter layout. Any conversion failure, or the
@@ -110,16 +119,19 @@ CPython prints.
 
 **Exceptions.** The typed exception rule from mixed mode is unchanged, and the hybrid adds the
 body gate above. A function whose typed closure could raise an exception that would escape a CPython
-handler is not accelerated; a function with indexing, division, a call or an explicit raise stays in
-CPython (for example `a // b` with a zero divisor and `xs[0]` on an empty list). The same exception
-class, message, traceback shape and caller `try/except` behavior are therefore observed. Conversions
-never leak a partial result: the wrapper either returns a value or re-enters Python.
+handler is not accelerated, so a caller `try/except` is never bypassed. An exception that is
+uncaught in CPython too may come from the clone: before `_Exit(1)` the clone calls a drain hook that
+flushes Python's `sys.stdout` (and the C stream), so stdout and the exit status match CPython; the
+stderr text is the typed runtime's one-line message rather than a CPython traceback (declared in
+DIFFERENCES). Conversions never leak a partial result: the wrapper either returns a value or
+re-enters Python.
 
 **Mutation.** A list parameter is copied into the native call. A function that mutates a list
 parameter (item/store/delete, `append`/`extend`/`pop`/..., or passing the list to another program
 function that may mutate it) is therefore not accelerated; it remains the original Python function,
 so the mutation is visible to the caller. Direct-mutation syntax is refused at selection time, not
-silently copied back.
+silently copied back, and a local assigned straight from a list parameter is followed as an alias so
+a later store through it is refused too.
 
 ## 4. Parallelism
 
@@ -190,8 +202,8 @@ Measured on the prototype's real runs:
   the hybrid correctly runs the original module.
 * the prototype does accelerate a helper in another corpus program: `t264` (`classify`), built and
   compared against CPython. Other candidates examined (`t081` `is_palindrome`, `t139` `fmt`,
-  `t211` `evaluate`, `t314` `longest_non_decreasing`) index or call and stay in CPython under the
-  no-trap body gate.
+  `t211` `evaluate`, `t314` `longest_non_decreasing`) either call untracked user code or use an
+  unsupported result kind and stay in CPython.
 
 ## 6. What stays standalone
 

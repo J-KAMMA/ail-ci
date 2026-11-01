@@ -34,6 +34,21 @@ if str(_PKG) not in sys.path:
 
 _SCALAR = ('int', 'float', 'bool', 'str')
 _LIST = ('list[int]', 'list[float]')
+_LIST_RET = ('list[int]', 'list[float]')
+# Calls whose typed form is pure and cannot mutate anything the caller can observe, so a later
+# overflow fallback cannot repeat a side effect.  Only `range` and `int` are needed by the reached
+# hot functions.  `int` is safe because pymix tracks its ValueError and the int64/overflow patch
+# turns `int(inf)` into the boxed fallback; conversions like `float(s)`/`ord(s)` raise types pymix
+# does not track, so a boxed caller's `try` would be bypassed and they stay refused.  Constructing
+# an exception object is pure; the tracked `raise` form is allowed by pymix's exception rule.
+# A name bound by the module or by the function shadows the builtin and is not in this set.
+_PURE_CALLS = frozenset({
+    'range', 'int',
+    'BaseException', 'Exception', 'ArithmeticError', 'AssertionError', 'AttributeError',
+    'EOFError', 'IndexError', 'KeyError', 'LookupError', 'MemoryError', 'NameError',
+    'NotImplementedError', 'OSError', 'OverflowError', 'RuntimeError', 'StopIteration',
+    'TypeError', 'ValueError', 'ZeroDivisionError',
+})
 _MUTATORS = frozenset({
     'append', 'extend', 'insert', 'pop', 'remove', 'clear', 'sort', 'reverse',
     'update', 'add', 'discard', '__setitem__', '__delitem__', 'setdefault',
@@ -62,31 +77,84 @@ def _own_nodes(fn):
             stack.extend(ast.iter_child_nodes(node))
 
 
-def _unsafe_body(fn):
-    """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
-    either return CPython's value or fall back, so a body that can raise stays in CPython: a
-    subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), a
-    call (an arbitrary side effect or exception), and `raise`/`assert`/`try`/`with`/import are all
-    outside this pass.  This is deliberately conservative; a missed speed-up is safe."""
+def _local_names(fn):
+    """Names the function itself binds: parameters plus every `Name` store in its own body.
+    A subscript store is safe when its base is one of these (a local list, not module state)."""
+    names = {a.arg for a in fn.args.args}
+    names.update(a.arg for a in fn.args.posonlyargs)
+    names.update(a.arg for a in fn.args.kwonlyargs)
+    if fn.args.vararg:
+        names.add(fn.args.vararg.arg)
+    if fn.args.kwarg:
+        names.add(fn.args.kwarg.arg)
     for node in _own_nodes(fn):
-        if isinstance(node, ast.Subscript):
-            return 'indexing can raise'
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
-            return 'division or power can raise'
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+    return names
+
+
+def _module_bound_names(tree):
+    """Top-level names a call could resolve to instead of the builtin (a module function, class,
+    import or assignment shadows the same spelling)."""
+    names = set()
+    for stmt in tree.body:
+        if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(stmt.name)
+        elif isinstance(stmt, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            for node in ast.walk(stmt):
+                if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+                    names.add(node.id)
+        elif isinstance(stmt, (ast.Import, ast.ImportFrom)):
+            for alias in stmt.names:
+                names.add(alias.asname or alias.name.split('.')[0])
+    return names
+
+
+def _unsafe_body(fn, module_names=frozenset()):
+    """Operations a hybrid clone cannot repeat or cannot leave to the typed runtime.
+
+    The exception rule is pymix's: only functions whose escaping exception is not caught by a
+    boxed caller `try` become units at all, and an uncaught one exits 1 as CPython does.  So
+    indexing, division/modulo and `raise` are allowed here.  A call is allowed only when it is a
+    pure builtin the module/function does not shadow; a user call, method call, print or any
+    import/try/with stays boxed because a later overflow fallback could repeat its side effect.
+    Attribute stores and stores into a name the function does not bind stay boxed for the same
+    reason.  A local list store is fine: the clone owns that list.
+    """
+    locals_ = _local_names(fn)
+    for node in _own_nodes(fn):
         if isinstance(node, ast.Call):
+            f = node.func
+            if (isinstance(f, ast.Name) and f.id in _PURE_CALLS
+                    and f.id not in locals_ and f.id not in module_names):
+                continue
             return 'a call can raise or have side effects'
-        if isinstance(node, (ast.Raise, ast.Assert)):
-            return 'the function can raise'
         if isinstance(node, (ast.Try, ast.With, ast.Import, ast.ImportFrom)):
             return 'try/with/import is not safe to clone'
+        if isinstance(node, ast.Assert):
+            return 'assert can raise and is not tracked by the exception rule'
+        if isinstance(node, ast.Raise):
+            # pymix records `raise Name(...)`; a raise of a variable or an arbitrary expression
+            # can escape a boxed caller's `try` unseen, so only the tracked constructor form is
+            # safe to clone.
+            exc = node.exc
+            if not (isinstance(exc, ast.Call) and isinstance(exc.func, ast.Name)):
+                return 'raise of an expression is not tracked by the exception rule'
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             return 'a global assignment is not safe to clone'
         if isinstance(node, ast.Delete):
             return 'delete is not safe to clone'
-        if isinstance(node, (ast.Attribute, ast.Subscript)) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        if isinstance(node, ast.Attribute) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            return 'attribute or index assignment is not safe to clone'
+        if isinstance(node, ast.Subscript) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            base = node.value
+            if isinstance(base, ast.Name) and base.id in locals_:
+                continue
             return 'attribute or index assignment is not safe to clone'
         if isinstance(node, (ast.Await, ast.Yield, ast.YieldFrom)):
             return 'coroutine/generator code stays in CPython'
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            return 'power can raise or produce a complex result'
     return None
 
 
@@ -96,27 +164,44 @@ def _list_param_mutated(fn, list_params):
     list parameter on to another user function, which may mutate it one step away."""
     if not list_params:
         return False
+    # A local assigned straight from a list parameter is another name for the caller's list in
+    # CPython; the typed clone got a copy, so a store through the alias is just as invisible to
+    # the caller as a store through the parameter itself.  Follow simple aliases to a fixed point
+    # (a rebinding away from the alias later only makes this answer more conservative).
+    aliases = set(list_params)
+    while True:
+        grown = False
+        for node in _own_nodes(fn):
+            if (isinstance(node, (ast.Assign, ast.AnnAssign))
+                    and isinstance(node.value, ast.Name) and node.value.id in aliases):
+                targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+                for target in targets:
+                    if isinstance(target, ast.Name) and target.id not in aliases:
+                        aliases.add(target.id)
+                        grown = True
+        if not grown:
+            break
     for node in _own_nodes(fn):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and isinstance(node.func.value, ast.Name)
-                and node.func.value.id in list_params and node.func.attr in _MUTATORS):
+                and node.func.value.id in aliases and node.func.attr in _MUTATORS):
             return True
         if (isinstance(node, ast.Subscript) and isinstance(node.value, ast.Name)
-                and node.value.id in list_params
+                and node.value.id in aliases
                 and isinstance(node.ctx, (ast.Store, ast.Del))):
             return True
         if isinstance(node, ast.AugAssign):
-            if isinstance(node.target, ast.Name) and node.target.id in list_params:
+            if isinstance(node.target, ast.Name) and node.target.id in aliases:
                 return True
             if (isinstance(node.target, ast.Subscript) and isinstance(node.target.value, ast.Name)
-                    and node.target.value.id in list_params):
+                    and node.target.value.id in aliases):
                 return True
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             return True
     for node in _own_nodes(fn):
         if isinstance(node, ast.Call):
             for arg in list(node.args) + [kw.value for kw in node.keywords]:
-                if isinstance(arg, ast.Name) and arg.id in list_params:
+                if isinstance(arg, ast.Name) and arg.id in aliases:
                     return True
     return False
 
@@ -265,8 +350,14 @@ pymix.analyze = _analyze
             capture_path.unlink(missing_ok=True)   # never reuse a partial capture from a failed CLI
             runner = run_dir / 'direct.py'
             runner.write_text(
-                'import os, pyboxed2\n'
-                'pyboxed2.build(open(os.environ["AIL_HYBRID_SRC"], encoding="utf-8").read(), {}, allow_mix=True)\n',
+                'import contextlib, io, os, sys\n'
+                'from pathlib import Path\n'
+                'sys.path.insert(0, %r)\n'
+                'import ail_chatgpt, pyboxed2\n'
+                'with contextlib.redirect_stderr(io.StringIO()):\n'
+                '    text, _, _ = ail_chatgpt._load_sources(\n'
+                '        Path(os.environ["AIL_HYBRID_SRC"]), (), "python", local_imports=True)\n'
+                'pyboxed2.build(text, {}, allow_mix=True)\n' % str(_HERE),
                 encoding='utf-8')
             direct_env = dict(env, AIL_HYBRID_SRC=str(source_path))
             try:
@@ -298,6 +389,7 @@ def _select(src, tree, report, facts):
     import unified
 
     funcs = _top_level_functions(tree)
+    module_names = _module_bound_names(tree)
     big_hard = bigcap.marked(tree, local=False)
     big_local = bigcap.marked(tree)
     id_reach, id_any = pyboxed2._mix_identity_unsafe(tree)
@@ -311,7 +403,7 @@ def _select(src, tree, report, facts):
             continue
         params = [(p, k) for p, k in info.get('params') or []]
         ret = info.get('ret')
-        if ret not in _SCALAR:
+        if ret not in _SCALAR and ret not in _LIST_RET:
             rejected[pyname] = 'result kind %s stays in CPython' % ret
             continue
         if pyname in big_hard:
@@ -327,7 +419,7 @@ def _select(src, tree, report, facts):
         if bad:
             rejected[pyname] = 'parameter kind %s stays in CPython' % bad[0]
             continue
-        unsafe = _unsafe_body(funcs[pyname])
+        unsafe = _unsafe_body(funcs[pyname], module_names)
         if unsafe:
             rejected[pyname] = unsafe
             continue
@@ -358,6 +450,10 @@ def _c_proto(item):
             args.extend(['const double *' + cn, 'int64_t ' + cn + '_len'])
     if item['ret'] == 'str':
         args.extend(['uint8_t *_out', 'int64_t _cap'])
+    elif item['ret'] == 'list[int]':
+        args.extend(['int64_t *_out', 'int64_t _cap'])
+    elif item['ret'] == 'list[float]':
+        args.extend(['double *_out', 'int64_t _cap'])
     rtype = 'double' if item['ret'] == 'float' else 'int64_t'
     return '%s %s(%s)' % (rtype, item['mangled'], ', '.join(args))
 
@@ -371,7 +467,26 @@ def _wrapper_source(module, items):
         '',
         'typedef struct { const uint8_t *p; int64_t n; _Bool bytes; } ail_str;',
         'static PyObject *AilHybridFallback;',
-        'void ail_mix_drain_out(void) { }',
+        # A clone\'s trap path calls this just before `_Exit(1)`.  The boxed program is CPython, so
+        # its earlier `print()` text is in Python\'s sys.stdout buffer, not the typed runtime\'s
+        # C buffer: flush it (and the C stream) first, exactly as CPython\'s normal exit would.
+        'static void ail_hybrid_drain_stdout(void) {',
+        '    PyGILState_STATE state = PyGILState_Ensure();',
+        '    PyObject *sys = PyImport_ImportModule("sys");',
+        '    if (sys != NULL) {',
+        '        PyObject *out = PyObject_GetAttrString(sys, "stdout");',
+        '        if (out != NULL) {',
+        '            PyObject *res = PyObject_CallMethod(out, "flush", NULL);',
+        '            Py_XDECREF(res);',
+        '            Py_DECREF(out);',
+        '        }',
+        '        Py_DECREF(sys);',
+        '    }',
+        '    PyErr_Clear();',
+        '    PyGILState_Release(state);',
+        '    fflush(stdout);',
+        '}',
+        'void ail_mix_drain_out(void) { ail_hybrid_drain_stdout(); }',
         'static PyObject *ail_hybrid_fallback(void) {',
         '    PyErr_SetString(AilHybridFallback, "argument or result does not fit the AIL ABI");',
         '    return NULL;',
@@ -479,6 +594,46 @@ def _wrapper_source(module, items):
             for b in bufs:
                 out.append('    PyMem_Free(%s);' % b)
             out.append('    if (!res) { PyErr_Clear(); return ail_hybrid_fallback(); }')
+            out.append('    return res;')
+        elif ret in ('list[int]', 'list[float]'):
+            is_int = ret == 'list[int]'
+            elem = 'int64_t' if is_int else 'double'
+            sep = ', ' if cargs else ''
+            out.append('    int64_t need;')
+            out.append('    Py_BEGIN_ALLOW_THREADS')
+            out.append('    need = %s(%s%sNULL, 0);' % (item['mangled'], cargs, sep))
+            out.append('    Py_END_ALLOW_THREADS')
+            out.append('    if (need < 0) %s;' % fail)
+            out.append('    %s *rb = (%s *)PyMem_Malloc((size_t)(need > 0 ? need : 1) * sizeof(%s));' % (elem, elem, elem))
+            out.append('    if (!rb) {')
+            for b in bufs:
+                out.append('        PyMem_Free(%s);' % b)
+            out.append('        return PyErr_NoMemory();')
+            out.append('    }')
+            out.append('    Py_BEGIN_ALLOW_THREADS')
+            out.append('    if (need > 0) %s(%s%srb, need);' % (item['mangled'], cargs, sep))
+            out.append('    Py_END_ALLOW_THREADS')
+            out.append('    PyObject *res = PyList_New((Py_ssize_t)need);')
+            out.append('    if (!res) {')
+            out.append('        PyMem_Free(rb);')
+            for b in bufs:
+                out.append('        PyMem_Free(%s);' % b)
+            out.append('        return PyErr_NoMemory();')
+            out.append('    }')
+            out.append('    for (Py_ssize_t i = 0; i < (Py_ssize_t)need; i++) {')
+            if is_int:
+                out.append('        PyObject *v = PyLong_FromLongLong((long long)rb[i]);')
+            else:
+                out.append('        PyObject *v = PyFloat_FromDouble(rb[i]);')
+            out.append('        if (!v) { Py_DECREF(res); PyMem_Free(rb);')
+            for b in bufs:
+                out.append('            PyMem_Free(%s);' % b)
+            out.append('            return NULL; }')
+            out.append('        PyList_SET_ITEM(res, i, v);')
+            out.append('    }')
+            out.append('    PyMem_Free(rb);')
+            for b in bufs:
+                out.append('    PyMem_Free(%s);' % b)
             out.append('    return res;')
         elif ret == 'float':
             out.append('    double r;')

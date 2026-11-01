@@ -1,3 +1,41 @@
+## 2026-11-01 -- typed reach on eight real programs: four hot functions now compile on the hybrid path (job-prog6-11020729)
+
+Profiled the eight programs with CPython 3.12 and `cProfile` (all self times round to 0.000 s because
+the programs are tiny; the table in `lab/progfix/prog6.md` names the functions that do the work and
+the first selection refusal for each). Four newly type on the CPython hybrid: `fibonacci_mod`
+(g09_000), `card_value` (t402), `catalan_numbers` (g09_020) and `count_no_adjacent_ones`
+(g09_014). The other four need larger features and are recorded as follow-ups: datetimes
+(g19_038), `list[str]` with a str default and recursion (g08_022), `dict[str, Any]`/JSON/CSV
+(g21_024), and dataclass/class-instance fields (g14_018).
+
+The common refusals were `unresolved-return: return branches require distinct tags` and
+`unresolved-param`. pymix now reads annotated assignments and return annotations (`list[int]` /
+`typing.List[int]`), infers list repetition and tuple/list unpacking, and treats `return []` in a
+list-returning function as that list kind. Parameter annotations are not seeded: a probe showed a
+lying `x: int` annotation next to `show([1, 2])` made the general build emit a mismatched clone
+signature (the baseline built it), so parameters stay inferred from the body and call sites. A
+function that can fall off its end or take a bare `return` is no longer a candidate (a probe
+printed `0`/`[]` where CPython prints `None`, in both the hybrid and the pre-existing general
+build). This was verified byte-identical generated C for all ten `lab/compare` tasks and the five
+`main.py` tasks that build.
+
+The hybrid now allows indexing, division/modulo and a tracked `raise Name(...)` when pymix proves no
+boxed caller handler can be bypassed. An uncaught trap flushes Python's `sys.stdout` from the
+wrapper's drain hook before `_Exit(1)`, so earlier `print` output and the exit status match CPython
+(stderr is the typed one-line message rather than a traceback; declared). Only `range` and `int`
+are allowed pure builtin calls (`float`/`ord`/`chr` raise untracked exception types, so they stay
+boxed), `assert`/untracked raises/arbitrary calls/attribute stores stay boxed, and a local alias of
+a list parameter is followed so a store through it cannot mutate only the clone's copy. List
+`int`/`float` returns use the typed length-then-fill ABI and fall back to CPython on int64 overflow;
+their units are linked into a plain general build only for the hybrid capture.
+
+Added `AIL_CURRENT/test_ail_prog6.py` (registered in `tests.d/`): it builds the four programs on the
+hybrid, asserts the accelerated set, and compares stdout/exit with CPython, plus overflow, empty and
+negative list results, uncaught-trap flush, list aliasing, an untracked pure call and a fall-through
+return. Probes in `/tmp/probes` (`p_types`, `p_listret`, `p_unpack`, `p_traps`, `p_ann_lie`,
+`p_overflow`, `p_alias`, ...) match CPython on both standalone builds and the hybrid; the documented
+int64 overflow probes stop loudly on the standalone builds by design.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten
