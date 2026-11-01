@@ -3913,10 +3913,6 @@ class Compiler(boxclosure.ClosureMixin):
         for pname, dexpr in zip(kwonly, node.args.kw_defaults):
             if dexpr is not None:
                 kw_defaults[pname] = dexpr
-            else:
-                raise Unsupported('a required keyword-only parameter %s in def %s (this cut '
-                                  'requires every keyword-only parameter to have a default)' %
-                                  (pname, node.name))
         lru = False
         is_static = False
         is_property = is_setter = is_classmethod = False
@@ -6763,9 +6759,6 @@ class Compiler(boxclosure.ClosureMixin):
 
     # -------------------------------------------------------------------------------- calls
     def expr_Call(self, node, ctx):
-        for kw in node.keywords:
-            if kw.arg is None:
-                raise Unsupported('a **kwargs call argument')
         f = node.func
         if (isinstance(f, ast.Call) and isinstance(f.func, ast.Name) and f.func.id == 'getattr'
                 and 'getattr' not in self.functions and len(f.args) == 2 and not f.keywords
@@ -6775,6 +6768,17 @@ class Compiler(boxclosure.ClosureMixin):
             node = ast.copy_location(ast.Call(func=ast.Attribute(value=f.args[0], attr=f.args[1].value, ctx=ast.Load()),
                                               args=node.args, keywords=node.keywords), node)
             f = node.func
+        starstar = [kw.value for kw in node.keywords if kw.arg is None]
+        if starstar:
+            if any(isinstance(a, ast.Starred) for a in node.args):
+                raise Unsupported('a call with both *args and **kwargs')
+            kwargs = {kw.arg: kw.value for kw in node.keywords if kw.arg is not None}
+            kwseq = [(kw.arg, kw.value) for kw in node.keywords]
+            if isinstance(f, ast.Name):
+                return self._call_name(f.id, node.args, kwargs, ctx, kwseq=kwseq)
+            if isinstance(f, ast.Attribute):
+                return self._call_attribute_starstar(f, node.args, kwargs, ctx, kwseq)
+            raise Unsupported('a **kwargs call argument in a call through a computed function value')
         # A single starred argument and nothing else (`f(*xs)`) -- xs's LENGTH is not known
         # until runtime, but every shape below still has a fixed-arity C calling convention
         # available: print(*xs) (the runtime's print already takes a (vals, n) array+count
@@ -7150,7 +7154,7 @@ class Compiler(boxclosure.ClosureMixin):
             out.append(t)
         return out
 
-    def _bind_args(self, fname, info, args, kwargs, ctx):
+    def _bind_args(self, fname, info, args, kwargs, ctx, kwseq=None):
         """Every positional call-site argument is compiled FIRST, left to right, then every
         keyword-argument VALUE, left to right (API.md section 12's evaluation-order rule,
         applied to a call site the same way it applies to a binary operator) -- matches
@@ -7164,6 +7168,8 @@ class Compiler(boxclosure.ClosureMixin):
         kwonly = info.get('kwonly', ())
         vararg = info.get('vararg')
         kwarg = info.get('kwarg')
+        if kwseq is not None:
+            return self._bind_args_dynamic(fname, info, args, kwargs, kwseq, ctx)
         if len(args) == 1 and isinstance(args[0], _StarC):
             return self._bind_star(fname, info, args[0], kwargs, strip_self, params, ctx)
         if len(args) > len(params) and not vararg:
@@ -7225,6 +7231,176 @@ class Compiler(boxclosure.ClosureMixin):
         elif extra_kw:
             raise Unsupported('%s() called with unknown keyword arguments %s' %
                               (fname, ', '.join(k for k, _ in extra_kw)))
+        return out
+
+    def _bind_args_dynamic(self, fname, info, args, kwargs, kwseq, ctx):
+        """A call with a `**mapping` argument: expand the mapping at run time and bind the
+        parameters with CPython's own rules (a duplicate or non-string keyword, a missing
+        argument, an unknown keyword and a surplus positional argument all raise TypeError at
+        the call).  Only the general path takes this route; the typed path still refuses it."""
+        if any(isinstance(a, (ast.Starred, _StarC)) for a in args):
+            raise Unsupported('a call with both *args and **kwargs')
+        strip_self = info.get('is_method') and not info.get('is_static')
+        params = info['params'][1:] if strip_self else list(info['params'])
+        kwonly = list(info.get('kwonly', ()))
+        vararg = info.get('vararg')
+        kwarg = info.get('kwarg')
+        posonly = [p for p in info.get('posonly', ()) if p in params]
+        qn = (info['owner_class'] + '.' + fname) if info.get('is_method') and info.get('owner_class') else fname
+        err = ctx.cur_err_target()
+        ctx.uses_st = True
+        pos = [self.expr(a, ctx) for a in args]
+        kw = ctx.tmp()
+        ctx.emit('%s = ail_dict_new(cx);' % kw)
+        for kwname, kwnode in kwseq:
+            if kwname is not None:
+                v = self.expr(kwnode, ctx)
+                key = self._str_lit_slot(kwname, ctx)
+                has = ctx.new_cvar('kh')
+                ctx.emit('int %s;' % has)
+                ctx.emit('st = ail_dict_contains(cx, &%s, %s, %s);' % (has, kw, key))
+                ctx.check()
+                ctx.emit('if (%s) {' % has)
+                ctx.indent += 1
+                pref = self._str_lit_slot('%s() got multiple values for keyword argument ' % qn, ctx)
+                rp, msg = ctx.tmp(), ctx.tmp()
+                ctx.emit('%s = ail_obj_repr(cx, %s);' % (rp, key))
+                ctx.emit('%s = ail_str_cat(cx, %s, %s);' % (msg, pref, rp))
+                ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_TYPEERROR], %s); goto %s;' % (msg, err))
+                ctx.indent -= 1
+                ctx.emit('}')
+                ctx.emit('st = ail_dict_set(cx, %s, %s, %s);' % (kw, key, v))
+                ctx.check()
+                continue
+            ev = self.expr(kwnode, ctx)
+            ctx.emit('if (%s.tag != AIL_T_DICT) { st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s; }'
+                     % (ev, c_str_literal('argument after ** must be a mapping'), err))
+            items, n, i = ctx.tmp(), ctx.new_cvar('kn'), ctx.new_cvar('ki')
+            pair, key, kval, has = ctx.tmp(), ctx.tmp(), ctx.tmp(), ctx.new_cvar('kh')
+            ctx.emit('%s = ail_dict_items(cx, %s);' % (items, ev))
+            ctx.emit('int64_t %s = ((ail_vecobj *)(%s).o)->n;' % (n, items))
+            ctx.emit('for (int64_t %s = 0; %s < %s; %s++) {' % (i, i, n, i))
+            ctx.indent += 1
+            ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[%s];' % (pair, items, i))
+            ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[0];' % (key, pair))
+            ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[1];' % (kval, pair))
+            ctx.emit('if (%s.tag != AIL_T_STR) { st = ail_raise_c(cx, AIL_B_TYPEERROR, '
+                     '"keywords must be strings"); goto %s; }' % (key, err))
+            ctx.emit('int %s;' % has)
+            ctx.emit('st = ail_dict_contains(cx, &%s, %s, %s);' % (has, kw, key))
+            ctx.check()
+            ctx.emit('if (%s) {' % has)
+            ctx.indent += 1
+            pref = self._str_lit_slot('%s() got multiple values for keyword argument ' % qn, ctx)
+            rp, msg = ctx.tmp(), ctx.tmp()
+            ctx.emit('%s = ail_obj_repr(cx, %s);' % (rp, key))
+            ctx.emit('%s = ail_str_cat(cx, %s, %s);' % (msg, pref, rp))
+            ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_TYPEERROR], %s); goto %s;' % (msg, err))
+            ctx.indent -= 1
+            ctx.emit('}')
+            ctx.emit('st = ail_dict_set(cx, %s, %s, %s);' % (kw, key, kval))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
+        kslot = {p: self._str_lit_slot(p, ctx) for p in params + kwonly}
+
+        def has_key(p):
+            h = ctx.new_cvar('kh')
+            ctx.emit('int %s;' % h)
+            ctx.emit('st = ail_dict_contains(cx, &%s, %s, %s);' % (h, kw, kslot[p]))
+            ctx.check()
+            return h
+
+        def take(p):
+            h = has_key(p)
+            v = ctx.tmp()
+            ctx.emit('if (%s) {' % h)
+            ctx.indent += 1
+            ctx.emit('st = ail_dict_get(cx, &%s, %s, %s, ail_box_none());' % (v, kw, kslot[p]))
+            ctx.check()
+            ctx.emit('st = ail_dict_del(cx, %s, %s);' % (kw, kslot[p]))
+            ctx.check()
+            ctx.indent -= 1
+            ctx.emit('}')
+            return h, v
+
+        for p in posonly:
+            h = has_key(p)
+            ctx.emit('if (%s) { st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s; }'
+                     % (h, c_str_literal("%s() got some positional-only arguments passed as keyword "
+                                         "arguments: '%s'" % (qn, p)), err))
+        out = []
+        for index, p in enumerate(params):
+            o = ctx.tmp()
+            if index < len(pos):
+                h = has_key(p)
+                ctx.emit('if (%s) { st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s; }'
+                         % (h, c_str_literal("%s() got multiple values for argument '%s'" % (qn, p)), err))
+                ctx.emit('%s = %s;' % (o, pos[index]))
+            else:
+                h, v = take(p)
+                ctx.emit('if (%s) {' % h)
+                ctx.indent += 1
+                ctx.emit('%s = %s;' % (o, v))
+                ctx.indent -= 1
+                ctx.emit('} else {')
+                ctx.indent += 1
+                if p in info['defaults']:
+                    ctx.emit('%s = %s;' % (o, self.expr(info['defaults'][p], ctx)))
+                else:
+                    ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
+                             % (c_str_literal("%s() missing 1 required positional argument: '%s'" % (qn, p)), err))
+                ctx.indent -= 1
+                ctx.emit('}')
+            out.append(o)
+        extra = pos[len(params):]
+        if vararg:
+            t = ctx.tmp()
+            if extra:
+                arr = ctx.new_cvar('va')
+                ctx.emit('ail_obj %s[%d] = { %s };' % (arr, len(extra), ', '.join(extra)))
+                ctx.emit('%s = ail_tuple_new(cx, %s, %d);' % (t, arr, len(extra)))
+            else:
+                ctx.emit('%s = ail_tuple_new(cx, NULL, 0);' % t)
+            out.append(t)
+        elif extra:
+            was = 'was' if len(pos) == 1 else 'were'
+            ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
+                     % (c_str_literal('%s() takes %d positional argument%s but %d %s given'
+                                      % (qn, len(params), '' if len(params) == 1 else 's',
+                                         len(pos), was)), err))
+        for p in kwonly:
+            o = ctx.tmp()
+            h, v = take(p)
+            ctx.emit('if (%s) {' % h)
+            ctx.indent += 1
+            ctx.emit('%s = %s;' % (o, v))
+            ctx.indent -= 1
+            ctx.emit('} else {')
+            ctx.indent += 1
+            if p in info['kw_defaults']:
+                ctx.emit('%s = %s;' % (o, self.expr(info['kw_defaults'][p], ctx)))
+            else:
+                ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, %s); goto %s;'
+                         % (c_str_literal("%s() missing 1 required keyword-only argument: '%s'" % (qn, p)), err))
+            ctx.indent -= 1
+            ctx.emit('}')
+            out.append(o)
+        if kwarg:
+            out.append(kw)
+        else:
+            ctx.emit('if (ail_dict_len(%s) != 0) {' % kw)
+            ctx.indent += 1
+            keys, key = ctx.tmp(), ctx.tmp()
+            ctx.emit('%s = ail_dict_keys(cx, %s);' % (keys, kw))
+            ctx.emit('%s = ((ail_vecobj *)(%s).o)->p[0];' % (key, keys))
+            pref = self._str_lit_slot('%s() got an unexpected keyword argument ' % qn, ctx)
+            rp, msg = ctx.tmp(), ctx.tmp()
+            ctx.emit('%s = ail_obj_repr(cx, %s);' % (rp, key))
+            ctx.emit('%s = ail_str_cat(cx, %s, %s);' % (msg, pref, rp))
+            ctx.emit('st = ail_raise(cx, cx->builtin_cls[AIL_B_TYPEERROR], %s); goto %s;' % (msg, err))
+            ctx.indent -= 1
+            ctx.emit('}')
         return out
 
     # ---------------------------------------------------------------------------------------
@@ -7504,11 +7680,11 @@ class Compiler(boxclosure.ClosureMixin):
         self.mix_guard_checks[name] = self.mix_guard_checks.get(name, 0) + 1
         return t
 
-    def _call_user_function(self, name, args, kwargs, ctx):
+    def _call_user_function(self, name, args, kwargs, ctx, kwseq=None):
         if self.uplan is not None:
             unified.boxed_body_hook(self, name)
         info = self.functions[name]
-        argcs = self._bind_args(name, info, args, kwargs, ctx)
+        argcs = self._bind_args(name, info, args, kwargs, ctx, kwseq)
         mix = self.mix_typed.get(name)
         if mix is not None:
             return self._call_mix_guarded(name, mix, argcs, ctx)
@@ -7642,7 +7818,7 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = %s;' % (t, v))
         return t
 
-    def _call_class(self, name, args, kwargs, ctx):
+    def _call_class(self, name, args, kwargs, ctx, kwseq=None):
         cls = self.classes[name]
         self._check_class_name_bound(name, ctx)
         info = self._resolve_method(name, '__init__')
@@ -7650,7 +7826,7 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.emit('%s = ail_inst_new(cx, g_slots_arr[%d]);' %
                 (t, self.global_slots['class:' + name]))
         if self._is_exc_class(name):
-            return self._call_exc_class(name, info, t, args, kwargs, ctx)
+            return self._call_exc_class(name, info, t, args, kwargs, ctx, kwseq)
         # Class attributes live on the class itself (installed once by _ensure_class_attrs); an
         # instance lookup falls through to them at run time, so it sees later `C.x = v` too and a
         # write to the instance shadows rather than mutating the class.
@@ -7662,16 +7838,16 @@ class Compiler(boxclosure.ClosureMixin):
         for kls in reversed(chain):
             self._ensure_class_attrs(kls, ctx)
         if info:
-            argcs = self._bind_args(name, info, args, kwargs, ctx)
+            argcs = self._bind_args(name, info, args, kwargs, ctx, kwseq)
             dummy = ctx.tmp()
             ctx.emit('st = %s(cx, &%s, %s%s);' % (info['cname'], dummy, t,
                      ''.join(', ' + a for a in argcs)))
             ctx.check()
-        elif args or kwargs:
+        elif args or kwargs or kwseq:
             raise Unsupported('%s() called with arguments but has no __init__' % name)
         return t
 
-    def _call_exc_class(self, name, info, t, args, kwargs, ctx):
+    def _call_exc_class(self, name, info, t, args, kwargs, ctx, kwseq=None):
         """An instance of an exception class of the program: args set as BaseException.__new__ sets them (the
         call's positional arguments), then the class's __init__ (whose super().__init__ resets them), then the
         message; the result is an exception value (safetyrt.EXC)."""
@@ -7679,7 +7855,7 @@ class Compiler(boxclosure.ClosureMixin):
         if any(isinstance(a, ast.Starred) for a in args):
             raise Unsupported('an exception class called with a starred argument')
         if info:
-            argcs = self._bind_args(name, info, args, kwargs, ctx)
+            argcs = self._bind_args(name, info, args, kwargs, ctx, kwseq)
             positional = argcs[:len(args)]
         else:
             if kwargs:
@@ -7850,7 +8026,16 @@ class Compiler(boxclosure.ClosureMixin):
             return name[len('_ail_c_'):] in cruntime.LIBM_FUNCS or name == '_ail_c_sqrt'
         return False
 
-    def _call_name(self, name, args, kwargs, ctx):
+    def _call_name(self, name, args, kwargs, ctx, kwseq=None):
+        if kwseq is not None:
+            shadowed = (name in ctx.slot_of or name in ctx.ptr_names or name in ctx.clo_index
+                        or name in ctx.free_names or name in ctx.cell_slots)
+            if name in self.functions and not shadowed:
+                return self._call_user_function(name, args, kwargs, ctx, kwseq)
+            if name in self.classes and not shadowed:
+                return self._call_class(name, args, kwargs, ctx, kwseq)
+            raise Unsupported('a **kwargs call argument to %s() (only a program function or '
+                              'class is modelled)' % name)
         if name == '_ail_nan_stop' and name not in self.functions:
             # collib.py's typed float deque helpers (DIFFERENCES C119): floats are boxed objects here and the search
             # is identity-then-== (see _cmp_once); the typed path refuses the call (pyfunc.py), so it ends up here
@@ -9786,6 +9971,31 @@ class Compiler(boxclosure.ClosureMixin):
 
     def _b_quit(self, args, kwargs, ctx):
         return self._emit_sys_exit(args, kwargs, ctx)
+
+    def _call_attribute_starstar(self, f, args, kwargs, ctx, kwseq):
+        """`obj.method(**mapping)` on a plain method of a program class.  The receiver is
+        evaluated first, then the arguments bind at run time; a property, a virtual dispatch
+        (a subclass may override the method), a builtin method or a module function still
+        refuses by name."""
+        if any(isinstance(a, ast.Starred) for a in args):
+            raise Unsupported('a call with both *args and **kwargs')
+        recv = f.value
+        recv_c = self.expr(recv, ctx)
+        cname = self._inst_class(recv, ctx)
+        info = self._resolve_method(cname, f.attr) if cname else None
+        if info is None or info.get('is_property') or info.get('is_setter'):
+            raise Unsupported('a **kwargs call argument to .%s() (only a plain method of a '
+                              'program class is modelled)' % f.attr)
+        if self._virtual_plan(cname, lambda c: self._resolve_method(c, f.attr))[1]:
+            raise Unsupported('a **kwargs call argument to .%s() on a class whose subclasses may '
+                              'override it' % f.attr)
+        argcs = self._bind_args(f.attr, info, args, kwargs, ctx, kwseq)
+        if not info.get('is_static'):
+            argcs = [self._self_arg(info, recv_c)] + argcs
+        t = ctx.tmp()
+        ctx.emit('st = %s(cx, &%s%s);' % (info['cname'], t, ''.join(', ' + a for a in argcs)))
+        ctx.check()
+        return t
 
     def _call_attribute(self, f, args, kwargs, ctx):
         recv = f.value

@@ -1,3 +1,38 @@
+## 2026-11-01 -- kwargs reach: `**mapping` calls and required keyword-only parameters (job-kwargs1-11011232)
+
+Measured 25 keyword-argument probes (`docs/design/KWARGS_REACH.md`, probes in `/tmp/kwmeasure/p/`):
+before this cut 14 matched CPython and 11 were refused. The top refusal was `a **kwargs call
+argument` (4 probes: `f(**d)`, `f(1, **d)`, `f(**{1: 2})`, `inner(**kw)`); required keyword-only
+parameters were the next (2 probes). The general path now expands a `**` mapping at run time and
+binds the callee with CPython's rules, and registers required keyword-only parameters. After:
+20 match and 5 are refused (a lambda used as a value, and four static binding refusals that are
+separate causes). The typed path is unchanged, so the default build falls back to the general
+path for `**`.
+
+`pyboxed2.expr_Call` routes a `**` call through a name to `_call_name(..., kwseq=...)` and through
+`obj.method` to `_call_attribute_starstar`; `_bind_args_dynamic` builds a runtime dict in source
+order, expands each mapping (dict tag, string keys, duplicate keys), then binds positional
+parameters, defaults, required keyword-only parameters, `*args` and `**kwargs`. Missing,
+unexpected, duplicate, non-string, non-mapping and surplus-positional cases raise `TypeError` at
+the call, so `try/except TypeError` sees them; `*args` with `**`, `**` to a builtin or function
+value, and `**` to a property/virtual dispatch are still refused by name. The generated C of the
+ten `lab/compare` tasks is byte-identical before and after (both `.py` and `.ail`; the three
+`.py` sources that do not build refuse identically).
+
+Probes in `/tmp/probes/` with `cmp.sh` on the default and forced general builds: `kw_basic`,
+`kw_kwonly_required`, `kw_dict_unpack`, `kw_dict_values`, `kw_dict_defaults`, `kw_dict_method`,
+`kw_dict_order`, `kw_dup_order`, `kw_err_dup`, `kw_err_dup_explicit_after`,
+`kw_err_dup_explicit_before`, `kw_err_unknown`, `kw_err_missing`, `kw_err_nonstr`,
+`kw_err_nonmap`, `kw_err_posonly`, `kw_err_posdup`, `kw_err_extra`,
+`kw_err_kwonly_missing2`; all match CPython on stdout and exit code, and
+`f(*xs, **d)` / `print(**d)` are refused by name.
+
+Added `AIL_CURRENT/test_ail_kwargs_reach.py` and registered it through
+`AIL_CURRENT/tests.d/test_ail_kwargs_reach.txt` (this tree has `tests.d`, so the tuple in
+`ail_check.py` is unchanged). Final-state tests: test_ail_kwargs_reach, test_ail_typedreach1,
+test_ail_c_keyword_functions, test_ail_callable_values, test_ail_py_typed_gaps,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
