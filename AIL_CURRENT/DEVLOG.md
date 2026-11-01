@@ -1,3 +1,16 @@
+## 2026-11-01 -- int64 constant census: refusals named, safe folds kept
+
+`docs/design/I64_CONSTANTS.md` records the first int64-constant refusal of all 34 modules in the compiler census and
+classifies each use: range bounds, all-ones masks, hash multipliers, sentinels, decimal thresholds and test fixtures.
+No compiler semantics changed. The safe subset was already the folded one: an out-of-int64 intermediate whose final value
+fits builds, as does a mask applied to an int64 constant (`5 & ((1 << 64) - 1)` prints 5); a mask that itself fits int64
+works on variables (`x & 0x7FFFFFFFFFFFFFFF`, `x & 0xFFFFFFFF`). Everything else, including `x & ((1 << 64) - 1)` for a
+nonnegative-looking argument, `0xcbf29ce484222325`, `1 << 63` and `10 ** 30`, stays refused by name with the
+`--exact-int` hint. The new `test_ail_i64_constants.py` locks those refusals on the default and forced general paths,
+checks the safe folds/masks against CPython, and checks that exact mode builds the same refused program. Probes in
+`/tmp/probes/i64_*.py` cover the values through arguments, list items, attributes and dict values, including negative and
+boundary inputs.
+
 ## 2026-10-31 -- ints are 64-bit by default; exact big ints are opt-in
 
 Owner decision: "strongest" over "identical to CPython". A Python-syntax program now gets int64: an operation that leaves int64
