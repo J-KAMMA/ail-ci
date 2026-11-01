@@ -70,6 +70,12 @@ def _ail_arr_check(tc: str, x):
 
 
 def _ail_arr_tname(x) -> str:
+    if isinstance(x, _AilArray):
+        return "array.array"
+    if isinstance(x, bytes):
+        return "bytes"
+    if isinstance(x, bytearray):
+        return "bytearray"
     if isinstance(x, bool):
         return "bool"
     if isinstance(x, int):
@@ -84,12 +90,14 @@ def _ail_arr_tname(x) -> str:
         return "tuple"
     if isinstance(x, dict):
         return "dict"
+    if type(x).__name__ == "range":
+        return "range"
     if x is None:
         return "NoneType"
     return "object"
 
 
-def _ail_arr_bad_kw():
+def _ail_arr_bad_kw(*args, **kwargs):
     raise TypeError("array.array() takes no keyword arguments")
 
 
@@ -304,6 +312,8 @@ class _AilArray:
         return out
 
     def __rmul__(self, n):
+        if isinstance(n, (str, list, tuple, bytes, bytearray)):
+            raise TypeError("can't multiply sequence by non-int of type 'array.array'")
         if not isinstance(n, int):
             raise TypeError("can't multiply sequence by non-int of type '%s'" % _ail_arr_tname(n))
         out = _AilArray(self.typecode)

@@ -1,3 +1,22 @@
+## 2026-11-01 -- array review follow-up: keyword arguments evaluate, reflected ordering names the operator (job-std_array-11020204)
+
+The review of `16dc414` found three regressions in the new array prelude. `array(...)` with a keyword
+now keeps every positional and keyword argument (a `*args, **kwargs` helper raises the CPython
+`TypeError` only after they are evaluated), so `array("i", boom(), bad=1)` raises `ValueError: boom`
+and `array("i", note(), bad=1)` prints before the `TypeError`; a `**mapping` argument stays a named
+compile-time refusal. Reflected ordering of a non-array against an array (`[1] <= a`, `>=`, `>`, `<`)
+no longer enters the array's `__lt__`: the out-of-line reflected path skips the array prelude class,
+and the generic error names the original operator and operand order (`'<=' not supported between
+instances of 'list' and 'array.array'`). The array class also prints as `array.array` in those
+runtime texts, gated on the array prelude. `'x' * a` and the other sequence-left forms name the
+array, not the sequence (`can't multiply sequence by non-int of type 'array.array'`).
+
+Probes `/tmp/probes/p_kweval.py`, `p_kweval3.py`, `p_cmp.py`, `p_cmp2.py`, `p_mul.py` and `p_mul2.py`
+match CPython 3.12 stdout on both `cmp.sh` builds; `p_kweval2.py` (`**` mapping) is refused by name.
+`test_ail_std_array`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_dunders`, `test_ail_cmp_classname`, `test_ail_array_ref`, `test_ail_array_t2` and
+`test_ail_stdlib5` pass.
+
 ## 2026-11-01 -- array review fixes: None bounds, genexpr fromlist, slice text, ordering (job-std_array-11012214)
 
 Review follow-up on `4d9cb02`. `array.index(x, start, stop)` now distinguishes an omitted bound from an

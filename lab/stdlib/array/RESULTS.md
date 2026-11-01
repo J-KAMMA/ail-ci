@@ -59,4 +59,8 @@ and exit status with CPython.
 
 Comparisons with a non-array now name the actual operator in the error (`'<='`, `'>'`, `'>='`),
 including when the array reaches the comparison through a function parameter, a list item, an
-attribute or a dict value. Array-to-array ordering and all nine programs match.
+attribute or a dict value; a reflected comparison (`[1] <= a`) keeps the original operand order and
+prints `array.array`. An `array(...)` call with keyword arguments evaluates all its arguments first
+and then raises CPython's `TypeError` (a `**mapping` argument is refused at compile time by name).
+`'x' * a` and the other sequence-left forms name the array. Array-to-array ordering and all nine
+programs match.

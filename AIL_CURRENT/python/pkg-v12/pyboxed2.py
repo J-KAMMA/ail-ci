@@ -3485,6 +3485,22 @@ class Compiler(boxclosure.ClosureMixin):
         tree.body = [Rewrite().visit(n) for n in tree.body]
         ast.fix_missing_locations(tree)
         text = safetyrt.bytes_prelude()
+        if any(isinstance(n, ast.ClassDef) and n.name == '_AilArray' for n in tree.body):
+            # the array prelude's class prints as CPython's array.array in bytes/bytearray multiply errors
+            text = text.replace(
+                "            if tn == 'deque':\n                tn = 'collections.deque'\n"
+                "            raise TypeError(\"can't multiply sequence by non-int of type '\" + tn + \"'\")",
+                "            if tn == 'deque':\n                tn = 'collections.deque'\n"
+                "            elif tn == '_AilArray':\n                tn = 'array.array'\n"
+                "            raise TypeError(\"can't multiply sequence by non-int of type '\" + tn + \"'\")")
+            text = text.replace(
+                "            tn = type(n).__name__\n"
+                "            raise TypeError(\"can't multiply sequence by non-int of type '\"\n"
+                "                            + (type(self).__name__ if tn in ('list', 'tuple', 'str', 'bytes', 'bytearray', 'deque') else tn) + \"'\")",
+                "            tn = type(n).__name__\n"
+                "            if tn == '_AilArray':\n                tn = 'array.array'\n"
+                "            raise TypeError(\"can't multiply sequence by non-int of type '\"\n"
+                "                            + (type(self).__name__ if tn in ('list', 'tuple', 'str', 'bytes', 'bytearray', 'deque') else tn) + \"'\")")
         if any(isinstance(n, ast.Name) and n.id == 'read_bytes' for n in ast.walk(tree)):
             text += safetyrt.READ_BYTES
         pre = ast.parse(text).body
