@@ -1,3 +1,53 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode-go/deepseek-v4.1-flash]
+**What the change actually does:** `d4d3f2b` fixes the hybrid's list-buffer declarations/fallback frees, restores the original source path (`__file__`/`argv[0]`/`sys.path`) in the packaged copy, regenerates accelerated wrappers with the original call signature plus copied metadata, makes only the mixed-mode overflow *flag* thread-local, and adds regression tests. It does **not** make the mixed-mode `jmp_buf`/save pointer thread-local.
+
+**Defects**
+
+1. **Concurrent int overflow still crashes the extension (GIL release + shared static `jmp_buf`).** Probe: `/tmp/rprobes/thr/tgt.py` (`def mul(n: int) -> int: return n * n`), hybrid built with `build --cpython`, then `/tmp/rprobes/thr/run.py` with 8 threads x 5000 calls over values including `3037000500` and `2**40` (overflow → longjmp fallback). It does load the native extension. Expected: plain-CPython hash `634904534`, exit 0. Actual: `accelerated_runtime True` then `*** longjmp causes uninitialized stack frame ***: terminated`, SIGABRT (rc 134). Single-thread overflow and multi-thread non-overflow both match CPython; only the shared `static jmp_buf`/`savep` path fails. The worker's thread harness is invalid: it loads the hybrid by file path without putting the output directory on `sys.path`, so `_ail_hybrid_native` is `None` and it compares CPython with CPython.
+
+2. **List-buffer leak on a later non-list argument (the "every fallback path frees each buffer" claim is false).** Probe: `/tmp/rprobes/leak/tgt.py` (`def f(a: list[int], b: list[int]) -> int: return 0`), hybrid built, 50,000 calls of `f(list(range(1000)), (2,))`. Expected: `maxrss_kb` ~10,440 (plain CPython). Actual: ~574,564 KB. The second list's `if (!PyList_CheckExact(...)) return ail_hybrid_fallback();` bypasses the `fallback:` label, so `b0` from the first argument is never freed. The same early-return leak exists for scalar conversion failures after a list argument. Output value itself is correct.
+
+3. **Metadata claim is false for functions with locals.** Probe: `/tmp/rprobes/r13/p.py` (`f(n)` with locals `z`, `w`), hybrid built and imported from `out`. Expected CPython: `1 ('n', 'z', 'w') f`. Actual hybrid: `1 ('n',) _ail_hybrid_call` (and `hasattr(f, '__wrapped__')` is `True` vs `False`). `inspect.signature` matches only because `__wrapped__` points at the original. `co_argcount` does match.
+
+4. **Wrapper helper names are not hygienic; a parameter with one of the generated names crashes.** Probe: `/tmp/rprobes/r27/p.py` with parameters named `_ail_hybrid_invoke`, `_ail_hybrid_native_ref`, `_ail_hybrid_original_ref`. Expected: `6`. Actual: `TypeError: 'int' object is not callable`, exit 1; the generated `_ail_hybrid_call` body resolves the helper name to the local argument.
+
+**Claims check**
+- "Fixed all three review defects": **false** (double free fixed; full freeing and metadata not).
+- Buffers NULL-declared / every fallback frees once: NULL declaration **verified**; every-path free **false** (defect 2).
+- Packaged `__file__`/`argv[0]`/sibling imports: **verified** on `/tmp/rprobes/r5` (`sib-ok`, `hello`, exit 0). Relocation of the output directory is explicitly not claimed.
+- Overflow flags thread-local: code **verified**, but concurrency safety **false** (defect 1); their 8x40k harness **did not load the extension**.
+- Required tests: **verified** — `test_ail_cpython_hybrid`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`: 4 modules, 0 failed.
+- `update_manifest.py --check`: **verified** (rc 0).
+- Default standalone unchanged: **verified** — `--debug-dir` `program.c` byte-identical to `/tmp/base` (only temp paths in `native_report.json` differ); `cmp.sh` outputs equal on HEAD and base.
+- `t264` `classify` accelerated: **verified**.
+- Two-/three-list and 10/10 probe claims: **unverified** in their form; my two-list fallbacks matched, but three-list/float-list/mixed functions were not emitted as units at all.
+
+**Unverified:** lab/compare timings and all 26/43 cases; the five refused corpus programs' full `in0`/`in1`/`in2` runs; speed (no hot runtime/compiler path changed, so no icount delta expected).
+
+**Pre-existing:** none blocking found; the standalone general/default paths behave identically to `/tmp/base`.
+
+VERDICT: FIX
+[cost $0.0563, opencode tokens {"total": 2876051, "input": 111692, "output": 12245, "reasoning": 40178, "cache.write": 0, "cache.read": 2711936}]
+    tool time: bash 10.5 min
+        300s bash   cd /tmp/rprobes && mkdir -p thr && cat > thr/tgt.py <<'PY' def mul(n: int) -> int:     return n * n print(mul(
+        120s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && (date; python3 ../tools/par_check.py -j 2 test_ail_cpython_h
+        120s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && setsid bash -c 'date; python3 ../tools/par_check.py -j 2 tes
+         20s bash   sleep 20; date; cat /tmp/rprobes/tests2.log
+          9s bash   cd /tmp/rprobes && mkdir -p r9 r10 r11 r12 && cat > r9/p.py <<'PY' def f(n: int) -> int:     z = n + 1     w =
+          9s bash   cd /tmp/rprobes && mkdir -p r13 r14 r15 r16 r17 r18 && cat > r13/p.py <<'PY' def f(n: int) -> int:     z = n +
+          9s bash   cd /tmp/rprobes && for n in r1 r2 r3 r4 r5 r6; do mkdir -p $n; done cp p_lists.py r1/p.py cp p_global.py r2/p.
+          7s bash   cd /tmp/rprobes && mkdir -p r7 r8 && cat > r7/p.py <<'PY' def f(a: list[int], b: list[int]) -> int:     return
+
+
+--- ORIGINAL TASK ---
 **Design and prototype: CPython plus fast parts (owner decision 2026-11-01).** AIL keeps its standalone mode. A program that fully compiles still becomes a small single native executable, unchanged. Programs or modules that AIL cannot fully translate must still run: functions that AIL can compile on the typed path become C in a CPython extension module, and everything else runs unchanged in real CPython. The goal is that every program CPython runs, AIL runs, with CPython's output.
 
 Step 1, design. Write docs/design/CPYTHON_HYBRID.md covering:
