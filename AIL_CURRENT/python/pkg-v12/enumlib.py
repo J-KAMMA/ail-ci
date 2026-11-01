@@ -16,7 +16,10 @@ Flag / IntFlag (prelude_flag.py): the values are worked out here (an int literal
 and earlier members), the members and the canonical-member list are as above; `Color(v)` / `~` / `|` / `&` / `^` /
 `in` / iteration of a member / `x in Color` are generated per class (the general path has no `type(self)(...)`),
 composites are made and cached as `Flag._missing_` does (3.12: STRICT for Flag, KEEP for IntFlag, the same
-error text). Not built, refused by name: a non-int or negative member value, boundary= keywords.
+error text). `x in Color` follows the running 3.12 patch: 3.12.10 made `EnumType.__contains__` look the value
+up through `Color(x)`, which propagates the TypeError of an empty enum, returns False for a non-member unhashable
+value and accepts a new Flag composite. Not built, refused by name: a non-int or negative member value,
+boundary= keywords.
 
 Not built, refused by name: the functional API `Enum("Color", "RED GREEN")`, mixed-in bases
 (`class C(str, Enum)`), members defined with `__init__` / `__new__`, `_generate_next_value_`, class methods.
@@ -25,6 +28,7 @@ Difference: `isinstance(member, int)` is False for an IntEnum member.
 import ast
 import classname
 import copy
+import sys
 
 import stdlib5
 from stdlib4 import refuse
@@ -32,6 +36,7 @@ from stdlib4 import refuse
 KINDS = {'Enum': '_AilEnum', 'IntEnum': '_AilIntEnum', 'StrEnum': '_AilStrEnum', 'Flag': '_AilFlag',
          'IntFlag': '_AilIntFlag'}
 HANDLED = {'Enum', 'IntEnum', 'StrEnum', 'Flag', 'IntFlag', 'auto', 'unique'}
+CONTAINS_CALLS = sys.version_info >= (3, 12, 10)
 FLAGS = ('Flag', 'IntFlag')
 WHAT = 'Enum, IntEnum, StrEnum, Flag, IntFlag, auto and unique are built'
 MEMBER_REFUSED = ('__init__', '__new__', '_generate_next_value_', '__call__', '__members__', '__getitem__')
@@ -399,7 +404,12 @@ def generated_flag(info):
     lines.append('_ail_en_%s_mm = [%s]' % (n, ', '.join(info.order)))
     lines.append('%s = {%s}' % (info.map, ', '.join('%r: %s' % (nm, v) for nm, v in zip(info.names, info.order))))
     lines.append('def %s(k):\n    if k in %s:\n        return %s[k]\n    raise KeyError(k)' % (info.get, info.map, info.map))
-    lines.append('def _ail_en_%s_has(v):\n    return isinstance(v, %s) or v in _ail_en_%s_v2m' % (n, n, n))
+    if CONTAINS_CALLS:
+        lines.append('def _ail_en_%s_has(v):\n    if isinstance(v, %s):\n        return True\n'
+                     '    try:\n        %s(v)\n        return True\n    except ValueError:\n        return False'
+                     % (n, n, info.call))
+    else:
+        lines.append('def _ail_en_%s_has(v):\n    return isinstance(v, %s) or v in _ail_en_%s_v2m' % (n, n, n))
     order = {info.ints[var]: i for i, (_, var) in enumerate(canonical)}
     lines.append('_ail_en_%s_ord = {%s}' % (n, ', '.join('%d: %d' % kv for kv in order.items())))
     sort = ''
@@ -484,9 +494,14 @@ def generated(info):
         lines.append('def %s(v):\n    for m in %s:\n        if m.value == v:\n            return m\n'
                      '    raise ValueError(repr(v) + " is not a valid %s")' % (info.call, info.all, info.name))
     lines.append('def %s(k):\n    if k in %s:\n        return %s[k]\n    raise KeyError(k)' % (info.get, info.map, info.map))
-    lines.append('def _ail_en_%s_has(v):\n    if isinstance(v, %s):\n        return True\n    hash(v)\n    for m in %s:\n'
-                 '        if m.value == v:\n            return True\n    return False'
-                 % (info.name, info.name, info.all))
+    if CONTAINS_CALLS:
+        lines.append('def _ail_en_%s_has(v):\n    if isinstance(v, %s):\n        return True\n'
+                     '    try:\n        %s(v)\n        return True\n    except ValueError:\n        return False'
+                     % (info.name, info.name, info.call))
+    else:
+        lines.append('def _ail_en_%s_has(v):\n    if isinstance(v, %s):\n        return True\n    hash(v)\n    for m in %s:\n'
+                     '        if m.value == v:\n            return True\n    return False'
+                     % (info.name, info.name, info.all))
     return ast.parse('\n'.join(lines)).body
 
 

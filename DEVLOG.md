@@ -1,3 +1,24 @@
+## 2026-11-01 -- stdlib enum: `in` follows the running 3.12 patch (job-std_enum-11020119)
+
+`test_ail_std_enum` passed with the system Python 3.12.3 but failed on CI, whose `actions/setup-python`
+interpreter is 3.12.15. CPython 3.12.10 changed `EnumType.__contains__` to look a value up through
+`cls(value)` and to catch only `ValueError`; an empty enum therefore raises its no-members `TypeError`
+for `x in E`, a non-member unhashable value returns `False` instead of raising, and a `Flag` accepts a
+composite that has not been made yet. The three old checks only read the value map (and hashed the value),
+so the empty-registry and unhashable-list edge cases diverged in opposite directions on the two patches.
+
+`enumlib.py` now keys `_ail_en_<class>_has` on `sys.version_info >= (3, 12, 10)`: older interpreters keep
+the hash / value-map loop, newer ones call the generated `_ail_en_<class>_call` and return `False` only on
+`ValueError`, so the empty-enum `TypeError`, the unhashable `False` and the `Flag` pseudo-member all match.
+The lab programs and `EDGE_PROGRAM` were left unchanged; their existing version-dependent expectations now
+match CPython on both interpreters.
+
+Verified `test_ail_std_enum` under `/usr/bin/python3` 3.12.3 and the setup-python 3.12.15 path, plus
+`/tmp/probes/enum_contains_{core,kinds,flags,routes}.py` on both builds and both interpreters (all eight
+comparisons byte-identical): empty/non-empty `Enum`, `IntEnum`, `StrEnum`, `Flag`, `IntFlag`, aliases,
+int/str/tuple/bool/float/None values, lists/dicts/sets, negative and boundary values, `not in`, and values
+through an argument, list item, attribute and dict value.
+
 ## 2026-11-01 -- stdlib enum: empty enum calls refused by name again (job-std_enum-11012140)
 
 `test_ail_fuzz80` (fuzz round 80) requires calling an empty `Enum`, `IntEnum`, `StrEnum`, `Flag` or
