@@ -13,7 +13,7 @@ import shutil
 import subprocess
 import tempfile
 
-from pipeline import PipelineError, compiler, ffi_link_args, link_flags
+from pipeline import PipelineError, compiler, ffi_link_args, link_flags, STRICT_DECL_FLAGS
 import native_diagnostics
 from pyfront import Unsupported
 import callable_types
@@ -608,7 +608,7 @@ def compile_object(source, output, paths=(), *, c_api_namespace=None):
         temporary_object = Path(directory) / 'module.o'
         c_path.write_text(code, encoding='utf8')
         native_diagnostics.generated(c_path, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-        result = native_diagnostics.run([compiler(), *FLAGS, '-c', str(c_path), '-o', str(temporary_object)],
+        result = native_diagnostics.run([compiler(), *FLAGS, *STRICT_DECL_FLAGS, '-c', str(c_path), '-o', str(temporary_object)],
                                 capture_output=True, timeout=120, phase='compile')
         if result.returncode:
             raise PipelineError('module C compile failed: ' + result.stderr.decode(errors='replace')[-2000:])
@@ -823,7 +823,7 @@ def link_objects(source, output, paths, *, unit_map=None):
             c_path = Path(directory) / 'entry.c'
             c_path.write_text(code, encoding='utf8')
             native_diagnostics.generated(c_path, info.get('c_source_regions', info.get('c_units', (None, []))[1]))
-            result = native_diagnostics.run([compiler(), *(['-g', '-O0', '-DAIL_DEBUG_SITE=1', *FLAGS[1:]] if os.environ.get('AIL_DEBUG') == '1' else FLAGS), *link_flags(), str(c_path),
+            result = native_diagnostics.run([compiler(), *(['-g', '-O0', '-DAIL_DEBUG_SITE=1', *FLAGS[1:]] if os.environ.get('AIL_DEBUG') == '1' else FLAGS), *STRICT_DECL_FLAGS, *link_flags(), str(c_path),
                                      *staged_objects, '-o', str(output)]
                                     + (['-lm'] if info.get('libm') else []) + ffi_link_args()
                                     + (['-lws2_32'] if platform.system() == 'Windows'
