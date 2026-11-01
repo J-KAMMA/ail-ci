@@ -1,3 +1,18 @@
+## 2026-11-01 -- shlex stdlib coverage (job-std_shlex-11011615)
+
+Added `AIL_CURRENT/stdlib/shlex.py`, a bundled `shlex` module (`split`, `quote`, `join`, and the
+`shlex` lexer: comments, posix/non-posix quoting, punctuation characters, custom delimiters,
+wordchars, pushback, source stack, iteration and the `ValueError` cases). Before it, every shlex
+use was refused at the import (`not in the subset: import of 'shlex' is not available`, with
+`general path: shlex.split` / `shlex.shlex` / `shlex.join`). The twelve programs in
+`lab/stdlib/shlex/` now all build in the default mode and match CPython's stdout and exit status
+on the default and forced-general builds; `lab/stdlib/shlex/RESULTS.md` records the typed/general
+result and the one typed-path follow-up (method defaults keep the bundled lexer on the general
+path). `test_ail_std_shlex.py` compiles and compares all twelve. At end of input `get_token()`, `read_token()`
+and `eof` return the empty string (AIL has no `None` for `str`); `read_token()` no longer leaks an
+internal sentinel. No compiler or runtime source changed, so generated C for existing programs is
+unchanged.
+
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
 Added `AIL_FE_JOBS` to the typed front end. Unset, POSIX builds with at least 8 functions use
