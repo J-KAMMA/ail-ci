@@ -1236,6 +1236,261 @@ _MATH_HELPERS['prod'] = (
     '    for v in xs:\n'
     '        r = r * v\n'
     '    return r\n')
+_MATH_HELPERS['tw_class'] = (
+    'class _ail_TextWrapper:\n'
+    '    def __init__(self, width: int = 70, initial_indent: str = "",\n'
+    '                 subsequent_indent: str = "", expand_tabs: bool = True,\n'
+    '                 replace_whitespace: bool = True,\n'
+    '                 fix_sentence_endings: bool = False,\n'
+    '                 break_long_words: bool = True, drop_whitespace: bool = True,\n'
+    '                 break_on_hyphens: bool = True, tabsize: int = 8,\n'
+    '                 max_lines=None, placeholder: str = " [...]") -> None:\n'
+    '        self.width = width\n'
+    '        self.initial_indent = initial_indent\n'
+    '        self.subsequent_indent = subsequent_indent\n'
+    '        self.expand_tabs = expand_tabs\n'
+    '        self.replace_whitespace = replace_whitespace\n'
+    '        self.fix_sentence_endings = fix_sentence_endings\n'
+    '        self.break_long_words = break_long_words\n'
+    '        self.drop_whitespace = drop_whitespace\n'
+    '        self.break_on_hyphens = break_on_hyphens\n'
+    '        self.tabsize = tabsize\n'
+    '        self.max_lines = max_lines\n'
+    '        self.placeholder = placeholder\n'
+    '\n'
+    '    def _is_ws(self, ch: str) -> bool:\n'
+    '        return ch == "\\t" or ch == "\\n" or ch == "\\x0b" or ch == "\\x0c" or ch == "\\r" or ch == " "\n'
+    '\n'
+    '    def _munge_whitespace(self, text: str) -> str:\n'
+    '        if self.expand_tabs:\n'
+    '            if isinstance(text, str) or isinstance(text, bytes) or isinstance(text, bytearray):\n'
+    '                text = text.expandtabs(self.tabsize)\n'
+    '            else:\n'
+    '                raise AttributeError("\\x27" + type(text).__name__ + "\\x27 object has no attribute \\x27expandtabs\\x27")\n'
+    '        if self.replace_whitespace:\n'
+    '            if isinstance(text, bytes) or isinstance(text, bytearray):\n'
+    '                raise TypeError("a bytes-like object is required, not \'dict\'")\n'
+    '            if not isinstance(text, str):\n'
+    '                raise AttributeError("\\x27" + type(text).__name__ + "\\x27 object has no attribute \\x27translate\\x27")\n'
+    '            out = ""\n'
+    '            for ch in text:\n'
+    '                if self._is_ws(ch):\n'
+    '                    out += " "\n'
+    '                else:\n'
+    '                    out += ch\n'
+    '            text = out\n'
+    '        return text\n'
+    '\n'
+    '    def _split_simple(self, text: str) -> list[str]:\n'
+    '        chunks: list[str] = []\n'
+    '        i = 0\n'
+    '        n = len(text)\n'
+    '        while i < n:\n'
+    '            ws = self._is_ws(text[i])\n'
+    '            j = i + 1\n'
+    '            while j < n and self._is_ws(text[j]) == ws:\n'
+    '                j += 1\n'
+    '            chunks.append(text[i:j])\n'
+    '            i = j\n'
+    '        return chunks\n'
+    '\n'
+    '    def _split(self, text: str) -> list[str]:\n'
+    '        if not isinstance(text, str):\n'
+    '            if isinstance(text, bytes) or isinstance(text, bytearray):\n'
+    '                raise TypeError("cannot use a string pattern on a bytes-like object")\n'
+    '            raise TypeError("expected string or bytes-like object, got \'" + type(text).__name__ + "\'")\n'
+    '        if not self.break_on_hyphens:\n'
+    '            return self._split_simple(text)\n'
+    '        chunks: list[str] = []\n'
+    '        n = len(text)\n'
+    '        i = 0\n'
+    '        while i < n:\n'
+    '            ch = text[i]\n'
+    '            sp = self._is_ws(ch)\n'
+    '            if sp:\n'
+    '                j = i\n'
+    '                while j < n and self._is_ws(text[j]):\n'
+    '                    j += 1\n'
+    '                chunks.append(text[i:j])\n'
+    '                i = j\n'
+    '                continue\n'
+    '            if (ch == "-" and i + 1 < n and text[i + 1] == "-" and i > 0\n'
+    '                    and (text[i - 1].isalnum() or text[i - 1] == "_" or text[i - 1] == "!"\n'
+    '                         or text[i - 1] == "\\"" or text[i - 1] == "\'" or text[i - 1] == "&"\n'
+    '                         or text[i - 1] == "." or text[i - 1] == "," or text[i - 1] == "?")):\n'
+    '                k = i\n'
+    '                while k < n and text[k] == "-":\n'
+    '                    k += 1\n'
+    '                if k - i >= 2 and k < n and (text[k].isalnum() or text[k] == "_"):\n'
+    '                    chunks.append(text[i:k])\n'
+    '                    i = k\n'
+    '                    continue\n'
+    '            j = i + 1\n'
+    '            end = n\n'
+    '            while j < n:\n'
+    '                c = text[j]\n'
+    '                if self._is_ws(c):\n'
+    '                    end = j\n'
+    '                    break\n'
+    '                if c == "-":\n'
+    '                    nxt = text[j + 1] if j + 1 < n else ""\n'
+    '                    if nxt != "" and (nxt.isalnum() or nxt == "_") and not nxt.isdecimal():\n'
+    '                        nxt2 = text[j + 2] if j + 2 < n else ""\n'
+    '                        nxt3 = text[j + 3] if j + 3 < n else ""\n'
+    '                        after = False\n'
+    '                        if nxt2 != "" and (nxt2.isalnum() or nxt2 == "_") and not nxt2.isdecimal():\n'
+    '                            after = True\n'
+    '                        elif nxt2 == "-" and nxt3 != "" and (nxt3.isalnum() or nxt3 == "_") and not nxt3.isdecimal():\n'
+    '                            after = True\n'
+    '                        if after:\n'
+    '                            hit = False\n'
+    '                            if j - 2 >= 0 and (text[j - 2].isalnum() or text[j - 2] == "_") \\\n'
+    '                                    and not text[j - 2].isdecimal() and (text[j - 1].isalnum() or text[j - 1] == "_") \\\n'
+    '                                    and not text[j - 1].isdecimal():\n'
+    '                                hit = True\n'
+    '                            elif j - 3 >= 0 and text[j - 2] == "-" \\\n'
+    '                                    and (text[j - 3].isalnum() or text[j - 3] == "_") and not text[j - 3].isdecimal() \\\n'
+    '                                    and (text[j - 1].isalnum() or text[j - 1] == "_") and not text[j - 1].isdecimal():\n'
+    '                                hit = True\n'
+    '                            if hit:\n'
+    '                                end = j + 1\n'
+    '                                break\n'
+    '                    prev = text[j - 1]\n'
+    '                    if prev.isalnum() or prev == "_" or prev == "!" or prev == "\\"" or prev == "\'" \\\n'
+    '                            or prev == "&" or prev == "." or prev == "," or prev == "?":\n'
+    '                        k = j\n'
+    '                        while k < n and text[k] == "-":\n'
+    '                            k += 1\n'
+    '                        if k - j >= 2 and k < n and (text[k].isalnum() or text[k] == "_"):\n'
+    '                            end = j\n'
+    '                            break\n'
+    '                j += 1\n'
+    '            chunks.append(text[i:end])\n'
+    '            i = end\n'
+    '        return chunks\n'
+    '\n'
+    '    def _sentence_end(self, chunk: str) -> bool:\n'
+    '        s = chunk\n'
+    '        if len(s) >= 2 and (s[-1] == "\\"" or s[-1] == "\'"):\n'
+    '            s = s[:-1]\n'
+    '        if len(s) < 2:\n'
+    '            return False\n'
+    '        return "a" <= s[-2] <= "z" and (s[-1] == "." or s[-1] == "!" or s[-1] == "?")\n'
+    '\n'
+    '    def _fix_sentence_endings(self, chunks: list[str]) -> None:\n'
+    '        i = 0\n'
+    '        while i < len(chunks) - 1:\n'
+    '            if chunks[i + 1] == " " and self._sentence_end(chunks[i]):\n'
+    '                chunks[i + 1] = "  "\n'
+    '                i += 2\n'
+    '            else:\n'
+    '                i += 1\n'
+    '\n'
+    '    def _handle_long_word(self, chunks: list[str], cur_line: list[str],\n'
+    '                          cur_len: int, width: int) -> None:\n'
+    '        if width < 1:\n'
+    '            space_left = 1\n'
+    '        else:\n'
+    '            space_left = width - cur_len\n'
+    '        if self.break_long_words:\n'
+    '            end = space_left\n'
+    '            chunk = chunks[-1]\n'
+    '            if self.break_on_hyphens and len(chunk) > space_left:\n'
+    '                hyphen = -1\n'
+    '                k = 0\n'
+    '                while k < space_left and k < len(chunk):\n'
+    '                    if chunk[k] == "-":\n'
+    '                        hyphen = k\n'
+    '                    k += 1\n'
+    '                if hyphen > 0:\n'
+    '                    other = False\n'
+    '                    k = 0\n'
+    '                    while k < hyphen:\n'
+    '                        if chunk[k] != "-":\n'
+    '                            other = True\n'
+    '                        k += 1\n'
+    '                    if other:\n'
+    '                        end = hyphen + 1\n'
+    '            cur_line.append(chunk[:end])\n'
+    '            chunks[-1] = chunk[end:]\n'
+    '        elif len(cur_line) == 0:\n'
+    '            cur_line.append(chunks.pop())\n'
+    '\n'
+    '    def _wrap_chunks(self, chunks: list[str]) -> list[str]:\n'
+    '        lines: list[str] = []\n'
+    '        if self.width <= 0:\n'
+    '            raise ValueError("invalid width " + repr(self.width) + " (must be > 0)")\n'
+    '        if self.max_lines is not None:\n'
+    '            if self.max_lines > 1:\n'
+    '                indent = self.subsequent_indent\n'
+    '            else:\n'
+    '                indent = self.initial_indent\n'
+    '            if len(indent) + len(self.placeholder.lstrip()) > self.width:\n'
+    '                raise ValueError("placeholder too large for max width")\n'
+    '        chunks.reverse()\n'
+    '        while len(chunks) > 0:\n'
+    '            cur_line: list[str] = []\n'
+    '            cur_len = 0\n'
+    '            if len(lines) > 0:\n'
+    '                indent = self.subsequent_indent\n'
+    '            else:\n'
+    '                indent = self.initial_indent\n'
+    '            width = self.width - len(indent)\n'
+    '            if self.drop_whitespace and chunks[-1].strip() == "" and len(lines) > 0:\n'
+    '                chunks.pop()\n'
+    '            while len(chunks) > 0:\n'
+    '                l = len(chunks[-1])\n'
+    '                if cur_len + l <= width:\n'
+    '                    cur_line.append(chunks.pop())\n'
+    '                    cur_len += l\n'
+    '                else:\n'
+    '                    break\n'
+    '            if len(chunks) > 0 and len(chunks[-1]) > width:\n'
+    '                self._handle_long_word(chunks, cur_line, cur_len, width)\n'
+    '                cur_len = 0\n'
+    '                for part in cur_line:\n'
+    '                    cur_len += len(part)\n'
+    '            if self.drop_whitespace and len(cur_line) > 0 and cur_line[-1].strip() == "":\n'
+    '                cur_len -= len(cur_line[-1])\n'
+    '                cur_line.pop()\n'
+    '            if len(cur_line) > 0:\n'
+    '                if (self.max_lines is None or len(lines) + 1 < self.max_lines\n'
+    '                        or ((len(chunks) == 0 or (self.drop_whitespace and len(chunks) == 1\n'
+    '                                                  and chunks[0].strip() == "")) and cur_len <= width)):\n'
+    '                    lines.append(indent + "".join(cur_line))\n'
+    '                else:\n'
+    '                    done = False\n'
+    '                    while len(cur_line) > 0:\n'
+    '                        if cur_line[-1].strip() != "" and cur_len + len(self.placeholder) <= width:\n'
+    '                            cur_line.append(self.placeholder)\n'
+    '                            lines.append(indent + "".join(cur_line))\n'
+    '                            done = True\n'
+    '                            break\n'
+    '                        cur_len -= len(cur_line[-1])\n'
+    '                        cur_line.pop()\n'
+    '                    if not done:\n'
+    '                        if len(lines) > 0:\n'
+    '                            prev_line = lines[-1].rstrip()\n'
+    '                            if len(prev_line) + len(self.placeholder) <= self.width:\n'
+    '                                lines[-1] = prev_line + self.placeholder\n'
+    '                                break\n'
+    '                        lines.append(indent + self.placeholder.lstrip())\n'
+    '                    break\n'
+    '        return lines\n'
+    '\n'
+    '    def _split_chunks(self, text: str) -> list[str]:\n'
+    '        text = self._munge_whitespace(text)\n'
+    '        return self._split(text)\n'
+    '\n'
+    '    def wrap(self, text: str) -> list[str]:\n'
+    '        chunks = self._split_chunks(text)\n'
+    '        if self.fix_sentence_endings:\n'
+    '            self._fix_sentence_endings(chunks)\n'
+    '        return self._wrap_chunks(chunks)\n'
+    '\n'
+    '    def fill(self, text: str) -> str:\n'
+    '        return "\\n".join(self.wrap(text))\n'
+)
 _MATH_HELPERS['tw_wrap_more'] = (
     'def _ail_tw_wrap_more(text: str, width: int, placeholder: str) -> list[str]:\n'
     '    if width <= 0:\n'
@@ -1483,15 +1738,18 @@ _OPERATOR_BINARY = {'add': ast.Add, 'sub': ast.Sub, 'mul': ast.Mult, 'truediv': 
 _OPERATOR_COMPARE = {'lt': ast.Lt, 'le': ast.LtE, 'gt': ast.Gt, 'ge': ast.GtE, 'eq': ast.Eq, 'ne': ast.NotEq}
 _OPERATOR_UNARY = {'neg': ast.USub, 'pos': ast.UAdd, 'invert': ast.Invert, 'inv': ast.Invert}
 _SMALL_MODULES = {
-    'textwrap': ('wrap', 'fill', 'dedent', 'shorten', 'indent'),
+    'textwrap': ('wrap', 'fill', 'dedent', 'shorten', 'indent', 'TextWrapper'),
     'time': (*_TIME_CLOCKS, *_TIME_LOWERED),
     'string': (*tuple(_STRING_CONSTANTS), 'capwords'),
     'os': ('cpu_count',),
     'operator': (*_OPERATOR_BINARY, *_OPERATOR_COMPARE, *_OPERATOR_UNARY, 'not_', 'abs', 'getitem', 'itemgetter'),
 }
 _SMALL_NOTE = {
-    'textwrap': 'textwrap.wrap(text[, width]), fill(text[, width]), dedent(text), shorten(text, width) and '
-                'indent(text, prefix) are built with their default options; the other options and functions are not',
+    'textwrap': 'textwrap.wrap(text[, width]), fill(text[, width]), dedent(text), shorten(text, width), '
+                'indent(text, prefix) and the TextWrapper class are built, including the common options '
+                '(initial_indent, subsequent_indent, expand_tabs, replace_whitespace, fix_sentence_endings, '
+                'break_long_words, drop_whitespace, break_on_hyphens, tabsize, max_lines, placeholder); '
+                'subclassing and the private methods are not',
     'time': 'time.perf_counter() / monotonic() / time() (and the _ns forms), sleep(), localtime(), gmtime(), '
             'strftime() and mktime() are built (the wall clock is an input: AIL_CLOCK=<seconds> pins it); '
             'asctime, ctime, struct_time, tzset and the zone constants are not',
@@ -2480,6 +2738,10 @@ class _Surface:
             sep = args[1] if len(args) == 2 else ast.Constant(value=None)
             return ast.Call(func=ast.Name(id='_ail_string_capwords', ctx=ast.Load()),
                             args=[args[0], sep], keywords=[])
+        if module == 'textwrap' and name == 'TextWrapper' and not any(
+                isinstance(arg, ast.Starred) for arg in args):
+            self.helper('tw_class')
+            return ast.Call(func=ast.Name(id='_ail_TextWrapper', ctx=ast.Load()), args=args, keywords=node.keywords)
         if module == 'textwrap' and name in ('wrap', 'fill', 'dedent', 'shorten') and not any(
                 isinstance(arg, ast.Starred) for arg in args):
             if name == 'dedent' and len(args) == 1 and not node.keywords:
@@ -2487,28 +2749,49 @@ class _Surface:
                 return ast.Call(func=ast.Name(id='_ail_tw_dedent', ctx=ast.Load()), args=args, keywords=[])
             text = None
             width = None
+            extras = []
             ok = len(args) <= 2
             if ok and len(args) >= 1:
                 text = args[0]
             if ok and len(args) == 2:
                 width = args[1]
             for keyword in node.keywords:
-                if keyword.arg == 'text' and text is None:
-                    text = keyword.value
-                elif keyword.arg == 'width' and width is None:
-                    width = keyword.value
-                else:
+                if keyword.arg == 'text':
+                    if text is None:
+                        text = keyword.value
+                    else:
+                        ok = False
+                elif keyword.arg == 'width':
+                    if width is None:
+                        width = keyword.value
+                    else:
+                        ok = False
+                elif keyword.arg is None:
                     ok = False
-            if ok and name != 'shorten' and width is None and text is not None and not node.keywords:
+                else:
+                    extras.append(keyword)
+            if ok and name != 'shorten' and width is None and text is not None:
                 width = ast.Constant(value=70)
             if ok and text is not None and width is not None:
-                helper = 'tw_shorten' if name == 'shorten' else 'tw_wrap'
-                for each in (*_MATH_DEPS.get(helper, ()), helper):
-                    if each not in self.helpers:
-                        self.helpers.append(each)
-                if name == 'fill' and 'tw_fill' not in self.helpers:
-                    self.helpers.append('tw_fill')
-                return ast.Call(func=ast.Name(id='_ail_tw_' + name, ctx=ast.Load()), args=[text, width], keywords=[])
+                self.helper('tw_class')
+                keywords = [ast.keyword(arg='width', value=width)]
+                if name == 'shorten':
+                    keywords.insert(0, ast.keyword(arg='max_lines', value=ast.Constant(value=1)))
+                keywords.extend(extras)
+                wrapper = ast.Call(func=ast.Name(id='_ail_TextWrapper', ctx=ast.Load()), args=[], keywords=keywords)
+                if name == 'shorten':
+                    body = ast.Call(
+                        func=ast.Attribute(value=ast.Constant(value=' '), attr='join', ctx=ast.Load()),
+                        args=[ast.Call(func=ast.Attribute(
+                            value=ast.Call(func=ast.Attribute(value=text, attr='strip', ctx=ast.Load()),
+                                           args=[], keywords=[]),
+                            attr='split', ctx=ast.Load()), args=[], keywords=[])], keywords=[])
+                    method = 'fill'
+                else:
+                    body = text
+                    method = name
+                return ast.Call(func=ast.Attribute(value=wrapper, attr=method, ctx=ast.Load()), args=[body],
+                                keywords=[])
         if plain and module == 'os' and name == 'cpu_count' and not args:
             return ast.Call(func=ast.Name(id='_ail_cpu_count', ctx=ast.Load()), args=[], keywords=[])
         if plain and module == 'operator':

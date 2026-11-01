@@ -4,8 +4,8 @@
 and otherwise keeps as many whole chunks as fit before CPython's default placeholder
 (" [...]"), dropping chunks from the end when the placeholder needs room.  The default build
 (AIL_IR=0 and 1) and the general path are both compared byte for byte, including the
-ValueError for a width that cannot hold the placeholder.  A placeholder= or any other
-option is still refused by name.
+ValueError for a width that cannot hold the placeholder.  A placeholder= and the common
+TextWrapper options are now built and compared too; a duplicate width stays refused by name.
 """
 import os
 import random
@@ -138,14 +138,15 @@ class Stdlib25(unittest.TestCase):
                 with self.subTest(general=general, ir=ir):
                     self.check("shorten_fuzz", text, ir, general)
 
-    def test_shorten_options_are_refused(self):
+    def test_shorten_options_match_cpython(self):
         text = ('import textwrap\n\n\ndef main() -> None:\n'
-                '    print(textwrap.shorten("hello world", 8, placeholder="..."))\n\n\nmain()\n')
-        with tempfile.TemporaryDirectory() as directory:
-            built, _, exe = compile_python(directory, text, "refused")
-            self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
-            self.assertIn("textwrap.shorten() with these arguments is not built", built.stderr)
-            self.assertFalse(exe.exists())
+                '    print(repr(textwrap.shorten("hello world", 8, placeholder="...")))\n'
+                '    print(repr(textwrap.shorten("one two three four", 12, placeholder=" ...")))\n'
+                '    print(repr(textwrap.shorten("one two three four", 12, initial_indent="> ")))\n\n\nmain()\n')
+        for general in (False, True):
+            for ir in (False, True):
+                with self.subTest(general=general, ir=ir):
+                    self.check("shorten_options", text, ir, general)
 
 
 if __name__ == "__main__":

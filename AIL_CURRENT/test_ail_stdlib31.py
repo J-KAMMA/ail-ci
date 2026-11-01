@@ -5,8 +5,8 @@ The text has its whitespace collapsed first, then the default TextWrapper (expan
 em-dash / hyphen chunking, break_long_words and break_on_hyphens) keeps as many chunks as fit and appends
 CPython's default placeholder " [...]".  The lowering reuses the chunking of the existing wrap helper, so a
 program that imports none of textwrap keeps its text.  A width below 5 raises CPython's "placeholder too
-large for max width", a width <= 0 its "invalid width" ValueError, and any keyword other than text / width
-stays a named compile-time refusal.  textwrap.indent, which this tree already builds, stays built.
+large for max width", and a width <= 0 its "invalid width" ValueError.  The common TextWrapper options
+(placeholder, initial_indent, ...) are now built and compared; a duplicate width stays a named refusal.
 """
 import os
 import subprocess
@@ -96,7 +96,7 @@ class Stdlib31Tests(unittest.TestCase):
             with self.subTest(env=env):
                 self.same_as_cpython(PROGRAM, "shorten", env)
 
-    def test_unsupported_options_are_refused_by_name(self):
+    def test_options_match_cpython(self):
         programs = [
             'import textwrap\n\n\ndef main() -> None:\n    print(textwrap.shorten("hello world", 10, placeholder="..."))\n\n\nmain()\n',
             'import textwrap\n\n\ndef main() -> None:\n    print(textwrap.wrap("a b", 10, initial_indent="> "))\n\n\nmain()\n',
@@ -104,11 +104,7 @@ class Stdlib31Tests(unittest.TestCase):
         for text in programs:
             for env in ({"AIL_IR": "0"}, {"AIL_IR": "1"}):
                 with self.subTest(env=env, text=text.splitlines()[2]):
-                    with tempfile.TemporaryDirectory() as directory:
-                        built, _, exe = compile_python(directory, text, "refused", **env)
-                        self.assertNotEqual(built.returncode, 0, built.stdout + built.stderr)
-                        self.assertIn("with these arguments is not built", built.stderr)
-                        self.assertFalse(exe.exists())
+                    self.same_as_cpython(text, "options", env)
 
 
 if __name__ == "__main__":

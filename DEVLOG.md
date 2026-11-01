@@ -1,3 +1,33 @@
+## 2026-11-01 -- stdlib textwrap: common options and the TextWrapper class (job-std_textwrap-11011435)
+
+Added twelve realistic `textwrap` programs under `lab/stdlib/textwrap/` and recorded their results in
+`lab/stdlib/textwrap/RESULTS.md`.  All twelve build (12/12, none refused) and match CPython 3.12 on
+stdout and exit status, on the default build and on the forced general build.
+
+Before this change only `wrap(text[, width])`, `fill(text[, width])`, `dedent`, `indent` and
+`shorten(text, width)` with default options were built; any other keyword, and the `TextWrapper`
+class, was refused by name.  The front end now lowers those calls through a new `_ail_TextWrapper`
+helper class (CPython 3.12's whitespace expansion, chunking, hyphen / long-word breaking, sentence
+spacing and max-lines placeholder logic) and accepts `initial_indent`, `subsequent_indent`,
+`expand_tabs`, `replace_whitespace`, `fix_sentence_endings`, `break_long_words`, `drop_whitespace`,
+`break_on_hyphens`, `tabsize`, `max_lines` and `placeholder`; `textwrap.TextWrapper` and
+`from textwrap import TextWrapper` build, with mutable fields, `wrap` and `fill`.  A duplicate
+`width` keeps its named refusal.  Every textwrap program still takes the general path because the
+helper's `__init__` has default arguments; that is a performance note, not a refusal.
+
+Probes in `/tmp/probes/` (`p_tw_opts`, `p_tw_class`, `p_tw_shorten`, `p_tw_indent`, `p_tw_types`,
+`p_tw_hyphen`, `p_tw_maxlines`, `p_tw_sentence`, `p_tw_widths`) cover every option, positional and
+keyword construction, attribute mutation, empty/whitespace text, widths -5..70, placeholder errors,
+non-str values (None, int, float, bytes, list), value sources through a list item, an attribute and a
+dict value, tabs, hyphens and em dashes, sentence endings and max-lines; all match CPython on the
+default and general builds.  Subclassing `TextWrapper` and `wordsep_re=` stay refused by name and are
+listed as follow-ups in RESULTS.md.
+
+Added `AIL_CURRENT/test_ail_std_textwrap.py` (registered through
+`AIL_CURRENT/tests.d/test_ail_std_textwrap.txt`); it runs CPython as the oracle for all twelve
+programs on both builds.  The stdlib1/25/31 tests now expect the options to build (and still expect a
+duplicate `width` to be refused).
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`
