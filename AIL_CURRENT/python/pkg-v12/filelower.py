@@ -910,6 +910,7 @@ class _Lowerer(ast.NodeTransformer):
                 if not self.general:
                     self.refuse(node, '%s(key) without a default returns None; this use is left to the general '
                                       'path' % name)
+                self.need.add('environ_optional')
                 return self.call('_ail_environ_get_or_none', key)
             return self.call('_ail_environ_get', key, default)
 
