@@ -264,11 +264,27 @@ class Lower(Stmts, Calls, Lams, Exprs):
             return [node]
         if isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name):
             return self.module_assign(node)
+        if (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                and node.value is not None and self._module_holds_tuples(node.value)):
+            # `START: tuple[int, int] = (0, 0)` -- an annotated module constant used to fall through
+            # to the ordinary statement path, which lowered its tuple value to a constructor call
+            # and left the typed path with a module-level name assigned to a Call.  Treat the same
+            # literal shape exactly like the unannotated assignment below, so the columns stay
+            # plain numeric module constants (`START__c0`, `START__c1`).
+            return self.module_assign(ast.Assign(targets=[node.target], value=node.value,
+                                                 lineno=node.lineno))
         self.cur = None
         self.fnkey = '<module>'
         self.env = {}
         self.alias = {}
         return self.stmts([node])
+
+    @staticmethod
+    def _module_holds_tuples(value):
+        if isinstance(value, ast.Tuple):
+            return True
+        return (isinstance(value, ast.List) and bool(value.elts)
+                and all(isinstance(e, ast.Tuple) for e in value.elts))
 
     def module_assign(self, node):
         nm = node.targets[0].id

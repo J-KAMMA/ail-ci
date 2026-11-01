@@ -1,3 +1,25 @@
+## 2026-11-01 -- typed reach: annotated tuple module constants and tuple keys in min/max (job-prog11-11020732)
+
+Profiled the eight prog11 programs with cProfile on their published inputs and recorded the table in
+`lab/progfix/prog11.md`.  Four were already typed (t256, t058, g11_006 and, after the first fix,
+g11_030); two more now build on the typed path.  `tuplib.py` lowers an annotated module tuple / list of
+tuples (`START: tuple[int, int] = (0, 0)`) through the same `module_assign` rule as the unannotated
+form, so the value no longer becomes a constructor call that the module-constant rule refuses
+(g11_030, both hot functions).  `iterlower.py` splits a tuple-returning key lambda in `min`/`max`
+into its components, evaluates each once per element in order, and compares them lexicographically
+with `==`/`<` or `==`/`>`, so t404's `min(xs, key=lambda v: (abs(v - cur), xs.index(v)))` builds
+typed.  Scalar keys and `default=` keep their previous shape.
+
+The remaining three are follow-ups with their exact messages in `lab/progfix/prog11.md`: t310 needs
+typed `iter()` plus a str `zip(s, t)` in a generator, g25_006 needs typed `Enum`/`auto()` methods, and
+t388 needs typed `datetime`.  `test_ail_prog11` (registered in `tests.d/`) compiles and compares all
+eight programs, requires `--strict` success for g11_030 and t404, and adds tuple-key and annotated
+tuple-constant programs.  Probes in `/tmp/probes/prog11_*`: tuple-key min/max with 1/2/3 components,
+ties, `default=`, empty `ValueError`, negative/-0.0/NaN/str components, and sources/keys through
+arguments, list items, attributes and dict values; annotated tuple, tuple-of-tuples, list-of-tuples
+and tuple-of-floats module constants.  All match CPython on both `cmp.sh` builds.  All ten
+`lab/compare` `main.ail` builds keep byte-identical generated C against the base commit.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten
