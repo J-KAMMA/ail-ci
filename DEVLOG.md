@@ -185,6 +185,21 @@ tables. The merged refusal keeps its message and `_biggate_on`; a build with typ
 only when the first build wired none. New `test_ail_walkmemo.py`, registered through `tests.d/`. The accepted
 PR's CRLF conversion of `pyboxed2.py` was not kept (the file stays LF). `tools/diff_ids.py` is not present on this
 tree; `tools/update_manifest.py` was run and `--check` passes.
+## 2026-11-01 -- re-apply PR #301 (no-implicit-decl) on the int64 tree (job-rbnoimpl-11011236)
+
+Re-applied PR #301: `pipeline.STRICT_DECL_FLAGS` (implicit function declaration, implicit int and
+incompatible pointer types as errors) now reaches every compile of generated C, and
+`test_ail_no_implicit_decl` is registered through `tests.d`. #284 had already added a non-big
+`ail__math_double` in its own `/*B<*/.../*B|*/.../*B>*/` block, so the PR's non-big definition in
+the older block made the int64/general world define it twice (`error: redefinition`). The #284
+block was removed: the PR's placement keeps one definition on both sides of the remaining block,
+so every world -- typed/general and default int64/`--exact-int` -- has exactly one
+`ail__math_double`. The strict flags stay in `pyc.CFLAGS_TUNE` and in the module, C-API and app/py
+builders. `tools/diff_ids.py` is absent on this tree. Probes: `p_math_channels`,
+`p_math_negative_widths`, `p_math_exact_big` match CPython on both builds (the big-int probe is
+refused by name in the default int64 mode). Tests: test_ail_no_implicit_decl, test_ail_int64_default,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 pass; the 10 lab/compare tasks build
+under the default and `--exact-int` with no compiler diagnostics.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
