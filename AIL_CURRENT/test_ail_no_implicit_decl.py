@@ -175,6 +175,19 @@ print(1)
             self.assertEqual(status, 'ok', out[-1500:])
 
     @unittest.skipUnless(CC, 'no C compiler')
+    def test_v1_general_runtime_declares_stdlib(self):
+        # pyboxed.py's v1 runtime calls calloc/malloc/free in the DIE block, before the runtime's
+        # own <stdlib.h>; the build's preamble must declare them or the strict flags reject the C
+        # and the pipeline silently rebuilds through another emitter.
+        path = self.write('v1_alloc.py', 'xs = [1, 2]\nprint(xs)\n')
+        dbg = self.tmp / 'v1_dbg'
+        out = self.tmp / 'v1_alloc'
+        code, text = build(path, out, extra_env={'AIL_GENERAL': 'v1'}, debug_dir=dbg)
+        self.assertEqual(code, 0, text[-1500:])
+        self.assertTrue((dbg / 'program.c').exists(), text[-1500:])
+        self.assertFalse((dbg / 'program-2.c').exists(), 'v1 C was rejected and rebuilt through the fallback')
+
+    @unittest.skipUnless(CC, 'no C compiler')
     def test_math_general_matches_cpython(self):
         path = self.write('m.py', self.MATH)
         expected = subprocess.run([sys.executable, str(path)], capture_output=True, text=True).stdout

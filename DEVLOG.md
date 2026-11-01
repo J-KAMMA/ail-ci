@@ -1,3 +1,18 @@
+## 2026-11-01 -- no-implicit-decl follow-up: v1 runtime preamble declares stdlib (job-rbnoimpl-11011913)
+
+The re-applied strict declaration flags made the v1 general emitter's C fail: its DIE block calls
+`calloc`/`malloc`/`free` before the `ail_obj` runtime's own `<stdlib.h>` include. gcc used to warn
+(and truncate those pointers to `int`), so the build "worked"; with `-Werror=implicit-function-declaration`
+the C was rejected and the pipeline silently rebuilt the program through the unified fallback. That
+broke `test_ail_pre246` (v1 programs no longer built on the v1 path) and `test_ail_pre33` (the fallback
+supports exact big ints, so v1 printed `10**40` instead of stopping with OverflowError). `pyboxed.py`'s
+build preamble now includes `<stdlib.h>` before the `OBJ` fragment, so the v1 C compiles under the strict
+flags and no fallback is used. `test_ail_no_implicit_decl` gained
+`test_v1_general_runtime_declares_stdlib`, which builds a v1 program and asserts there is no
+`program-2.c` fallback. Tests: test_ail_pre246, test_ail_pre33 and test_ail_no_implicit_decl pass.
+Probes `p_v1_alloc`, `p_v1_args`, `p_v1_empty`, `p_v1_negative` match CPython on both cmp.sh builds and
+on `AIL_GENERAL=v1` (no fallback).
+
 ## 2026-11-01 -- re-apply PR #301 (no-implicit-decl) on the int64 tree (job-rbnoimpl-11011236)
 
 Re-applied PR #301: `pipeline.STRICT_DECL_FLAGS` (implicit function declaration, implicit int and
