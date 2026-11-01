@@ -6472,9 +6472,13 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
-    def _property_owner_cond(self, obj, c):
-        return '((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, ' \
-               'g_slots_arr[%d]))' % (obj, obj, obj, self.global_slots['class:' + c])
+    def _property_owner_cond(self, obj, c, blockers=()):
+        cond = ('((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, '
+                'g_slots_arr[%d]))' % (obj, obj, obj, self.global_slots['class:' + c]))
+        for d in blockers:
+            cond += (' && !((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, '
+                     'g_slots_arr[%d]))' % (obj, obj, obj, self.global_slots['class:' + d]))
+        return cond
 
     def _property_read(self, node, owners, ctx):
         """obj.NAME where a class of the program has a @property NAME: its getter for an instance of such a class
@@ -6485,7 +6489,9 @@ class Compiler(boxclosure.ClosureMixin):
         first = True
         for c in owners:
             info = self.classes[c]['methods'][node.attr]
-            ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
+            blockers = [d for d in self.class_order if d != c and self._is_subclass_of(d, c)
+                        and self._class_defines_plain_attr(d, node.attr, include_methods=False)]
+            ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c, blockers)))
             first = False
             ctx.indent += 1
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, obj))
@@ -7557,6 +7563,27 @@ class Compiler(boxclosure.ClosureMixin):
             name = self.classes[name]['base']
             seen += 1
         return False
+
+    def _class_defines_plain_attr(self, c, attr, include_methods=True):
+        """True when c's own body binds attr to a non-property value (a class attribute, and with
+        include_methods a plain method), so it shadows an inherited property for c and its subclasses."""
+        cls = self.classes.get(c)
+        if not cls:
+            return False
+        last = False
+        for entry in cls.get('class_body', []):
+            if entry[1] != attr:
+                continue
+            if entry[0] == 'a':
+                last = True
+            elif entry[0] == 'p':
+                last = False
+            elif include_methods:
+                info = cls['methods'].get(attr)
+                last = not (info is not None and info.get('is_property'))
+            else:
+                last = False
+        return last
 
     def _is_exc_class(self, name):
         """The class derives from a builtin exception class."""
@@ -11624,7 +11651,9 @@ class Compiler(boxclosure.ClosureMixin):
                 # AttributeError, as CPython does, instead of silently shadowing the property.
                 first = True
                 for c in special:
-                    ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
+                    blockers = [d for d in self.class_order if d != c and self._is_subclass_of(d, c)
+                                and self._class_defines_plain_attr(d, target.attr)]
+                    ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c, blockers)))
                     first = False
                     ctx.indent += 1
                     if c in setters:
@@ -11632,8 +11661,11 @@ class Compiler(boxclosure.ClosureMixin):
                         dummy = ctx.tmp()
                         ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], dummy, obj, value_c))
                     else:
-                        ctx.emit('st = ail_raise_c(cx, AIL_B_ATTRIBUTEERROR, "property \'%s\' of \'%s\' '
-                                 'object has no setter");' % (target.attr, c))
+                        nb = ctx.new_cvar('pnb')
+                        ctx.emit('{ char %s[220]; snprintf(%s, sizeof %s, "property \'%%s\' of \'%%s\' '
+                                 'object has no setter", %s, ail__tname_c(%s)); st = ail_raise_c(cx, '
+                                 'AIL_B_ATTRIBUTEERROR, %s); }'
+                                 % (nb, nb, nb, c_str_literal(target.attr), obj, nb))
                     ctx.check()
                     ctx.indent -= 1
                 ctx.emit('} else {')

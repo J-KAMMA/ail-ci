@@ -1,3 +1,18 @@
+## 2026-11-01 -- Property stores respect a subclass's plain attribute; inherited errors name the run-time type (job-decexact2-11020111)
+
+The review found the read-only property store check was over-broad: `class B(A): x = 0` under an inherited `@property x`
+was rejected, where CPython stores in the instance and reads the class attribute. A property owner now applies only
+when no more-derived class in `class_order` defines the name as a plain class attribute (the read path uses the same
+shadow test); the ordinary attribute path then handles the store. The `AttributeError` text now takes the object's
+run-time class name (`ail__tname_c`) instead of the class that defined the property, so `C(A).x = 5` says
+`property 'x' of 'C' object has no setter` and a deeper subclass names itself. Probes in `/tmp/probes`:
+`p14_subplain`, `p15_subplain2`, `p18_subplain_mixed`, `p19_subplain_setter` and `p20_subplain_deep` match CPython
+on both builds; `p16_submsg` matches the run-time class names; `p_numassign`, `p_prop`, `p_accept`, `p_frac_small` and
+exact-mode `p_exact_ret` still match. The earlier early-return escapes (`p_roundfrac`, `p_floordivfrac`,
+`p_dec_mathfloor`, `p_leaktyped`, `p_hashfrac`) still stop loudly. `test_ail_int64_default` gained both property
+cases; `test_ail_int64_default`, `test_ail_stdtop1`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (552 s, 0 failed). Manifest clean.
+
 ## 2026-11-01 -- Decimal/Fraction exact-return check covers every exit; property stores stop (job-decexact2-11020111)
 
 The review found the outermost-return check was inserted only before a prelude function's final `return AIL_OK`, so a
