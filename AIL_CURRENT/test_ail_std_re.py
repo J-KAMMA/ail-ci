@@ -69,5 +69,38 @@ class StdRePrograms(unittest.TestCase):
                         self.fail("%s (AIL_IR=%s): output lengths differ" % (name, ir))
 
 
+    def test_match_tuple_receiver_evaluated_once(self):
+        text = (
+            "import re\n"
+            "calls = [0]\n"
+            "def get():\n"
+            "    calls[0] += 1\n"
+            "    return re.search(r\"(?P<x>a)(b)\", \"ab\")\n"
+            "print(get().group(1, 2))\n"
+            "print(calls[0])\n"
+            "calls[0] = 0\n"
+            "print(get().span())\n"
+            "print(calls[0])\n"
+            "calls[0] = 0\n"
+            "print(get().span(\"x\"))\n"
+            "print(calls[0])\n"
+            "calls[0] = 0\n"
+            "print(get().group(\"x\", 2, 0))\n"
+            "print(calls[0])\n"
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            oracle = Path(directory, "oracle.py")
+            oracle.write_text(text, encoding="utf-8")
+            want = subprocess.run([sys.executable, "-X", "utf8", str(oracle)], capture_output=True,
+                                  timeout=300)
+            for ir in ("0", "1"):
+                built, _, exe = compile_python(directory, text, "sideeffect" + ir, AIL_IR=ir)
+                self.assertEqual(built.returncode, 0, "side effect (AIL_IR=%s)\n%s%s" % (
+                    ir, built.stdout, built.stderr))
+                got = subprocess.run([str(exe)], capture_output=True, timeout=300)
+                self.assertEqual(got.returncode, want.returncode, got.stderr.decode("utf-8", "replace"))
+                self.assertEqual(got.stdout, want.stdout, "side effect (AIL_IR=%s)" % ir)
+
+
 if __name__ == "__main__":
     unittest.main()
