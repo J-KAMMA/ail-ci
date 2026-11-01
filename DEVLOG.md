@@ -1,3 +1,23 @@
+## 2026-11-01 -- `numbers` review fixes: virtual run-time registration, decorator timing, shadowing
+
+Fixed the three review defects in `numberslib.py`. `register` is now a virtual run-time table
+entry instead of a compile-time base change: `numbers.X.register(Cls)` lowers to
+`_ail_num_register(Cls, kind, names)` and `@numbers.X.register` inserts that call after the class
+statement, so an uncalled function, `if False`, and a check before a module-level register all see
+CPython's answers. A registered class no longer inherits the ABC's `real` / `imag` / `conjugate`
+methods, and a subclass of a registered class is registered too (the static descendant names are
+recorded). `issubclass(UserClass, numbers.X)` is now checked at run time against the same table
+and against the class's real bases. A register call written before its class definition, a
+register decorator combined with another decorator, and a parameter that shadows a from-imported
+ABC name are named compile-time refusals.
+
+Probes `/tmp/probes/rev_*.py` cover module-level ordering, an uncalled function, `if False`, a
+method and a function call, registration twice, a subclass, `issubclass` timing, the decorator
+form, the return value, values through arguments / list items / attributes / dict values,
+virtual-attribute absence, and the early-registration and combined-decorator refusals on both
+`cmp.sh` builds. `test_ail_std_numbers`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (4/4, 362s); `update_manifest.py --check` is clean.
+
 ## 2026-11-01 -- `numbers` review fixes: subclasses, name collisions, tuples, value use
 
 Fixed the four review defects in `numberslib.py`. The runtime classifier now tests the actual

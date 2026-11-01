@@ -9,17 +9,21 @@ The uses ordinary code makes are lowered here:
                                              ->  _ail_num_in(x, [3, 5])
     issubclass(type(x), numbers.Number)      ->  _ail_num_isinstance(x, 1)
     issubclass(int, numbers.Integral)        ->  True      (known statically)
-    numbers.Real.register(MyClass)           ->  MyClass gains Real as a base  (the expression is MyClass)
-    @numbers.Real.register                   (a decorator: the class gains Real as a base)
+    issubclass(MyClass, numbers.Real)        ->  _ail_num_issubclass(MyClass, 3)   (at run time)
+    numbers.Real.register(MyClass)           ->  _ail_num_register(MyClass, 3, [...])  (the expression is MyClass)
+    @numbers.Real.register                   (a decorator: the class is registered when it is defined)
 
 The classification of the builtin types matches CPython: bool and int are Integral, float is Real,
 complex is Complex; a Fraction is Rational and a Decimal is Number.  A user class that inherits one
-of the ABCs is classified by that inheritance, and one registered with `register` gains the base.
+of the ABCs is classified by that inheritance.  `register` is virtual: it records the class in a
+run-time table (so its position in the control flow is respected) and does not add a base, so a
+registered class does not gain the ABC's `real` / `imag` / `conjugate` methods.
 
 Not built, refused by name: `numbers` used as a value, other attributes of the ABCs, a class
-value that is not a name defined in this program (issubclass of a run-time class object) and
-registration of a name that is not a class defined here.  CPython's ABCMeta also refuses to
-instantiate a subclass that leaves abstract methods unimplemented; that check is not made here.
+value that is not a name defined in this program (issubclass of a run-time class object), a
+register decorator combined with another decorator, and registration of a name that is not a
+class defined here.  CPython's ABCMeta also refuses to instantiate a subclass that leaves
+abstract methods unimplemented; that check is not made here.
 """
 import ast
 
@@ -35,6 +39,9 @@ NONNUM = {'str', 'list', 'dict', 'tuple', 'set', 'frozenset', 'bytes', 'bytearra
 WHAT = 'Number, Complex, Real, Rational and Integral are the names of the module that are built'
 HELPER = '_ail_num_isinstance'
 IN_HELPER = '_ail_num_in'
+REGISTER_HELPER = '_ail_num_register'
+ISSUBCLASS_HELPER = '_ail_num_issubclass'
+ISSUBCLASS_IN_HELPER = '_ail_num_issubclass_in'
 
 
 def kind_of(node, binder):
@@ -59,9 +66,9 @@ def simple(node):
     return isinstance(node, (ast.Name, ast.Constant))
 
 
-def class_kinds(tree, binder, extra, actual_kind):
-    """For every class defined at the top level, the set of numbers kinds it is a subclass of.  `extra`
-    maps a class name to kinds added by register()."""
+def class_kinds(tree, binder, actual_kind):
+    """For every class defined at the top level, the set of numbers kinds it is a subclass of through
+    its bases (registration is virtual and is looked up at run time, not here)."""
     defs = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
     memo = {}
 
@@ -79,7 +86,6 @@ def class_kinds(tree, binder, extra, actual_kind):
                 continue
             if isinstance(base, ast.Name) and base.id in defs:
                 out |= of(base.id, seen)
-        out |= extra.get(name, set())
         memo[name] = out
         return out
 
@@ -91,14 +97,17 @@ def run(tree, text):
     if not binder:
         return
     for each in ast.walk(tree):
-        if isinstance(each, (ast.FunctionDef, ast.ClassDef)) and each.name in NAMES or (
-                isinstance(each, ast.Name) and each.id in NAMES and not isinstance(each.ctx, ast.Load)):
-            refuse(binder.first, 'the program binds the name %s itself and also imports numbers; rename one' % each.id
-                   if isinstance(each, ast.Name) else
-                   'the program defines %s itself and also imports numbers; rename one' % each.name)
+        bound = None
+        if isinstance(each, ast.arg) and each.arg in NAMES:
+            bound = each.arg
+        elif isinstance(each, (ast.FunctionDef, ast.ClassDef)) and each.name in NAMES:
+            bound = each.name
+        elif isinstance(each, ast.Name) and each.id in NAMES and not isinstance(each.ctx, ast.Load):
+            bound = each.id
+        if bound is not None:
+            refuse(binder.first, 'the program binds the name %s itself and also imports numbers; rename one' % bound)
 
     defs = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
-    extra = {}
     mods = stdlib5.imported_modules(tree)
     frac_binder = stdlib5.peek_imports(tree, 'fractions') if 'fractions' in mods else None
     decimal_binder = stdlib5.peek_imports(tree, 'decimal') if 'decimal' in mods else None
@@ -119,62 +128,67 @@ def run(tree, text):
             return node.id
         return None
 
-    def add_base(name, kind):
-        cls = defs[name]
-        existing = []
-        for old in cls.bases:
-            found = binder.attr(old)
-            if found in KIND:
-                existing.append(KIND[found])
-            elif isinstance(old, ast.Name) and old.id in KIND:
-                existing.append(KIND[old.id])
-        if existing:
-            if any(kind in ANCESTORS[k] for k in existing) or kind in existing:
-                extra.setdefault(name, set()).update(ANCESTORS[kind])
-                return
-            if all(k in ANCESTORS[kind] for k in existing):
-                cls.bases = [b for b in cls.bases
-                             if binder.attr(b) not in KIND and not (isinstance(b, ast.Name) and b.id in KIND)]
-                cls.bases.append(ast.Name(id=KIND_NAME[kind], ctx=ast.Load()))
-                extra.setdefault(name, set()).update(ANCESTORS[kind])
-                return
-        if cls.bases:
-            refuse(cls, 'register() of class %s is not built: it already has a base class and adding the '
-                   'numbers class would need multiple inheritance; inherit the numbers class directly'
-                   % name)
-        cls.bases.append(ast.Name(id=KIND_NAME[kind], ctx=ast.Load()))
-        extra.setdefault(name, set()).update(ANCESTORS[kind])
+    def ancestor_names(name, seen=None):
+        """The user classes `name` inherits from, directly or through another user class."""
+        seen = set() if seen is None else seen
+        if name in seen or name not in defs:
+            return set()
+        seen = seen | {name}
+        out = set()
+        for base in defs[name].bases:
+            if isinstance(base, ast.Name) and base.id in defs:
+                out.add(base.id)
+                out |= ancestor_names(base.id, seen)
+        return out
 
-    def register_call(node):
-        """The target class name of a `numbers.X.register(Cls)` call, or None."""
-        func = node.func
-        if not isinstance(func, ast.Attribute) or func.attr != 'register' or node.keywords or len(node.args) != 1:
-            return None
-        if kind_of(func.value, binder) is None:
-            return None
-        return register_target(node.args[0])
+    def descendants(name):
+        """`name` and every user class that inherits from it (registration is virtual, so an instance of a
+        subclass is registered too).  Names are used, so a class defined later in the file is covered."""
+        out = [name]
+        for other in defs:
+            if other != name and name in ancestor_names(other):
+                out.append(other)
+        return out
 
-    # registration, before the classification tables are built
+    def register_expression(target, kind):
+        return ast.Call(func=ast.Name(id=REGISTER_HELPER, ctx=ast.Load()),
+                        args=[ast.Name(id=target, ctx=ast.Load()), ast.Constant(kind),
+                              ast.List(elts=[ast.Constant(n) for n in descendants(target)], ctx=ast.Load())],
+                        keywords=[])
+
+    # A register decorator runs when the class is defined: keep the class statement and put the run-time
+    # registration immediately after it, so its position in the control flow is respected.  Combining it
+    # with another decorator is refused rather than guessed at (the decorator order could change which
+    # class object is registered).
+    body = []
     for stmt in tree.body:
         if isinstance(stmt, ast.ClassDef):
+            kinds = []
             keep = []
             for dec in stmt.decorator_list:
-                if isinstance(dec, ast.Attribute) and dec.attr == 'register' and kind_of(dec.value, binder) is not None:
-                    add_base(stmt.name, kind_of(dec.value, binder))
+                kind = kind_of(dec.value, binder) if isinstance(dec, ast.Attribute) and dec.attr == 'register' else None
+                if kind is not None:
+                    kinds.append(kind)
                 else:
                     keep.append(dec)
-            stmt.decorator_list = keep
-    for each in ast.walk(tree):
-        if isinstance(each, ast.Call):
-            target = register_call(each)
-            if target is not None:
-                add_base(target, kind_of(each.func.value, binder))
+            if kinds:
+                if len(kinds) != 1 or keep:
+                    refuse(stmt, 'a numbers register decorator combined with other decorators is not built; '
+                           'call numbers.X.register(Cls) after the class definition instead')
+                stmt.decorator_list = []
+                body.append(stmt)
+                body.append(ast.Expr(value=register_expression(stmt.name, kinds[0])))
+                continue
+        body.append(stmt)
+    tree.body = body
 
-    kinds_of = class_kinds(tree, binder, extra, actual_kind)
+    kinds_of = class_kinds(tree, binder, actual_kind)
+    kinds_map = {name: kinds_of(name) for name in defs}
     used = set()
 
     def static_issubclass(first, target_kinds):
-        """True/False when the first argument names a class known at compile time, else None."""
+        """True/False when the first argument names a class known at compile time, else None (a user class
+        is checked at run time, so registration before or after the call is respected)."""
         k = actual_kind(first)
         if k is not None:
             have = ANCESTORS[k]
@@ -186,13 +200,19 @@ def run(tree, text):
                 have = set()
             elif name in KIND:
                 have = ANCESTORS[KIND[name]]
-            elif name in defs:
-                have = kinds_of(name)
             else:
                 return None
         else:
             return None
         return bool(have & set(target_kinds))
+
+    def issubclass_expression(first, target_kinds):
+        if len(target_kinds) == 1:
+            return ast.Call(func=ast.Name(id=ISSUBCLASS_HELPER, ctx=ast.Load()),
+                            args=[first, ast.Constant(target_kinds[0])], keywords=[])
+        return ast.Call(func=ast.Name(id=ISSUBCLASS_IN_HELPER, ctx=ast.Load()),
+                        args=[first, ast.List(elts=[ast.Constant(k) for k in target_kinds], ctx=ast.Load())],
+                        keywords=[])
 
     class Fix(ast.NodeTransformer):
         def visit_Call(self, node):
@@ -202,7 +222,11 @@ def run(tree, text):
                 if target is None:
                     refuse(node, 'register() of a name that is not a class defined in this program is not built; '
                            'define the class here or inherit the ABC directly')
-                return ast.copy_location(ast.Name(id=target, ctx=ast.Load()), node)
+                if node.lineno < defs[target].lineno:
+                    refuse(node, 'register() written before the class %s is defined is not built; move the '
+                           'registration after the class definition, where CPython binds the name' % target)
+                used.add('register')
+                return ast.copy_location(register_expression(target, kind_of(func.value, binder)), node)
             # isinstance(value, numbers-kind or a tuple of them)
             if isinstance(node.func, ast.Name) and node.func.id == 'isinstance' and len(node.args) == 2 \
                     and not node.keywords:
@@ -251,12 +275,15 @@ def run(tree, text):
                     if k is not None:
                         targets.append(k)
                 if targets:
-                    used.add('isinstance')
                     first = node.args[0]
                     if isinstance(first, ast.Call) and isinstance(first.func, ast.Name) \
                             and first.func.id == 'type' and len(first.args) == 1 and not first.keywords:
+                        used.add('isinstance')
                         value = self.visit(first.args[0])
                         return ast.copy_location(kinds_expression(targets, value, node.lineno), node)
+                    if isinstance(first, ast.Name) and first.id in defs:
+                        used.add('issubclass')
+                        return ast.copy_location(issubclass_expression(first, targets), node)
                     result = static_issubclass(first, targets)
                     if result is None:
                         refuse(node, 'issubclass() of a class value that is not a name defined in this program is '
@@ -340,25 +367,56 @@ def run(tree, text):
 
     fractions_check = ' or isinstance(v, Fraction)' if frac_binder is not None else ''
     decimal_check = ' or isinstance(v, Decimal)' if decimal_binder is not None else ''
+    class_kinds_literal = '{' + ', '.join(
+        '%r: %r' % (name, tuple(sorted(kinds_map[name]))) for name in defs if kinds_map[name]) + '}'
+    registry_helper = (
+        '_ail_num_virtual = []\n'
+        '_ail_num_class_kinds = ' + class_kinds_literal + '\n\n'
+        'def %s(cls, k: int, names: list[str]):\n'
+        '    _ail_num_virtual.append((k, names))\n'
+        '    return cls\n\n'
+        'def %s(cls, k: int) -> bool:\n'
+        '    name = cls.__name__\n'
+        '    if k in _ail_num_class_kinds.get(name, ()):\n'
+        '        return True\n'
+        '    for e in _ail_num_virtual:\n'
+        '        if k <= e[0] and name in e[1]:\n'
+        '            return True\n'
+        '    return False\n\n'
+        'def %s(cls, ks: list[int]) -> bool:\n'
+        '    for k in ks:\n'
+        '        if %s(cls, k):\n'
+        '            return True\n'
+        '    return False\n\n'
+    ) % (REGISTER_HELPER, ISSUBCLASS_HELPER, ISSUBCLASS_IN_HELPER, ISSUBCLASS_HELPER)
     kinds_helper = (
         'def {h}(v, k: int) -> bool:\n'
         '    t = type(v).__name__\n'
         '    if k == 5:\n'
-        '        return isinstance(v, int) or isinstance(v, Integral)\n'
-        '    if k == 4:\n'
-        '        return {h}(v, 5){frac} or isinstance(v, Rational)\n'
-        '    if k == 3:\n'
-        '        return {h}(v, 4) or isinstance(v, float) or isinstance(v, Real)\n'
-        '    if k == 2:\n'
-        '        return {h}(v, 3) or t == "complex" or isinstance(v, Complex)\n'
-        '    return {h}(v, 2){dec} or isinstance(v, Number)\n\n'
+        '        if isinstance(v, int) or isinstance(v, Integral):\n'
+        '            return True\n'
+        '    elif k == 4:\n'
+        '        if {h}(v, 5){frac} or isinstance(v, Rational):\n'
+        '            return True\n'
+        '    elif k == 3:\n'
+        '        if {h}(v, 4) or isinstance(v, float) or isinstance(v, Real):\n'
+        '            return True\n'
+        '    elif k == 2:\n'
+        '        if {h}(v, 3) or t == "complex" or isinstance(v, Complex):\n'
+        '            return True\n'
+        '    elif {h}(v, 2){dec} or isinstance(v, Number):\n'
+        '        return True\n'
+        '    for e in _ail_num_virtual:\n'
+        '        if k <= e[0] and t in e[1]:\n'
+        '            return True\n'
+        '    return False\n\n'
         'def {i}(v, ks: list[int]) -> bool:\n'
         '    for k in ks:\n'
         '        if {h}(v, k):\n'
         '            return True\n'
         '    return False\n'
     ).format(h=HELPER, i=IN_HELPER, frac=fractions_check, dec=decimal_check)
-    if 'isinstance' not in used:
-        # no classification call was lowered: the helper functions would be dead code
-        kinds_helper = ''
-    stdlib5.add_once(text, stdlib5.prelude('numbers') + '\n' + kinds_helper)
+    if not used:
+        # no classification or registration call was lowered: the helpers would be dead code
+        registry_helper = kinds_helper = ''
+    stdlib5.add_once(text, stdlib5.prelude('numbers') + '\n' + registry_helper + kinds_helper)

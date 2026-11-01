@@ -66,6 +66,48 @@ def main():
 
 main()
 """,
+    "register_timing.py": """import numbers
+
+class A:
+    pass
+
+class B:
+    pass
+
+def setup():
+    numbers.Real.register(B)
+
+if False:
+    numbers.Number.register(B)
+
+print(isinstance(A(), numbers.Number))
+print(issubclass(A, numbers.Real))
+numbers.Number.register(A)
+print(isinstance(A(), numbers.Number))
+print(issubclass(A, numbers.Real))
+
+def main():
+    print(isinstance(B(), numbers.Real))
+    setup()
+    print(isinstance(B(), numbers.Real))
+
+main()
+""",
+    "register_virtual.py": """import numbers
+
+class Money:
+    pass
+
+class Sub(Money):
+    pass
+
+numbers.Real.register(Money)
+
+print(hasattr(Money, "real"), hasattr(Money, "imag"), hasattr(Money, "conjugate"))
+print(hasattr(Money(), "real"), hasattr(Money(), "imag"))
+print(isinstance(Sub(), numbers.Real), issubclass(Sub, numbers.Real))
+print(isinstance(Money(), numbers.Rational), isinstance(Money(), numbers.Number))
+""",
     "tuple_and_nested.py": """import numbers
 
 class A:
@@ -124,6 +166,23 @@ class NumbersLabTests(unittest.TestCase):
                 expected = subprocess.run([sys.executable, str(path)], capture_output=True, timeout=300)
                 self.assertEqual((ran.returncode, ran.stdout), (expected.returncode, expected.stdout),
                                  ran.stderr[:500])
+
+    def test_shadowing_and_early_register_are_refused_by_name(self):
+        cases = {
+            "shadow.py": ("from numbers import Number, Real\nclass A: pass\nclass B: pass\n"
+                          "def f(Number, Real, x):\n    return (isinstance(x, Number), isinstance(x, Real))\n"
+                          "print(f(A, B, A()))\n", "binds the name Number itself"),
+            "early.py": ("import numbers\nnumbers.Real.register(A)\nclass A: pass\n"
+                         "print(isinstance(A(), numbers.Real))\n",
+                         "register() written before the class A is defined"),
+        }
+        for name, (source, wanted) in cases.items():
+            with self.subTest(program=name), tempfile.TemporaryDirectory() as directory:
+                Path(directory, name).write_text(source)
+                built, exe = build(directory, name)
+                self.assertEqual(built.returncode, 3, built.stdout + built.stderr)
+                self.assertIn(wanted, built.stdout + built.stderr)
+                self.assertFalse(exe.exists())
 
     def test_numbers_value_is_refused_by_name(self):
         with tempfile.TemporaryDirectory() as directory:

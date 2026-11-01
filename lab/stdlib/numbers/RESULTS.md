@@ -52,9 +52,11 @@ comparison. No refusal remains for those features.
   for tuples), and classifies bool/int as `Integral`, float as `Real`, complex as `Complex`,
   Fraction as `Rational` and Decimal as `Number`. `issubclass` is answered statically for the
   builtin types, the ABCs, Fraction/Decimal and classes defined in the program (including
-  `issubclass(type(x), ABC)`); `numbers.X.register(Cls)` and `@numbers.X.register` add the
-  corresponding base to a class defined in the same program and return that class, as CPython's
-  `register` does. The runtime classifier tests the actual injected `Fraction` / `Decimal`
+  `issubclass(type(x), ABC)`); `numbers.X.register(Cls)` and `@numbers.X.register` record the
+  class in a run-time virtual-registration table and return that class, as CPython's `register`
+  does. The registration runs where it is written (inside a function, under `if`, or at module
+  scope) and does not add a base, so a registered class does not inherit the ABC's `real`,
+  `imag` or `conjugate` methods. The runtime classifier tests the actual injected `Fraction` / `Decimal`
   classes when those modules are imported, so a subclass of `fractions.Fraction` is a
   Rational/Real/Number and a user class that merely has the same name is not one. `isinstance`
   tuples are flattened recursively; a tuple with no `numbers.*` element is left to the ordinary
@@ -80,11 +82,11 @@ comparison. No refusal remains for those features.
       not in the subset: the name 'issubclass' is not a known function/class/builtin
       note: <file>:<line>: issubclass() of a class value that is not a name defined in this program is not built; write issubclass(type(x), numbers.X) or a class defined here
 
-* **Registering a class that already has a non-numbers base is refused by name**, because adding
-  the ABC would need multiple inheritance (the runtime does not build it). The unlowered
-  `numbers.Real` read is the generic first line and the naming note follows:
-
-      not in the subset: numbers.Real used as a plain value
-      note: <file>:<line>: register() of class Money is not built: it already has a base class and adding the numbers class would need multiple inheritance; inherit the numbers class directly
+* **A register call written before its class definition is refused by name**, because the
+  compiler binds a class name statically and CPython would raise `NameError` there; move the
+  registration after the class definition. A register decorator combined with another decorator
+  is also refused by name (the decorator order could change which class object is registered).
+* **A parameter that shadows a from-imported ABC name is refused by name**, matching the
+  existing refusal for a def or class with that name.
 
 No other feature is needed for the eleven passing programs.
