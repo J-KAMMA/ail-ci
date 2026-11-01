@@ -1019,14 +1019,15 @@ def analyze(comp, tree, demote, nofloat=False):
     # value that crosses a call stays exact without marking the caller (an exact function's int result is unboxed only
     # when it is bounded, an unbounded one is boxed; a boxed argument fails the specialised body's entry guard).
     _exact_mode = exact_enabled()
-    _mark_fn = bigcap.own_marked if _exact_mode else bigcap.marked
-    _marks = {k: v for k, v in _mark_fn(tree).items()
+    import walkmemo
+    _tree_fp = walkmemo.fingerprint(tree) if walkmemo.enabled() else None
+    _marks = {k: v for k, v in walkmemo.marks(tree, _exact_mode, fp=_tree_fp).items()
               if k not in _prelude and not k.startswith(('_ail', '_Ail'))}
     _local_demote = any(
         k != '<module>' and k not in _ann
         and not v.startswith(('it calls ', 'it contains '))
         for k, v in _marks.items())
-    _demote_names = {k for k in _mark_fn(tree, local=False)
+    _demote_names = {k for k in walkmemo.marks(tree, _exact_mode, local=False, fp=_tree_fp)
                      if k not in _prelude and not k.startswith(('_ail', '_Ail'))}
     if _local_demote:
         _demote_names |= set(_marks)

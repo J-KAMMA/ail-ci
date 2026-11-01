@@ -251,6 +251,31 @@ with `heapq.merge`, including infinite streams and a non-callable key. Final-sta
 `-j 2`: test_ail_std_heapq, test_ail_genlib, test_ail_heapq_bisect, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3, 0 failed. `tools/update_manifest.py` was run and
 `--check` passes; `tools/ci_shards.py --check` exits 0 and reports the new module as unassigned (it is still spread over the shards by name until the next `--update`).
+## 2026-11-01 -- packaging: a pinned compiler source is always in the SDK (job-rbfailfast-11011832)
+
+The integration of rbfailfast (cand-1101180129 / a72a4db) refreshed the pin of `python/pkg-v12/walkmemo.py`
+without its `s` flag, so `sdk_files` left the new module out while `test_ail_packaging` still required every
+pinned compiler file: `test_every_compiler_file_is_selected` failed with `['python/pkg-v12/walkmemo.py']`.
+The earlier branch fix (0fa5abc) only edited the shard line, and that edit is not part of the integration
+refresh, so `ail_manifest.load` now selects every pinned `.py`/`.h`/`.c` under `python/pkg-v12/` (including
+`ir/`) and every top-level `stdlib/` source that exists in the tree. Other pinned files, absent pins and
+nested `stdlib/` stay out. On this branch every such file already carries `s`, so the wheel is unchanged.
+`test_ail_packaging` passes on the integration tree a72a4db with only this file and its pin copied in (17/17)
+and on this branch; the targeted modules plus test_ail_safetynet, test_ail_files and test_ail_corpus_findings3
+all pass. Probes: `p_manifest` (flag/subdir/absent boundaries) and `p_plain`, `p_walk_small` (both builds match
+CPython; `p_walk` is refused by name for int64 overflow on both builds, as before).
+
+## 2026-11-01 -- py-failfast re-applied: memoized marks and refusals (job-rbfailfast-11011235)
+
+Re-applied PR #299 (`py-failfast`) on the tree that already has int64-by-default (#284) and the module system
+(#307). `python/pkg-v12/walkmemo.py` memoizes `bigcap.marked`/`own_marked` by a digest of the tree content,
+`pymix.analyze` per source and environment, and the refusal of `pyboxed2.build` per source/mode/environment; the
+general path's `build()` is split into a memoizing wrapper and `_build_once`, keeping the int64 routing of #284.
+`AIL_NO_WALKMEMO=1` turns the tables off. `unified.analyze` and `pyboxed2`'s two mark sites now go through the
+tables. The merged refusal keeps its message and `_biggate_on`; a build with typed clones off reuses a refusal
+only when the first build wired none. New `test_ail_walkmemo.py`, registered through `tests.d/`. The accepted
+PR's CRLF conversion of `pyboxed2.py` was not kept (the file stays LF). `tools/diff_ids.py` is not present on this
+tree; `tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
