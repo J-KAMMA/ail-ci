@@ -534,7 +534,7 @@ class Refusals(unittest.TestCase):
         "flags": ("from decimal import Decimal, getcontext\nprint(getcontext().flags)\n", "decimal.Context.flags is not supported"),
         "basic": ("from decimal import Decimal, BasicContext\nprint(Decimal(1))\n", "decimal.BasicContext is not supported"),
         "ln": ("from decimal import Decimal\nprint(Decimal(2).ln())\n", "decimal.Decimal.ln is not supported"),
-        "as_tuple": ("from decimal import Decimal\nprint(Decimal('1.5').as_tuple())\n", "decimal.Decimal.as_tuple is not supported"),
+        "logb": ("from decimal import Decimal\nprint(Decimal('1.5').logb())\n", "decimal.Decimal.logb is not supported"),
         "fma": ("from decimal import Decimal\nprint(Decimal(2).fma(3, 4))\n", "decimal.Decimal.fma is not supported"),
         "fraction exponent": ("from decimal import Decimal\nprint(Decimal(4) ** Decimal('0.5'))\n", "non-integer exponent is not supported"),
         "pow3": ("from decimal import Decimal\nprint(pow(Decimal(4), 2, 5))\n", "three-argument pow is not supported"),

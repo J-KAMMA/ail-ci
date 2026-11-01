@@ -1,3 +1,19 @@
+## 2026-11-01 -- `decimal` lab: int64 coefficients and `as_tuple` (job-std_decimal-11012337)
+
+`lab/stdlib/decimal` now has 12 realistic programs; all build with the default command on the
+general path and match CPython 3.12 stdout and exit status.  `Decimal.as_tuple` was the one refusal
+(`decimal.Decimal.as_tuple is not supported`); it is built in `prelude_decimal.py`, including NaN /
+infinity exponents and a `DecimalTuple` result with fields, indexing, unpacking and repr.  The int64
+default keeps a Decimal coefficient arbitrary precision through `_DecInt` while the program's own
+ints stay int64 and stop loudly.  `stdtop.py` selects that coefficient class when `intmode.exact()`
+is false and no longer refuses `as_tuple`; `test_ail_stdtop1.py` keeps a named refusal for `logb`.
+`lab/stdlib/decimal/RESULTS.md` records each build, the general-path reasons and the remaining named
+refusals.  `test_ail_std_decimal.py` (registered in `tests.d`) compares all 12 programs with CPython.
+Probes in `/tmp/probes` cover `as_tuple` over finite / NaN / infinity / negative / empty values and
+through an argument, a list item, an attribute, a dict value and an alias, large coefficients,
+float construction, error paths and both `cmp.sh` builds; `dec_refusals` and `dec_traps` are refused
+by name.
+
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object
