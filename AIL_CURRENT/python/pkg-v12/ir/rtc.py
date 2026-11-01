@@ -117,6 +117,8 @@ _entry('fmt_str', (S,), (S,), 'ail_fmt_gen_str({A}, {0}, {fill}, {align}, {width
 
 # --- numbers from text
 _entry('str_to_int', (S,), (N,), 'ail_str_to_int({0})', Effects(raises=[VALUE]), parts=('STR',))
+_entry('str_to_int_base', (S, N), (N,), 'ail_str_to_int_base({0}, {1})', Effects(raises=[VALUE]),
+       parts=('STR', 'INTBASE'))
 _entry('bytes_to_int', (B,), (N,), 'ail_bytes_to_int({0})', Effects(raises=[VALUE]), parts=('BYTES',))
 _entry('tint_from_str', (S,), (I.TINT,), 'ail_tint_from_str({A}, 10, {0})',
        Effects(allocs=[ARENA], raises=[VALUE, DIE]), parts=('TINTT', 'STR', 'STRREPR'), arena='s')
