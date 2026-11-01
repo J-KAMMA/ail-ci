@@ -174,6 +174,17 @@ Tests on the final commit: `test_ail_server`, `test_ail_build_cache`, `test_ail_
 `test_ail_safetynet` with `AIL_SERVER=0`; all passed with `-j 2`. `tools/update_manifest.py` was run
 and `--check` passed. No new DIFFERENCES rows. The test modules were already registered through
 `AIL_CURRENT/tests.d/`; no `ail_check.py` tuple change.
+## 2026-11-01 -- py-failfast re-applied: memoized marks and refusals (job-rbfailfast-11011235)
+
+Re-applied PR #299 (`py-failfast`) on the tree that already has int64-by-default (#284) and the module system
+(#307). `python/pkg-v12/walkmemo.py` memoizes `bigcap.marked`/`own_marked` by a digest of the tree content,
+`pymix.analyze` per source and environment, and the refusal of `pyboxed2.build` per source/mode/environment; the
+general path's `build()` is split into a memoizing wrapper and `_build_once`, keeping the int64 routing of #284.
+`AIL_NO_WALKMEMO=1` turns the tables off. `unified.analyze` and `pyboxed2`'s two mark sites now go through the
+tables. The merged refusal keeps its message and `_biggate_on`; a build with typed clones off reuses a refusal
+only when the first build wired none. New `test_ail_walkmemo.py`, registered through `tests.d/`. The accepted
+PR's CRLF conversion of `pyboxed2.py` was not kept (the file stays LF). `tools/diff_ids.py` is not present on this
+tree; `tools/update_manifest.py` was run and `--check` passes.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
