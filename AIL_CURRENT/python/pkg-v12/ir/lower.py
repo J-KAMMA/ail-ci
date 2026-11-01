@@ -3152,15 +3152,20 @@ class Lowering(TextLowering):
         raise NotS0('builtin %s()' % f)
 
     def int_text(self, text, base):
-        """`int(text)` / `int(text, base)` with a str or bytes first argument, on the Python
-        surface: a value beyond int64 is a big int, so this is the tagged-int parse."""
-        if not __import__('intmode').exact_python():
-            raise NotS0('int() of text and a base')
+        """`int(text)` / `int(text, base)` with a str or bytes first argument.  In the exact
+        mode a value beyond int64 is a big int, so this is the tagged-int parse.  In the default
+        int64 mode a str parses through the checked int64 helper (CPython's whitespace, sign,
+        underscore and base-0 prefix rules); a value beyond int64 is the language's loud overflow
+        stop.  Bytes with an explicit base stay on the legacy emitter."""
         v = self.expr(text)
         if v.type not in (I.STRV, BYTES):
             raise NotS0('int() of a value that is not text')
         b = self.coerce(self.expr(base), I.I64)
-        return self.rt('tint_from_str_base' if v.type == I.STRV else 'tint_from_bytes_base', [v, b])
+        if __import__('intmode').exact_python():
+            return self.rt('tint_from_str_base' if v.type == I.STRV else 'tint_from_bytes_base', [v, b])
+        if v.type != I.STRV:
+            raise NotS0('int() of bytes and a base')
+        return self.rt('str_to_int_base', [v, b])
 
     def keyed_sort(self, f, node):
         """The two statements sortkeys.py leaves for `xs.sort(key=...)` / `sorted(xs, key=...)`: the permutation

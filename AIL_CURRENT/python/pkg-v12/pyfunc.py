@@ -18928,10 +18928,7 @@ def _borrowed_callback_helper(summary, ctx):
     fn = summary['function']
     if fn.name in ctx.borrowed_callback_helper_names:
         return ctx.borrowed_callback_helper_names[fn.name]
-    symbol = '_ail_borrowed_' + ctx.private_callback_prefix + '_' + ctx.csym[fn.name]
-    while symbol in ctx.borrowed_callback_symbols or symbol + '_unwind' in ctx.borrowed_callback_symbols:
-        symbol += '_'
-    ctx.borrowed_callback_symbols.update((symbol, symbol + '_unwind'))
+    symbol = _fe_pair_name(ctx, '_ail_borrowed_' + ctx.private_callback_prefix + '_' + ctx.csym[fn.name])
     ctx.borrowed_callback_helper_names[fn.name] = symbol
     private = _caller_ctx(fn, ctx.funcs)
     private.need = ctx.need
@@ -22386,6 +22383,8 @@ def _raise_stmt(node, ctx, pad):
 
 
 def _handled_name(ctx, base):
+    if _FE_COLLECT is not None:
+        return _fe_token('handled', base)
     reserved = (set(ctx.csym.values()) | {'v_' + name for name in ctx.source_names}
                 | ctx.handled_symbols)
     while base in reserved:
@@ -35650,6 +35649,66 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
                     _visit(_f.name)
             _compile_fns = ([_by_name[_n] for _n in _ordered]
                             + [f for f in fns if f.name not in _seen])
+
+    def _fe_call(fn, sigs_used, cname, recursive_flag, arity, base_ctx, static_symbol):
+        return ((fn, sigs_used, strict, cname, recursive_flag, csym, arity, clones,
+                 base_ctx, classes, defaults),
+                dict(is_method=fn.name in method_names, grid_by_func=grid_by_func,
+                     owned_str_fns=owned_str_fns, owned_bytes_fns=owned_bytes_fns,
+                     separate_units=bool(info is not None and info.get('_want_units')),
+                     static_helpers=bool(info is not None and info.get('_mixed_clone')
+                                         and static_symbol != csym[fns[-1].name]),
+                     local_methods=not bool(info is not None and info.get('_link_units')),
+                     cleanup_symbols=cleanup_symbols,
+                     readonly_scalar_helpers=readonly_scalar_helpers,
+                     non_escaping_helpers=non_escaping_helpers,
+                     float64_pipelines=float64_pipelines,
+                     borrowed_callback_summaries=borrowed_callbacks,
+                     internal_exact_bytes_fns=internal_exact_bytes_fns,
+                     byterows_by_func={g.name: _record_annotated_byterow(g) for g in fns},
+                     experimental_borrow_numeric_names=borrow_numeric_names,
+                     experimental_borrow_leaf_self=borrow_leaf_self,
+                     experimental_borrow_scalar_self=borrow_scalar_self,
+                     experimental_trim_borrowed_exc_base=trim_borrowed_exc_base,
+                     experimental_byte_arithmetic=byte_arithmetic,
+                     experimental_ephemeral_numeric_temps=ephemeral_numeric_temps,
+                     experimental_private_try_scalars=private_try_scalars,
+                     experimental_fresh_bytes_fields=fresh_bytes_fields,
+                     readonly_bytes_consumers=readonly_bytes_consumers,
+                     checked_arrays=bool(info is not None and info.get('_checked_arrays'))))
+
+    _fe_jobs = _fe_job_count(len(_compile_fns), info)
+    if _fe_jobs > 1:
+        _fe_weights = []
+        for f in _compile_fns:
+            weight = _fe_weight(f)
+            _fe_weights.append(weight)
+            _fe_weights.extend([weight] * len(clones.get(f.name, {})))
+        if not _fe_worth_parallel(_fe_weights):
+            _fe_jobs = 1
+    _fe_units = _fe_results = _fe_index = None
+    if _fe_jobs > 1:
+        _fe_base = {f.name: _caller_ctx(f, sigs, arity_seeds.get(f.name), classes,
+                                        owned_str_fns, owned_bytes_fns)
+                    for f in _compile_fns}
+        _fe_units = []
+        for f in _compile_fns:
+            cname = csym[f.name]
+            base_ctx = _fe_base[f.name]
+            _args, _kwargs = _fe_call(f, sigs, cname, f.name in recursive,
+                                      arity_seeds.get(f.name), base_ctx, cname)
+            _fe_units.append(_fe_make_unit(f, _args, _kwargs, base_ctx, sigs))
+            for _key, (csym_variant, variant_params, variant_arity) in clones.get(f.name, {}).items():
+                sigs_variant = dict(sigs)
+                sigs_variant[f.name] = (variant_params, sigs[f.name][1])
+                _args2, _kwargs2 = _fe_call(f, sigs_variant, csym_variant, False,
+                                            variant_arity, base_ctx, csym_variant)
+                _fe_units.append(_fe_make_unit(f, _args2, _kwargs2, base_ctx, sigs_variant))
+        _fe_results = _fe_run_units(_fe_units, _fe_jobs, classes, cleanup_symbols)
+        if _fe_results is None:
+            _fe_units = None
+        else:
+            _fe_index = 0
     for f in _compile_fns:
         cname = csym[f.name]
         # `base_ctx` is THIS function's OWN fully-typed, UNSPECIALISED ctx (`_caller_ctx`) -- the
@@ -35658,31 +35717,17 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         # call site's clone lookup (`_call`, section 26) always asks the question the plan was
         # built to answer, never a different one derived from whichever variant happens to be
         # mid-compile.
-        base_ctx = _caller_ctx(f, sigs, arity_seeds.get(f.name), classes, owned_str_fns, owned_bytes_fns)
-        h, b, ctx = _one_function(f, sigs, strict, cname, f.name in recursive, csym,
-                                  arity_seeds.get(f.name), clones, base_ctx, classes,
-                                  defaults, f.name in method_names, grid_by_func, owned_str_fns, owned_bytes_fns,
-                                  separate_units=bool(info is not None and info.get('_want_units')),
-                                  static_helpers=bool(info is not None and info.get('_mixed_clone')
-                                                      and cname != csym[fns[-1].name]),
-                                  local_methods=not bool(info is not None and info.get('_link_units')),
-                                  cleanup_symbols=cleanup_symbols,
-                                  readonly_scalar_helpers=readonly_scalar_helpers,
-                                  non_escaping_helpers=non_escaping_helpers,
-                                  float64_pipelines=float64_pipelines,
-                                  borrowed_callback_summaries=borrowed_callbacks,
-                                  internal_exact_bytes_fns=internal_exact_bytes_fns,
-                                  byterows_by_func={g.name: _record_annotated_byterow(g) for g in fns},
-                                  experimental_borrow_numeric_names=borrow_numeric_names,
-                                  experimental_borrow_leaf_self=borrow_leaf_self,
-                                  experimental_borrow_scalar_self=borrow_scalar_self,
-                                  experimental_trim_borrowed_exc_base=trim_borrowed_exc_base,
-                                  experimental_byte_arithmetic=byte_arithmetic,
-                                  experimental_ephemeral_numeric_temps=ephemeral_numeric_temps,
-                                  experimental_private_try_scalars=private_try_scalars,
-                                  experimental_fresh_bytes_fields=fresh_bytes_fields,
-                                  readonly_bytes_consumers=readonly_bytes_consumers,
-                                  checked_arrays=bool(info is not None and info.get('_checked_arrays')))
+        if _fe_results is not None:
+            _unit = _fe_units[_fe_index]
+            _fe_index += 1
+            base_ctx = _unit['base_ctx']
+            h, b, ctx = _fe_take(_unit, _fe_results[_fe_index - 1])
+        else:
+            base_ctx = _caller_ctx(f, sigs, arity_seeds.get(f.name), classes,
+                                   owned_str_fns, owned_bytes_fns)
+            _args, _kwargs = _fe_call(f, sigs, cname, f.name in recursive,
+                                      arity_seeds.get(f.name), base_ctx, cname)
+            h, b, ctx = _one_function(*_args, **_kwargs)
         ctxs[f.name] = ctx
         symbol_contexts[cname] = ctx
         if getattr(f, '_ail_dispatcher', False) and not clones.get(f.name):
@@ -35702,31 +35747,14 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
         for _key, (csym_variant, variant_params, variant_arity) in clones.get(f.name, {}).items():
             sigs_variant = dict(sigs)
             sigs_variant[f.name] = (variant_params, sigs[f.name][1])
-            h2, b2, ctx2 = _one_function(f, sigs_variant, strict, csym_variant, False, csym,
-                                         variant_arity, clones, base_ctx, classes,
-                                         defaults, f.name in method_names, grid_by_func,
-                                         owned_str_fns, owned_bytes_fns,
-                                         separate_units=bool(info is not None and info.get('_want_units')),
-                                         static_helpers=bool(info is not None and info.get('_mixed_clone')
-                                                             and csym_variant != csym[fns[-1].name]),
-                                         local_methods=not bool(info is not None and info.get('_link_units')),
-                                         cleanup_symbols=cleanup_symbols,
-                                         readonly_scalar_helpers=readonly_scalar_helpers,
-                                         non_escaping_helpers=non_escaping_helpers,
-                                         float64_pipelines=float64_pipelines,
-                                         borrowed_callback_summaries=borrowed_callbacks,
-                                         internal_exact_bytes_fns=internal_exact_bytes_fns,
-                                         byterows_by_func={g.name: _record_annotated_byterow(g) for g in fns},
-                                         experimental_borrow_numeric_names=borrow_numeric_names,
-                                         experimental_borrow_leaf_self=borrow_leaf_self,
-                                         experimental_borrow_scalar_self=borrow_scalar_self,
-                                         experimental_trim_borrowed_exc_base=trim_borrowed_exc_base,
-                                         experimental_byte_arithmetic=byte_arithmetic,
-                                         experimental_ephemeral_numeric_temps=ephemeral_numeric_temps,
-                                         experimental_private_try_scalars=private_try_scalars,
-                                         experimental_fresh_bytes_fields=fresh_bytes_fields,
-                                         readonly_bytes_consumers=readonly_bytes_consumers,
-                                  checked_arrays=bool(info is not None and info.get('_checked_arrays')))
+            if _fe_results is not None:
+                _unit = _fe_units[_fe_index]
+                _fe_index += 1
+                h2, b2, ctx2 = _fe_take(_unit, _fe_results[_fe_index - 1])
+            else:
+                _args2, _kwargs2 = _fe_call(f, sigs_variant, csym_variant, False,
+                                            variant_arity, base_ctx, csym_variant)
+                h2, b2, ctx2 = _one_function(*_args2, **_kwargs2)
             heads.append(h2)
             bodies.append(b2)
             body_names.append(f.name)
@@ -36785,6 +36813,10 @@ def _one_function(*args, **kwargs):
         import aliasrefuse
         aliasrefuse.refuse_instead(_sys_modules()[__name__], args[0], refusal)
         raise
+    return _one_function_finish(result, args, kwargs)
+
+
+def _one_function_finish(result, args, kwargs):
     if os.environ.get('AIL_IR', '1').strip().lower() in ('0', 'off', 'no', 'false'):
         final = result
     else:
@@ -36810,6 +36842,237 @@ def _sys_modules():
     return sys.modules
 
 
+# The front end emits a handful of generated C names whose exact spelling depends on every name
+# requested before it (see `_handled_name`, `_fe_plain_name`, `_fe_pair_name`).  A parallel worker
+# cannot see the other workers, so while it compiles one function those names become unique
+# placeholder tokens; the parent replays every request in the serial function order afterwards.
+_FE_COLLECT = None
+_FE_UNITS = None
+_FE_CLASSES = None
+_FE_SPECS0 = None
+
+
+def _fe_token(kind, base):
+    token = '\x01AILFE%d\x02' % len(_FE_COLLECT)
+    _FE_COLLECT.append({'kind': kind, 'base': base, 'token': token})
+    return token
+
+
+def _fe_plain_name(symbols, base, add):
+    if _FE_COLLECT is not None:
+        return _fe_token('plain_add' if add else 'plain_noadd', base)
+    while base in symbols:
+        base += '_'
+    if add:
+        symbols.add(base)
+    return base
+
+
+def _fe_pair_name(ctx, base):
+    if _FE_COLLECT is not None:
+        return _fe_token('pair', base)
+    symbols = ctx.borrowed_callback_symbols
+    while base in symbols or base + '_unwind' in symbols:
+        base += '_'
+    symbols.update((base, base + '_unwind'))
+    return base
+
+
+def _fe_weight(fn):
+    """A cheap size estimate for scheduling and for deciding whether workers can pay for themselves."""
+    return sum(1 for _ in ast.walk(fn))
+
+
+def _fe_worth_parallel(weights):
+    """False when one function dominates the program or there is too little work to fork for.
+
+    A single function is compiled by a single worker, so its own body sets a hard floor on the
+    parallel wall time; when it is most of the program the pool only adds fork, transfer and
+    replay overhead. Measured on the lab/compare tasks (2026-11-01): 8% or more slower overall
+    on scar_life and no change on berth_sim/chain_relax/ledger_bin, while the multi-function
+    programs gained. The cut is conservative (60% of the node count) so balanced programs are
+    unaffected."""
+    total = sum(weights)
+    if len(weights) < 2 or total < 400:
+        return False
+    return max(weights) * 5 <= total * 3
+
+
+def _fe_job_count(nfns, info):
+    if os.name == 'nt':
+        return 1
+    raw = os.environ.get('AIL_FE_JOBS')
+    if raw is not None and raw.strip():
+        try:
+            jobs = int(raw)
+        except ValueError:
+            return 1
+    else:
+        if nfns < 8:
+            return 1
+        jobs = min(4, os.cpu_count() or 1)
+    if jobs <= 1:
+        return 1
+    if os.environ.get('AIL_DEBUG') or os.environ.get('AIL_NO_FE_PARALLEL'):
+        return 1
+    if info is not None and (info.get('_want_units') or info.get('_link_units')
+                             or info.get('_want_source_regions')):
+        return 1
+    return min(jobs, nfns)
+
+
+def _fe_make_unit(fn, args, kwargs, base_ctx, sigs):
+    attach = {
+        'funcs': sigs,
+        'classes': args[9],
+        'defaults': args[10] or {},
+        'csym': args[5] or {},
+        'clones': args[7] or {},
+        'funcs_grid': kwargs.get('grid_by_func') or {},
+        'funcs_byterow': kwargs.get('byterows_by_func') or {},
+        'modconsts': _MODCONSTS,
+        'borrowed_callback_summaries': kwargs.get('borrowed_callback_summaries') or {},
+        'float64_pipelines': kwargs.get('float64_pipelines'),
+        'owned_str_fns': kwargs.get('owned_str_fns') or set(),
+        'owned_bytes_fns': kwargs.get('owned_bytes_fns') or set(),
+        'readonly_scalar_helpers': kwargs.get('readonly_scalar_helpers') or set(),
+        'non_escaping_helpers': kwargs.get('non_escaping_helpers') or set(),
+        'readonly_bytes_consumers': kwargs.get('readonly_bytes_consumers') or set(),
+        'internal_exact_bytes_fns': kwargs.get('internal_exact_bytes_fns') or set(),
+        'borrowed_callback_symbols': kwargs.get('cleanup_symbols'),
+        'handled_symbols': kwargs.get('cleanup_symbols'),
+        'base_ctx': base_ctx,
+        'fn_node': fn,
+    }
+    return {'f': fn, 'args': args, 'kwargs': kwargs, 'base_ctx': base_ctx,
+            'sigs': sigs, 'attach': attach, 'weight': _fe_weight(fn)}
+
+
+def _fe_reset_specs():
+    for name, info in _FE_CLASSES.items():
+        sort0, heap0 = _FE_SPECS0.get(name, ({}, {}))
+        info.sort_specs.clear()
+        info.sort_specs.update((k, list(v)) for k, v in sort0.items())
+        info.heap_specs.clear()
+        info.heap_specs.update((k, list(v)) for k, v in heap0.items())
+
+
+def _fe_spec_changes():
+    changes = []
+    for name, info in _FE_CLASSES.items():
+        sort0, heap0 = _FE_SPECS0.get(name, ({}, {}))
+        for kind, table, before in (('sort', info.sort_specs, sort0),
+                                    ('heap', info.heap_specs, heap0)):
+            for key, value in table.items():
+                if before.get(key) != value:
+                    changes.append((name, kind, key, list(value)))
+    return changes
+
+
+def _fe_worker(index):
+    global _FE_COLLECT
+    unit = _FE_UNITS[index]
+    _fe_reset_specs()
+    _FE_COLLECT = []
+    try:
+        result = _one_function_legacy(*unit['args'], **unit['kwargs'])
+        requests = list(_FE_COLLECT)
+    except Unsupported as refusal:
+        return {'refusal': refusal, 'specs': []}
+    finally:
+        _FE_COLLECT = None
+    h, b, ctx = result
+    changes = _fe_spec_changes()
+    shared = set(unit['attach'])
+    compact = {k: v for k, v in ctx.__dict__.items() if k not in shared}
+    return {'h': h, 'b': b, 'ctx': compact,
+            'requests': [(r['kind'], r['base'], r['token']) for r in requests],
+            'specs': changes,
+            'source_vnames': ['v_' + n for n in sorted(ctx.source_names)]}
+
+
+def _fe_replay(requests, reserved, source_vnames):
+    mapping = {}
+    for kind, base, token in requests:
+        name = base
+        if kind == 'handled':
+            while name in reserved or name in source_vnames:
+                name += '_'
+            reserved.add(name)
+        elif kind == 'plain_add':
+            while name in reserved:
+                name += '_'
+            reserved.add(name)
+        elif kind == 'plain_noadd':
+            while name in reserved:
+                name += '_'
+        elif kind == 'pair':
+            while name in reserved or name + '_unwind' in reserved:
+                name += '_'
+            reserved.update((name, name + '_unwind'))
+        else:
+            raise AssertionError('unknown front-end name request %r' % (kind,))
+        mapping[token] = name
+    return mapping
+
+
+def _fe_run_units(units, jobs, classes, initial_symbols):
+    global _FE_UNITS, _FE_CLASSES, _FE_SPECS0
+    _FE_UNITS = units
+    _FE_CLASSES = classes
+    _FE_SPECS0 = {name: ({k: list(v) for k, v in info.sort_specs.items()},
+                         {k: list(v) for k, v in info.heap_specs.items()})
+                  for name, info in classes.items()}
+    try:
+        try:
+            import multiprocessing
+            mp = multiprocessing.get_context('fork')
+            # Longest function first: a worker that picks up the program's largest body last would
+            # hold the whole parallel section for it after every other worker has gone idle. The
+            # result order is restored below, so the serial replay order is untouched.
+            order = sorted(range(len(units)),
+                           key=lambda index: (-units[index]['weight'], index))
+            ordered = [None] * len(units)
+            with mp.Pool(processes=min(jobs, len(units))) as pool:
+                for index, result in zip(order, pool.map(_fe_worker, order, chunksize=1)):
+                    ordered[index] = result
+            results = ordered
+        except (OSError, ValueError, ImportError):
+            return None
+    finally:
+        _FE_UNITS = None
+        _FE_CLASSES = None
+        _FE_SPECS0 = None
+    for unit, result in zip(units, results):
+        refusal = result.get('refusal')
+        if refusal is not None:
+            import aliasrefuse
+            aliasrefuse.refuse_instead(_sys_modules()[__name__], unit['f'], refusal)
+            raise refusal
+    for result in results:
+        for name, kind, key, value in result['specs']:
+            table = (classes[name].sort_specs if kind == 'sort'
+                     else classes[name].heap_specs)
+            if key not in table or table[key] != value:
+                table[key] = value
+    reserved = set(initial_symbols)
+    for result in results:
+        source_vnames = set(result['source_vnames'])
+        mapping = _fe_replay(result['requests'], reserved, source_vnames)
+        for token, name in mapping.items():
+            result['h'] = result['h'].replace(token, name)
+            result['b'] = result['b'].replace(token, name)
+    initial_symbols.update(reserved)
+    return results
+
+
+def _fe_take(unit, result):
+    ctx = Ctx.__new__(Ctx)
+    ctx.__dict__.update(result['ctx'])
+    ctx.__dict__.update(unit['attach'])
+    return _one_function_finish((result['h'], result['b'], ctx), unit['args'], unit['kwargs'])
+
+
 def _one_function_legacy(*args, **kwargs):
     fn = args[0]
     builders = True
@@ -36822,10 +37085,13 @@ def _one_function_legacy(*args, **kwargs):
                     probe_kwargs['cleanup_symbols'] = set(probe_kwargs['cleanup_symbols'])
                 global _RANGE_PROBE
                 _RANGE_PROBE = True     # only the probe's ctx is used: skip the range analysis
+                _fe_probe_start = len(_FE_COLLECT) if _FE_COLLECT is not None else None
                 try:
                     first = _one_function_numeric_impl(*probe_args, **probe_kwargs)
                 finally:
                     _RANGE_PROBE = False
+                    if _fe_probe_start is not None:
+                        del _FE_COLLECT[_fe_probe_start:]
                 break
             except _BuilderBail as bail:
                 if not builders:
@@ -36982,10 +37248,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     ctx.free_points = _last_use_free_points(fn)
     ctx.loop_local_points = _loop_local_release_points(fn)
     ctx.unused_decode_locals = _unused_decode_locals(fn)
-    ctx.finally_return_release_name = '_ail_finally_release_' + cname
-    while ctx.finally_return_release_name in cleanup_symbols:
-        ctx.finally_return_release_name += '_'
-    cleanup_symbols.add(ctx.finally_return_release_name)
+    ctx.finally_return_release_name = _fe_plain_name(cleanup_symbols, '_ail_finally_release_' + cname, add=True)
     ctx.float64_pipelines = float64_pipelines
     ctx.exc_frame = _owns_try(fn)
     ctx.stdin_unbound = _stdin_only_bindings(fn)
@@ -37347,9 +37610,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     frame_cells_needed = ctx.exc_frame and (
         any(_frame_ptr_kind(ctx.types[v]) and v not in plain_cells for v in ctx.locals)
         or any((ctx.needs_sarena, ctx.needs_barena, ctx.needs_pool, ctx.needs_dpool, ctx.needs_bpool)))
-    frame_cells_name = '_ail_frame_cells'
-    while frame_cells_name in cleanup_symbols:
-        frame_cells_name += '_'
+    frame_cells_name = _fe_plain_name(cleanup_symbols, '_ail_frame_cells', add=False)
     frees = ''.join('%s(&%s); ' % (_free_fn(v), ctx.cname(v)) for v in owned)
     frees += ''.join('ail_tab_free(&%s); ' % ctx.tdict_col(v, j)
                      for v in owned if ctx.types[v] == DICT and v in ctx.tdict
@@ -37433,10 +37694,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
             ctx.finally_return_release_name, ctx.finally_return_release)
     if cleanup_steps:
         ctx.parts.add('DIE')
-        cleanup_name = 'ail_unwind_' + cname
-        while cleanup_name in cleanup_symbols:
-            cleanup_name += '_'
-        cleanup_symbols.add(cleanup_name)
+        cleanup_name = _fe_plain_name(cleanup_symbols, 'ail_unwind_' + cname, add=True)
         cleanup_head += 'static void %s(void **p) { %s }\n' % (cleanup_name, ' '.join(cleanup_steps))
         if cleanup_args:
             cleanup_entry += '    void *v__cleanup_args[] = {%s};\n' % ', '.join(cleanup_args)
