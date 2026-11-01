@@ -1,0 +1,1014 @@
+{
+ "started": "2026-11-01T09:20:36Z",
+ "runs": 4,
+ "tasks": [
+  {
+   "task": "berth_sim",
+   "case": "perf",
+   "runs": 4,
+   "wall_ms": 2577.7,
+   "samples_s": 8.66,
+   "functions": [
+    {
+     "pct": 49.77,
+     "self_s": 4.31,
+     "name": "py_main"
+    },
+    {
+     "pct": 40.88,
+     "self_s": 3.54,
+     "name": "ail_slist_push"
+    },
+    {
+     "pct": 2.19,
+     "self_s": 0.19,
+     "name": "ail_stdin_readline"
+    },
+    {
+     "pct": 2.19,
+     "self_s": 0.19,
+     "name": "fpop"
+    },
+    {
+     "pct": 1.73,
+     "self_s": 0.15,
+     "name": "fpush"
+    },
+    {
+     "pct": 1.04,
+     "self_s": 0.09,
+     "name": "ail__sarena_keep_roots_slow.constprop.0"
+    },
+    {
+     "pct": 1.04,
+     "self_s": 0.09,
+     "name": "ail_perm_apply.constprop.0"
+    },
+    {
+     "pct": 0.46,
+     "self_s": 0.04,
+     "name": "ail__blk_take"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 31.87,
+     "self_s": 2.76,
+     "name": "ail__keysort_i64 (program.c:3870 @ 34f3)"
+    },
+    {
+     "pct": 14.55,
+     "self_s": 1.26,
+     "name": "py_main (program.c:6362 @ a8c1)"
+    },
+    {
+     "pct": 11.09,
+     "self_s": 0.96,
+     "name": "ck_mul (program.c:3957 @ 8308)"
+    },
+    {
+     "pct": 2.42,
+     "self_s": 0.21,
+     "name": "ail_list_push (program.c:3305 @ 9e01)"
+    },
+    {
+     "pct": 2.08,
+     "self_s": 0.18,
+     "name": "ail__keysort_i64 (program.c:3870 @ 3416)"
+    },
+    {
+     "pct": 1.85,
+     "self_s": 0.16,
+     "name": "py_main (program.c:5903 @ 82c9)"
+    },
+    {
+     "pct": 1.73,
+     "self_s": 0.15,
+     "name": "ail_ir_view_get (program.c:3415 @ a905)"
+    },
+    {
+     "pct": 1.5,
+     "self_s": 0.13,
+     "name": "py_main (program.c:5913 @ 8349)"
+    },
+    {
+     "pct": 1.15,
+     "self_s": 0.1,
+     "name": "ck_add (program.c:3949 @ a0e2)"
+    },
+    {
+     "pct": 1.04,
+     "self_s": 0.09,
+     "name": "memcpy (string_fortified.h:29 @ 27d4)"
+    },
+    {
+     "pct": 0.87,
+     "self_s": 0.07,
+     "name": "ck_mul (program.c:3957 @ a0c2)"
+    },
+    {
+     "pct": 0.81,
+     "self_s": 0.07,
+     "name": "ail__str_to_int_full (program.c:1589 @ 370d)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-gda8hfd5/berth_sim/dbg/program.c"
+  },
+  {
+   "task": "chain_relax",
+   "case": "perf",
+   "runs": 4,
+   "wall_ms": 1114.9,
+   "samples_s": 4.44,
+   "functions": [
+    {
+     "pct": 100.0,
+     "self_s": 4.44,
+     "name": "py_main"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail__blk_take"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_sarena_pushn"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_str_index_cur"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_sarena_free"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail__fmt_pad.constprop.0"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail__str_cat_slow.constprop.0"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_fmt_spec_float.constprop.0"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 20.5,
+     "self_s": 0.91,
+     "name": "ail_fsqrt (program.c:72 @ 4f29)"
+    },
+    {
+     "pct": 15.88,
+     "self_s": 0.7,
+     "name": "ail_fsqrt (program.c:72 @ 59be)"
+    },
+    {
+     "pct": 10.59,
+     "self_s": 0.47,
+     "name": "py_main (program.c:4039 @ 4f39)"
+    },
+    {
+     "pct": 7.55,
+     "self_s": 0.34,
+     "name": "py_main (program.c:4073 @ 59ce)"
+    },
+    {
+     "pct": 7.21,
+     "self_s": 0.32,
+     "name": "ail_fdiv (program.c:3070 @ 59ca)"
+    },
+    {
+     "pct": 6.76,
+     "self_s": 0.3,
+     "name": "py_main (program.c:4044 @ 59a8)"
+    },
+    {
+     "pct": 4.28,
+     "self_s": 0.19,
+     "name": "py_main (program.c:4031 @ 4f0e)"
+    },
+    {
+     "pct": 4.28,
+     "self_s": 0.19,
+     "name": "py_main (program.c:4035 @ 4f25)"
+    },
+    {
+     "pct": 3.6,
+     "self_s": 0.16,
+     "name": "py_main (program.c:4069 @ 59ba)"
+    },
+    {
+     "pct": 3.49,
+     "self_s": 0.15,
+     "name": "py_main (program.c:4068 @ 59b2)"
+    },
+    {
+     "pct": 2.48,
+     "self_s": 0.11,
+     "name": "py_main (program.c:4033 @ 4f19)"
+    },
+    {
+     "pct": 2.03,
+     "self_s": 0.09,
+     "name": "ail_fdiv (program.c:3070 @ 4f35)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-gda8hfd5/chain_relax/dbg/program.c"
+  },
+  {
+   "task": "echo_pack",
+   "case": "perf",
+   "runs": 4,
+   "wall_ms": 1111.0,
+   "samples_s": 3.52,
+   "functions": [
+    {
+     "pct": 93.18,
+     "self_s": 3.28,
+     "name": "pack"
+    },
+    {
+     "pct": 2.56,
+     "self_s": 0.09,
+     "name": "ail_tab_hfree_slot"
+    },
+    {
+     "pct": 1.14,
+     "self_s": 0.04,
+     "name": "flush"
+    },
+    {
+     "pct": 0.85,
+     "self_s": 0.03,
+     "name": "ail_tab_order_append"
+    },
+    {
+     "pct": 0.85,
+     "self_s": 0.03,
+     "name": "ail_tab_hput"
+    },
+    {
+     "pct": 0.85,
+     "self_s": 0.03,
+     "name": "ail_tab_hash_rearray"
+    },
+    {
+     "pct": 0.28,
+     "self_s": 0.01,
+     "name": "ail_idict_put_slow"
+    },
+    {
+     "pct": 0.28,
+     "self_s": 0.01,
+     "name": "ail_bytearray_extend"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 15.91,
+     "self_s": 0.56,
+     "name": "ail_tab_hslot (program.c:3147 @ 4960)"
+    },
+    {
+     "pct": 12.93,
+     "self_s": 0.46,
+     "name": "ail_tab_hslot (program.c:3147 @ 4936)"
+    },
+    {
+     "pct": 12.36,
+     "self_s": 0.43,
+     "name": "pack (program.c:5158 @ 4698)"
+    },
+    {
+     "pct": 7.95,
+     "self_s": 0.28,
+     "name": "ail_tab_hslot (program.c:3147 @ 44a0)"
+    },
+    {
+     "pct": 6.53,
+     "self_s": 0.23,
+     "name": "ail_bytes_get (program.c:3934 @ 42f5)"
+    },
+    {
+     "pct": 2.84,
+     "self_s": 0.1,
+     "name": "ail_tab_hslot (program.c:3147 @ 447d)"
+    },
+    {
+     "pct": 2.84,
+     "self_s": 0.1,
+     "name": "pack (program.c:5195 @ 4665)"
+    },
+    {
+     "pct": 2.56,
+     "self_s": 0.09,
+     "name": "ck_add (program.c:4994 @ 4318)"
+    },
+    {
+     "pct": 2.41,
+     "self_s": 0.09,
+     "name": "ail_list_push (program.c:2809 @ 3bd8)"
+    },
+    {
+     "pct": 2.27,
+     "self_s": 0.08,
+     "name": "ail_tab_hslot (program.c:3147 @ 49ee)"
+    },
+    {
+     "pct": 1.42,
+     "self_s": 0.05,
+     "name": "pack (program.c:5249 @ 480c)"
+    },
+    {
+     "pct": 1.14,
+     "self_s": 0.04,
+     "name": "ail_bytearray_append (program.c:4794 @ 47d9)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-gda8hfd5/echo_pack/dbg/program.c"
+  },
+  {
+   "task": "ledger_bin",
+   "case": "perf",
+   "runs": 4,
+   "wall_ms": 849.2,
+   "samples_s": 2.42,
+   "functions": [
+    {
+     "pct": 74.38,
+     "self_s": 1.8,
+     "name": "py_main"
+    },
+    {
+     "pct": 12.4,
+     "self_s": 0.3,
+     "name": "ail_keysort_perm.constprop.0"
+    },
+    {
+     "pct": 8.68,
+     "self_s": 0.21,
+     "name": "readvar"
+    },
+    {
+     "pct": 2.07,
+     "self_s": 0.05,
+     "name": "ail_slist_push"
+    },
+    {
+     "pct": 0.83,
+     "self_s": 0.02,
+     "name": "ail_tab_hput"
+    },
+    {
+     "pct": 0.41,
+     "self_s": 0.01,
+     "name": "ail_tab_hfree_slot"
+    },
+    {
+     "pct": 0.41,
+     "self_s": 0.01,
+     "name": "ail_sarena_pushn"
+    },
+    {
+     "pct": 0.41,
+     "self_s": 0.01,
+     "name": "ail_tab_order_append"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 26.24,
+     "self_s": 0.64,
+     "name": "pymod (program.c:5386 @ 72fb)"
+    },
+    {
+     "pct": 7.44,
+     "self_s": 0.18,
+     "name": "ail_tab_hslot (program.c:3526 @ 88f3)"
+    },
+    {
+     "pct": 5.37,
+     "self_s": 0.13,
+     "name": "py_main (program.c:6221 @ 72c4)"
+    },
+    {
+     "pct": 5.37,
+     "self_s": 0.13,
+     "name": "py_main (program.c:6400 @ 86d1)"
+    },
+    {
+     "pct": 4.96,
+     "self_s": 0.12,
+     "name": "ail__keysort_i64 (program.c:5317 @ 3673)"
+    },
+    {
+     "pct": 4.55,
+     "self_s": 0.11,
+     "name": "ail_tab_hslot (program.c:3526 @ 88b0)"
+    },
+    {
+     "pct": 2.07,
+     "self_s": 0.05,
+     "name": "ail_slist_push (program.c:2790 @ 3885)"
+    },
+    {
+     "pct": 1.86,
+     "self_s": 0.04,
+     "name": "py_main (program.c:6408 @ 870b)"
+    },
+    {
+     "pct": 1.65,
+     "self_s": 0.04,
+     "name": "ail_list_push (program.c:3328 @ 7430)"
+    },
+    {
+     "pct": 1.65,
+     "self_s": 0.04,
+     "name": "ail_tab_hslot (program.c:3526 @ 888b)"
+    },
+    {
+     "pct": 1.65,
+     "self_s": 0.04,
+     "name": "ck_add (program.c:5390 @ 56d7)"
+    },
+    {
+     "pct": 1.65,
+     "self_s": 0.04,
+     "name": "ck_mul (program.c:5398 @ 56f5)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-gda8hfd5/ledger_bin/dbg/program.c"
+  },
+  {
+   "task": "rail_transfer",
+   "case": "perf",
+   "runs": 4,
+   "wall_ms": 1021.4,
+   "samples_s": 3.73,
+   "functions": [
+    {
+     "pct": 86.33,
+     "self_s": 3.22,
+     "name": "solve"
+    },
+    {
+     "pct": 6.17,
+     "self_s": 0.23,
+     "name": "ail_rl_III_push"
+    },
+    {
+     "pct": 2.68,
+     "self_s": 0.1,
+     "name": "py_main"
+    },
+    {
+     "pct": 2.14,
+     "self_s": 0.08,
+     "name": "ail_pool_refill.constprop.0"
+    },
+    {
+     "pct": 1.34,
+     "self_s": 0.05,
+     "name": "ail_list_reserve"
+    },
+    {
+     "pct": 0.54,
+     "self_s": 0.02,
+     "name": "ail_str_split_ws"
+    },
+    {
+     "pct": 0.27,
+     "self_s": 0.01,
+     "name": "ail_olist_drop"
+    },
+    {
+     "pct": 0.27,
+     "self_s": 0.01,
+     "name": "ail__blk_take"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 14.34,
+     "self_s": 0.54,
+     "name": "ail_rh_lt_III_0_1_2 (program.c:5818 @ 586d)"
+    },
+    {
+     "pct": 9.65,
+     "self_s": 0.36,
+     "name": "ail_rh_down_III_0_1_2 (program.c:5827 @ 58a0)"
+    },
+    {
+     "pct": 6.17,
+     "self_s": 0.23,
+     "name": "ail_rl_III_push (program.c:5811 @ 29cd)"
+    },
+    {
+     "pct": 5.36,
+     "self_s": 0.2,
+     "name": "solve (program.c:6063 @ 5e78)"
+    },
+    {
+     "pct": 4.29,
+     "self_s": 0.16,
+     "name": "ail_rh_lt_III_0_1_2 (program.c:5826 @ 58dd)"
+    },
+    {
+     "pct": 4.02,
+     "self_s": 0.15,
+     "name": "ail_rh_lt_III_0_1_2 (program.c:5132 @ 5ab8)"
+    },
+    {
+     "pct": 3.08,
+     "self_s": 0.12,
+     "name": "ail_list_span_get (program.c:5134 @ 5b7a)"
+    },
+    {
+     "pct": 3.08,
+     "self_s": 0.12,
+     "name": "ail_list_span_get (program.c:5134 @ 5e2f)"
+    },
+    {
+     "pct": 3.08,
+     "self_s": 0.12,
+     "name": "ck_add (program.c:5437 @ 5b7e)"
+    },
+    {
+     "pct": 3.08,
+     "self_s": 0.12,
+     "name": "solve (program.c:6058 @ 5e33)"
+    },
+    {
+     "pct": 2.68,
+     "self_s": 0.1,
+     "name": "ail_list_span_get (program.c:5134 @ 5d3f)"
+    },
+    {
+     "pct": 2.68,
+     "self_s": 0.1,
+     "name": "solve (program.c:6021 @ 5d4a)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-gda8hfd5/rail_transfer/dbg/program.c"
+  },
+  {
+   "task": "scar_life",
+   "case": "perf",
+   "runs": 4,
+   "wall_ms": 24642.4,
+   "samples_s": 107.52,
+   "functions": [
+    {
+     "pct": 100.0,
+     "self_s": 107.52,
+     "name": "py_main"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_bytearray_release"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_bytearray_store"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_str_from_int_buf"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_bytearray_meta"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_bytearray_reserve"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail__blk_take"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_sarena_pushn"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 11.1,
+     "self_s": 11.93,
+     "name": "py_main (program.c:7063 @ 5d36)"
+    },
+    {
+     "pct": 10.56,
+     "self_s": 11.35,
+     "name": "py_main (program.c:7074 @ 5d6a)"
+    },
+    {
+     "pct": 9.96,
+     "self_s": 10.71,
+     "name": "py_main (program.c:7071 @ 5d3e)"
+    },
+    {
+     "pct": 7.96,
+     "self_s": 8.56,
+     "name": "ck_add (program.c:6101 @ 5d7c)"
+    },
+    {
+     "pct": 3.53,
+     "self_s": 3.8,
+     "name": "py_main (program.c:7052 @ 5d09)"
+    },
+    {
+     "pct": 3.37,
+     "self_s": 3.62,
+     "name": "py_main (program.c:7065 @ 5db1)"
+    },
+    {
+     "pct": 3.35,
+     "self_s": 3.6,
+     "name": "py_main (program.c:7073 @ 5d66)"
+    },
+    {
+     "pct": 3.08,
+     "self_s": 3.31,
+     "name": "py_main (program.c:7073 @ 5d59)"
+    },
+    {
+     "pct": 3.07,
+     "self_s": 3.31,
+     "name": "py_main (program.c:7042 @ 5ce2)"
+    },
+    {
+     "pct": 3.07,
+     "self_s": 3.3,
+     "name": "py_main (program.c:7032 @ 5cad)"
+    },
+    {
+     "pct": 3.04,
+     "self_s": 3.27,
+     "name": "py_main (program.c:7066 @ 5d49)"
+    },
+    {
+     "pct": 2.88,
+     "self_s": 3.1,
+     "name": "py_main (program.c:7033 @ 5cc1)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-gda8hfd5/scar_life/dbg/program.c"
+  },
+  {
+   "task": "tally_lang",
+   "case": "perf",
+   "runs": 4,
+   "wall_ms": 4024.3,
+   "samples_s": 6.75,
+   "functions": [
+    {
+     "pct": 67.56,
+     "self_s": 4.56,
+     "name": "ev"
+    },
+    {
+     "pct": 32.44,
+     "self_s": 2.19,
+     "name": "py_run__try1"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_list_pop.constprop.0"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "push"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_numfield_list_index_slow"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_stab_slot"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_alloc"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_sarena_pushn"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 8.59,
+     "self_s": 0.58,
+     "name": "ev (program.c:8089 @ 8c80)"
+    },
+    {
+     "pct": 8.15,
+     "self_s": 0.55,
+     "name": "py_run__try1 (program.c:8279 @ 9215)"
+    },
+    {
+     "pct": 6.52,
+     "self_s": 0.44,
+     "name": "ev (program.c:8090 @ 8c95)"
+    },
+    {
+     "pct": 5.33,
+     "self_s": 0.36,
+     "name": "ev (program.c:8144 @ 8d31)"
+    },
+    {
+     "pct": 5.04,
+     "self_s": 0.34,
+     "name": "ev (program.c:8256 @ 8dac)"
+    },
+    {
+     "pct": 4.67,
+     "self_s": 0.32,
+     "name": "ev (program.c:8094 @ 8cce)"
+    },
+    {
+     "pct": 3.41,
+     "self_s": 0.23,
+     "name": "ev (program.c:8146 @ 8d3c)"
+    },
+    {
+     "pct": 2.37,
+     "self_s": 0.16,
+     "name": "ev (program.c:8092 @ 8cb9)"
+    },
+    {
+     "pct": 2.37,
+     "self_s": 0.16,
+     "name": "py_run__try1 (program.c:8276 @ 9211)"
+    },
+    {
+     "pct": 2.22,
+     "self_s": 0.15,
+     "name": "ail_list_span_get (program.c:5167 @ 8cca)"
+    },
+    {
+     "pct": 2.15,
+     "self_s": 0.14,
+     "name": "ail_list_span_get (program.c:5167 @ 8cdf)"
+    },
+    {
+     "pct": 2.15,
+     "self_s": 0.14,
+     "name": "ck_add (program.c:6855 @ 9023)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-gda8hfd5/tally_lang/dbg/program.c"
+  },
+  {
+   "task": "ticket_audit",
+   "case": "perf",
+   "runs": 4,
+   "wall_ms": 3874.1,
+   "samples_s": 8.83,
+   "functions": [
+    {
+     "pct": 44.28,
+     "self_s": 3.91,
+     "name": "py_main"
+    },
+    {
+     "pct": 24.01,
+     "self_s": 2.12,
+     "name": "ail_stab_slot"
+    },
+    {
+     "pct": 5.66,
+     "self_s": 0.5,
+     "name": "ail_sdict_put"
+    },
+    {
+     "pct": 5.32,
+     "self_s": 0.47,
+     "name": "ail_blist_release"
+    },
+    {
+     "pct": 4.87,
+     "self_s": 0.43,
+     "name": "ail_blist_push"
+    },
+    {
+     "pct": 3.62,
+     "self_s": 0.32,
+     "name": "ail__blk_take"
+    },
+    {
+     "pct": 1.81,
+     "self_s": 0.16,
+     "name": "ail_bytes_to_int"
+    },
+    {
+     "pct": 1.7,
+     "self_s": 0.15,
+     "name": "ail_sarena_free"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 18.52,
+     "self_s": 1.64,
+     "name": "ail_stab_lookup (program.c:6213 @ 86eb)"
+    },
+    {
+     "pct": 12.46,
+     "self_s": 1.1,
+     "name": "ail_tab_hslot (program.c:4424 @ 117c2)"
+    },
+    {
+     "pct": 6.91,
+     "self_s": 0.61,
+     "name": "ck_add (program.c:7441 @ 11468)"
+    },
+    {
+     "pct": 2.6,
+     "self_s": 0.23,
+     "name": "ail_tab_hslot (program.c:4424 @ 1169d)"
+    },
+    {
+     "pct": 2.15,
+     "self_s": 0.19,
+     "name": "ail_str_eq (program.c:921 @ 8729)"
+    },
+    {
+     "pct": 2.15,
+     "self_s": 0.19,
+     "name": "py_main (program.c:8760 @ c70f)"
+    },
+    {
+     "pct": 1.93,
+     "self_s": 0.17,
+     "name": "rec (program.c:8453 @ 112e8)"
+    },
+    {
+     "pct": 1.81,
+     "self_s": 0.16,
+     "name": "ail__bpay_release (program.c:6749 @ 6a3f)"
+    },
+    {
+     "pct": 1.81,
+     "self_s": 0.16,
+     "name": "ail_stab_place (program.c:6238 @ a4e8)"
+    },
+    {
+     "pct": 1.81,
+     "self_s": 0.16,
+     "name": "rec (program.c:8371 @ da1c)"
+    },
+    {
+     "pct": 1.36,
+     "self_s": 0.12,
+     "name": "ail_stab_lookup (program.c:6213 @ 8707)"
+    },
+    {
+     "pct": 1.25,
+     "self_s": 0.11,
+     "name": "ail_blist_add (program.c:6866 @ 6c39)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-gda8hfd5/ticket_audit/dbg/program.c"
+  },
+  {
+   "task": "tree_fold",
+   "case": "perf",
+   "runs": 4,
+   "wall_ms": 2501.3,
+   "samples_s": 6.04,
+   "functions": [
+    {
+     "pct": 29.97,
+     "self_s": 1.81,
+     "name": "do_sort"
+    },
+    {
+     "pct": 16.39,
+     "self_s": 0.99,
+     "name": "ail_slist_push"
+    },
+    {
+     "pct": 15.23,
+     "self_s": 0.92,
+     "name": "rebuild"
+    },
+    {
+     "pct": 9.44,
+     "self_s": 0.57,
+     "name": "parse_tree"
+    },
+    {
+     "pct": 4.8,
+     "self_s": 0.29,
+     "name": "do_fold"
+    },
+    {
+     "pct": 4.47,
+     "self_s": 0.27,
+     "name": "do_print"
+    },
+    {
+     "pct": 4.3,
+     "self_s": 0.26,
+     "name": "py_main"
+    },
+    {
+     "pct": 3.48,
+     "self_s": 0.21,
+     "name": "compact"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 14.74,
+     "self_s": 0.89,
+     "name": "ail_slist_push (program.c:4440 @ 2f55)"
+    },
+    {
+     "pct": 5.96,
+     "self_s": 0.36,
+     "name": "ail__key_i64_first (program.c:6883 @ 99f2)"
+    },
+    {
+     "pct": 3.64,
+     "self_s": 0.22,
+     "name": "ail__keysort_i64_first (program.c:6888 @ 9b8b)"
+    },
+    {
+     "pct": 3.48,
+     "self_s": 0.21,
+     "name": "ail__keysort_i64_first (program.c:6888 @ 98f3)"
+    },
+    {
+     "pct": 2.65,
+     "self_s": 0.16,
+     "name": "rebuild (program.c:7688 @ 7570)"
+    },
+    {
+     "pct": 1.99,
+     "self_s": 0.12,
+     "name": "ail_keycol_cmp (program.c:6792 @ 9a38)"
+    },
+    {
+     "pct": 1.66,
+     "self_s": 0.1,
+     "name": "ail__keysort_i64_first (program.c:6888 @ 99e0)"
+    },
+    {
+     "pct": 1.66,
+     "self_s": 0.1,
+     "name": "compact (program.c:7562 @ 61b5)"
+    },
+    {
+     "pct": 1.49,
+     "self_s": 0.09,
+     "name": "ail_keysort_perm (program.c:6928 @ 924d)"
+    },
+    {
+     "pct": 1.49,
+     "self_s": 0.09,
+     "name": "ail_numfield_list_append (program.c:5527 @ 4ecd)"
+    },
+    {
+     "pct": 1.49,
+     "self_s": 0.09,
+     "name": "ail_pslist_at (program.c:4926 @ 7549)"
+    },
+    {
+     "pct": 1.32,
+     "self_s": 0.08,
+     "name": "ck_sub (program.c:6961 @ 6e6a)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-gda8hfd5/tree_fold/dbg/program.c"
+  }
+ ]
+}

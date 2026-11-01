@@ -297,6 +297,7 @@ _BUILTIN_KWARGS = {
     'enumerate': {'start'},
     'sum': {'start'},
     'int': {'base'},  # 'x' itself is positional-only in CPython
+    'round': {'number', 'ndigits'},
     'zip': {'strict'},
     'dict': None,  # arbitrary: keyword arguments ARE dict entries
 }
@@ -2726,13 +2727,14 @@ class Compiler(boxclosure.ClosureMixin):
         # The size gate uses only local proofs (BIGINT.md rules 2-4): no call-site, field or container scan.
         # In exact mode (unified.exact_enabled) only module code that can itself make a big int keeps every int boxed:
         # a marked function called from it returns its big ints boxed.
-        _mark_fn = bigcap.own_marked if unified.exact_enabled() else bigcap.marked
-        _marks = _mark_fn(mix_tree, local=False)
+        import walkmemo
+        _own_marks = unified.exact_enabled()
+        _marks = walkmemo.marks(mix_tree, _own_marks, local=False)
         _prelude = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
         if '<module>' in _marks and _prelude:
             _own = copy.copy(mix_tree)
             _own.body = [n for n in mix_tree.body if getattr(n, 'name', None) not in _prelude]
-            _marks = _mark_fn(_own, local=False)
+            _marks = walkmemo.marks(_own, _own_marks, local=False)
         if unified.enabled() and ('<program>', '*') not in self.u_demote and not unified.nan_capable(mix_tree) \
                 and '<module>' not in _marks:     # the module code can need a big int: every int stays boxed
             self.uplan = unified.analyze(self, tree, self.u_demote)
@@ -7241,7 +7243,8 @@ class Compiler(boxclosure.ClosureMixin):
         if pymix is None or os.environ.get('AIL_NO_MIX') or not self.allow_mix:
             return
         try:
-            report = pymix.analyze(source)
+            import walkmemo
+            report = walkmemo.mix_report(pymix, source)
         except Exception:
             return
         if not report.candidates:
@@ -9763,11 +9766,26 @@ class Compiler(boxclosure.ClosureMixin):
         return t
 
     def _b_round(self, args, kwargs, ctx):
-        if not args or len(args) > 2 or kwargs:
+        pos = list(args)
+        if len(pos) > 2 or (kwargs and set(kwargs) - {'number', 'ndigits'}):
             raise Unsupported('round() with other than (number[, ndigits])')
-        v = self.expr(args[0], ctx)
-        has_n = len(args) == 2
-        n = self.expr(args[1], ctx) if has_n else 'ail_box_none()'
+        if 'number' in kwargs and pos:
+            raise Unsupported('round() got multiple values for argument number')
+        if not pos and 'number' not in kwargs:
+            raise Unsupported('round() missing required argument number')
+        if 'ndigits' in kwargs and len(pos) > 1:
+            raise Unsupported('round() got multiple values for argument ndigits')
+        # Lower in source order: positional arguments first, then keywords as written.
+        # CPython evaluates them left-to-right, so round(ndigits=dig(), number=num())
+        # must call dig() before num(); binding keywords by name here used to reorder them.
+        bound = {}
+        for i, node in enumerate(pos):
+            bound['number' if i == 0 else 'ndigits'] = self.expr(node, ctx)
+        for key, node in kwargs.items():
+            bound[key] = self.expr(node, ctx)
+        v = bound['number']
+        has_n = 'ndigits' in bound
+        n = bound['ndigits'] if has_n else 'ail_box_none()'
         t = ctx.tmp()
         ctx.emit('st = ail_bi_round(cx, &%s, %s, %d, %s);' % (t, v, has_n, n))
         ctx.check()
@@ -12927,6 +12945,22 @@ def _lazy_raising_genexp(tree):
 def build(source, report, allow_mix=True):
     """One build with the big int support in the program when it can reach it, else (byte for byte what it was before the big ints)
     without (biggate.py): the first pass has it, a second pass without runs when the first shows no creator reachable."""
+    import walkmemo
+    repeat = walkmemo.failed_build(source, allow_mix)
+    if repeat is not None:
+        # the same source, mode and environment was refused earlier in this process (pyc builds it again after the
+        # typed path's later attempts): the refusal is a function of those, so it is raised again without the 8-25 s
+        biggate.ON = getattr(repeat, '_biggate_on', biggate.ON)
+        raise repeat
+    try:
+        return _build_once(source, report, allow_mix)
+    except Unsupported as refusal:
+        refusal._biggate_on = biggate.ON
+        walkmemo.remember_failure(source, allow_mix, refusal)
+        raise
+
+
+def _build_once(source, report, allow_mix):
     mode = os.environ.get('AIL_BIGINT', 'auto')
     import intmode
     int64 = intmode.int64_python()
@@ -13002,6 +13036,10 @@ def _build(source, report, allow_mix=True):
         except boxclosure.NeedCells as need:
             # a closure shares names its enclosing function kept in plain slots: cells from the start
             hints.setdefault(need.fname, set()).update(need.names)
+        except Unsupported as refusal:
+            # no typed clone wired: a build with `allow_mix=False` takes exactly the same road (walkmemo.failed_build)
+            refusal._mix_inert = not compiler.mix_typed
+            raise
     else:
         raise Unsupported('closures nested too deeply to settle their shared names')
     if compiler.dunder_ops:

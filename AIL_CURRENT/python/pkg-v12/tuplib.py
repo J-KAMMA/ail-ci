@@ -54,6 +54,12 @@ class Lower(Stmts, Calls, Lams, Exprs):
         self.source = source
         self.tree = ast.parse(source)
         self.gen = G.Gen()
+        self.gen.key_args = any(
+            isinstance(n, ast.ExceptHandler) and n.name is not None and (
+                isinstance(n.type, ast.Name) and n.type.id == 'KeyError' or
+                isinstance(n.type, ast.Tuple) and any(isinstance(x, ast.Name) and x.id == 'KeyError'
+                                                      for x in n.type.elts))
+            for n in ast.walk(self.tree))
         self.hints = {} if hints is None else hints
         self.rets_in = {} if rets is None else rets
         self.rets_out = {}

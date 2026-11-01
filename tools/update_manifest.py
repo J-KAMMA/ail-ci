@@ -8,8 +8,10 @@ The pins live one per line in AIL_CURRENT/manifest.d/<xx>.txt (see AIL_CURRENT/a
 MANIFEST.json, so pull requests that touch different files edit different lines and merge cleanly.
 Resolving a merge: take either side of any manifest.d conflict (or leave the markers in), then run
 this script without --check; it tolerates conflict markers in the shards and recomputes every pin from
-the files, so the result is the same whichever side was kept.  A legacy MANIFEST.json that still holds
-the sha256/files/sdk_files maps is converted to the shard layout on the first write.
+the files, so the result is the same whichever side was kept.  A new compiler source under
+python/pkg-v12 or stdlib is pinned with the s flag even when the kept side had no pin for it, so the
+wheel still selects it.  A legacy MANIFEST.json that still holds the sha256/files/sdk_files maps is
+converted to the shard layout on the first write.
 """
 import hashlib, json, re, subprocess, sys
 from pathlib import Path
@@ -24,6 +26,12 @@ LEGACY_KEYS = ("sha256", "files", "sdk_files")
 
 def sha(name):
     return hashlib.sha256((SRC / name).read_bytes()).hexdigest()
+
+
+def sdk_source(name):
+    """A compiler source that the wheel and an exported SDK must carry."""
+    return (name.startswith(("python/pkg-v12/", "stdlib/")) and name.endswith((".py", ".h", ".c"))
+            and "__pycache__" not in name.split("/"))
 
 
 def main():
@@ -71,10 +79,16 @@ def main():
     must = {name for name, (_, flags) in pins.items() if "s" in flags}
     must |= {n for n in names if n.startswith("tests.d/") and n.endswith(".txt")}
     must |= {n for n in names if n.endswith(".py") and (n.startswith("python/pkg-v12/") or n[:-3] in registered)}
+    must |= {n for n in names if sdk_source(n)}
     unpinned = sorted(n for n in must if n in names and not pins.get(n, ("",))[0])
     for name in unpinned:
         print(("unpinned " if check else "pinned ") + name)
-        pins[name] = (sha(name), pins.get(name, ("", ""))[1])
+        flags = pins.get(name, ("", ""))[1]
+        if sdk_source(name):
+            # A merge that keeps the side without a new compiler file's pin must restore it as an SDK
+            # file: test_ail_packaging fails when a pinned compiler file is not in sdk_files.
+            flags = ail_manifest._flags(flags + "s")
+        pins[name] = (sha(name), flags)
     for name, digest in stale.items():
         print(("stale " if check else "updated ") + name)
         pins[name] = (digest, pins[name][1])

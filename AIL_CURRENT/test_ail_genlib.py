@@ -23,6 +23,7 @@ partial() is called (a def or lambda of the program with plain parameters), so i
 """
 import ast
 import datetime as D
+import heapq
 import itertools
 import json
 import math
@@ -197,6 +198,80 @@ class G1Prelude(unittest.TestCase):
             self.assertEqual(outcome(lambda: list(G._ail_batched(data, k))), outcome(lambda: list(itertools.batched(data, k))))
             self.assertEqual(list(G._ail_repeat(7, k)), list(itertools.repeat(7, k)))
         self.assertEqual(list(itertools.islice(G._ail_repeat("x"), 3)), ["x"] * 3)
+
+    def test_merge(self):
+        rng = random.Random(7)
+        for _ in range(2500):
+            streams = []
+            for _ in range(rng.randrange(0, 5)):
+                values = [rng.randrange(-4, 5) for _ in range(rng.randrange(0, 7))]
+                if rng.random() < 0.7:
+                    values.sort(reverse=rng.random() < 0.3)
+                streams.append(values)
+            reverse = rng.random() < 0.5
+            key = rng.choice([None, lambda v: (v % 3, -v), lambda v: -v])
+            self.assertEqual(list(G._ail_merge(*streams, key=key, reverse=reverse)),
+                             list(heapq.merge(*streams, key=key, reverse=reverse)), (streams, key, reverse))
+        self.assertEqual(list(G._ail_merge()), [])
+        self.assertEqual(list(itertools.islice(G._ail_merge(itertools.count(), itertools.count(0, 2)), 10)),
+                         list(itertools.islice(heapq.merge(itertools.count(), itertools.count(0, 2)), 10)))
+        self.assertEqual(outcome(lambda: list(G._ail_merge([1], key=1))),
+                         outcome(lambda: list(heapq.merge([1], key=1))))
+
+        calls = []
+
+        def saw(v):
+            calls.append(v)
+            return v
+
+        self.assertEqual(list(G._ail_merge([1, 2, 3], key=saw)), [1, 2, 3])
+        self.assertEqual(calls, [1])
+        calls.clear()
+        self.assertEqual(list(G._ail_merge([1, 3], [2, 4], key=saw)), [1, 2, 3, 4])
+        self.assertEqual(calls, [1, 2, 3, 4])
+
+        def boom(v):
+            if v == 2:
+                raise ValueError("boom")
+            return v
+
+        self.assertEqual(list(G._ail_merge([1, 2, 3], key=boom)), [1, 2, 3])
+
+        class OnlyLt:
+            def __init__(self, name, rank):
+                self.name = name
+                self.rank = rank
+
+            def __lt__(self, other):
+                return self.rank < other.rank
+
+            def __repr__(self):
+                return self.name
+
+        a = [OnlyLt("a", 1), OnlyLt("b", 1)]
+        b = [OnlyLt("c", 1), OnlyLt("d", 1)]
+        for reverse in (False, True):
+            self.assertEqual([v.name for v in G._ail_merge(a, b, reverse=reverse)],
+                             [v.name for v in heapq.merge(a, b, reverse=reverse)])
+
+        class NeverEqual(OnlyLt):
+            def __eq__(self, other):
+                return False
+
+        same = NeverEqual("s", 1)
+        c = [same, NeverEqual("e", 2)]
+        d = [same, NeverEqual("f", 2)]
+        for reverse in (False, True):
+            self.assertEqual([v.name for v in G._ail_merge(c, d, reverse=reverse)],
+                             [v.name for v in heapq.merge(c, d, reverse=reverse)])
+
+        nan = float("nan")
+        for streams in ([[nan, 1.0], [nan, 2.0]],
+                        [[float("nan"), 1.0], [float("nan"), 2.0]],
+                        [[float("nan"), 1.0], [float("nan"), 2.0], [float("nan"), 3.0]]):
+            got = list(G._ail_merge(*streams))
+            want = list(heapq.merge(*streams))
+            self.assertEqual([repr(v) for v in got], [repr(v) for v in want])
 
     def test_isclose(self):
         rng = random.Random(4)
@@ -999,7 +1074,7 @@ class G3Refusals(unittest.TestCase):
             ("from datetime import date\nprint(date.today())\n", "datetime.date.today is not built"),
             ("import datetime\nprint(datetime.timezone.utc)\n", "datetime.timezone"),
             ("import json\nprint(json.dumps({}, cls=object))\n", "keyword argument cls is not built"),
-            ("import statistics\nprint(statistics.quantiles([1, 2, 3, 4]))\n", "statistics.quantiles"),
+            ("import statistics\nprint(statistics.linear_regression([1, 2, 3, 4], [2, 4, 6, 8]))\n", "statistics.linear_regression"),
             ("import json\nprint(json.load(open('x')))\n", "json.load"),
             ("import itertools\nprint(list(itertools.product([1], foo=2)))\n", "product() with a keyword argument other than repeat"),
             ("from functools import partial\nprint(partial(print, 1)())\n", "functools.partial() of anything but a def or lambda"),

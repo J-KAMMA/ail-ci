@@ -1,3 +1,85 @@
+## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
+
+Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
+`jmp_buf` and its save pointer are now `__thread` in the hybrid's copy of each unit, so concurrent
+calls that overflow no longer share a jump target (the 8x5000 probe now exits 0 with CPython's
+answers). Every conversion failure after a list argument now jumps to the `fallback:` label, which
+frees each buffer once; a later non-list, wrong scalar, wrong list or failed str result no longer
+leaks the earlier list copy (50,000 calls stay at plain-CPython RSS). The wrapper still copies the
+original metadata, and now rewrites `__code__` with the original `co_name`, `co_varnames` (including
+locals), `co_nlocals`, filename and first line, so functions with locals report CPython's
+`co_varnames` and no `__wrapped__`. Helper references in the generated call body use names chosen
+against the parameter list, so parameters called `_ail_hybrid_invoke`/`_ail_hybrid_native_ref`/
+`_ail_hybrid_original_ref` (or their double-underscore spellings) no longer shadow them.
+`test_ail_cpython_hybrid` gained concurrent-overflow, later-argument-fallback and locals/helper-name
+metadata cases. Probes in `/tmp/fixprobe*` and `/tmp/fixthr` matched CPython; the standalone paths
+are unchanged.
+
+## 2026-11-01 -- CPython hybrid review fixes: fallback buffers, packaged paths, metadata (job-cpyhyb1-11011403)
+
+Fixed the three review defects in `ail build --cpython`. A fallback from the first of several list
+parameters no longer frees uninitialised buffers: every list buffer is declared as NULL before the
+conversion loops and the fallback label frees all of them (list[int] and list[float]). The packaged
+`prog.py` now sets `__file__` and `sys.argv[0]` to the original source and puts its directory first
+on `sys.path`, so `__file__`-relative data files and sibling imports work from the output directory.
+The accelerated wrapper is generated with the original parameter layout and copies annotations,
+defaults, kwdefaults, name/qualname/doc/module/dict, so `__code__.co_argcount`/`co_varnames` and
+`inspect.signature` match; keyword calls and default values still behave as CPython. The hybrid
+unit's overflow flag is now thread-local because native calls release the GIL; free-threaded CPython
+is still not claimed.
+
+Tests: `test_ail_cpython_hybrid` gained regression cases for two- and three-list fallbacks, metadata
+and `__file__`/sibling imports. Probes in `/tmp/probes/hyb_*` cover scalar int/float/bool/str
+boundaries, int64 and beyond, empty/negative lists, aliasing, mutation, kwargs/defaults, packaging
+and concurrent overflow calls; every hybrid run matched CPython. Default and general standalone
+paths are unchanged (the same probes still show the pre-existing standalone int64/metadata limits).
+
+## 2026-11-01 -- CPython hybrid prototype: typed helpers in an extension, CPython for the rest (job-cpyhyb1-11011403)
+
+Added an explicit `ail build --cpython prog.py -o DIR` mode. The output is a normal CPython program
+with a generated extension module: scalar and list-int/list-float helpers the real typed emitter
+accepts are called natively, and every call whose values do not fit the ABI, whose int overflows,
+or whose typed clone is absent runs the original Python function. The standalone build is
+untouched; the flag, the design (`docs/design/CPYTHON_HYBRID.md` and its `AIL_CURRENT/docs/design`
+copy) and the fallback rules are new.
+
+The analysis reuses `pymix.analyze` and `pyboxed2`'s mixed-mode units rather than a second
+selection rule. It runs the real CLI general build in a subprocess with a temporary
+`sitecustomize.py`, captures the units, and retries a direct `pyboxed2.build` on the original
+source when the CLI refuses the program. Annotations only seed parameter kinds (the boundary still
+checks the actual value); the CLI's `__ail_checked_*__` return markers are stripped for the unit
+emission because `to_c` otherwise refuses a checked `str` helper. Units use the int64 mixed-mode
+ABI even when the surround build uses exact ints: the existing overflow flag sends a value that
+does not fit back to Python, so no `ail_tint` crosses the extension boundary. Two mixed-mode
+details are loosened only in the analysis process: the entry regex has a word boundary so
+`ail_unwind_<name>` cannot be taken for the entry, and the str ABI's `uint8_t *_out` is accepted
+by the validator. The wrapper defines `ail_mix_drain_out` so a unit's trap path links. A
+conservative body gate then keeps any function with a possible typed trap in CPython: indexing,
+division/power, a call, `raise`/`assert`, `try`/`with`/import, `global`/`nonlocal`, deletes and
+attribute/index stores. A missed speed-up is safe; an IndexError that exits instead of reaching
+the caller's handler is not.
+
+Packaging: `prog.py` is the original source plus a preamble and a rebinding after each accelerated
+def, `prog.orig.py` is the untouched source, `prog` is the launcher, and
+`_ail_<stem>_fast.<ext>.so` plus `build.json` name the native side. A missing extension makes the
+preamble return the original functions. Every native call releases the GIL; typed parallel clones
+are linked with `-pthread`; free-threaded CPython is explicitly not claimed or tested.
+
+Results: `lab/compare` `berth_sim` and `term_rank` are general today and matched CPython on all
+26 and 43 public+hidden cases (hybrid vs CPython: 0.249 s vs 0.246 s and 0.067 s vs 0.065 s on
+medium inputs; standalone general 0.528 s / 0.126 s). Five refused corpus programs (`t440`,
+`t447`, `t472`, `t437`, `t456`) built and matched CPython on every input; they have no wrappable
+unit, so they run as CPython. The accelerated corpus example `t264` (`classify`) was also built
+and compared; the other candidates examined (`t081` `is_palindrome`, `t139` `fmt`, `t211`
+`evaluate`, `t314` `longest_non_decreasing`) index or call and now stay in CPython under the body
+gate. The boundary microbenchmark (`inc(n)=n+1`, 2M calls) is 32.5 ns/call plain,
+67.7 ns native-direct and 115.4 ns through the generated wrapper, so the mode pays only when the
+function body does enough work; a C callable type is the next step for the closure overhead.
+
+Added `AIL_CURRENT/ail_cpython_hybrid.py`, `AIL_CURRENT/test_ail_cpython_hybrid.py` and
+`AIL_CURRENT/tests.d/test_ail_cpython_hybrid.txt`. Final-state tests: test_ail_cpython_hybrid,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+
 ## 2026-11-01 -- int64 constant census: refusals named, safe folds kept
 
 `docs/design/I64_CONSTANTS.md` records the first int64-constant refusal of all 34 modules in the compiler census and
@@ -34,6 +116,29 @@ examples, the quick reference, the Numbers/FFI/Fraction/Decimal notes, A1/C171 a
 declared rows, and added the current row to `DIFFERENCES.md`. `test_ail_tutorial.py` now runs
 runtime-stop, static-refusal and exact-mode samples as well as the default ones. No compiler
 behaviour changed.
+## 2026-11-01 -- manifest merge: a regenerated compiler pin keeps its SDK flag
+
+`tools/update_manifest.py` recomputes pins after a manifest.d merge, but a new compiler source whose pin the kept
+side did not have was re-added without the `s` flag, so the wheel's `sdk_files` lost it and `test_ail_packaging`
+failed on the integration branch (`ccsplit.py` after the cc-split change). The tool now treats every `.py`/`.h`/`.c`
+under `python/pkg-v12/` or `stdlib/` as a compiler source: a missing pin is restored as an SDK pin (`s`), and every
+compiler source is pinned even when the kept side dropped it. `test_ail_registry` covers the dropped-pin merge, and
+`test_ail_packaging` passes after taking either side of the manifest.d conflict.
+
+## 2026-11-01 -- gcc time: one body per identical clone (default), parallel units and one exit cleanup (opt-in)
+
+The typed program's C (runtime, user prototypes, user functions) is one gcc run. OFF BY DEFAULT (they cost up to +0.4%
+run icount on some tasks): `AIL_CC_SPLIT=N` (N>=2) or `AIL_CC_JOBS=N` turn the split on, `AIL_EXIT_MERGE=1` the exit
+sharing. `python/pkg-v12/ccsplit.py` then cuts it into up to min(4, cores) units compiled in parallel and linked (`pyc._split_build`): the runtime and prototypes
+are in every unit, every `static` user function is in every unit, every other user function in exactly one (largest first
+onto the lightest unit; the plan depends on the text alone). Run-time state is defined once (`AIL_LINK_STATE` is the
+definition in the unit holding `main`, `extern` elsewhere; the object pool's file-scope statics get the same treatment).
+It is skipped when the movable user code is under 30000 characters, when one function holds more than 70% of it, on
+Windows, with `--debug`, `--static` and a native build report, and falls back to the one-unit build when a unit does not
+compile, link, or defines state twice (`nm` check). `AIL_CC_SPLIT_LOG=<file>` records the decision. The legacy `_rewrite_returns` shares one copy of the exit frees among the
+returns that lie outside every loop of a function with at least 8 free/release calls (`AIL_EXIT_MERGE=1`, `all` every
+return; merging returns inside loops, or in small hot functions, cost run time). A specialisation (`fmt__t0`) whose C is the
+base function's with only the name changed is emitted as a call to the base: ON by default (`AIL_NO_CLONE_DEDUPE=1` off); run icount unchanged on all 10 compare-lab tasks.
 
 ## 2026-10-31 -- ints are 64-bit by default; exact big ints are opt-in
 
