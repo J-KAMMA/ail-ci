@@ -97,6 +97,9 @@ class Refused(Exception):
     pass
 
 
+_CM_AMBIGUOUS = object()      # a ChainMap name whose single written-out display is not the runtime value
+
+
 class C:
     """A collections object: kind ctr | dds (defaultdict of scalars) | ddl (defaultdict(list)) | od | dq."""
     def __init__(self, kind, K=None, V=None, default=None, sets=False, fname=None):
@@ -2209,8 +2212,10 @@ class Scope:
         if mv is not None and mv not in ('int', 'bool'):
             r.refuse(st, '%s needs int values (found %s)' % (what, tname(mv)))
 
-    def chainmap_call(self, arg):
-        """The ChainMap(...) call an argument stands for: the call itself or the one assignment that binds it."""
+    def chainmap_call(self, arg, t):
+        """The ChainMap(...) call an argument stands for: the call itself or the one assignment that binds it.
+        A name that is a parameter or has more than one binding returns _CM_AMBIGUOUS: the written-out maps of
+        one assignment would not describe the value the call reads at run time."""
         def is_call(node):
             if not isinstance(node, ast.Call):
                 return False
@@ -2219,16 +2224,30 @@ class Scope:
             return name == 'ChainMap'
         if is_call(arg):
             return arg
-        if isinstance(arg, ast.Name):
-            found = None
-            for st in self.own():
-                if isinstance(st, ast.Assign) and len(st.targets) == 1 \
-                        and isinstance(st.targets[0], ast.Name) and st.targets[0].id == arg.id:
-                    if not is_call(st.value):
-                        return None
-                    found = st.value
-            return found
-        return None
+        if not isinstance(arg, ast.Name):
+            return None
+        assigns = [s for s in self.own()
+                   if (isinstance(s, ast.Assign) and len(s.targets) == 1
+                       and isinstance(s.targets[0], ast.Name) and s.targets[0].id == arg.id)
+                   or (isinstance(s, ast.AnnAssign) and isinstance(s.target, ast.Name)
+                       and s.target.id == arg.id and s.value is not None)]
+        chainmapish = (isinstance(t, tuple) and t[0] == 'obj' and t[1] == 'ChainMap') \
+            or any(is_call(s.value) for s in assigns)
+        if not chainmapish:
+            return None
+        stores = [0]
+
+        def walk(node):
+            if node is not self.fn and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                return
+            if isinstance(node, ast.Name) and node.id == arg.id and isinstance(node.ctx, ast.Store):
+                stores[0] += 1
+            for child in ast.iter_child_nodes(node):
+                walk(child)
+        walk(self.fn)
+        if arg.id in self.params or stores[0] != 1 or len(assigns) != 1 or not is_call(assigns[0].value):
+            return _CM_AMBIGUOUS
+        return assigns[0].value
 
     def chainmap_matches(self, c, arg):
         """True when every mapping in a ChainMap display has the Counter's key type and int values."""
@@ -2247,7 +2266,11 @@ class Scope:
             r.refuse(st, 'Counter.subtract takes one iterable or mapping')
         arg = call.args[0]
         t = r.infer(arg, self.env)
-        cm = self.chainmap_call(arg)
+        cm = self.chainmap_call(arg, t)
+        if cm is _CM_AMBIGUOUS:
+            r.refuse(st, 'Counter.subtract(ChainMap): the ChainMap argument must be a direct ChainMap(...) call '
+                     'or a name assigned exactly once by a ChainMap(...) display, not a parameter or a name with '
+                     'more than one binding')
         if cm is not None or (isinstance(t, tuple) and t[0] == 'obj' and t[1] == 'ChainMap'):
             if not self.chainmap_matches(c, cm):
                 r.refuse(st, 'Counter.subtract(ChainMap): the ChainMap keys / values must be written out in '

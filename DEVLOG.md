@@ -1,3 +1,18 @@
+## 2026-11-01 -- std_collections review 4: refuse a ChainMap name with more than one binding
+
+The review found that `c.subtract(cm)` lowered a `ChainMap` name through the last written-out
+assignment, so when `cm` was reassigned (in a branch or after the call) the key check saw one map
+while the runtime value was another; a `str` key then landed in an int-typed Counter and printed
+unquoted (`Counter({1: 2, a: -3})` where CPython prints `Counter({1: 2, 'a': -3})`).  `collib.py`'s
+`chainmap_call` now requires the argument to be a direct `ChainMap(...)` call or a name bound
+exactly once by a `ChainMap(...)` display and not also a parameter; any other ChainMap name is
+refused by name, so the default build falls back to the general path, whose runtime dispatch matches
+CPython.  Probes `/tmp/probes/fix/p_cmbranch`, `p_cmreassign`, `p_cmname`, `p_cmdirect`,
+`p_cmsingle_str`, `p_cmalias`, `p_cmmixed`, `p_cmbranchsingle` and `p_cmparam` match CPython or are
+refused by name on both builds (the key-switch probes `p_keyswitch_store`/`_update`/`_subtract`
+also match).  `test_ail_std_collections`, `test_ail_collections`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass; the manifest `--check` exits 0.
+
 ## 2026-11-01 -- std_collections review 3: refuse key-type switches on a typed Counter
 
 The review found that a `Counter({1: 2})` typed from its dict literal now accepted a `str` key
