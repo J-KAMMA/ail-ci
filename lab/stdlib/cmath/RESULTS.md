@@ -91,9 +91,11 @@ The review's eight counterexamples in `/tmp/rprobes` were re-run and all now mat
   arguments combine as CPython does (`complex(1+2j, 3)` is `(1+5j)`, `complex(1+2j, 3+4j)` is `(-3+5j)`),
   with the constructor's own messages (`first argument ...`, `can't take second arg if first is a string`,
   `second arg can't be a string`). Signed zeros are preserved exactly.
-* `z ** n` only takes the integer power path for a finite integral `n`; every other exponent uses
-  CPython's `_Py_c_pow` algorithm with its errno mapping: a domain error in `cos`/`sin` (an infinite
-  phase) raises `ZeroDivisionError: 0.0 to a negative or complex power`, a non-finite result raises
+* `z ** n` takes the integer power path for a finite integral `n` in either direction, including a
+  reflected real base (`float("inf") ** (2+0j)` is `(nan+nanj)`, while the exponent `1` still raises
+  `OverflowError: complex exponentiation`). Every other exponent uses CPython's `_Py_c_pow` algorithm
+  with its errno mapping: a domain error in `cos`/`sin` (an infinite phase) raises
+  `ZeroDivisionError: 0.0 to a negative or complex power`, a non-finite result raises
   `OverflowError: complex exponentiation`, and NaN results such as `2j ** nan` are `(nan+nanj)`. A zero
   base with a negative or complex exponent raises `ZeroDivisionError: 0.0 to a negative or complex
   power`; small non-negative integer exponents preserve the signed zeros CPython's `c_powi` does.
@@ -111,6 +113,9 @@ The review's eight counterexamples in `/tmp/rprobes` were re-run and all now mat
   applies CPython's argument parsing, including duplicate keywords, non-string keys, missing or extra
   positional arguments and `isclose`'s keyword names. `cmath.isclose(1.0, 1.0, **{})` is `True`, and
   `cmath.sqrt(**{})` raises CPython's `TypeError: cmath.sqrt() takes exactly one argument (0 given)`.
+  A non-mapping value raises CPython's `cmath.<name>() argument after ** must be a mapping, not
+  <type>` (list, int, NoneType, str, tuple), a custom mapping with `keys()`/`__getitem__` is accepted,
+  and a starred positional argument before the mapping builds and matches.
 
 The regression cases are checked by `test_ail_std_cmath.py` (`test_review_regressions`) against CPython.
 
@@ -120,7 +125,8 @@ The regression cases are checked by `test_ail_std_cmath.py` (`test_review_regres
 | --- | --- | --- |
 | `p_pow.py` | infinite/NaN exponents, zero base with negative/complex exponents, integer exponents 100 and 101, reflected power | g, d match |
 | `p_pow2.py`, `p_powgrid.py` | the review's five non-finite-exponent counterexamples; a 15 x 20 grid over zeros, signed zeros, infinities, NaNs and huge values, including signed-zero bases | g, d match |
-| `p_kw2.py` | `**mapping` for every `cmath` function: empty and non-empty mappings, `a`/`b`/`rel_tol`/`abs_tol`, duplicates, non-string keys, unknown keywords, missing/extra positional arguments, `*args` with `**` | g, d match |
+| `p_kw2.py`, `p_kwbad.py` | `**mapping` for every `cmath` function: empty and non-empty mappings, `a`/`b`/`rel_tol`/`abs_tol`, duplicates, non-string keys, unknown keywords, missing/extra positional arguments, `*args` with `**`; non-mapping list/int/None/str/tuple values, a custom `keys()` mapping, and a tuple starting with `"kw"` | g, d match |
+| `p_rpow2.py` | reflected powers: `float("inf") ** (n+0j)` for n = 0, ±1, ±2, ±3, 99, 100, 101, finite bases, signed zeros and overflow boundaries | g, d match |
 | `p_star.py` | `cmath.isclose(1.0, 1.0, **{})` and `cmath.sqrt(**{})` | g, d match |
 | `p_special.py` | `log` with bases `0`, `1`, `1j`, `-1`, `e`, plus `log(0)`, `atanh(±1)`, infinite imaginary `exp` | g, d match |
 | `p_complex2.py` | every `complex(...)` form, malformed strings, `rect`/`sqrt`/`phase` argument types, `isclose` arity/keywords | g, d match |

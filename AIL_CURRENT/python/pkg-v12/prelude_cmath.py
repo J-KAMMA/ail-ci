@@ -305,7 +305,7 @@ class _AilComplex:
         return _ail_cm_cpow(self, b)
 
     def __rpow__(self, other):
-        return _ail_cm_pow(_ail_cm_as(other), self)
+        return _ail_cm_as(other).__pow__(self)
 
     def __eq__(self, other):
         if isinstance(other, _AilComplex):
@@ -347,21 +347,59 @@ def _ail_cm_raise(message: str, *values) -> None:
     raise TypeError(message)
 
 
+class _AilCMKeyword:
+    def __init__(self, key: str, value) -> None:
+        self.key = key
+        self.value = value
+
+
+class _AilCMStarred:
+    def __init__(self, value) -> None:
+        self.value = value
+
+
+def _ail_cm_kwarg(key: str, value):
+    return _AilCMKeyword(key, value)
+
+
+def _ail_cm_star(value):
+    return _AilCMStarred(value)
+
+
+def _ail_cm_args(*parts):
+    out = []
+    for part in parts:
+        if isinstance(part, _AilCMStarred):
+            for item in part.value:
+                out.append(item)
+        else:
+            out.append(part)
+    return tuple(out)
+
+
 def _ail_cm_kw(name: str, args, *parts):
     kw = {}
     for part in parts:
-        if isinstance(part, dict):
-            for key in part:
-                if not isinstance(key, str):
-                    raise TypeError("keywords must be strings")
-                if key in kw:
-                    raise TypeError("cmath.%s() got multiple values for keyword argument '%s'" % (name, key))
-                kw[key] = part[key]
-        else:
-            key = part[1]
+        if isinstance(part, _AilCMKeyword):
+            key = part.key
             if key in kw:
                 raise TypeError("cmath.%s() got multiple values for keyword argument '%s'" % (name, key))
-            kw[key] = part[2]
+            kw[key] = part.value
+            continue
+        if isinstance(part, dict):
+            keys = list(part.keys())
+        else:
+            try:
+                keys = list(part.keys())
+            except AttributeError:
+                raise TypeError("cmath.%s() argument after ** must be a mapping, not %s"
+                                % (name, _ail_cm_tname(part)))
+        for key in keys:
+            if not isinstance(key, str):
+                raise TypeError("keywords must be strings")
+            if key in kw:
+                raise TypeError("cmath.%s() got multiple values for keyword argument '%s'" % (name, key))
+            kw[key] = part[key]
     if name == 'isclose':
         return _ail_cm_kw_isclose(args, kw)
     if name == 'log':

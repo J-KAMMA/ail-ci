@@ -150,10 +150,14 @@ def rewrite(tree, text):
                     if k.arg is None:
                         parts.append(k.value)
                     else:
-                        parts.append(ast.Tuple(elts=[ast.Constant(value='kw'),
-                                                     ast.Constant(value=k.arg), k.value],
-                                               ctx=ast.Load()))
-                args = ast.Tuple(elts=list(node.args), ctx=ast.Load())
+                        parts.append(_call('_ail_cm_kwarg', [ast.Constant(value=k.arg), k.value]))
+                values = []
+                for a in node.args:
+                    if isinstance(a, ast.Starred):
+                        values.append(_call('_ail_cm_star', [a.value]))
+                    else:
+                        values.append(a)
+                args = _call('_ail_cm_args', values)
                 lowered = _call('_ail_cm_kw', [ast.Constant(value=found), args] + parts)
                 return stdlib5.Replace(fix).visit(lowered)
         if isinstance(node, ast.Call) and not any(isinstance(a, ast.Starred) for a in node.args):

@@ -1,3 +1,20 @@
+## 2026-11-01 -- stdlib cmath review 2: non-mapping `**` and reflected powers (job-std_cmath-11020402)
+
+Fixed the two defects in review 2. A `cmath.f(...)` call with `**value` now distinguishes explicit
+keywords from the mapping value with a marker class, so a non-mapping value raises CPython's
+`cmath.<name>() argument after ** must be a mapping, not <type>` instead of indexing a tuple; dict
+keys, custom mapping objects (`keys()`/`__getitem__`), duplicate keys and non-string keys follow
+CPython. A starred positional argument with `**` is collected at runtime, so
+`cmath.isclose(*[1.0, 1.0], **{"rel_tol": 1e-9})` builds and matches. Reflected powers now take the
+same integer fast path as `complex ** complex`, so `float("inf") ** (2+0j)` is `(nan+nanj)` (and
+`float("inf") ** (1+0j)` still raises `OverflowError`), and finite reflected powers use CPython's
+`c_powi` rounding.
+
+Probes `p_kwbad` and `p_rpow2` cover the review counterexamples plus list item / attribute / dict
+value mappings, custom mappings, non-string keys, starred arguments, signed zeros and ±100/±101
+exponents; `p_rev1`, `p_rev2`, `p_kwmore`, `p_kwtypes2`, `p_rpow`, `p_powgrid`, `p_powedge` and
+`p_over` match CPython on both `cmp.sh` builds. `test_ail_std_cmath` gained the new regressions.
+
 ## 2026-11-01 -- stdlib cmath review fixes: non-finite powers and **mapping (job-std_cmath-11020402)
 
 Fixed the two remaining review defects. Complex `**` now follows CPython 3.12's `_Py_c_pow` errno
