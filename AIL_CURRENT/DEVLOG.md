@@ -149,6 +149,17 @@ compile, link, or defines state twice (`nm` check). `AIL_CC_SPLIT_LOG=<file>` re
 returns that lie outside every loop of a function with at least 8 free/release calls (`AIL_EXIT_MERGE=1`, `all` every
 return; merging returns inside loops, or in small hot functions, cost run time). A specialisation (`fmt__t0`) whose C is the
 base function's with only the name changed is emitted as a call to the base: ON by default (`AIL_NO_CLONE_DEDUPE=1` off); run icount unchanged on all 10 compare-lab tasks.
+## 2026-11-01 -- Decimal and Fraction compute exactly in every int mode; property stores stop by name (job decexact2)
+
+The Decimal/Fraction prelude now runs its internal arithmetic at exact depth in the default int64 mode too, using the existing
+per-function exact-int machinery, so `Decimal(1)/Decimal(3)`, `sqrt`, `getcontext().prec = 50`, `Decimal("1e30") + 1` and
+`Decimal(2) ** 100` match CPython without `--exact-int`; every successful prelude return leaves through `ail_exact_visible`,
+so an early return cannot leak an exact value. Ints that leave the library (`int(d)`, `as_tuple()`, `Fraction.numerator`, ...)
+still follow the user mode and stop with the int64 overflow message when they do not fit. A store to a getter-only property
+raises `AttributeError: property 'x' of '<run-time class>' object has no setter` instead of silently creating an instance
+attribute; a plain class attribute (or method) bound after a property in the same class body, or in a subclass, shadows it for
+read and store as CPython does. `test_ail_int64_default.py` covers the same-class and subclass cases; probes
+`/tmp/probes/p_sameclass_*` match CPython on both builds.
 
 ## 2026-10-31 -- ints are 64-bit by default; exact big ints are opt-in
 

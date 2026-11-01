@@ -2874,6 +2874,20 @@ class Compiler(boxclosure.ClosureMixin):
             any(name in cls['methods'] for name in ('__iadd__', '__isub__', '__imul__',
                                                     '__iand__', '__ior__', '__ixor__'))
             for cls in self.classes.values())
+        import intmode
+        self.exact_all = intmode.exact_python()
+        self.exact_cnames = set()
+        if not self.exact_all:
+            _has = lambda _cls, _pre: _cls in self.classes and any(k.startswith(_pre) for k in self.functions)
+            _libs = [c for c, p in (('Decimal', '_ail_dec_'), ('Fraction', '_ail_fr_')) if _has(c, p)]
+            for _cls_name in _libs:
+                _cls = self.classes.get(_cls_name)
+                if _cls is not None:
+                    for _info in _cls['methods'].values():
+                        self.exact_cnames.add(_info['cname'])
+            for _key, _info in self.functions.items():
+                if _key.startswith(('_ail_dec_', '_ail_fr_')):
+                    self.exact_cnames.add(_info['cname'])
 
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
@@ -3164,6 +3178,8 @@ class Compiler(boxclosure.ClosureMixin):
             return ''.join(parts)
         parts.append('int main(int argc, char **argv) {\n' if self.uses_argv else 'int main(void) {\n')
         parts.append('    ail_ctx cxs, *cx = &cxs;\n    ail_ctx_init(cx);\n')
+        if self.exact_all:
+            parts.append(biggate.cond('    cx->exact_depth = 1;\n'))
         parts.extend(setup)
         if self.uses_argv:
             k = self.global_slots['g:__ail_sys_argv']
@@ -3873,6 +3889,8 @@ class Compiler(boxclosure.ClosureMixin):
         lines = []
         lines.append('int main(int argc, char **argv) {\n')
         lines.append('    ail_ctx cxs, *cx = &cxs;\n    ail_ctx_init(cx);\n')
+        if self.exact_all:
+            lines.append(biggate.cond('    cx->exact_depth = 1;\n'))
         lines.extend(setup_lines)
         lines.append('    if (argc < %d) { fputs("%s\\n", stderr); ail_ctx_destroy(cx); return 2; }\n' %
                      (2 + len(extra), usage))
@@ -4399,6 +4417,19 @@ class Compiler(boxclosure.ClosureMixin):
             if guard:
                 head = 'static ail_st %s(ail_ctx *cx, ail_obj *out%s) {\n' % (impl_cname, sig)
                 full = full.replace(head, head + guard, 1)
+        if self.exact_cnames and biggate.ON and info['cname'] in self.exact_cnames:
+            _enter = '    AIL_FRAME_ENTER(cx, f, %d);\n' % n_slots
+            full = full.replace(_enter, _enter + '    ail_exact_enter(cx);\n', 1)
+            full = full.replace('AIL_FRAME_LEAVE(cx, f);', 'ail_exact_leave(cx); AIL_FRAME_LEAVE(cx, f);')
+            # Every successful return must check the value it hands back, not only the tail return: a
+            # source-level `return` inside an `if` leaves through its own AIL_FRAME_LEAVE.  The rewrite
+            # above already put `ail_exact_leave` in front of every frame leave; match that prefix with
+            # any indentation (and on one line, e.g. the finally COMPLETE_RETURN arm).
+            _guard = ('if (cx->exact_depth == 1) { ail_st _vst = ail_exact_visible(cx, out); '
+                      'if (_vst != AIL_OK) { ail_exact_leave(cx); AIL_FRAME_LEAVE(cx, f); return _vst; } }\n')
+            full = re.sub(r'(?m)([ \t]*)ail_exact_leave\(cx\); AIL_FRAME_LEAVE\(cx, f\);(\s*)return AIL_OK;',
+                          lambda m: '%s%s%sail_exact_leave(cx); AIL_FRAME_LEAVE(cx, f);%sreturn AIL_OK;'
+                          % (m.group(1), _guard, m.group(1), m.group(2)), full)
         self.top_defs.append(full)
         if info['lru_cache']:
             self._emit_lru_wrapper(info)
@@ -6600,9 +6631,13 @@ class Compiler(boxclosure.ClosureMixin):
         ctx.check()
         return t
 
-    def _property_owner_cond(self, obj, c):
-        return '((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, ' \
-               'g_slots_arr[%d]))' % (obj, obj, obj, self.global_slots['class:' + c])
+    def _property_owner_cond(self, obj, c, blockers=()):
+        cond = ('((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, '
+                'g_slots_arr[%d]))' % (obj, obj, obj, self.global_slots['class:' + c]))
+        for d in blockers:
+            cond += (' && !((%s.tag == AIL_T_INST || %s.tag == AIL_T_EXC) && ail_class_is_or_subclass(((ail_instobj *)%s.o)->cls, '
+                     'g_slots_arr[%d]))' % (obj, obj, obj, self.global_slots['class:' + d]))
+        return cond
 
     def _property_read(self, node, owners, ctx):
         """obj.NAME where a class of the program has a @property NAME: its getter for an instance of such a class
@@ -6613,7 +6648,9 @@ class Compiler(boxclosure.ClosureMixin):
         first = True
         for c in owners:
             info = self.classes[c]['methods'][node.attr]
-            ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
+            blockers = [d for d in self.class_order if self._is_subclass_of(d, c)
+                        and self._class_defines_plain_attr(d, node.attr, include_methods=False)]
+            ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c, blockers)))
             first = False
             ctx.indent += 1
             ctx.emit('st = %s(cx, &%s, %s);' % (info['cname'], t, obj))
@@ -7686,6 +7723,27 @@ class Compiler(boxclosure.ClosureMixin):
             name = self.classes[name]['base']
             seen += 1
         return False
+
+    def _class_defines_plain_attr(self, c, attr, include_methods=True):
+        """True when c's own body binds attr to a non-property value (a class attribute, and with
+        include_methods a plain method), so it shadows an inherited property for c and its subclasses."""
+        cls = self.classes.get(c)
+        if not cls:
+            return False
+        last = False
+        for entry in cls.get('class_body', []):
+            if entry[1] != attr:
+                continue
+            if entry[0] == 'a':
+                last = True
+            elif entry[0] == 'p':
+                last = False
+            elif include_methods:
+                info = cls['methods'].get(attr)
+                last = not (info is not None and info.get('is_property'))
+            else:
+                last = False
+        return last
 
     def _is_exc_class(self, name):
         """The class derives from a builtin exception class."""
@@ -11770,16 +11828,32 @@ class Compiler(boxclosure.ClosureMixin):
             obj = self.expr(target.value, ctx)
             self.attr_names.add(target.attr)
             setters = [c for c in self.class_order if '__ail_set_' + target.attr in self.classes[c]['methods']]
-            if setters:
-                # obj.NAME = v where a class has a property setter for NAME
+            getters = [c for c in self.class_order
+                       if self.classes[c]['methods'].get(target.attr, {}).get('is_property')]
+            read_only = [c for c in getters
+                         if '__ail_set_' + target.attr not in self.classes[c]['methods']]
+            special = sorted(set(setters) | set(read_only),
+                             key=lambda c: -sum(1 for k in self.classes if self._is_subclass_of(c, k)))
+            if special:
+                # obj.NAME = v: a property setter runs it; a property with no setter raises
+                # AttributeError, as CPython does, instead of silently shadowing the property.
                 first = True
-                for c in setters:
-                    info = self.classes[c]['methods']['__ail_set_' + target.attr]
-                    ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c)))
+                for c in special:
+                    blockers = [d for d in self.class_order if self._is_subclass_of(d, c)
+                                and self._class_defines_plain_attr(d, target.attr)]
+                    ctx.emit('%sif (%s) {' % ('' if first else '} else ', self._property_owner_cond(obj, c, blockers)))
                     first = False
                     ctx.indent += 1
-                    dummy = ctx.tmp()
-                    ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], dummy, obj, value_c))
+                    if c in setters:
+                        info = self.classes[c]['methods']['__ail_set_' + target.attr]
+                        dummy = ctx.tmp()
+                        ctx.emit('st = %s(cx, &%s, %s, %s);' % (info['cname'], dummy, obj, value_c))
+                    else:
+                        nb = ctx.new_cvar('pnb')
+                        ctx.emit('{ char %s[220]; snprintf(%s, sizeof %s, "property \'%%s\' of \'%%s\' '
+                                 'object has no setter", %s, ail__tname_c(%s)); st = ail_raise_c(cx, '
+                                 'AIL_B_ATTRIBUTEERROR, %s); }'
+                                 % (nb, nb, nb, c_str_literal(target.attr), obj, nb))
                     ctx.check()
                     ctx.indent -= 1
                 ctx.emit('} else {')
@@ -13485,6 +13559,21 @@ def _lazy_raising_genexp(tree):
     return None
 
 
+_EXACT_PRELUDE_UNITS = frozenset(('Decimal', 'Fraction'))
+
+
+def _exact_library(source):
+    """Does this program use one of the exact-int library preludes (Decimal/Fraction)?  Their coefficients are Python ints by
+    definition, so their own code always needs the big int runtime even in the default int64 mode; the rest of the program
+    keeps int64 (the prelude functions enter `exact_depth`, bigint_obj.py).  The prelude unit list is enough when the front
+    end wrote it; the source fingerprint covers a build that takes the text directly (`--syntax python` on a non-.py file)."""
+    units = {n for n in os.environ.get('AIL_PRELUDE_UNITS', '').split('\n') if n}
+    if units & _EXACT_PRELUDE_UNITS:
+        return True
+    return ('class Decimal' in source and '_ail_dec_p10' in source) or \
+           ('class Fraction' in source and '_ail_fr_gcd' in source)
+
+
 def build(source, report, allow_mix=True):
     """One build with the big int support in the program when it can reach it, else (byte for byte what it was before the big ints)
     without (biggate.py): the first pass has it, a second pass without runs when the first shows no creator reachable."""
@@ -13507,9 +13596,12 @@ def _build_once(source, report, allow_mix):
     mode = os.environ.get('AIL_BIGINT', 'auto')
     import intmode
     int64 = intmode.int64_python()
-    if int64:
+    exact_lib = int64 and _exact_library(source)
+    if int64 and not exact_lib:
         mode = 'off'        # int64 ints (the default for a Python-syntax program, intmode.py): the runtime without big ints,
         #                     whose overflow is the loud stop
+    elif exact_lib:
+        mode = 'on'         # Decimal/Fraction compute with exact ints internally in every mode
     biggate.ON = mode != 'off'
     body = _build(source, report, allow_mix)
     big = mode != 'off' and (mode == 'on' or report.get('big_enum') or biggate.wants_big(body))

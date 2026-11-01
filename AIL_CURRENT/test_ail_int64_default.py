@@ -393,5 +393,154 @@ main()
             self.assertEqual(exact_made.returncode, 0, exact_made.stderr)
 
 
+class DecimalLibrary(unittest.TestCase):
+    """Decimal/Fraction compute with exact ints internally in the default int64 mode; an int they hand back to the
+    program follows the program's mode (int(d) beyond int64 stops loudly)."""
+
+    PROGRAM = '''from decimal import Decimal, getcontext
+from fractions import Fraction
+
+print(Decimal(1) / Decimal(3))
+print(Decimal("2").sqrt())
+print(Decimal("10.50") * Decimal("3"))
+print(Decimal(2) ** 100)
+getcontext().prec = 50
+print(Decimal(1) / Decimal(3))
+print(Decimal("1e30") + 1)
+print(Fraction(1, 3) + Fraction(1, 6))
+print(Fraction(2, 1) ** 100)
+'''
+    WANT = ('0.3333333333333333333333333333\n'
+            '1.414213562373095048801688724\n'
+            '31.50\n'
+            '1.267650600228229401496703205E+30\n'
+            '0.33333333333333333333333333333333333333333333333333\n'
+            '1000000000000000000000000000001\n'
+            '1/2\n'
+            '1267650600228229401496703205376\n')
+
+    def test_library_internals_are_exact_in_both_modes(self):
+        for mode in ('default', 'force', 'exact'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                made, exe = build(tmp, self.PROGRAM, 'dec', mode)
+                self.assertEqual(made.returncode, 0, made.stderr)
+                self.assertEqual(run(exe, ''), (0, self.WANT, ''))
+
+    def test_visible_int_beyond_int64_stops(self):
+        snippets = (
+            ('int(Decimal(2) ** 100)', 'from decimal import Decimal\n'),
+            ('int(Fraction(2) ** 100)', 'from fractions import Fraction\n'),
+            ('(Decimal(2) ** 100).as_integer_ratio()', 'from decimal import Decimal\n'),
+            ('(Fraction(2) ** 100).as_integer_ratio()', 'from fractions import Fraction\n'),
+            ('(Fraction(2) ** 100).numerator', 'from fractions import Fraction\n'),
+            ('(Fraction(1, 2) ** 200).denominator', 'from fractions import Fraction\n'),
+            ('round(Decimal(2) ** 100)', 'from decimal import Decimal\n'),
+            ('(Decimal(2) ** 100).__trunc__()', 'from decimal import Decimal\n'),
+            ('round(Fraction(2) ** 100)', 'from fractions import Fraction\n'),
+            ('(Fraction(2) ** 100) // 1', 'from fractions import Fraction\n'),
+            ('math.floor(Decimal(2) ** 100)', 'import math\nfrom decimal import Decimal\n'),
+            ('math.ceil(Decimal(2) ** 100)', 'import math\nfrom decimal import Decimal\n'),
+            ('hash(Fraction(2) ** 100)', 'from fractions import Fraction\n'),
+        )
+        for expr, setup in snippets:
+            with self.subTest(expr=expr), tempfile.TemporaryDirectory() as tmp:
+                made, exe = build(tmp, setup + 'print(%s)\n' % expr, 'deci')
+                self.assertEqual(made.returncode, 0, made.stderr)
+                code, out, err = run(exe, '')
+                self.assertEqual((code, out), (1, ''))
+                self.assertEqual(err, 'OverflowError: integer overflow in int()%s\n' % SUFFIX)
+
+    def test_read_only_property_assignment_stops(self):
+        text = ('from fractions import Fraction\n'
+                'f = Fraction(1, 2)\n'
+                'f.numerator = 3\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            made, exe = build(tmp, text, 'roprop')
+            self.assertEqual(made.returncode, 0, made.stderr)
+            code, out, err = run(exe, '')
+            self.assertEqual((code, out), (1, ''))
+            self.assertIn("AttributeError: property 'numerator' of 'Fraction' object has no setter", err)
+
+    def test_inherited_property_message_names_the_runtime_type(self):
+        text = ('class A:\n'
+                '    @property\n'
+                '    def x(self):\n'
+                '        return 1\n'
+                'class C(A):\n'
+                '    pass\n'
+                'class D(C):\n'
+                '    pass\n'
+                'for o in [C(), D()]:\n'
+                '    try:\n'
+                '        o.x = 5\n'
+                '    except AttributeError as e:\n'
+                '        print("AttributeError", e)\n')
+        want = ("AttributeError property 'x' of 'C' object has no setter\n"
+                "AttributeError property 'x' of 'D' object has no setter\n")
+        for mode in ('default', 'force'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                made, exe = build(tmp, text, 'proptype', mode)
+                self.assertEqual(made.returncode, 0, made.stderr)
+                self.assertEqual(run(exe, ''), (0, want, ''))
+
+    def test_subclass_plain_attribute_shadows_the_property(self):
+        text = ('class A:\n'
+                '    @property\n'
+                '    def x(self):\n'
+                '        return 1\n'
+                'class B(A):\n'
+                '    x = 0\n'
+                'class C(A):\n'
+                '    pass\n'
+                'b = B()\n'
+                'print(b.x)\n'
+                'b.x = 7\n'
+                'print(b.x)\n'
+                'try:\n'
+                '    C().x = 5\n'
+                'except AttributeError as e:\n'
+                '    print("AttributeError", e)\n')
+        want = ("0\n"
+                "7\n"
+                "AttributeError property 'x' of 'C' object has no setter\n")
+        for mode in ('default', 'force'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                made, exe = build(tmp, text, 'propshadow', mode)
+                self.assertEqual(made.returncode, 0, made.stderr)
+                self.assertEqual(run(exe, ''), (0, want, ''))
+
+    def test_class_attribute_after_property_shadows_it(self):
+        text = ('class A:\n'
+                '    @property\n'
+                '    def x(self):\n'
+                '        return 1\n'
+                '    x = 0\n'
+                'a = A()\n'
+                'print(a.x)\n'
+                'a.x = 5\n'
+                'print(a.x)\n'
+                'print(A.x)\n')
+        want = '0\n5\n0\n'
+        for mode in ('default', 'force'):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                made, exe = build(tmp, text, 'propowner', mode)
+                self.assertEqual(made.returncode, 0, made.stderr)
+                self.assertEqual(run(exe, ''), (0, want, ''))
+
+    def test_exact_mode_hands_back_exact_ints(self):
+        text = ('from decimal import Decimal\n'
+                'from fractions import Fraction\n'
+                'print((Decimal(2) ** 100).as_integer_ratio())\n'
+                'print((Fraction(2) ** 100).numerator)\n'
+                'print((Fraction(1, 2) ** 200).denominator)\n')
+        want = ('(1267650600228229401496703205000, 1)\n'
+                '1267650600228229401496703205376\n'
+                '1606938044258990275541962092341162602522202993782792835301376\n')
+        with tempfile.TemporaryDirectory() as tmp:
+            made, exe = build(tmp, text, 'dece', 'exact')
+            self.assertEqual(made.returncode, 0, made.stderr)
+            self.assertEqual(run(exe, ''), (0, want, ''))
+
+
 if __name__ == '__main__':
     unittest.main()

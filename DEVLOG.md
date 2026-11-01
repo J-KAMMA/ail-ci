@@ -1113,6 +1113,70 @@ through arguments, a list item, a dict value and an attribute.  Added
 updated `test_ail_stdlib1.py`'s old Template-refusal case to Formatter.  Final-state tests:
 test_ail_std_string, test_ail_stdlib1, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3.
+## 2026-11-01 -- Property stores respect a subclass's plain attribute; inherited errors name the run-time type (job-decexact2-11020111)
+
+The review found the read-only property store check was over-broad: `class B(A): x = 0` under an inherited `@property x`
+was rejected, where CPython stores in the instance and reads the class attribute. A property owner now applies only
+when no more-derived class in `class_order` defines the name as a plain class attribute (the read path uses the same
+shadow test); the ordinary attribute path then handles the store. The `AttributeError` text now takes the object's
+run-time class name (`ail__tname_c`) instead of the class that defined the property, so `C(A).x = 5` says
+`property 'x' of 'C' object has no setter` and a deeper subclass names itself. Probes in `/tmp/probes`:
+`p14_subplain`, `p15_subplain2`, `p18_subplain_mixed`, `p19_subplain_setter` and `p20_subplain_deep` match CPython
+on both builds; `p16_submsg` matches the run-time class names; `p_numassign`, `p_prop`, `p_accept`, `p_frac_small` and
+exact-mode `p_exact_ret` still match. The earlier early-return escapes (`p_roundfrac`, `p_floordivfrac`,
+`p_dec_mathfloor`, `p_leaktyped`, `p_hashfrac`) still stop loudly. `test_ail_int64_default` gained both property
+cases; `test_ail_int64_default`, `test_ail_stdtop1`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (552 s, 0 failed). Manifest clean.
+
+## 2026-11-01 -- Decimal/Fraction exact-return check covers every exit; property stores stop (job-decexact2-11020111)
+
+The review found the outermost-return check was inserted only before a prelude function's final `return AIL_OK`, so a
+source-level `return` inside an `if` handed a big int back to the program: `round(Fraction(2) ** 100)`,
+`(Fraction(2) ** 100) // 1` and `math.floor/ceil(Decimal(2) ** 100)` printed the big value, and user code then computed
+with it exactly in int64 mode. `_emit_function` now applies the `exact_depth == 1` check before every successful
+`return AIL_OK` of an exact prelude function (including the finally COMPLETE_RETURN arm); each such exit stops with
+`integer overflow in int()` while internal calls (depth > 1) still pass exact values. Storing to a property with no
+setter (`Fraction(1, 2).numerator = 3`) now raises CPython's `AttributeError: property 'numerator' of 'Fraction' object
+has no setter` instead of silently shadowing it. Probes in `/tmp/probes`: `p_roundfrac`, `p_floordivfrac`,
+`p_dec_mathfloor`, `p_leaktyped` and `p_hashfrac` stop loudly on both builds; `p_numassign` and `p_prop` match CPython;
+`p_accept` and `p_frac_small` match CPython; `p_exact_ret` matches CPython with `AIL_EXACT_INT=1`. The 6 `lab/compare`
+`main.py` that build keep byte-identical `program.c` (the other 4 refuse identically). `test_ail_int64_default` gained
+the new return and property cases; `test_ail_int64_default`, `test_ail_stdtop1`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` pass (542 s, 0 failed).
+
+## 2026-11-01 -- Decimal/Fraction review: an exact int cannot escape through a returned value (job-decexact2-11011010)
+
+The review found that big ints still escaped the library into the program: `(Decimal(2) ** 100).as_integer_ratio()`
+and `Fraction(2) ** 100`'s `.numerator` / `.denominator` handed out big ints, so user code then did arbitrary
+precision arithmetic at depth 0. Every successful return of a Decimal/Fraction prelude function now checks the
+outermost return when it leaves the library (`exact_depth == 1`): a big int, or a tuple/list holding one, stops
+with `integer overflow in int()`, while internal calls (depth > 1) pass exact values through. Fraction's
+numerator/denominator are now read-only properties backed by the internal `_n`/`_d`, so the read goes through the
+same check; `int()`, `__trunc__`, `__floor__`, `__ceil__`, `__round__` and `as_integer_ratio` are covered by the
+same return check. `test_ail_int64_default` gained the escape cases and an exact-mode counterpart. Probes in
+`/tmp/probes`: `p_dec_ratio`, `p_dec_ratio_print`, `p_frac_num`, `p_frac_den`, `p_frac_ratio`, `p_arg`, `p_list`,
+`p_dict`, `p_attr` stop loudly (exit 1) on both builds; `p_small` matches CPython; `p_exact` matches CPython in
+exact mode. All ten `lab/compare` `main.ail` builds are byte-identical to the base, and so are the six default
+`main.py` builds; the two exact-int tasks differ only by the exact-depth machinery from the previous commit, and
+the other three `main.py` files refuse identically at base and HEAD.
+
+## 2026-11-01 -- Decimal/Fraction prelude: exact ints inside, int64 for the program (job-decexact2-11011010)
+
+The default int64 mode made the Decimal prelude fail on its own `10 ** prec`: `Decimal(1) / Decimal(3)`,
+`Decimal("2").sqrt()`, `Decimal(2) ** 100`, a 50-digit division and `Decimal("1e30") + 1` all stopped
+with `integer overflow in **` unless `--exact-int` was given. The prelude functions and methods of
+Decimal and Fraction now run inside a per-function exact depth (`exact_depth`, entered/left in the
+generated C by `pyboxed2.py`), and `pyboxed2.build` keeps the big-int runtime for a program that uses
+either library. User code stays int64: its `+ - * // ** <<` still stop loudly, and an int the library
+hands back follows the user mode, so `int(Decimal("1e30"))` stops with `integer overflow in int()`.
+`test_ail_stdtop1.py` no longer sets `AIL_EXACT_INT` (its edge program uses an in-range guard for the
+`int(Decimal(...))` line; the `2 ** 100` argument became `Decimal(2) ** 100`), and
+`test_ail_int64_default.py` gained `DecimalLibrary` for both the acceptance values and the visible-int
+stop. Probes in `/tmp/probes`: `p_dec_accept`, `p_dec_ops`, `p_dec_args`, `p_dec_str2`, `p_dec_module`,
+`p_frac2`, `p_frac_basic` match CPython on both builds; `dec_int_big`, `dec_pow_int`, `frac_int_big`,
+`dec_user_int64`, `dec_user_parse`, `dec_exc_then_user` show the named int64 stops (and no exact-depth
+leak after a Decimal/Fraction exception). All ten `lab/compare` tasks build byte-identical C against
+HEAD for both `main.ail` and every `main.py` that builds; the others refuse identically.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
