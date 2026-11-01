@@ -1,3 +1,24 @@
+## 2026-11-01 -- heterogeneous tuple reach: unannotated signatures take the typed path (job-tup1-11011230)
+
+Measured 25 heterogeneous-tuple probes (`/tmp/probes/t01`..`t25`) on the default build: 9 typed, 16 general,
+0 refused, every one matching CPython. The largest single fallback cause was an unannotated signature:
+`def g(t): return t[1], t[2]` stayed general even when every call site passed the same tuple shape, because
+the tuple pass refused the argument and the typed path cannot build a tuple of unknown type. The pass now
+collects call-site argument types (positional and keyword), keeps a parameter type only when every call site
+agrees on one known type, spells tuple-containing types on the parameter, uses scalar types internally to
+settle return types, and repeats the lowering until parameter types, return types and empty-display hints stop
+changing (at most four rounds). Unknown call sites and conflicting shapes stay unannotated and on the general
+path. Four probes moved typed (t02, t12, t13, t15), so the same 25 are now 13 typed / 12 general / 0 refused;
+the remaining general causes are unsupported tuple operations (4), float keys (3), bytes elements (2), mixed
+tuple shapes (1), a literal-list `for` (1) and an unannotated attribute (1). Boundary probes b01-b18 cover
+wrapper propagation, keyword calls, nested tuples, INT64_MIN/MAX and `-0.0`, aliasing, bool elements, list and
+dict parameters, scalar routes, an annotated attribute and the conservative shape/scalar conflicts; all match
+CPython on both builds. Generated C of the 10 `lab/compare` tasks (20 builds, `.ail` and `.py`) is
+byte-identical to the base. Added `AIL_CURRENT/test_ail_tuple_reach.py` (18 tests) and registered it through
+`AIL_CURRENT/tests.d/test_ail_tuple_reach.txt`; design note `docs/design/TUPLE_REACH.md`. Final-state tests:
+test_ail_tuple_reach, test_ail_tuples, test_ail_typed_tuples, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`

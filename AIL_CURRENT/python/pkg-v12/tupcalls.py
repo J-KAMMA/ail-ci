@@ -119,6 +119,9 @@ class Calls:
         args, ts, _ = self.args_ex(ast.Call(func=node.func, args=[
             ast.Constant(value=0) if i in fixed else node.args[i] for i in keep], keywords=[]), wants)
         for j, i in enumerate(keep):
+            if i not in fixed and i < len(params):
+                self.observe_param(sig, i + (1 if method else 0), ts[j])
+        for j, i in enumerate(keep):
             if i in fixed:
                 args[j] = fixed[i]
             elif has_tuple(deep(ts[j])) and not has_tuple(deep(wants[j])):
@@ -141,6 +144,9 @@ class Calls:
                     kws.append(ast.keyword(arg=kw.arg, value=repl))
                     continue
             n, t = self.exv(kw.value, w)
+            pi = next((k for k, p in enumerate(sig.params) if p[0] == kw.arg), None)
+            if pi is not None:
+                self.observe_param(sig, pi, t)
             n, t = self.coerce(n, t, w)
             kws.append(ast.keyword(arg=kw.arg, value=n))
         t = sig.ret
