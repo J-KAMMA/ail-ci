@@ -80,6 +80,21 @@ def pure(node):
     return False
 
 
+def const_display(node):
+    """A display that evaluates to the same value every time it runs: literals, their unary
+    operators, constant arithmetic and nested displays of those.  Iterating one can safely build
+    the same list at the loop instead of keeping the tuple a variable points at."""
+    if isinstance(node, ast.Constant):
+        return True
+    if isinstance(node, ast.UnaryOp):
+        return const_display(node.operand)
+    if isinstance(node, ast.BinOp):
+        return const_display(node.left) and const_display(node.right)
+    if isinstance(node, (ast.Tuple, ast.List)):
+        return all(const_display(e) for e in node.elts)
+    return False
+
+
 def const_int(node):
     if isinstance(node, ast.Constant) and type(node.value) is int:
         return node.value

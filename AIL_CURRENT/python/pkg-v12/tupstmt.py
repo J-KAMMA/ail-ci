@@ -296,6 +296,13 @@ class Stmts:
 
     def stmt_Assign(self, st):
         tgts = st.targets
+        for t in tgts:
+            for sub in ast.walk(t):
+                if isinstance(sub, ast.Name):
+                    self.tuple_literals.pop(sub.id, None)
+        if (len(tgts) == 1 and isinstance(tgts[0], ast.Name)
+                and isinstance(st.value, ast.Tuple)):
+            self.tuple_literals[tgts[0].id] = [fresh_copy(e) for e in st.value.elts]
         key = (self.fnkey, getattr(st, "lineno", 0), getattr(st, "col_offset", 0))
         if len(tgts) == 1 and isinstance(tgts[0], ast.Name) and isinstance(st.value, ast.Lambda):
             if tgts[0].id in getattr(self, 'closure_reads', ()):
@@ -403,6 +410,10 @@ class Stmts:
         return out
 
     def stmt_AnnAssign(self, st):
+        if isinstance(st.target, ast.Name):
+            self.tuple_literals.pop(st.target.id, None)
+            if isinstance(st.value, ast.Tuple):
+                self.tuple_literals[st.target.id] = [fresh_copy(e) for e in st.value.elts]
         ann, t = self.map_ann(st.annotation)
         t = deep(t) if t is not None else None
         st.annotation = ann
@@ -422,6 +433,8 @@ class Stmts:
 
     def stmt_AugAssign(self, st):
         tgt = st.target
+        if isinstance(tgt, ast.Name):
+            self.tuple_literals.pop(tgt.id, None)
         if isinstance(tgt, ast.Subscript):
             c, ct = self.exv(tgt.value)
             ct = deep(ct)

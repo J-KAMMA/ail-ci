@@ -94,6 +94,8 @@ class Lower(Stmts, Calls, Lams, Exprs):
         self.specs = {}
         self.pristine = {}
         self.binds = {}
+        self.tuple_literals = {}       # local name -> the elements of the tuple literal last assigned to it
+        self.iterable_only = set()     # names whose only use in the current function is as a loop iterable
 
     # ------------------------------------------------------------------------------------------
     def collect(self):
@@ -188,6 +190,27 @@ class Lower(Stmts, Calls, Lams, Exprs):
                 self.methods[(name, item.name)] = self.make_sig(item, name)
 
     # ------------------------------------------------------------------------------------------
+    @staticmethod
+    def iterable_only_names(fn):
+        """Names whose only use in `fn` is as a loop / comprehension iterable and whose only store
+        is the one binding.  Such a name can be walked as a list even when it was bound to a tuple
+        literal, because nothing else can observe which of the two it is."""
+        parents = {child: parent for parent in ast.walk(fn) for child in ast.iter_child_nodes(parent)}
+        uses = {}
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Name):
+                uses.setdefault(node.id, []).append(node)
+        out = set()
+        for name, nodes in uses.items():
+            loads = [n for n in nodes if isinstance(n.ctx, ast.Load)]
+            stores = [n for n in nodes if isinstance(n.ctx, (ast.Store, ast.Del))]
+            if len(stores) != 1:
+                continue
+            if all(isinstance(parents.get(n), (ast.For, ast.AsyncFor, ast.comprehension))
+                   and parents.get(n).iter is n for n in loads):
+                out.add(name)
+        return out
+
     def function(self, fn, owner=None):
         sig = self.sigs[id(fn)]
         self.cur = sig
@@ -195,6 +218,8 @@ class Lower(Stmts, Calls, Lams, Exprs):
         self.env = {}
         self.alias = {}
         self.lam_alias = {}
+        self.tuple_literals = {}
+        self.iterable_only = self.iterable_only_names(fn)
         self.closure_reads = self.nested_scope_reads(fn)
         self.scan_binds(fn)
         self.rets = []

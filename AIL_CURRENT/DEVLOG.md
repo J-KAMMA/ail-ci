@@ -1,3 +1,31 @@
+## 2026-11-01 -- prog7: the hot function of g10_032 reaches the typed path (job-prog7-11020729)
+
+Profiled the eight task programs under CPython 3.12 and kept the functions holding 80% of the own
+time (`lab/progfix/prog7.md`). Four of them were already wholly typed (`t018`, `g15_018`, `t474`,
+`g23_038`). `g12_034`, `g14_038` and `t184` stay general for features that need a new subsystem
+(`random.Random` method defaults, `object`/`sys.getsizeof`, an unannotated `json.loads` result and
+`Any`); the exact messages are in `lab/progfix/prog7.md` as follow-ups.
+
+`g10_032`'s hot `largest_region` is typed now. Three compiler changes together:
+
+* `nested_lists.py` types a bool row as `_AilRow_bool` (bool is a scalar element) instead of putting
+  it in the same `_AilRow_int` as the grid's number rows;
+* `boolkind.py` resolves a field store through `row[i]` to the row class named by the list's
+  annotation or by a literal list of its constructors, so `_AilRow_bool.v` and `_AilRow_int.v` no
+  longer reach each other (they share the field name `v`);
+* `tuplib.py`/`tupexpr.py`/`tupstmt.py`/`tupcommon.py` lower `for dr, dc in directions:` over a
+  tuple of constant displays to an annotated list built before the loop. It does not force the
+  tuple pass when that is the program's only tuple use, so general-path C is unchanged.
+
+Tests: `AIL_CURRENT/test_ail_prog7.py` (registered in `tests.d/`) compiles the exact `g10_032`
+program, its empty/single/line/all-ones/diagonal boundaries, constant tuple loops (break, continue,
+nested unpacking), tuple-as-value/name/empty/mixed cases and bool+int rows in one function, each
+compared with CPython. `test_ail_tuples`, `test_ail_nested_lists` and `test_ail_boolfield` pass. All
+ten `lab/compare` tasks keep byte-identical `program.c` on the builds that built before (both
+`main.ail` and the `main.py` builds; `berth_sim/main.py` was the sensitive one). Probes in
+`/tmp/probes/p_g10_*`, `p_tuple_*`, `p_nested_bool.py`, `p_bool_rows.py` match CPython on both
+`cmp.sh` builds.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
