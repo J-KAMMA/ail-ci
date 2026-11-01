@@ -6,49 +6,53 @@
 
 --- LAST REVIEW ---
 ## review 1
+(free quota used up; paid model from here)
 [model opencode-go/deepseek-v4.1-flash]
-**What the change really does.** Commit `84f2280` adjusts the `cmath` prelude/lowering: complex `**` routes non-finite exponents through `_ail_cm_pow`, zero bases raise CPython's power error, `cmath.log(z, base)` rejects a zero log-base, `complex()` follows `complex_new`, `cmath` arguments are type-checked, and keyword calls are lowered to runtime `TypeError`s. No compiler/runtime change outside this path.
+## Review of `7fba184` (change `work..HEAD`: `51ddaee`, `7fba184`)
 
-**Probes** (in `/tmp/rprobes`, run with `cmp.sh`; g and d agree with each other throughout):
-- `p_log2`, `p_ctor2`, `p_args2`, `p_parse2` — **same stdout** as CPython (base-vs-log, constructor forms/messages, malformed strings, argument types, keyword/isclose rules).
-- `p_pow2`, `p_pow3` — **DIFF** (defect 1).
-- `p_star2` — **DIFF** (defect 2).
-- `p_types2` — DIFF only in type names (pre-existing resolver, below).
-- `p_plain2` and `lab/compare` `berth_sim`, `echo_pack`, `ledger_bin`, `term_rank`, `ticket_audit` — `program.c` byte-identical to `/tmp/basework` (`work`).
-- Worker's original probes `p_pow`, `p_special`, `p_complex2`, `p_forms`: same stdout (8 review defects fixed).
+**What the change really does.** It fixes review 1: non-finite/imaginary exponents in `_ail_cm_pow` now map to CPython's `ZeroDivisionError`/`OverflowError`/NaN, the integer `**` fast path is shared with reflected powers and checks overflow, and `cmath.f(...)` calls containing `**mapping` are lowered to a runtime `_ail_cm_kw` that parses arguments like CPython (explicit keywords, mappings, `*args`). Only `cmathlib.py` and `prelude_cmath.py` change.
+
+**Probes run** (`cmp.sh`, both g and d builds):
+- `rv_pow`, `rv_rpow`, `rv_plain`, `rv_dataflow`, `rv_kw5`, worker's `p_pow2`, `p_star2`, `p_powgrid`, `p_powedge`, `p_over`, `p_minbad` — same stdout as CPython; review 1 defects 1 and 2 are fixed.
+- `rv_kw` — `**` mapping semantics (empty/non-empty, `a`/`b`/tols, duplicates, non-string keys, custom `keys()`, non-mapping list/int/None/str/tuple, `*list + **`) match except the star error below.
+- `rv_zeroexp`, `rv_min1` — **DIFF/crash** (defect 1); base matches CPython.
+- `rv_starbase` — **DIFF** (defect 2).
+- Plain non-cmath program: `program.c` byte-identical to `/tmp/base`. No `lab/compare/src` task imports `cmath`, so all 10 C files are unaffected (stronger than the report's 5).
+- `test_ail_std_cmath`, `test_ail_safetynet` on HEAD: 2/2 pass (272 s). `update_manifest.py --check`: rc=0.
 
 **Defects**
-1. Non-finite exponents are still wrong for bases whose argument is non-zero. `_ail_cm_pow` lets `math.cos(inf)`/division raise `ValueError`/`ZeroDivisionError: float division by zero`; CPython maps this to `ZeroDivisionError: 0.0 to a negative or complex power`.
+1. Regression: zero base with a large integral float exponent now crashes instead of returning `0j`. Removing the zero-base early return makes `math.floor(b.real)` run before the `abs(b.real) <= 100` guard, so AIL's int-based `floor` raises.
    ```python
    import cmath
-   try: print(2j ** float("inf"))
-   except Exception as e: print(type(e).__name__ + ": " + str(e))
+   print(0j ** 1e300)
+   print(0.0 ** complex(1e300, 0.0))
+   print(0j ** 1e19)
    ```
-   Expected `ZeroDivisionError: 0.0 to a negative or complex power`; actual `ValueError: math domain error`. Same for `2j ** -inf`, `(1+1j) ** inf`, `(-2+0j) ** inf`, `(2+0j) ** complex(0.0, inf)` (actual `ZeroDivisionError: float division by zero`), etc. The report's "inf/NaN exponents give `(nan+nanj)`" is false in general.
-2. The new keyword-rejection lowering mishandles `**mapping`: `cmathlib.py:145` only excludes `ast.Starred` positional arguments, not keywords with `arg is None`.
+   Expected `0j\n0j\n0j` (CPython and `/tmp/base` both print this). Actual: no stdout, `OverflowError: integer overflow in int(float) (ints are 64-bit; --exact-int gives exact ints)`, exit 1, both builds. Reorder `abs(b.real) <= 100.0` before `math.floor`, or restore the zero-base early path.
+2. The new `*args` collection loses CPython's star message: `_ail_cm_args` iterates the value directly.
    ```python
    import cmath
-   print(cmath.isclose(1.0, 1.0, **{}))
+   print(cmath.isclose(*5, **{}))
    ```
-   Expected `True`; actual `TypeError: 'None' is an invalid keyword argument for isclose()`. Likewise `cmath.sqrt(**{})`: expected `TypeError: cmath.sqrt() takes exactly one argument (0 given)`; actual `TypeError: cmath.sqrt() takes no keyword arguments`.
+   Expected `TypeError: cmath.isclose() argument after * must be an iterable, not int`. Actual `TypeError: 'int' object is not iterable`. Base gave a named compile-time refusal (`a **kwargs call argument`), which was acceptable; the change introduced this wrong runtime message. Only invalid starred operands are affected.
 
-**Report claims.** 8 defects fixed: verified. `log` base / `complex()` / malformed strings / explicit keyword rejection: verified. `lab/compare` 5 C files identical: verified. `test_ail_std_cmath` + `test_ail_safetynet`: pass (760 s). Manifest `--check`: rc=0. "all cmath args use ... not `<type>`": false for user types (below). `test_ail_files` and `test_ail_corpus_findings3`: unverified (not rerun, per scope).
+**Report claims.** Non-finite powers fixed: verified. `**mapping` / non-mapping / custom mappings / non-string keys / duplicates: verified, except the invalid-star message ("`*args + **` match" is false for a non-iterable `*`). Reflected-power claims (`inf ** (2+0j)`, `inf ** (1+0j)`): verified. `lab/compare` C unchanged: verified (all 10, via no-cmath sources + a plain-program C diff). Tests 2/2 rerun pass; `test_ail_files`/`test_ail_corpus_findings3` not rerun (per scope). Manifest check rc=0: verified. "`p_powbig` int(float) overflow pre-existing": true for non-zero bases, but the zero-base form is new (defect 1).
 
-**Pre-existing.** `_ail_cm_tname` falls back to `"object"`, so `cmath.sqrt(Thing())` says `not object` where CPython says `not Thing` (and a function gives `not object` vs `not function`); the fallback predates this commit. The other `lab/compare` tasks fail to compile on base too.
+**Pre-existing.** Non-zero base with a huge integral float exponent (`(2+0j) ** 1e300`, `1j ** 1e300`) has the same `int(float)` overflow / wrong messages on base. `_ail_cm_tname` still falls back to `object` for user types. `cmath.isclose(1.0, a=1.0, b=1.0)` is a named compile-time refusal on base and HEAD alike.
 
-**Unverified.** Earlier worker probes `pcm1`/`pforms`/`pflow`/`pnum`/`pspecial`/`pstrings`/`phash`/`phash2` (not rerun); speed (no hot code touched); full suite.
+**Unverified.** `test_ail_files`, `test_ail_corpus_findings3`; speed (no non-cmath hot code touched, so not measured); pathological custom mappings that mutate during `**` expansion.
 
 VERDICT: FIX
-[cost $0.0374, opencode tokens {"total": 1728757, "input": 84863, "output": 11965, "reasoning": 21049, "cache.write": 0, "cache.read": 1610880}]
-    tool time: bash 17.4 min
-        325s bash   cmp /tmp/cmpdep/head/dd/program.c /tmp/cmpdep/base/dd/program.c && echo PLAIN_C_IDENTICAL; cd /home/runner/wor
-        149s bash   cd /tmp/rprobes && python3 - <<'PY' from pathlib import Path p=Path('p_ctor2.py') t=p.read_text() t=t.replace(
-        120s bash   cd /home/runner/work/_temp/w2/AIL_CURRENT && (python3 ../tools/par_check.py -j 2 test_ail_std_cmath test_ail_s
-        120s bash   cd /home/runner/work/_temp/w2/AIL_CURRENT && setsid nohup bash -c 'python3 ../tools/par_check.py -j 2 test_ail
-        103s bash   ls /tmp/probes 2>/dev/null | head -20; cd /tmp/probes 2>/dev/null && for p in p_pow p_special p_complex2 p_for
-         66s bash   cat > /tmp/rprobes/p_types2.py <<'EOF' import cmath   class Thing:     pass   def fn(x):     return x + 1   de
-         62s bash   cd /tmp/rprobes && for p in p_pow2 p_log2 p_ctor2 p_args2 p_parse2; do (bash ~/tools/cmp.sh /tmp/rprobes/$p.py
-         51s bash   cd /tmp/rprobes && python3 - <<'PY' from pathlib import Path p=Path('p_pow2.py') t=p.read_text() t=t.replace('
+[cost $0.0400, opencode tokens {"total": 1908167, "input": 89585, "output": 10854, "reasoning": 24432, "cache.write": 0, "cache.read": 1783296}]
+    tool time: bash 15.8 min
+        273s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && python3 ../tools/par_check.py -j 2 test_ail_std_cmath test_a
+         94s bash   cd /tmp/rprobes && for p in rv_rpow rv_dataflow rv_plain; do echo "======== $p"; bash ~/tools/cmp.sh /tmp/rpro
+         83s bash   cd /tmp/rprobes && for p in p_powgrid p_over p_minbad; do echo "==== $p"; bash ~/tools/cmp.sh /tmp/rprobes/$p.
+         79s bash   cat > /tmp/rprobes/rv_min1.py <<'EOF' import cmath print(0j ** 1e300) print(0.0 ** complex(1e300, 0.0)) print(
+         72s bash   cd /tmp/rprobes && for p in rv_pow rv_rpow rv_kw; do echo "======== $p"; bash ~/tools/cmp.sh /tmp/rprobes/$p.p
+         64s bash   cd /tmp/rprobes && printf 'import cmath\ndef show(l,f):\n    try: print(l, repr(f()))\n    except Exception as
+         59s bash   cd /tmp/rprobes && for p in p_star2 p_pow2; do echo "==== $p"; bash ~/tools/cmp.sh /tmp/rprobes/$p.py /home/ru
+         54s bash   cat > /tmp/rprobes/rv_zeroexp.py <<'EOF' import cmath def show(label, f):     try:         print(label, repr(f
 
 
 --- ORIGINAL TASK ---
