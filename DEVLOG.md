@@ -1,3 +1,12 @@
+## 2026-11-01 -- stdlib enum review fix: StrEnum.isprintable (job-std_enum-11012140)
+
+Removed the `_AilStrEnum.isprintable` forwarder. `str.isprintable` is not built (it is refused by name),
+so the forwarder made a program compile and then raise `AttributeError` at run time. The call is again a
+named compile-time refusal. The other `StrEnum` string forwarders still match CPython: a probe exercising
+every remaining forwarder (case, strip, search, replace, split/join, partition, padding, predicates,
+containment, indexing, length, repetition and ordering) is byte-identical on both builds, as are
+`isidentifier()` and `isascii()`.
+
 ## 2026-11-01 -- stdlib enum review fixes (job-std_enum-11011520)
 
 Review follow-up on the enum lowering and prelude:

@@ -407,8 +407,5 @@ class _AilStrEnum(_AilEnum):
     def isidentifier(self) -> bool:
         return self.value.isidentifier()
 
-    def isprintable(self) -> bool:
-        return self.value.isprintable()
-
     def isascii(self) -> bool:
         return self.value.isascii()
