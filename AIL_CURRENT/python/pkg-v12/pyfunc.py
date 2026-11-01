@@ -30019,7 +30019,13 @@ def _comp_element_kind(iter_node, ctx, scope):
         return STR
     if _is_flist_call(source, ctx) or _is_flist_name(source, ctx):
         return FLT
-    return INT
+    try:
+        source_kind = _etype(source, ctx)
+    except Unsupported:
+        return None
+    if _is_olist_kind(source_kind):
+        return None                 # a struct-instance list says nothing about a scalar claim
+    return INT if source_kind == LIST else None
 
 
 def _comprehension_claims(fn, ctx):
