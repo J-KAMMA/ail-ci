@@ -68,6 +68,27 @@ def main() -> None:
 main()
 '''
 
+ENV_LOOP = r'''import os
+
+
+def main() -> None:
+    keys = ["COVENV_KEY", "COVENV_EMPTY", "COVENV_MISSING"]
+    for i in range(3):
+        v = os.environ.get(keys[i])
+        print(i, v is None, v or "none")
+    vals = [os.environ.get("COVENV_KEY"), os.environ.get("COVENV_EMPTY"),
+            os.environ.get("COVENV_MISSING")]
+    print(vals[0] is None, vals[1] is None, vals[2] is None)
+    d = {"a": os.environ.get("COVENV_KEY"), "b": os.environ.get("COVENV_MISSING")}
+    print(d["a"] is None, d["b"] is None)
+    print(d["a"] or "d", d["b"] or "d")
+    g = [os.getenv("COVENV_KEY"), os.getenv("COVENV_MISSING")]
+    print(g[0] is None, g[1] is None)
+
+
+main()
+'''
+
 ENV_RETURN = r'''import os
 
 
@@ -174,11 +195,21 @@ class Covenv(unittest.TestCase):
             with self.subTest(mode=mode):
                 self.check(ENV_RETURN, "return_" + mode, mode, run_env)
 
+    def test_environ_get_loop_and_containers(self):
+        run_env = {"COVENV_KEY": "value", "COVENV_EMPTY": ""}
+        for mode in ("default", "general"):
+            with self.subTest(mode=mode):
+                self.check(ENV_LOOP, "loop_" + mode, mode, run_env)
+
     def test_path_home(self):
         cases = {}
         cases["unset"] = {"HOME": None}
         cases["empty"] = {"HOME": ""}
         cases["trailing"] = {"HOME": "/tmp/covenv-home/"}
+        cases["internal"] = {"HOME": "/tmp//covenv-home///a//"}
+        cases["double_root"] = {"HOME": "//covenv-home"}
+        cases["triple_root"] = {"HOME": "///covenv-home"}
+        cases["relative"] = {"HOME": "covenv-relative-home"}
         for label, run_env in cases.items():
             for mode in ("typed", "general"):
                 with self.subTest(home=label, mode=mode):

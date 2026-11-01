@@ -910,13 +910,7 @@ class _Lowerer(ast.NodeTransformer):
                 if not self.general:
                     self.refuse(node, '%s(key) without a default returns None; this use is left to the general '
                                       'path' % name)
-                keyname = self.fresh('envk')
-                self.hoist.append(ast.Assign(targets=[self.N(keyname, True)], value=key))
-                k = self.N(keyname)
-                has = ast.Compare(left=self.call('_ail_os_hasenv', k), ops=[ast.NotEq()],
-                                  comparators=[self.C(0)])
-                return self.at(ast.IfExp(test=has, body=self.call('_ail_os_getenv', self.N(keyname)),
-                                         orelse=self.C(None)), node)
+                return self.call('_ail_environ_get_or_none', key)
             return self.call('_ail_environ_get', key, default)
 
 

@@ -432,6 +432,12 @@ def _ail_environ_get(k: str, d: str) -> str:
     return d
 
 
+def _ail_environ_get_or_none(k: str) -> str | None:
+    if _ail_os_hasenv(k) != 0:
+        return _ail_os_getenv(k)
+    return None
+
+
 def _ail_environ_item(k: str) -> str:
     if _ail_os_hasenv(k) != 0:
         return _ail_os_getenv(k)
