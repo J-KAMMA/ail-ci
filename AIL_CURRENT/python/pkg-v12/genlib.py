@@ -72,8 +72,8 @@ TABLE = {
     'datetime.datetime.strptime': '_ail_datetime_strptime',
     'heapq.merge': '_ail_merge',
 }
-for _name in ('seed', 'random', 'randint', 'randrange', 'uniform', 'gauss', 'choice', 'shuffle',
-              'sample', 'getrandbits', 'choices', 'expovariate', 'triangular'):
+for _name in ('seed', 'random', 'randint', 'randrange', 'uniform', 'gauss', 'normalvariate', 'choice',
+              'shuffle', 'sample', 'getrandbits', 'choices', 'expovariate', 'triangular'):
     TABLE['random.' + _name] = '_ail_rng.' + _name
 
 # names whose calls take only these keyword arguments (others are refused by name)

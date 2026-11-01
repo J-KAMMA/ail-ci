@@ -2,7 +2,7 @@
 
 `rng = random.Random(seed)` makes an object with its own Mersenne Twister state (prelude_random.py: CPython 3.12's
 MT19937 and the methods built on it, bit for bit): `random randint randrange choice shuffle sample uniform gauss
-getrandbits choices expovariate triangular seed`. Any number of generators, kept in variables, fields, lists or
+normalvariate getrandbits choices expovariate triangular seed`. Any number of generators, kept in variables, fields, lists or
 passed to functions.
 
 A program that also calls the module-level functions (`random.seed(1)`, `random.randint(1, 6)`) keeps their state
@@ -12,15 +12,15 @@ A program that only uses the module-level functions is not touched here (stdlib3
 
 Not built, refused by name: `random.Random()` without a seed (not reproducible), a seed that is a str / bytes /
 float / None (CPython hashes those), `random.SystemRandom`, `getstate` / `setstate`, `randbytes`, the other
-distributions. getrandbits(k) beyond 62 bits is a RuntimeError (integers are 64-bit).
+distributions. getrandbits(k) beyond 63 bits is a RuntimeError (integers are 64-bit).
 """
 import ast
 
 import stdlib5
 from stdlib4 import refuse
 
-MODULE_FUNCS = {'seed', 'random', 'randint', 'randrange', 'uniform', 'gauss', 'choice', 'shuffle', 'sample',
-                'getrandbits', 'choices', 'expovariate', 'triangular'}
+MODULE_FUNCS = {'seed', 'random', 'randint', 'randrange', 'uniform', 'gauss', 'normalvariate', 'choice',
+                'shuffle', 'sample', 'getrandbits', 'choices', 'expovariate', 'triangular'}
 
 
 def run(tree, text):

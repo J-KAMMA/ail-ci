@@ -213,6 +213,49 @@ Added `AIL_CURRENT/test_ail_std_json.py` (registered through `tests.d/test_ail_s
 which builds the ten passing programs in the default mode, runs each next to CPython in a fresh
 directory and compares stdout and exit code. Refreshed the manifest; ran
 `test_ail_std_json`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`.
+## 2026-11-01 -- stdlib random: keep the unified plan (job-std_random-11011843)
+
+Integration follow-up. The finite-total check added to both `choices` preludes spelled
+`float("inf")`. The general path's `unified.nan_capable` sees that `"inf"` string in the merged
+program and refuses a type plan for it, so `test_ail_unified`'s plan test found no `stats.jsonl`
+(the plan is what writes it). The check now compares `total` against the finite double bounds
+(`> 1.7976931348623157e308` / `< -1.7976931348623157e308`): NaN is still caught by `total != total`,
+infinity by the bounds, and every finite total is unchanged. On top of `origin/integ` (4397565) the
+targeted `test_ail_obj_refs`, `test_ail_safetynet`, `test_ail_std_random`, `test_ail_unified` and
+`test_ail_virtual_dispatch` pass, as do `test_ail_files` and `test_ail_corpus_findings3`.
+
+## 2026-11-01 -- stdlib random coverage: review fixes (job-std_random-11011523)
+
+Review follow-up on `26c4101`. `choices` no longer copies `cum_weights` into a list in either prelude: it
+uses the object as given, so a dict raises `KeyError -1`, and a set or int raises `TypeError` exactly as
+CPython does, while list, tuple, range and bytes inputs keep matching (the earlier `list()` accepted or
+reworded those errors). `test_ail_std_random` now pins those cases in the `choices` program and the
+prelude unit test. `docs/spec/DIFFERENCES.md` A51(7) now says `getrandbits(k)` needs `k <= 63` and
+A61(5) records `normalvariate` as built; a new `C?-job-std_random-11011523-1` row records the 63-bit
+`getrandbits` limit and the `cum_weights` behaviour.
+
+## 2026-11-01 -- stdlib random coverage: real programs (job-std_random-11011523)
+
+Added 12 realistic `random` programs under `lab/stdlib/random/`. In the default build, 11 build and
+print CPython 3.12's stdout and exit status; `secure_token.py` remains a named refusal because
+`random.SystemRandom` needs an OS-entropy source (recorded as a follow-up with the exact text in
+`lab/stdlib/random/RESULTS.md`). The compiler/runtime/prelude changes were not program workarounds:
+
+* `random.normalvariate(mu, sigma)` is built on the typed path (`cruntime.py`, `stdlib3.py`,
+  `pyfunc.py`) and the general path (`prelude_random_boxed.py`, `randrt.py`), using CPython 3.12's
+  ratio-of-uniforms loop.
+* `random.getrandbits(k)` is built on the typed path; `k < 0` is CPython's `ValueError`, `k == 0`
+  returns 0 without a draw, and `k <= 63` matches CPython (ints above 63 bits are the declared
+  int64 limit and stop loudly).
+* `choices` accepts keyword-only `cum_weights=` on both paths, with CPython's `TypeError` for both
+  weight forms, the population-length `ValueError`, and the zero/negative/non-finite total errors.
+
+The generated C of all 10 `lab/compare/src/*/main.ail` tasks is byte-identical before/after
+(`--debug-dir` `program.c`, 10/10 same). Every passing program also matches CPython when forced
+through the general path (`AIL_UNIFIED_FORCE=1`) and, where it builds, the typed path
+(`AIL_NO_GENERAL=1`). `test_ail_std_random.py` pins the 11 programs plus the new feature paths;
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and the targeted random tests
+were run on the final commit.
 
 ## 2026-11-01 -- AIL_FE_JOBS: parallel per-function front end (job-fepar2-11011058)
 
