@@ -29,12 +29,16 @@ rejected the extra positional arguments) and `array.fromlist()`. Both are now in
 `python/pkg-v12/prelude_array.py`; `inventory.py` and `matrix_rows.py` build and match CPython.
 
 The same prelude change rounded out CPython's sequence behaviour for the programs: slice reads
-return an `array`; slice assignment accepts only a same-typecode `array`; deletion accepts slices and
-integers; `__getitem__`/`__setitem__`/`__delitem__` report CPython's `TypeError`/`IndexError` texts;
+return an `array`; slice assignment accepts only a same-typecode `array` (an extended-slice length
+mismatch says `attempt to assign array of size ...`); deletion accepts slices and integers;
+`__getitem__`/`__setitem__`/`__delitem__` report CPython's `TypeError`/`IndexError` texts;
 `remove`/`index` report `array.remove(x): x not in array` / `array.index(x): x not in array`;
-`fromlist` requires a list; comparisons and `+`, `+=`, `*`, `*=`, `2 * a` follow CPython (including
-the "can only append/extend ..." and same-typecode messages); and `array(...)` with keyword
-arguments raises CPython's `TypeError("array.array() takes no keyword arguments")` at run time.
+`index(x, start[, stop])` treats an omitted bound differently from an explicit `None` or another
+non-integer and raises CPython's `slice indices must be integers or have an __index__ method`;
+`fromlist` requires a real list (a generator expression, even after AIL materialises it, raises
+`arg must be list`); comparisons and `+`, `+=`, `*`, `*=`, `2 * a` follow CPython (including the
+"can only append/extend ..." and same-typecode messages); and `array(...)` with keyword arguments
+raises CPython's `TypeError("array.array() takes no keyword arguments")` at run time.
 
 `test_ail_std_array.py` builds the nine passing programs in both `AIL_IR` modes and compares stdout
 and exit status with CPython.
@@ -53,7 +57,6 @@ and exit status with CPython.
   `note: lab/stdlib/array/binary_packets.py:6: array.tobytes is not built: arrays are lists of numbers here (tolist(), extend, append, pop, insert, index, count, reverse, byteswap)`.
   `frombytes()` and `buffer_info()` are refused by the same rule and need a real byte buffer.
 
-A known pre-existing general-path limitation, not blocking these programs: for an `array` compared
-with a non-array using `<=`, `>` or `>=`, the run-time error says `'<' not supported ...` while
-CPython names the actual operator. Array-to-array ordering and all nine programs match; the programs
-that test this only catch `TypeError` (they do not print its text).
+Comparisons with a non-array now name the actual operator in the error (`'<='`, `'>'`, `'>='`),
+including when the array reaches the comparison through a function parameter, a list item, an
+attribute or a dict value. Array-to-array ordering and all nine programs match.

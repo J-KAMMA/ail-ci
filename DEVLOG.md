@@ -1,3 +1,22 @@
+## 2026-11-01 -- array review fixes: None bounds, genexpr fromlist, slice text, ordering (job-std_array-11012214)
+
+Review follow-up on `4d9cb02`. `array.index(x, start, stop)` now distinguishes an omitted bound from an
+explicit `None` (a sentinel) and rejects any non-integer bound with CPython's `slice indices must be
+integers or have an __index__ method`; `fromlist` rejects a materialised generator expression with
+`arg must be list`; an extended-slice length mismatch says `attempt to assign array of size ...`; and
+`<=`, `>` and `>=` against a non-array name the actual operator, including through a function
+parameter, list item, attribute or dict value. The last one uses an op-aware `__le__`/`__ge__`/`__gt__`
+dispatch (`dunderrt.py`, enabled only for the array prelude so the other programs keep their generated
+C) and static ordering dispatch in `pyboxed2.py`. The invalid-typecode text follows CPython 3.12.3,
+whose message omits the historical `w` that the base prelude still had.
+
+Probes `/tmp/probes/w2arr_{idx_edges,fromlist_sources,slice_assign,cmp_ops,typecode}.py` match
+CPython 3.12.3 stdout on both `cmp.sh` builds, as do the review's `p_idxnone`, `p_from2`, `p_ext`,
+`p_cmp`, `p_cmp2` and `p_cmp3`. All ten `lab/compare` `main.ail` builds and every buildable `main.py`
+have byte-identical generated C against `0ee2c47`; the three `main.py` builds that already failed at
+base fail with the same refusals. `lab/stdlib/array/RESULTS.md` and `DIFFERENCES.md` drop the old
+ordering-text follow-up.
+
 ## 2026-11-01 -- CPython `array` on the general path (job-std_array-11012214)
 
 `lab/stdlib/array` now has twelve realistic `array` programs. Initially 7 built (all on the general

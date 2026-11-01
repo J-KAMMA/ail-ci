@@ -35,6 +35,8 @@ D2 = {'__add__': 'ADD', '__radd__': 'RADD', '__sub__': 'SUB', '__rsub__': 'RSUB'
       '__iadd__': 'IADD', '__isub__': 'ISUB', '__imul__': 'IMUL', '__iand__': 'IAND', '__ior__': 'IOR',
       '__ixor__': 'IXOR'}
 D3 = {'__setitem__': 'SETITEM'}
+# ordering methods the op-aware ordering path installs only when a class defines one (see patch(ordering=True))
+ORDER2 = {'__le__': 'LE', '__ge__': 'GE'}
 # an operator method that is a hook here; a program defining one of these turns the patch on
 HOOKED = frozenset(D1) | frozenset(D2) | frozenset(D3)
 # of those, the ones the emitter already binds for a receiver whose class it can tell (a program defining only
@@ -352,10 +354,12 @@ _VIEW_OP_NE = (
     '    *out = ail_box_bool(!ail_obj_eq_raw(a, b)); return AIL_OK;\n}')
 
 
-def _edits(inplace=False):
+def _edits(inplace=False, ordering=False):
     """(old, new) text replacements, each applied to exactly one place of the runtime."""
     e = []
     enums = ENUMS_INPLACE if inplace else ENUMS
+    if ordering:
+        enums = enums.replace('AIL_D2_EQ, AIL_D2_GT,', 'AIL_D2_EQ, AIL_D2_GT, AIL_D2_LE, AIL_D2_GE,')
     # tables in the class object
     e.append(('typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;',
               enums + 'typedef struct { ail_gcobj hdr; ail_obj name /* STR */; ail_obj base /* CLASS or NONE */; int builtin_id;'))
@@ -442,6 +446,22 @@ def _edits(inplace=False):
               '        if (ail_dun1(x, AIL_D1_INT)) hv = ail_pyhash_int(hv);   /* IntEnum / IntFlag: int.__hash__ of the value */\n'
               '        *out = hv == -1 ? -2 : hv; return AIL_OK;\n    }\n'
               '    return ail_raise_c(cx, AIL_B_TYPEERROR, "__hash__ method should return an integer");\n}\n'))
+    if ordering:
+        e.append((
+            '    if (a.tag == AIL_T_INST) {   /* a user __lt__ (found through the base classes) orders instances, as CPython does */\n',
+            '    if (a.tag == AIL_T_INST && op[0] == \'<\' && op[1] == \'=\') {\n'
+            '        ail_d2_fn f = ail_dun2(a, AIL_D2_LE);\n'
+            '        if (f) { ail_obj r; ail_st st = f(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_obj_truthy(r) ? 0 : 1; return AIL_OK; }\n'
+            '    }\n'
+            '    if (a.tag == AIL_T_INST && op[0] == \'>\' && op[1] == \'=\') {\n'
+            '        ail_d2_fn f = ail_dun2(a, AIL_D2_GE);\n'
+            '        if (f) { ail_obj r; ail_st st = f(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_obj_truthy(r) ? 0 : -1; return AIL_OK; }\n'
+            '    }\n'
+            '    if (a.tag == AIL_T_INST && op[0] == \'>\' && op[1] == 0) {\n'
+            '        ail_d2_fn f = ail_dun2(a, AIL_D2_GT);\n'
+            '        if (f) { ail_obj r; ail_st st = f(cx, &r, a, b); if (st != AIL_OK) return st; *out = ail_obj_truthy(r) ? 1 : -1; return AIL_OK; }\n'
+            '    }\n'
+            '    if (a.tag == AIL_T_INST) {   /* a user __lt__ (found through the base classes) orders instances, as CPython does */\n'))
     # ordering: a on the left with no < answer (its > may answer), or the instance on the right (out of line, so that the
     # comparison of two instances, the hot case of a sort, keeps its size)
     e.append(('            if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }\n'
@@ -659,9 +679,9 @@ def _edits(inplace=False):
     return e
 
 
-def patch(text, inplace=False):
+def patch(text, inplace=False, ordering=False):
     """The generated C with the operator-method dispatch added to the general-path runtime."""
-    for old, new in _edits(inplace):
+    for old, new in _edits(inplace, ordering):
         if old == new:
             continue
         count = text.count(old)
@@ -688,14 +708,17 @@ def patch(text, inplace=False):
     return text[:k] + text[k:].replace('ail_obj_truthy(', 'ail_truthy_u(')
 
 
-def install(cls_global, cls_methods, all_params_of):
+def install(cls_global, cls_methods, all_params_of, ordering=False):
     """C statements for the program's setup code: the tables of one class."""
     lines = []
+    table = dict(D2)
+    if ordering:
+        table.update(ORDER2)
     for name, key in D1.items():
         info = cls_methods.get(name)
         if info and len(all_params_of(info)) == 1:
             lines.append('    ((ail_classobj *)%s.o)->d1[AIL_D1_%s] = %s;\n' % (cls_global, key, info['cname']))
-    for name, key in D2.items():
+    for name, key in table.items():
         info = cls_methods.get(name)
         if info and len(all_params_of(info)) == 2:
             lines.append('    ((ail_classobj *)%s.o)->d2[AIL_D2_%s] = %s;\n' % (cls_global, key, info['cname']))

@@ -2718,6 +2718,11 @@ class Compiler(boxclosure.ClosureMixin):
             any(name in cls['methods'] for name in ('__iadd__', '__isub__', '__imul__',
                                                     '__iand__', '__ior__', '__ixor__'))
             for cls in self.classes.values())
+        # the array prelude's unknown-type comparisons need the op-aware ordering dispatch (its own
+        # method for <= and >=, and __gt__ for > before __lt__); every other program keeps the
+        # runtime text it had, so the lab/compare programs stay byte-identical
+        self.dunder_ordering = any(c == '_AilArray' and ('__le__' in cls['methods'] or '__ge__' in cls['methods'])
+                                   for c, cls in self.classes.items())
 
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
@@ -2985,7 +2990,8 @@ class Compiler(boxclosure.ClosureMixin):
                              (self.global_slots['class:' + cname], itr['cname']))
             if self.dunder_ops:
                 setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
-                                              cls['methods'], lambda info: info['all_params']))
+                                              cls['methods'], lambda info: info['all_params'],
+                                              ordering=self.dunder_ordering))
             if cls.get('dc'):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->dc = %d; '
                              '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
@@ -6021,7 +6027,8 @@ class Compiler(boxclosure.ClosureMixin):
             return t
         # with NotImplemented in the program the run time's dispatch decides (it tries the other operand next)
         cname = self._inst_class(an, ctx) if an is not None and not self.uses_ni else None
-        dunder = {ast.Eq: '__eq__', ast.Lt: '__lt__'}.get(type(op))
+        dunder = {ast.Eq: '__eq__', ast.Lt: '__lt__', ast.LtE: '__le__', ast.Gt: '__gt__',
+                  ast.GtE: '__ge__'}.get(type(op))
         invert = False
         if cname and type(op) is ast.NotEq:
             # C42: `!=` asks __ne__ when the class (or a subclass) defines it, otherwise it is the negation of __eq__
@@ -13006,7 +13013,7 @@ def _build(source, report, allow_mix=True):
         raise Unsupported('closures nested too deeply to settle their shared names')
     if compiler.dunder_ops:
         import dunderrt
-        body = dunderrt.patch(body, inplace=compiler.dunder_inplace)
+        body = dunderrt.patch(body, inplace=compiler.dunder_inplace, ordering=compiler.dunder_ordering)
     if compiler.generators:
         import safetyrt
         body = safetyrt.patch_generators(body)

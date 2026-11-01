@@ -93,6 +93,13 @@ def _ail_arr_bad_kw():
     raise TypeError("array.array() takes no keyword arguments")
 
 
+class _AilArrayMissing:
+    pass
+
+
+_AIL_ARR_MISSING = _AilArrayMissing()
+
+
 class _AilArray:
     def __init__(self, typecode: str, initializer=None):
         self.typecode = typecode
@@ -132,11 +139,15 @@ class _AilArray:
         except ValueError:
             raise ValueError("array.remove(x): x not in array")
 
-    def index(self, x, start=None, stop=None) -> int:
+    def index(self, x, start=_AIL_ARR_MISSING, stop=_AIL_ARR_MISSING) -> int:
+        if start is not _AIL_ARR_MISSING and not isinstance(start, int):
+            raise TypeError("slice indices must be integers or have an __index__ method")
+        if stop is not _AIL_ARR_MISSING and not isinstance(stop, int):
+            raise TypeError("slice indices must be integers or have an __index__ method")
         try:
-            if start is None:
+            if start is _AIL_ARR_MISSING:
                 return self.data.index(x)
-            if stop is None:
+            if stop is _AIL_ARR_MISSING:
                 return self.data.index(x, start)
             return self.data.index(x, start, stop)
         except ValueError:
@@ -150,6 +161,10 @@ class _AilArray:
 
     def fromlist(self, values):
         if not isinstance(values, list):
+            raise TypeError("arg must be list")
+        try:
+            reversed(values)
+        except TypeError:
             raise TypeError("arg must be list")
         for x in values:
             self.data.append(_ail_arr_check(self.typecode, x))
@@ -211,7 +226,10 @@ class _AilArray:
                 raise TypeError('can only assign array (not "%s") to array slice' % _ail_arr_tname(x))
             if x.typecode != self.typecode:
                 raise TypeError("bad argument type for built-in operation")
-            self.data[i] = x.data
+            try:
+                self.data[i] = x.data
+            except ValueError as e:
+                raise ValueError(str(e).replace("sequence", "array", 1))
             return
         self.data[self._position(i, True)] = _ail_arr_check(self.typecode, x)
 
