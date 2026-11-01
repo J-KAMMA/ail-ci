@@ -1,3 +1,16 @@
+## 2026-11-01 -- typed reach batch 4 review: accelerated zero division falls back (job-prog4-fix)
+
+Fixed the review defect in `4957411`: an accelerated int/bool clone no longer exits through the
+typed runtime's `ail_die` on a zero divisor.  The hybrid analysis now routes the clone's
+division/modulo stops through the same `setjmp` signal already used for int64 overflow, so the
+Python wrapper calls the original function and CPython raises `ZeroDivisionError` after flushing
+its own buffered stdout.  A float/str-returning clone has no fallback signal, so a divisor that is
+not a non-zero literal keeps it in CPython.  The general-path/mixed C is untouched, including the
+10 `lab/compare` tasks.  Probes `/tmp/probes/p1_div_zero.py`, `p1c_fdiv_zero.py`, `p3b_no_try.py`,
+`p6b_zero_paths.py` and `p6c_zero_attr.py` match CPython under `--cpython`;
+`p1b_float_zero.py` now reports `accelerated: []` and matches.  Extended
+`AIL_CURRENT/test_ail_prog4.py` with the uncaught-zero path.
+
 ## 2026-11-01 -- typed reach batch 4: division/modulo and safe slices in the hybrid (job-prog4-11020446)
 
 Profiled the eight requested programs and recorded the hot functions and their first typed-path

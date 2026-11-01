@@ -2,16 +2,21 @@
 
 The CPython hybrid accelerates only a function the real mixed-mode emitter accepts.  The hot helper
 in `lab/census/programs/dev/t024.py` is `is_prime`: its `%` and `//` were refused by the hybrid's
-extra body gate even though `pymix` had already proved that a trap cannot reach a boxed handler.
-That gate now allows division/modulo, and a slice only when its step is a constant non-zero integer
-(step 0 is CPython's ValueError; a run-time step is left to CPython), so `is_prime`, `mod7`,
-`divmod7` and the safe slice helpers gain a typed clone while the rest of each program stays in
-CPython.
+extra body gate.  That gate now allows division/modulo for an int/bool result (a zero-division trap
+is routed to the Python fallback, so CPython raises the real exception after flushing its buffered
+stdout) and for any result when the divisor is a non-zero literal.  A float/str result with a
+divisor that can be zero stays in CPython because that clone has no fallback signal.  A slice is
+allowed only when its step is a constant non-zero integer (step 0 is CPython's ValueError; a
+run-time step is left to CPython).  `is_prime`, `mod7`, `divmod7` and the safe slice helpers gain a
+typed clone while the rest of each program stays in CPython.
 
 T1  `is_prime` is named in the hybrid's accelerated list.
 T2  the hybrid program prints CPython's stdout and exit status on every public input.
 T3  division/modulo boundaries (zero, negative, bool, int64 edges) and a safe slice run natively;
     a variable or zero slice step is not accelerated and falls back to CPython's exception.
+T4  an uncaught zero divisor in an accelerated int clone falls back to CPython: stdout printed
+    before the trap survives and the exit status and exception text match.  A float clone with a
+    run-time divisor is not accelerated, so its zero division also matches CPython.
 """
 import json
 import os
@@ -68,6 +73,39 @@ for a, b in ((1, 0), (1.0, 0.0)):
             print('zero', fn(a, b))
         except Exception as exc:
             print('zero-exc', type(exc).__name__, exc)
+'''
+
+TRAP = '''
+def mod(x: int, y: int) -> int:
+    return x % y
+
+def fdiv(x: int, y: int) -> int:
+    return x // y
+
+def tdiv(x: float, y: float) -> float:
+    return x / y
+
+class Box:
+    def __init__(self, n):
+        self.n = n
+
+print('start')
+print('ok', mod(17, 5), fdiv(-7, 3))
+print('through-list', mod([17, 5][1], [10, 3][1]))
+print('through-attr', mod(Box(17).n, Box(3).n))
+print('through-dict', fdiv({'a': 7}['a'], {'b': 3}['b']))
+print('before-zero')
+print(mod(17, [0][0]))
+'''
+
+FLOAT_TRAP = '''
+def tdiv(x: float, y: float) -> float:
+    return x / y
+
+print('start')
+print(tdiv(3.0, 2.0))
+print('before-zero')
+print(tdiv(3.0, 0.0))
 '''
 
 SLICES = '''
@@ -169,6 +207,18 @@ class Prog4TypedReach(unittest.TestCase):
             self.assertIn('mod7', report['accelerated'])
             self.assertIn('divmod7', report['accelerated'])
             self.compare(tmp, src, out, 'divmod')
+
+    def test_uncaught_zero_division_matches_cpython(self):
+        with tempfile.TemporaryDirectory(prefix='ail-prog4-') as tmp:
+            src, out, report = self.build(tmp, 'trap', TRAP)
+            self.assertIn('mod', report['accelerated'])
+            self.assertIn('fdiv', report['accelerated'])
+            got = self.compare(tmp, src, out, 'trap')
+            self.assertIn(b'before-zero', got.stdout)
+            src, out, report = self.build(tmp, 'float_trap', FLOAT_TRAP)
+            self.assertNotIn('tdiv', report['accelerated'])
+            got = self.compare(tmp, src, out, 'float_trap')
+            self.assertIn(b'before-zero', got.stdout)
 
     def test_slice_steps_are_safe(self):
         with tempfile.TemporaryDirectory(prefix='ail-prog4-') as tmp:

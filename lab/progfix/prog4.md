@@ -26,11 +26,20 @@ reach 80% of that program's own time.
 
 ## What was fixed
 
-The mixed-mode/hybrid body gate refused every division, modulo and subscript.  It now allows
-division and modulo (the existing `pymix` rule already refuses a candidate whose trap could reach a
-boxed `try`), and a slice only when its step is a constant non-zero integer.  A run-time step and a
-literal zero step stay in CPython because they can raise `ValueError`/`TypeError`; this also keeps
-the old blanket slice allowance from hiding `xs[::0]`.
+The mixed-mode/hybrid body gate refused every division, modulo and subscript.  It now allows a
+slice only when its step is a constant non-zero integer; a run-time step and a literal zero step
+stay in CPython because they can raise `ValueError`/`TypeError`, and this also keeps the old
+blanket slice allowance from hiding `xs[::0]`.
+
+Division and modulo are allowed with one of two safety proofs.  A non-zero numeric literal divisor
+cannot trap.  Otherwise an int/bool-returning clone is still allowed because its zero-division stop
+is routed through the same `setjmp` signal the hybrid already uses for int64 overflow: the Python
+wrapper then calls the original function, which raises CPython's own `ZeroDivisionError`, and the
+interpreter flushes its buffered stdout on the way out.  A float/str-returning clone has no
+fallback signal, so a divisor that is not a non-zero literal keeps it in CPython.  The first
+version of this batch claimed `pymix`'s boxed-`try` rule made an uncaught trap harmless; it did
+not, and an accelerated `x % 0` lost the stdout printed before it.  The probes now cover the
+uncaught path in a module with no `try`.
 
 The hybrid analysis now seeds an annotated result kind as well as the parameter kinds, and fills
 the missing `str`-slice kind in `pymix`'s inference.  That reach is needed for `str`-returning typed
@@ -38,7 +47,9 @@ helpers (`def head(s: str) -> str: return s[:2]`); `analyze` still refuses a fun
 branches disagree with the annotation.
 
 `is_prime` is the one hot function of these eight that the change moves onto the typed hybrid path:
-`t024` now reports `accelerated: ["is_prime"]`, and all three public inputs match CPython.
+`t024` now reports `accelerated: ["is_prime"]`, and all three public inputs match CPython.  Its
+run-time divisors (`x % i`, `x % (i + 2)`) are covered by the fallback route, so the acceleration
+does not weaken the zero-division guarantee.
 
 ## Follow-ups (big features, not implemented here)
 

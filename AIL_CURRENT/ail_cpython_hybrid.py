@@ -77,20 +77,39 @@ def _safe_slice_step(sl):
             and step.value != 0)
 
 
-def _unsafe_body(fn):
+def _provably_nonzero(node):
+    """A divisor that is a non-zero numeric literal (with an optional sign) cannot trap."""
+    if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd))
+            and isinstance(node.operand, ast.Constant)):
+        node = node.operand
+        if not isinstance(node.value, (int, float)) or isinstance(node.value, bool):
+            return False
+        value = -node.value if isinstance(node.op, ast.USub) else node.value
+        return value != 0
+    return (isinstance(node, ast.Constant) and isinstance(node.value, (int, float))
+            and not isinstance(node.value, bool) and node.value != 0)
+
+
+def _unsafe_body(fn, ret=None):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
     subscript (IndexError/KeyError), a slice whose step is not a non-zero integer literal
     (ValueError/TypeError), power (complex results, 0 ** negative), a call (an arbitrary side
     effect or exception), and `raise`/`assert`/`try`/`with`/import are all outside this pass.
-    Division and modulo are allowed here because `pymix`'s exception rule already refuses a
-    candidate whose division could trap into a boxed handler, and the hybrid only sees units that
-    passed it.  This is deliberately conservative; a missed speed-up is safe."""
+
+    Division and modulo are allowed only when the divisor is a non-zero literal, or for an
+    int/bool result whose clone routes a zero-division trap to the Python fallback (the hybrid
+    analysis patches the clone's trap paths, see `_analysis`); a float/str result still refuses a
+    divisor that can be zero, because that clone has no fallback signal.  This is deliberately
+    conservative; a missed speed-up is safe."""
     for node in _own_nodes(fn):
         if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
             return 'indexing can raise'
         if isinstance(node, ast.Subscript) and not _safe_slice_step(node.slice):
             return 'a slice step can be zero or non-integer'
+        if (isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod))
+                and ret not in ('int', 'bool') and not _provably_nonzero(node.right)):
+            return 'division or modulo by a divisor that may be zero'
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
             return 'power can raise or produce a complex result'
         if isinstance(node, ast.Call):
@@ -157,7 +176,8 @@ def _analysis(src):
     (`ail_unwind_<name>` must not match), the documented str ABI's `uint8_t *_out` result
     parameter is accepted by the existing validator (which writes through `int32_t *`), and
     parameter and return annotations seed `pymix`'s kinds.  The selection pass below still requires
-    the body to have no operation that can trap.
+    the body to have no operation that can trap without a fallback signal (the subprocess also
+    routes an int/bool clone's zero-division stops to its overflow `setjmp`, see the patch below).
     """
     import tempfile
     fd, name = tempfile.mkstemp(prefix='ail-hybrid-src-', suffix='.py')
@@ -227,6 +247,30 @@ def _expr_kind(e, facts, rets):
             return pymix.STR
     return kind
 pymix._expr_kind = _expr_kind
+# A zero-division trap in a clone is an uncaught exit in the typed runtime.  CPython's stdout is
+# buffered in Python, not in libc, so `ail_die` cannot flush what the program already printed.  The
+# int/bool clone's wrapper already installs a setjmp signal for int64 overflow; route every
+# division/modulo stop through the same signal so the Python wrapper calls the original function,
+# which raises CPython's own exception (and the interpreter flushes stdout on the way out).  Only
+# this hybrid analysis installs the patch; the general mixed-mode C is byte-for-byte unchanged.
+_old_overflow_fallback = pyboxed2._mix_overflow_fallback
+_DIV_TRAPS = ('division by zero', 'integer division by zero', 'integer modulo by zero',
+              'integer division or modulo by zero', 'float division by zero',
+              'float floor division by zero', 'float modulo')
+def _overflow_fallback(csrc, mangled, overflow):
+    result = _old_overflow_fallback(csrc, mangled, overflow)
+    if result is None:
+        return None
+    csrc, state = result
+    hit = mangled + '__mix_overflow_hit'
+    for message in _DIV_TRAPS:
+        csrc = csrc.replace('ail_die("' + message + '")', hit + '()')
+    csrc = csrc.replace('ail_die(mod ? "integer modulo by zero" : "integer division by zero")',
+                        hit + '()')
+    csrc = csrc.replace('ail_die(remainder ? "float modulo" : "float floor division by zero")',
+                        hit + '()')
+    return csrc, state
+pyboxed2._mix_overflow_fallback = _overflow_fallback
 _old_extract = pyboxed2._mix_extract_signature
 _old_validate = pyboxed2._mix_validate_signature
 _old_build = pyboxed2.build
@@ -364,7 +408,7 @@ def _select(src, tree, report, facts):
         if bad:
             rejected[pyname] = 'parameter kind %s stays in CPython' % bad[0]
             continue
-        unsafe = _unsafe_body(funcs[pyname])
+        unsafe = _unsafe_body(funcs[pyname], ret)
         if unsafe:
             rejected[pyname] = unsafe
             continue
