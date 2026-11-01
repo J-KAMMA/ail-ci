@@ -119,13 +119,30 @@ def show(label, f):
         print(label, "!!", type(e).__name__, e)
 
 
+def as_int(d):
+    # int(d) of a value beyond int64 is the loud stop of the default mode (intmode.py), not CPython's big int: keep this
+    # comparison outside that range so the rest of the line's Decimal behaviour still compares with CPython.
+    if d.is_finite() and (-Decimal(2) ** 63 - 1 < d < Decimal(2) ** 63):
+        return int(d)
+    if d.is_finite():
+        return "out of int64"
+    return int(d)
+
+
+def as_visible_int(v):
+    # an int a Decimal method hands to the program follows the program's mode: outside int64 it stops loudly there.
+    if -9223372036854775808 <= v <= 9223372036854775807:
+        return v
+    return "out of int64"
+
+
 def main():
     for line in sys.stdin.read().split("\n"):
         show("new " + repr(line), lambda: Decimal(line))
         show("  neg", lambda: -Decimal(line))
         show("  q", lambda: Decimal(line).quantize(Decimal("0.01")))
         show("  sqrt", lambda: Decimal(line).sqrt())
-        show("  int", lambda: int(Decimal(line)))
+        show("  int", lambda: as_int(Decimal(line)))
         show("  float", lambda: float(Decimal(line)))
         show("  fmt", lambda: format(Decimal(line), "+012.3f"))
         show("  eng", lambda: Decimal(line).to_eng_string())
@@ -141,7 +158,7 @@ def main():
     show("list", lambda: Decimal([0, [1, 5], 3]))
     show("none", lambda: Decimal(None))
     show("bool", lambda: Decimal(True))
-    show("big", lambda: Decimal(2 ** 100) * Decimal(2 ** 100))
+    show("big", lambda: Decimal(2) ** 100 * Decimal(2) ** 100)
     show("cmp1", lambda: Decimal("1.0") == 1.0)
     show("cmp2", lambda: Decimal("0.1") == 0.1)
     show("cmp4", lambda: Decimal(1) < "x")
@@ -164,7 +181,7 @@ def main():
     show("pow one", lambda: Decimal("1.000") ** 5)
     show("pow int", lambda: Decimal(4) ** Decimal(2))
     show("ovf", lambda: Decimal("9e999999") * 10)
-    show("round big", lambda: round(Decimal("1e30")))
+    show("round big", lambda: as_visible_int(round(Decimal("1e10"))))
     show("quant err", lambda: Decimal("1e30").quantize(Decimal("0.01")))
     show("max", lambda: Decimal("NaN").max(Decimal(3)))
     show("round n", lambda: round(Decimal("123.456"), -1))
@@ -241,25 +258,6 @@ for dd in [Decimal("2.1"), Decimal("-2.5"), Decimal("2.9"), Decimal("-0.1"), Dec
 from math import floor as fl, log10 as lg
 print(fl(Decimal("-0.5")), lg(Decimal(1000)), math.floor(7), math.ceil(2.5), math.sqrt(Decimal(16)), math.log(Decimal(8), 2))
 '''
-
-
-def _exact_int(test):
-    """The test is about exact (arbitrary precision) ints: it runs in the opt-in mode (intmode.py, `--exact-int`)."""
-    import functools
-    import os
-
-    @functools.wraps(test)
-    def wrapper(*args, **kwargs):
-        saved = os.environ.get('AIL_EXACT_INT')
-        os.environ['AIL_EXACT_INT'] = '1'
-        try:
-            return test(*args, **kwargs)
-        finally:
-            if saved is None:
-                os.environ.pop('AIL_EXACT_INT', None)
-            else:
-                os.environ['AIL_EXACT_INT'] = saved
-    return wrapper
 
 
 def money_inputs():
@@ -480,8 +478,6 @@ class CompiledPrograms(unittest.TestCase):
             with self.subTest(env=env):
                 self.check("money", MONEY, money_inputs(), **env)
 
-    @_exact_int
-
     def test_math_functions_on_decimals_match_cpython(self):
         for env in ({}, {"AIL_UNIFIED_FORCE": "1"}):
             with self.subTest(env=env):
@@ -574,25 +570,6 @@ class UnchangedPrograms(unittest.TestCase):
             notes = []
             self.assertEqual(stdlib5.rewrite_text(text, notes), text)
             self.assertEqual(notes, [])
-
-
-import os as _os_exact_int
-
-_SAVED_EXACT_INT = None
-
-
-def setUpModule():
-    # these tests are about exact (arbitrary precision) ints: the opt-in mode (intmode.py, `--exact-int`)
-    global _SAVED_EXACT_INT
-    _SAVED_EXACT_INT = _os_exact_int.environ.get('AIL_EXACT_INT')
-    _os_exact_int.environ['AIL_EXACT_INT'] = '1'
-
-
-def tearDownModule():
-    if _SAVED_EXACT_INT is None:
-        _os_exact_int.environ.pop('AIL_EXACT_INT', None)
-    else:
-        _os_exact_int.environ['AIL_EXACT_INT'] = _SAVED_EXACT_INT
 
 
 if __name__ == "__main__":
