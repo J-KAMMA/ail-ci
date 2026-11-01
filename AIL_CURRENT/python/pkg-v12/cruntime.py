@@ -18680,7 +18680,7 @@ static inline ail_st ail_bi_round(ail_ctx *cx, ail_obj *out, ail_obj x, int has_
                builds; uncaught it still ends the program with exit 1 and the "integer overflow"
                text (now prefixed by CPython's own class name). */
             if (r >= 9223372036854775808.0 || r < -9223372036854775808.0)
-                return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "integer overflow");
+                return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "integer overflow in round()");
             *out = ail_box_int((int64_t)r);
 /*B>*/
             return AIL_OK;
@@ -20979,14 +20979,18 @@ static inline ail_st ail_math_sqrt(ail_ctx *cx, ail_obj *out, ail_obj x) {
     if (v < 0.0) return ail_raise_c(cx, AIL_B_VALUEERROR, "math domain error");
     *out = ail_box_float(cx, sqrt(v)); return AIL_OK;
 }
-static inline ail_st ail__float_to_int_checked(ail_ctx *cx, ail_obj *out, double v) {
+static inline ail_st ail__float_to_int_checked(ail_ctx *cx, ail_obj *out, double v, const char *op) {
     if (v != v) return ail_raise_c(cx, AIL_B_VALUEERROR, "cannot convert float NaN to integer");
     if (v > 1.7976931348623157e308 || v < -1.7976931348623157e308 || v == HUGE_VAL || v == -HUGE_VAL)
         return ail_raise_c(cx, AIL_B_OVERFLOWERROR, "cannot convert float infinity to integer");
 /*B<*/
     *out = ail_int_from_double(cx, v); return AIL_OK;
 /*B|*/
-    if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) return ail_hit_limit(cx, "int_overflow", "integer overflow in int(float)");
+    if (v >= 9223372036854775808.0 || v < -9223372036854775808.0) {
+        char msg[96];
+        snprintf(msg, sizeof msg, "integer overflow in %s", op);
+        return ail_hit_limit(cx, "int_overflow", msg);
+    }
     *out = ail_box_int((int64_t)v); return AIL_OK;
 /*B>*/
 }
@@ -20997,7 +21001,7 @@ static inline ail_st ail_math_floor(ail_ctx *cx, ail_obj *out, ail_obj x) {
 /*B>*/
     ail_st st = ail__math_check_num(cx, x); if (st != AIL_OK) return st;
     if (ail__is_intlike(x.tag)) { *out = ail_box_int(x.i); return AIL_OK; }
-    return ail__float_to_int_checked(cx, out, floor(ail_float_val(x)));
+    return ail__float_to_int_checked(cx, out, floor(ail_float_val(x)), "math.floor()");
 }
 static inline ail_st ail_math_ceil(ail_ctx *cx, ail_obj *out, ail_obj x) {
 /*B<*/
@@ -21006,7 +21010,7 @@ static inline ail_st ail_math_ceil(ail_ctx *cx, ail_obj *out, ail_obj x) {
 /*B>*/
     ail_st st = ail__math_check_num(cx, x); if (st != AIL_OK) return st;
     if (ail__is_intlike(x.tag)) { *out = ail_box_int(x.i); return AIL_OK; }
-    return ail__float_to_int_checked(cx, out, ceil(ail_float_val(x)));
+    return ail__float_to_int_checked(cx, out, ceil(ail_float_val(x)), "math.ceil()");
 }
 static inline ail_st ail_math_trunc(ail_ctx *cx, ail_obj *out, ail_obj x) {
 /*B<*/
@@ -21015,7 +21019,7 @@ static inline ail_st ail_math_trunc(ail_ctx *cx, ail_obj *out, ail_obj x) {
 /*B>*/
     ail_st st = ail__math_check_num(cx, x); if (st != AIL_OK) return st;
     if (ail__is_intlike(x.tag)) { *out = ail_box_int(x.i); return AIL_OK; }
-    return ail__float_to_int_checked(cx, out, trunc(ail_float_val(x)));
+    return ail__float_to_int_checked(cx, out, trunc(ail_float_val(x)), "math.trunc()");
 }
 static inline ail_st ail_math_isqrt(ail_ctx *cx, ail_obj *out, ail_obj n) {
     ail_st st = ail__require_intlike(cx, n); if (st != AIL_OK) return st;
@@ -21079,6 +21083,7 @@ static inline ail_st ail_math_gcd(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj 
     uint64_t x = a.i < 0 ? (uint64_t)(-(a.i + 1)) + 1u : (uint64_t)a.i;
     uint64_t y = b.i < 0 ? (uint64_t)(-(b.i + 1)) + 1u : (uint64_t)b.i;
     while (y) { uint64_t t = y; y = x % y; x = t; }
+    if (x > (uint64_t)INT64_MAX) return ail_hit_limit(cx, "int_overflow", "integer overflow in math.gcd()");
     *out = ail_box_int((int64_t)x); return AIL_OK;
 /*B>*/
 }
@@ -21098,12 +21103,15 @@ static inline ail_st ail_math_lcm(ail_ctx *cx, ail_obj *out, ail_obj a, ail_obj 
     AIL_FRAME_LEAVE(cx, fr);
     return st;
 /*B|*/
+    if (a.i == 0 || b.i == 0) { *out = ail_box_int(0); return AIL_OK; }
+    if (a.i == INT64_MIN || b.i == INT64_MIN)
+        return ail_hit_limit(cx, "int_overflow", "integer overflow in math.lcm()");
     ail_obj g; ail_st st = ail_math_gcd(cx, &g, a, b); if (st != AIL_OK) return st;
-    if (g.i == 0) { *out = ail_box_int(0); return AIL_OK; }
     uint64_t x = a.i < 0 ? (uint64_t)(-(a.i + 1)) + 1u : (uint64_t)a.i;
     uint64_t r = x / (uint64_t)g.i;
     uint64_t y = b.i < 0 ? (uint64_t)(-(b.i + 1)) + 1u : (uint64_t)b.i;
-    /* small enough for this judge's inputs -- no overflow check beyond int64 box */
+    if (r > (uint64_t)INT64_MAX / y)
+        return ail_hit_limit(cx, "int_overflow", "integer overflow in math.lcm()");
     *out = ail_box_int((int64_t)(r * y)); return AIL_OK;
 /*B>*/
 }

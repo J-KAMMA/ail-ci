@@ -2,7 +2,7 @@
 
 The fz2 review recorded that the general path's `round()` of a finite float outside int64
 stopped through `ail_hit_limit` (AIL_LIMIT), which no `try` could see; `ail_bi_round` now
-raises the ordinary `OverflowError("integer overflow")` on the int64 general runtime, so
+raises the ordinary `OverflowError("integer overflow in round()")` on the int64 general runtime, so
 `except OverflowError`, `except Exception`, a bare `except` and a handler's `finally` all see
 it, and an uncaught wide value keeps the output written so far (exit 1).
 
@@ -277,11 +277,11 @@ class Pre429Tests(unittest.TestCase):
         self.typed_stop('uncaught', UNCAUGHT, b'before\n')
 
     def test_int64_general_wide_round_is_catchable(self):
-        self.caught('catch', CATCH, "caught OverflowError 'integer overflow'\nafter\n")
+        self.caught('catch', CATCH, "caught OverflowError 'integer overflow in round()'\nafter\n")
         self.caught('exception', EXCEPTION, 'exception caught\nafter\n')
         self.caught('bare', BARE, 'bare caught\nafter\n')
         self.caught('catch_finally', CATCH_FINALLY, 'caught\nfinally ran\nafter\n')
-        self.caught('negative', NEGATIVE, "neg caught 'integer overflow'\nafter\n")
+        self.caught('negative', NEGATIVE, "neg caught 'integer overflow in round()'\nafter\n")
         self.caught('dynamic', DYNAMIC, 'dynamic caught\nafter\n')
         self.general_stop('finally_only', FINALLY_ONLY, b'finally ran\n')
         self.general_stop('value_only', VALUE_ONLY, b'')

@@ -290,7 +290,7 @@ static ail_obj ail_builtin_round(ail_obj x, int has_n, int64_t n) {
     double v = ail__as_double(x);
     if (!has_n) {
         double r = nearbyint(v);
-        if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) ail_raise_c(AIL_ERR_OVERFLOW, "integer overflow");
+        if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) ail_raise_c(AIL_ERR_OVERFLOW, "integer overflow in round()");
         return ail_box_int((int64_t)r);
     }
     double scale = (pow)(10.0, (double)n);
@@ -533,12 +533,12 @@ static ail_obj ail_math_sqrt(ail_obj x) {
 }
 static ail_obj ail_math_floor(ail_obj x) {
     double r = floor(ail__as_double(x));
-    if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) ail_raise_c(AIL_ERR_OVERFLOW, "integer overflow");
+    if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) ail_raise_c(AIL_ERR_OVERFLOW, "integer overflow in math.floor()");
     return ail_box_int((int64_t)r);
 }
 static ail_obj ail_math_ceil(ail_obj x) {
     double r = ceil(ail__as_double(x));
-    if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) ail_raise_c(AIL_ERR_OVERFLOW, "integer overflow");
+    if (r >= 9223372036854775808.0 || r < -9223372036854775808.0) ail_raise_c(AIL_ERR_OVERFLOW, "integer overflow in math.ceil()");
     return ail_box_int((int64_t)r);
 }
 static ail_obj ail_math_isqrt(ail_obj x) {
@@ -551,9 +551,11 @@ static ail_obj ail_math_isqrt(ail_obj x) {
     return ail_box_int(r);
 }
 static ail_obj ail_math_gcd(ail_obj a, ail_obj b) {
-    int64_t x = a.i < 0 ? -a.i : a.i, y = b.i < 0 ? -b.i : b.i;
-    while (y) { int64_t t = y; y = x % y; x = t; }
-    return ail_box_int(x);
+    uint64_t x = a.i < 0 ? (uint64_t)(-(a.i + 1)) + 1u : (uint64_t)a.i;
+    uint64_t y = b.i < 0 ? (uint64_t)(-(b.i + 1)) + 1u : (uint64_t)b.i;
+    while (y) { uint64_t t = y; y = x % y; x = t; }
+    if (x > (uint64_t)INT64_MAX) ail_raise_c(AIL_ERR_OVERFLOW, "integer overflow in math.gcd()");
+    return ail_box_int((int64_t)x);
 }
 
 /* -------- collections.Counter / defaultdict -------- */
