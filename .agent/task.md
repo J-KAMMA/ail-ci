@@ -1,15 +1,6 @@
-**Coverage: make real programs that use the CPython stdlib module `random` build and print exactly what CPython prints.**
+**Your change fails tests on top of the current integration branch.** Applied alone on today's integ, one or more of these test modules fail: test_ail_obj_refs test_ail_safetynet test_ail_std_random test_ail_unified test_ail_virtual_dispatch.
 
-1. Write 12 small realistic programs, each 15–60 lines, that use `random` the way typical code does: its most common functions and classes, the common argument forms and keyword arguments, and its edge cases (empty inputs, errors that the program catches). Put them in lab/stdlib/random/.
-2. Build each one in the default mode (`ail_chatgpt.py compile X.py --syntax python`). Record the result for each: typed / general / refused, with the first refusal message, in lab/stdlib/random/RESULTS.md.
-3. Fix the reasons, starting with the one that blocks the most programs, until at least 9 of the 12 build. Each built program must match CPython's stdout and exit code. Fix the compiler, runtime or prelude, never the programs.
-4. A reason that needs a big new feature is out of scope for this task: leave it, and write it in RESULTS.md as a follow-up with the exact refusal text.
-
-Rules:
-- Never wrap ints silently. Default ints are int64, and overflow stops loudly.
-- The generated C of the 10 lab/compare tasks must stay byte-identical.
-- Add the passing programs as a test (a new test_ail_std_random.py registered in tests.d), and compare them with CPython in the test.
-- Run that test plus test_ail_safetynet, run `python3 tools/update_manifest.py`, and commit.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find why it fails here (another change may have altered behaviour or output your test expects), and fix it so they pass while keeping your fix and its test. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
