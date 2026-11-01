@@ -1,3 +1,20 @@
+## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
+
+Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
+`jmp_buf` and its save pointer are now `__thread` in the hybrid's copy of each unit, so concurrent
+calls that overflow no longer share a jump target (the 8x5000 probe now exits 0 with CPython's
+answers). Every conversion failure after a list argument now jumps to the `fallback:` label, which
+frees each buffer once; a later non-list, wrong scalar, wrong list or failed str result no longer
+leaks the earlier list copy (50,000 calls stay at plain-CPython RSS). The wrapper still copies the
+original metadata, and now rewrites `__code__` with the original `co_name`, `co_varnames` (including
+locals), `co_nlocals`, filename and first line, so functions with locals report CPython's
+`co_varnames` and no `__wrapped__`. Helper references in the generated call body use names chosen
+against the parameter list, so parameters called `_ail_hybrid_invoke`/`_ail_hybrid_native_ref`/
+`_ail_hybrid_original_ref` (or their double-underscore spellings) no longer shadow them.
+`test_ail_cpython_hybrid` gained concurrent-overflow, later-argument-fallback and locals/helper-name
+metadata cases. Probes in `/tmp/fixprobe*` and `/tmp/fixthr` matched CPython; the standalone paths
+are unchanged.
+
 ## 2026-11-01 -- CPython hybrid review fixes: fallback buffers, packaged paths, metadata (job-cpyhyb1-11011403)
 
 Fixed the three review defects in `ail build --cpython`. A fallback from the first of several list

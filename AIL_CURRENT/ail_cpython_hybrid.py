@@ -388,7 +388,12 @@ def _wrapper_source(module, items):
         out.append('static PyObject *ail_w_%s(PyObject *self, PyObject *args) {' % name)
         out.append('    PyObject *o[%d];' % max(1, len(params)))
         out.append('    if (PyTuple_GET_SIZE(args) != %d) return ail_hybrid_fallback();' % len(params))
-        bufs = []
+        # Every conversion failure after the declarations below must free whatever buffers an
+        # earlier list argument already filled; `fallback:` does that.  When there are no buffers
+        # the label is not emitted, so keep the direct return in that case.
+        bufs = ['b%d' % i for i, (_p, kind) in enumerate(params)
+                if kind in ('list[int]', 'list[float]')]
+        fail = 'goto fallback' if bufs else 'return ail_hybrid_fallback()'
         for i, (p, kind) in enumerate(params):
             out.append('    o[%d] = PyTuple_GET_ITEM(args, %d);' % (i, i))
             # Declare every list buffer before any conversion loop.  A later loop can `goto
@@ -396,38 +401,36 @@ def _wrapper_source(module, items):
             # so each must already be a valid pointer (NULL frees are no-ops).
             if kind == 'list[int]':
                 out.append('    int64_t *b%d = NULL;' % i)
-                bufs.append('b%d' % i)
             elif kind == 'list[float]':
                 out.append('    double *b%d = NULL;' % i)
-                bufs.append('b%d' % i)
         call = []
         for i, (p, kind) in enumerate(params):
             o = 'o[%d]' % i
             if kind in ('int', 'bool'):
                 if kind == 'bool':
-                    out.append('    if (!PyBool_Check(%s)) return ail_hybrid_fallback();' % o)
+                    out.append('    if (!PyBool_Check(%s)) %s;' % (o, fail))
                     out.append('    int64_t a%d = PyObject_IsTrue(%s) ? 1 : 0;' % (i, o))
                 else:
-                    out.append('    if (!PyLong_CheckExact(%s)) return ail_hybrid_fallback();' % o)
+                    out.append('    if (!PyLong_CheckExact(%s)) %s;' % (o, fail))
                     out.append('    int ovf%d = 0; long long a%d = PyLong_AsLongLongAndOverflow(%s, &ovf%d);' % (i, i, o, i))
-                    out.append('    if (ovf%d) return ail_hybrid_fallback();' % i)
-                    out.append('    if (a%d == -1 && PyErr_Occurred()) { PyErr_Clear(); return ail_hybrid_fallback(); }' % i)
+                    out.append('    if (ovf%d) %s;' % (i, fail))
+                    out.append('    if (a%d == -1 && PyErr_Occurred()) { PyErr_Clear(); %s; }' % (i, fail))
                     out.append('    a%d = (int64_t)a%d;' % (i, i))
                 call.append('a%d' % i)
             elif kind == 'float':
-                out.append('    if (!PyFloat_CheckExact(%s)) return ail_hybrid_fallback();' % o)
+                out.append('    if (!PyFloat_CheckExact(%s)) %s;' % (o, fail))
                 out.append('    double a%d = PyFloat_AsDouble(%s);' % (i, o))
-                out.append('    if (a%d == -1.0 && PyErr_Occurred()) { PyErr_Clear(); return ail_hybrid_fallback(); }' % i)
+                out.append('    if (a%d == -1.0 && PyErr_Occurred()) { PyErr_Clear(); %s; }' % (i, fail))
                 call.append('a%d' % i)
             elif kind == 'str':
-                out.append('    if (!PyUnicode_CheckExact(%s)) return ail_hybrid_fallback();' % o)
+                out.append('    if (!PyUnicode_CheckExact(%s)) %s;' % (o, fail))
                 out.append('    Py_ssize_t n%d = 0; const char *p%d = PyUnicode_AsUTF8AndSize(%s, &n%d);' % (i, i, o, i))
-                out.append('    if (!p%d) { PyErr_Clear(); return ail_hybrid_fallback(); }' % i)
+                out.append('    if (!p%d) { PyErr_Clear(); %s; }' % (i, fail))
                 out.append('    ail_str a%d; a%d.p = (const uint8_t *)p%d; a%d.n = (int64_t)n%d; a%d.bytes = 1;' % (i, i, i, i, i, i))
                 out.append('    for (Py_ssize_t k%d = 0; k%d < n%d; k%d++) if ((unsigned char)p%d[k%d] >= 0x80) { a%d.bytes = 0; break; }' % (i, i, i, i, i, i, i))
                 call.append('a%d' % i)
             elif kind == 'list[int]':
-                out.append('    if (!PyList_CheckExact(%s)) return ail_hybrid_fallback();' % o)
+                out.append('    if (!PyList_CheckExact(%s)) %s;' % (o, fail))
                 out.append('    Py_ssize_t n%d = PyList_GET_SIZE(%s);' % (i, o))
                 out.append('    b%d = n%d ? (int64_t *)PyMem_Malloc((size_t)n%d * sizeof(int64_t)) : NULL;' % (i, i, i))
                 out.append('    if (n%d && !b%d) goto fallback;' % (i, i))
@@ -442,7 +445,7 @@ def _wrapper_source(module, items):
                 call.append('b%d' % i)
                 call.append('(int64_t)n%d' % i)
             elif kind == 'list[float]':
-                out.append('    if (!PyList_CheckExact(%s)) return ail_hybrid_fallback();' % o)
+                out.append('    if (!PyList_CheckExact(%s)) %s;' % (o, fail))
                 out.append('    Py_ssize_t n%d = PyList_GET_SIZE(%s);' % (i, o))
                 out.append('    b%d = n%d ? (double *)PyMem_Malloc((size_t)n%d * sizeof(double)) : NULL;' % (i, i, i))
                 out.append('    if (n%d && !b%d) goto fallback;' % (i, i))
@@ -461,9 +464,13 @@ def _wrapper_source(module, items):
             out.append('    Py_BEGIN_ALLOW_THREADS')
             out.append('    need = %s(%s%sNULL, 0);' % (item['mangled'], cargs, ', ' if cargs else ''))
             out.append('    Py_END_ALLOW_THREADS')
-            out.append('    if (need < 0) return ail_hybrid_fallback();')
+            out.append('    if (need < 0) %s;' % fail)
             out.append('    uint8_t *sb = (uint8_t *)PyMem_Malloc((size_t)(need > 0 ? need : 1));')
-            out.append('    if (!sb) return PyErr_NoMemory();')
+            out.append('    if (!sb) {')
+            for b in bufs:
+                out.append('        PyMem_Free(%s);' % b)
+            out.append('        return PyErr_NoMemory();')
+            out.append('    }')
             out.append('    Py_BEGIN_ALLOW_THREADS')
             out.append('    if (need > 0) %s(%s%s(void *)sb, need);' % (item['mangled'], cargs, ', ' if cargs else ''))
             out.append('    Py_END_ALLOW_THREADS')
@@ -598,12 +605,23 @@ def _preamble(module, original_path):
         '    _kwtext = "{" + ", ".join("%r: %s" % (p.name, p.name) for p in _kwonly) + "}"\n'
         '    _varkwtext = _varkw.name if _varkw is not None else "{}"\n'
         '    _varargtext = _vararg.name if _vararg is not None else "()"\n'
+        '    # The generated body needs three helper names from its globals.  A parameter may have\n'
+        '    # any of the obvious names, so pick spellings the parameter list cannot shadow.\n'
+        '    _taken = {p.name for p in _params}\n'
+        '    _helpers = {}\n'
+        '    for _role in ("invoke", "native", "original"):\n'
+        '        _nm = "__ail_hybrid_" + _role\n'
+        '        while _nm in _taken:\n'
+        '            _nm += "_"\n'
+        '        _taken.add(_nm)\n'
+        '        _helpers[_role] = _nm\n'
         '    _src = ("def _ail_hybrid_call(%s):\\n"\n'
-        '            "    return _ail_hybrid_invoke(_ail_hybrid_native_ref, _ail_hybrid_original_ref, %s, %s, %s, %s)\\n"\n'
-        '            % (", ".join(_decl), _postuple, _kwtext, _varargtext, _varkwtext))\n'
-        '    _namespace = {"_ail_hybrid_invoke": _ail_hybrid_invoke,\n'
-        '                  "_ail_hybrid_native_ref": _native,\n'
-        '                  "_ail_hybrid_original_ref": _original}\n'
+        '            "    return %s(%s, %s, %s, %s, %s, %s)\\n"\n'
+        '            % (", ".join(_decl), _helpers["invoke"], _helpers["native"],\n'
+        '               _helpers["original"], _postuple, _kwtext, _varargtext, _varkwtext))\n'
+        '    _namespace = {_helpers["invoke"]: _ail_hybrid_invoke,\n'
+        '                  _helpers["native"]: _native,\n'
+        '                  _helpers["original"]: _original}\n'
         '    exec(_src, _namespace)\n'
         '    _call = _namespace["_ail_hybrid_call"]\n'
         '    _call.__name__ = _original.__name__\n'
@@ -617,7 +635,19 @@ def _preamble(module, original_path):
         '        _call.__dict__.update(_original.__dict__)\n'
         '    except Exception:\n'
         '        pass\n'
-        '    _call.__wrapped__ = _original\n'
+        '    # CPython introspection sees the original code layout, including its local names.\n'
+        '    # `co_nlocals` must be updated with `co_varnames` (CodeType rejects a mismatch); only\n'
+        '    # the wrapper\'s parameter slots are ever loaded, so the extra locals are inert.\n'
+        '    try:\n'
+        '        _oc = _original.__code__\n'
+        '        _kw = {"co_name": _oc.co_name, "co_varnames": _oc.co_varnames,\n'
+        '               "co_nlocals": len(_oc.co_varnames),\n'
+        '               "co_filename": _oc.co_filename, "co_firstlineno": _oc.co_firstlineno}\n'
+        '        if hasattr(_oc, "co_qualname"):\n'
+        '            _kw["co_qualname"] = _oc.co_qualname\n'
+        '        _call.__code__ = _call.__code__.replace(**_kw)\n'
+        '    except Exception:\n'
+        '        pass\n'
         '    return _call\n'
         'if _ail_hybrid_native is None:\n'
         '    def _ail_hybrid_make(_native, _original):\n'
@@ -668,6 +698,13 @@ def _compile(items, units, module, out_dir):
                       r'extern __thread int \1;', csrc)
         csrc = re.sub(r'(?m)^int (%s__mix_overflow) = 0;$' % re.escape(item['mangled']),
                       r'__thread int \1 = 0;', csrc)
+        # The int64-overflow escape is per-call as well: the buffer and the save pointer must
+        # belong to the calling thread, or two concurrent overflow fallbacks restore each
+        # other's cleanup state or longjmp through the other thread's frame (SIGABRT).
+        csrc = re.sub(r'(?m)^static jmp_buf (%s__mix_jmp);$' % re.escape(item['mangled']),
+                      r'static __thread jmp_buf \1;', csrc)
+        csrc = re.sub(r'(?m)^static ([A-Za-z_][A-Za-z0-9_]* \*%s__mix_savep);$'
+                      % re.escape(item['mangled']), r'static __thread \1;', csrc)
         cpath = out_dir / ('%s_unit%d.c' % (module, i))
         opath = out_dir / ('%s_unit%d.o' % (module, i))
         cpath.write_text(csrc, encoding='utf-8')

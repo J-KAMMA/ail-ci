@@ -78,8 +78,12 @@ and calls the original Python function with the same values. Keyword arguments b
 closure first (so CPython's own `TypeError`, positional-only rules and defaults still apply) and are
 then passed to the native call; a wrong arity or a `**kwargs` call falls back. The closure copies
 `__name__`, `__qualname__`, `__doc__`, `__module__`, `__dict__`, `__annotations__`, `__defaults__`
-and `__kwdefaults__`, and its `__code__.co_argcount`/`co_varnames` and `inspect.signature` match the
-original parameter list, so introspection sees the Python function.
+and `__kwdefaults__`. Its `__code__` is rewritten to the original's `co_name`, `co_varnames`
+(including local names), `co_nlocals`, filename and first line, and its `__defaults__`/annotations
+make `inspect.signature` match without installing a `__wrapped__` attribute. The generated call
+body refers to its helpers through names chosen against the parameter list, so a parameter may be
+called `_ail_hybrid_invoke` (or any other generated spelling) without shadowing them. Introspection
+therefore sees the Python function's code layout; only the executable bytecode differs.
 
 Measured per-call cost (Linux x86-64, CPython 3.12, `inc(n) = n + 1`, 2,000,000 calls, median of 5):
 
@@ -122,10 +126,12 @@ silently copied back.
 All native calls are surrounded by `Py_BEGIN_ALLOW_THREADS` / `Py_END_ALLOW_THREADS`. The arguments
 are converted (or copied) while the GIL is held; the typed C body runs with no Python object access
 and no GIL; the result is boxed after the GIL is reacquired. A fallback flag is read after
-reacquisition before returning to Python. In the hybrid's copy of each unit that flag is
-thread-local (`__thread`), and every list buffer is declared and initialised before any conversion
-loop, so concurrent calls and a fallback from a later argument cannot share state or free an
-uninitialised pointer.
+reacquisition before returning to Python. In the hybrid's copy of each unit the overflow flag,
+the `jmp_buf` used for an int overflow and its save pointer are thread-local (`__thread`), so two
+concurrent fallbacks cannot restore each other's cleanup state or longjmp through the other
+thread's frame. Every list buffer is declared and initialised before any conversion loop, and every
+conversion failure after a list argument jumps to the label that frees all of them, so a fallback
+from a later argument cannot leak an earlier argument's buffer.
 
 Typed parallel loops (`# ail: par`, typedpar) compile inside the same typed clone. The extension is
 compiled and linked with `-pthread`; if such a clone spawns native threads, they run while the

@@ -94,8 +94,9 @@ print(days(datetime.date(2024, 1, 1), datetime.date(2024, 1, 31)))
 '''
 
 
-def run(cmd, cwd=None, stdin=''):
-    return subprocess.run(cmd, cwd=cwd, input=stdin.encode(), capture_output=True, timeout=600)
+def run(cmd, cwd=None, stdin='', env=None):
+    return subprocess.run(cmd, cwd=cwd, input=stdin.encode(), env=env,
+                          capture_output=True, timeout=600)
 
 
 @unittest.skipUnless(HAVE_CC and HAVE_HEADERS, 'needs a C compiler and the CPython headers')
@@ -156,27 +157,102 @@ print(f([1], [2]))
             self.assertEqual(got.stdout, want.stdout)
             self.assertEqual(got.returncode, want.returncode)
 
+    def compare_imported(self, tmp, out, runner_text):
+        runner = Path(tmp) / 'runner.py'
+        runner.write_text(runner_text, encoding='utf-8')
+        want = run([sys.executable, str(runner)], tmp,
+                   env=dict(os.environ, PYTHONPATH=str(tmp)))
+        got = run([sys.executable, str(runner)], tmp,
+                  env=dict(os.environ, PYTHONPATH=str(out)))
+        self.assertEqual(got.stdout, want.stdout)
+        self.assertEqual(got.returncode, want.returncode)
+        return got
+
     def test_accelerated_metadata(self):
         text = '''
 def f(n: int) -> int:
-    return n + 1
+    z = n + 1
+    w = z * 2
+    return w
 
 def g(n: int = 7) -> int:
     return n * 2
 
-print(f.__annotations__)
-print(f.__defaults__)
-print(f.__code__.co_argcount, f.__code__.co_varnames)
-print(f(4), g(), g(4), g(n=5))
+def h(_ail_hybrid_invoke: int, _ail_hybrid_native_ref: int,
+      _ail_hybrid_original_ref: int) -> int:
+    return _ail_hybrid_invoke + _ail_hybrid_native_ref + _ail_hybrid_original_ref
+
+def k(__ail_hybrid_invoke: int, __ail_hybrid_native_ref: int,
+      __ail_hybrid_original_ref: int) -> int:
+    return __ail_hybrid_invoke + __ail_hybrid_native_ref + __ail_hybrid_original_ref
+'''
+        runner = '''
+import inspect
+import metadata as m
+print(m.f.__annotations__)
+print(m.f.__defaults__)
+print(m.f.__code__.co_argcount, m.f.__code__.co_varnames, m.f.__code__.co_name)
+print(hasattr(m.f, '__wrapped__'), inspect.signature(m.f))
+print(m.f(4), m.g(), m.g(4), m.g(n=5), m.h(1, 2, 3), m.k(4, 5, 6))
 '''
         with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
             src, out, report = self.build(tmp, 'metadata', text)
-            self.assertIn('f', report['accelerated'])
-            self.assertIn('g', report['accelerated'])
-            want = run([sys.executable, str(src)], tmp)
-            got = run([str(out / 'metadata')], tmp)
-            self.assertEqual(got.stdout, want.stdout)
-            self.assertEqual(got.returncode, want.returncode)
+            for name in ('f', 'g', 'h', 'k'):
+                self.assertIn(name, report['accelerated'])
+            self.compare_imported(tmp, out, runner)
+
+    def test_fallback_from_later_arguments_releases_buffers(self):
+        text = '''
+def f(a: list[int], b: list[int]) -> int:
+    return 0
+
+def g(a: list[int], n: int) -> int:
+    return n
+
+def h(a: list[int], s: str) -> int:
+    return 0
+'''
+        runner = '''
+import fallbackbuf as m
+for _ in range(20000):
+    m.f([0] * 100, (2,))
+    m.g([0] * 100, 2**100)
+    m.h([0] * 100, 3)
+print(m.f([1], [2]), m.g([1], 3), m.h([1], 'x'))
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'fallbackbuf', text)
+            for name in ('f', 'g', 'h'):
+                self.assertIn(name, report['accelerated'])
+            self.compare_imported(tmp, out, runner)
+
+    def test_concurrent_overflow_falls_back_per_thread(self):
+        text = '''
+def mul(n: int) -> int:
+    return n * n
+'''
+        runner = '''
+import threading
+import threaded as m
+values = [3037000500, 2**40, 3, -4, 2**62, 7]
+def work():
+    for i in range(2000):
+        n = values[i % len(values)]
+        assert m.mul(n) == n * n
+
+threads = [threading.Thread(target=work) for _ in range(8)]
+for t in threads:
+    t.start()
+for t in threads:
+    t.join()
+print('threads-ok')
+'''
+        with tempfile.TemporaryDirectory(prefix='ail-cpython-hybrid-') as tmp:
+            src, out, report = self.build(tmp, 'threaded', text)
+            self.assertIn('mul', report['accelerated'])
+            got = self.compare_imported(tmp, out, runner)
+            self.assertEqual(got.returncode, 0)
+            self.assertIn(b'threads-ok', got.stdout)
 
     def test_file_and_sibling_import_survive_packaging(self):
         text = '''
