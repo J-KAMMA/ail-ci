@@ -1,3 +1,15 @@
+## 2026-11-01 -- stdlib `fnmatch` review follow-up (job-std_fnmatch-11011617)
+
+Fixed the reviewer's sequence-pattern defect: `fnmatchcase` with a non-str/bytes sequence now runs
+CPython's `translate` semantics instead of treating the sequence as a list of one-character specs.
+Each element is one literal chunk unless it is exactly `*` or `?`, so `fnmatchcase("ab", ("ab",))`
+is True; int elements raise `decoding to str: need a bytes-like object, int found`; bytes elements
+raise `sequence item 0: expected str instance, bytes found`; `range` is hashable as in CPython even
+though the AIL runtime is not; unhashable sequences keep the `lru_cache` error. A `[` element
+reproduces CPython's `AttributeError` from slicing the sequence. `test_ail_std_fnmatch` now covers
+sequence patterns through `translate`, `fnmatchcase`, arguments, list items, dict values and
+attributes, and the 10 `lab/compare` generated C files are still byte-identical to the base commit.
+
 ## 2026-11-01 -- stdlib `fnmatch` on the general path (job-std_fnmatch-11011617)
 
 Added `fnmatch` to the stdlib quick check (`ail_syntax.py`), the module set and prelude routing in

@@ -110,6 +110,21 @@ class Prelude(unittest.TestCase):
                 self.assertEqual(attempt(lambda: P._ail_fnmatch_case(name, pat)),
                                  attempt(lambda: fnmatch.fnmatchcase(name, pat)), (name, pat))
 
+    def test_sequence_patterns(self):
+        # _compile_pattern runs translate on a non-str/bytes sequence: "ab" is one literal chunk, not
+        # two one-character specs, and element types reach re.escape / "".join with CPython's errors
+        import prelude_fnmatch as P
+        names = ["", "a", "ab", "abc", "a.py", "x\ny", b"a"]
+        patterns = [("ab",), ("a", "b"), ("a", "*", "c"), ("a", "?", "c"), ("",), ("", "a"),
+                    (".", "py"), ("a", "[", "b", "]"), ("[",), ("[", "b"), (1, 2), range(2),
+                    (b"a",), (bytearray(b"a"),), 5, None, ["a", "b"], {"a": 1}]
+        for pat in patterns:
+            self.assertEqual(attempt(lambda: P._ail_fnmatch_translate(pat)),
+                             attempt(lambda: fnmatch.translate(pat)), repr(pat))
+            for name in names:
+                self.assertEqual(attempt(lambda: P._ail_fnmatch_case(name, pat)),
+                                 attempt(lambda: fnmatch.fnmatchcase(name, pat)), (name, pat))
+
 
 class CompiledPrograms(unittest.TestCase):
     def test_lab_programs_match_cpython(self):

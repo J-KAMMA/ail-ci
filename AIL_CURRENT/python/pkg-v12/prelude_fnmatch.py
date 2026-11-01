@@ -20,7 +20,7 @@ def _ail_fnm_escape(c: str) -> str:
     if not isinstance(c, str):
         # re.escape's own error, which fnmatch.translate(bytes) reaches: a bytes pattern indexes to ints
         raise TypeError("decoding to str: need a bytes-like object, %s found" % _ail_fnm_tname(c))
-    if c in _AIL_FNM_SPECIAL:
+    if len(c) > 0 and c in _AIL_FNM_SPECIAL:
         return "\\" + c
     return c
 
@@ -199,24 +199,82 @@ def _ail_fnm_match(name: str, pat: str) -> bool:
     return ti == len(kinds)
 
 
+def _ail_fnm_match_tokens(name: str, kinds: list[int], specs: list[str]) -> bool:
+    # like _ail_fnm_match, but a literal token (kind 0) may be several characters: fnmatchcase with a
+    # sequence pattern translates each element as a whole through re.escape, so "ab" is two literals
+    ni = 0
+    ti = 0
+    star_t = -1
+    star_n = -1
+    while ni < len(name):
+        if ti < len(kinds) and kinds[ti] != 2:
+            if kinds[ti] == 0:
+                spec = specs[ti]
+                if name[ni:ni + len(spec)] == spec:
+                    ni = ni + len(spec)
+                    ti = ti + 1
+                    continue
+            elif _ail_fnm_match_one(kinds[ti], specs[ti], name[ni]):
+                ni = ni + 1
+                ti = ti + 1
+                continue
+        if ti < len(kinds) and kinds[ti] == 2:
+            star_t = ti
+            star_n = ni
+            ti = ti + 1
+            continue
+        if star_t >= 0:
+            star_n = star_n + 1
+            ni = star_n
+            ti = star_t + 1
+            continue
+        return False
+    while ti < len(kinds) and (kinds[ti] == 2 or (kinds[ti] == 0 and len(specs[ti]) == 0)):
+        ti = ti + 1
+    return ti == len(kinds)
+
+
+def _ail_fnmatch_seq_tokens(pat) -> tuple[list[int], list[str]]:
+    # the token stream CPython's translate builds for a non-str/bytes sequence: an element that is
+    # exactly "*" or "?" is the shell operator, and every other element is one literal chunk
+    kinds: list[int] = []
+    specs: list[str] = []
+    i = 0
+    n = len(pat)
+    while i < n:
+        c = pat[i]
+        i = i + 1
+        if c == "*":
+            if len(kinds) == 0 or kinds[len(kinds) - 1] != 2:
+                kinds.append(2)
+                specs.append("")
+        elif c == "?":
+            kinds.append(1)
+            specs.append("")
+        else:
+            kinds.append(0)
+            specs.append(c)
+    return kinds, specs
+
+
 def _ail_fnmatch_case(name, pat):
     if not isinstance(pat, (str, bytes)):
-        # CPython's _compile_pattern is lru_cache'd, so an unhashable pattern is refused before its length
-        try:
+        # CPython's _compile_pattern is lru_cache'd, so an unhashable pattern is refused before its
+        # length; let hash() raise its own TypeError (the element type, not the sequence type).
+        # range is hashable in CPython but the AIL runtime does not hash it, so do not ask it.
+        if type(pat).__name__ != "range":
             hash(pat)
-        except TypeError:
-            raise TypeError("unhashable type: %r" % type(pat).__name__)
-        try:
-            seq = list(pat)
-        except TypeError:
-            raise TypeError("object of type %r has no len()" % _ail_fnm_tname(pat))
+        # translate(pat) first: it raises CPython's own errors for ints, byte elements, "[" in a
+        # sequence and non-sequences, before anything happens to the name
+        _ail_fnmatch_translate(pat)
         if type(name).__name__ in ("bytearray", "memoryview"):
             raise TypeError("cannot use a string pattern on a bytes-like object")
         if not isinstance(name, (str, bytes)):
             raise TypeError("expected string or bytes-like object, got %r" % _ail_fnm_tname(name))
         if isinstance(name, bytes):
             raise TypeError("cannot use a string pattern on a bytes-like object")
-        return _ail_fnm_match(name, seq)
+        kinds, specs = _ail_fnmatch_seq_tokens(pat)
+        return _ail_fnm_match_tokens(name, kinds, specs)
     if type(name).__name__ in ("bytearray", "memoryview"):
         if not isinstance(pat, bytes):
             raise TypeError("cannot use a string pattern on a bytes-like object")
@@ -290,7 +348,16 @@ def _ail_fnmatch_translate(pat):
                         stuff = "\\" + stuff
                     res.append("[" + stuff + "]")
         else:
-            res.append(_ail_fnm_escape(c))
+            # re.escape returns bytes unchanged for a bytes-like element (the later "".join then
+            # raises "sequence item ... expected str instance, bytes found"); anything else goes
+            # through re.escape's str-only error
+            tn = _ail_fnm_tname(c)
+            if tn == "bytes":
+                res.append(c)
+            elif tn == "bytearray" or tn == "memoryview":
+                res.append(bytes(c))
+            else:
+                res.append(_ail_fnm_escape(c))
     inp = res
     res = []
     i = 0
