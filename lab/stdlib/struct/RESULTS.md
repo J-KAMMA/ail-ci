@@ -53,3 +53,8 @@ IEEE 754 packing and unpacking; start/negative offsets and the `pack_into` / `un
 3. `struct.iter_unpack` / `Struct.iter_unpack` return a list in this build, not CPython's one-pass iterator:
    `for ... in ...` and `list(...)` match, but `next(...)` raises `TypeError` and `len(...)` succeeds where
    CPython has no `len`.
+4. Unsigned 64-bit unpack (difference `C?-job-std_struct-11012058-2`): with the default int64 build, a `Q`, `P`,
+   `L` or `N` field at or above 2^63 stops with
+   `OverflowError: integer overflow in * (ints are 64-bit; --exact-int gives exact ints)` (exit 1, stdout kept),
+   where CPython returns `9223372036854775808`. This is the declared int64 rule, not silent wrapping; the same
+   program with `--exact-int` matches CPython. Values below 2^63 and all signed fields match in the default build.

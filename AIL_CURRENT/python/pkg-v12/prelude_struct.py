@@ -80,8 +80,6 @@ def _ail_struct_parse(fmt):
                 j = j + 1
             count = int(fmt[i:j])
             i = j
-            while i < len(fmt) and fmt[i] in _STRUCT_WHITE:
-                i = i + 1
             if i >= len(fmt):
                 raise error("repeat count given without format specifier")
             ch = fmt[i]
@@ -377,7 +375,7 @@ def _ail_struct_from_f32(bits: int) -> float:
     else:
         r = _ail_struct_scale(1.0 + float(mant) * 1.1920928955078125e-07, exp - 127)
     if sign:
-        r = 0.0 - r
+        r = math.copysign(r, -1.0)
     return r
 
 
@@ -395,7 +393,7 @@ def _ail_struct_from_f16(bits: int) -> float:
     else:
         r = _ail_struct_scale(1.0 + float(mant) * 0.0009765625, exp - 15)
     if sign:
-        r = 0.0 - r
+        r = math.copysign(r, -1.0)
     return r
 
 
@@ -620,7 +618,7 @@ def _ail_struct_from_bits64(hi: int, lo: int) -> float:
     else:
         r = _ail_struct_scale(1.0 + float(mant) * 2.220446049250313e-16, exp - 1023)
     if sign:
-        r = 0.0 - r
+        r = math.copysign(r, -1.0)
     return r
 
 
@@ -639,7 +637,7 @@ def _ail_struct_unpack_items(items, size: int, data, start: int):
                 continue
             n = data[pos]
             if n > count - 1:
-                raise error("unpack requires a buffer of " + str(size) + " bytes")
+                n = count - 1
             out.append(bytes(data[pos + 1:pos + 1 + n]))
             continue
         j = 0
@@ -721,10 +719,13 @@ def _ail_struct_unpack_from(fmt, data, offset: int = 0):
     if not _ail_struct_is_buffer(data):
         raise TypeError("a bytes-like object is required, not '" + _ail_struct_tname(data) + "'")
     if offset < 0:
+        original = offset
         offset = offset + len(data)
-        if offset < 0 or offset + size > len(data):
+        if offset < 0:
+            raise error("offset " + str(original) + " out of range for " + str(len(data)) + "-byte buffer")
+        if offset + size > len(data):
             raise error("not enough data to unpack " + str(size) + " bytes at offset "
-                                  + str(offset - len(data)))
+                                  + str(original))
     elif offset + size > len(data):
         raise error("unpack_from requires a buffer of at least " + str(offset + size)
                               + " bytes for unpacking " + str(size) + " bytes at offset " + str(offset)
@@ -738,13 +739,16 @@ def _ail_struct_pack_into_values(fmt, buffer, offset: int, values) -> None:
     if offset < 0:
         original = offset
         offset = offset + len(buffer)
-        if offset < 0 or offset + size > len(buffer):
+        if offset < 0:
+            raise error("offset " + str(original) + " out of range for " + str(len(buffer)) + "-byte buffer")
+        if offset + size > len(buffer):
             raise error("no space to pack " + str(size) + " bytes at offset " + str(original))
     elif offset + size > len(buffer):
         raise error("pack_into requires a buffer of at least " + str(offset + size)
                     + " bytes for packing " + str(size) + " bytes at offset " + str(offset)
                     + " (actual buffer size is " + str(len(buffer)) + ")")
     _ail_struct_set_big(items, _ail_struct_big_of(fmt))
+    _NATIVE_MODE[-1] = _ail_struct_native_of(fmt)
     packed = _ail_struct_pack_items(items, size, values)
     k = 0
     while k < size:
@@ -805,7 +809,9 @@ class _AilStruct:
         if offset < 0:
             original = offset
             offset = offset + len(buffer)
-            if offset < 0 or offset + self.size > len(buffer):
+            if offset < 0:
+                raise error("offset " + str(original) + " out of range for " + str(len(buffer)) + "-byte buffer")
+            if offset + self.size > len(buffer):
                 raise error("no space to pack " + str(self.size) + " bytes at offset " + str(original))
         elif offset + self.size > len(buffer):
             raise error("pack_into requires a buffer of at least " + str(offset + self.size)
@@ -823,10 +829,13 @@ class _AilStruct:
         if not _ail_struct_is_buffer(data):
             raise TypeError("a bytes-like object is required, not '" + _ail_struct_tname(data) + "'")
         if offset < 0:
+            original = offset
             offset = offset + len(data)
-            if offset < 0 or offset + self.size > len(data):
+            if offset < 0:
+                raise error("offset " + str(original) + " out of range for " + str(len(data)) + "-byte buffer")
+            if offset + self.size > len(data):
                 raise error("not enough data to unpack " + str(self.size) + " bytes at offset "
-                                      + str(offset - len(data)))
+                                      + str(original))
         elif offset + self.size > len(data):
             raise error("unpack_from requires a buffer of at least " + str(offset + self.size)
                                   + " bytes for unpacking " + str(self.size) + " bytes at offset " + str(offset)

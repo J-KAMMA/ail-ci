@@ -1,3 +1,17 @@
+## 2026-11-01 -- stdlib `struct`: review fixes (job-std_struct-11012058)
+
+Fixed the five defects from the review of the `struct` change. `pack_into` (module and `Struct`) now sets the
+native float mode before packing, so `@f` overflows to infinity and a following `<f` refuses instead of leaking
+the previous mode; `p` unpack clamps an overlarge length byte to `count - 1` like CPython; unpacked negative zero
+keeps its sign for `e`, `f` and `d` (via `math.copysign`); whitespace between a repeat count and its specifier is
+a bad format; and a negative offset below `-len(buffer)` reports `offset N out of range for M-byte buffer` for
+`unpack_from`/`pack_into` and `Struct` methods. The remaining default-build difference -- unsigned 64-bit `Q`/`P`
+values at or above 2^63 stop with the int64 overflow instead of printing CPython's value -- is now declared as
+`C?-job-std_struct-11012058-2`; `--exact-int` matches CPython. Added five regression programs to
+`test_ail_std_struct.py`; the probes in `/tmp/probes/struct_*.py` match CPython on both builds (the uint64 probe
+shows the declared overflow, and matches with `--exact-int`). Re-ran `test_ail_std_struct`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3` and refreshed the manifest.
+
 ## 2026-11-01 -- stdlib `struct`: pack / unpack / Struct (job-std_struct-11012058)
 
 Added `python/pkg-v12/structlib.py` and `prelude_struct.py`, called from the batch-5 pass in
