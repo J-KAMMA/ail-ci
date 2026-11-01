@@ -226,6 +226,7 @@ class Lowerer:
 
     def run(self):
         self.check_placement()
+        self.return_kinds = _return_kinds(self.tree)
         # module-level statements may not use an Optional function (they would need module-level temporaries)
         for node in self.tree.body:
             if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
@@ -412,7 +413,11 @@ class Lowerer:
             if isinstance(f, ast.Name):
                 info = self.funcs.get(f.id)
                 if info is not None:
-                    return info.ret is None and info.node.returns is not None and not _is_none(info.node.returns)
+                    if info.ret is not None:
+                        return False
+                    if info.node.returns is not None:
+                        return not _is_none(info.node.returns)
+                    return self.return_kinds.get(f.id) in KINDS
                 return f.id in self.NONNULL_BUILTINS
             if isinstance(f, ast.Attribute):
                 if f.attr in self.MAYBE_NONE_METHODS:
@@ -1294,17 +1299,52 @@ class _LocalKinds:
         return None
 
 
-def annotate_none_locals(tree):
-    """`x = None` and, elsewhere in the same function, `x = <a value of one scalar kind>`, with no
-    annotation on x: the first binding of x gets `x: <kind> | None`, which the Optional lowering below
-    takes (it refuses the uses it cannot prove, by name). Returns the number of names annotated."""
-    count = 0
+def _return_kinds(tree):
+    """The scalar kind each function is already known to return: an annotation, or -- for an
+    unannotated function whose every return is one scalar kind and which cannot fall off its end --
+    the kind its own body shows. The second half is what lets a call to a plain helper be assigned
+    to a variable the Optional lowering has made a (flag, value) pair: without it `res = pack(data)`
+    beside `res = unpack(data)` (unpack returning `bytes | None`) looks like a possibly-None value
+    even though `pack` always returns bytes."""
     returns = {}
     for n in tree.body:
         if isinstance(n, ast.FunctionDef) and n.returns is not None:
             r = ast.unparse(n.returns)
             if r in KINDS:
                 returns[n.name] = r
+    for _ in range(len(tree.body) + 1):
+        changed = False
+        for fn in tree.body:
+            if (not isinstance(fn, ast.FunctionDef) or fn.returns is not None or fn.decorator_list
+                    or fn.name in returns):
+                continue
+            if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.Yield, ast.YieldFrom))
+                   for st in fn.body for n in ast.walk(st)):
+                continue
+            if not _terminates(fn.body):
+                continue
+            kinds = _LocalKinds(fn, returns)
+            rets = [n for n in kinds.nodes if isinstance(n, ast.Return)]
+            if any(r.value is None or _is_none(r.value) for r in rets):
+                continue
+            present = [r for r in rets if r.value is not None]
+            found = {kinds.expr(r.value) for r in present}
+            if len(found) == 1:
+                kind = found.pop()
+                if kind in KINDS:
+                    returns[fn.name] = kind
+                    changed = True
+        if not changed:
+            break
+    return returns
+
+
+def annotate_none_locals(tree):
+    """`x = None` and, elsewhere in the same function, `x = <a value of one scalar kind>`, with no
+    annotation on x: the first binding of x gets `x: <kind> | None`, which the Optional lowering below
+    takes (it refuses the uses it cannot prove, by name). Returns the number of names annotated."""
+    count = 0
+    returns = _return_kinds(tree)
     fns = [n for n in tree.body if isinstance(n, ast.FunctionDef)]
     fns += [m for c in tree.body if isinstance(c, ast.ClassDef) for m in c.body if isinstance(m, ast.FunctionDef)]
     for fn in fns:
@@ -1351,12 +1391,7 @@ def annotate_none_returns(tree):
     program then keeps its old route).  The kind is told as for a local (`_LocalKinds`); a return whose kind cannot
     be told leaves the function alone.  Returns the number of functions annotated."""
     count = 0
-    returns = {}
-    for n in tree.body:
-        if isinstance(n, ast.FunctionDef) and n.returns is not None:
-            r = ast.unparse(n.returns)
-            if r in KINDS:
-                returns[n.name] = r
+    returns = _return_kinds(tree)
     for fn in [n for n in tree.body if isinstance(n, ast.FunctionDef)]:
         if fn.returns is not None or fn.decorator_list:
             continue

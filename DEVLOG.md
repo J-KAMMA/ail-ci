@@ -1,3 +1,20 @@
+## 2026-11-01 -- pyreach1: Python sources and the typed path (job-pyreach1-11011012)
+
+Built all ten `lab/compare/src/*/main.py` with `--syntax python --strict` (plus `--exact-int` for
+`chain_relax`/`rail_transfer`, as `run_task.py` does) and wrote the ranked blocker list to
+`docs/design/PY_TYPED_REACH.md`. The top reason is None/Optional (3 tasks: berth_sim, chain_relax,
+echo_pack). Fixed its two front-end causes: `sys.argv[i]` was typed as int in `_etype` and at call
+sites (`_claim`), so a str-only parameter lost to an int claim and then disagreed with a generated
+regex helper's `s: str`; and `optlib` only knew annotated helpers' return kinds, so an unannotated
+helper that always returns one scalar kind was treated as possibly None when assigned into an
+Optional local. `optlib._return_kinds` now infers those plain returns and `Lowerer.nonnull` uses
+them. echo_pack gets past the None reason; its next blocker is a bytes-keyed dict of int lists
+(`idx`), so no lab/compare task is fully typed yet. Probes: argv_starts, argv_re, optret3 build
+typed and match CPython; optbytes and the dict-of-containers probe still behave as documented.
+Added `test_ail_pytyped_reach.py`; final-state tests: test_ail_pytyped_reach, test_ail_argv_slices,
+test_ail_optional_locals, test_ail_optional_structs, test_ail_strict, test_ail_safetynet,
+test_ail_files, test_ail_corpus_findings3.
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`

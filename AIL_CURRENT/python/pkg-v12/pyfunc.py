@@ -1540,6 +1540,8 @@ def _etype(node, ctx):
         return NULLK
     if dunders.is_exc_code(node):
         return INT
+    if _is_sys_argv_index(node):
+        return STR
     if isinstance(node, ast.BinOp) and type(node.op) in SET_OPS and _map_kind(node, ctx) in SETS:
         return _map_kind(node, ctx)
     if _local_slist_pop(node, ctx) or _string_field_call(node, ctx) and node.func.attr == 'pop':
@@ -30143,6 +30145,8 @@ def _claim(arg, ctx):
     covering parameters and locals a `.append()`/read/copy pattern established) because `_etype`
     has no notion of a row's WIDTH at all -- it only ever answers int/float/bytes/array.
     """
+    if _is_sys_argv_index(arg):
+        return STR
     if isinstance(arg, ast.Name) and arg.id in ctx.tstride:
         return ('rows', ctx.tstride[arg.id])
     if _is_handle_producing(arg, ctx):
