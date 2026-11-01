@@ -1,3 +1,32 @@
+## 2026-11-01 -- covisin1: isinstance() with a tuple, an attribute or a type constant (job-covisin1-11011014)
+
+The module census over `AIL_CURRENT/python/pkg-v12/*.py` (148 files, `fallback_census.py`) went from 9
+modules whose general-path refusal was "isinstance() with a non-name type argument" to 0.  The forms now
+build: a tuple literal (nested and empty), a module-level type tuple (`TYPES = (int, str)`, `K = B`,
+`NESTED = ((float, bool), TYPES)`), a class through a module (`shapes.Shape`), and a class or tuple of
+classes that is only known at run time.  The typed path flattens nested tuples and answers statically when
+every element is a name it knows; otherwise the general path falls back to a small recursive
+`ail2_dyn_isinstance` for CLASS values and tuples of them.  `tuplib` expands a module type constant at its
+`isinstance()` use before the numeric-tuple pass; it drops only type-tuple/alias assignments whose every
+read was replaced and leaves other module assignments (including side effects) alone.  `_static_isinstance`
+folds an empty tuple to False on the typed path.
+
+Probes in `/tmp/probes`, default and general builds via `bash ~/tools/cmp.sh`, all match CPython:
+`p_static_tuple`, `p_constants`, `p_runtime_classes`, `p_dynclass`, `p_attr_local`, `p_attr_var`,
+`p_modconst`, `p_nested`, `p_tuple`, `p_typed_static`, `p_typed_static2`, `p_types_const`, `p_values2`,
+`p_sideeffect`, `p_empty_typed` (subclasses, bool vs int, empty/nested/aliased specs, values from an
+argument, list item, attribute and dict value).  The module-attribute form is covered by
+`test_ail_covisin1` on the typed and general paths.  Remaining, refused by name on both builds:
+a builtin type object that only reaches `isinstance()` as a run-time value (`check(v, int)`,
+`p_builtin_runtime2`) because the general path does not model builtin type objects as values.
+
+All ten `lab/compare` AIL sources generate byte-identical C against the base tree (10/10); the CPython
+sources do too for the 7 that build on both sides (the other 3 are refused identically by both trees).
+
+Added `AIL_CURRENT/test_ail_covisin1.py` and registered it through `AIL_CURRENT/tests.d/test_ail_covisin1.txt`.
+Final-state tests: test_ail_covisin1, test_ail_tuples, test_ail_modconst, test_ail_py_typed_gaps,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (91 tests, OK; one platform skip).
+
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
 The review found that the general path's new NaN early return bypassed `f.sign`, so `f'{nan:+f}'`

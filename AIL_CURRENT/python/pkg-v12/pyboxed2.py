@@ -8547,37 +8547,77 @@ class Compiler(boxclosure.ClosureMixin):
                  % (t, o, o, o, self._method_owners_check(o, '__call__')))
         return t
 
+    def _ensure_dyn_isinstance(self):
+        if getattr(self, '_dyn_isinstance', False):
+            return
+        self._dyn_isinstance = True
+        self.top_defs.append(
+            'static int ail2_dyn_isinstance(ail_obj x, ail_obj spec) {\n'
+            '    if (spec.tag == AIL_T_CLASS) {\n'
+            '        if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC)\n'
+            '            return ail_class_is_or_subclass(((ail_instobj *)x.o)->cls, spec);\n'
+            '        return 0;\n'
+            '    }\n'
+            '    if (spec.tag == AIL_T_TUPLE) {\n'
+            '        ail_vecobj *v = (ail_vecobj *)spec.o;\n'
+            '        for (int64_t i = 0; i < v->n; i++)\n'
+            '            if (ail2_dyn_isinstance(x, v->p[i])) return 1;\n'
+            '    }\n'
+            '    return 0;\n'
+            '}\n\n')
+
+    def _static_isinstance_check(self, v, tnode, ctx):
+        """The C test for one type name of an isinstance() argument, or None when the element is
+        not a name this path can settle (then its value is tested at run time)."""
+        if not isinstance(tnode, ast.Name):
+            return None
+        tname = tnode.id
+        if tname in self.classes:
+            self._check_class_name_bound(tname, ctx)
+        if tname == 'int':
+            return '(%s.tag==AIL_T_INT||%s.tag==AIL_T_BOOL%s)' % (
+                v, v, ('||%s.tag==AIL_T_BIG' % v) if biggate.ON else '')
+        if tname in TYPE_TAG:
+            return '%s.tag==%s' % (v, TYPE_TAG[tname])
+        if tname == 'range':
+            return '%s.tag==AIL_T_RANGE' % v
+        if tname in EXC_IDS and tname not in self.classes:
+            return ('((%s.tag==AIL_T_INST || %s.tag==AIL_T_EXC) && ail_class_is_or_subclass('
+                    '((ail_instobj *)%s.o)->cls, cx->builtin_cls[%s]))' % (v, v, v, EXC_IDS[tname]))
+        if tname in self.classes and self._is_exc_class(tname):
+            return ('((%s.tag==AIL_T_INST || %s.tag==AIL_T_EXC) && ail_class_is_or_subclass('
+                    '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
+                    (v, v, v, self.global_slots['class:' + tname]))
+        if tname in self.classes:
+            return ('(%s.tag==AIL_T_INST && ail_class_is_or_subclass('
+                    '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
+                    (v, v, self.global_slots['class:' + tname]))
+        return None
+
     def _b_isinstance(self, args, kwargs, ctx):
         if len(args) != 2 or kwargs:
             raise Unsupported('isinstance() with other than 2 arguments')
         v = self.expr(args[0], ctx)
-        types = args[1].elts if isinstance(args[1], ast.Tuple) else [args[1]]
+        def _flat(spec):
+            if isinstance(spec, ast.Tuple):
+                for e in spec.elts:
+                    yield from _flat(e)
+            else:
+                yield spec
+        types = list(_flat(args[1]))
+        if not types:
+            return 'ail_box_bool(0)'
         checks = []
         for tnode in types:
-            if not isinstance(tnode, ast.Name):
-                raise Unsupported('isinstance() with a non-name type argument')
-            tname = tnode.id
-            if tname in self.classes:
-                self._check_class_name_bound(tname, ctx)
-            if tname == 'int':
-                checks.append('(%s.tag==AIL_T_INT||%s.tag==AIL_T_BOOL%s)' % (v, v, ('||%s.tag==AIL_T_BIG' % v) if biggate.ON else ''))
-            elif tname in TYPE_TAG:
-                checks.append('%s.tag==%s' % (v, TYPE_TAG[tname]))
-            elif tname == 'range':
-                checks.append('%s.tag==AIL_T_RANGE' % v)
-            elif tname in EXC_IDS and tname not in self.classes:
-                checks.append('((%s.tag==AIL_T_INST || %s.tag==AIL_T_EXC) && ail_class_is_or_subclass('
-                              '((ail_instobj *)%s.o)->cls, cx->builtin_cls[%s]))' % (v, v, v, EXC_IDS[tname]))
-            elif tname in self.classes and self._is_exc_class(tname):
-                checks.append('((%s.tag==AIL_T_INST || %s.tag==AIL_T_EXC) && ail_class_is_or_subclass('
-                              '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
-                              (v, v, v, self.global_slots['class:' + tname]))
-            elif tname in self.classes:
-                checks.append('(%s.tag==AIL_T_INST && ail_class_is_or_subclass('
-                              '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
-                              (v, v, self.global_slots['class:' + tname]))
-            else:
-                raise Unsupported('isinstance() against an unknown type %s' % tname)
+            check = self._static_isinstance_check(v, tnode, ctx)
+            if check is None:
+                # A type value known only at run time (a parameter, a field, an element of a
+                # tuple): the CLASS objects and tuples of them the program can build are tested
+                # by the small recursive helper, never refused.
+                tobj = self.expr(tnode, ctx)
+                self._ensure_dyn_isinstance()
+                check = 'ail2_dyn_isinstance(%s, %s)' % (v, tobj)
+            checks.append(check)
         t = ctx.tmp()
         ctx.emit('%s = ail_box_bool(%s);' % (t, ' || '.join(checks)))
         return t

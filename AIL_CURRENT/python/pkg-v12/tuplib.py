@@ -368,6 +368,104 @@ class Lower(Stmts, Calls, Lams, Exprs):
         return out.rstrip('\n') + ('\n\n\n' + helpers if helpers else '') + '\n'
 
 
+_ISINSTANCE_TYPE_NAMES = frozenset((
+    'int', 'float', 'str', 'bool', 'bytes', 'bytearray', 'list', 'tuple', 'dict',
+    'set', 'frozenset', 'range', 'object'))
+
+
+def _expand_isinstance_type_constants(tree):
+    """Replace a module-level constant used as isinstance()'s second argument with its value.
+
+    `TYPES = (int, str)` is a tuple of type objects, not a tuple the lowering can build (its
+    elements are not numbers), and `K = SomeClass` is a plain alias.  Both are common in a
+    program that tests against a set of types.  Expanding the use before the tuple pass keeps
+    the constant from being mistaken for a numeric tuple, and leaves the ordinary type names
+    for the typed and general paths to compile.  A type-tuple or alias assignment is dropped
+    when no other read of the name remains; other module assignments are left untouched.
+    """
+    defs = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    if 'isinstance' in defs:
+        return False
+    constants = {}
+    for stmt in tree.body:
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            name = stmt.targets[0].id
+            constants.setdefault(name, []).append(stmt.value)
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.value is not None:
+            constants.setdefault(stmt.target.id, []).append(stmt.value)
+    constants = {name: values[0] for name, values in constants.items() if len(values) == 1}
+
+    def is_type(node, seen):
+        if isinstance(node, ast.Name):
+            if node.id in _ISINSTANCE_TYPE_NAMES or node.id in defs:
+                return True
+            if node.id in constants and node.id not in seen:
+                return is_type(constants[node.id], seen | {node.id})
+            return False
+        if isinstance(node, ast.Attribute):
+            return True
+        if isinstance(node, ast.Tuple):
+            return bool(node.elts) and all(is_type(e, seen) for e in node.elts)
+        return False
+
+    def expand(node, seen):
+        if isinstance(node, ast.Tuple):
+            out = []
+            for e in node.elts:
+                out.extend(expand(e, seen))
+            return out
+        if isinstance(node, ast.Name) and node.id in constants and node.id not in seen:
+            return expand(constants[node.id], seen | {node.id})
+        return [node]
+
+    changed = False
+    for call in ast.walk(tree):
+        if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                and call.func.id == 'isinstance' and len(call.args) == 2 and not call.keywords):
+            continue
+        spec = call.args[1]
+        expanded = expand(spec, frozenset())
+        if not expanded or not all(is_type(e, frozenset()) for e in expanded):
+            continue
+        if len(expanded) == 1 and expanded[0] is spec:
+            continue
+        new = expanded[0] if len(expanded) == 1 else ast.Tuple(elts=expanded, ctx=ast.Load())
+        call.args[1] = ast.copy_location(new, spec)
+        changed = True
+    if not changed:
+        return False
+    # A constant may name another one (`NESTED = ((float, bool), TYPES)`).  Drop the assignments
+    # whose every use was replaced, repeating so a constant reached only through a dropped one
+    # goes too.  Only a type tuple or alias is dropped: an unrelated unused module assignment can
+    # still have a side effect (`X = print("hi")`) and must keep running.  The values themselves
+    # are left alone, so a constant that is also read elsewhere keeps its nesting.
+    def target_of(stmt):
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            return stmt.targets[0].id
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            return stmt.target.id
+        return None
+
+    droppable = {name for name, value in constants.items() if is_type(value, frozenset())}
+    while True:
+        loads = {}
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+                loads[node.id] = loads.get(node.id, 0) + 1
+        body = []
+        dropped = False
+        for stmt in tree.body:
+            target = target_of(stmt)
+            if target in droppable and loads.get(target, 0) == 0:
+                dropped = True
+                continue
+            body.append(stmt)
+        tree.body = body
+        if not dropped:
+            break
+    return True
+
+
 def rewrite(source, notes=None):
     """The program with its tuples lowered; the source as written when no tuple use needs it (or when one is not
     built -- the reason is then added to `notes`)."""
@@ -375,6 +473,13 @@ def rewrite(source, notes=None):
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return source
+    if _expand_isinstance_type_constants(tree):
+        ast.fix_missing_locations(tree)
+        source = ast.unparse(tree)
+        try:
+            tree = ast.parse(source)
+        except (SyntaxError, ValueError):
+            return source
     if not candidate(tree):
         return source
     import numidentity

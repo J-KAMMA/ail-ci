@@ -1986,7 +1986,15 @@ class Compiler:
         if len(args) != 2:
             raise Unsupported('isinstance() with other than 2 arguments')
         v = self.expr(args[0], ctx)
-        types = args[1].elts if isinstance(args[1], ast.Tuple) else [args[1]]
+        def _flat(spec):
+            if isinstance(spec, ast.Tuple):
+                for e in spec.elts:
+                    yield from _flat(e)
+            else:
+                yield spec
+        types = list(_flat(args[1]))
+        if not types:
+            return 'ail_box_bool(0)'
         checks = []
         for tnode in types:
             if not isinstance(tnode, ast.Name):
