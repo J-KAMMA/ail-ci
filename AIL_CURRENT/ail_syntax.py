@@ -1460,12 +1460,52 @@ _MATH_HELPERS['op_delitem'] = (
 _MATH_HELPERS['op_countof'] = (
     'def _ail_op_countof(seq, value):\n'
     '    n = 0\n'
+    '    indexed = False\n'
+    '    first = None\n'
+    '    if not isinstance(seq, (dict, set, frozenset)):\n'
+    '        try:\n'
+    '            first = seq[0]\n'
+    '            indexed = True\n'
+    '        except IndexError:\n'
+    '            return 0\n'
+    '        except TypeError:\n'
+    '            indexed = False\n'
+    '    if indexed:\n'
+    '        if first == value:\n'
+    '            n += 1\n'
+    '        index = 1\n'
+    '        length = len(seq)\n'
+    '        while index < length:\n'
+    '            if seq[index] == value:\n'
+    '                n += 1\n'
+    '            index += 1\n'
+    '        return n\n'
     '    for item in seq:\n'
     '        if item == value:\n'
     '            n += 1\n'
     '    return n\n')
 _MATH_HELPERS['op_indexof'] = (
     'def _ail_op_indexof(seq, value):\n'
+    '    indexed = False\n'
+    '    first = None\n'
+    '    if not isinstance(seq, (dict, set, frozenset)):\n'
+    '        try:\n'
+    '            first = seq[0]\n'
+    '            indexed = True\n'
+    '        except IndexError:\n'
+    '            raise ValueError("sequence.index(x): x not in sequence")\n'
+    '        except TypeError:\n'
+    '            indexed = False\n'
+    '    if indexed:\n'
+    '        if first == value:\n'
+    '            return 0\n'
+    '        index = 1\n'
+    '        length = len(seq)\n'
+    '        while index < length:\n'
+    '            if seq[index] == value:\n'
+    '                return index\n'
+    '            index += 1\n'
+    '        raise ValueError("sequence.index(x): x not in sequence")\n'
     '    index = 0\n'
     '    for item in seq:\n'
     '        if item == value:\n'
@@ -1591,6 +1631,7 @@ class _SurfaceExpr(ast.NodeTransformer):
         self.boolean = boolean
         self.bool_calls = set()
         self.bool_compares = {}
+        self.capture_serial = 0
 
     def mark_bool(self, node):
         """Calls whose result is only tested (a match used as a condition): no Match object is built."""
@@ -1661,6 +1702,103 @@ class _SurfaceExpr(ast.NodeTransformer):
         self.changed = True
         return ast.fix_missing_locations(ast.copy_location(new, old))
 
+    @staticmethod
+    def _capture_pure(node):
+        """An expression whose evaluation has no observable effect (so moving it past the callable
+        construction cannot change what the program prints or writes)."""
+        if isinstance(node, ast.Constant):
+            return True
+        if isinstance(node, (ast.Tuple, ast.List)) and all(_SurfaceExpr._capture_pure(e) for e in node.elts):
+            return True
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+            return _SurfaceExpr._capture_pure(node.operand)
+        return False
+
+    @staticmethod
+    def _capture_needed(call, path):
+        """Whether an operator callable inlined at this site has arguments that must be captured."""
+        if path == 'operator.itemgetter':
+            return any(not isinstance(arg, ast.Constant) for arg in call.args)
+        if path == 'operator.methodcaller':
+            if not (call.args and isinstance(call.args[0], ast.Constant)
+                    and isinstance(call.args[0].value, str)):
+                return False
+            return (any(not isinstance(arg, ast.Constant) for arg in call.args[1:])
+                    or any(not isinstance(keyword.value, ast.Constant) for keyword in call.keywords))
+        return False
+
+    def _key_consumer(self, node):
+        if isinstance(node.func, ast.Name):
+            return (node.func.id in ('sorted', 'min', 'max') and node.func.id not in self.surface.names
+                    and node.func.id not in self.surface.def_names)
+        return isinstance(node.func, ast.Attribute) and node.func.attr == 'sort'
+
+    def _capture_name(self, stem):
+        self.capture_serial += 1
+        return '_ail_%s%d' % (stem, self.capture_serial)
+
+    def capture_wrap(self, node):
+        """Bind an inlined itemgetter / methodcaller at its construction site.
+
+        The plain one-argument lambda the key= / map() / filter() lowering inlines evaluates its
+        indices and bound arguments per element, while CPython evaluates them once when the callable
+        is built.  A lambda that returns the call, applied to those arguments, keeps CPython's order:
+        the arguments are bound before the consuming call runs, and nothing is re-evaluated."""
+        if (isinstance(node.func, ast.Name) and node.func.id in ('map', 'filter')
+                and node.func.id not in self.surface.names and node.func.id not in self.surface.def_names
+                and len(node.args) >= 1 and isinstance(node.args[0], ast.Call)):
+            call = node.args[0]
+            path = self.surface.path(call.func)
+            if path in ('operator.itemgetter', 'operator.methodcaller') and self._capture_needed(call, path):
+                holder = self._capture_name('opg')
+                inner = copy.deepcopy(node)
+                inner.args[0] = ast.Name(id=holder, ctx=ast.Load())
+                inner = self.visit(inner)
+                captured = self.visit(copy.deepcopy(call))
+                return self.replaced(ast.Call(func=self.surface._operator_lambda([holder], inner),
+                                              args=[captured], keywords=[]), node)
+        if not self._key_consumer(node):
+            return None
+        if any(isinstance(argument, ast.Starred) for argument in node.args) \
+                or any(keyword.arg is None for keyword in node.keywords):
+            return None
+        for position, keyword in enumerate(node.keywords):
+            if keyword.arg != 'key' or not isinstance(keyword.value, ast.Call):
+                continue
+            call = keyword.value
+            path = self.surface.path(call.func)
+            if path not in ('operator.itemgetter', 'operator.methodcaller') or not self._capture_needed(call, path):
+                continue
+            holder = self._capture_name('opg')
+            inner = copy.deepcopy(node)
+            before = []
+            for index, argument in enumerate(inner.args):
+                if not self._capture_pure(argument):
+                    name = self._capture_name('opp')
+                    before.append((name, self.visit(copy.deepcopy(node.args[index]))))
+                    inner.args[index] = ast.Name(id=name, ctx=ast.Load())
+            for index in range(position):
+                argument = inner.keywords[index]
+                if argument.arg is None:
+                    return None
+                if not self._capture_pure(argument.value):
+                    name = self._capture_name('opp')
+                    before.append((name, self.visit(copy.deepcopy(node.keywords[index].value))))
+                    argument.value = ast.Name(id=name, ctx=ast.Load())
+            if (isinstance(inner.func, ast.Attribute) and inner.func.attr == 'sort'
+                    and not self._capture_pure(inner.func.value)):
+                name = self._capture_name('opp')
+                before.insert(0, (name, self.visit(copy.deepcopy(node.func.value))))
+                inner.func.value = ast.Name(id=name, ctx=ast.Load())
+            captured = self.visit(copy.deepcopy(call))
+            inner.keywords[position].value = ast.Name(id=holder, ctx=ast.Load())
+            inner = self.visit(inner)
+            parameters = [name for name, _ in before] + [holder]
+            arguments = [argument for _, argument in before] + [captured]
+            return self.replaced(ast.Call(func=self.surface._operator_lambda(parameters, inner),
+                                          args=arguments, keywords=[]), node)
+        return None
+
     def visit_Call(self, node):
         surface = self.surface
         path = surface.path(node.func)
@@ -1669,6 +1807,9 @@ class _SurfaceExpr(ast.NodeTransformer):
         if (surface.re_on and path is None and isinstance(node.func, ast.Attribute)
                 and not isinstance(node.func.value, ast.Name)):
             node.func.value = self.visit(node.func.value)      # re.search(...).start(): the inner call too
+        wrapped = self.capture_wrap(node)
+        if wrapped is not None:
+            return wrapped
         if (path is None and isinstance(node.func, ast.Name) and node.func.id in ('map', 'filter')
                 and node.func.id not in surface.names and node.func.id not in surface.def_names
                 and node.args and isinstance(node.args[0], ast.Call)):

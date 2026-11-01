@@ -1,3 +1,17 @@
+## 2026-11-01 -- operator: callable arguments captured, countOf/indexOf follow the sequence protocol
+
+The review of `job-std_operator` found three silent differences in the new `operator` lowering. Inline
+`key=itemgetter(...)` / `key=methodcaller(...)` and inline `map(itemgetter(...), xs)` / `filter(methodcaller(...), xs)`
+inlined a one-argument lambda that re-read the index or bound argument per element, while CPython evaluates them once
+when the callable is built. The Python surface now wraps those inlined callables in a lambda applied to the arguments at
+the construction site (and passes any non-pure earlier arguments through in order), so `sorted(rows, key=itemgetter(idx(), 1))`
+calls `idx()` once, and `m = map(itemgetter(i), rows); i = 1; list(m)` uses the old `i`. `countOf` / `indexOf` used
+`for item in seq`, which crashed on a `__getitem__`-only sequence; the helpers now use the indexing protocol when the
+object is not a dict/set (the same choice CPython's `PySequence_Count` / `PySequence_Index` make) and fall back to
+iteration, keeping the exact `ValueError` text. `test_ail_std_operator.py` adds the review probes; the 11 lab programs,
+the capture cases, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass, and the generated C of
+the 10 `lab/compare/src` tasks is unchanged.
+
 ## 2026-11-01 -- int64 constant census: refusals named, safe folds kept
 
 `docs/design/I64_CONSTANTS.md` records the first int64-constant refusal of all 34 modules in the compiler census and

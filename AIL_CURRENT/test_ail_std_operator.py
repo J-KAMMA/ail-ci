@@ -78,6 +78,52 @@ f = methodcaller("endswith", s)
 s = ".txt"
 print(list(filter(f, names)))
 """,
+    "inline_key_multi_capture": r"""from operator import itemgetter
+rows = [("b", 20), ("a", 10), ("c", 30)]
+calls = 0
+def idx():
+    global calls
+    calls += 1
+    return 1
+print("multi", sorted(rows, key=itemgetter(idx(), 0)))
+print("calls", calls)
+""",
+    "inline_map_filter_lazy_capture": r"""from operator import itemgetter, methodcaller
+rows = [("a", 10), ("b", 20), ("c", 30)]
+i = 0
+m = map(itemgetter(i), rows)
+i = 1
+print(list(m))
+names = ["a.md", "b.txt", "c.md"]
+s = ".md"
+f = filter(methodcaller("endswith", s), names)
+s = ".txt"
+print(list(f))
+calls = 0
+def suffix():
+    global calls
+    calls += 1
+    return ".md"
+print(list(filter(methodcaller("endswith", suffix()), names)))
+print("calls", calls)
+""",
+    "scan_getitem_only": r"""from operator import countOf, indexOf
+class Seq:
+    def __init__(self):
+        self.items = [10, 20, 10]
+    def __len__(self):
+        return len(self.items)
+    def __getitem__(self, i):
+        if i >= len(self.items):
+            raise IndexError
+        return self.items[i]
+s = Seq()
+print("cnt_custom", countOf(s, 10), indexOf(s, 10))
+try:
+    indexOf(s, 99)
+except ValueError as exc:
+    print(type(exc).__name__, str(exc))
+""",
 }
 
 
