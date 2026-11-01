@@ -1,15 +1,6 @@
-**Re-apply PR #299 (py-failfast) on the current tree.**
-- Fetch it anonymously with `git fetch https://github.com/J-KAMMA/ail-ci.git py-failfast`.
-- Its change is `git diff $(git merge-base FETCH_HEAD HEAD) FETCH_HEAD -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json'`.
-- What it does: it memoizes refusals, so a program that is refused fails fast, 46→18 s and 56→30 s.
-- Apply it here and resolve conflicts by keeping both sides' fixes. integ has since merged #284 (int64 default) and #307 (module system).
+**Your change breaks other tests in the full suite.** On top of the current integration branch, these test modules fail with your change and pass without it: test_ail_packaging.
 
-Acceptance:
-- A refused program gives the same refusal message as without the change.
-- A program that builds produces the same generated C.
-- Check both on the 10 lab/compare tasks and on 30 lab/corpus programs that are refused.
-- Run the touched test modules plus test_ail_safetynet.
-- Run `python3 tools/diff_ids.py` and `python3 tools/update_manifest.py`, then commit. Change nothing else.
+Run each of them (`cd AIL_CURRENT && python3 -m unittest -q <module>`), find what your change broke, and fix it so they pass again while keeping your own fix and its test. If your fix cannot coexist with them, revert it and say so. Commit.
 
 **Rules for every job.**
 - **Load:** you are one of up to five agents on a 16 GB PC. Keep local parallelism at 2 (`-j 2`) and never run the whole suite; the full suite runs on CI after merge.
