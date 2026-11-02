@@ -43,6 +43,8 @@ class Sig:
     def __init__(self, node, owner=None):
         self.node, self.owner = node, owner
         self.params = []        # [(name, type, has_default)]
+        self.given = []         # True for a parameter whose annotation the source spells out
+        self.rebound = []       # True for a parameter the function body assigns to itself
         self.ret = None
         self.kwonly = []
 

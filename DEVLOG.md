@@ -19,6 +19,30 @@ parameter).  Exact messages and hot-function shares are in `lab/progfix/prog5.md
 builds the four typed programs and compares stdout/exit with CPython, plus typed callable and
 appended-rows programs.  Probes `/tmp/probes/p5_{groupby,rows_append,rows_sources,set_str,
 callable_exc}.py` match CPython on both `cmp.sh` builds.  No new semantic difference was added.
+## 2026-11-01 -- typed reach: `enumerate(str)` makes g25_030 fully typed (job-prog10-11020733)
+
+Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time over repeated `main()` calls) and
+recorded every hot user function in `lab/progfix/prog10.md`. Three were already wholly typed (`g07_038`,
+`t016`, `g11_016`; the four hot `g11_016` functions hold 83.9%). `g25_030.find_completions` (32.6%) was the one
+feasible small fix: it stopped the typed path at ``this use of a str as an iterable is not built (plain
+`for c in s` is); for an index keep a counter``. `python/pkg-v12/pyfunc.py` now lowers
+`for index, ch in enumerate(text)` over a `str` as the pair form of the existing character walk: one
+private temp for the iterable, the same UTF-8 view, and a private counter so the index counts characters,
+not bytes, and a body that rebinds it cannot disturb the next step. `g25_030` is now typed as a whole
+program on both `AIL_IR` modes; before, only `next_state` was accelerated by `ail build --cpython`.
+`AIL_CURRENT/test_ail_prog10.py` (registered in `tests.d/`) compiles the original program and an
+argument/list-item/attribute/dict-value probe with empty, ASCII, combining and CJK text, and compares both
+with CPython. Probes `/tmp/probes/prog10_enum_str.py`, `prog10_enum_routes.py` and `prog10_enum_edges.py`
+(start argument, break/continue/else, nested loops, rebinding the index and the character) match CPython on
+both `cmp.sh` builds; a non-BMP emoji variant is refused by name on the general build (the existing 16-bit
+v2 limit) and matches on the default build. `prog10_setstr.py` and `prog10_setstr2.py` are refused by name
+on the typed path (the `set[str]` comprehension / `set(str)` follow-ups recorded for `g06_016`), so they
+fall back to the general path, where a printed short set keeps insertion order rather than CPython's hash
+order -- the known set-order difference, not something this change touches. The generated C of the ten
+`lab/compare/src/*/main.ail` tasks is byte-identical to the base commit. The other refusals need big
+features: classes/ABC rich comparisons returning `NotImplemented` (`g13_014`), a nested tuple target over
+`itertools.combinations` (`g06_036`), `set[str]` comprehensions (`g06_016`) and nested
+`list[dict[str, str]]` records (`g01_016`).
 
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
@@ -210,6 +234,73 @@ which compares the nine passing programs with CPython on both IR modes. Probes i
 `~/tools/cmp.sh` builds; the literal `'f'`/`'u'`/`tobytes` forms are refused by name. Also ran
 `test_ail_std_array`, `test_ail_array_ref`, `test_ail_array_t2`, `test_ail_stdlib5`,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`, then refreshed the manifest.
+## 2026-11-01 -- `numbers` review 2 fix: decorator-only registration helper gating
+
+Fixed the review defect in `numberslib.py`: the register-decorator lowering inserted
+`_ail_num_register(...)` but did not mark `register` as used, so the helper was emitted as an
+empty string and `@numbers.Real.register` alone failed with `not in the subset: the name
+'_ail_num_register' is not a known function/class/builtin`. The decorator branch now adds
+`used.add('register')` (the `used` set is created before the class rewrite), so
+`decorator_only`, `decorator_attrs`, `decorator_only3`, `decorator_only_isc` and
+`decorator_plus_other` build and match CPython on both `cmp.sh` builds. A decorator-only
+regression case was added to `test_ail_std_numbers.py`. `test_ail_std_numbers`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass (4/4, 375s);
+`update_manifest.py --check` is clean.
+
+## 2026-11-01 -- `numbers` review fixes: virtual run-time registration, decorator timing, shadowing
+
+Fixed the three review defects in `numberslib.py`. `register` is now a virtual run-time table
+entry instead of a compile-time base change: `numbers.X.register(Cls)` lowers to
+`_ail_num_register(Cls, kind, names)` and `@numbers.X.register` inserts that call after the class
+statement, so an uncalled function, `if False`, and a check before a module-level register all see
+CPython's answers. A registered class no longer inherits the ABC's `real` / `imag` / `conjugate`
+methods, and a subclass of a registered class is registered too (the static descendant names are
+recorded). `issubclass(UserClass, numbers.X)` is now checked at run time against the same table
+and against the class's real bases. A register call written before its class definition, a
+register decorator combined with another decorator, and a parameter that shadows a from-imported
+ABC name are named compile-time refusals.
+
+Probes `/tmp/probes/rev_*.py` cover module-level ordering, an uncalled function, `if False`, a
+method and a function call, registration twice, a subclass, `issubclass` timing, the decorator
+form, the return value, values through arguments / list items / attributes / dict values,
+virtual-attribute absence, and the early-registration and combined-decorator refusals on both
+`cmp.sh` builds. `test_ail_std_numbers`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (4/4, 362s); `update_manifest.py --check` is clean.
+
+## 2026-11-01 -- `numbers` review fixes: subclasses, name collisions, tuples, value use
+
+Fixed the four review defects in `numberslib.py`. The runtime classifier now tests the actual
+injected `Fraction` / `Decimal` classes (only when those modules are imported), so a subclass of
+`fractions.Fraction` is Rational/Real/Number and a user class merely named `Fraction` / `Decimal`
+is not. A class whose base resolves to the real `Fraction` / `Decimal` is classified the same way
+statically. `isinstance` tuples are flattened recursively and left untouched when they contain no
+`numbers.*` element, so an ordinary `(A, B)` works in a numbers program and nested number tuples
+classify. Using `numbers.X` as a plain value is refused by name as the module docstring says;
+class bases and annotations still reference the injected classes.
+
+Probes `/tmp/probes/num_*` (fraction routes and aliases, user-named classes, plain/nested tuples,
+value refusal, bases/annotations, kinds through list/dict, registered subclass) match CPython or
+are refused by name on both `cmp.sh` builds. `test_ail_std_numbers` gained regression cases and
+passes with `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and
+`test_ail_stdlib5`.
+
+## 2026-11-01 -- CPython `numbers` ABCs on the general path (job-std_numbers-11020026)
+
+Added `numbers` as a library batch-5 module: `prelude_numbers.py` supplies Number, Complex,
+Real, Rational and Integral as plain classes in CPython's inheritance order, and `numberslib.py`
+lowers `isinstance` / `issubclass` / `register` onto that hierarchy. bool and int classify as
+Integral, float as Real, complex as Complex, Fraction as Rational and Decimal as Number; classes
+defined in the program are classified through their bases and through `register` (both the call
+and decorator forms). `lab/stdlib/numbers/` has 12 ordinary programs; 11 build on the default
+(general) path and match CPython 3.12 stdout and exit code, while the complex-literal program is
+a named follow-up (`a constant of type complex`). The unmodelled ABCMeta abstract-method check,
+a dynamic class value in `issubclass`, and registering a class that already has a non-numbers
+base are recorded in `lab/stdlib/numbers/RESULTS.md`.
+
+Added `AIL_CURRENT/test_ail_std_numbers.py` (registered through `tests.d/test_ail_std_numbers.txt`).
+Probes `/tmp/probes/num_*.py` cover every classification kind, aliases and from-imports, tuples,
+register/decorator registration, subclass inheritance, values through arguments, list items,
+attributes and dict values, empty/negative values and caught errors on both `cmp.sh` builds.
 
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
@@ -1481,6 +1572,61 @@ generated C of the compare tasks is unchanged (five default builds, `chain_relax
 with `--exact-int`, and the three regex tasks refuse identically; checked against HEAD).  Final-state
 tests: test_ail_std_collections, test_ail_collections, test_ail_tuples, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3.
+## 2026-11-01 -- tuple reach review 2: defaults and `None` returns stay general (job-tup1-11020552)
+
+The second review found two more programs the call-site inference broke. A parameter with a default was
+given the tuple type of its call sites, so `def g(t="x")` returned the default as a tuple class (the same
+for `None`, `int`, `float`, `bool` and tuple defaults); a parameter with a default is now never given a
+call-site type, so the compiler's own refusal of a non-numeric default or of a conflicting call site keeps
+the program on the general path. A `return None` or bare `return` was dropped from the return list before
+the mixed-return guard, so a function returning a tuple on one path and `None` on another still settled a
+tuple return type; `None` (and a bare return) now counts as a return type on its path, the function's
+return type is not settled, and it stays on the general path as before the inference. Probes c1, c2, c4,
+c6 (None / bare return, before and after the tuple path, keyword-only) and d1-d5, e1-e8 (str / None / int /
+float / bool / tuple / list defaults, same and different shapes, positional-only, defaults that mention
+another parameter, a default overwritten in the body) all match CPython on the default and forced-general
+builds; c3, c5, c7 and the d4/d5 tuple defaults keep their previous results. `test_ail_tuple_reach` gained
+7 regression tests (28 total); `test_ail_tuple_reach`, `test_ail_tuples`, `test_ail_typed_tuples`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass (6 modules, 0 failed). Generated
+C of the 10 `lab/compare` tasks is unchanged: the 17 builds that succeed are byte-identical between HEAD
+and this change, and the 3 `main.py` failures are identical on both.
+
+## 2026-11-01 -- tuple reach review: do not type a reassigned parameter or a mixed-return function (job-tup1-11011230)
+
+The review found two programs the new call-site inference broke. `def f(n): n = "x"; return n, (1, "a")`
+was given `n: int` from `f(1)`, so the reassignment stored a `str` in an int field and the tuple printed
+`(x, ...)`; the pass now ignores a call-site type for any parameter the body assigns to itself (ordinary,
+augmented, loop target and tuple reassignment all checked). A method returning `"none"` on one path and
+`t[0], t[1]` on another was pulled onto the typed path by an inferred tuple parameter, but its return type
+cannot be settled, so the caller printed `<_AilT_i_s object>`; a function with a tuple return that is not
+settled now keeps its parameters unannotated and stays on the general path, as before the inference.
+Probes p07, r06, v01-v11 (argument, list item, dict value, attribute, keyword, branch, augmented and loop
+reassignment, mixed scalar/tuple and mixed tuple-shape returns) all match CPython on the default and
+forced-general builds. `test_ail_tuple_reach` gained 3 regression tests (21 total). Generated C of the
+`lab/compare` tasks is unchanged: all 10 `.ail`, the 5 default `.py` and the 2 `--exact-int` `.py` builds are
+byte-identical (17 builds); the other 3 `.py` programs fail identically on both revisions.  All 10 `.py`
+tuple rewrites are identical in text; one diagnostic note differs and does not affect the C.
+
+## 2026-11-01 -- heterogeneous tuple reach: unannotated signatures take the typed path (job-tup1-11011230)
+
+Measured 25 heterogeneous-tuple probes (`/tmp/probes/t01`..`t25`) on the default build: 9 typed, 16 general,
+0 refused, every one matching CPython. The largest single fallback cause was an unannotated signature:
+`def g(t): return t[1], t[2]` stayed general even when every call site passed the same tuple shape, because
+the tuple pass refused the argument and the typed path cannot build a tuple of unknown type. The pass now
+collects call-site argument types (positional and keyword), keeps a parameter type only when every call site
+agrees on one known type, spells tuple-containing types on the parameter, uses scalar types internally to
+settle return types, and repeats the lowering until parameter types, return types and empty-display hints stop
+changing (at most four rounds). Unknown call sites and conflicting shapes stay unannotated and on the general
+path. Four probes moved typed (t02, t12, t13, t15), so the same 25 are now 13 typed / 12 general / 0 refused;
+the remaining general causes are unsupported tuple operations (4), float keys (3), bytes elements (2), mixed
+tuple shapes (1), a literal-list `for` (1) and an unannotated attribute (1). Boundary probes b01-b18 cover
+wrapper propagation, keyword calls, nested tuples, INT64_MIN/MAX and `-0.0`, aliasing, bool elements, list and
+dict parameters, scalar routes, an annotated attribute and the conservative shape/scalar conflicts; all match
+CPython on both builds. Generated C of the 10 `lab/compare` tasks (20 builds, `.ail` and `.py`) is
+byte-identical to the base. Added `AIL_CURRENT/test_ail_tuple_reach.py` (18 tests) and registered it through
+`AIL_CURRENT/tests.d/test_ail_tuple_reach.txt`; design note `docs/design/TUPLE_REACH.md`. Final-state tests:
+test_ail_tuple_reach, test_ail_tuples, test_ail_typed_tuples, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 

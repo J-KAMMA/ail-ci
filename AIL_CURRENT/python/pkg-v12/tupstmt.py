@@ -89,6 +89,7 @@ class Stmts:
 
     def stmt_Return(self, st):
         if st.value is None:
+            self.rets.append('none')
             return [st]
         want = self.cur.ret if self.cur is not None else None
         v, t = self.exv(st.value, want)
