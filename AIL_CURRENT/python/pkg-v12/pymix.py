@@ -150,12 +150,25 @@ _TRAP_EXC = {ast.Div: 'ZeroDivisionError', ast.FloorDiv: 'ZeroDivisionError', as
 _SHIFT_EXC = {ast.LShift: 'ValueError', ast.RShift: 'ValueError'}
 
 
+def _numeric_constant(node):
+    """A numeric literal's value, including a unary sign (`-3`, `+2`)."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)):
+        return node.value
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
+        value = _numeric_constant(node.operand)
+        if value is not None:
+            return -value if isinstance(node.op, ast.USub) else value
+    return None
+
+
 def _provably_nonzero(node):
-    return isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and node.value != 0
+    value = _numeric_constant(node)
+    return value is not None and value != 0
 
 
 def _provably_nonnegative(node):
-    return isinstance(node, ast.Constant) and isinstance(node.value, int) and node.value >= 0
+    value = _numeric_constant(node)
+    return isinstance(value, int) and value >= 0
 
 
 def _build_parents(tree):
@@ -472,10 +485,51 @@ def _expr_kind(e, facts, rets):
     return UNKNOWN
 
 
-def _call_kind(e, facts, rets):
-    if not isinstance(e.func, ast.Name):
+# Every method here returns one fixed kind for any str receiver (`"x".split()`,
+# `line.upper()`), and none of them is a named exception trap; `.index()`/`.format()` are omitted
+# because they can raise and a kind alone must not make them candidates.
+_STR_METHOD_KINDS = {
+    'split': LIST_STR, 'rsplit': LIST_STR, 'splitlines': LIST_STR,
+    'join': STR, 'upper': STR, 'lower': STR, 'casefold': STR, 'strip': STR,
+    'lstrip': STR, 'rstrip': STR, 'capitalize': STR, 'title': STR, 'swapcase': STR,
+    'center': STR, 'ljust': STR, 'rjust': STR, 'zfill': STR, 'expandtabs': STR,
+    'replace': STR, 'removeprefix': STR, 'removesuffix': STR,
+    'find': INT, 'rfind': INT, 'count': INT,
+    'startswith': BOOL, 'endswith': BOOL, 'isdigit': BOOL, 'isalpha': BOOL,
+    'isalnum': BOOL, 'isspace': BOOL, 'isupper': BOOL, 'islower': BOOL,
+    'istitle': BOOL, 'isdecimal': BOOL, 'isnumeric': BOOL, 'isidentifier': BOOL,
+    'isprintable': BOOL, 'isascii': BOOL,
+}
+
+
+def _sys_stdin_read_kind(e):
+    """`sys.stdin.read()` / `sys.stdin.readline()` are str; the call itself can raise but that is
+    the exception pass's concern, not this one's."""
+    func = e.func
+    if not (isinstance(func, ast.Attribute) and func.attr in ('read', 'readline')):
         return UNKNOWN
-    fn = e.func.id
+    stdin = func.value
+    if (isinstance(stdin, ast.Attribute) and stdin.attr == 'stdin'
+            and isinstance(stdin.value, ast.Name) and stdin.value.id == 'sys'):
+        return STR
+    return UNKNOWN
+
+
+def _call_kind(e, facts, rets):
+    func = e.func
+    if isinstance(func, ast.Attribute):
+        receiver = _expr_kind(func.value, facts, rets)
+        if receiver == STR:
+            return _STR_METHOD_KINDS.get(func.attr, UNKNOWN)
+        if receiver in LIST_KINDS:
+            if func.attr == 'copy':
+                return receiver
+            if func.attr == 'count':
+                return INT
+        return _sys_stdin_read_kind(e)
+    if not isinstance(func, ast.Name):
+        return UNKNOWN
+    fn = func.id
     if fn == 'int':
         return INT
     if fn == 'float':
@@ -491,6 +545,15 @@ def _call_kind(e, facts, rets):
     if fn in ('sum', 'min', 'max') and len(e.args) == 1:
         base = _expr_kind(e.args[0], facts, rets)
         return ELEM_OF.get(base, UNKNOWN)
+    if fn in ('sorted', 'list') and len(e.args) == 1 and not e.keywords:
+        return LIST_OF.get(ELEM_OF.get(_expr_kind(e.args[0], facts, rets)), UNKNOWN)
+    if fn == 'abs' and len(e.args) == 1 and not e.keywords:
+        base = _expr_kind(e.args[0], facts, rets)
+        return base if base in NUMERIC else UNKNOWN
+    if fn == 'ord' and len(e.args) == 1 and not e.keywords:
+        return INT
+    if fn == 'chr' and len(e.args) == 1 and not e.keywords:
+        return STR
     if fn in rets:
         return rets[fn]
     return UNKNOWN
@@ -746,11 +809,14 @@ def analyze(source, classes=()):
     indirect |= _indirect_names(tree, fn_facts, parents)
     report = MixReport()
     rets = {name: f.ret for name, f in fn_facts.items()}
-    # One C return ABI cannot preserve distinct Python tags on different branches.
+    # One C return ABI cannot preserve distinct Python tags on different branches.  A return whose
+    # own expression the pass cannot type stays UNKNOWN: an annotation is not proof (CPython does
+    # not enforce it), so trusting it could box a bool as an int or a str as a number.  The kind
+    # has to come from the body.
     unsafe_returns = {
         name for name, f in fn_facts.items() if name != MODULE_SCOPE
-        and {_expr_kind(n.value, f, rets) for n in ast.walk(f.node)
-             if isinstance(n, ast.Return)} != {f.ret}
+        and {_expr_kind(n.value, f, rets) if n.value is not None else UNKNOWN
+             for n in ast.walk(f.node) if isinstance(n, ast.Return)} != {f.ret}
     }
     # A typed caller also compiles its callees, so leaving only the callee boxed is insufficient.
     while True:

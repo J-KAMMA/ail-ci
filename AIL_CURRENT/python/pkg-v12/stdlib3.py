@@ -148,8 +148,8 @@ def binds(tree, name):
 
 
 RANDOM_NOTE = ('random is built for seed(<int>), random, randint, randrange, uniform, gauss, normalvariate, '
-               'getrandbits, choice (a list), shuffle (a list) and sample (a list): CPython 3.12\'s MT19937, '
-               'bit for bit')
+               'expovariate, getrandbits, choice (a list), shuffle (a list) and sample (a list): CPython 3.12\'s '
+               'MT19937, bit for bit')
 
 
 class Lib3(iterlower._Lower):
@@ -277,6 +277,11 @@ class Lib3(iterlower._Lower):
                 ordered = [got['mu'], got['sigma']]
             self.rand_arg_check(call, what)
             return self.at(call, _call(_name('_ail_rand_' + attr), *ordered))
+        if attr == 'expovariate':
+            got = self.args_of(call, ['lambd'], what=what)
+            ordered = [got.get('lambd', num(1.0))]
+            self.rand_arg_check(call, what)
+            return self.at(call, _call(_name('_ail_rand_expovariate'), *ordered))
         if attr in ('randint', 'randrange'):
             if attr == 'randint':
                 got = self.args_of(call, ['a', 'b'], what=what)

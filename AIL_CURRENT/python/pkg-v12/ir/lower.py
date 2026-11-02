@@ -44,6 +44,9 @@ LIST_STR = I.T('obj', I.T('list', I.STRV))
 PLIST = I.PLIST
 # list-valued methods the S3a lowering recognises as changing a list's length or contents
 _LIST_MUTATORS = ('append', 'pop', 'clear', 'extend', 'insert', 'remove', 'sort', 'reverse')
+# A one-shot comprehension reserve is bounded like the legacy `_append_loop_reserve`: a huge range
+# bound must not allocate before an early exception, and a larger result still grows by doubling.
+_LIST_RESERVE_LIMIT = 1 << 22
 
 
 def is_list(t):
@@ -679,12 +682,13 @@ class Lowering(TextLowering):
     def drop_after(self, s):
         """An owned list whose last mention is statement `s` is dropped when `s` completes (the
         legacy path frees a numeric-list local at the same point, so a pipeline of whole-array
-        steps holds two arrays at a time, not all of them until the function returns)."""
+        steps holds two arrays at a time, not all of them until the function returns). Lists of
+        str are owned the same way and their spines are the expensive ones (24 bytes an element)."""
         names = (getattr(self.ctx, 'free_points', None) or {}).get(id(s), ())
         for name in names:
             place = self.places.get(name)
-            if place is None or not is_list(place.type.pointee) or name in self.ctx.kind \
-                    or self.b.terminated():
+            if place is None or not (is_list(place.type.pointee) or is_slist(place.type.pointee)) \
+                    or name in self.ctx.kind or self.b.terminated():
                 continue
             self.b.emit('list.reset', [self.list_ref(place)], [], {'drop': True})
 
@@ -1416,7 +1420,7 @@ class Lowering(TextLowering):
                     raise NotS0('an exact int that may exceed int64 stored in an int64 list')
             v = self.field_value(v, elem, e)
             self.b.emit('list.push', [ref, v])
-        self.comp_loop(node, node.elt, push, reserve=(None if elem == I.STRV else ref), tagged=(elem == I.STRV))
+        self.comp_loop(node, node.elt, push, reserve=ref, tagged=(elem == I.STRV))
         return tmp
 
     def comp_loop(self, node, elt, per_elt, reserve=None, tagged=False):
@@ -1490,8 +1494,15 @@ class Lowering(TextLowering):
                 lo, hi = self.slice_bounds(slice_of, hi)
             nargs = 1
         if reserve is not None and nargs < 3 and not g.ifs:
-            # one allocation for a comprehension of known length (the legacy path reserves too)
-            self.b.emit('list.reserve', [reserve, self.b.value('sub', [hi, lo], I.I64, {'mode': 'nsw'})])
+            # one allocation for a comprehension of known length (the legacy path reserves too).
+            # Only list[str] is capped so a huge bound cannot allocate before an early exception;
+            # list[int]/list[float] keep the exact reserve so a large comprehension does not realloc.
+            trip = self.b.value('sub', [hi, lo], I.I64, {'mode': 'nsw'})
+            if tagged:
+                limit = self.const(I.I64, _LIST_RESERVE_LIMIT)
+                below = self.b.value('cmp.lt', [trip, limit], I.I1)
+                trip = self.b.value('select', [below, trip, limit], I.I64)
+            self.b.emit('list.reserve', [reserve, trip])
         index = I.Value(I.I64, hint=name if over_range else 'k')
         body = I.Region([index])
 

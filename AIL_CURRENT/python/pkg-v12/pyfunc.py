@@ -1423,6 +1423,7 @@ _AIL_SYSINFO = {'_ail_perf_counter': (FLT, 'ail_perf_counter'), '_ail_perf_count
 _AIL_RAND = {'_ail_rand_seed': (INT, 'ail_rand_seed', (INT,)), '_ail_rand_random': (FLT, 'ail_rand_random', ()),
              '_ail_rand_uniform': (FLT, 'ail_rand_uniform', (FLT, FLT)), '_ail_rand_gauss': (FLT, 'ail_rand_gauss', (FLT, FLT)),
              '_ail_rand_normalvariate': (FLT, 'ail_rand_normalvariate', (FLT, FLT)),
+             '_ail_rand_expovariate': (FLT, 'ail_rand_expovariate', (FLT,)),
              '_ail_rand_getrandbits': (INT, 'ail_rand_getrandbits', (INT,)),
              '_ail_rand_range': (INT, 'ail_rand_randrange', (INT, INT, INT, INT)),
              '_ail_rand_below_i': (INT, 'ail_rand_below_i', (INT,)),
@@ -1714,6 +1715,15 @@ def _etype(node, ctx):
             # row's own bytes field so `out = out + row[0]` types correctly before a line of C is
             # written, exactly the way it already must for a bytes list element.
             return BYTES
+        if (isinstance(node.slice, ast.Slice) and isinstance(node.value, ast.Name)
+                and node.value.id not in ctx.tstride
+                and node.value.id not in (ctx.nlist, ctx.handles, ctx.blist, ctx.strlist,
+                                          ctx.srowtypes)
+                and ctx.type_of(node.value.id) in (LIST, FLIST)):
+            # `xs[a:b]` is a list, not an element. The generic name branch just below answered
+            # INT for every subscript, so an annotated `xs: list[int]` reassigned from its own
+            # slice (`xs = xs[:n]`) was checked as "assigning int" and refused.
+            return ctx.type_of(node.value.id)
         if isinstance(node.value, ast.Name) and ctx.type_of(node.value.id) in ('array', LIST, DICT):
             return INT
         return INT
@@ -1775,6 +1785,10 @@ def _etype(node, ctx):
         if f == 'jsdiv':
             return FLT
         if f == '__ail_class_id' and _HIER or f == 'isinstance' and _is_class_isinstance(node, ctx):
+            return INT
+        if f == 'isinstance' and _mixed_class_isinstance(node, ctx):
+            return INT
+        if f == 'issubclass' and _static_issubclass(node, ctx) is not None:
             return INT
         if f == 'isinstance' and _static_isinstance(node, ctx) is not None:
             return INT
@@ -4477,7 +4491,8 @@ def _annotation_kind(ann, classes=()):
         return fnkind
     if ann is None:
         return None
-    if isinstance(ann, ast.Name) and ann.id in (EXCEPTION, '__ail_checked_exception__'):
+    if isinstance(ann, ast.Name) and (ann.id in (EXCEPTION, '__ail_checked_exception__')
+                                      or ann.id == 'Exception' and ann.id not in classes):
         return EXCEPTION
     if isinstance(ann, ast.Name) and (ann.id == '__ail_checked_bytearray__' or ann.id == BYTEARRAY and ann.id not in classes):
         return BYTEARRAY
@@ -12393,10 +12408,31 @@ def _mixed_numeric_pair(left, right, op, ctx):
     return '((%s = %s), (%s = %s), %s)' % (ltmp, left_c, rtmp, right_c, relation)
 
 
+def _set_operand_kind(node, ctx):
+    """The kind of one operand of `a & b`: a `set(s)` call says it before its assignment's
+    annotation is known, so the BinOp has a kind to combine (its own operand, not the default
+    INT).  Kept out of `_map_kind` itself: a bare `set(xs)` is a value this compiler builds at the
+    use site (`_set_value`), not a persistent typed table whose pointer could be taken."""
+    if (isinstance(node, ast.Call) and _is_set_literal(node) and node.args
+            and 'set' not in ctx.funcs):
+        source = node.args[0]
+        try:
+            if _is_str_expr(source, ctx) or _is_slist_expr(source, ctx):
+                return SSET
+        except Unsupported:
+            pass
+        try:
+            if _etype(source, ctx) in (LIST, 'array', RANGE) or _is_map_expr(source, ctx):
+                return ISET
+        except Unsupported:
+            pass
+    return _map_kind(node, ctx)
+
+
 def _map_kind(node, ctx):
     if isinstance(node, ast.BinOp) and type(node.op) in SET_OPS:
         # A typed set with a typed set of the same kind, or with a set literal: .
-        left, right = _map_kind(node.left, ctx), _map_kind(node.right, ctx)
+        left, right = _set_operand_kind(node.left, ctx), _set_operand_kind(node.right, ctx)
         if left in SETS and (right == left or right is None and _is_set_literal(node.right)):
             return left
         return right if right in SETS and left is None and _is_set_literal(node.left) else None
@@ -12520,13 +12556,33 @@ def _set_literal(node, ctx, kind):
     if isinstance(node, ast.Call) and node.args:
         source = node.args[0]
         if kind == SSET:
-            if not _is_slist_expr(source, ctx):
-                raise Unsupported('set[str] is built from a list of str')
-            def render():
-                items = _slist_arg_c(source, ctx)
-                return '({ for (int64_t _i = 0; _i < %s.n; _i++) ail_sset_add(&%s, %s.p[_i]); 0; })' % (items, temporary, items)
+            if _is_slist_expr(source, ctx):
+                def render():
+                    items = _slist_arg_c(source, ctx)
+                    return '({ for (int64_t _i = 0; _i < %s.n; _i++) ail_sset_add(&%s, %s.p[_i]); 0; })' % (items, temporary, items)
+            elif _is_str_expr(source, ctx):
+                def render():
+                    # `set(s)` iterates the str's CODE POINTS, exactly as CPython does.  A view of
+                    # one character is the same allocation-free ail_str `for c in s` already binds;
+                    # the byte offset steps by the UTF-8 width so non-ASCII text yields one entry
+                    # per character, never one per byte.
+                    ctx.parts.add('STR')
+                    text = _str_value(source, ctx)
+                    return ('({ ail_str _set_s = %s; '
+                            'for (int64_t _i = 0, _w = 0; _i < _set_s.n; _i += _w) { '
+                            'const uint8_t _b = _set_s.p[_i]; '
+                            '_w = _b < 0x80 ? 1 : ail__utf8_w(_b, _set_s.n - _i); '
+                            'ail_sset_add(&%s, (ail_str){_set_s.p + _i, _w, _b < 0x80}); } 0; })'
+                            % (text, temporary))
+            else:
+                raise Unsupported('set[str] is built from a list of str or a str')
         else:
-            if _etype(source, ctx) not in (LIST, 'array', RANGE) and not _is_map_expr(source, ctx):
+            direct_range = (isinstance(source, ast.Call) and isinstance(source.func, ast.Name)
+                            and source.func.id == 'range'
+                            and source.func.id not in ctx.funcs
+                            and source.func.id not in ctx.classes)
+            if (_etype(source, ctx) not in (LIST, 'array', RANGE)
+                    and not direct_range and not _is_map_expr(source, ctx)):
                 raise Unsupported('set[int] is built from a list of int')
             def render():
                 lo, n, element, pre = _iter_plan(source, ctx)
@@ -16582,6 +16638,94 @@ def _is_class_isinstance(node, ctx):
     return bool(names) and all(isinstance(n, ast.Name) and n.id in ctx.classes for n in names)
 
 
+_BUILTIN_TYPE_OBJECTS = {
+    'bool': bool, 'int': int, 'float': float, 'str': str, 'bytes': bytes, 'bytearray': bytearray,
+    'list': list, 'tuple': tuple, 'dict': dict, 'set': set, 'frozenset': frozenset, 'range': range,
+    'object': object,
+}
+
+
+def _builtin_type_name(name, ctx):
+    """A builtin type name that no function, class or local of the program shadows."""
+    return name in _BUILTIN_TYPE_OBJECTS and all(
+        name not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))
+
+
+def _mixed_class_isinstance(node, ctx):
+    """`isinstance(x, (C, int, ...))` in a hierarchy: a tuple that mixes classes of this program with
+    builtin types. `_isinstance_value` already knows how to ignore a builtin target for a class
+    instance; this predicate admits the mixed tuple to it. None for a value whose kind is not a class
+    instance, so the ordinary builtin lowering still sees (and refuses or builds) that shape."""
+    if not (_HIER and isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'isinstance' and len(node.args) == 2 and not node.keywords
+            and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))
+            and isinstance(node.args[0], (ast.Name, ast.Attribute))):
+        return False
+    spec = node.args[1]
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    if not names or not all(isinstance(n, ast.Name) for n in names):
+        return False
+    if not any(n.id in ctx.classes for n in names):
+        return False
+    if not all(n.id in ctx.classes or _builtin_type_name(n.id, ctx) for n in names):
+        return False
+    try:
+        kind = _etype(node.args[0], ctx)
+    except Unsupported:
+        return False
+    return _is_obj_kind(kind)
+
+
+def _isinstance_targets_shadowed(node, ctx):
+    """True when a target name of `isinstance(x, (...))` is a local or parameter: it is that value,
+    not the class or builtin type name, so CPython raises TypeError instead of testing the type."""
+    local = getattr(ctx, 'local_bindings', ())
+    if not local or not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                         and len(node.args) == 2):
+        return False
+    spec = node.args[1]
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    return any(isinstance(n, ast.Name) and n.id in local for n in names)
+
+
+def _static_issubclass(node, ctx):
+    """True or False when `issubclass(C, D)` (or a tuple of Ds) is settled when the program is built:
+    C and every D a class of this program or a builtin type name. None otherwise. A local or
+    parameter that shadows one of those names is a value, not the class or builtin, so it is not
+    folded (CPython raises TypeError there)."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'issubclass' and len(node.args) == 2 and not node.keywords
+            and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))):
+        return None
+    local = getattr(ctx, 'local_bindings', ())
+    if node.func.id in local:
+        return None
+    left, spec = node.args
+    if not isinstance(left, ast.Name):
+        return None
+    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
+    if not names or not all(isinstance(n, ast.Name) for n in names):
+        return None
+    if left.id in local or any(n.id in local for n in names):
+        return None
+    if left.id in ctx.classes:
+        if not all(n.id in ctx.classes or _builtin_type_name(n.id, ctx) for n in names):
+            return None
+        chain = set(_class_chain(left.id))
+        return any((n.id in chain) if n.id in ctx.classes else n.id == 'object' for n in names)
+    if not _builtin_type_name(left.id, ctx):
+        return None
+    if not all(n.id in ctx.classes or _builtin_type_name(n.id, ctx) for n in names):
+        return None
+    left_type = _BUILTIN_TYPE_OBJECTS[left.id]
+    for n in names:
+        if n.id in ctx.classes:
+            continue
+        if issubclass(left_type, _BUILTIN_TYPE_OBJECTS[n.id]):
+            return True
+    return False
+
+
 def _bare_except_to_exception(tree):
     """A bare `except:` catches what `except Exception:` catches here: every exception the program can
     raise (CPython's bare except also takes SystemExit and KeyboardInterrupt; `sys.exit()` ends the
@@ -16620,6 +16764,8 @@ def _static_isinstance(node, ctx):
     if not names or not all(isinstance(n, ast.Name) for n in names):
         return None
     targets = {n.id for n in names}
+    if any(n.id in getattr(ctx, 'local_bindings', ()) for n in names):
+        return None
     user = targets & set(ctx.classes)
     if not targets <= (_STATIC_TYPES | user) or (user and _HIER):
         return None
@@ -16715,6 +16861,11 @@ def _isinstance_value(node, ctx):
         raise Unsupported('isinstance(%s, ...): bind the value to a name first' % ast.unparse(value))
     targets = [n.id for n in (spec.elts if isinstance(spec, ast.Tuple) else [spec])]
     static = kind[1]
+    pointer = _null_test_pointer(value, ctx)
+    if 'object' in targets:
+        # Every class instance, and None, is an object: an object target settles the whole tuple,
+        # wherever it appears in it.
+        return '((void)(%s), (int64_t)1)' % pointer
     tests = []
     for t in targets:
         if t in _class_chain(static) or t == static:
@@ -16724,7 +16875,6 @@ def _isinstance_value(node, ctx):
             lo, hi = ctx.classes[t].cid, ctx.classes[t].cid_hi
             tests.append('(uint64_t)(((ail_obj_header *)_ail_io)->drop - %dU) <= %dU' % (lo, hi - lo)
                          if hi > lo else '((ail_obj_header *)_ail_io)->drop == %d' % lo)
-    pointer = _null_test_pointer(value, ctx)
     nullable = static in _NULLABLE
     if tests is None:
         return '(int64_t)((%s) != 0)' % pointer if nullable else '((void)(%s), (int64_t)1)' % pointer
@@ -16744,8 +16894,19 @@ def _call(node, ctx):
         raise Unsupported('%s has no value; use a statement' % node.func.id)
     if _is_tcp_poll_call(node, ctx):
         return _tcp_poll_value(node, ctx)[0]
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'isinstance' and len(node.args) == 2 and not node.keywords
+            and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))
+            and _isinstance_targets_shadowed(node, ctx)):
+        raise Unsupported('isinstance() target is a local or parameter that shadows a class or builtin '
+                          'type name; CPython raises TypeError for a value that is not a type')
     if _is_class_isinstance(node, ctx):
         return _isinstance_value(node, ctx)
+    if _mixed_class_isinstance(node, ctx):
+        return _isinstance_value(node, ctx)
+    known = _static_issubclass(node, ctx)
+    if known is not None:
+        return '1' if known else '0'
     known = _static_isinstance(node, ctx)
     if known is not None:
         return '1' if known else '0'
@@ -19159,6 +19320,9 @@ def _listcomp_simd_safe(node, ctx):
     return True
 
 
+_LIST_RESERVE_LIMIT = 1 << 22
+
+
 def _listcomp_into_temp(node, ctx):
     """`[e for v in seq if c]` as a value: one list, built once, freed with the rest."""
     if len(node.generators) != 1 or node.generators[0].is_async:
@@ -19233,10 +19397,18 @@ def _listcomp_into_temp(node, ctx):
     indexed = (kind in (FLIST, LIST) and not g.ifs and not struct_source and not string_source
                and simple.fullmatch(lo) and simple.fullmatch(n)
                and _listcomp_index_store_safe(node.elt))
-    if (kind in (FLIST, LIST) and not g.ifs and not struct_source and not string_source
+    if (kind in (FLIST, LIST, SLIST) and not g.ifs and not struct_source and not string_source
             and simple.fullmatch(lo) and simple.fullmatch(n)):
-        head = '%s_reserve(&%s, (%s) - (%s)); %s%s' % (
-            'ail_flist' if kind == FLIST else 'ail_list', c, n, lo,
+        # A huge range bound must not force a huge allocation before an early exception: cap the
+        # one-shot reserve exactly like `_append_loop_reserve` (a larger list still grows by
+        # doubling from here, so only the preallocation is bounded). Only the push-based list[str]
+        # path is capped: the indexed list[int]/list[float] path below stores directly into
+        # `.p[n++]` and depends on the reserve matching the trip count exactly.
+        trip = '(%s) - (%s)' % (n, lo)
+        sized = ('(%s) < %d ? (%s) : %d' % (trip, _LIST_RESERVE_LIMIT, trip, _LIST_RESERVE_LIMIT)
+                 if kind == SLIST else trip)
+        head = '%s_reserve(&%s, %s); %s%s' % (
+            'ail_flist' if kind == FLIST else 'ail_slist' if kind == SLIST else 'ail_list', c, sized,
             '\n#pragma omp simd\n' if indexed and _listcomp_simd_safe(node.elt, ctx) else '', head)
     if pre:
         head = '%s %s' % (' '.join(pre), head)
@@ -20037,7 +20209,7 @@ def _last_use_frees(statements, ctx, ind):
             if name in ctx.kind or name not in ctx.locals:
                 continue
             kind = ctx.types.get(name)
-            if kind in (LIST, FLIST):
+            if kind in (LIST, FLIST, SLIST):
                 out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, kind, ctx.cname(name)))
             elif kind == BYTES and _bytes_local_releasable(name, ctx):
                 out.append('%s{ ail_barena_release(&%s, %s.p); %s = (ail_bytes){0}; }\n'
@@ -20157,6 +20329,88 @@ def _debug_site(node, ind):
     return '#line %d "%s"\n%sAIL_DBG_SITE("%s:%d");\n#line %d "%s"\n' % (line, name, '    ' * ind, name, line, line, name)
 
 
+def _emptied_name(stmt):
+    if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) \
+            and isinstance(stmt.value, ast.List) and not stmt.value.elts:
+        return stmt.target.id
+    if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 \
+            and isinstance(stmt.targets[0], ast.Name) and isinstance(stmt.value, ast.List) \
+            and not stmt.value.elts:
+        return stmt.targets[0].id
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) \
+            and isinstance(stmt.value.func, ast.Attribute) and stmt.value.func.attr == 'clear' \
+            and not stmt.value.args and not stmt.value.keywords \
+            and isinstance(stmt.value.func.value, ast.Name):
+        return stmt.value.func.value.id
+    return None
+
+
+_APPEND_LOOP_SKIPS = tuple(node for node in (
+    ast.Break, ast.Continue, ast.Return, ast.Raise, ast.Yield, ast.YieldFrom,
+    ast.If, ast.While, ast.For, ast.AsyncFor, ast.Try, getattr(ast, 'TryStar', None),
+    getattr(ast, 'Match', None), ast.With, ast.AsyncWith, ast.Assert,
+) if node is not None)
+
+
+def _append_loop_reserve(previous, node, ctx, ind):
+    if not previous or not isinstance(node, ast.For):
+        return ''
+    names = [name for name in (_emptied_name(stmt) for stmt in previous) if name is not None]
+    names = [name for name in names if ctx.types.get(name) in (LIST, FLIST, SLIST)
+             and name in ctx.locals and name not in ctx.kind]
+    if not names:
+        return ''
+    it = node.iter
+    if not (isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == 'range'
+            and it.func.id not in ctx.funcs and it.func.id not in ctx.classes and not it.keywords
+            and 1 <= len(it.args) <= 3):
+        return ''
+    def bound(e):
+        if isinstance(e, ast.Constant) and type(e.value) is int:
+            return str(e.value)
+        if isinstance(e, ast.Name) and ctx.types.get(e.id) == INT:
+            return ctx.cname(e.id)
+        return None
+    if len(it.args) == 3:
+        step = bound(it.args[2])
+        if step != '1':
+            return ''
+    lo = bound(it.args[0]) if len(it.args) > 1 else '0'
+    hi = bound(it.args[-1] if len(it.args) > 1 else it.args[0])
+    if lo is None or hi is None:
+        return ''
+    parents = {}
+    for stmt in node.body:
+        for child in ast.walk(stmt):
+            for sub in ast.iter_child_nodes(child):
+                parents[sub] = child
+    appended = set()
+    for stmt in node.body:
+        for n in ast.walk(stmt):
+            if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                return ''
+            if isinstance(n, _APPEND_LOOP_SKIPS):
+                return ''
+            if not (isinstance(n, ast.Name) and n.id in names):
+                continue
+            attr = parents.get(n)
+            call = parents.get(attr) if attr is not None else None
+            if not (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
+                    and isinstance(call, ast.Call) and call.func is attr
+                    and isinstance(parents.get(call), ast.Expr)):
+                return ''
+            appended.add(n.id)
+    trip = hi if len(it.args) == 1 else '(%s) - (%s)' % (hi, lo)
+    limit = _LIST_RESERVE_LIMIT
+    if trip.isdigit() and int(trip) <= limit:
+        sized = trip
+    else:
+        sized = '(%s) < %d ? (%s) : %d' % (trip, limit, trip, limit)
+    return ''.join('%sail_%s_reserve(&%s, %s);\n' % ('    ' * ind, ctx.types[name],
+                                                    ctx.cname(name), sized)
+                   for name in names if name in appended)
+
+
 def _stmts(body, ctx, ind):
     emitted, index = [], 0
     while index < len(body):
@@ -20169,9 +20423,16 @@ def _stmts(body, ctx, ind):
         consumed = 3 if fused is not None else 1
         if fused is None:
             fused = _emit_string_repeat_loop(body[index], ctx, ind)
+        previous, j = [], index - 1
+        while j >= 0 and _emptied_name(body[j]) is not None:
+            previous.append(body[j])
+            j -= 1
+        reserve = (_append_loop_reserve(previous, body[index], ctx, ind)
+                   if fused is None else '')
         try:
             first_temp = ctx.tmp
-            emitted.append(fused if fused is not None else _stmt(body[index], ctx, ind))
+            piece = fused if fused is not None else _stmt(body[index], ctx, ind)
+            emitted.append(reserve + piece if reserve else piece)
             if (_NULLABLE and fused is None and isinstance(body[index], (ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign))):
                 # Struct temporaries made by this statement are released at its end, not at the
                 # function's: a tree built and walked in one statement is freed before the next.
@@ -20758,6 +21019,38 @@ def _stmt_inner(node, ctx, ind):
                 names = [ctx.declare(e.id) for e in t.elts]
                 return out + ''.join('%s%s = %s;\n' % (pad, c, m)
                                      for c, m in zip(names, vals))
+            if (isinstance(node.value, ast.Call) and isinstance(node.value.func, ast.Name)
+                    and node.value.func.id == 'divmod'
+                    and node.value.func.id not in getattr(ctx, 'funcs', {})
+                    and node.value.func.id not in getattr(ctx, 'classes', {})
+                    and len(node.value.args) == 2 and not node.value.keywords
+                    and len(t.elts) == 2 and all(isinstance(e, ast.Name) for e in t.elts)):
+                # `q, r = divmod(a, b)` -- the one place `divmod` is built. Both operands are
+                # evaluated once, left to right, into private temps, then the same floor-division
+                # and modulo helpers `a // b` and `a % b` already use: CPython's signs, and the
+                # same loud overflow rule (`pydiv`/`pymod`). A float operand makes both results
+                # float, exactly as CPython's divmod does.
+                left, right = node.value.args
+                lkind, rkind = _etype(left, ctx), _etype(right, ctx)
+                if lkind not in NUM or rkind not in NUM:
+                    raise Unsupported('divmod() needs two numbers')
+                kind = FLT if FLT in (lkind, rkind) else INT
+                lc, rc = _expr(left, ctx), _expr(right, ctx)
+                lt, _ = ctx.temp(lkind)
+                rt, _ = ctx.temp(rkind)
+                pre = _flush(ctx, pad)
+                pre += '%s%s = %s;\n' % (pad, lt, lc)
+                pre += '%s%s = %s;\n' % (pad, rt, rc)
+                if kind == FLT:
+                    ctx.parts.add('FFLOORMOD')
+                    vals = ['ail_ffloormod((double)(%s), (double)(%s), 0)' % (lt, rt),
+                            'ail_ffloormod((double)(%s), (double)(%s), 1)' % (lt, rt)]
+                else:
+                    ctx.floor.update(('pydiv', 'pymod'))
+                    vals = ['pydiv(%s, %s)' % (lt, rt), 'pymod(%s, %s)' % (lt, rt)]
+                names = [ctx.declare(e.id, kind) for e in t.elts]
+                return pre + ''.join('%s%s = %s;\n' % (pad, name, value)
+                                     for name, value in zip(names, vals))
             if not isinstance(node.value, ast.Tuple) or len(node.value.elts) != len(t.elts):
                 raise Unsupported('tuple assignment from %s; the right-hand side has to be a '
                                   'literal tuple of the same length, or a NAME already bound to a '
@@ -25973,12 +26266,51 @@ def _for_enumerate_start(node, it, ctx, ind):
         kind = INT
     elif isinstance(source, ast.Name) and _is_flist_name(source, ctx) and source.id not in ctx.tstride:
         kind = FLT
+    elif _is_str_expr(source, ctx):
+        kind = STR
     else:
         raise Unsupported('enumerate() with a start over something other than a named list of int, '
                           'float or str')
     if _etype(start, ctx) != INT or _is_handle_producing(start, ctx):
         raise Unsupported('enumerate() needs an int start')
     iname, vname = (e.id for e in node.target.elts)
+    if _is_str_expr(source, ctx) and not _is_slist_expr(source, ctx):
+        # `for i, c in enumerate(s, start)` over a plain str: the same one-code-point walk the
+        # plain `for c in s` branch uses, with the position counted in code points (not bytes).
+        # The start is evaluated after the iterable, once; the counter is private, so rebinding
+        # `i` in the body cannot change the next index.
+        sval = _str_value(source, ctx)
+        ctx.parts.add('STR')
+        stmp, _ = ctx.temp(STR)
+        pre = _flush(ctx, pad)
+        pre += '%s%s = %s;\n' % (pad, stmp, sval)
+        first, _ = ctx.temp(INT)
+        pre += _flush(ctx, pad)
+        pre += '%s%s = %s;\n' % (pad, first, _map_inline(lambda: _expr(start, ctx), ctx))
+        counter, _ = ctx.temp(INT)
+        i = ctx.declare(iname, INT)
+        v = ctx.declare(vname, STR)
+        _use(ctx.need, 'ck_add')
+        if ctx.rebound is not None and vname not in ctx.rebound:
+            ctx.onecp.add(vname)
+        idx, _ = ctx.temp(INT)
+        byte0 = '%s_b0' % idx
+        pre += '%s%s = 0;\n' % (pad, counter)
+        pre += '%s{\n%s    const uint8_t *%s_p = %s.p; const int64_t %s_n = %s.n;\n' % (
+            pad, pad, idx, stmp, idx, stmp)
+        head = ('%s    for (int64_t %s_k = 0, %s_w = 0; %s_k < %s_n; %s_k += %s_w) {\n'
+                '%s        const uint8_t %s = %s_p[%s_k];\n'
+                '%s        %s_w = %s < 0x80 ? 1 : ail__utf8_w(%s, %s_n - %s_k);\n'
+                '%s        %s = ck_add(%s, %s);\n'
+                '%s        %s = ck_add(%s, 1);\n'
+                '%s        %s = (ail_str){%s_p + %s_k, %s_w, %s < 0x80};\n') % (
+            pad, idx, idx, idx, idx, idx, idx,
+            pad, byte0, idx, idx,
+            pad, idx, byte0, byte0, idx, idx,
+            pad, i, first, counter,
+            pad, counter, counter,
+            pad, v, idx, idx, idx, byte0)
+        return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n' + pad + '}\n'
     if kind == STR:
         base = _slist_arg_c(source, ctx)
         ctx.parts.add('SLIST')
@@ -26693,6 +27025,51 @@ def _for_inner_impl(node, ctx, ind):
                 head = '%sfor (%s = 0; %s < %s.n; %s++) {\n%s    %s = %s.p[%s];\n' % (
                     pad, i, i, c, i, pad, v, c, i)
                 return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+            if _is_str_expr(it.args[0], ctx):
+                # `for i, ch in enumerate(text):` -- the pair form of the plain `for c in s`
+                # branch further down. The walk is the same UTF-8 byte walk (one code point per
+                # step via `ail_str_index`'s view), and `i` counts CHARACTERS, not bytes, so a
+                # non-ASCII character advances it by one exactly as CPython's enumerate does.
+                # The iterable is evaluated once into a private temp, and `i` is bound from a
+                # private counter each step so a body that rebinds the index cannot disturb the
+                # next step.
+                sval = _str_value(it.args[0], ctx)
+                ctx.parts.add('STR')
+                stmp, _ = ctx.temp(STR)
+                v = ctx.declare(vname, STR)
+                pre = _flush(ctx, pad)
+                pre += '%s%s = %s;\n' % (pad, stmp, sval)
+                if ctx.rebound is not None and vname not in ctx.rebound:
+                    ctx.onecp.add(vname)
+                byte0 = '%s_b0' % idx
+                counter = '%s_i' % idx
+                pre += '%s{\n%s    const uint8_t *%s_p = %s.p; const int64_t %s_n = %s.n;\n' % (
+                    pad, pad, idx, stmp, idx, stmp)
+                head = ('%s    for (int64_t %s_k = 0, %s_w = 0, %s_i = 0; %s_k < %s_n; '
+                        '%s_k += %s_w, %s_i++) {\n'
+                        '%s        const uint8_t %s = %s_p[%s_k];\n'
+                        '%s        %s_w = %s < 0x80 ? 1 : ail__utf8_w(%s, %s_n - %s_k);\n'
+                        '%s        %s = (ail_str){%s_p + %s_k, %s_w, %s < 0x80};\n'
+                        '%s        %s = %s;\n') % (
+                    pad, idx, idx, idx, idx, idx,
+                    idx, idx, idx,
+                    pad, byte0, idx, idx,
+                    pad, idx, byte0, byte0, idx, idx,
+                    pad, v, idx, idx, idx, byte0,
+                    pad, i, counter)
+                _saved_b0 = dict(getattr(ctx, 'byte0_names', {}))
+                if vname in ctx.onecp:
+                    ctx.byte0_names = dict(_saved_b0, **{vname: byte0})
+                _saved = set(ctx.len1_names)
+                ctx.len1_names.add(vname)
+                for _s in node.body:
+                    for _n in ast.walk(_s):
+                        if isinstance(_n, ast.Name) and isinstance(_n.ctx, ast.Store):
+                            ctx.len1_names.add(_n.id)
+                _body = _loop_stmts(node.body, ctx, ind + 2)
+                ctx.len1_names = _saved
+                ctx.byte0_names = _saved_b0
+                return pre + head + _body + pad + '    }' + chr(10) + pad + '}' + chr(10)
             p, n = _seq(it.args[0], ctx)
             if _seq_yields_handles(it.args[0], ctx):
                 # `for i, v in enumerate(g):` -- `v` inherits the handle-ness of `g`'s elements,
