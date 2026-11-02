@@ -23,9 +23,12 @@ CPython hybrid (`docs/design/CPYTHON_HYBRID.md`) accelerates exactly those typed
   becomes an index cursor (`temp = seq[i]; i += 1`) when `seq` is a known list/str/bytes (or a
   list/str/bytes literal), the iterator is bound exactly once directly in the function body with
   no rebinding or delete, every use of `it` is such a `next`, every `next` textually follows the
-  binding, and no effectful receiver/argument is evaluated before it.  A `try` anywhere, a
-  `while`-test use, `next(it, default)` and a source deleted or rebound after `iter()` stay on the
-  general path.  This is what makes `t266.main` and `t266.dfs` typed.
+  binding, and no effectful receiver/argument is evaluated before it.  An `AugAssign` whose value
+  holds a `next` is only lowered when its target is a plain name: CPython evaluates the target
+  before the value, so a subscript / attribute target (`a[items.pop(0) % 2] += next(it)`) may run
+  code that the hoisted cursor read would otherwise overtake.  A `try` anywhere, a `while`-test
+  use, `next(it, default)` and a source deleted or rebound after `iter()` stay on the general
+  path.  This is what makes `t266.main` and `t266.dfs` typed.
 * `python/pkg-v12/nested_lists.py`: a hoisted comprehension temp (`__ail_itemsN` / `__ail_rowsN`)
   is marked `_ail_synth`, so `_last_use_free_points` cannot decide the prelude loop is its last
   mention (both share the comprehension's source position) and free it before the statement that
@@ -43,13 +46,17 @@ CPython hybrid (`docs/design/CPYTHON_HYBRID.md`) accelerates exactly those typed
   compiles `t266` and compares every `in*.txt` case with CPython; compiles the newly typed
   iterator shapes (list literal, named list, str, bytes, append after `iter()`, `next` in an `if`
   test, an exhausted cursor, `xs += [<comprehension>]` for str and nested lists); checks the
-  shapes that stay general (`try`, `while` test, two-argument `next`, effectful argument, rebind,
-  `del`, use before the binding); and keeps `g11_022`, `g09_034`, `g02_012`, `t244` typed and
+  shapes that stay general (`try`, `while` test, two-argument `next`, effectful argument, effectful
+  augmented-assignment target, rebind, `del`, use before the binding); and keeps `g11_022`,
+  `g09_034`, `g02_012`, `t244` typed and
   `g23_004`, `g03_008` general, each compared with CPython.  `t172` is checked as refused by name.
 * Probes in `/tmp/probes`: `p30_iter_{basic,named,float,multi,if,empty,exhausted,arg,attr,dictval,
   del,rebind,before,nested,try,while,default,unsafe}.py`, `p30_aug_{comp,comp2,comp3,comp4,comp5,
-  lines}.py`, `p30_joincomp_{a,b,c,d}.py`, `p30_nested_aug.py`, `p30_nested_sum.py`.  Every one
-  matches CPython's stdout and exit status on both `cmp.sh` builds.  The exhausted-cursor probes
+  lines,target,target2,target_name,target_arg,target_attr,target_dict_value,target_next_in_target,
+  target_pop_index}.py`, `p30_joincomp_{a,b,c,d}.py`, `p30_nested_aug.py`, `p30_nested_sum.py`.
+  Every one matches CPython's stdout and exit status on both `cmp.sh` builds.  The
+  effectful-target probes stay on the general path; `target_name` (`total += next(it)`) stays
+  typed on the default build.  The exhausted-cursor probes
   match on stdout/exit; the typed runtime names the uncaught trap `list index out of range` where
   CPython says `StopIteration` (recorded as `C?-job-prog30-11021835-1`).
 * The generated C of the ten `lab/compare/src/*/main.ail` tasks is byte-identical to the base

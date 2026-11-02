@@ -337,7 +337,13 @@ class _Lower:
             if isinstance(parent, ast.stmt):
                 if isinstance(parent, ast.If) and parent.test is child:
                     return True
-                if (isinstance(parent, (ast.Assign, ast.AnnAssign, ast.AugAssign, ast.Return, ast.Expr))
+                if isinstance(parent, ast.AugAssign) and parent.value is child:
+                    # CPython evaluates an augmented assignment's target before its value, so a
+                    # target that runs code (a subscript / attribute, which may call __getitem__ /
+                    # __getattribute__) would move the hoisted `next` past that code.  Only a plain
+                    # name target is evaluated without running anything and may be reordered.
+                    return isinstance(parent.target, ast.Name)
+                if (isinstance(parent, (ast.Assign, ast.AnnAssign, ast.Return, ast.Expr))
                         and getattr(parent, 'value', None) is child):
                     return True
                 return False

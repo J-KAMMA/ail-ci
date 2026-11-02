@@ -23,6 +23,9 @@ P8  `t172` needs a dict of dicts, tuple iteration and generator unpacking at onc
     by name (the general path cannot build it either) and the exact first reason is recorded.
 P9  `xs += [<comprehension>]` keeps both the old and the new elements, for a list of str and a
     nested list (the hoisted comprehension's temp is not freed before its consumer).
+P10 an augmented-assignment target that runs code (`a[items.pop(0) % 2] += next(it)`) is evaluated
+    before the value in CPython, so the cursor lowering is refused and the program stays general;
+    a plain name target (`total += next(it)`) is still lowered.
 """
 import os
 import shutil
@@ -162,6 +165,15 @@ AUG_NESTED = '''def main() -> None:
 main()
 '''
 
+AUG_EFFECTFUL_TARGET = '''def main() -> None:
+    items = [10, 20, 30]
+    it = iter(items)
+    a = [0, 0]
+    a[items.pop(0) % 2] += next(it)
+    print(a, items)
+main()
+'''
+
 T266 = ROOT.parent / 'lab/corpus/programs/deepseek-v4.1-flash-free/t266.py'
 T266_INPUTS = sorted((ROOT.parent / 'lab/corpus/tasks/t266').glob('in*.txt'))
 
@@ -276,6 +288,9 @@ class Prog30(unittest.TestCase):
     def test_augassign_comprehension_keeps_both_sides(self):
         self.check(AUG_COMP, 'aug_comp')
         self.check(AUG_NESTED, 'aug_nested')
+
+    def test_effectful_augassign_target_stays_general(self):
+        self.check(AUG_EFFECTFUL_TARGET, 'aug_effectful_target', expect_typed=False)
 
     def test_unsupported_shapes_stay_general(self):
         for source, name in ((ITER_REBIND, 'iter_rebind'), (ITER_TRY, 'iter_try'),

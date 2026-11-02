@@ -9,6 +9,11 @@ when the binding, every use and the evaluation order are provably simple (no `tr
 delete, no effectful call before a `next`, all uses single-argument `next`).  `t266` is typed as a
 whole program on both `AIL_IR` modes and matches CPython on every `in*.txt`.
 
+Review fix: an augmented assignment evaluates its target before its value in CPython, so the cursor
+lowering is now refused when a `next` sits in an `AugAssign` value and the target is not a plain
+name (`a[items.pop(0) % 2] += next(it)` printed `[10, 0]` instead of `[20, 0]`).  Those programs
+stay on the general path and match CPython; `total += next(it)` is still lowered and typed.
+
 `t244` was already typed but its `lines += [" ".join(map(str, row)) for row in p]` printed only the
 transpose: `nested_lists.py` hoisted the comprehension into `__ail_itemsN`, and
 `_last_use_free_points` freed that temp after the prelude loop (the prelude and the consuming
