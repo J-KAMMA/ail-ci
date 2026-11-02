@@ -19619,6 +19619,36 @@ def _listcomp_into_temp(node, ctx):
     return c
 
 
+def _setcomp_runs_code(node):
+    """Whether the element or any filter of this comprehension can call back into the program."""
+    expressions = [node.elt]
+    for generator in node.generators:
+        expressions.extend(generator.ifs)
+    return any(isinstance(n, (ast.Call, ast.Await, ast.Yield, ast.YieldFrom, ast.NamedExpr,
+                              ast.Lambda))
+               for expression in expressions for n in ast.walk(expression))
+
+
+def _setcomp_source_can_change(node, ctx):
+    """Whether the comprehension's source is a mutable container this compiler may snapshot.
+
+    A list field read and a dict `.keys()`/`.values()` read are copied on the typed path, while a
+    plain list name is walked live.  In either case a call inside the element or filter can change
+    the source while CPython's own iterator is still walking it, so the eager list lowering here
+    would silently use the sequence as it was on entry.
+    """
+    source = node
+    while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
+        source = source.value
+    if _is_map_snapshot(source, ctx, 'keys') or _is_map_snapshot(source, ctx, 'values'):
+        return True
+    try:
+        source_type = _etype(source, ctx)
+    except Unsupported:
+        return True
+    return source_type in (LIST, FLIST, SLIST, SET, DICT)
+
+
 def _setcomp_len(node, ctx):
     """`len({e for v in seq if c})`: build the eager list comprehension, add its elements to a
     private set, and take that set's length.  This is the one use of a set comprehension as a
@@ -19627,6 +19657,12 @@ def _setcomp_len(node, ctx):
     kind = _listcomp_kind(node, ctx)
     if kind == FLIST:
         raise Unsupported('len() of a set comprehension with float elements is not built')
+    if _setcomp_runs_code(node) and _setcomp_source_can_change(node.generators[0].iter, ctx):
+        raise Unsupported('len() of a set comprehension over a mutable sequence whose element or '
+                          'filter runs code: the source can change while it is walked, and the '
+                          'eager list lowering would silently use the sequence as it was on entry. '
+                          'Bind the comprehension to a list first, or test its elements without '
+                          'calling code')
     setkind = SSET if kind == SLIST else ISET
     saved, ctx.pre = ctx.pre, []
     try:

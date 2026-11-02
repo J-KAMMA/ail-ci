@@ -136,6 +136,29 @@ def main() -> None:
 main()
 '''
 
+MUTATED_SETCOMP = '''
+class Box:
+    def __init__(self) -> None:
+        self.xs: list[int] = [1, 2]
+
+    def side(self) -> bool:
+        if len(self.xs) < 3:
+            self.xs.append(99)
+        return True
+
+
+def f(box: Box) -> int:
+    return len({x for x in box.xs if box.side()})
+
+
+def main() -> None:
+    box = Box()
+    print(f(box), len(box.xs))
+
+
+main()
+'''
+
 SHADOWED_LEN = '''
 V = frozenset("aeiou")
 
@@ -277,6 +300,17 @@ class TypedReach29(unittest.TestCase):
         output = (built.stdout + built.stderr).decode('utf-8', 'replace')
         self.assertNotEqual(built.returncode, 0, output[-3000:])
         self.assertIn('set comprehension with float elements', output)
+
+    def test_mutated_set_comprehension_source_is_refused_by_name(self):
+        src = Path(self.tmp) / 'mutated_setcomp.py'
+        src.write_text(MUTATED_SETCOMP, encoding='utf-8')
+        built, _ = self.build(src, 'mutated_setcomp', strict=True)
+        output = (built.stdout + built.stderr).decode('utf-8', 'replace')
+        self.assertNotEqual(built.returncode, 0, output[-3000:])
+        self.assertIn('set comprehension over a mutable sequence', output)
+        general, exe = self.build(src, 'mutated_setcomp_general', strict=False)
+        self.assertEqual(general.returncode, 0, general.stderr[-3000:])
+        self.compare(src, exe, None)
 
     def test_shadowed_len_is_refused_by_name(self):
         src = Path(self.tmp) / 'shadowed_len.py'

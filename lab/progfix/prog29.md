@@ -62,7 +62,10 @@ program matching CPython under `build --cpython`, where it runs as plain CPython
    comprehension, creates a private `set[int]`/`set[str]` table, adds the list elements to it, and
    returns its length.  Duplicates collapse exactly as CPython's set does, and the result is an
    ordinary expression usable in `+=`, comparisons and calls.  Only int and str elements are built;
-   a float set comprehension is still refused by name.
+   a float set comprehension is still refused by name.  A comprehension over a mutable list, set or
+   dict whose element or filter runs code is refused by name: CPython's iterator observes a source
+   that the element/filter changes (appends, removals, a dict resized), while the eager lowering
+   would silently use the sequence as it was on entry.
 
 ### Review fixes
 
@@ -97,9 +100,12 @@ Every probe below was run with `bash ~/tools/cmp.sh /tmp/probes/<p>.py $PWD`; "s
 | `prog29_frozenset_iter.py` (`for ch in VOWELS`) | refused by name: `'VOWELS' is a module-level frozenset; only \`x in VOWELS\` and \`len(VOWELS)\` are built on the typed path (iteration order of a frozenset is not preserved)` | strict refusal as named; without `--strict` both builds take the general path, whose frozenset iteration is the documented A2 insertion order (identical to the base commit) |
 | `prog29_setcomp_float.py` (`len({x / 2 ...})`) | refused by name: `len() of a set comprehension with float elements is not built` | -- (expected refusal) |
 | `prog29_z_shadowlen.py` (nested `def len` then `len(V)`) | refused by name: the `len` is `not the builtin` | both builds match CPython: TypeError/exit 1 |
-| `prog29_z_shadowlen_{param,local,module,module_var}.py` (parameter/local/module `len`) | refused by name (`not the builtin`, or `call to len()` once the name is a module value) | both builds match CPython |
+| `prog29_z_shadowlen_{param,local}.py` (parameter/local `len`, call in another function) | pass (typed; the call resolves to the builtin) | both builds match CPython |
+| `prog29_z_shadowlen_{module,module_var}.py` (`len` bound at module scope) | refused by name (`not the builtin`, or `call to len()` once the name is a module value) | both builds match CPython |
 | `prog29_z_shadowlen_inner_only.py` (inner function shadows `len`, outer call is builtin) | pass (typed) | same |
-| `prog29_r_order.py`, `prog29_r_order_{call,arg,class,list}.py` (read before assignment) | refused by name: `is a module-level frozenset read before its assignment` | both builds match CPython: NameError/exit 1 |
+| `prog29_r_order.py`, `prog29_r_order_{call,class,list}.py` (read before assignment) | refused by name: `is a module-level frozenset read before its assignment` | both builds match CPython: NameError/exit 1 |
+| `prog29_r_order_arg.py` (annotated `frozenset` parameter) | refused by name: annotated `frozenset` parameters are not supported, not by the read-before-assignment check | both builds match CPython: NameError/exit 1 |
+| `p_sc_mutate_attr.py` (a filter appends to the list field being walked) | refused by name: `len() of a set comprehension over a mutable sequence whose element or filter runs code` (strict); default build falls back and matches CPython `3 3` | same after the fallback; the old eager lowering printed `2 3` |
 | `prog29_r_order_ok.py`, `prog29_order_unrelated.py` (function defined before, called after the assignment) | pass (typed) | same |
 
 ## Follow-ups (left by name)
