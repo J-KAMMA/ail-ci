@@ -100,6 +100,20 @@ scalar `int | None` local or a set comprehension of `str`; each is recorded with
 in `lab/progfix/prog2.md`. `test_ail_prog2.py` (registered through
 `tests.d/test_ail_prog2.txt`) checks the proof rules, builds the raw `isup` case and compares it with
 CPython, and verifies the hybrid acceleration of `reverse_words` and `state_at`.
+## 2026-11-01 -- prog3 typed reach: random.expovariate (job-prog3-11020344)
+
+Profiled the eight prog3 programs with CPython 3.12 `cProfile` and recorded the hot functions and
+their first typed-path refusal in `lab/progfix/prog3.md`. `g09_008` and `t370` already build on the
+typed path; `g12_008` was blocked only by `random.expovariate`, which the typed random library did
+not build. Added it in `cruntime.py` (`ail_rand_expovariate`: `-log(1 - random()) / lambd`, with
+CPython's `ZeroDivisionError: float division by zero` for a zero `lambd`), `stdlib3.py` (default,
+positional and `lambd=` forms) and `pyfunc.py` (`_AIL_RAND`). `g12_008` now builds with
+`AIL_NO_GENERAL=1`, so its hot `simulate_mm1` runs typed and its output matches CPython byte for
+byte. The other five programs stay as follow-ups with their exact messages (generators, typed
+`datetime`, heterogeneous `json.dumps`, optional lists, enum members in a module-level table).
+`AIL_CURRENT/test_ail_prog3.py` (registered in `tests.d/`) builds `g12_008` typed and compares it
+with CPython, and pins the expovariate forms, zero-division and generator-state cases. The generated
+C of all ten `lab/compare/src/*/main.ail` tasks is byte-identical.
 
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
