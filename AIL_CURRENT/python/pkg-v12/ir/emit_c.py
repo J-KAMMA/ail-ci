@@ -1505,6 +1505,8 @@ class Emitter(TextEmitter):
             L = o[0]
             if op == 'list.reset':
                 return self.line(depth, 'ail_slist_free(%s);' % L)
+            if op == 'list.reserve':
+                return self.line(depth, 'ail_slist_reserve(%s, %s);' % (L, o[1]))
             if op == 'list.lit':
                 self.parts.add('DIE')
                 return self.line(depth, '{ ail_slist_free(%s);%s }' % (

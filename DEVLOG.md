@@ -1188,6 +1188,71 @@ Added `AIL_CURRENT/test_ail_class_reach.py` (5 cases) and
 `AIL_CURRENT/docs/design/CLASS_REACH.md`. Final-state tests: test_ail_class_reach,
 test_ail_typed_inherit, test_ail_virtual_dispatch, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3.
+## 2026-11-01 -- mem1 review: cap only the list[str] comprehension reserve (job-mem1-11020654)
+
+The review found that the previous fix capped every comprehension reserve, which broke the legacy
+emitter's indexed `list[int]`/`list[float]` path: it skips the push capacity check and stores
+directly into `.p[n++]`, relying on the reserve matching the trip count, so a 32,000,000-element
+comprehension wrote past a 2^22 buffer and exited 139. The cap also forced doubling reallocs for
+large legitimate `list[int]` comprehensions, raising peak RSS (~+12 MiB on a 32M one). Both emitters
+now cap only the push-based `list[str]` comprehension reserve; `list[int]`/`list[float]` keep the
+exact reserve, so the pre-existing huge-bound/early-exception case for those types is unchanged
+(CPython/base also fail it). Added a 5,000,000-element `list[int]` comprehension case to
+`test_ail_slist_reserve` to keep the indexed path exact. Probes p1/p2 (huge `list[str]` bound),
+p4/p5 (empty range, dict/list item), p6/p7 (4,194,305 and 32,000,000 `list[int]`) match CPython on
+the default and general builds and typed AIL_IR=0/1; p3 remains the known pre-existing `list[int]`
+huge-bound failure.
+
+## 2026-11-01 -- mem1 review: cap the comprehension reserve too (job-mem1-11020654)
+
+The review found the new `list[str]` comprehension reserve was uncapped: `[boom(i) for i in
+range(10**18)]` emitted `ail_slist_reserve(&v, 10**18 - 0)` and died `list too long` before
+`boom(0)` could raise, where CPython and the base build catch the exception and print `caught`.
+`_listcomp_into_temp` now caps the one-shot reserve at 2^22 elements (shared `_LIST_RESERVE_LIMIT`,
+also used by `_append_loop_reserve`), and the IR `list.reserve` site emits the same
+`min(hi - lo, 2^22)`; both apply to `list[int]`/`list[float]` as well, which fixes the pre-existing
+`list[int]` instance.  Added `comp_early` and `comp_early_arg` regression cases to
+`test_ail_slist_reserve`.  Probes p7/p7b (argument and literal huge bound, 10**12), p7c (`list[int]`)
+and p7d (normal comprehensions) match CPython on the default and general builds and on the typed
+path with AIL_IR=0 and 1.  Tests: test_ail_slist_reserve, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 all pass.
+
+## 2026-11-01 -- mem1 review: append-loop reserve only when the append is unconditional (job-mem1-11011013)
+
+The review found that the new append-loop reserve was sized to the whole `range()` trip count even
+when the body leaves early or skips the append, so `for i in range(10**17): xs.append("v"); break`
+emitted `ail_slist_reserve(&xs, 100000000000000000)` and died `out of memory`/`list too long` where
+CPython and the base build print `v` and exit 0. `_append_loop_reserve` now refuses any body with
+`break`/`continue`/`return`/`raise`/`yield`/`assert` or a nested `if`/loop/`try`/`match`/`with`,
+requires each append to be a whole expression statement, and caps the reserve at 2^22 elements so an
+early exception cannot force a huge allocation.  The earlier claim "range bounds are known" was
+also too broad: parameters are not recognised, only constants and local ints, and the design note
+now says so.  Added `stopped`, `stopped_local`, `early`, `odd`, `stopped_int` and `stopped_float`
+regression cases to `test_ail_slist_reserve`.  Probes p10 (local `m = n`, 2^61, break) and p11
+(literal `range(10**17)`, break) now print `v` and exit 0 on the default and general builds.
+
+## 2026-11-01 -- tree_fold peak memory: reserve string-list spines and free them at last use (job-mem1-11011013)
+
+tree_fold's AIL build peaked at 603.7 MiB against Rust's 314.8 MiB.  An LD_PRELOAD counting
+allocator put 230.0 MiB of the simultaneous live bytes in several 3,000,000-element `list[str]`
+spines (24 bytes an element), grown by doubling as temporaries and kept until the function returned;
+`ail_list_reserve`/`rebuild` held another 137/128 MiB of int vectors.  The runtime now has
+`ail_slist_reserve`, one exact allocation for a string list whose length is known: a `list[str]`
+comprehension, or an append loop after an empty/clear whose `range` bounds are known.  The emitter
+does the same for `list[int]`/`list[float]` append loops, and the IR has a `list.reserve` operation.
+`list[str]` locals now join the numeric lists in last-use release (`_last_use_frees` and the IR
+`drop_after`), so a temporary spine is freed before the next one is built.  No task source changed.
+tree_fold peak RSS is 450.2 MiB (was 603.7), allocator peak 470.3 MiB (was 689.6), allocations
+3,786,111 (was 3,786,368), wall 1.764 s (was 1.875 s); Rust is 314.8 MiB.  All public and hidden
+cases of all ten lab/compare tasks still match the reference, and every other task's RSS is
+unchanged (the five 0/+4 KiB deltas are one page; the C is identical or only differs by the new
+reserve/free).  `tools/icount` cannot run here (`perf_event_open` EACCES, paranoid=4; no valgrind),
+so no instruction-count claim is made.  Measurements and the per-node comparison are in
+`docs/design/MEM_TREEFOLD.md`.  Probes `p_slist_append`, `p_slist_comp`, `p_slist_routes`,
+`p_slist_lastuse`, `p_list_append_reserve` match CPython on the default, general, and IR=0 builds.
+Added `test_ail_slist_reserve` (registered in `tests.d`); final-state tests: test_ail_slist_reserve,
+test_ail_last_use_free, test_ail_memory_shapes, test_ail_list_ops, test_ail_sort_keys,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 

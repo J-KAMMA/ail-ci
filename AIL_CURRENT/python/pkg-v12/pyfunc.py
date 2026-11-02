@@ -19282,6 +19282,9 @@ def _listcomp_simd_safe(node, ctx):
     return True
 
 
+_LIST_RESERVE_LIMIT = 1 << 22
+
+
 def _listcomp_into_temp(node, ctx):
     """`[e for v in seq if c]` as a value: one list, built once, freed with the rest."""
     if len(node.generators) != 1 or node.generators[0].is_async:
@@ -19356,10 +19359,18 @@ def _listcomp_into_temp(node, ctx):
     indexed = (kind in (FLIST, LIST) and not g.ifs and not struct_source and not string_source
                and simple.fullmatch(lo) and simple.fullmatch(n)
                and _listcomp_index_store_safe(node.elt))
-    if (kind in (FLIST, LIST) and not g.ifs and not struct_source and not string_source
+    if (kind in (FLIST, LIST, SLIST) and not g.ifs and not struct_source and not string_source
             and simple.fullmatch(lo) and simple.fullmatch(n)):
-        head = '%s_reserve(&%s, (%s) - (%s)); %s%s' % (
-            'ail_flist' if kind == FLIST else 'ail_list', c, n, lo,
+        # A huge range bound must not force a huge allocation before an early exception: cap the
+        # one-shot reserve exactly like `_append_loop_reserve` (a larger list still grows by
+        # doubling from here, so only the preallocation is bounded). Only the push-based list[str]
+        # path is capped: the indexed list[int]/list[float] path below stores directly into
+        # `.p[n++]` and depends on the reserve matching the trip count exactly.
+        trip = '(%s) - (%s)' % (n, lo)
+        sized = ('(%s) < %d ? (%s) : %d' % (trip, _LIST_RESERVE_LIMIT, trip, _LIST_RESERVE_LIMIT)
+                 if kind == SLIST else trip)
+        head = '%s_reserve(&%s, %s); %s%s' % (
+            'ail_flist' if kind == FLIST else 'ail_slist' if kind == SLIST else 'ail_list', c, sized,
             '\n#pragma omp simd\n' if indexed and _listcomp_simd_safe(node.elt, ctx) else '', head)
     if pre:
         head = '%s %s' % (' '.join(pre), head)
@@ -20160,7 +20171,7 @@ def _last_use_frees(statements, ctx, ind):
             if name in ctx.kind or name not in ctx.locals:
                 continue
             kind = ctx.types.get(name)
-            if kind in (LIST, FLIST):
+            if kind in (LIST, FLIST, SLIST):
                 out.append('%sail_%s_free(&%s);\n' % ('    ' * ind, kind, ctx.cname(name)))
             elif kind == BYTES and _bytes_local_releasable(name, ctx):
                 out.append('%s{ ail_barena_release(&%s, %s.p); %s = (ail_bytes){0}; }\n'
@@ -20280,6 +20291,88 @@ def _debug_site(node, ind):
     return '#line %d "%s"\n%sAIL_DBG_SITE("%s:%d");\n#line %d "%s"\n' % (line, name, '    ' * ind, name, line, line, name)
 
 
+def _emptied_name(stmt):
+    if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) \
+            and isinstance(stmt.value, ast.List) and not stmt.value.elts:
+        return stmt.target.id
+    if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 \
+            and isinstance(stmt.targets[0], ast.Name) and isinstance(stmt.value, ast.List) \
+            and not stmt.value.elts:
+        return stmt.targets[0].id
+    if isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Call) \
+            and isinstance(stmt.value.func, ast.Attribute) and stmt.value.func.attr == 'clear' \
+            and not stmt.value.args and not stmt.value.keywords \
+            and isinstance(stmt.value.func.value, ast.Name):
+        return stmt.value.func.value.id
+    return None
+
+
+_APPEND_LOOP_SKIPS = tuple(node for node in (
+    ast.Break, ast.Continue, ast.Return, ast.Raise, ast.Yield, ast.YieldFrom,
+    ast.If, ast.While, ast.For, ast.AsyncFor, ast.Try, getattr(ast, 'TryStar', None),
+    getattr(ast, 'Match', None), ast.With, ast.AsyncWith, ast.Assert,
+) if node is not None)
+
+
+def _append_loop_reserve(previous, node, ctx, ind):
+    if not previous or not isinstance(node, ast.For):
+        return ''
+    names = [name for name in (_emptied_name(stmt) for stmt in previous) if name is not None]
+    names = [name for name in names if ctx.types.get(name) in (LIST, FLIST, SLIST)
+             and name in ctx.locals and name not in ctx.kind]
+    if not names:
+        return ''
+    it = node.iter
+    if not (isinstance(it, ast.Call) and isinstance(it.func, ast.Name) and it.func.id == 'range'
+            and it.func.id not in ctx.funcs and it.func.id not in ctx.classes and not it.keywords
+            and 1 <= len(it.args) <= 3):
+        return ''
+    def bound(e):
+        if isinstance(e, ast.Constant) and type(e.value) is int:
+            return str(e.value)
+        if isinstance(e, ast.Name) and ctx.types.get(e.id) == INT:
+            return ctx.cname(e.id)
+        return None
+    if len(it.args) == 3:
+        step = bound(it.args[2])
+        if step != '1':
+            return ''
+    lo = bound(it.args[0]) if len(it.args) > 1 else '0'
+    hi = bound(it.args[-1] if len(it.args) > 1 else it.args[0])
+    if lo is None or hi is None:
+        return ''
+    parents = {}
+    for stmt in node.body:
+        for child in ast.walk(stmt):
+            for sub in ast.iter_child_nodes(child):
+                parents[sub] = child
+    appended = set()
+    for stmt in node.body:
+        for n in ast.walk(stmt):
+            if isinstance(n, (ast.Lambda, ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                return ''
+            if isinstance(n, _APPEND_LOOP_SKIPS):
+                return ''
+            if not (isinstance(n, ast.Name) and n.id in names):
+                continue
+            attr = parents.get(n)
+            call = parents.get(attr) if attr is not None else None
+            if not (isinstance(attr, ast.Attribute) and attr.value is n and attr.attr == 'append'
+                    and isinstance(call, ast.Call) and call.func is attr
+                    and isinstance(parents.get(call), ast.Expr)):
+                return ''
+            appended.add(n.id)
+    trip = hi if len(it.args) == 1 else '(%s) - (%s)' % (hi, lo)
+    limit = _LIST_RESERVE_LIMIT
+    if trip.isdigit() and int(trip) <= limit:
+        sized = trip
+    else:
+        sized = '(%s) < %d ? (%s) : %d' % (trip, limit, trip, limit)
+    return ''.join('%sail_%s_reserve(&%s, %s);\n' % ('    ' * ind, ctx.types[name],
+                                                    ctx.cname(name), sized)
+                   for name in names if name in appended)
+
+
 def _stmts(body, ctx, ind):
     emitted, index = [], 0
     while index < len(body):
@@ -20292,9 +20385,16 @@ def _stmts(body, ctx, ind):
         consumed = 3 if fused is not None else 1
         if fused is None:
             fused = _emit_string_repeat_loop(body[index], ctx, ind)
+        previous, j = [], index - 1
+        while j >= 0 and _emptied_name(body[j]) is not None:
+            previous.append(body[j])
+            j -= 1
+        reserve = (_append_loop_reserve(previous, body[index], ctx, ind)
+                   if fused is None else '')
         try:
             first_temp = ctx.tmp
-            emitted.append(fused if fused is not None else _stmt(body[index], ctx, ind))
+            piece = fused if fused is not None else _stmt(body[index], ctx, ind)
+            emitted.append(reserve + piece if reserve else piece)
             if (_NULLABLE and fused is None and isinstance(body[index], (ast.Expr, ast.Assign, ast.AugAssign, ast.AnnAssign))):
                 # Struct temporaries made by this statement are released at its end, not at the
                 # function's: a tree built and walked in one statement is freed before the next.

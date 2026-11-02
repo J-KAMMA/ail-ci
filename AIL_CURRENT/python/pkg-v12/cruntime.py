@@ -2924,6 +2924,17 @@ static void ail_slist_push(ail_slist *L, ail_str v) {
     }
     L->p[L->n++] = v;
 }
+/* One allocation for a list whose length is known (a comprehension); a spine is 24 bytes an
+   element and doubling to the next power of two held up to twice that again. */
+static void ail_slist_reserve(ail_slist *L, int64_t extra) {
+    if (!L || extra <= 0 || L->n < 0 || L->cap < L->n || (L->cap && !L->p)) return;
+    if (L->cap - L->n >= extra) return;
+    if (extra > (int64_t)(SIZE_MAX / sizeof(ail_str)) - L->n) ail_die("list too long");
+    ail__need_elems(L->n + extra, AIL_ELEM_LIMIT(ail_str));
+    ail_str *q = (ail_str *)realloc(L->p, (size_t)(L->n + extra) * sizeof *q);
+    if (!q) ail_die("out of memory");
+    L->p = q; L->cap = L->n + extra;
+}
 /* Same rule as ail_list_clear: a compiler-generated temp inside a loop is the same C
    variable on every iteration and has to start empty. */
 static void ail_slist_reverse(ail_slist *L) {
