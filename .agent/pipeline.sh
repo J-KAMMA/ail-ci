@@ -84,7 +84,8 @@ run_cc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout; return
   wait_offpeak
   # Command Code CLI (GOAT plan, owner 2026-10-26), pinned; the key lives only in this process's environment
   [ -x "$S/cc/node_modules/.bin/cmd" ] || npm install --prefix "$S/cc" --no-fund --no-audit command-code@1.88.0 >/dev/null 2>&1 || return 1
-  COMMAND_CODE_API_KEY=$(cat "$RUNNER_TEMP/cc.key") timeout "${3}m" "$S/cc/node_modules/.bin/cmd" -p --model deepseek-v4.1-flash \
+  local cm=$3; lm=$(( $(left) - 10 )); [ "$cm" -gt "$lm" ] && cm=$lm; [ "$cm" -lt 5 ] && return 1
+  COMMAND_CODE_API_KEY=$(cat "$RUNNER_TEMP/cc.key") timeout "${cm}m" "$S/cc/node_modules/.bin/cmd" -p --model deepseek-v4.1-flash \
     --yolo -t --max-turns 250 --output-format json \
     < <(printf 'Do the task described below, in this directory. When finished, reply with a short final report.\n\n'; cat "$1") \
     > "$S/$2.cc.json" 2> "$S/$2.cc.err"
@@ -119,6 +120,8 @@ run_oc() {  # $1 prompt file, $2 tag, $3 minutes -> final text on stdout
       cc_tried=1; run_cc "$1" "$2" "$3" && return 0
     fi
     mins=$3; quota=0
+    # 2026-11-02: never run past T_END (spec1 ran 5.5 h and the job cancel lost all its work)
+    lm=$(( $(left) - 10 )); [ "$mins" -gt "$lm" ] && mins=$lm; [ "$mins" -lt 5 ] && { echo "(no time left)"; return 0; }
     rm -rf "$HOME/.local/share/opencode/log"
     timeout "${mins}m" "$OC" run --format json --dir "$PWD" -m "$model" "Do the task described in the attached file, in this directory. When finished, reply with a short final report." -f "$1" > "$S/$2.jsonl" 2> "$S/$2.err" &
     pid=$!
@@ -193,10 +196,18 @@ suite_new() {  # prints the test modules that fail now and are not in the known-
   (cd AIL_CURRENT && timeout 75m python3 ../tools/par_check.py -j 4 > "$S/suite.log" 2>&1)
   grep -oE 'FAIL test_ail_[a-z0-9_]+' "$S/suite.log" | awk '{print $2}' | sort -u | grep -vxF -f .agent/integ_base_fail.txt 2>/dev/null
 }
-if [ "$verdict" = ACCEPT ] && [ $SUITE = 1 ]; then
+if [ "$verdict" = ACCEPT ] && [ $SUITE = 1 ] && [ "$(left)" -lt 90 ]; then
+  printf '
+## full suite skipped: only %s minutes left (the integration gate runs it)
+' "$(left)" >> "$log"
+elif [ "$verdict" = ACCEPT ] && [ $SUITE = 1 ]; then
   bad=$(suite_new)
   printf '\n## full suite\n%s\n' "${bad:-no new failures}" >> "$log"
-  if [ -n "$bad" ]; then
+  if [ -n "$bad" ] && [ "$(left)" -lt 150 ]; then
+    printf '
+## suite fix skipped: only %s minutes left
+' "$(left)" >> "$log"; verdict=FIX
+  elif [ -n "$bad" ]; then
     { printf 'Your change is accepted by the reviewer but breaks these test modules in the full suite: %s\n' "$(echo $bad)"
       printf 'Run each (cd AIL_CURRENT && python3 -m unittest -q <module>), find what your change broke, fix it while keeping your own fix and its test, and commit.\n'; } > "$S/worksuite.md"
     report=$(run_oc "$S/worksuite.md" worksuite 60)

@@ -1,3 +1,45 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode-go/deepseek-v4.1-flash]
+**What the change really does:** adds a compare-report→`docs/COMPARISON.md` generator, a fixture and doc, a README “How AIL compares” section, a unit test, manifest/DEVLOG entries, and `head`/`date`/`run` metadata to `merge.py`/`run_task.py`. No AIL semantics changed.
+
+**Verified**
+- `test_compare_publish`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`: 4/4 pass (372s).
+- `tools/update_manifest.py --check`: rc 0.
+- Committed doc == fresh fixture render; probe `/tmp/rprobes/rp_publish_edge.py` (empty, tie, zero/negative, failed build, interpreted) passes.
+- `merge.py`→`compare_publish.py` now renders `date 2026-11-02` from task records, as the reviewer probe required.
+- The three AIL-py refusals are real: `--strict` returns rc 3 for `scar_life`, `tally_lang`, `tree_fold`; `echo_pack`/`term_rank`/`ticket_audit` typed (`--strict` rc 0). README counts match the doc; no adjectives.
+
+**False claim in the report**
+- “Fixture now carries only the supplied run 41393616319 numbers” — it still carries per-task binary/compile values, AIL path/`why_not_typed`, and toolchain versions/pins that the task never supplied.
+
+**Defects**
+1. Per-task **binary size** and **compile time** are invented. The task supplies only ranges (`AIL binary 34–102`, `Rust 4450–4518`; `AIL compile 1.87–11.17`, `Rust 0.19–0.56`), but `tools/testdata/compare-report.json` assigns per-task values (e.g. `berth_sim 102/4518 KiB`, `7.01/0.41 s`; `chain_relax 34/4450`, `1.87/0.19`; `echo_pack 71/4485`, `2.41/0.25`). These are the same values from the rejected first fixture (`5477c3d`), not from run 41393616319. They drive the per-task W/L ratios and the geomean rows (`binary 0.02x n=10`, `compile 10.87x n=10`) presented as measured. Expected: per-task values `n/a` (only the supplied ranges are known); actual: full invented per-task table. Probe: compare `.agent/task.md` lines 19–20 with the fixture.
+2. The generated doc still asserts per-task AIL path/`why_not_typed` (“general”; “why not typed: a call can raise or have side effects” for every general task) with no supplied source. At HEAD, `berth_sim` and `scar_life` `main.ail` accept `--strict` (rc 0, typed), contradicting the fixture’s “general”; the run commit differs, so this is unverified rather than proven wrong, but it should not be presented as run data without the artifact.
+
+**Pre-existing:** none observed.
+**Unverified:** actual values/toolchain versions/tool paths of run 41393616319 (artifact unavailable); README’s “not reported” lines for instructions/build disk are honest.
+
+VERDICT: FIX
+[cost $0.0346, opencode tokens {"total": 1644560, "input": 75354, "output": 5614, "reasoning": 25544, "cache.write": 0, "cache.read": 1538048}]
+    tool time: bash 7.6 min
+        373s bash   date; cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && python3 ../tools/par_check.py -j 2 test_compare_publis
+         37s bash   cd /home/runner/work/ail-ci/ail-ci && rm -rf /tmp/verify_paths && mkdir -p /tmp/verify_paths && for t in scar_
+         25s bash   cd /home/runner/work/ail-ci/ail-ci && for t in echo_pack term_rank ticket_audit berth_sim scar_life; do timeou
+         10s bash   cd /home/runner/work/ail-ci/ail-ci && sed -n '103,118p' lab/compare/run_task.py; echo ====; env AIL_NO_CACHE=1
+         10s bash   cd /home/runner/work/ail-ci/ail-ci && git cat-file -t 4f1245b 2>&1; git log --oneline -3; echo ====; env AIL_N
+          0s bash   cd /home/runner/work/ail-ci/ail-ci && python3 tools/compare_publish.py tools/testdata/compare-report.json -o /
+          0s bash   cd /home/runner/work/ail-ci/ail-ci && timeout 30 git fetch --depth=1 origin 4f1245b 2>&1 | tail -5; echo RC=$?
+          0s bash   cd /home/runner/work/ail-ci/ail-ci && grep -rn "scar_life\|tally_lang\|tree_fold\|41393616319\|4f1245b" --incl
+
+
+--- ORIGINAL TASK ---
 Lane: docs
 
 **Publish the language comparison table, wins and losses alike (owner decision 2026-11-02: 全部そのまま載せる).**
