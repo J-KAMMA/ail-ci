@@ -407,9 +407,63 @@ class _Lower:
                 and key.value.id in getattr(self, 'dicts', ())):
             key = ast.parse('lambda _k: %s[_k]' % key.value.id, mode='eval').body      # max(d, key=d.get)
         is_max = call.func.id == 'max'
+        # A tuple-returning key is split into components so the loop compares them lexicographically.
+        tuple_key = key is not None and self.apply_components(key, _name('_ail_probe')) is not None
         index, best_index, best_key, count = (self.fresh(n) for n in ('i', 'bi', 'bk', 'n'))
         pre = []
         holder = None
+        if (tuple_key and isinstance(source, ast.Name)
+                and source.id in getattr(self, 'dicts', ())):
+            # Walk the dict itself rather than copying its keys into a fresh empty list: an empty
+            # list built by the lowering has no element kind for the typed emitter to infer from,
+            # so a str key read back out of it would be taken for an int. Each field is evaluated
+            # once per key, in key order, and the comparison short-circuits at the first unequal
+            # field; the first key wins a tie.
+            each_key, have, best = self.fresh('kk'), self.fresh('have'), self.fresh('be')
+            key_parts = self.apply_components(key, _name(each_key))
+            if key_parts is None:
+                return None
+            best_parts = [self.fresh('bk') for _ in key_parts]
+            each_parts = [self.fresh('ck') for _ in key_parts]
+            if default is not None:
+                fallback, result = self.fresh('dflt'), self.fresh('res')
+                pre.insert(0, ast.Assign(targets=[_name(fallback, True)],
+                                         value=self.expr(default)))
+            pre.append(ast.Assign(targets=[_name(have, True)], value=ast.Constant(value=False)))
+            body = [ast.Assign(targets=[_name(name, True)], value=self.expr(part))
+                    for name, part in zip(each_parts, key_parts)]
+            better = ast.Constant(value=False)
+            for i in range(len(each_parts) - 1, -1, -1):
+                less = ast.Compare(left=_name(each_parts[i]),
+                                   ops=[ast.Gt() if is_max else ast.Lt()],
+                                   comparators=[_name(best_parts[i])])
+                equal = ast.Compare(left=_name(each_parts[i]), ops=[ast.Eq()],
+                                    comparators=[_name(best_parts[i])])
+                better = ast.IfExp(test=equal, body=better, orelse=less)
+            first = [ast.Assign(targets=[_name(name, True)], value=_name(source_name))
+                     for name, source_name in zip(best_parts, each_parts)]
+            first.append(ast.Assign(targets=[_name(best, True)], value=_name(each_key)))
+            update = [ast.Assign(targets=[_name(name, True)], value=_name(source_name))
+                      for name, source_name in zip(best_parts, each_parts)]
+            update.append(ast.Assign(targets=[_name(best, True)], value=_name(each_key)))
+            body.append(ast.If(
+                test=ast.UnaryOp(op=ast.Not(), operand=_name(have)),
+                body=first + [ast.Assign(targets=[_name(have, True)], value=ast.Constant(value=True))],
+                orelse=[ast.If(test=_mark(better), body=update, orelse=[])]))
+            pre.append(ast.For(target=_name(each_key, True), iter=_name(source.id),
+                               body=body, orelse=[]))
+            if default is None:
+                pre.append(ast.If(
+                    test=ast.UnaryOp(op=ast.Not(), operand=_name(have)),
+                    body=[ast.Raise(exc=_call(_name('ValueError'), ast.Constant(
+                        value='%s() iterable argument is empty' % ('max' if is_max else 'min'))),
+                        cause=None)], orelse=[]))
+                return pre, _name(best)
+            pre.append(ast.Assign(targets=[_name(result, True)], value=_name(fallback)))
+            pre.append(ast.If(test=_name(have),
+                              body=[ast.Assign(targets=[_name(result, True)], value=_name(best))],
+                              orelse=[]))
+            return pre, _name(result)
         if isinstance(source, ast.Name) and source.id in self.sequences:
             holder = source.id
         elif isinstance(source, ast.Name) and source.id in getattr(self, 'dicts', ()):
@@ -442,10 +496,8 @@ class _Lower:
                     return ast.BinOp(left=_name(start), op=ast.Add(), right=position)
         else:
             return None
-        # A tuple-returning key is split into components so the loop compares them lexicographically.
         # The element is bound before the key runs (as CPython's iterator yields it), and the walk
         # re-reads len() each step, so a key that mutates the source list still sees CPython's order.
-        tuple_key = key is not None and self.apply_components(key, _name('_ail_probe')) is not None
         first_parts = each_parts = None
         first_elem = current_elem = None
         if key is None:
