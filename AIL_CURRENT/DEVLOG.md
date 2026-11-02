@@ -1,3 +1,39 @@
+## 2026-11-02 -- prog29 review 2: typed set/dict sources join the mutation guard (job-prog29-11022055)
+
+Fixed the remaining defect in the set-comprehension guard.  `_setcomp_source_can_change` matched
+only the untyped `LIST`/`FLIST`/`SLIST`/`SET`/`DICT` kinds, so a typed `set[int]`/`set[str]` field
+(`ISET`/`SSET`) or a typed dict source (`IDICT`/`SDICT`/...) slipped through: the eager lowering
+snapshotted it and `len({x for x in box.s if box.side()})` printed `2 3` at exit 0 where CPython
+raises `RuntimeError: Set changed size during iteration` at exit 1.  The guard now also matches
+every kind in `MAPS`, which covers the typed sets and dicts.  The default build falls back to the
+general path for the refused function and matches CPython; `--strict` names the refusal.
+
+`test_ail_prog29` gained typed-set-field mutation and typed-dict-source cases.  Probes
+`p_sc_mutate_setfield.py`, `p_sc_mutate_dictfield.py`, `p_sc_mutate_setlocal.py`,
+`p_sc_mutate_dictlocal.py` and `p_sc_typed_dict_call.py` match CPython in both builds; the strict
+build refuses by name.  The `.keys()`/`.values()`-only limitation noted in the previous entry is
+gone: typed set and dict sources are covered too.
+
+## 2026-11-02 -- prog29 review fix: a set comprehension cannot silently walk a changed source (job-prog29-11022055)
+
+Fixed the one defect from the review of the typed reach work.  `len({e for v in seq if c})` lowered
+to an eager list comprehension and then walked that list, but a source that the element or a filter
+changes (for example a filter that appends to the list field being walked) is snapshotted on the
+typed path: CPython's iterator sees the append and yielded `3` where the lowering printed `2`.
+Because making that exact would mean changing the field-list snapshot semantics the whole typed
+path relies on, the shape is now a named compile-time refusal when the source is a mutable list,
+float list or str list, or an untyped set/dict (including a dict `.keys()`/`.values()` snapshot),
+and the element or any filter runs code (`Call`, `NamedExpr`, `Lambda`, `Await` or `Yield`).  The
+typed set/dict kinds were missed here and are covered by the review 2 entry above.  Immutable
+str/bytes sources, and comprehensions without code in the element/filters, still lower as before,
+so `g17_026` stays wholly typed.  The default build falls back to the general path for the refused
+function and matches the old sequence change (`3 3`); `--strict` names the refusal.
+
+`test_ail_prog29` gained the mutation case.  Probes `p_sc_mutate_attr.py`, `p_lc_mutate_attr.py` and
+`p_manual_for_mutate.py` show the default build now matching CPython (`3 3`) and the general build
+unchanged; the strict build refuses the set-comprehension probe by name.  `lab/progfix/prog29.md`
+now records the actual results for the parameter/local `len` shadows and the annotated-frozenset
+parameter probe instead of claiming they were refused.
 ## 2026-11-02 -- typed reach 12 fix: tuple local store/delete refused (job-prog12-11020843)
 
 Review of 2c28c6a found that the list-compatible-use check counted any `name[...]` as an
