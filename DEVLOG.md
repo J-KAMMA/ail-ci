@@ -1,3 +1,14 @@
+## 2026-11-02 -- reintenum4 review: truncate operand names in pow errors (job-rbreintenum4-11021830)
+
+Fixed the two review defects in `dunderrt.py`: the binary `**` error and the 3-argument `pow`
+operand-type error now format each class name with `%.100s`, matching CPython's 100-character
+limit.  Probes `/tmp/probes/v_trunc.py` and `/tmp/probes/v_trunc3.py` (direct, argument, list
+item, attribute, dict value, reflected/mid/third operand; both builds) match CPython.  This also
+corrects the previous entry's claim: a class-only program's C is not byte-identical to the base,
+because the shared `ail_bi_pow` helper, the `op`-aware ordering path and the `**` message are in
+every build; only the `enum=`-gated MUL slow-path guard and Decimal/Fraction ordering branch are
+conditional.
+
 ## 2026-11-02 -- reintenum4 re-apply: enum power, cross-kind equality, ordering and divmod (job-rbreintenum4-11021830)
 
 Re-applied the accepted `job-reintenum4-11021117` change on this tree.  The later accepted fixes for

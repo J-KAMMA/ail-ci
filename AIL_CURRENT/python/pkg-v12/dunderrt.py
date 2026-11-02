@@ -372,9 +372,9 @@ BI_POW_NEW = (
     '                ops[i] = v;\n'
     '            } else {\n'
     '                char buf[500], na[160], nb[160], nc[160];\n'
-    '                snprintf(na, sizeof na, "%s", ail__tname_c(base));\n'
-    '                snprintf(nb, sizeof nb, "%s", ail__tname_c(exp));\n'
-    '                snprintf(nc, sizeof nc, "%s", ail__tname_c(modv));\n'
+    '                snprintf(na, sizeof na, "%.100s", ail__tname_c(base));\n'
+    '                snprintf(nb, sizeof nb, "%.100s", ail__tname_c(exp));\n'
+    '                snprintf(nc, sizeof nc, "%.100s", ail__tname_c(modv));\n'
     '                snprintf(buf, sizeof buf, "unsupported operand type(s) for ** or pow(): \'%s\', \'%s\', \'%s\'", na, nb, nc);\n'
     '                return ail_raise_c(cx, AIL_B_TYPEERROR, buf);\n'
     '            }\n'
@@ -549,8 +549,8 @@ def _edits(inplace=False, ordering=False, enum=False):
             # CPython names both operands and says `** or pow()`; no instance reaches here (the guard above dispatches it).
             # ail__tname_c returns one shared static buffer, so copy each name before the snprintf.
             new_err = ('    char buf[420], na[160], nb[160];\n'
-                       '    snprintf(na, sizeof na, "%s", ail__tname_c(a));\n'
-                       '    snprintf(nb, sizeof nb, "%s", ail__tname_c(b));\n'
+                       '    snprintf(na, sizeof na, "%.100s", ail__tname_c(a));\n'
+                       '    snprintf(nb, sizeof nb, "%.100s", ail__tname_c(b));\n'
                        '    snprintf(buf, sizeof buf, "unsupported operand type(s) for ** or pow(): \'%s\' and \'%s\'", na, nb);\n'
                        '    return ail_raise_c(cx, AIL_B_TYPEERROR, buf);')
         else:
