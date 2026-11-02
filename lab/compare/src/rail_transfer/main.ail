@@ -8,65 +8,125 @@ struct G {
     estart: list[int];
     etarget: list[int];
     ecost: list[int];
-    dist: list[int];
-    bd: list[int];
+    dt: list[int];
+    db: list[int];
+    done: list[int];
+    t0: list[int];
+    t1: list[int];
+    h0: list[Item];
+    h1: list[Item];
+    mt: int;
+    mb: int;
+}
+
+fn meet(g: G, d: int, node: int) -> void {
+    let v = g.ns + g.nn;
+    let o = 1 - d;
+    let ot = g.dt[o * v + node];
+    if ot >= 0 {
+        let t = g.dt[d * v + node] + ot;
+        let b = g.db[d * v + node] + g.db[o * v + node];
+        if t < g.mt or (t == g.mt and b < g.mb) {
+            g.mt = t;
+            g.mb = b;
+        }
+    }
+}
+
+fn relax(g: G, d: int, node: int, T: int, B: int) -> void {
+    let v = g.ns + g.nn;
+    let idx = d * v + node;
+    if g.dt[idx] < 0 {
+        if d == 0 { g.t0.append(node); } else { g.t1.append(node); }
+    }
+    if g.dt[idx] < 0 or T < g.dt[idx] or (T == g.dt[idx] and B < g.db[idx]) {
+        g.dt[idx] = T;
+        g.db[idx] = B;
+        if d == 0 {
+            heappush(g.h0, Item(T, B, node), key=lambda it: (it.d, it.b, it.n));
+        } else {
+            heappush(g.h1, Item(T, B, node), key=lambda it: (it.d, it.b, it.n));
+        }
+        meet(g, d, node);
+    }
 }
 
 fn solve(g: G, s: int, t: int) -> str {
     if s == t { return "0 0"; }
-    let inf = 1 << 62;
-    let touched: list[int] = [];
-    let h: list[Item] = [];
+    let v = g.ns + g.nn;
+    let t0: list[int] = [];
+    let t1: list[int] = [];
+    let h0: list[Item] = [];
+    let h1: list[Item] = [];
+    g.t0 = t0;
+    g.t1 = t1;
+    g.h0 = h0;
+    g.h1 = h1;
+    g.mt = 1 << 62;
+    g.mb = 0;
+    relax(g, 0, s, 0, 0);
     for n in range(g.sstart[s], g.sstart[s + 1]) {
-        let id = g.ns + n;
-        g.dist[id] = 0;
-        g.bd[id] = 1;
-        touched.append(id);
-        heappush(h, Item(0, 1, id), key=lambda it: (it.d, it.b, it.n));
+        relax(g, 0, g.ns + n, 0, 1);
     }
-    let rd = -1;
-    let rb = 0;
-    while len(h) > 0 {
-        let it = heappop(h, key=lambda it: (it.d, it.b, it.n));
+    relax(g, 1, t, 0, 0);
+    for n in range(g.sstart[t], g.sstart[t + 1]) {
+        relax(g, 1, g.ns + n, 0, 0);
+    }
+    while len(g.h0) > 0 and len(g.h1) > 0 {
+        let f = g.h0[0];
+        let b = g.h1[0];
+        if g.mt != (1 << 62) {
+            let st = f.d + b.d;
+            let sb = f.b + b.b;
+            if st > g.mt or (st == g.mt and sb >= g.mb) { break; }
+        }
+        let d = 0;
+        if len(g.h0) > len(g.h1) { d = 1; }
+        let it = Item(0, 0, 0);
+        if d == 0 {
+            it = heappop(g.h0, key=lambda it: (it.d, it.b, it.n));
+        } else {
+            it = heappop(g.h1, key=lambda it: (it.d, it.b, it.n));
+        }
         let u = it.n;
-        if it.d > g.dist[u] or (it.d == g.dist[u] and it.b > g.bd[u]) { continue; }
-        if u == t { rd = it.d; rb = it.b; break; }
+        let idx = d * v + u;
+        if g.done[idx] != 0 or it.d != g.dt[idx] or it.b != g.db[idx] { continue; }
+        g.done[idx] = 1;
         if u < g.ns {
-            let nd = it.d + g.x[u];
-            let nb = it.b + 1;
-            for n in range(g.sstart[u], g.sstart[u + 1]) {
-                let v = g.ns + n;
-                if nd < g.dist[v] or (nd == g.dist[v] and nb < g.bd[v]) {
-                    if g.dist[v] == inf { touched.append(v); }
-                    g.dist[v] = nd;
-                    g.bd[v] = nb;
-                    heappush(h, Item(nd, nb, v), key=lambda it: (it.d, it.b, it.n));
+            if d == 0 {
+                let nd = it.d + g.x[u];
+                let nb = it.b + 1;
+                for n in range(g.sstart[u], g.sstart[u + 1]) {
+                    let w = g.ns + n;
+                    if g.done[w] == 0 { relax(g, 0, w, nd, nb); }
+                }
+            } else {
+                for n in range(g.sstart[u], g.sstart[u + 1]) {
+                    let w = g.ns + n;
+                    if g.done[v + w] == 0 { relax(g, 1, w, it.d, it.b); }
                 }
             }
         } else {
             let k = u - g.ns;
             let hub = g.nstation[k];
-            if it.d < g.dist[hub] or (it.d == g.dist[hub] and it.b < g.bd[hub]) {
-                if g.dist[hub] == inf { touched.append(hub); }
-                g.dist[hub] = it.d;
-                g.bd[hub] = it.b;
-                heappush(h, Item(it.d, it.b, hub), key=lambda it: (it.d, it.b, it.n));
+            if g.done[d * v + hub] == 0 {
+                if d == 0 { relax(g, 0, hub, it.d, it.b); }
+                else { relax(g, 1, hub, it.d + g.x[hub], it.b + 1); }
             }
             for e in range(g.estart[k], g.estart[k + 1]) {
-                let v = g.etarget[e];
-                let nd = it.d + g.ecost[e];
-                if nd < g.dist[v] or (nd == g.dist[v] and it.b < g.bd[v]) {
-                    if g.dist[v] == inf { touched.append(v); }
-                    g.dist[v] = nd;
-                    g.bd[v] = it.b;
-                    heappush(h, Item(nd, it.b, v), key=lambda it: (it.d, it.b, it.n));
+                let w = g.etarget[e];
+                if g.done[d * v + w] == 0 {
+                    let nd = it.d + g.ecost[e];
+                    if d == 0 { relax(g, 0, w, nd, it.b); }
+                    else { relax(g, 1, w, nd, it.b); }
                 }
             }
         }
     }
-    for id in touched { g.dist[id] = inf; g.bd[id] = 0; }
-    if rd < 0 { return "none"; }
-    return f"{rd} {rb}";
+    for id in g.t0 { g.dt[id] = -1; g.done[id] = 0; }
+    for id in g.t1 { g.dt[v + id] = -1; g.done[v + id] = 0; }
+    if g.mt == (1 << 62) { return "none"; }
+    return f"{g.mt} {g.mb}";
 }
 
 fn main() {
@@ -136,7 +196,9 @@ fn main() {
         epos[a] += 1;
     }
     let inf = 1 << 62;
-    let g = G(k, n, x, sstart, nstation, estart, etarget, ecost, [inf] * (n + k), [0] * (n + k));
+    let nv = n + k;
+    let g = G(k, n, x, sstart, nstation, estart, etarget, ecost,
+              [-1] * (2 * nv), [0] * (2 * nv), [0] * (2 * nv), [], [], [], [], inf, 0);
     for _ in range(q) {
         let f = input().split();
         print(solve(g, int(f[0]), int(f[1])));
