@@ -1,3 +1,27 @@
+## 2026-11-02 -- prog30 typed reach: t266 iterator lowering and a t244 list-extend fix (job-prog30-11021835)
+
+Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time over repeated `main`
+calls); the table and every first refusal are in `lab/progfix/prog30.md`.  Five were already typed
+at the base (`g11_022`, `g09_034`, `g02_012`, `t244`, and `t266` after this change).  `t266` spent
+56% of its own time in `main`/`dfs`, both blocked by `it = iter(data)`/`next(it)`:
+`python/pkg-v12/iterlower.py` now lowers that shape to an index cursor over the same list/str/bytes
+when the binding, every use and the evaluation order are provably simple (no `try`, no rebind or
+delete, no effectful call before a `next`, all uses single-argument `next`).  `t266` is typed as a
+whole program on both `AIL_IR` modes and matches CPython on every `in*.txt`.
+
+`t244` was already typed but its `lines += [" ".join(map(str, row)) for row in p]` printed only the
+transpose: `nested_lists.py` hoisted the comprehension into `__ail_itemsN`, and
+`_last_use_free_points` freed that temp after the prelude loop (the prelude and the consuming
+statement share the comprehension's source position) before the `extend` read it.  The hoisted temp
+load is now `_ail_synth`, so it is kept until return; all `t244` inputs match CPython.
+
+Still general (recorded follow-ups, exact messages in prog30.md): `g23_004` (comprehension tuple
+targets / multiple for-clauses), `g03_008` (function-valued parameter), `t172` (dict of dicts,
+generator unpacking, tuple iteration; the general path cannot build it either).  The generated C of
+the ten `lab/compare` tasks is byte-identical.  Probes `/tmp/probes/p30_*` match CPython on both
+`cmp.sh` builds; the only stderr-only difference, an exhausted cursor naming the typed runtime's
+`list index out of range` instead of `StopIteration`, is `C?-job-prog30-11021835-1`.
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.

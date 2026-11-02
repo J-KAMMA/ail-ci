@@ -920,8 +920,10 @@ class NestedLists:
         if self.build_into is not None and self.build_into[0] is comp:
             temp = self.built_into = self.build_into[1]
             self.build_into = None
+            synthetic = False
         else:
             temp = self.fresh('rows' if rows else 'items')
+            synthetic = True
         self.env[temp] = ('nest', element) if rows else ('list', element)
         annotation = self.row_ann(element) if rows else ast.Subscript(
             value=ast.Name(id='list', ctx=ast.Load()), slice=ast.Name(id=_element_text(element), ctx=ast.Load()),
@@ -968,7 +970,14 @@ class NestedLists:
                 if isinstance(n, (ast.stmt, ast.expr)) and not hasattr(n, 'lineno'):
                     ast.copy_location(n, comp)
         pre.extend(body)
-        return ast.copy_location(ast.Name(id=temp, ctx=ast.Load()), comp)
+        result = ast.copy_location(ast.Name(id=temp, ctx=ast.Load()), comp)
+        if synthetic:
+            # The prelude this comprehension became and the statement that now reads the temp
+            # share the comprehension's source location, so source order cannot tell which
+            # mention is last: keep the temp until the function returns instead of letting
+            # `_last_use_free_points` free it between the loop and its consumer.
+            result._ail_synth = True
+        return result
 
 
 ACTIVE = False   # the last rewrite lowered something (refusals then name rows, not `.v`)
