@@ -70,6 +70,29 @@ refusal is named with a position. Generated C of the ten `lab/compare` programs 
 to `HEAD`. Gate modules, `test_ail_pre197`, `test_ail_safetynet`, `test_ail_files` and
 `test_ail_corpus_findings3` pass; `tools/update_manifest.py --check` is clean. No push (job
 instruction).
+## 2026-11-02 -- rail-s1: rail_transfer's AIL and CPython sources use the two-sided search (job-rails1-11030014)
+
+Ported the bidirectional Dijkstra of `lab/compare/src/rail_transfer/main.c` into `main.ail` (solve only;
+the parse and graph build are unchanged) and into `main.py`, so the AIL, ail-py and CPython columns run the
+same algorithm as C and Rust. The search keeps flat `dt`/`db`/`done` arrays of length `2*(n+k)` in the
+graph struct, one touched list per side, and the two record heaps; the meet, stale-entry and stop rules
+follow lines 119-176 of `main.c`. `main.py` uses the same two-sided search over its packed
+`(time << 24) | boardings` costs.
+
+Results on the generated perf input (seed `rail_transfer-20261012`, 4,066,652 bytes): stdout md5
+`e04679834cdf3d4d8441f9adf3182e91` for main.ail, main.py, reference.py and the ail-py build; all 24 public
+and hidden cases equal reference.py with `path: typed`; AIL wall 64.6 ms (median of 5, C 100.0 ms on this
+runner), down from the one-sided 862 ms laptop number. `tools/icount.c` could not run here
+(`perf_event_open: Permission denied`, `perf_event_paranoid=4`) and valgrind is not installed, so this
+entry has no instruction-count number; the wall time is inside the design's 50-75 ms expectation.
+Differential fuzz: 300 `random_net` cases (n 2..400, maxx 0/1000, maxt 0/100000) matched reference.py for
+main.py, the strict main.ail binary and the ail-py binary. A forced-general build
+(`AIL_UNIFIED_FORCE=1`, no `--strict`) is refused for this brace-syntax source with
+`not in the subset: general path explicitly requested`; the unmodified HEAD file is refused the same way,
+so the default typed build and CPython were the two builds fuzzed. Rust was not installed on this runner
+(rustup has no toolchain), so `run_task.py --langs ail,c,rust` reported a rust build failure; ail and c
+passed every public/hidden case. Modules run: `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.
 
 ## 2026-11-02 -- re-apply accepted prog8 change on staging-integ (job-rbprog8-11021901)
 

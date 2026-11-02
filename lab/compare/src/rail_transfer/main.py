@@ -47,70 +47,150 @@ def main():
         adj[a].append((ts << NB) | b)
         adj[b].append((ts << NB) | a)
     del ids
-    # group queries by source
     qs = []
-    bysrc = {}
     for i in range(Q):
         s = data[p]; d = data[p + 1]; p += 2
         qs.append((s, d))
-        if s != d:
-            bysrc.setdefault(s, set()).add(d)
-        res = {}
+    V = nid
     INF = 1 << 200
-    for s, dests in bysrc.items():
-        sl = st_lines[s]
-        if sl is None:
-            for d in dests:
-                res[(s, d)] = None
-            continue
-        dist = [INF] * nid
-        remaining = len(dests)
-        heap = []
-        for a in sl:
-            dist[a] = 1
-            heap.append((1 << NB) | a)
-        heap.sort()
-        while heap and remaining:
-            it = heappop(heap)
-            u = it & NMASK
-            k = it >> NB
-            if dist[u] != k:
-                continue
-            if u < N:
-                if u in dests:
-                    res[(s, u)] = k
-                    remaining -= 1
-                sl = st_lines[u]
-                if sl is not None:
-                    nk = k + (X[u] << SH) + 1
-                    for a in sl:
-                        if nk < dist[a]:
-                            dist[a] = nk
-                            heappush(heap, (nk << NB) | a)
-            else:
-                w = node_station[u]
-                if k < dist[w]:
-                    dist[w] = k
-                    heappush(heap, (k << NB) | w)
-                for e in adj[u]:
-                    nk = k + (e >> NB)
-                    w = e & NMASK
-                    if nk < dist[w]:
-                        dist[w] = nk
-                        heappush(heap, (nk << NB) | w)
-        for d in dests:
-            if (s, d) not in res:
-                res[(s, d)] = None
+    dt = [INF] * (2 * V)
+    done = [0] * (2 * V)
     out = []
     for s, d in qs:
         if s == d:
             out.append("0 0")
-        else:
-            k = res[(s, d)]
-            if k is None:
-                out.append("none")
+            continue
+        t0 = []
+        t1 = []
+        heap0 = []
+        heap1 = []
+        best = INF
+        # forward seeds: station S at (0, 0), its line nodes at (0, 1)
+        if dt[s] == INF:
+            t0.append(s)
+        if 0 < dt[s]:
+            dt[s] = 0
+            heappush(heap0, s)
+            if dt[V + s] != INF:
+                z = dt[V + s]
+                if z < best: best = z
+        sl = st_lines[s]
+        if sl is not None:
+            for a in sl:
+                if dt[a] == INF:
+                    t0.append(a)
+                if 1 < dt[a]:
+                    dt[a] = 1
+                    heappush(heap0, (1 << NB) | a)
+                    if dt[V + a] != INF:
+                        z = 1 + dt[V + a]
+                        if z < best: best = z
+        # backward seeds: station D at (0, 0), its line nodes at (0, 0)
+        if dt[V + d] == INF:
+            t1.append(d)
+        if 0 < dt[V + d]:
+            dt[V + d] = 0
+            heappush(heap1, d)
+            if dt[d] != INF:
+                z = dt[d]
+                if z < best: best = z
+        sl = st_lines[d]
+        if sl is not None:
+            for a in sl:
+                if dt[V + a] == INF:
+                    t1.append(a)
+                if 0 < dt[V + a]:
+                    dt[V + a] = 0
+                    heappush(heap1, a)
+                    if dt[a] != INF:
+                        z = dt[a]
+                        if z < best: best = z
+        while heap0 and heap1:
+            if best != INF and (heap0[0] >> NB) + (heap1[0] >> NB) >= best:
+                break
+            if len(heap0) <= len(heap1):
+                it = heappop(heap0)
+                u = it & NMASK
+                k = it >> NB
+                idx = u
             else:
-                out.append("%d %d" % (k >> SH, k & MASK))
+                it = heappop(heap1)
+                u = it & NMASK
+                k = it >> NB
+                idx = V + u
+            if done[idx] or k != dt[idx]:
+                continue
+            done[idx] = 1
+            if u < N:
+                sl = st_lines[u]
+                if sl is not None:
+                    if idx == u:
+                        base = k + (X[u] << SH) + 1
+                        for a in sl:
+                            if not done[a] and base < dt[a]:
+                                if dt[a] == INF: t0.append(a)
+                                dt[a] = base
+                                heappush(heap0, (base << NB) | a)
+                                if dt[V + a] != INF:
+                                    z = base + dt[V + a]
+                                    if z < best: best = z
+                    else:
+                        for a in sl:
+                            if not done[V + a] and k < dt[V + a]:
+                                if dt[V + a] == INF: t1.append(a)
+                                dt[V + a] = k
+                                heappush(heap1, (k << NB) | a)
+                                if dt[a] != INF:
+                                    z = k + dt[a]
+                                    if z < best: best = z
+            else:
+                hub = node_station[u]
+                if idx == u:
+                    if not done[hub] and k < dt[hub]:
+                        if dt[hub] == INF: t0.append(hub)
+                        dt[hub] = k
+                        heappush(heap0, (k << NB) | hub)
+                        if dt[V + hub] != INF:
+                            z = k + dt[V + hub]
+                            if z < best: best = z
+                else:
+                    base = k + (X[hub] << SH) + 1
+                    if not done[V + hub] and base < dt[V + hub]:
+                        if dt[V + hub] == INF: t1.append(hub)
+                        dt[V + hub] = base
+                        heappush(heap1, (base << NB) | hub)
+                        if dt[hub] != INF:
+                            z = base + dt[hub]
+                            if z < best: best = z
+                for e in adj[u]:
+                    nk = k + (e >> NB)
+                    v = e & NMASK
+                    if idx == u:
+                        if not done[v] and nk < dt[v]:
+                            if dt[v] == INF: t0.append(v)
+                            dt[v] = nk
+                            heappush(heap0, (nk << NB) | v)
+                            if dt[V + v] != INF:
+                                z = nk + dt[V + v]
+                                if z < best: best = z
+                    else:
+                        if not done[V + v] and nk < dt[V + v]:
+                            if dt[V + v] == INF: t1.append(v)
+                            dt[V + v] = nk
+                            heappush(heap1, (nk << NB) | v)
+                            if dt[v] != INF:
+                                z = nk + dt[v]
+                                if z < best: best = z
+        for u in t0:
+            dt[u] = INF
+            done[u] = 0
+        for u in t1:
+            dt[V + u] = INF
+            done[V + u] = 0
+        if best == INF:
+            out.append("none")
+        else:
+            out.append("%d %d" % (best >> SH, best & MASK))
     sys.stdout.write("\n".join(out) + ("\n" if out else ""))
 
 
