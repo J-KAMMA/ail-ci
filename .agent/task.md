@@ -7,78 +7,68 @@
 --- LAST REVIEW ---
 ## review 1
 [model opencode-go/deepseek-v4.1-flash]
-Review complete. Findings below.
+Review complete.
 
 ## What the change does
-Adds `bool` as a nested-list row scalar (`list[list[bool]]` → hidden `_AilRow_bool`), removes the fold refusal for slices of `list[float]` (via a broader `_is_flist_name`) and compiles `enumerate(str)` as a UTF-8 character walk with a separate counter. It also pins `test_ail_prog8` and rewrites `prog8.md`.
+Replaces the `-0.0`-sentinel `NSUM` scalar with a C struct `ail_nsum { double v; int64_t is_int0; }`, threads the flag through folds/assignments/`+=`/returns/`print`/formatting/conversions/truthiness, and turns uses that cannot stay exact into named refusals.
 
 ## Probes (HEAD, both `cmp.sh` builds)
-| probe | covers | HEAD | base |
-|---|---|---|---|
-| `e1_enum.py` | unicode, empty, source rebind, index rebind, nested same names | both match | match (general) |
-| `e2_enum_body.py` | break/continue, `ch+ch`, `ch.upper()` | both match | match (general) |
-| `e3_enum_start.py` | `enumerate(str, start)` | both match (named refusal → general) | match |
-| `f1_floatslice.py` | attribute/list-item/call slice, int list, `[::-1]` | both match | match |
-| `f2_slice_alias.py` | mutating base inside `sum(gen over xs[1:])` | both match | match |
-| `f3_floatstep.py` | stepped/negative-step slices, `min`/`max` | both match | match |
-| `f4_emptyslice.py` | **empty float slice in `sum`** | **default build WRONG** | default matches CPython |
-| `f5_emptybare.py` | empty bare `list[float]` in `sum` | `0.0` | `0.0` (pre-existing) |
-| `f6_emptyminmax.py` | `min`/`max` of empty float slice | both match | match |
-| `b1_boolgrid.py` | rows via param/attr/dict, `sum/any/all`, alias, empty, jagged | both match | match |
-| `b2_boolint.py` | int stored in bool row | both match (general) | match |
-| `b3_boolunann.py` | unannotated nested bool | both match (general) | match |
-| `b4_boolalias.py` | row alias mutation | both match | match |
-| `n1_nofeature.py` | program not using the features | match | match |
+| probe | covers | result |
+|---|---|---|
+| `p1_f4` | review's empty float-slice `sum` | both match; base default `0.0` |
+| `p2_flow` | `-0.0` merged with conditional `sum`, dead/taken loop branch | both match |
+| `p3_func` / `p14_mixedreturn` | function with `return sum(xs)` and `return <float>` | **default build fails to compile**; general matches |
+| `p4_arith`, `p26_cmp` | `+ * / -`, compares, `int`/`float`/`bool`, `if` | both match |
+| `p5_fmt`, `p25_fconv` | `:.2f/e/g`, `%`, `.format`, `!r/!s`, plain `print` | both match |
+| `p6_containers`, `p20_literals`, `p27_callret_store` | attr/dict/list/set/list-literal storage | both match (named refusal or general) |
+| `p7_gen` | filtered generator/listcomp sums, empty and non-empty | both match |
+| `p8_mutate`, `p9_edge` | slice alias + mutation, `-0.0`, `0.0`, `1e308` overflow | both match |
+| `p11`–`p13`, `p15`–`p19`, `p21a`, `p22` | bool ops, slice bounds, `in`/`is`, `+=`, annotated local, return use, globals, `print(end=)`, unpack, attribute | both match |
+| `p10_nofeature` | program using no new feature | C byte-identical to base in both builds (`--debug-dir`) |
 
-The three real hot programs (`g03_020`, `g05_014`, `g09_012`) compile with **0** general-path notes on HEAD; on base each has exactly one refusal. `tools/update_manifest.py --check` exits 0. `test_ail_prog8`, `test_ail_nested_lists`, `test_ail_boolfield`, `test_ail_safetynet` all pass on HEAD. C for every buildable `lab/compare` source (`main.ail` and `main.py`, `--exact-int` for rail/chain) is byte-identical to base; `scar_life`, `tally_lang`, `tree_fold` `main.py` fail identically on both (pre-existing).
+Named worker probes `p9_flow`, `p10_return`, `p15a_min`, `p15_loop_empty`, `p17_branch_min`, `p19_negzero_min`, and `/tmp/probes/nsum_{flow_typed,float_merge,convert}.py` all match on both builds.
 
 ## Report claims
-- Manifest pinned / `--check` 0 / module runs — **verified**.
-- `test_ail_prog8` covers g03_020 + g05_014 and 7 tests pass — **verified**.
-- `prog8.md` corrected to base refusals/after — **verified**.
-- Real programs typed; float-slice + enum-str paths typed — **verified**.
-- “Empty float-list `sum` `0.0` is pre-existing” — **false for the slice form**: bare `sum(empty_float_list)` is pre-existing (`f5`), but `sum(xs[a:b])` on an empty slice matches CPython on base and returns `0.0` on HEAD (`f4`).
-- Exact worker probe files `pfloat_test`/`penum_test`/`pfloat_slice*`/`penum_unicode` — **unverified** (not in tree; equivalent probes above pass).
+- Both review defects fixed — **verified** (`p1_f4`, `p2_flow`).
+- Named probes match — **verified**.
+- `test_ail_prog8`, `test_ail_nested_lists`, `test_ail_float_argument_widening`, `test_ail_safetynet` pass — **verified** (8 tests). `test_ail_files`/`test_ail_corpus_findings3` not run (**unverified**).
+- `update_manifest.py --check` exits 0 — **verified**.
+- `lab/compare` C byte-identical — not fully re-run (**unverified**); the no-feature probe's C is identical, and `lab/compare` sums are ints.
+- “NSUM is a struct with a flag” — true in code, but **false in the docs** (`SEMANTICS.md`/`DIFFERENCES.md` still describe the old `-0.0` sentinel).
 
-## Defect
-1. **`sum` over an empty `list[float]` slice now silently prints `0.0` where CPython prints `0`.** This path was refused on base, so the change unmasks it. Probe `/tmp/rprobes/f4_emptyslice.py`:
+## Defects
+1. Mixed `NSUM`/float return paths produce a raw C compile error. Probe `/tmp/rprobes/p14_mixedreturn.py` (same shape in `p3_func.py`):
 ```python
-def total(xs: list[float], a: int, b: int):
-    return sum(xs[a:b])
-
-def main():
-    xs: list[float] = [1.0, 2.0, 3.0]
-    print(total(xs, 1, 1))
-    print(sum(xs[1:1]))
-    print(sum(xs[5:9]))
-    empty: list[float] = []
-    print(sum(empty))
-
-main()
+def g(xs: list[float], n: int) -> float:
+    if n > 0:
+        return sum(xs)
+    return 1.5
 ```
-Expected (CPython): `0` `0` `0` `0`. Actual HEAD default build: `0.0` `0.0` `0.0` `0.0` (base default: `0` `0` `0` `0`). `test_ail_prog8` misses it because `FLOAT_SLICE` prints only `len(empty[:])`.
+Expected CPython: `1.5 0 2.5` / `1.5 0 2.5`. Actual HEAD default build: `build d failed` — `error: incompatible types when returning type 'double' but 'ail_nsum' was expected` (`return (1.5);`). General path matches; base default builds. Cause: `_signatures`/`_reconcile_return_kinds` (`pyfunc.py:31275`, `:29444`) allow `NSUM`+`FLT` returns and set the C return type to `ail_nsum`, but the `ast.Return` path (`pyfunc.py:22225`) does not wrap a float value with `ail_nsum_from_float` (only `Assign`/`AugAssign` do). Fix: wrap float returns when `ctx.ret == NSUM`, or make the mixed-return case a named refusal.
+2. `SEMANTICS.md:9525-9528` and the C1 row of `docs/spec/DIFFERENCES.md` still document `NSUM` as “a `double` with `-0.0` as the empty-sum sentinel”; the implementation now uses the explicit `is_int0` flag. Documentation contradicts the code and the worker report.
 
 ## Pre-existing
-- `sum(empty_float_list)` → `0.0` vs CPython `0` on both base and HEAD (`f5`).
-- `scar_life`/`tally_lang`/`tree_fold` `main.py` do not build on either tree.
+- Chained assignment `c = d = sum(empty)` fails to build on both HEAD and base (`v_d` undeclared); a plain `c = d = 1.5` fails identically, so the chained-assignment bug predates this change (`p21b`, `p23`).
+- A function with an explicit return on one path and fallthrough returns `0`/`0.0` instead of `None` on both trees (`p24_fallthrough`).
 
 ## Unverified
-- Worker’s own probe files/results (reproduced equivalently above).
-- Wider suite and speed/instruction counts (not run per instructions; change is not obviously hot-code-altering beyond the targeted paths).
+- Full `lab/compare` C identity and the two test modules not run (time/scope).
+- Wider suite and instruction counts (not run per instructions; no hot program returns `sum` directly on a mixed path).
 
 VERDICT: FIX
 
-1. Empty float-list slice: `sum(xs[a:b])` (a>=b) returns `0.0`; CPython returns int `0`. Probe `/tmp/rprobes/f4_emptyslice.py`; expected `0 0 0 0`, actual `0.0 0.0 0.0 0.0` on the default build (base matches CPython).
-[cost $0.0315, opencode tokens {"total": 1530843, "input": 96659, "output": 8259, "reasoning": 13061, "cache.write": 0, "cache.read": 1412864}]
-    tool time: bash 22.5 min
-        542s bash   cd /home/runner/work/ail-ci/ail-ci && d=$(mktemp -d /tmp/cid2XXXX); fail=0; for t in berth_sim chain_relax ech
-        508s bash   cd /home/runner/work/ail-ci/ail-ci && d=$(mktemp -d /tmp/cidentXXXX); fail=0; for t in berth_sim chain_relax e
-        187s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 2400 python3 ../tools/par_check.py -j 2 test_ail_pro
-         43s bash   cd /tmp/basework && for p in /tmp/rprobes/e1_enum.py /tmp/rprobes/e2_enum_body.py /tmp/rprobes/e3_enum_start.p
-         19s bash   cd /home/runner/work/ail-ci/ail-ci && for p in /tmp/rprobes/b1_boolgrid.py /tmp/rprobes/b2_boolint.py /tmp/rpr
-         14s bash   cd /home/runner/work/ail-ci/ail-ci && for p in /tmp/rprobes/f1_floatslice.py /tmp/rprobes/f2_slice_alias.py /t
-          9s bash   cd /home/runner/work/ail-ci/ail-ci && for p in /tmp/rprobes/e1_enum.py /tmp/rprobes/e2_enum_body.py /tmp/rprob
-          8s bash   cd /tmp/basework && d=$(mktemp -d /tmp/typedbXXXX); i=0; for src in lab/census/programs/gdev/g03_020.py lab/ce
+1. Mixed `NSUM`/float returns: `/tmp/rprobes/p14_mixedreturn.py`; expected `1.5 0 2.5` twice, actual default build fails (`incompatible types when returning type 'double' but 'ail_nsum' was expected`). Wrap float returns when the return kind is `NSUM`, or refuse the mix by name.
+2. Update `SEMANTICS.md` and `DIFFERENCES.md` to describe the `{double v; int64_t is_int0}` struct instead of the obsolete `-0.0` sentinel.
+[cost $0.0433, opencode tokens {"total": 3415468, "input": 86057, "output": 11023, "reasoning": 23156, "cache.write": 0, "cache.read": 3295232}]
+    tool time: bash 6.9 min
+        157s bash   cd /home/runner/work/ail-ci/ail-ci && python3 tools/update_manifest.py --check; echo "manifest exit $?"; date;
+        120s bash   cd /home/runner/work/ail-ci/ail-ci && mkdir -p /tmp/rprobes && (cd AIL_CURRENT && nohup python3 ../tools/par_c
+         27s bash   cd /home/runner/work/ail-ci/ail-ci && for p in p1_f4 p2_flow p3_func p4_arith p5_fmt p6_containers p7_gen p8_m
+         25s bash   cd /home/runner/work/ail-ci/ail-ci && for p in p1_f4 p2_flow p3_func p4_arith p5_fmt p6_containers p7_gen p8_m
+         23s bash   cd /home/runner/work/ail-ci/ail-ci && for f in /tmp/rprobes/p9_flow.py /tmp/rprobes/p10_return.py /tmp/rprobes
+         15s bash   cd /tmp/rprobes && cat > p11_boolop.py <<'EOF' def main():     empty: list[float] = []     xs: list[float] = [
+         12s bash   cd /tmp/rprobes && cat > p24_fallthrough.py <<'EOF' def f(xs: list[float], n: int):     if n > 0:         retu
+          8s bash   cd /tmp/rprobes && cat > p20_literals.py <<'EOF' def main():     empty: list[float] = []     xs: list[float] =
 
 
 --- ORIGINAL TASK ---
