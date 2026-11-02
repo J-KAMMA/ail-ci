@@ -7,10 +7,13 @@ CPython's `MY:5` / `M:5`. A `TypedDict` construction with a `**` mapping now goe
 when `dict` is not shadowed, and the helper checks every keyword key with `isinstance(key, str)` before building,
 so `Movie(**{1: 2})` raises `TypeError: keywords must be strings` for a positional class, a functional declaration,
 a parameter named `dict`, and values reaching the call through an argument, a list item, an attribute and a dict
-value. The `test_ail_std_typing` boundary program now covers the non-string key. Probes
+value. The helper also keeps CPython's order and duplicate-key error (`__main__.Movie() got multiple values for
+keyword argument 'title'`) and still lets a positional mapping be overridden by a keyword. The
+`test_ail_std_typing` boundary program now covers the non-string key. Probes
 `p_cast_module_shadow.py`, `p_cast_alias_module.py`, `p_td_kw_unshadow.py`, `p_td_kw_param.py`, `p_td_kw_places.py`,
-`p_td_kw_mixed.py`, `p_td_functional_kw.py`, `p_td_kw_ok.py` and `p_cast_shadow_local.py` match CPython on both
-`cmp.sh` builds (or are refused by name); `p_cast_pre_rebind.py` is refused by name.
+`p_td_kw_mixed.py`, `p_td_kw_dup.py`, `p_td_kw_pos_override.py`, `p_td_functional_kw.py`, `p_td_kw_ok.py` and
+`p_cast_shadow_local.py` match CPython on both `cmp.sh` builds (or are refused by name); `p_cast_pre_rebind.py` is
+refused by name.
 
 ## 2026-11-02 -- typing review: cast and TypedDict shadowing (job-rbstd_typing-11021401)
 

@@ -140,7 +140,8 @@ def _module_rebinds(nodes, guarded):
 
 
 class _Fix(ast.NodeTransformer):
-    def __init__(self, binder, typed_dicts, new_types, ident, bad, dict_name, dict_bound):
+    def __init__(self, binder, typed_dicts, new_types, ident, bad, dict_name, dict_bound,
+                 td_base, td_add, td_splash, td_done):
         self.binder = binder
         self.typed_dicts = typed_dicts
         self.new_types = new_types
@@ -148,9 +149,14 @@ class _Fix(ast.NodeTransformer):
         self.bad = bad
         self.dict_name = dict_name
         self.dict_bound = dict_bound
+        self.td_base = td_base
+        self.td_add = td_add
+        self.td_splash = td_splash
+        self.td_done = td_done
         self.ident_used = False
         self.bad_used = False
         self.dict_used = False
+        self.splash_used = False
         self.scopes = []
 
     def _declared(self, name):
@@ -266,8 +272,26 @@ class _Fix(ast.NodeTransformer):
             if len(node.args) == 2 and not node.keywords:
                 return ast.copy_location(node.args[1], node)
             refuse(node, 'cast(T, value) takes two positional arguments here')
-        if is_typed_dict and (self._dict_shadowed()
-                              or any(k.arg is None for k in node.keywords)):
+        if is_typed_dict and any(k.arg is None for k in node.keywords):
+            self.splash_used = True
+            shown = name if name is not None else ''
+            expr = ast.Call(
+                func=ast.Name(id=self.td_base, ctx=ast.Load()),
+                args=[ast.List(elts=list(node.args), ctx=ast.Load())], keywords=[])
+            for keyword in node.keywords:
+                if keyword.arg is None:
+                    expr = ast.Call(
+                        func=ast.Name(id=self.td_splash, ctx=ast.Load()),
+                        args=[expr, keyword.value, ast.Constant(value=shown)], keywords=[])
+                else:
+                    expr = ast.Call(
+                        func=ast.Name(id=self.td_add, ctx=ast.Load()),
+                        args=[expr, ast.Constant(value=keyword.arg), keyword.value,
+                              ast.Constant(value=shown)], keywords=[])
+            return ast.copy_location(
+                ast.Call(func=ast.Name(id=self.td_done, ctx=ast.Load()),
+                         args=[expr], keywords=[]), node)
+        if is_typed_dict and self._dict_shadowed():
             self.dict_used = True
             keys = [ast.Constant(value=k.arg) if k.arg is not None else None
                     for k in node.keywords]
@@ -311,7 +335,8 @@ def _fresh(tree, stem):
     return name
 
 
-def _defs(ident, bad, ident_used, bad_used, dict_name, dict_used):
+def _defs(ident, bad, ident_used, bad_used, dict_name, dict_used,
+          td_base, td_add, td_splash, td_done, splash_used):
     out = []
     if dict_used:
         out.append(ast.parse(
@@ -327,6 +352,40 @@ def _defs(ident, bad, ident_used, bad_used, dict_name, dict_used):
             '    result.update(keywords)\n'
             '    return result\n'
             % dict_name, mode='exec').body[0])
+    if splash_used:
+        out.extend(ast.parse(
+            'def %s(positional):\n'
+            '    result = {}\n'
+            '    if len(positional) == 1:\n'
+            '        result.update(positional[0])\n'
+            '    return (result, len(positional), {})\n'
+            '\n'
+            'def %s(state, key, value, name):\n'
+            '    result = state[0]\n'
+            '    seen = state[2]\n'
+            '    if key in seen:\n'
+            '        raise TypeError("__main__.%%s() got multiple values for keyword argument \'%%s\'" %% (name, key))\n'
+            '    seen[key] = 1\n'
+            '    result[key] = value\n'
+            '    return state\n'
+            '\n'
+            'def %s(state, mapping, name):\n'
+            '    result = state[0]\n'
+            '    seen = state[2]\n'
+            '    for key in mapping:\n'
+            '        if not isinstance(key, str):\n'
+            '            raise TypeError("keywords must be strings")\n'
+            '        if key in seen:\n'
+            '            raise TypeError("__main__.%%s() got multiple values for keyword argument \'%%s\'" %% (name, key))\n'
+            '        seen[key] = 1\n'
+            '        result[key] = mapping[key]\n'
+            '    return state\n'
+            '\n'
+            'def %s(state):\n'
+            '    if state[1] > 1:\n'
+            '        raise TypeError("dict expected at most 1 argument, got %%d" %% state[1])\n'
+            '    return state[0]\n'
+            % (td_base, td_add, td_splash, td_done), mode='exec').body)
     if ident_used:
         out.append(ast.parse('def %s(obj):\n    return obj\n' % ident, mode='exec').body[0])
     if bad_used:
@@ -394,8 +453,14 @@ def run(tree, text):
     ident = _fresh(tree, '_ail_newtype_identity')
     bad = _fresh(tree, '_ail_newtype_bad_call')
     dict_name = _fresh(tree, '_ail_typed_dict_new')
+    td_base = _fresh(tree, '_ail_typed_dict_base')
+    td_add = _fresh(tree, '_ail_typed_dict_add')
+    td_splash = _fresh(tree, '_ail_typed_dict_splash')
+    td_done = _fresh(tree, '_ail_typed_dict_done')
     dict_bound = 'dict' in _scope_locals(body)
-    fix = _Fix(binder, typed_dicts, new_types, ident, bad, dict_name, dict_bound)
+    fix = _Fix(binder, typed_dicts, new_types, ident, bad, dict_name, dict_bound,
+               td_base, td_add, td_splash, td_done)
     tree.body = [fix.visit(stmt) for stmt in tree.body]
     _insert_helpers(tree, _defs(ident, bad, fix.ident_used, fix.bad_used,
-                                dict_name, fix.dict_used))
+                                dict_name, fix.dict_used, td_base, td_add, td_splash, td_done,
+                                fix.splash_used))
