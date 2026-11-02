@@ -436,6 +436,451 @@ class Lower(Stmts, Calls, Lams, Exprs):
         return out.rstrip('\n') + ('\n\n\n' + helpers if helpers else '') + '\n'
 
 
+_ISINSTANCE_TYPE_NAMES = frozenset((
+    'int', 'float', 'str', 'bool', 'bytes', 'bytearray', 'list', 'tuple', 'dict',
+    'set', 'frozenset', 'range', 'object'))
+
+# The builtin exception classes an isinstance() type tuple may name (the names pyboxed2.EXC_IDS
+# knows; a user exception class is in `defs` below).
+_ISINSTANCE_EXC_NAMES = frozenset((
+    'Exception', 'TypeError', 'ValueError', 'ZeroDivisionError', 'IndexError', 'KeyError',
+    'AttributeError', 'StopIteration', 'NameError', 'OverflowError', 'UnboundLocalError',
+    'RuntimeError', 'AssertionError', 'NotImplementedError', 'EOFError', 'OSError',
+    'ConnectionError', 'BlockingIOError', 'ChildProcessError', 'BrokenPipeError',
+    'ConnectionAbortedError', 'ConnectionRefusedError', 'ConnectionResetError',
+    'FileExistsError', 'FileNotFoundError', 'InterruptedError', 'IsADirectoryError',
+    'NotADirectoryError', 'PermissionError', 'ProcessLookupError', 'TimeoutError'))
+
+_FUNCS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+
+
+def _collect_bindings(node, binds, globals_, nonlocals_, root=False):
+    """Every name bound in one lexical scope, not descending into a nested scope.
+
+    `root` is the node whose own binding must not count: a function's name binds in the enclosing
+    scope, and a comprehension's target binds in the comprehension, not the containing function.
+    """
+    if not root:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            binds.add(node.name)
+            return
+        if isinstance(node, ast.ClassDef):
+            binds.add(node.name)
+            return
+        if isinstance(node, ast.Lambda) or isinstance(node, _COMPREHENSIONS):
+            return
+    if isinstance(node, ast.Global):
+        globals_.update(node.names)
+        return
+    if isinstance(node, ast.Nonlocal):
+        nonlocals_.update(node.names)
+        return
+    if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+        binds.add(node.id)
+    elif isinstance(node, _FUNCS):
+        args = node.args
+        for arg in (*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg):
+            if arg is not None:
+                binds.add(arg.arg)
+    elif isinstance(node, ast.alias):
+        binds.add(node.asname or node.name.split('.')[0])
+    elif isinstance(node, ast.ExceptHandler) and node.name:
+        binds.add(node.name)
+    elif isinstance(node, ast.MatchAs) and node.name:
+        binds.add(node.name)
+    elif isinstance(node, ast.MatchStar) and node.name:
+        binds.add(node.name)
+    elif isinstance(node, ast.MatchMapping) and node.rest:
+        binds.add(node.rest)
+    for child in ast.iter_child_nodes(node):
+        _collect_bindings(child, binds, globals_, nonlocals_, False)
+
+
+def _scope(kind, node, root=False):
+    binds, globals_, nonlocals_ = set(), set(), set()
+    _collect_bindings(node, binds, globals_, nonlocals_, root)
+    return (kind, binds - globals_ - nonlocals_, globals_, nonlocals_)
+
+
+def _module_bindings(tree):
+    """The binding nodes of each name in module scope (not inside a def, class or comprehension)."""
+    out = {}
+
+    def add(name, node):
+        out.setdefault(name, []).append(node)
+
+    def walk(node, root=False):
+        if not root:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                add(node.name, node)
+                return
+            if isinstance(node, ast.ClassDef):
+                add(node.name, node)
+                return
+            if isinstance(node, ast.Lambda) or isinstance(node, _COMPREHENSIONS):
+                return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            add(node.id, node)
+        elif isinstance(node, ast.alias):
+            add(node.asname or node.name.split('.')[0], node)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            add(node.name, node)
+        elif isinstance(node, ast.MatchAs) and node.name:
+            add(node.name, node)
+        elif isinstance(node, ast.MatchStar) and node.name:
+            add(node.name, node)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            add(node.rest, node)
+        for child in ast.iter_child_nodes(node):
+            walk(child, False)
+
+    walk(tree, True)
+    return out
+
+
+def _shadowed(name, chain):
+    """Whether `name` in this scope chain denotes anything but the module binding."""
+    crossed_function = False
+    for kind, binds, globals_, nonlocals_ in reversed(chain):
+        if kind == 'module':
+            return False
+        if kind == 'comp':
+            if name in binds:
+                return True
+        elif kind == 'function':
+            if name in globals_:
+                return False
+            if name in nonlocals_ or name in binds:
+                return True
+            crossed_function = True
+        elif kind == 'class' and not crossed_function and name in binds:
+            return True
+    return False
+
+
+def _isinstance_uses(tree):
+    """Every isinstance() call with the scope chain and top-level statement index of its use."""
+    uses = []
+
+    def walk(node, chain, top_index):
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'isinstance' and len(node.args) == 2 and not node.keywords):
+            uses.append((node, chain, top_index))
+        if isinstance(node, _FUNCS):
+            inner = chain + [_scope('function', node, True)]
+        elif isinstance(node, ast.ClassDef):
+            inner = chain + [_scope('class', node, True)]
+        elif isinstance(node, _COMPREHENSIONS):
+            binds = set()
+            for gen in node.generators:
+                _collect_bindings(gen.target, binds, set(), set(), False)
+            inner = chain + [('comp', binds, set(), set())]
+        else:
+            inner = chain
+        for child in ast.iter_child_nodes(node):
+            walk(child, inner, top_index)
+
+    module = ('module', set(), set(), set())
+    for index, stmt in enumerate(tree.body):
+        walk(stmt, [module], index)
+    return uses
+
+
+def _module_reads(tree):
+    """The (node, scope chain) of every name read in the program (a read of a module binding is one
+    whose chain does not shadow the name)."""
+    reads = {}
+
+    def walk(node, chain):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, ast.Load):
+            reads.setdefault(node.id, []).append((node, chain))
+        if isinstance(node, _FUNCS):
+            inner = chain + [_scope('function', node, True)]
+        elif isinstance(node, ast.ClassDef):
+            inner = chain + [_scope('class', node, True)]
+        elif isinstance(node, _COMPREHENSIONS):
+            binds = set()
+            for gen in node.generators:
+                _collect_bindings(gen.target, binds, set(), set(), False)
+            inner = chain + [('comp', binds, set(), set())]
+        else:
+            inner = chain
+        for child in ast.iter_child_nodes(node):
+            walk(child, inner)
+
+    walk(tree, [('module', set(), set(), set())])
+    return reads
+
+
+def _expand_isinstance_type_constants(tree):
+    """Replace a module-level constant used as isinstance()'s second argument with its value.
+
+    `TYPES = (int, str)` is a tuple of type objects, not a tuple the lowering can build (its
+    elements are not numbers), and `K = SomeClass` is a plain alias.  Both are common in a
+    program that tests against a set of types.  Expanding the use before the tuple pass keeps
+    the constant from being mistaken for a numeric tuple, and leaves the ordinary type names
+    for the typed and general paths to compile.  A type-tuple or alias assignment is dropped
+    when no other read of the name remains; other module assignments are left untouched.
+
+    The value CPython captured at the assignment is what the use must see, not a re-read of the
+    expression at the use.  When every name in the value is a builtin type or a class bound once
+    before the assignment, the names can be written at the use directly (the typed path then
+    settles them).  Otherwise the value is snapshotted into fresh module names at the assignment
+    (`T = (A,)` before `A = B`, `T = box.t` before `box.t` changes, or a forward reference that
+    must raise NameError), and the use reads those names: the general path keeps CPython's value
+    and its NameError.
+
+    An expansion only replaces a use where the name really denotes that module constant, not
+    where a parameter, local, comprehension target or class-body binding shadows it.  Every other
+    use keeps the name, so the runtime path sees the value CPython sees (or its NameError).
+    """
+    defs = {n.name for n in tree.body if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+    if 'isinstance' in defs:
+        return False
+    candidates = {}
+    for index, stmt in enumerate(tree.body):
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            name, target, value = stmt.targets[0].id, stmt.targets[0], stmt.value
+        elif isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name) and stmt.value is not None:
+            name, target, value = stmt.target.id, stmt.target, stmt.value
+        else:
+            continue
+        candidates.setdefault(name, []).append((index, target, value))
+    bindings = _module_bindings(tree)
+    binding_positions = {}
+    for index, stmt in enumerate(tree.body):
+        one = ast.Module(body=[stmt], type_ignores=[])
+        for name, nodes in _module_bindings(one).items():
+            for node in nodes:
+                binding_positions.setdefault(name, []).append((index, node))
+    forbidden = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Global):
+            forbidden.update(node.names)
+        elif isinstance(node, ast.NamedExpr) and isinstance(node.target, ast.Name):
+            forbidden.add(node.target.id)
+    constants, where = {}, {}
+    for name, found in candidates.items():
+        if len(found) != 1 or name in forbidden:
+            continue
+        index, target, value = found[0]
+        if bindings.get(name) != [target]:
+            continue
+        constants[name] = value
+        where[name] = index
+
+    def is_type(node, seen):
+        if isinstance(node, ast.Name):
+            if (node.id in _ISINSTANCE_TYPE_NAMES or node.id in _ISINSTANCE_EXC_NAMES
+                    or node.id in defs):
+                return True
+            if node.id in constants and node.id not in seen:
+                return is_type(constants[node.id], seen | {node.id})
+            return False
+        if isinstance(node, ast.Attribute):
+            return True
+        if isinstance(node, ast.Tuple):
+            return bool(node.elts) and all(is_type(e, seen) for e in node.elts)
+        return False
+
+    module_allowed = {name for name, value in constants.items() if is_type(value, frozenset())}
+
+    def expand_value(node, seen):
+        # Resolve inside a module constant with module scope, whatever a local at the use means.
+        if isinstance(node, ast.Tuple):
+            out = []
+            for e in node.elts:
+                out.extend(expand_value(e, seen))
+            return out
+        if isinstance(node, ast.Name) and node.id in module_allowed and node.id not in seen:
+            return expand_value(constants[node.id], seen | {node.id})
+        return [node]
+
+    def stable_name(nid, assign_index, seen):
+        if nid in _ISINSTANCE_TYPE_NAMES or nid in _ISINSTANCE_EXC_NAMES:
+            return not binding_positions.get(nid)
+        if nid in defs:
+            found = binding_positions.get(nid, ())
+            return len(found) == 1 and found[0][0] < assign_index
+        if nid in constants and nid not in seen:
+            return (where[nid] < assign_index
+                    and stable_value(constants[nid], assign_index, seen | {nid}))
+        return False
+
+    def stable_value(node, assign_index, seen):
+        if isinstance(node, ast.Tuple):
+            return bool(node.elts) and all(stable_value(e, assign_index, seen) for e in node.elts)
+        if isinstance(node, ast.Name):
+            return stable_name(node.id, assign_index, seen)
+        return False
+
+    def direct_nodes(name, chain):
+        value = constants[name]
+        if not stable_value(value, where[name], frozenset((name,))):
+            return None
+        leaves = expand_value(value, frozenset((name,)))
+        if not all(isinstance(e, ast.Name) and not _shadowed(e.id, chain) for e in leaves):
+            return None
+        return leaves
+
+    uses = _isinstance_uses(tree)
+    replaceable = set()
+    for call, chain, index in uses:
+        for node in ast.walk(call.args[1]):
+            if (isinstance(node, ast.Name) and node.id in module_allowed
+                    and not _shadowed(node.id, chain)):
+                replaceable.add(id(node))
+    reads0 = _module_reads(tree)
+
+    def can_drop(name):
+        return not any(not _shadowed(name, chain) and id(node) not in replaceable
+                       for node, chain in reads0.get(name, ()))
+
+    used_names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {
+        n.arg for n in ast.walk(tree) if isinstance(n, ast.arg)}
+
+    def fresh(base):
+        name, k = base, 1
+        while name in used_names:
+            name = '%s_%d' % (base, k)
+            k += 1
+        used_names.add(name)
+        return name
+
+    snapshot_names = {}
+    forward_aliases = {}
+
+    def forward_alias(nid):
+        # A name bound only later in the module: read it through a module-level alias installed at
+        # that binding, so the snapshot before it sees an unbound name (NameError), not the class
+        # object this emitter creates at startup.
+        if nid not in forward_aliases:
+            found = binding_positions.get(nid, ())
+            index = found[0][0] if found else len(tree.body)
+            forward_aliases[nid] = (fresh('_ail_defined_%s' % nid), index)
+        return forward_aliases[nid][0]
+
+    def snapshot_leaf_nodes(node, name, seen):
+        if isinstance(node, ast.Tuple):
+            out = []
+            for e in node.elts:
+                out.extend(snapshot_leaf_nodes(e, name, seen))
+            return out
+        if (isinstance(node, ast.Name) and node.id in module_allowed and node.id not in seen
+                and where[node.id] < where[name]):
+            return snapshot_leaf_nodes(constants[node.id], name, seen | {node.id})
+        return [node]
+
+    def forward_unbound(node, name):
+        if not isinstance(node, ast.Name):
+            return False
+        nid = node.id
+        if nid in _ISINSTANCE_TYPE_NAMES or nid in _ISINSTANCE_EXC_NAMES:
+            return False
+        return not any(index < where[name] for index, _ in binding_positions.get(nid, ()))
+
+    def snapshot_for(name):
+        if name not in snapshot_names:
+            leaves = snapshot_leaf_nodes(constants[name], name, frozenset((name,)))
+            items = []
+            for i, leaf in enumerate(leaves):
+                hidden = fresh('_ail_snap_%s_%d' % (name, i))
+                if forward_unbound(leaf, name):
+                    # CPython reads the name at the assignment and it is not bound yet: keep the
+                    # NameError at the same point (the class objects are hoisted here, so a plain
+                    # snapshot of the name would silently find the later class).
+                    leaf = ast.copy_location(
+                        ast.Name(id=forward_alias(leaf.id), ctx=ast.Load()), leaf)
+                items.append((hidden, leaf))
+            snapshot_names[name] = items
+        return snapshot_names[name]
+
+    def target_of(stmt):
+        if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
+            return stmt.targets[0].id
+        if isinstance(stmt, ast.AnnAssign) and isinstance(stmt.target, ast.Name):
+            return stmt.target.id
+        return None
+
+    changed = False
+    for call, chain, index in uses:
+        spec = call.args[1]
+
+        def expand_use(node):
+            if isinstance(node, ast.Tuple):
+                out = []
+                for e in node.elts:
+                    out.extend(expand_use(e))
+                return out
+            if (isinstance(node, ast.Name) and node.id in module_allowed
+                    and not _shadowed(node.id, chain)):
+                direct = direct_nodes(node.id, chain)
+                if direct is not None and where[node.id] < index:
+                    return direct
+                if can_drop(node.id):
+                    return [ast.Name(id=hidden, ctx=ast.Load())
+                            for hidden, _ in snapshot_for(node.id)]
+            return [node]
+
+        expanded = expand_use(spec)
+        if not expanded or not all(isinstance(e, (ast.Name, ast.Attribute)) for e in expanded):
+            continue
+        if len(expanded) == 1 and expanded[0] is spec:
+            continue
+        new = expanded[0] if len(expanded) == 1 else ast.Tuple(elts=expanded, ctx=ast.Load())
+        call.args[1] = ast.copy_location(new, spec)
+        changed = True
+    if not changed:
+        return False
+    # A snapshot is evaluated where the assignment was, so the original expression runs once (and
+    # still raises the NameError CPython raises) even though the assignment itself is dropped.
+    if snapshot_names or forward_aliases:
+        by_index = {}
+        for nid, (alias, index) in forward_aliases.items():
+            by_index.setdefault(index, []).append((alias, nid))
+        body = []
+        for index, stmt in enumerate(tree.body):
+            target = target_of(stmt)
+            if target in snapshot_names:
+                for hidden, leaf in snapshot_names[target]:
+                    body.append(ast.copy_location(ast.Assign(
+                        targets=[ast.Name(id=hidden, ctx=ast.Store())], value=leaf), stmt))
+            body.append(stmt)
+            for alias, nid in by_index.get(index, ()):
+                # The snapshot before this point already raised NameError, so the alias only has
+                # to become bound here: it need not read the name (whose value the general path
+                # may not be able to build as a plain value).  The subscript keeps the emitter
+                # from hoisting this constant assignment above the snapshot.
+                value = ast.Subscript(value=ast.List(elts=[ast.Constant(value=None)], ctx=ast.Load()),
+                                      slice=ast.Constant(value=0), ctx=ast.Load())
+                body.append(ast.copy_location(ast.Assign(
+                    targets=[ast.Name(id=alias, ctx=ast.Store())], value=value), stmt))
+        tree.body = body
+    # A constant may name another one (`NESTED = ((float, bool), TYPES)`).  Drop the assignments
+    # whose every use was replaced, repeating so a constant reached only through a dropped one
+    # goes too.  Only a type tuple or alias is dropped: an unrelated unused module assignment can
+    # still have a side effect (`X = print("hi")`) and must keep running.  The values themselves
+    # are left alone, so a constant that is also read elsewhere keeps its nesting.  A use left in
+    # place (shadowed, or with another read) still counts as a read, so its assignment stays and a
+    # name that cannot be built here is refused by name instead.
+    droppable = {name for name, value in constants.items() if is_type(value, frozenset())}
+    while True:
+        reads = _module_reads(tree)
+        body = []
+        dropped = False
+        for stmt in tree.body:
+            target = target_of(stmt)
+            if target in droppable and not any(not _shadowed(target, chain)
+                                               for _, chain in reads.get(target, ())):
+                dropped = True
+                continue
+            body.append(stmt)
+        tree.body = body
+        if not dropped:
+            break
+    return True
+
 def rewrite(source, notes=None):
     """The program with its tuples lowered; the source as written when no tuple use needs it (or when one is not
     built -- the reason is then added to `notes`)."""
@@ -443,6 +888,13 @@ def rewrite(source, notes=None):
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return source
+    if _expand_isinstance_type_constants(tree):
+        ast.fix_missing_locations(tree)
+        source = ast.unparse(tree)
+        try:
+            tree = ast.parse(source)
+        except (SyntaxError, ValueError):
+            return source
     if not candidate(tree):
         return source
     import numidentity

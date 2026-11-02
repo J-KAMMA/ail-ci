@@ -46,6 +46,18 @@ _BIN = {ast.Add: 'add', ast.Sub: 'sub', ast.Mult: 'mul', ast.Div: 'truediv', ast
 _UN = {ast.USub: '__neg__', ast.UAdd: '__pos__', ast.Invert: '__invert__'}
 _CMP = {ast.Eq: '__eq__', ast.NotEq: '__ne__', ast.Lt: '__lt__', ast.LtE: '__le__', ast.Gt: '__gt__',
         ast.GtE: '__ge__'}
+
+
+def _isinstance_names(spec):
+    if isinstance(spec, ast.Tuple):
+        out = []
+        for e in spec.elts:
+            sub = _isinstance_names(e)
+            if sub is None:
+                return None
+            out.extend(sub)
+        return out
+    return [spec] if isinstance(spec, ast.Name) else None
 _SWAP = {'__lt__': '__gt__', '__gt__': '__lt__', '__le__': '__ge__', '__ge__': '__le__',
          '__eq__': '__eq__', '__ne__': '__ne__'}
 ORDER = ('__lt__', '__le__', '__gt__', '__ge__')
@@ -2350,8 +2362,8 @@ class _Rewriter(ast.NodeTransformer):
             args = node.args
             if n == 'isinstance' and len(args) == 2:
                 t = self.T(args[0])
-                classes = args[1].elts if isinstance(args[1], ast.Tuple) else [args[1]]
-                if inst(t) and all(isinstance(k, ast.Name) for k in classes):
+                classes = _isinstance_names(args[1])
+                if inst(t) and classes is not None:
                     names = {k.id for k in classes}
                     if t[1] in self.models and (names <= set(self.models) or t[1] in names):
                         self.folded = True

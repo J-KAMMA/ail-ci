@@ -1,3 +1,29 @@
+## 2026-11-02 -- a decorated class is not a class-only module binding
+
+The keyword-argument path added by the previous entry classified every `ClassDef` as binding the
+class itself. A class decorator rebinds the name to whatever the decorator returns, so a decorated
+class with a module-level binding (`if False: A = B`) was allowed keyword construction and then
+silently constructed the undecorated class (`<A object>`) where CPython calls the decorator's
+result (`8`). `_class_only_module_names` now treats a `ClassDef` with a non-empty `decorator_list`
+as an `'other'` binding, which restores the previous named compile-time refusal for its keyword
+calls while leaving undecorated classes exact. `test_ail_covisin1.py` covers the decorated form on
+the default and general builds.
+
+## 2026-11-01 -- module-bound class constructors keep keyword arguments
+
+A class name that also has a module-level binding (`if False: A = B` in dead code, or a real
+`A = B`) is read through its module slot, so its call goes through the general path's
+`call_value`. That path refused every keyword argument, which turned a working constructor call
+(`A(x=3)`) into a compile-time refusal in both builds. `call_value` now precomputes the keyword
+values once (after the positional ones, in call-site order) and passes them to `_call_class` for
+each candidate class in the runtime slot dispatch, so defaults, keyword-only parameters and
+exception classes bind exactly as a direct class call does. The runtime fallback for a slot that
+is not one of the program's classes stays a named refusal, and a new `_class_only_module_names`
+analysis allows keywords only when every module-level binding of the name is the class itself or
+another class name (a greatest fixpoint over aliases); a name that may hold a function or a plain
+value keeps the previous compile-time refusal instead of becoming a wrong run-time result.
+`test_ail_covisin1.py` covers the dead-`if` binding, an executed class-to-class rebind, an
+exception class rebind, keyword-only/default parameters and the keyword evaluation order.
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow

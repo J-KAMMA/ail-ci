@@ -16626,6 +16626,22 @@ def _stab_add_plan(name, key_node, value, ctx):
     return None
 
 
+def _isinstance_names(spec):
+    """The type names of an isinstance() second argument, flattening nested tuples; None when it
+    holds anything but a name."""
+    if isinstance(spec, ast.Tuple):
+        out = []
+        for e in spec.elts:
+            sub = _isinstance_names(e)
+            if sub is None:
+                return None
+            out.extend(sub)
+        return out
+    if isinstance(spec, ast.Name):
+        return [spec]
+    return None
+
+
 def _is_class_isinstance(node, ctx):
     """`isinstance(x, C)` / `isinstance(x, (C1, C2))` with classes of this program, in a program with
     inheritance (TYPED_INHERITANCE.md section 1)."""
@@ -16633,9 +16649,8 @@ def _is_class_isinstance(node, ctx):
             and node.func.id == 'isinstance' and len(node.args) == 2 and not node.keywords
             and all(node.func.id not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))):
         return False
-    spec = node.args[1]
-    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
-    return bool(names) and all(isinstance(n, ast.Name) and n.id in ctx.classes for n in names)
+    names = _isinstance_names(node.args[1])
+    return bool(names) and all(n.id in ctx.classes for n in names)
 
 
 _BUILTIN_TYPE_OBJECTS = {
@@ -16760,9 +16775,11 @@ def _static_isinstance(node, ctx):
             and all('isinstance' not in table for table in (ctx.funcs, ctx.classes, ctx.kind, ctx.types))):
         return None
     value, spec = node.args
-    names = spec.elts if isinstance(spec, ast.Tuple) else [spec]
-    if not names or not all(isinstance(n, ast.Name) for n in names):
+    names = _isinstance_names(spec)
+    if names is None:
         return None
+    if not names:
+        return False                    # isinstance(x, ()) is False for every x
     targets = {n.id for n in names}
     if any(n.id in getattr(ctx, 'local_bindings', ()) for n in names):
         return None
@@ -16859,7 +16876,7 @@ def _isinstance_value(node, ctx):
                           'of this program' % (ast.unparse(value), _a(kind)))
     if not isinstance(value, (ast.Name, ast.Attribute)):
         raise Unsupported('isinstance(%s, ...): bind the value to a name first' % ast.unparse(value))
-    targets = [n.id for n in (spec.elts if isinstance(spec, ast.Tuple) else [spec])]
+    targets = [n.id for n in _isinstance_names(spec)]
     static = kind[1]
     pointer = _null_test_pointer(value, ctx)
     if 'object' in targets:

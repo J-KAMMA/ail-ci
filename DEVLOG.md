@@ -1,3 +1,99 @@
+## 2026-11-01 -- covisin1 review: a module-bound class name keeps its constructor when the binding did not run (job-covisin1-11020702)
+
+The review found that routing a module-rebound class name through its module slot also sent the
+call through the dynamic value path, which knew how to call functions but not a class held in the
+slot.  Every module-level binding of a class name -- even an unexecuted `if False: A = B`, an empty
+`for A in []`, an unexecuted `try`/`else`, an unpacking target, or an annotation -- therefore lost
+the constructor and raised `TypeError: 'type' object is not callable`.  `pyboxed2` now adds every
+class that has a module binding to `class_values`, so the value path can construct the class object
+the slot actually holds (the class definition, a rebound class, or a class passed through a
+function, list, attribute or dict) and still raises CPython's `TypeError` when the slot holds a
+non-callable.
+
+Probes (`bash ~/tools/cmp.sh`, default + general) match CPython: the review's `p29_rebind_conditional`
+and `p43_for_rebind`, `p53_try_rebind`, `p54_unpack_rebind`, `p56_annotation_rebind`,
+`p57_cond_ann`, `p59_func_cond_call` (all print `A`, exit 0), the executed-rebinding probes `p30`,
+`p31`, `p55`, and new ones for an executed `if`, a non-class rebinding (`TypeError`), a function
+rebinding, and class values passed through a parameter, list item, attribute and dict value.  All
+ten `lab/compare` AIL sources still generate byte-identical C.  Added a regression test to
+`test_ail_covisin1`.
+
+## 2026-11-01 -- covisin1 review: snapshot a type constant's value, and follow a rebound class (job-covisin1-11011014)
+
+The review found three wrong answers from expanding a module type constant by name alone: a constant
+whose value was read from an attribute kept the name, so a later attribute store changed the answer
+(`T = box.t; box.t = B`); a module assignment that rebinds a class name (`A = B`) still called the
+class definition as a constructor and still tested `isinstance(..., A)` against the definition; and a
+constant assigned before its class/name was bound was replaced by a name that did not exist yet, so
+CPython's `NameError` became `False`.  `tuplib` now snapshots a constant whose module binding can
+change, or whose leaf names are shadowed at an `isinstance()` use, into hidden `_ail_snap_*` names at
+the assignment, and drops the original only when every read was replaced.  A forward leaf gets a
+hidden `_ail_defined_*` marker after its later binding, so the earlier snapshot raises `NameError`.
+Builtin exception names are type constants too.  `pyboxed2._call_name` and `_static_isinstance_check`
+now read a class name that was rebound at module level through the module slot instead of the class
+definition.
+
+Probes (`bash ~/tools/cmp.sh`, default + general) all match CPython: the review's `p11_attr_snapshot`
+(`True False`), `p8_rebind_class` (`False False`), `p4_forward_alias` and `p5_nested_forward` (exit 1,
+empty stdout), plus `p8b_rebind_call`, `p8c_rebind_isinstance`, `p1e_exc_const`, `p2_classbody_const`
+and `p6_tuple_basic`.  Added five snapshot/forward/exception regression tests to
+`test_ail_covisin1`.  Final-state tests: `test_ail_covisin1`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` (0 failed).
+
+## 2026-11-01 -- covisin1 review: expand a type constant only where the name and the binding are the module's (job-covisin1-11011014)
+
+The review found three wrong answers from `tuplib._expand_isinstance_type_constants` inlining a
+module type constant without looking at lexical scope or execution order: a parameter/local
+shadowing the name (`K` was still replaced by the module value), and a use before the assignment
+(CPython raises `NameError`, the rewrite answered `False`).  The expansion now resolves the use to
+the module binding: it computes the scope chain (functions, lambdas, comprehensions, class bodies)
+and skips a name bound there; it expands only where the top-level assignment precedes the
+containing top-level statement (so a function defined above the assignment keeps the name and
+reaches CPython's global lookup/`NameError` at run time); and names with a second module binding, a
+`global` assignment or a walrus target are not treated as constants.  Values inside a constant are
+still resolved in module scope, because that is where the tuple was built.  An assignment is now
+dropped only when no unexpanded read of the module binding remains, not merely when no `Name` load
+remains, so a shadowing local no longer keeps an unbuildable builtin-type tuple around.
+
+Probes (`bash ~/tools/cmp.sh`, default + general) all match CPython: the review's `p7_shadowclass`,
+`p9_localshadow` and `p10_order` (exit 1, empty stdout), plus `p20_scopes` (nested function,
+comprehension target, class body), `p21_order_class`, `p22_order_before` (NameError), `p24_builtin_shadow`
+(local tuple of classes shadowing `TYPES = (int, str)`), `p25_nested_scope_tuple`, `p26_alias_chain`.
+`p23_builtin_order` (module use before a builtin-type tuple assignment) is refused by name, as on the
+base tree, never answered wrongly.  The previous fifteen probes still match.  All ten `lab/compare`
+AIL sources generate byte-identical C (10/10).  Added five scope/order regression tests to
+`test_ail_covisin1`.  Final-state tests: `test_ail_covisin1`, `test_ail_tuples`, `test_ail_modconst`,
+`test_ail_py_typed_gaps`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+(96 tests, OK; one platform skip).
+
+## 2026-11-01 -- covisin1: isinstance() with a tuple, an attribute or a type constant (job-covisin1-11011014)
+
+The module census over `AIL_CURRENT/python/pkg-v12/*.py` (148 files, `fallback_census.py`) went from 9
+modules whose general-path refusal was "isinstance() with a non-name type argument" to 0.  The forms now
+build: a tuple literal (nested and empty), a module-level type tuple (`TYPES = (int, str)`, `K = B`,
+`NESTED = ((float, bool), TYPES)`), a class through a module (`shapes.Shape`), and a class or tuple of
+classes that is only known at run time.  The typed path flattens nested tuples and answers statically when
+every element is a name it knows; otherwise the general path falls back to a small recursive
+`ail2_dyn_isinstance` for CLASS values and tuples of them.  `tuplib` expands a module type constant at its
+`isinstance()` use before the numeric-tuple pass; it drops only type-tuple/alias assignments whose every
+read was replaced and leaves other module assignments (including side effects) alone.  `_static_isinstance`
+folds an empty tuple to False on the typed path.
+
+Probes in `/tmp/probes`, default and general builds via `bash ~/tools/cmp.sh`, all match CPython:
+`p_static_tuple`, `p_constants`, `p_runtime_classes`, `p_dynclass`, `p_attr_local`, `p_attr_var`,
+`p_modconst`, `p_nested`, `p_tuple`, `p_typed_static`, `p_typed_static2`, `p_types_const`, `p_values2`,
+`p_sideeffect`, `p_empty_typed` (subclasses, bool vs int, empty/nested/aliased specs, values from an
+argument, list item, attribute and dict value).  The module-attribute form is covered by
+`test_ail_covisin1` on the typed and general paths.  Remaining, refused by name on both builds:
+a builtin type object that only reaches `isinstance()` as a run-time value (`check(v, int)`,
+`p_builtin_runtime2`) because the general path does not model builtin type objects as values.
+
+All ten `lab/compare` AIL sources generate byte-identical C against the base tree (10/10); the CPython
+sources do too for the 7 that build on both sides (the other 3 are refused identically by both trees).
+
+Added `AIL_CURRENT/test_ail_covisin1.py` and registered it through `AIL_CURRENT/tests.d/test_ail_covisin1.txt`.
+Final-state tests: test_ail_covisin1, test_ail_tuples, test_ail_modconst, test_ail_py_typed_gaps,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3 (91 tests, OK; one platform skip).
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.

@@ -1887,6 +1887,113 @@ def _scan_assigned_names(stmts):
     return names
 
 
+def _class_only_module_names(tree, classes, module_names):
+    """The module-bound class names whose module slot can only ever hold a class.
+
+    A call to such a name through the slot (`A(x=1)` after a conditional `A = B`) is always a
+    class construction, so it may carry keyword arguments.  A name with any other kind of
+    module-level binding (a plain value, a function, an import, a `global` write, a loop or
+    `with` target, a tuple-unpacking target whose value is not traced) is left out: its call
+    stays the named keyword-argument refusal instead of becoming a wrong runtime result."""
+    bindings = {}   # name -> list of 'class' | ('name', id) | 'other'
+    globals_ = set()
+
+    def add(name, kind):
+        bindings.setdefault(name, []).append(kind)
+
+    def value_kind(node):
+        if isinstance(node, ast.Name) and node.id in classes:
+            return ('name', node.id)
+        return 'other'
+
+    def target_kinds(target, kind):
+        if isinstance(target, ast.Name):
+            add(target.id, kind)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                target_kinds(elt, 'other')
+
+    def pattern_names(pat):
+        out = set()
+        for n in ast.walk(pat):
+            if isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+                out.add(n.name)
+            elif isinstance(n, ast.MatchMapping) and n.rest:
+                out.add(n.rest)
+        return out
+
+    def walk(stmts):
+        for n in stmts:
+            if isinstance(n, ast.ClassDef):
+                add(n.name, 'other' if n.decorator_list else 'class')
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                add(n.name, 'other')
+            elif isinstance(n, ast.Assign):
+                kind = value_kind(n.value)
+                for t in n.targets:
+                    target_kinds(t, kind)
+            elif isinstance(n, ast.AnnAssign):
+                if n.value is not None:
+                    target_kinds(n.target, value_kind(n.value))
+            elif isinstance(n, ast.AugAssign):
+                target_kinds(n.target, 'other')
+            elif isinstance(n, (ast.For, ast.AsyncFor)):
+                target_kinds(n.target, 'other')
+                walk(n.body)
+                walk(n.orelse)
+            elif isinstance(n, (ast.While, ast.If)):
+                walk(n.body)
+                walk(n.orelse)
+            elif isinstance(n, ast.Try):
+                walk(n.body)
+                for h in n.handlers:
+                    if h.name:
+                        add(h.name, 'other')
+                    walk(h.body)
+                walk(n.orelse)
+                walk(n.finalbody)
+            elif isinstance(n, (ast.With, ast.AsyncWith)):
+                for it in n.items:
+                    if it.optional_vars is not None:
+                        target_kinds(it.optional_vars, 'other')
+                walk(n.body)
+            elif isinstance(n, ast.Import):
+                for a in n.names:
+                    add((a.asname or a.name).split('.')[0], 'other')
+            elif isinstance(n, ast.ImportFrom):
+                for a in n.names:
+                    if a.name != '*':
+                        add(a.asname or a.name, 'other')
+            elif isinstance(n, getattr(ast, 'Match', ())):
+                for case in n.cases:
+                    for nm in pattern_names(case.pattern):
+                        add(nm, 'other')
+                    walk(case.body)
+    walk(tree.body)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Global):
+            globals_.update(n.names)
+    # Only names whose every traced binding is the class itself or another class name can be
+    # safe.  A name in module_names with no traced binding (a form this walk does not model)
+    # is left out, so the analysis errs towards refusing.
+    safe = {name for name in set(classes) & module_names
+            if name not in globals_ and bindings.get(name)
+            and all(k == 'class' or (isinstance(k, tuple) and k[0] == 'name')
+                    for k in bindings[name])}
+    # A class name may be an alias of another module-bound class name that is itself rebound
+    # (`A = B; B = A` is still classes only, but `B = 5` makes both unsafe): greatest fixpoint.
+    changed = True
+    while changed:
+        changed = False
+        for name in list(safe):
+            for kind in bindings[name]:
+                if isinstance(kind, tuple) and kind[1] in module_names and kind[1] not in safe:
+                    safe.discard(name)
+                    changed = True
+                    break
+    return safe
+
+
 def _rebound_function_names(tree, functions):
     """Top-level functions whose module binding an assignment at module scope changes
     (`f = lambda: ...`).  A `global f` write inside a function is a separate storage path and
@@ -2871,9 +2978,14 @@ class Compiler(boxclosure.ClosureMixin):
         called = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
         self.class_values = sorted({n.id for n in ast.walk(tree) if isinstance(n, ast.Name) and n.id in self.classes
                                     and isinstance(n.ctx, ast.Load) and id(n) not in called} | {
+            # A class name bound anywhere at module level is read through its module slot (a
+            # rebinding may not have run), so a call must construct whatever class the slot
+            # holds, exactly as a call through a class value does.
+            c for c in self.classes if c in self.module_names} | {
             c for c in self.classes if any(i.get('is_classmethod') for i in self.classes[c]['methods'].values())
             or any(self._is_subclass_of(c, k) for k in self.classes
                    if any(i.get('is_classmethod') for i in self.classes[k]['methods'].values()))})
+        self.class_only_names = _class_only_module_names(tree, self.classes, self.module_names)
         import dunderrt
         # operator methods, identity ==, hashing, str() through the class chain and AttributeError on a non-instance
         # are dispatched by the run time in every program that has a class (C30-C32: they were silent or fatal)
@@ -8078,13 +8190,16 @@ class Compiler(boxclosure.ClosureMixin):
             import safetyrt
             if name in safetyrt.PRIMS:
                 return self._call_safety_prim(name, args, kwargs, ctx)
-        if (name in self.classes and name not in ctx.slot_of and name not in ctx.ptr_names
+        if (name in self.classes and name not in self.module_names
+                and name not in ctx.slot_of and name not in ctx.ptr_names
                 and name not in ctx.clo_index and name not in ctx.free_names
                 and name not in ctx.cell_slots):
             # a parameter, local, cell or closure binding of the same name shadows the class in
             # CPython for the WHOLE activation: U() then calls that value, not the class (an
             # unbound local is UnboundLocalError, an instance is TypeError), exactly as expr_Name
             # already reads it. Without this the constructor-call path silently called the class.
+            # A module-level assignment to the class name rebinds the module slot (`A = B`), so
+            # the call goes through that slot like expr_Name does, not the class definition.
             return self._call_class(name, args, kwargs, ctx)
         if name in ctx.nested_funcs:
             return self._call_nested_function(name, args, kwargs, ctx)
@@ -8164,7 +8279,12 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported("call to __import__(); a program is built whole, so a module name cannot be "
                               "chosen at run time\n  write instead: import the module at the top of the file")
         if name in ctx.slot_of or name in ctx.ptr_names or self._is_global_name(name, ctx):
-            return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
+            # A module-bound class name whose slot can only hold a class is constructed through
+            # the class branch of call_value, which binds keyword arguments exactly. Any other
+            # value keeps the named refusal for keywords (call_value raises it).
+            kw_class_safe = bool(kwargs) and name in self.class_only_names
+            return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx,
+                                   kw_class_safe=kw_class_safe)
         raise Unsupported("the name '%s' is not a known function/class/builtin" % name)
 
     # ---- a small, honest core of builtins implemented directly against the FIXED v2 API
@@ -8745,41 +8865,86 @@ class Compiler(boxclosure.ClosureMixin):
                  % (t, o, o, o, self._method_owners_check(o, '__call__')))
         return t
 
+    def _ensure_dyn_isinstance(self):
+        if getattr(self, '_dyn_isinstance', False):
+            return
+        self._dyn_isinstance = True
+        self.top_defs.append(
+            'static int ail2_dyn_isinstance(ail_obj x, ail_obj spec) {\n'
+            '    if (spec.tag == AIL_T_CLASS) {\n'
+            '        if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC)\n'
+            '            return ail_class_is_or_subclass(((ail_instobj *)x.o)->cls, spec);\n'
+            '        return 0;\n'
+            '    }\n'
+            '    if (spec.tag == AIL_T_TUPLE) {\n'
+            '        ail_vecobj *v = (ail_vecobj *)spec.o;\n'
+            '        for (int64_t i = 0; i < v->n; i++)\n'
+            '            if (ail2_dyn_isinstance(x, v->p[i])) return 1;\n'
+            '    }\n'
+            '    return 0;\n'
+            '}\n\n')
+
+    def _static_isinstance_check(self, v, tnode, ctx):
+        """The C test for one type name of an isinstance() argument, or None when the element is
+        not a name this path can settle (then its value is tested at run time)."""
+        if not isinstance(tnode, ast.Name):
+            return None
+        tname = tnode.id
+        if (tname in getattr(ctx, 'local_bindings', ())
+                and (tname in self.classes or tname in TYPE_TAG or tname in EXC_IDS)):
+            raise Unsupported('isinstance() target %s is a local or parameter that shadows a '
+                              'class or builtin type name; CPython raises TypeError for a value '
+                              'that is not a type' % tname)
+        if tname in self.classes and tname in self.module_names:
+            # a module-level assignment to the class name rebinds the module slot (`A = B`): the
+            # test must read that value at run time, not the class definition
+            return None
+        if tname in self.classes:
+            self._check_class_name_bound(tname, ctx)
+        if tname == 'int':
+            return '(%s.tag==AIL_T_INT||%s.tag==AIL_T_BOOL%s)' % (
+                v, v, ('||%s.tag==AIL_T_BIG' % v) if biggate.ON else '')
+        if tname in TYPE_TAG:
+            return '%s.tag==%s' % (v, TYPE_TAG[tname])
+        if tname == 'range':
+            return '%s.tag==AIL_T_RANGE' % v
+        if tname in EXC_IDS and tname not in self.classes:
+            return ('((%s.tag==AIL_T_INST || %s.tag==AIL_T_EXC) && ail_class_is_or_subclass('
+                    '((ail_instobj *)%s.o)->cls, cx->builtin_cls[%s]))' % (v, v, v, EXC_IDS[tname]))
+        if tname in self.classes and self._is_exc_class(tname):
+            return ('((%s.tag==AIL_T_INST || %s.tag==AIL_T_EXC) && ail_class_is_or_subclass('
+                    '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
+                    (v, v, v, self.global_slots['class:' + tname]))
+        if tname in self.classes:
+            return ('(%s.tag==AIL_T_INST && ail_class_is_or_subclass('
+                    '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
+                    (v, v, self.global_slots['class:' + tname]))
+        return None
+
     def _b_isinstance(self, args, kwargs, ctx):
         if len(args) != 2 or kwargs:
             raise Unsupported('isinstance() with other than 2 arguments')
         v = self.expr(args[0], ctx)
-        types = args[1].elts if isinstance(args[1], ast.Tuple) else [args[1]]
+        def _flat(spec):
+            if isinstance(spec, ast.Tuple):
+                for e in spec.elts:
+                    yield from _flat(e)
+            else:
+                yield spec
+        types = list(_flat(args[1]))
+        if not types:
+            return 'ail_box_bool(0)'
         checks = []
         for tnode in types:
-            if not isinstance(tnode, ast.Name):
-                raise Unsupported('isinstance() with a non-name type argument')
-            tname = tnode.id
-            if tname in getattr(ctx, 'local_bindings', ()):
-                raise Unsupported('isinstance() target %s is a local or parameter that shadows a '
-                                  'class or builtin type name; CPython raises TypeError for a value '
-                                  'that is not a type' % tname)
-            if tname in self.classes:
-                self._check_class_name_bound(tname, ctx)
-            if tname == 'int':
-                checks.append('(%s.tag==AIL_T_INT||%s.tag==AIL_T_BOOL%s)' % (v, v, ('||%s.tag==AIL_T_BIG' % v) if biggate.ON else ''))
-            elif tname in TYPE_TAG:
-                checks.append('%s.tag==%s' % (v, TYPE_TAG[tname]))
-            elif tname == 'range':
-                checks.append('%s.tag==AIL_T_RANGE' % v)
-            elif tname in EXC_IDS and tname not in self.classes:
-                checks.append('((%s.tag==AIL_T_INST || %s.tag==AIL_T_EXC) && ail_class_is_or_subclass('
-                              '((ail_instobj *)%s.o)->cls, cx->builtin_cls[%s]))' % (v, v, v, EXC_IDS[tname]))
-            elif tname in self.classes and self._is_exc_class(tname):
-                checks.append('((%s.tag==AIL_T_INST || %s.tag==AIL_T_EXC) && ail_class_is_or_subclass('
-                              '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
-                              (v, v, v, self.global_slots['class:' + tname]))
-            elif tname in self.classes:
-                checks.append('(%s.tag==AIL_T_INST && ail_class_is_or_subclass('
-                              '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
-                              (v, v, self.global_slots['class:' + tname]))
-            else:
-                raise Unsupported('isinstance() against an unknown type %s' % tname)
+            check = self._static_isinstance_check(v, tnode, ctx)
+            if check is None:
+                # A type value known only at run time (a parameter, a field, an element of a
+                # tuple): the CLASS objects and tuples of them the program can build are tested
+                # by the small recursive helper, never refused.
+                tobj = self.expr(tnode, ctx)
+                self._ensure_dyn_isinstance()
+                check = 'ail2_dyn_isinstance(%s, %s)' % (v, tobj)
+            checks.append(check)
         t = ctx.tmp()
         ctx.emit('%s = ail_box_bool(%s);' % (t, ' || '.join(checks)))
         return t
