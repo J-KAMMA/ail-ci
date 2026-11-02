@@ -62,18 +62,226 @@ def _own_nodes(fn):
             stack.extend(ast.iter_child_nodes(node))
 
 
-def _unsafe_body(fn):
+def _constant_number(node):
+    """The int/float value of a literal (or one leading +/-), else None.  Bools are excluded so
+    the divisor proof cannot treat `True % 1` as an ordinary numeric fact by accident."""
+    sign = 1
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        sign = -1 if isinstance(node.op, ast.USub) else 1
+        node = node.operand
+    if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
+            and not isinstance(node.value, bool):
+        return sign * node.value
+    return None
+
+
+def _module_binding_counts(tree):
+    """How many times each name is bound at module scope, counting every shape that binds one
+    (assignment/augmented assignment/annotation, `for`/`with ... as` target, import alias,
+    `def`/`class` name, delete) and never looking inside a function or class body."""
+    counts = {}
+
+    def add(name):
+        counts[name] = counts.get(name, 0) + 1
+
+    def scan(node):
+        if isinstance(node, ast.Name):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                add(node.id)
+            return
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            add(node.name)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                add(alias.asname or alias.name.split('.')[0])
+            return
+        if isinstance(node, ast.ExceptHandler) and node.name:
+            add(node.name)
+        for child in ast.iter_child_nodes(node):
+            scan(child)
+
+    for statement in tree.body:
+        scan(statement)
+    return counts
+
+
+def _written_globals(tree):
+    """Names a function both declares `global` and rebinds; such a name is a mutable module
+    variable, not a one-time constant."""
+    written = set()
+    for fn in ast.walk(tree):
+        if not isinstance(fn, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        names = set()
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Global):
+                names.update(node.names)
+        if not names:
+            continue
+        for node in ast.walk(fn):
+            if isinstance(node, ast.Name) and node.id in names \
+                    and isinstance(node.ctx, (ast.Store, ast.Del)):
+                written.add(node.id)
+            elif isinstance(node, ast.alias) and (node.asname or node.name.split('.')[0]) in names:
+                written.add(node.asname or node.name.split('.')[0])
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) \
+                    and node is not fn and node.name in names:
+                written.add(node.name)
+    return written
+
+
+def _module_numbers(tree):
+    """Top-level `NAME = <numeric literal>` bindings that are genuine one-time constants: the name
+    is bound exactly once at module scope and no function rebinds it under `global`.  A divisor
+    naming one is provably nonzero when the literal is; a rebound name is not proven."""
+    counts = _module_binding_counts(tree)
+    written = _written_globals(tree)
+    found = {}
+    for node in tree.body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1 \
+                and isinstance(node.targets[0], ast.Name):
+            name = node.targets[0].id
+            if counts.get(name) != 1 or name in written:
+                continue
+            value = _constant_number(node.value)
+            if value is not None:
+                found[name] = value
+    return found
+
+
+def _local_positive(fn, name):
+    """True when every binding of local `name` in this function keeps it positive: a positive
+    literal, or a positive literal added to it, with a positive literal binding at the function's
+    own top level before every read.  A parameter, a tuple/`for`/`with` target, a binding inside a
+    branch that may not run, or a binding whose value is not a positive literal is not proven.
+    This is deliberately tiny and only lets safe `%`/`//`/`/` through the body gate; it does not
+    claim a general interval analysis."""
+    params = {a.arg for a in fn.args.posonlyargs + fn.args.args + fn.args.kwonlyargs}
+    if fn.args.vararg is not None:
+        params.add(fn.args.vararg.arg)
+    if fn.args.kwarg is not None:
+        params.add(fn.args.kwarg.arg)
+    if name in params:
+        return False
+    parents = {}
+    bindings = []
+    stack = [(statement, fn) for statement in fn.body]
+    while stack:
+        node, parent = stack.pop()
+        parents[node] = parent
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        if isinstance(node, ast.Name) and node.id == name \
+                and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bindings.append(node)
+        for child in ast.iter_child_nodes(node):
+            stack.append((child, node))
+    if not bindings:
+        return None                            # not a local: the caller may consult a module constant
+    events = []
+    seed_line = None
+    for bind in bindings:
+        parent = parents.get(bind)
+        if isinstance(parent, ast.Assign) and any(target is bind for target in parent.targets):
+            events.append(('set', parent.value))
+            if parents.get(parent) is fn:
+                value = _constant_number(parent.value)
+                if value is not None and value > 0:
+                    if seed_line is None or parent.lineno < seed_line:
+                        seed_line = parent.lineno
+        elif isinstance(parent, ast.AnnAssign) and parent.target is bind:
+            events.append(('set', parent.value))
+            if parents.get(parent) is fn:
+                value = _constant_number(parent.value)
+                if value is not None and value > 0:
+                    if seed_line is None or parent.lineno < seed_line:
+                        seed_line = parent.lineno
+        elif isinstance(parent, ast.AugAssign) and parent.target is bind:
+            events.append(('aug', parent.op, parent.value))
+        else:
+            return False                        # tuple/`for`/`with` target, delete, walrus, ...
+    if seed_line is None:
+        return False                           # no unconditional positive binding at the top level
+    for node in _own_nodes(fn):
+        if isinstance(node, ast.Name) and node.id == name \
+                and isinstance(node.ctx, ast.Load) and node.lineno <= seed_line:
+            return False                       # a read before the binding would be unbound
+    for event in events:
+        if event[0] == 'set':
+            value = _constant_number(event[1])
+            if value is None or value <= 0:
+                return False
+        else:
+            _tag, op, value = event
+            amount = _constant_number(value)
+            if not isinstance(op, ast.Add) or amount is None or amount <= 0:
+                return False
+    return True
+
+
+def _provably_nonzero(node, fn, module_numbers):
+    value = _constant_number(node)
+    if value is not None:
+        return value != 0
+    if isinstance(node, ast.Name):
+        positive = _local_positive(fn, node.id)
+        if positive is not None:
+            return positive
+        return module_numbers.get(node.id, 0) != 0
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        return _provably_nonzero(node.operand, fn, module_numbers)
+    return False
+
+
+_SAFE_CALLS = frozenset({'range', 'len'})
+
+
+def _safe_builtin_call(node, fn, module_names):
+    """`range(...)` and `len(...)` when the name is still the builtin (not shadowed at module
+    scope, by a parameter, a local, or a nested def).  The typed emitter only compiles these on
+    values it already knows, and neither has a side effect; `range` over int64 arguments and
+    `len` of a typed list/str cannot raise.  Every other call stays out of the clone."""
+    if not isinstance(node.func, ast.Name) or node.func.id not in _SAFE_CALLS:
+        return False
+    name = node.func.id
+    if name in module_names or name in {a.arg for a in fn.args.args}:
+        return False
+    if node.keywords or any(isinstance(a, ast.Starred) for a in node.args):
+        return False
+    for child in _own_nodes(fn):
+        if isinstance(child, ast.Name) and child.id == name \
+                and isinstance(child.ctx, (ast.Store, ast.Del)):
+            return False
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child.name == name:
+            return False
+    if name == 'range':
+        return 1 <= len(node.args) <= 3
+    return len(node.args) == 1
+
+
+def _unsafe_body(fn, module_numbers=None, module_names=()):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
     subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), a
     call (an arbitrary side effect or exception), and `raise`/`assert`/`try`/`with`/import are all
-    outside this pass.  This is deliberately conservative; a missed speed-up is safe."""
+    outside this pass.  `%`, `//` and `/` are allowed only when the divisor is a positive literal,
+    a local every binding keeps positive (`i = 2; i += 1`), or a nonzero literal module
+    constant; such a division cannot trap.  `range`/`len` are allowed when their names are the
+    builtins.  This is deliberately conservative; a missed speed-up is safe."""
+    module_numbers = module_numbers or {}
+    module_names = set(module_names)
     for node in _own_nodes(fn):
         if isinstance(node, ast.Subscript):
             return 'indexing can raise'
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
             return 'division or power can raise'
-        if isinstance(node, ast.Call):
+        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) \
+                and not _provably_nonzero(node.right, fn, module_numbers):
+            return 'division or power can raise'
+        if isinstance(node, ast.Call) and not _safe_builtin_call(node, fn, module_names):
             return 'a call can raise or have side effects'
         if isinstance(node, (ast.Raise, ast.Assert)):
             return 'the function can raise'
@@ -90,12 +298,35 @@ def _unsafe_body(fn):
     return None
 
 
-def _list_param_mutated(fn, list_params):
+_NONMUTATING_CALLS = frozenset({'len', 'sum', 'min', 'max', 'sorted', 'any', 'all'})
+
+
+def _safe_nonmutating_call(node, fn, module_names):
+    """A builtin that reads its arguments and never mutates them, still spelled as the builtin
+    (not shadowed at module scope, by a parameter, a local, or a nested def).  Passing a list
+    parameter to it is not passing the list on to another user function."""
+    if not isinstance(node.func, ast.Name) or node.func.id not in _NONMUTATING_CALLS:
+        return False
+    name = node.func.id
+    if name in module_names or name in {a.arg for a in fn.args.args}:
+        return False
+    for child in _own_nodes(fn):
+        if isinstance(child, ast.Name) and child.id == name \
+                and isinstance(child.ctx, (ast.Store, ast.Del)):
+            return False
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child.name == name:
+            return False
+    return True
+
+
+def _list_param_mutated(fn, list_params, module_names=()):
     """A list argument is copied into the typed call, so a function that mutates it must stay in
     CPython (mutation would otherwise not be visible to the caller).  This also refuses passing a
-    list parameter on to another user function, which may mutate it one step away."""
+    list parameter on to another user function, which may mutate it one step away -- except to a
+    builtin that only reads it (`len`, `sum`, `min`, `max`, `sorted`, `any`, `all`)."""
     if not list_params:
         return False
+    module_names = set(module_names)
     for node in _own_nodes(fn):
         if (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
                 and isinstance(node.func.value, ast.Name)
@@ -114,7 +345,7 @@ def _list_param_mutated(fn, list_params):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             return True
     for node in _own_nodes(fn):
-        if isinstance(node, ast.Call):
+        if isinstance(node, ast.Call) and not _safe_nonmutating_call(node, fn, module_names):
             for arg in list(node.args) + [kw.value for kw in node.keywords]:
                 if isinstance(arg, ast.Name) and arg.id in list_params:
                     return True
@@ -253,6 +484,22 @@ pymix.analyze = _analyze
                AIL_EXACT_INT='1', AIL_SURFACE='python', AIL_GENERAL='v2')
     env.pop('AIL_UNIFIED_FORCE', None)
     env.pop('AIL_NO_MIX', None)
+
+    def direct_capture():
+        """Run the raw mixed-mode emitter on the original source and write its capture, if any."""
+        capture_path.unlink(missing_ok=True)   # never reuse a partial capture from a failed CLI
+        runner = run_dir / 'direct.py'
+        runner.write_text(
+            'import os, pyboxed2\n'
+            'pyboxed2.build(open(os.environ["AIL_HYBRID_SRC"], encoding="utf-8").read(), {}, allow_mix=True)\n',
+            encoding='utf-8')
+        direct_env = dict(env, AIL_HYBRID_SRC=str(source_path))
+        try:
+            subprocess.run([sys.executable, '-B', str(runner)], env=direct_env,
+                           capture_output=True, text=True, timeout=900)
+        except Exception:
+            pass
+
     try:
         proc = subprocess.run([sys.executable, '-B', str(cli), 'compile', str(source_path),
                                '--syntax', 'python', '--exact-int', '-o', str(run_dir / 'analysis-only')],
@@ -262,23 +509,23 @@ pymix.analyze = _analyze
             # loop over a tuple, an unsupported import used only by `main`, ...).  A direct
             # pyboxed2 build analyses the original source and can still wire the independent
             # helpers; if that also fails, CPython fallback is the answer.
-            capture_path.unlink(missing_ok=True)   # never reuse a partial capture from a failed CLI
-            runner = run_dir / 'direct.py'
-            runner.write_text(
-                'import os, pyboxed2\n'
-                'pyboxed2.build(open(os.environ["AIL_HYBRID_SRC"], encoding="utf-8").read(), {}, allow_mix=True)\n',
-                encoding='utf-8')
-            direct_env = dict(env, AIL_HYBRID_SRC=str(source_path))
-            try:
-                subprocess.run([sys.executable, '-B', str(runner)], env=direct_env,
-                               capture_output=True, text=True, timeout=900)
-            except Exception:
-                pass
+            direct_capture()
         if not capture_path.exists():
             note = [line for line in (proc.stderr or proc.stdout or '').strip().splitlines() if line.strip()]
             text = note[-1] if note else 'the analysis build was refused'
             return {'mix_units': [], 'typed_inline': [], 'note': text[:600]}, {}
         data = json.loads(capture_path.read_text(encoding='utf-8'))
+        # A program the typed path takes WHOLE emits no mixed-mode units (there is no general
+        # path to splice them into), so the hybrid used to accelerate nothing.  Ask the same
+        # emitter for the per-function units of the original source as well; a fully typed
+        # program's hot helpers then still get a native clone, and `_select` applies its usual
+        # safety gate.  If the direct build emits nothing, keep the typed build's own data.
+        if not data.get('mix_units'):
+            direct_capture()
+            if capture_path.exists():
+                direct = json.loads(capture_path.read_text(encoding='utf-8'))
+                if direct.get('mix_units'):
+                    data = direct
     except Exception as error:
         return {'mix_units': [], 'typed_inline': [], 'note': ('analysis failed: ' + str(error))[:600]}, {}
     finally:
@@ -298,6 +545,8 @@ def _select(src, tree, report, facts):
     import unified
 
     funcs = _top_level_functions(tree)
+    module_numbers = _module_numbers(tree)
+    module_names = set(_module_binding_counts(tree)) | set(funcs)
     big_hard = bigcap.marked(tree, local=False)
     big_local = bigcap.marked(tree)
     id_reach, id_any = pyboxed2._mix_identity_unsafe(tree)
@@ -327,12 +576,12 @@ def _select(src, tree, report, facts):
         if bad:
             rejected[pyname] = 'parameter kind %s stays in CPython' % bad[0]
             continue
-        unsafe = _unsafe_body(funcs[pyname])
+        unsafe = _unsafe_body(funcs[pyname], module_numbers, module_names)
         if unsafe:
             rejected[pyname] = unsafe
             continue
         list_params = {p for p, k in params if k in _LIST}
-        if _list_param_mutated(funcs[pyname], list_params):
+        if _list_param_mutated(funcs[pyname], list_params, module_names):
             rejected[pyname] = 'the list parameter is mutated'
             continue
         chosen[pyname] = {

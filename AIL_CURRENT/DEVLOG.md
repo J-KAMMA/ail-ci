@@ -1,3 +1,25 @@
+## 2026-11-02 -- prog14: typed reach for eight real programs (job-prog14-11020844)
+
+Profiled the eight task programs with CPython 3.12; the hot functions are g02_002's
+`proper_divisor_sum` (0.030 s of 0.032 s, 94%) and t341's `count_valid` (0.011 s of 0.011 s).  Both
+now become hybrid typed clones.  `pymix` infers `a, b = b, (a + b) % MOD` element by element and
+keeps literal module constants in the candidacy slice, and the hybrid body gate accepts a
+`%`/`//`/`/` whose divisor is a positive literal, a local bound once to a positive literal and only
+increased, or a one-time nonzero literal module constant; `range`/`len` are accepted while they are
+the builtins.  The proofs are conservative: a name rebound at module scope (second assignment,
+`+=`, `for`, `global`) is not a constant, a set/dict literal is not kept, and a parameter,
+tuple/`for` target, branch-only binding, boolean or read before the binding is not a positive
+local.  The other six programs stay in CPython for the reasons in `lab/progfix/prog14.md` (`match`,
+generators/`Optional[Tuple]`, nested closures, csv/None mains, `getattr`).
+
+Tests: the new `test_ail_prog14` (registered in `tests.d`) plus `test_ail_cpython_hybrid`,
+`test_ail_flush_exit`, `test_ail_mixed_bounds`, `test_ail_walkmemo`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.  Probes in `/tmp/probes/prog14_*.py`
+cover literal/local/module/parameter/list/attribute/dict divisors, `% 0`, negatives, booleans,
+rebinding (`+=`, `for`, `global`), read-before-binding, int64 edges and big ints; every probe
+matches CPython or is refused by name, and the hybrid build matches CPython on each one.  The
+generated C of the ten `lab/compare` tasks is byte-identical to `HEAD`.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
