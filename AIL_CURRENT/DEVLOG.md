@@ -1,3 +1,15 @@
+## 2026-11-02 -- non-type isinstance arguments raise TypeError
+
+The review found that `ail2_dyn_isinstance` returned false for any second argument that was not a
+class or a tuple, so a non-type value (or a non-type element before a match) was silently skipped
+and could even turn `isinstance(1, (5, int))` into `True`. The helper now raises CPython's
+`TypeError` for such a value and the generated test checks the pending exception after a dynamic
+spec; a non-type element after an earlier match stays unevaluated, as in CPython. Names that are
+unsupported builtin/typing types (`object`, `complex`, ...) keep the named compile refusal, as do
+list/set/dict literals and union/parameterised type expressions; a local or parameter shadowing a
+builtin type name is refused by name again. `test_ail_covisin1.py` and `test_ail_class_reach.py`
+cover the forms on the default and general builds.
+
 ## 2026-11-02 -- a decorated class is not a class-only module binding
 
 The keyword-argument path added by the previous entry classified every `ClassDef` as binding the

@@ -1,3 +1,24 @@
+## 2026-11-02 -- covisin1 review: non-type isinstance arguments raise TypeError (job-rbcovisin1-11021332)
+
+The review found that `ail2_dyn_isinstance` returned false for any second argument that was not a
+class or a tuple, so a non-type value (or a non-type element before a match) was silently skipped
+and could even turn `isinstance(1, (5, int))` into `True`.  The helper now raises CPython's
+`TypeError` for such a value and the generated test checks the pending exception after a dynamic
+spec; a non-type element after an earlier match stays unevaluated, as in CPython.  Names that are
+unsupported builtin/typing types (`object`, `complex`, ...) keep the named compile refusal, as do
+list/set/dict literals and union/parameterised type expressions; a local or parameter shadowing a
+builtin type name is refused by name again, restoring the class-reach expectations.
+
+Probes (`/tmp/probes/fix_isinst_valid.py`, `fix_isinst_bad.py`, plus the review's
+`p_nontype_before_match`, `p02_nontype_scalar`, `p_isinst_badtype`, `p14`/`p15`, `p18`, `p21`,
+`p32`/`p33`) match CPython on the default and general builds for a scalar, `None`, a list item, a
+dict value, an attribute, a module global, a function argument, tuple/nested elements before and
+after a match, empty tuples, bool/int, bytes/bytearray and caught or uncaught `TypeError`; the
+unbuildable type-expression forms are refused by name.  Final-state tests: `test_ail_covisin1`,
+`test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`, `test_ail_tuples`,
+`test_ail_modconst`, `test_ail_py_typed_gaps`, `test_ail_dunders` and `test_ail_class_reach`
+(0 failed).
+
 ## 2026-11-01 -- covisin1 review: a module-bound class name keeps its constructor when the binding did not run (job-covisin1-11020702)
 
 The review found that routing a module-rebound class name through its module slot also sent the

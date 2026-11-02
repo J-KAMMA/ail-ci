@@ -8870,7 +8870,7 @@ class Compiler(boxclosure.ClosureMixin):
             return
         self._dyn_isinstance = True
         self.top_defs.append(
-            'static int ail2_dyn_isinstance(ail_obj x, ail_obj spec) {\n'
+            'static int ail2_dyn_isinstance(ail_ctx *cx, ail_obj x, ail_obj spec) {\n'
             '    if (spec.tag == AIL_T_CLASS) {\n'
             '        if (x.tag == AIL_T_INST || x.tag == AIL_T_EXC)\n'
             '            return ail_class_is_or_subclass(((ail_instobj *)x.o)->cls, spec);\n'
@@ -8878,9 +8878,15 @@ class Compiler(boxclosure.ClosureMixin):
             '    }\n'
             '    if (spec.tag == AIL_T_TUPLE) {\n'
             '        ail_vecobj *v = (ail_vecobj *)spec.o;\n'
-            '        for (int64_t i = 0; i < v->n; i++)\n'
-            '            if (ail2_dyn_isinstance(x, v->p[i])) return 1;\n'
+            '        for (int64_t i = 0; i < v->n; i++) {\n'
+            '            int r = ail2_dyn_isinstance(cx, x, v->p[i]);\n'
+            '            if (cx->exc_pending) return 0;\n'
+            '            if (r) return 1;\n'
+            '        }\n'
+            '        return 0;\n'
             '    }\n'
+            '    ail_raise_c(cx, AIL_B_TYPEERROR, '
+            '"isinstance() arg 2 must be a type, a tuple of types, or a union");\n'
             '    return 0;\n'
             '}\n\n')
 
@@ -8891,7 +8897,8 @@ class Compiler(boxclosure.ClosureMixin):
             return None
         tname = tnode.id
         if (tname in getattr(ctx, 'local_bindings', ())
-                and (tname in self.classes or tname in TYPE_TAG or tname in EXC_IDS)):
+                and (tname in self.classes or tname in TYPE_TAG or tname in EXC_IDS
+                     or tname in _TYPE_BASES)):
             raise Unsupported('isinstance() target %s is a local or parameter that shadows a '
                               'class or builtin type name; CPython raises TypeError for a value '
                               'that is not a type' % tname)
@@ -8919,6 +8926,14 @@ class Compiler(boxclosure.ClosureMixin):
             return ('(%s.tag==AIL_T_INST && ail_class_is_or_subclass('
                     '((ail_instobj *)%s.o)->cls, g_slots_arr[%d]))' %
                     (v, v, self.global_slots['class:' + tname]))
+        if (tname in _TYPE_BASES and tname not in TYPE_TAG
+                and tname not in ('bytes', 'bytearray')
+                and tname not in self.classes and tname not in EXC_IDS
+                and tname not in self.module_names
+                and tname not in getattr(ctx, 'local_bindings', ())):
+            # A builtin type this path has no value for (object, complex, typing's names): the
+            # run-time fallback cannot read it, so keep the named compile refusal.
+            raise Unsupported('isinstance() against an unknown type %s' % tname)
         return None
 
     def _b_isinstance(self, args, kwargs, ctx):
@@ -8935,18 +8950,34 @@ class Compiler(boxclosure.ClosureMixin):
         if not types:
             return 'ail_box_bool(0)'
         checks = []
+        dynamic = False
         for tnode in types:
             check = self._static_isinstance_check(v, tnode, ctx)
             if check is None:
+                if isinstance(tnode, ast.BinOp) and isinstance(tnode.op, ast.BitOr):
+                    raise Unsupported('isinstance() with a union type argument')
+                if isinstance(tnode, ast.Subscript) and _is_type_expr(tnode):
+                    raise Unsupported('isinstance() with a parameterized type argument')
+                if (isinstance(tnode, ast.Attribute) and isinstance(tnode.value, ast.Name)
+                        and tnode.value.id in ('typing', 'collections', 't')):
+                    raise Unsupported('isinstance() with a typing type argument')
+                if isinstance(tnode, (ast.List, ast.Set, ast.Dict)):
+                    raise Unsupported('isinstance() with a list/set/dict literal as the type argument')
                 # A type value known only at run time (a parameter, a field, an element of a
                 # tuple): the CLASS objects and tuples of them the program can build are tested
-                # by the small recursive helper, never refused.
+                # by the small recursive helper, which raises CPython's TypeError for an element
+                # that is not a type. The `||` short-circuit keeps a later invalid element
+                # unevaluated once an earlier one matched.
                 tobj = self.expr(tnode, ctx)
                 self._ensure_dyn_isinstance()
-                check = 'ail2_dyn_isinstance(%s, %s)' % (v, tobj)
+                dynamic = True
+                check = 'ail2_dyn_isinstance(cx, %s, %s)' % (v, tobj)
             checks.append(check)
         t = ctx.tmp()
         ctx.emit('%s = ail_box_bool(%s);' % (t, ' || '.join(checks)))
+        if dynamic:
+            ctx.uses_st = True
+            ctx.emit('if (cx->exc_pending) { st = AIL_EXC; goto %s; }' % ctx.cur_err_target())
         return t
 
     def _b_enumerate(self, args, kwargs, ctx):
