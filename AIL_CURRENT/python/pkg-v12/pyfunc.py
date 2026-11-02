@@ -18407,6 +18407,10 @@ def _pair_plan(src, ctx):
     own docstring for the identical bug this mirrors, and `_inline_pair_fold` for the fix).
     """
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id == 'enumerate':
+        if len(src.args) not in (1, 2) or {kw.arg for kw in src.keywords} - {'start'}:
+            # No iterable at all, or an argument list the boxed/general path rejects: refuse it by
+            # the same name instead of indexing the argument list.
+            raise Unsupported('enumerate() with other than (iterable[, start])')
         if len(src.args) != 1 or src.keywords:
             # `enumerate(xs, start=1)` inside a comprehension or a fold: refused by name (the
             # index counted from 0 here, whatever the start said)
@@ -18502,6 +18506,10 @@ def _pair_key_kind(src, ctx):
 def _pair_value_kind(src, ctx):
     """The kind of the SECOND name of an `enumerate` / `zip` / `.items()` pair target."""
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id in ('enumerate', 'zip'):
+        if src.func.id == 'enumerate' and not src.args:
+            return INT
+        if src.func.id == 'zip' and len(src.args) < 2:
+            return INT
         base = src.args[0] if src.func.id == 'enumerate' else src.args[1]
         return _iter_elem_kind(base, ctx)
     if (isinstance(src, ast.Call) and isinstance(src.func, ast.Attribute)
@@ -19698,7 +19706,6 @@ def _listcomp_kind(node, ctx):
         if len(g.target.elts) != 2 or not all(isinstance(e, ast.Name) for e in g.target.elts):
             raise Unsupported('a comprehension target that is not a pair of names')
         pair = [e.id for e in g.target.elts]
-        _pair_plan(g.iter, ctx)
     elif not isinstance(g.target, ast.Name):
         raise Unsupported('a comprehension target that is not a name')
     source = g.iter
