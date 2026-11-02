@@ -1759,7 +1759,11 @@ def _etype(node, ctx):
         if isinstance(node.op, ast.Add) and _is_bytes_expr(node.left, ctx) \
                 and _is_bytes_expr(node.right, ctx):
             return BYTES
-        if any(_is_ref_kind(_etype(value, ctx)) for value in (node.left, node.right)):
+        l = _etype(node.left, ctx)
+        if _is_ref_kind(l):
+            raise Unsupported('arithmetic on a struct is unsupported; read a numeric field')
+        r = _etype(node.right, ctx)
+        if _is_ref_kind(r):
             raise Unsupported('arithmetic on a struct is unsupported; read a numeric field')
         nsum_kinds = (_etype(node.left, ctx), _etype(node.right, ctx))
         if NSUM in nsum_kinds:
@@ -1806,7 +1810,6 @@ def _etype(node, ctx):
                         'time, where CPython returns a float (2 ** -1 is 0.5); the typed path '
                         'uses exact int64 integer power, so this program is built on the general path')
             return FLT
-        l, r = _etype(node.left, ctx), _etype(node.right, ctx)
         return FLT if FLT in (l, r) else INT
     if isinstance(node, (ast.Compare, ast.BoolOp)):
         return INT
@@ -7318,6 +7321,14 @@ def _slist_snapshot(value, ctx):
 
 
 def _numeric_field_kind(node, ctx):
+    if isinstance(node, ast.IfExp):
+        kinds = [_scalar_list_expression_kind(branch, ctx) for branch in (node.body, node.orelse)]
+        if kinds[0] in (LIST, FLIST) and (kinds[1] == kinds[0]
+                                           or kinds[1] is None and _is_empty_list_lit(node.orelse)):
+            return kinds[0]
+        if kinds[1] in (LIST, FLIST) and kinds[0] is None and _is_empty_list_lit(node.body):
+            return kinds[1]
+        return None
     if isinstance(node, ast.List):
         if any(isinstance(element, ast.Tuple) for element in node.elts):
             return None
@@ -20473,6 +20484,49 @@ def _range_list_comp(node, ctx):
                           ifs=[], is_async=0)])
 
 
+def _set_keys_are_str_or_bytes(node, ctx):
+    """Whether this unannotated set expression is keyed by str/bytes rather than int numbers.
+
+    Only the int-table path may materialise `a & b` in a typed assignment; a str/bytes-keyed
+    unannotated set keeps its keys in ail_stab/ail_btab, which the int-table helpers cannot
+    read.  Such programs keep the older, general path (still CPython-compatible)."""
+    if isinstance(node, ast.Name):
+        return (node.id in getattr(ctx, 'untyped_str_sets', ())
+                or node.id in getattr(ctx, 'untyped_byte_sets', ())
+                or node.id in ctx.skeys or node.id in ctx.bkeys)
+    if isinstance(node, ast.BinOp) and type(node.op) in SET_OPS:
+        return (_set_keys_are_str_or_bytes(node.left, ctx)
+                or _set_keys_are_str_or_bytes(node.right, ctx))
+    if isinstance(node, ast.Set):
+        try:
+            return any(_is_str_expr(e, ctx) or _is_bytes_expr(e, ctx) for e in node.elts)
+        except Unsupported:
+            return False
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'set' and node.args):
+        source = node.args[0]
+        if isinstance(source, (ast.List, ast.Tuple)):
+            try:
+                return any(_is_str_expr(e, ctx) or _is_bytes_expr(e, ctx)
+                           for e in source.elts)
+            except Unsupported:
+                return False
+        if isinstance(source, ast.Name):
+            return (source.id in getattr(ctx, 'untyped_str_sets', ())
+                    or source.id in getattr(ctx, 'untyped_byte_sets', ())
+                    or source.id in getattr(ctx, 'slist_names', ())
+                    or source.id in ctx.blist)
+        if isinstance(source, ast.IfExp):
+            return (_set_keys_are_str_or_bytes(source.body, ctx)
+                    or _set_keys_are_str_or_bytes(source.orelse, ctx))
+        try:
+            if _is_str_expr(source, ctx) or _is_bytes_expr(source, ctx):
+                return True
+        except Unsupported:
+            pass
+    return False
+
+
 def _container_literal(node, ctx):
     """Container constructors and literals, filled by `_stmt`'s assignment handling."""
     if _is_argv_slice(node):
@@ -20514,9 +20568,22 @@ def _container_literal(node, ctx):
             return DICT
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'set' \
             and len(node.args) == 1:
+        if _set_keys_are_str_or_bytes(node, ctx):
+            # A str/bytes-keyed unannotated set lives in ail_stab/ail_btab on the general path;
+            # the typed `set(xs)` fill below only knows how to build an ail_tab from int keys.
+            # Leave the whole function to the general path rather than emit ail_tab_put on an
+            # ail_str (or claim the destination as an int table that its other lines disagree
+            # with), exactly as a set operator over str keys already does.
+            raise Unsupported('set(...) of str or bytes keys in a function built on the typed '
+                              'path; an unannotated set of str/bytes keys is left to the general '
+                              'path -- move it to a function of its own, or annotate its keys')
         return SET                                  # set(xs) -- filled by the caller below
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'sorted':
         return LIST
+    if (isinstance(node, ast.BinOp) and type(node.op) in SET_OPS
+            and _set_kind_of(node, ctx) == SET
+            and not _set_keys_are_str_or_bytes(node, ctx)):
+        return SET
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Mult):
         # `xs = [e] * n` / `xs = n * [e]` -- a one-element list literal repeated n times,
         # filled by the same Assign caller as every other container literal. Element kind picks
@@ -21226,6 +21293,9 @@ def _numeric_assign(node,ctx,ind):
     target=node.targets[0] if isinstance(node,ast.Assign) and len(node.targets)==1 else node.target if isinstance(node,ast.AugAssign) else None
     if not isinstance(target,ast.Name):return None
     value=ast.BinOp(left=ast.Name(id=target.id,ctx=ast.Load()),op=node.op,right=node.value) if isinstance(node,ast.AugAssign) else node.value
+    if (isinstance(value, ast.BinOp) and type(value.op) in SET_OPS
+            and _set_kind_of(value, ctx) == SET):
+        return None
     if not _numeric_expression_needed(value,ctx):return None
     kind=_etype(value,ctx)
     if kind not in NUM:return None
@@ -22507,6 +22577,24 @@ def _stmt_inner(node, ctx, ind):
                             pad, ctx.dpool(), htemp, ktemp, vtemp)
                     out += '%sail_tab_put(&%s, %s, %s);\n' % (pad, c, otemp, htemp)
                 return out
+            if isinstance(v, ast.BinOp) and type(v.op) in SET_OPS:
+                # An unannotated set built by `a & b`, `a | b`, `a - b` or `a ^ b`:
+                # `_set_value` materialises the operation into a private table, then the
+                # result is copied into this name's own table (the same value semantics
+                # every other container binding here has -- no aliasing). The destination's
+                # key kind is fixed by its first binding, so a str/bytes-keyed name cannot
+                # receive this int table: refuse rather than emit ail_tab_copy into an
+                # ail_stab/ail_btab (or let the earlier binding disagree with this one).
+                if (t.id in ctx.skeys or t.id in ctx.bkeys
+                        or t.id in getattr(ctx, 'untyped_str_sets', ())
+                        or t.id in getattr(ctx, 'untyped_byte_sets', ())):
+                    raise Unsupported('%r holds a str/bytes-keyed unannotated set; a set '
+                                      'operator with int keys cannot rebind it -- a local\'s '
+                                      'key kind is settled by its first assignment, so give the '
+                                      'int set a different name' % t.id)
+                src = _set_value(v, ctx)
+                return (_flush(ctx, pad) + clear
+                        + '%sail_tab_copy(&%s, &%s);\n' % (pad, c, src))
             if isinstance(v, ast.Call) and isinstance(v.func, ast.Name):
                 if v.func.id == 'set' and v.args:                    # set(xs)
                     if _seq_yields_handles(v.args[0], ctx):
@@ -28656,9 +28744,135 @@ def _promote_floats(fn, ctx):
                     nsum_names.update(t.id for t in n.targets if isinstance(t, ast.Name))
             except Unsupported:
                 pass
+    # The str- and bytes-keyed unannotated sets.  The set-operator path below materialises an
+    # operation as an int table (`_set_value`); a str/bytes set keeps its keys in a separate
+    # table, so taking that path for one would emit ail_tab_* calls on an ail_stab/ail_btab and
+    # fail in gcc.  Leave those to the existing, general path instead.  The fixed point follows
+    # a set's source (`set(words)` where words is a list of str, a set literal of strings) and
+    # plain aliases, so a later `a & b` knows both sides are string sets.
+    untyped_str_sets, untyped_byte_sets = set(), set()
+
+    def _set_item_key(e):
+        try:
+            if _is_str_expr(e, ctx):
+                return STR
+            if _is_bytes_expr(e, ctx):
+                return BYTES
+        except Unsupported:
+            pass
+        if isinstance(e, ast.Name):
+            if e.id in untyped_str_sets:
+                return STR
+            if e.id in untyped_byte_sets:
+                return BYTES
+            if e.id in slist_names:
+                return STR
+            if e.id in ctx.blist:
+                return BYTES
+            t = ctx.types.get(e.id)
+            if t in (LIST, 'array', RANGE):
+                return INT
+            if t == SLIST:
+                return STR
+            if t == BLIST:
+                return BYTES
+        if isinstance(e, ast.IfExp):
+            left, right = _set_item_key(e.body), _set_item_key(e.orelse)
+            return left if left == right else None
+        if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id == 'range':
+            return INT
+        return None
+
+    def _set_source_key(src):
+        if isinstance(src, (ast.List, ast.Tuple)):
+            kinds = {_set_item_key(e) for e in src.elts}
+            return kinds.pop() if len(kinds) == 1 else None
+        if isinstance(src, ast.IfExp):
+            left, right = _set_source_key(src.body), _set_source_key(src.orelse)
+            return left if left == right else None
+        if isinstance(src, ast.Subscript) and isinstance(src.slice, ast.Slice):
+            return _set_source_key(src.value)
+        if (isinstance(src, ast.Call) and isinstance(src.func, ast.Name)
+                and src.func.id in ('list', 'sorted') and src.args):
+            return _set_source_key(src.args[0])
+        if isinstance(src, ast.ListComp):
+            try:
+                kind = _listcomp_kind(src, ctx)
+            except Unsupported:
+                kind = None
+            return LIST if kind == LIST else STR if kind == SLIST else None
+        return _set_item_key(src)
+
+    def _set_value_key(v):
+        if isinstance(v, ast.Set):
+            kinds = {_set_item_key(e) for e in v.elts}
+            return kinds.pop() if len(kinds) == 1 else None
+        if (isinstance(v, ast.Call) and isinstance(v.func, ast.Name)
+                and v.func.id == 'set'):
+            return _set_source_key(v.args[0]) if v.args else None
+        if isinstance(v, ast.Name):
+            return _set_item_key(v)
+        if isinstance(v, ast.BinOp) and type(v.op) in SET_OPS:
+            left, right = _set_value_key(v.left), _set_value_key(v.right)
+            return left if left == right else None
+        return None
+
+    while True:
+        grew = False
+        for n in nodes:
+            if (not isinstance(n, ast.Assign) or len(n.targets) != 1
+                    or not isinstance(n.targets[0], ast.Name)):
+                continue
+            name = n.targets[0].id
+            if name in untyped_str_sets or name in untyped_byte_sets:
+                continue
+            kind = _set_value_key(n.value)
+            if kind == STR:
+                untyped_str_sets.add(name)
+                grew = True
+            elif kind == BYTES:
+                untyped_byte_sets.add(name)
+                grew = True
+        if not grew:
+            break
+    ctx.untyped_str_sets = untyped_str_sets
+    ctx.untyped_byte_sets = untyped_byte_sets
+
+    # Unannotated sets built by `set(...)`, by a plain alias, or by a set operator. Their
+    # kind is settled where they are built, never by this pass's INT default: `set_b = set_a`
+    # and `common = set_a & set_b` would otherwise be claimed int before either name has a
+    # type, and the later, correct set binding would be refused as a rebind conflict.
+    untyped_sets = set()
+    while True:
+        grew = False
+        for n in nodes:
+            if (not isinstance(n, ast.Assign) or len(n.targets) != 1
+                    or not isinstance(n.targets[0], ast.Name)):
+                continue
+            name = n.targets[0].id
+            if name in untyped_sets:
+                continue
+            value = n.value
+            if (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                    and value.func.id == 'set'
+                    and value.func.id not in getattr(ctx, 'funcs', {})):
+                untyped_sets.add(name)
+                grew = True
+            elif isinstance(value, ast.Name) and value.id in untyped_sets:
+                untyped_sets.add(name)
+                grew = True
+            elif (isinstance(value, ast.BinOp) and type(value.op) in SET_OPS
+                    and isinstance(value.left, ast.Name) and value.left.id in untyped_sets
+                    and isinstance(value.right, ast.Name) and value.right.id in untyped_sets):
+                untyped_sets.add(name)
+                grew = True
+        if not grew:
+            break
 
     for n in nodes:
         if isinstance(n, ast.Assign):
+            if (isinstance(n.targets[0], ast.Name) and n.targets[0].id in untyped_sets):
+                continue            # an unannotated set, settled where it is built
             if (isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
                     and ctx.funcs.get(n.value.func.id, (None, None))[1] == GRIDRET):
                 continue
@@ -29280,6 +29494,16 @@ def _bind_container_types(fn, ctx):
             kind = (LIST if isinstance(n.value, ast.Call) and isinstance(n.value.func, ast.Name)
                     and ctx.funcs.get(n.value.func.id, (None, None))[1] == GRIDRET
                     else _container_literal(n.value, ctx))
+            if (kind is None and isinstance(n.value, ast.Name)
+                    and ctx.types.get(n.value.id) == SET
+                    and not _set_keys_are_str_or_bytes(n.value, ctx)):
+                kind = SET                       # `b = a` where both are unannotated int sets
+            if (kind == SET and isinstance(n.value, ast.BinOp)
+                    and type(n.value.op) in SET_OPS):
+                # `_promote_floats` provisionally claims this name int because it also sees
+                # integer bitwise operators; the set operation is the authoritative shape.
+                ctx.types[n.targets[0].id] = SET
+                continue
             if _is_ref_kind(ctx.types.get(n.targets[0].id)) or ctx.types.get(n.targets[0].id) in MAPS:
                 continue
             if kind == LIST and n.targets[0].id in ctx.blist:
