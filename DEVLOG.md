@@ -1,3 +1,25 @@
+## 2026-11-02 -- rel-evalorder: quiet operands gate the list count/index hoist (job-relevalorder-11030340)
+
+`_ListLowering.index_or_count` hoisted `xs.count(v)` / `xs.index(v)` into the statement prelude
+whenever its own receiver and arguments looked safe, even when an earlier operand that Python
+evaluates first could raise or change the list.  On the Python surface it now hoists only when
+every earlier operand is quiet (a name, a constant, an attribute chain over a name, or `len()` of
+one), or, for `count`, when the receiver and argument are quiet and no earlier call can change the
+source.  `index` can raise `ValueError`, so it requires the first condition.  Everything else is
+refused by name as before and takes the general path, which keeps source order.  This fixes
+`print(xs[i], xs.index(99))` (was an uncaught ValueError on the default build) and
+`print(xs.pop(), xs.count(1))` on `[1, 2, 1]` (was `1 2`, CPython `1 1`).  The AIL brace syntax has
+no general fallback, so it keeps the old permissive decision rather than turning a build into a
+refusal.
+
+`AIL_CURRENT/test_ail_eval_order.py` (registered in `tests.d/`) compares the four release probes,
+the int64-overflow seed and the two extra order probes against CPython 3.12 in the default build
+and with `AIL_UNIFIED_FORCE=1`; the control `count_noexc` is also built with `--strict`.  The three
+other hoisting helpers found by the same template stay open, so change 2 stopped as instructed:
+list `+` (`print(xs[i], xs + [f(2)])`), `list(...)` (`print(xs[i], list(g()))`) and the heapq
+values (`print(xs[i], heappop(h))`) still run their side effect before the earlier operand on the
+default build; they are recorded as expected failures in the module.
+
 ## 2026-11-02 -- prog29 review fixes: shadowed `len` and frozenset reads before assignment
 
 Two review defects, both in the module-`frozenset` support, are fixed without touching a program.

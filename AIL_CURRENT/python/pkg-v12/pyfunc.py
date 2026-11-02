@@ -35604,18 +35604,49 @@ class _ListLowering:
                         return True
         return False
 
+    @staticmethod
+    def quiet(node):
+        """True for a node that cannot raise and has no side effects: a name, a constant, an
+        attribute chain over a name, or len() of one of those.  A subscript, another call or an
+        arithmetic operand is not quiet."""
+        if isinstance(node, (ast.Name, ast.Constant)):
+            return True
+        if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                and node.func.id == 'len' and len(node.args) == 1 and not node.keywords):
+            return _ListLowering.quiet(node.args[0])
+        while isinstance(node, ast.Attribute):
+            node = node.value
+        return isinstance(node, ast.Name)
+
     def index_or_count(self, node, prelude):
         args = node.args
         start = self.eval_start[-1] if self.eval_start else len(self.evaluated)
-        earlier_risky = any(tryhoist._expr(operand, set()) != set()
-                            for operand in self.evaluated[:start])
-        call_risky = any(tryhoist._expr(part, set()) != set()
-                         for part in [node.func.value, *args])
-        if earlier_risky and call_risky:
-            raise Unsupported(
-                'list.%s() after a part of this statement that Python evaluates first may '
-                'raise or run code; bind the earlier part to a name first, or move the '
-                'method call before it' % node.func.attr)
+        earlier = self.evaluated[:start]
+        source = node.func.value
+        if os.environ.get('AIL_SURFACE') == 'python':
+            if not all(self.quiet(operand) for operand in earlier):
+                # count() cannot raise, so it may still go ahead of an operand that can: only a
+                # source change would make its answer wrong.  index() can raise ValueError, so it
+                # needs every earlier operand to be quiet.
+                if not (node.func.attr == 'count' and len(args) == 1
+                        and self.quiet(source) and self.quiet(args[0])
+                        and not self.list_source_changed_before(source, earlier)):
+                    raise Unsupported(
+                        'list.%s() after a part of this statement that Python evaluates first may '
+                        'raise or run code; bind the earlier part to a name first, or move the '
+                        'method call before it' % node.func.attr)
+        else:
+            # The AIL brace syntax has no general path to fall back to: keep its old, permissive
+            # decision so a program that used to build still builds.
+            earlier_risky = any(tryhoist._expr(operand, set()) != set()
+                                for operand in earlier)
+            call_risky = any(tryhoist._expr(part, set()) != set()
+                             for part in [node.func.value, *args])
+            if earlier_risky and call_risky:
+                raise Unsupported(
+                    'list.%s() after a part of this statement that Python evaluates first may '
+                    'raise or run code; bind the earlier part to a name first, or move the '
+                    'method call before it' % node.func.attr)
         bound_kinds = []
         if node.func.attr == 'index' and len(args) > 1:
             bound_kinds = [self.index_bound_kind(arg) for arg in args[1:]]
