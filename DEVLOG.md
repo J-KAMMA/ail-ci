@@ -1,3 +1,18 @@
+## 2026-11-02 -- typing review 3: TypedDict ** error order, declared name, len shadow (job-rbstd_typing-11021949)
+
+Review follow-up on `8e626c0`. Every TypedDict construction now goes through the generated helper, which no longer
+calls `len` and therefore keeps working when the module binds `len = 5`. The helper stores positional and keyword
+sources first: a non-dict `**` value raises `__main__.Name() argument after ** must be a mapping, not <type>`, a
+duplicate keyword raises CPython's `got multiple values for keyword argument` during argument passing, then
+non-string keys raise `keywords must be strings`, then the positional count and the positional update are applied.
+This gives CPython's precedence for `Movie(1, **{2: 3})` (keywords), `Movie(1, 2, **{"a": 1})` (arity) and
+`Movie(**[(1, 2)])` / `Movie(**5)` (mapping). A functional declaration keeps its declared type name, so
+`Film = TypedDict("Reel", ...)` reports `__main__.Reel()` rather than `__main__.Film()`. The boundary program covers
+the precedence, non-mapping, functional-name and `len` cases in a separate small program (the main boundary program
+uses builtin `len`). Probes `p_rev2_precedence.py`, `p_rev2_functional_name.py`, `p_rev2_len_shadow.py`,
+`p_rev2_nonmap.py`, `p_rev2_eval_order.py`, `p_rev2_dict_shadow.py` and `p_rev2_dict_shadow_len.py` match CPython on
+both `cmp.sh` builds except for the pre-existing keys()-only mapping difference recorded in `DIFFERENCES.md`.
+
 ## 2026-11-02 -- typing review 2: module-level cast shadowing, TypedDict ** keys (job-rbstd_typing-11021949)
 
 Review follow-up on `8d2a60e`. A module-level rebinding of a handled typing name or of its module alias is now

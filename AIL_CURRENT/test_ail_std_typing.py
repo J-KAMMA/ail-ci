@@ -46,6 +46,7 @@ class Partial(TypedDict, total=False):
 
 
 Movie = TypedDict("Movie", {"title": str})
+Film = TypedDict("Reel", {"title": str})
 UserId = NewType("UserId", int)
 Name = NewType("Name", str)
 AdminId = NewType("AdminId", UserId)
@@ -79,6 +80,22 @@ def main() -> None:
         Movie(**{1: 2})
     except TypeError as exc:
         print("badkeys", exc)
+    try:
+        Movie(1, **{2: 3})
+    except TypeError as exc:
+        print("precedence", exc)
+    try:
+        Movie(1, 2, **{"a": 1})
+    except TypeError as exc:
+        print("arity", exc)
+    try:
+        Movie(**[(1, 2)])
+    except TypeError as exc:
+        print("nonmap", exc)
+    try:
+        Film(**{"title": "x"}, title="y")
+    except TypeError as exc:
+        print("declared-name", exc)
     u = UserId(5)
     print(add(u, 3), UserId(1) + UserId(2))
     n = Name("ada")
@@ -103,6 +120,29 @@ def main() -> None:
 
 
 main()
+'''
+
+
+LEN_SHADOW = '''from typing import TypedDict
+
+
+class Movie(TypedDict):
+    title: str
+
+
+len = 5
+
+
+def show(label, f):
+    try:
+        print(label, f())
+    except Exception as exc:
+        print(label, type(exc).__name__, exc)
+
+
+show("arity", lambda: Movie(1, 2, **{"a": 1}))
+show("good", lambda: Movie(**{"title": "x"}))
+show("nonmap", lambda: Movie(**[(1, 2)]))
 '''
 
 
@@ -138,6 +178,10 @@ class TypingLabTests(unittest.TestCase):
     def test_typeddict_newtype_cast_boundaries(self):
         with tempfile.TemporaryDirectory() as directory:
             compare_with_cpython(self, directory, "boundaries.py", BOUNDARIES)
+
+    def test_typeddict_helper_does_not_capture_len(self):
+        with tempfile.TemporaryDirectory() as directory:
+            compare_with_cpython(self, directory, "len_shadow.py", LEN_SHADOW)
 
     def test_followups_are_refused_by_name(self):
         for name, wanted in REFUSED.items():

@@ -4,8 +4,11 @@
   the module-level declaration is read as the builtin `dict`, the declaration itself is dropped.  A TypedDict is a
   dict at run time in CPython, and the fields are not checked, so a literal, `Movie(title=...)`, `Movie(**data)`,
   item access and `len` keep CPython's behaviour.  A local variable, parameter or other binding with the same name
-  shadows the declaration, exactly as it does in CPython; a local or parameter named `dict` does not capture
-  `Movie(...)`, which is built through a module-level helper with no such name.
+  shadows the declaration, exactly as it does in CPython; a local or parameter named `dict` or `len` does not
+  capture `Movie(...)`, which is built through module-level helpers with no such name.  A `**` argument must be a
+  mapping (a `dict` here), its keys must be strings, a repeated keyword is CPython's `TypeError`, and the errors
+  keep CPython's precedence: a bad mapping or duplicate during argument passing, then non-string keys, then the
+  positional count and update.
 * `NewType("Name", Base)` keeps CPython's call behaviour: `Name(v)` is `v` itself (not `Base(v)`), and a call
   with another arity or with any keyword raises CPython's `TypeError` text.  A use of the name that is not a
   direct call reads as an identity function of one argument (so an alias keeps working); the base, including
@@ -140,23 +143,20 @@ def _module_rebinds(nodes, guarded):
 
 
 class _Fix(ast.NodeTransformer):
-    def __init__(self, binder, typed_dicts, new_types, ident, bad, dict_name, dict_bound,
+    def __init__(self, binder, typed_dicts, new_types, ident, bad,
                  td_base, td_add, td_splash, td_done):
         self.binder = binder
         self.typed_dicts = typed_dicts
         self.new_types = new_types
         self.ident = ident
         self.bad = bad
-        self.dict_name = dict_name
-        self.dict_bound = dict_bound
         self.td_base = td_base
         self.td_add = td_add
         self.td_splash = td_splash
         self.td_done = td_done
         self.ident_used = False
         self.bad_used = False
-        self.dict_used = False
-        self.splash_used = False
+        self.td_used = False
         self.scopes = []
 
     def _declared(self, name):
@@ -174,9 +174,6 @@ class _Fix(ast.NodeTransformer):
             if name in names:
                 return True
         return False
-
-    def _dict_shadowed(self):
-        return self.dict_bound or self._shadowed('dict')
 
     def _visit_scope(self, kind, locals_, nodes):
         self.scopes.append((kind, locals_))
@@ -243,6 +240,26 @@ class _Fix(ast.NodeTransformer):
                 refuse(node, 'a nonlocal %s declaration is not lowered here' % name)
         return node
 
+    def _typed_dict_expr(self, node, name):
+        self.td_used = True
+        shown = self.typed_dicts.get(name, '') if name is not None else ''
+        expr = ast.Call(
+            func=ast.Name(id=self.td_base, ctx=ast.Load()),
+            args=[ast.List(elts=list(node.args), ctx=ast.Load())], keywords=[])
+        for keyword in node.keywords:
+            if keyword.arg is None:
+                expr = ast.Call(
+                    func=ast.Name(id=self.td_splash, ctx=ast.Load()),
+                    args=[expr, keyword.value, ast.Constant(value=shown)], keywords=[])
+            else:
+                expr = ast.Call(
+                    func=ast.Name(id=self.td_add, ctx=ast.Load()),
+                    args=[expr, ast.Constant(value=keyword.arg), keyword.value,
+                          ast.Constant(value=shown)], keywords=[])
+        return ast.copy_location(
+            ast.Call(func=ast.Name(id=self.td_done, ctx=ast.Load()),
+                     args=[expr], keywords=[]), node)
+
     def visit_Call(self, node):
         name = node.func.id if isinstance(node.func, ast.Name) else None
         is_new_type = name in self.new_types and not self._shadowed(name)
@@ -272,34 +289,8 @@ class _Fix(ast.NodeTransformer):
             if len(node.args) == 2 and not node.keywords:
                 return ast.copy_location(node.args[1], node)
             refuse(node, 'cast(T, value) takes two positional arguments here')
-        if is_typed_dict and any(k.arg is None for k in node.keywords):
-            self.splash_used = True
-            shown = name if name is not None else ''
-            expr = ast.Call(
-                func=ast.Name(id=self.td_base, ctx=ast.Load()),
-                args=[ast.List(elts=list(node.args), ctx=ast.Load())], keywords=[])
-            for keyword in node.keywords:
-                if keyword.arg is None:
-                    expr = ast.Call(
-                        func=ast.Name(id=self.td_splash, ctx=ast.Load()),
-                        args=[expr, keyword.value, ast.Constant(value=shown)], keywords=[])
-                else:
-                    expr = ast.Call(
-                        func=ast.Name(id=self.td_add, ctx=ast.Load()),
-                        args=[expr, ast.Constant(value=keyword.arg), keyword.value,
-                              ast.Constant(value=shown)], keywords=[])
-            return ast.copy_location(
-                ast.Call(func=ast.Name(id=self.td_done, ctx=ast.Load()),
-                         args=[expr], keywords=[]), node)
-        if is_typed_dict and self._dict_shadowed():
-            self.dict_used = True
-            keys = [ast.Constant(value=k.arg) if k.arg is not None else None
-                    for k in node.keywords]
-            values = [k.value for k in node.keywords]
-            return ast.copy_location(ast.Call(
-                func=ast.Name(id=self.dict_name, ctx=ast.Load()),
-                args=[ast.List(elts=list(node.args), ctx=ast.Load()),
-                      ast.Dict(keys=keys, values=values)], keywords=[]), node)
+        if is_typed_dict:
+            return self._typed_dict_expr(node, name)
         return node
 
     def visit_Name(self, node):
@@ -335,56 +326,50 @@ def _fresh(tree, stem):
     return name
 
 
-def _defs(ident, bad, ident_used, bad_used, dict_name, dict_used,
-          td_base, td_add, td_splash, td_done, splash_used):
+def _defs(ident, bad, ident_used, bad_used, td_base, td_add, td_splash, td_done, td_used):
     out = []
-    if dict_used:
-        out.append(ast.parse(
-            'def %s(positional, keywords):\n'
-            '    for key in keywords:\n'
-            '        if not isinstance(key, str):\n'
-            '            raise TypeError("keywords must be strings")\n'
-            '    if len(positional) > 1:\n'
-            '        raise TypeError("dict expected at most 1 argument, got %%d" %% len(positional))\n'
-            '    result = {}\n'
-            '    if positional:\n'
-            '        result.update(positional[0])\n'
-            '    result.update(keywords)\n'
-            '    return result\n'
-            % dict_name, mode='exec').body[0])
-    if splash_used:
+    if td_used:
         out.extend(ast.parse(
             'def %s(positional):\n'
-            '    result = {}\n'
-            '    if len(positional) == 1:\n'
-            '        result.update(positional[0])\n'
-            '    return (result, len(positional), {})\n'
+            '    count = 0\n'
+            '    for item in positional:\n'
+            '        count += 1\n'
+            '    return [positional, count, {}, []]\n'
             '\n'
             'def %s(state, key, value, name):\n'
-            '    result = state[0]\n'
             '    seen = state[2]\n'
             '    if key in seen:\n'
             '        raise TypeError("__main__.%%s() got multiple values for keyword argument \'%%s\'" %% (name, key))\n'
             '    seen[key] = 1\n'
-            '    result[key] = value\n'
+            '    state[3].append([key, value])\n'
             '    return state\n'
             '\n'
             'def %s(state, mapping, name):\n'
-            '    result = state[0]\n'
+            '    if not isinstance(mapping, dict):\n'
+            '        raise TypeError("__main__.%%s() argument after ** must be a mapping, not %%s" %% '
+            '(name, mapping.__class__.__name__))\n'
             '    seen = state[2]\n'
-            '    for key in mapping:\n'
-            '        if not isinstance(key, str):\n'
-            '            raise TypeError("keywords must be strings")\n'
+            '    pairs = state[3]\n'
+            '    for key in mapping.keys():\n'
             '        if key in seen:\n'
-            '            raise TypeError("__main__.%%s() got multiple values for keyword argument \'%%s\'" %% (name, key))\n'
+            '            raise TypeError("__main__.%%s() got multiple values for keyword argument \'%%s\'" %% '
+            '(name, key))\n'
             '        seen[key] = 1\n'
-            '        result[key] = mapping[key]\n'
+            '        pairs.append([key, mapping[key]])\n'
             '    return state\n'
             '\n'
             'def %s(state):\n'
+            '    for pair in state[3]:\n'
+            '        if not isinstance(pair[0], str):\n'
+            '            raise TypeError("keywords must be strings")\n'
             '    if state[1] > 1:\n'
             '        raise TypeError("dict expected at most 1 argument, got %%d" %% state[1])\n'
-            '    return state[0]\n'
+            '    result = {}\n'
+            '    if state[1]:\n'
+            '        result.update(state[0][0])\n'
+            '    for pair in state[3]:\n'
+            '        result[pair[0]] = pair[1]\n'
+            '    return result\n'
             % (td_base, td_add, td_splash, td_done), mode='exec').body)
     if ident_used:
         out.append(ast.parse('def %s(obj):\n    return obj\n' % ident, mode='exec').body[0])
@@ -415,7 +400,7 @@ def run(tree, text):
     binder = stdlib5.take_imports(tree, 'typing', HANDLED, whole=False)
     if not binder:
         return
-    typed_dicts = set()
+    typed_dicts = {}
     new_types = {}
     body = []
     for stmt in tree.body:
@@ -427,13 +412,13 @@ def run(tree, text):
                 if stmt.decorator_list or [k for k in stmt.keywords if k.arg != 'total']:
                     refuse(stmt, 'class %s: a TypedDict decorator or keyword other than total is not built'
                            % stmt.name)
-                typed_dicts.add(stmt.name)
+                typed_dicts[stmt.name] = stmt.name
                 continue
         if isinstance(stmt, ast.Assign) and len(stmt.targets) == 1 and isinstance(stmt.targets[0], ast.Name):
             target = stmt.targets[0].id
             declared = _typed_dict_call(stmt.value, binder)
             if declared is not None:
-                typed_dicts.add(target)
+                typed_dicts[target] = declared
                 continue
             base = _new_type_base(stmt.value, binder)
             if base is not None:
@@ -441,8 +426,7 @@ def run(tree, text):
                 continue
         body.append(stmt)
     tree.body = body
-    declared = typed_dicts | set(new_types)
-    guarded = declared | set(binder.names) | set(binder.aliases)
+    guarded = set(typed_dicts) | set(new_types) | set(binder.names) | set(binder.aliases)
     rebound = _module_rebinds(body, guarded)
     if rebound:
         name = sorted(rebound)[0]
@@ -452,15 +436,12 @@ def run(tree, text):
     new_types = _resolve(new_types)
     ident = _fresh(tree, '_ail_newtype_identity')
     bad = _fresh(tree, '_ail_newtype_bad_call')
-    dict_name = _fresh(tree, '_ail_typed_dict_new')
     td_base = _fresh(tree, '_ail_typed_dict_base')
     td_add = _fresh(tree, '_ail_typed_dict_add')
     td_splash = _fresh(tree, '_ail_typed_dict_splash')
     td_done = _fresh(tree, '_ail_typed_dict_done')
-    dict_bound = 'dict' in _scope_locals(body)
-    fix = _Fix(binder, typed_dicts, new_types, ident, bad, dict_name, dict_bound,
+    fix = _Fix(binder, typed_dicts, new_types, ident, bad,
                td_base, td_add, td_splash, td_done)
     tree.body = [fix.visit(stmt) for stmt in tree.body]
     _insert_helpers(tree, _defs(ident, bad, fix.ident_used, fix.bad_used,
-                                dict_name, fix.dict_used, td_base, td_add, td_splash, td_done,
-                                fix.splash_used))
+                                td_base, td_add, td_splash, td_done, fix.td_used))
