@@ -1572,6 +1572,61 @@ generated C of the compare tasks is unchanged (five default builds, `chain_relax
 with `--exact-int`, and the three regex tasks refuse identically; checked against HEAD).  Final-state
 tests: test_ail_std_collections, test_ail_collections, test_ail_tuples, test_ail_safetynet,
 test_ail_files and test_ail_corpus_findings3.
+## 2026-11-01 -- tuple reach review 2: defaults and `None` returns stay general (job-tup1-11020552)
+
+The second review found two more programs the call-site inference broke. A parameter with a default was
+given the tuple type of its call sites, so `def g(t="x")` returned the default as a tuple class (the same
+for `None`, `int`, `float`, `bool` and tuple defaults); a parameter with a default is now never given a
+call-site type, so the compiler's own refusal of a non-numeric default or of a conflicting call site keeps
+the program on the general path. A `return None` or bare `return` was dropped from the return list before
+the mixed-return guard, so a function returning a tuple on one path and `None` on another still settled a
+tuple return type; `None` (and a bare return) now counts as a return type on its path, the function's
+return type is not settled, and it stays on the general path as before the inference. Probes c1, c2, c4,
+c6 (None / bare return, before and after the tuple path, keyword-only) and d1-d5, e1-e8 (str / None / int /
+float / bool / tuple / list defaults, same and different shapes, positional-only, defaults that mention
+another parameter, a default overwritten in the body) all match CPython on the default and forced-general
+builds; c3, c5, c7 and the d4/d5 tuple defaults keep their previous results. `test_ail_tuple_reach` gained
+7 regression tests (28 total); `test_ail_tuple_reach`, `test_ail_tuples`, `test_ail_typed_tuples`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass (6 modules, 0 failed). Generated
+C of the 10 `lab/compare` tasks is unchanged: the 17 builds that succeed are byte-identical between HEAD
+and this change, and the 3 `main.py` failures are identical on both.
+
+## 2026-11-01 -- tuple reach review: do not type a reassigned parameter or a mixed-return function (job-tup1-11011230)
+
+The review found two programs the new call-site inference broke. `def f(n): n = "x"; return n, (1, "a")`
+was given `n: int` from `f(1)`, so the reassignment stored a `str` in an int field and the tuple printed
+`(x, ...)`; the pass now ignores a call-site type for any parameter the body assigns to itself (ordinary,
+augmented, loop target and tuple reassignment all checked). A method returning `"none"` on one path and
+`t[0], t[1]` on another was pulled onto the typed path by an inferred tuple parameter, but its return type
+cannot be settled, so the caller printed `<_AilT_i_s object>`; a function with a tuple return that is not
+settled now keeps its parameters unannotated and stays on the general path, as before the inference.
+Probes p07, r06, v01-v11 (argument, list item, dict value, attribute, keyword, branch, augmented and loop
+reassignment, mixed scalar/tuple and mixed tuple-shape returns) all match CPython on the default and
+forced-general builds. `test_ail_tuple_reach` gained 3 regression tests (21 total). Generated C of the
+`lab/compare` tasks is unchanged: all 10 `.ail`, the 5 default `.py` and the 2 `--exact-int` `.py` builds are
+byte-identical (17 builds); the other 3 `.py` programs fail identically on both revisions.  All 10 `.py`
+tuple rewrites are identical in text; one diagnostic note differs and does not affect the C.
+
+## 2026-11-01 -- heterogeneous tuple reach: unannotated signatures take the typed path (job-tup1-11011230)
+
+Measured 25 heterogeneous-tuple probes (`/tmp/probes/t01`..`t25`) on the default build: 9 typed, 16 general,
+0 refused, every one matching CPython. The largest single fallback cause was an unannotated signature:
+`def g(t): return t[1], t[2]` stayed general even when every call site passed the same tuple shape, because
+the tuple pass refused the argument and the typed path cannot build a tuple of unknown type. The pass now
+collects call-site argument types (positional and keyword), keeps a parameter type only when every call site
+agrees on one known type, spells tuple-containing types on the parameter, uses scalar types internally to
+settle return types, and repeats the lowering until parameter types, return types and empty-display hints stop
+changing (at most four rounds). Unknown call sites and conflicting shapes stay unannotated and on the general
+path. Four probes moved typed (t02, t12, t13, t15), so the same 25 are now 13 typed / 12 general / 0 refused;
+the remaining general causes are unsupported tuple operations (4), float keys (3), bytes elements (2), mixed
+tuple shapes (1), a literal-list `for` (1) and an unannotated attribute (1). Boundary probes b01-b18 cover
+wrapper propagation, keyword calls, nested tuples, INT64_MIN/MAX and `-0.0`, aliasing, bool elements, list and
+dict parameters, scalar routes, an annotated attribute and the conservative shape/scalar conflicts; all match
+CPython on both builds. Generated C of the 10 `lab/compare` tasks (20 builds, `.ail` and `.py`) is
+byte-identical to the base. Added `AIL_CURRENT/test_ail_tuple_reach.py` (18 tests) and registered it through
+`AIL_CURRENT/tests.d/test_ail_tuple_reach.txt`; design note `docs/design/TUPLE_REACH.md`. Final-state tests:
+test_ail_tuple_reach, test_ail_tuples, test_ail_typed_tuples, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
