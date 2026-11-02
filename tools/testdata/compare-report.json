@@ -2,6 +2,16 @@
  "head": "4f1245b",
  "date": "2026-11-02",
  "run": "41393616319",
+ "ranges": {
+  "binary_bytes": {
+   "ail": [34816, 104448],
+   "rust": [4556800, 4626432]
+  },
+  "compile_s": {
+   "ail": [1.87, 11.17],
+   "rust": [0.19, 0.56]
+  }
+ },
  "tasks": [
   {
    "task": "berth_sim",
@@ -9,30 +19,11 @@
    "smoke": false,
    "head": "4f1245b",
    "date": "2026-11-02",
-   "tools": {
-    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-    "go": "go version go1.24.13 linux/amd64",
-    "nim": "Nim Compiler Version 2.2.12 [Linux: amd64]",
-    "python": "3.12.3",
-    "valgrind": "valgrind-3.22.0"
-   },
-   "pins": {
-    "GCC": "13.3.0",
-    "RUSTC": "1.99.1",
-    "GO": "1.24.13",
-    "NIM": "2.2.12",
-    "PYTHON": "3.12"
-   },
    "results": {
     "ail": {
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects",
-     "binary_bytes": 104448,
-     "compile_s": 7.01,
      "wall_ms": 2472,
      "rss_kib": 244941
     },
@@ -40,8 +31,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "binary_bytes": 4626432,
-     "compile_s": 0.41,
      "wall_ms": 1470,
      "rss_kib": 192205
     }
@@ -58,18 +47,12 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects",
-     "binary_bytes": 34816,
-     "compile_s": 1.87,
      "wall_ms": 1256
     },
     "rust": {
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "binary_bytes": 4556800,
-     "compile_s": 0.19,
      "wall_ms": 1037
     }
    }
@@ -85,9 +68,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "path": "typed",
-     "binary_bytes": 72704,
-     "compile_s": 2.41,
      "wall_ms": 934,
      "rss_kib": 354406
     },
@@ -95,8 +75,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "binary_bytes": 4592640,
-     "compile_s": 0.25,
      "wall_ms": 1895,
      "rss_kib": 352870
     }
@@ -113,10 +91,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects",
-     "binary_bytes": 90112,
-     "compile_s": 2.74,
      "wall_ms": 840,
      "rss_kib": 345088
     },
@@ -124,8 +98,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "binary_bytes": 4610048,
-     "compile_s": 0.28,
      "wall_ms": 2833,
      "rss_kib": 280371
     }
@@ -142,18 +114,12 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects",
-     "binary_bytes": 46080,
-     "compile_s": 1.88,
      "wall_ms": 862
     },
     "rust": {
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "binary_bytes": 4568064,
-     "compile_s": 0.2,
      "wall_ms": 48
     }
    }
@@ -169,10 +135,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects",
-     "binary_bytes": 64512,
-     "compile_s": 2.02,
      "wall_ms": 16696
     },
     "ail-py": {
@@ -186,8 +148,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "binary_bytes": 4586496,
-     "compile_s": 0.23,
      "wall_ms": 29534
     }
    }
@@ -203,10 +163,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects",
-     "binary_bytes": 58368,
-     "compile_s": 3.04,
      "wall_ms": 1548
     },
     "ail-py": {
@@ -220,8 +176,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "binary_bytes": 4580352,
-     "compile_s": 0.31,
      "wall_ms": 1640
     }
    }
@@ -237,17 +191,12 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "path": "typed",
-     "binary_bytes": 94208,
-     "compile_s": 2.56,
      "wall_ms": 2260
     },
     "rust": {
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "binary_bytes": 4614144,
-     "compile_s": 0.27,
      "wall_ms": 2925
     }
    }
@@ -263,17 +212,12 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "path": "typed",
-     "binary_bytes": 80896,
-     "compile_s": 4.45,
      "wall_ms": 1887
     },
     "rust": {
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "binary_bytes": 4600832,
-     "compile_s": 0.47,
      "wall_ms": 4248
     }
    }
@@ -289,10 +233,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects",
-     "binary_bytes": 98304,
-     "compile_s": 11.17,
      "wall_ms": 1866,
      "rss_kib": 475750
     },
@@ -307,8 +247,6 @@
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "binary_bytes": 4618240,
-     "compile_s": 0.56,
      "wall_ms": 1783,
      "rss_kib": 322458
     }

@@ -1,3 +1,16 @@
+## 2026-11-02 -- docs review fix: no invented per-task values in the comparison (job-reltable-11022358)
+
+The fixture now contains only what run 41393616319 actually supplied for binary size and compile
+time: the ranges `AIL 34–102 / Rust 4450–4518 KiB` and `AIL 1.87–11.17 / Rust 0.19–0.56 s`, held
+in a top-level `ranges` object.  The invented per-task binary/compile values and their ratios and
+geomean rows are gone; those metric tables show n/a per task and a `Supplied range (no per-task
+values)` line that states the one count the ranges prove (binary 10/10, compile 0/10).  The same
+counts drive the README lines.  The fixture also no longer carries per-task AIL path/`why_not_typed`
+or the toolchain versions and pins, which the task did not supply; the document shows the AIL path
+as absent and says `No tool versions in the report.`  The AIL (py src) refusals stay because the
+review verified them at HEAD.  `test_compare_publish` now checks the per-task n/a values, the range
+counts, the absent paths and tool versions, the fresh fixture render and the README counts.
+
 ## 2026-11-02 -- docs review fix: the comparison fixture only carries supplied numbers (job-reltable-11022136)
 
 The fixture `tools/testdata/compare-report.json` now keeps only the values supplied for run

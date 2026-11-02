@@ -4,16 +4,7 @@ AIL commit `4f1245b`; date 2026-11-02; 10 tasks; run 41393616319; fixture `tools
 
 ## Toolchain versions
 
-| tool | version |
-|---|---|
-| gcc | gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0 |
-| rustc | rustc 1.99.1 (58cf8f9c3 2026-10-13) |
-| go | go version go1.24.13 linux/amd64 |
-| nim | Nim Compiler Version 2.2.12 [Linux: amd64] |
-| python | 3.12.3 |
-| valgrind | valgrind-3.22.0 |
-
-Pins: GCC=13.3.0; RUSTC=1.99.1; GO=1.24.13; NIM=2.2.12; PYTHON=3.12.
+No tool versions in the report.
 
 ## Scorecards
 
@@ -21,33 +12,33 @@ Pins: GCC=13.3.0; RUSTC=1.99.1; GO=1.24.13; NIM=2.2.12; PYTHON=3.12.
 
 | task | path | cases | instr | RSS | binary | compile | disk | wall |
 |---|---|---|---|---|---|---|---|---|
-| berth_sim | general | n/a | - | L 1.27x | W 0.02x | L 17.10x | - | L 1.68x |
-| chain_relax | general | n/a | - | - | W 0.01x | L 9.84x | - | L 1.21x |
-| echo_pack | typed | n/a | - | L 1.00x | W 0.02x | L 9.64x | - | W 0.49x |
-| ledger_bin | general | n/a | - | L 1.23x | W 0.02x | L 9.79x | - | W 0.30x |
-| rail_transfer | general | n/a | - | - | W 0.01x | L 9.40x | - | L 17.96x |
-| scar_life | general | n/a | - | - | W 0.01x | L 8.78x | - | W 0.57x |
-| tally_lang | general | n/a | - | - | W 0.01x | L 9.81x | - | W 0.94x |
-| term_rank | typed | n/a | - | - | W 0.02x | L 9.48x | - | W 0.77x |
-| ticket_audit | typed | n/a | - | - | W 0.02x | L 9.47x | - | W 0.44x |
-| tree_fold | general | n/a | - | L 1.48x | W 0.02x | L 19.95x | - | L 1.05x |
-| **W / n** | | | **0/0** | **0/4** | **10/10** | **0/10** | **0/0** | **6/10** |
+| berth_sim | - | n/a | - | L 1.27x | - | - | - | L 1.68x |
+| chain_relax | - | n/a | - | - | - | - | - | L 1.21x |
+| echo_pack | - | n/a | - | L 1.00x | - | - | - | W 0.49x |
+| ledger_bin | - | n/a | - | L 1.23x | - | - | - | W 0.30x |
+| rail_transfer | - | n/a | - | - | - | - | - | L 17.96x |
+| scar_life | - | n/a | - | - | - | - | - | W 0.57x |
+| tally_lang | - | n/a | - | - | - | - | - | W 0.94x |
+| term_rank | - | n/a | - | - | - | - | - | W 0.77x |
+| ticket_audit | - | n/a | - | - | - | - | - | W 0.44x |
+| tree_fold | - | n/a | - | L 1.48x | - | - | - | L 1.05x |
+| **W / n** | | | **0/0** | **0/4** | **0/0** | **0/0** | **0/0** | **6/10** |
 
 ### AIL vs the best other language
 
 | task | path | cases | instr | RSS | binary | compile | disk | wall |
 |---|---|---|---|---|---|---|---|---|
-| berth_sim | general | n/a | - | L 1.27x | W 0.02x | L 17.10x | - | L 1.68x |
-| chain_relax | general | n/a | - | - | W 0.01x | L 9.84x | - | L 1.21x |
-| echo_pack | typed | n/a | - | L 1.00x | W 0.02x | L 9.64x | - | W 0.49x |
-| ledger_bin | general | n/a | - | L 1.23x | W 0.02x | L 9.79x | - | W 0.30x |
-| rail_transfer | general | n/a | - | - | W 0.01x | L 9.40x | - | L 17.96x |
-| scar_life | general | n/a | - | - | W 0.01x | L 8.78x | - | W 0.57x |
-| tally_lang | general | n/a | - | - | W 0.01x | L 9.81x | - | W 0.94x |
-| term_rank | typed | n/a | - | - | W 0.02x | L 9.48x | - | W 0.77x |
-| ticket_audit | typed | n/a | - | - | W 0.02x | L 9.47x | - | W 0.44x |
-| tree_fold | general | n/a | - | L 1.48x | W 0.02x | L 19.95x | - | L 1.05x |
-| **W / n** | | | **0/0** | **0/4** | **10/10** | **0/10** | **0/0** | **6/10** |
+| berth_sim | - | n/a | - | L 1.27x | - | - | - | L 1.68x |
+| chain_relax | - | n/a | - | - | - | - | - | L 1.21x |
+| echo_pack | - | n/a | - | L 1.00x | - | - | - | W 0.49x |
+| ledger_bin | - | n/a | - | L 1.23x | - | - | - | W 0.30x |
+| rail_transfer | - | n/a | - | - | - | - | - | L 17.96x |
+| scar_life | - | n/a | - | - | - | - | - | W 0.57x |
+| tally_lang | - | n/a | - | - | - | - | - | W 0.94x |
+| term_rank | - | n/a | - | - | - | - | - | W 0.77x |
+| ticket_audit | - | n/a | - | - | - | - | - | W 0.44x |
+| tree_fold | - | n/a | - | L 1.48x | - | - | - | L 1.05x |
+| **W / n** | | | **0/0** | **0/4** | **0/0** | **0/0** | **0/0** | **6/10** |
 
 ### AIL (py src) vs Rust
 
@@ -119,33 +110,37 @@ Pins: GCC=13.3.0; RUSTC=1.99.1; GO=1.24.13; NIM=2.2.12; PYTHON=3.12.
 
 | task | AIL | AIL (py src) | C | Rust | Go | Nim | Python | best other | AIL/Rust | AIL/best | AIL(py)/Rust | AIL(py)/best |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| berth_sim | 102 | not run | not run | 4518 | not run | not run | not run | 4518 (Rust) | 0.02x | 0.02x | - | - |
-| chain_relax | 34 | not run | not run | 4450 | not run | not run | not run | 4450 (Rust) | 0.01x | 0.01x | - | - |
-| echo_pack | 71 | not run | not run | 4485 | not run | not run | not run | 4485 (Rust) | 0.02x | 0.02x | - | - |
-| ledger_bin | 88 | not run | not run | 4502 | not run | not run | not run | 4502 (Rust) | 0.02x | 0.02x | - | - |
-| rail_transfer | 45 | not run | not run | 4461 | not run | not run | not run | 4461 (Rust) | 0.01x | 0.01x | - | - |
-| scar_life | 63 | build failed | not run | 4479 | not run | not run | not run | 4479 (Rust) | 0.01x | 0.01x | - | - |
-| tally_lang | 57 | build failed | not run | 4473 | not run | not run | not run | 4473 (Rust) | 0.01x | 0.01x | - | - |
-| term_rank | 92 | not run | not run | 4506 | not run | not run | not run | 4506 (Rust) | 0.02x | 0.02x | - | - |
-| ticket_audit | 79 | not run | not run | 4493 | not run | not run | not run | 4493 (Rust) | 0.02x | 0.02x | - | - |
-| tree_fold | 96 | build failed | not run | 4510 | not run | not run | not run | 4510 (Rust) | 0.02x | 0.02x | - | - |
-| **geomean** |  |  |  |  |  |  |  |  | **0.02x** (n=10) | **0.02x** (n=10) | - | - |
+| berth_sim | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| chain_relax | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| echo_pack | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| ledger_bin | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| rail_transfer | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| scar_life | n/a | build failed | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| tally_lang | n/a | build failed | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| term_rank | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| ticket_audit | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| tree_fold | n/a | build failed | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| **geomean** |  |  |  |  |  |  |  |  | - | - | - | - |
+
+Supplied range (no per-task values): AIL 34–102; Rust 4450–4518; AIL lower on 10/10 tasks.
 
 ### Compile time (s, median of 3 cold builds)
 
 | task | AIL | AIL (py src) | C | Rust | Go | Nim | Python | best other | AIL/Rust | AIL/best | AIL(py)/Rust | AIL(py)/best |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
-| berth_sim | 7.01 | not run | not run | 0.41 | not run | not run | not run | 0.41 (Rust) | 17.10x | 17.10x | - | - |
-| chain_relax | 1.87 | not run | not run | 0.19 | not run | not run | not run | 0.19 (Rust) | 9.84x | 9.84x | - | - |
-| echo_pack | 2.41 | not run | not run | 0.25 | not run | not run | not run | 0.25 (Rust) | 9.64x | 9.64x | - | - |
-| ledger_bin | 2.74 | not run | not run | 0.28 | not run | not run | not run | 0.28 (Rust) | 9.79x | 9.79x | - | - |
-| rail_transfer | 1.88 | not run | not run | 0.20 | not run | not run | not run | 0.20 (Rust) | 9.40x | 9.40x | - | - |
-| scar_life | 2.02 | build failed | not run | 0.23 | not run | not run | not run | 0.23 (Rust) | 8.78x | 8.78x | - | - |
-| tally_lang | 3.04 | build failed | not run | 0.31 | not run | not run | not run | 0.31 (Rust) | 9.81x | 9.81x | - | - |
-| term_rank | 2.56 | not run | not run | 0.27 | not run | not run | not run | 0.27 (Rust) | 9.48x | 9.48x | - | - |
-| ticket_audit | 4.45 | not run | not run | 0.47 | not run | not run | not run | 0.47 (Rust) | 9.47x | 9.47x | - | - |
-| tree_fold | 11.17 | build failed | not run | 0.56 | not run | not run | not run | 0.56 (Rust) | 19.95x | 19.95x | - | - |
-| **geomean** |  |  |  |  |  |  |  |  | **10.87x** (n=10) | **10.87x** (n=10) | - | - |
+| berth_sim | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| chain_relax | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| echo_pack | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| ledger_bin | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| rail_transfer | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| scar_life | n/a | build failed | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| tally_lang | n/a | build failed | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| term_rank | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| ticket_audit | n/a | not run | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| tree_fold | n/a | build failed | not run | n/a | not run | not run | not run | - | - | - | - | - |
+| **geomean** |  |  |  |  |  |  |  |  | - | - | - | - |
+
+Supplied range (no per-task values): AIL 1.87–11.17; Rust 0.19–0.56; AIL lower on 0/10 tasks.
 
 ### Build disk (MiB, fresh build dir with its caches)
 
@@ -183,16 +178,16 @@ Pins: GCC=13.3.0; RUSTC=1.99.1; GO=1.24.13; NIM=2.2.12; PYTHON=3.12.
 
 | task | AIL path | AIL (py src) path | AIL cases | AIL (py src) cases | AIL note | AIL (py src) note |
 |---|---|---|---|---|---|---|
-| berth_sim | general | not run | n/a | n/a | why not typed: a call can raise or have side effects | - |
-| chain_relax | general | not run | n/a | n/a | why not typed: a call can raise or have side effects | - |
-| echo_pack | typed | not run | n/a | n/a | - | - |
-| ledger_bin | general | not run | n/a | n/a | why not typed: a call can raise or have side effects | - |
-| rail_transfer | general | not run | n/a | n/a | why not typed: a call can raise or have side effects | - |
-| scar_life | general | refused | n/a | n/a | why not typed: a call can raise or have side effects | refused: import of 're' with a use that is not built |
-| tally_lang | general | refused | n/a | n/a | why not typed: a call can raise or have side effects | refused: locals()/vars()/eval/exec in a function with a possibly-unassigned local |
-| term_rank | typed | not run | n/a | n/a | - | - |
-| ticket_audit | typed | not run | n/a | n/a | - | - |
-| tree_fold | general | refused | n/a | n/a | why not typed: a call can raise or have side effects | refused: import of 're' with a use that is not built |
+| berth_sim | - | not run | n/a | n/a | - | - |
+| chain_relax | - | not run | n/a | n/a | - | - |
+| echo_pack | - | not run | n/a | n/a | - | - |
+| ledger_bin | - | not run | n/a | n/a | - | - |
+| rail_transfer | - | not run | n/a | n/a | - | - |
+| scar_life | - | refused | n/a | n/a | - | refused: import of 're' with a use that is not built |
+| tally_lang | - | refused | n/a | n/a | - | refused: locals()/vars()/eval/exec in a function with a possibly-unassigned local |
+| term_rank | - | not run | n/a | n/a | - | - |
+| ticket_audit | - | not run | n/a | n/a | - | - |
+| tree_fold | - | refused | n/a | n/a | - | refused: import of 're' with a use that is not built |
 
 ## Method
 

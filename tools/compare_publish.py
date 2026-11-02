@@ -124,7 +124,34 @@ def summary_counts(report, lang='ail', opponent='rust'):
     return counts
 
 
-def metric_table(tasks, key, title, fmt):
+def _range_from(ranges, key, lang):
+    item = (ranges or {}).get(key) or {}
+    value = item.get(lang)
+    if (isinstance(value, (list, tuple)) and len(value) == 2
+            and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in value)):
+        return float(value[0]), float(value[1])
+    return None
+
+
+def range_counts(report, key, lang='ail', opponent='rust'):
+    """W/n that the supplied lower/upper bounds prove, without per-task values.
+
+    All metrics are lower-is-better.  Disjoint ranges prove every task; overlapping ranges prove
+    nothing, so the count is 0/0.
+    """
+    mine = _range_from(report.get('ranges'), key, lang)
+    other = _range_from(report.get('ranges'), key, opponent)
+    total = len(report['tasks'])
+    if not mine or not other or not total:
+        return [0, 0]
+    if mine[1] < other[0]:
+        return [total, total]
+    if mine[0] > other[1]:
+        return [0, total]
+    return [0, 0]
+
+
+def metric_table(tasks, key, title, fmt, ranges=None):
     head = ['task'] + [merge.NAMES[lang] for lang in merge.LANGS] + ['best other', 'AIL/Rust', 'AIL/best',
                                                                       'AIL(py)/Rust', 'AIL(py)/best']
     lines = ['### ' + title, '', '| ' + ' | '.join(head) + ' |', '|' + '---|' * len(head)]
@@ -148,6 +175,18 @@ def metric_table(tasks, key, title, fmt):
         value = merge.geomean(ratios[pair])
         geo.append('**%.2fx** (n=%d)' % (value, len(ratios[pair])) if value else '-')
     lines.append('| ' + ' | '.join(geo) + ' |')
+    mine = _range_from(ranges, key, 'ail')
+    other = _range_from(ranges, key, 'rust')
+    has_per_task = any(merge.usable(task['results'].get('ail'), key) is not None for task in tasks)
+    if mine and other and not has_per_task:
+        if mine[1] < other[0]:
+            result = 'AIL lower on %d/%d tasks' % (len(tasks), len(tasks))
+        elif mine[0] > other[1]:
+            result = 'AIL lower on 0/%d tasks' % len(tasks)
+        else:
+            result = 'ranges overlap: per-task W/L not known'
+        lines += ['', 'Supplied range (no per-task values): AIL %s–%s; Rust %s–%s; %s.' % (
+            fmt(mine[0]), fmt(mine[1]), fmt(other[0]), fmt(other[1]), result)]
     return lines
 
 
@@ -204,7 +243,7 @@ def render(report, source=None, fixture=None, date=None):
             lines += scorecard(tasks, lang, opponent)[0] + ['']
     lines += ['## Metrics', '']
     for key, title, fmt in merge.METRICS:
-        lines += metric_table(tasks, key, title, fmt) + ['']
+        lines += metric_table(tasks, key, title, fmt, ranges=report.get('ranges')) + ['']
     lines += paths_table(tasks) + ['']
     lines += ['## Method', '', *merge.METHOD_LINES]
     return '\n'.join(lines) + '\n'

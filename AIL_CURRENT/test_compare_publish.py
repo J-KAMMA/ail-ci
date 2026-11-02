@@ -53,18 +53,19 @@ class ComparePublish(unittest.TestCase):
             self.assertIn('### %s vs Rust' % lang, self.text)
             self.assertIn('### %s vs the best other language' % lang, self.text)
 
-    def test_toolchain_versions(self):
-        self.assertIn('gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0', self.text)
-        self.assertIn('rustc 1.99.1 (58cf8f9c3 2026-10-13)', self.text)
+    def test_toolchain_versions_are_not_invented(self):
+        self.assertIn('No tool versions in the report.', self.text)
+        self.assertNotIn('rustc 1.99.1', self.text)
 
     def test_ail_py_table_includes_refusals(self):
         for task in ('scar_life', 'tally_lang', 'tree_fold'):
-            self.assertIn('| %s | general | refused |' % task, self.text)
+            self.assertIn('| %s | - | refused |' % task, self.text)
         self.assertIn("refused: import of 're' with a use that is not built", self.text)
 
     def test_ail_py_table_does_not_copy_the_ail_metrics(self):
         self.assertIn('| berth_sim | not run | n/a |', self.text)
-        self.assertNotIn('| berth_sim | general | n/a | - | - | W', self.text)
+        self.assertNotIn('| berth_sim | - | n/a | - | - | W', self.text)
+        self.assertNotIn('why not typed:', self.text)
 
     def test_method_section_is_unchanged(self):
         for line in self.publisher.merge.METHOD_LINES:
@@ -73,19 +74,34 @@ class ComparePublish(unittest.TestCase):
     def test_win_counts_against_rust(self):
         counts = self.publisher.summary_counts(self.report)
         expected = {
-            'instructions': [0, 0], 'rss_kib': [0, 4], 'binary_bytes': [10, 10],
-            'compile_s': [0, 10], 'build_disk_kib': [0, 0], 'wall_ms': [6, 10],
+            'instructions': [0, 0], 'rss_kib': [0, 4], 'binary_bytes': [0, 0],
+            'compile_s': [0, 0], 'build_disk_kib': [0, 0], 'wall_ms': [6, 10],
         }
         self.assertEqual(counts, expected)
+
+    def test_supplied_ranges_give_the_binary_and_compile_counts(self):
+        self.assertEqual(self.publisher.range_counts(self.report, 'binary_bytes'), [10, 10])
+        self.assertEqual(self.publisher.range_counts(self.report, 'compile_s'), [0, 10])
+        self.assertIn('Supplied range (no per-task values): AIL 34–102; Rust 4450–4518; AIL lower on 10/10 tasks.',
+                      self.text)
+        self.assertIn('Supplied range (no per-task values): AIL 1.87–11.17; Rust 0.19–0.56; AIL lower on 0/10 tasks.',
+                      self.text)
 
     def test_fixture_carries_only_supplied_metrics(self):
         for task in self.report['tasks']:
             self.assertLessEqual(set(task['results']), {'ail', 'ail-py', 'rust'})
             for result in task['results'].values():
-                for key in ('instructions', 'build_disk_kib', 'cases_public', 'cases_hidden'):
+                for key in ('instructions', 'build_disk_kib', 'cases_public', 'cases_hidden',
+                            'binary_bytes', 'compile_s'):
                     self.assertNotIn(key, result)
+            self.assertNotIn('path', task['results']['ail'])
+            self.assertNotIn('why_not_typed', task['results']['ail'])
             if 'ail-py' in task['results']:
                 self.assertEqual(task['results']['ail-py']['path'], 'refused')
+        self.assertEqual(set(self.report['ranges']), {'binary_bytes', 'compile_s'})
+        for task in self.report['tasks']:
+            self.assertNotIn('tools', task)
+            self.assertNotIn('pins', task)
 
     def test_date_survives_the_merge_report_shape(self):
         with tempfile.TemporaryDirectory(prefix='compare-merge-') as tmp:
@@ -104,11 +120,13 @@ class ComparePublish(unittest.TestCase):
 
     def test_readme_counts_match_the_fixture(self):
         counts = self.publisher.summary_counts(self.report)
+        binary = self.publisher.range_counts(self.report, 'binary_bytes')
+        compile_counts = self.publisher.range_counts(self.report, 'compile_s')
         readme = (REPO / 'README.md').read_text(encoding='utf-8')
         self.assertIn('Peak RSS: AIL is lower on %d/%d tasks with data.' % tuple(counts['rss_kib']), readme)
-        self.assertIn('Binary size: AIL is smaller on %d/%d tasks.' % tuple(counts['binary_bytes']), readme)
-        compile_slower = counts['compile_s'][1] - counts['compile_s'][0]
-        self.assertIn('Compile time: AIL is slower to compile on %d/%d tasks.' % (compile_slower, counts['compile_s'][1]), readme)
+        self.assertIn('Binary size: AIL is smaller on %d/%d tasks.' % tuple(binary), readme)
+        compile_slower = compile_counts[1] - compile_counts[0]
+        self.assertIn('Compile time: AIL is slower to compile on %d/%d tasks.' % (compile_slower, compile_counts[1]), readme)
         self.assertIn('Wall time: AIL is lower on %d/%d tasks.' % tuple(counts['wall_ms']), readme)
         self.assertNotIn('against C, Rust, Go, Nim and Python', readme)
 
