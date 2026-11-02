@@ -1,4 +1,4 @@
-"""PEP 517 build backend for ail-lang (G14). Standard library only, so it works offline and without `wheel`.
+"""PEP 517 build backend for ailc (G14). Standard library only, so it works offline and without `wheel`.
 
 The wheel holds three things:
 
@@ -9,7 +9,7 @@ The wheel holds three things:
                                         second file list here: whatever the SDK export refuses or
                                         leaves out (experiments/, docs/design, tasks-novel, evidence/ ...)
                                         cannot get into the wheel.
-* ail_lang-<version>.dist-info/         METADATA, WHEEL, entry_points.txt, RECORD,
+* ailc-<version>.dist-info/             METADATA, WHEEL, entry_points.txt, RECORD,
                                         licenses/LICENSE-APACHE and licenses/LICENSE-MIT
 
 Only a wheel is built (`pip install .`, `pip wheel .`, `python -m build --wheel`). An sdist would have to
@@ -30,8 +30,9 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 PACKAGE = Path(__file__).resolve().parent / "ail_lang"
 SOURCE = REPO / "AIL_CURRENT"
-NAME = "ail-lang"
-DIST = "ail_lang"
+NAME = "ailc"
+DIST = "ailc"
+IMPORT = "ail_lang"                                     # the import package and the `ail` command module
 SUMMARY = "AIL: a Python-like language that compiles to standalone C executables"
 REQUIRES_PYTHON = ">=3.10"
 PACKAGE_FILES = ("__init__.py", "__main__.py", "cli.py", "project.py", "lsp.py")
@@ -77,7 +78,21 @@ def metadata_text():
         "Summary: " + SUMMARY,
         "License-Expression: " + LICENSE_EXPRESSION,
         "Requires-Python: " + REQUIRES_PYTHON,
+        "Project-URL: Homepage, https://github.com/J-KAMMA/ail-ci",
+        "Project-URL: Documentation, https://github.com/J-KAMMA/ail-ci/blob/main/docs/INSTALL.md",
+        "Project-URL: Issues, https://github.com/J-KAMMA/ail-ci/issues",
+        "Classifier: Development Status :: 3 - Alpha",
+        "Classifier: Environment :: Console",
+        "Classifier: Intended Audience :: Developers",
+        "Classifier: Operating System :: POSIX :: Linux",
+        "Classifier: Operating System :: MacOS",
+        "Classifier: Operating System :: Microsoft :: Windows",
+        "Classifier: Programming Language :: C",
         "Classifier: Programming Language :: Python :: 3",
+        "Classifier: Programming Language :: Python :: 3.10",
+        "Classifier: Programming Language :: Python :: 3.11",
+        "Classifier: Programming Language :: Python :: 3.12",
+        "Classifier: Programming Language :: Python :: 3.13",
         "Classifier: Topic :: Software Development :: Compilers",
         "Provides-Extra: zig",
         "Requires-Dist: ziglang==0.13.0; extra == \"zig\"",
@@ -105,9 +120,9 @@ def collect(work):
     """{path inside the wheel: bytes} for the whole wheel except RECORD."""
     entries = {}
     for name in PACKAGE_FILES:
-        entries["%s/%s" % (DIST, name)] = (PACKAGE / name).read_bytes()
+        entries["%s/%s" % (IMPORT, name)] = (PACKAGE / name).read_bytes()
     for name, data in sdk_files(work).items():
-        entries["%s/sdk/%s" % (DIST, name)] = data
+        entries["%s/sdk/%s" % (IMPORT, name)] = data
     info = "%s-%s.dist-info" % (DIST, version())
     entries[info + "/METADATA"] = metadata_text().encode("utf-8")
     entries[info + "/WHEEL"] = wheel_text().encode("utf-8")
@@ -160,5 +175,5 @@ def get_requires_for_build_wheel(config_settings=None):
 
 
 def build_sdist(sdist_directory, config_settings=None):
-    raise RuntimeError("ail-lang is built as a wheel only (an sdist would carry the private repository); "
+    raise RuntimeError("ailc is built as a wheel only (an sdist would carry the private repository); "
                        "use `pip wheel .` or `python -m build --wheel`")

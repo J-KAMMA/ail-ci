@@ -4,7 +4,7 @@ build-backend = "ail_wheel_backend"
 backend-path = ["packaging"]
 
 [project]
-name = "ail-lang"
+name = "ailc"
 dynamic = ["version"]          # packaging/ail_lang/__init__.py __version__ (read by packaging/ail_wheel_backend.py)
 description = "AIL: a Python-like language that compiles to standalone C executables"
 readme = "packaging/README.md"

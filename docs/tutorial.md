@@ -1,7 +1,7 @@
 # AIL tutorial
 
 About 20 minutes. You need a working setup from [INSTALL.md](INSTALL.md): `pip install` the
-`ail-lang` package (or use a git checkout) and a C compiler. Check with:
+`ailc` package (or use a git checkout) and a C compiler. Check with:
 
 ```sh
 ail doctor

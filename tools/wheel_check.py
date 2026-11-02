@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the ail-lang wheel from this checkout in a fresh venv and use it like a user would.
+"""Build the ailc wheel from this checkout in a fresh venv and use it like a user would.
 
     python3 tools/wheel_check.py            # needs python3 (with venv + pip) and a C compiler; no network
                                             # (pip is told not to look for build dependencies: there are none)
@@ -57,7 +57,7 @@ def main():
         bindir = venv / ("Scripts" if os.name == "nt" else "bin")
         python = bindir / ("python.exe" if os.name == "nt" else "python")
         run([str(python), "-m", "pip", "wheel", "--no-deps", "-w", str(wheels), str(REPO)])
-        wheel = sorted(wheels.glob("ail_lang-*.whl"))
+        wheel = sorted(wheels.glob("ailc-*.whl"))
         if len(wheel) != 1:
             raise SystemExit("expected one wheel, found %r" % wheel)
         run([str(python), "-m", "pip", "install", str(wheel[0])])

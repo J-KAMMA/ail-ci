@@ -26,10 +26,10 @@ AILのソースを `.ail` に書き、単独の実行ファイルへコンパイ
 現行の到達判定は `../AIL_PROGRESS_CRITERIA_20261005.md` 冒頭にあります。
 下の旧改訂にある5/12（42%）は当時の記録であり、現在の完成率ではありません。
 
-## pipでインストールして使う（ail-lang, G13）
+## pipでインストールして使う（ailc, G13）
 
 ```
-pip install ail-lang
+pip install ailc
 ail run prog.py              # 一時的な実行ファイルへコンパイルして実行（プログラムへの引数は prog.py の後ろ）
 ail build prog.py -o prog    # 単独の実行ファイルを作る（-o を省くと拡張子を除いた名前）
 ail check prog.py            # 型・構文の検査だけ（Cコンパイラ不要。終了コード0=通過、1=ソースの誤り、2=設定・I/O）
@@ -43,7 +43,7 @@ ail check prog.py            # 型・構文の検査だけ（Cコンパイラ不
 - 同梱物は `export-sdk` が選ぶファイルと同じです（MANIFEST.json の `sdk_files` と SHA-256）。`ail integrity` で照合できます。
   `experiments/`・`docs/design`・`a held-out task set`・`evidence/` は入りません。
 - 実行時にCコンパイラが要ります。探す順は `$PIPE_CC`、PATH上の `cc`・`clang`・`gcc`、`zig cc`（`$AIL_ZIG`、PATH上の `zig`、
-  `pip install "ail-lang[zig]"` で入るziglang）。無ければ、入れ方を示すメッセージを出して終了コード2で止まります。`ail doctor` で確認できます。
+  `pip install "ailc[zig]"` で入るziglang）。無ければ、入れ方を示すメッセージを出して終了コード2で止まります。`ail doctor` で確認できます。
 - ビルドキャッシュ（G3）はユーザーごとです。`$AIL_CACHE`、無ければLinuxは `$XDG_CACHE_HOME/ail`（既定 `~/.cache/ail`）、macOSは
   `~/Library/Caches/ail`、Windowsは `%LOCALAPPDATA%\ail\cache`（Windowsではキャッシュ自体がまだ無効）。他のユーザー所有のディレクトリは使わず、
   キャッシュなしで動きます。`ail cache path|stats|clear`、`--no-cache` または `AIL_NO_CACHE=1` で無効にできます。

@@ -34,6 +34,21 @@ function and matches the old sequence change (`3 3`); `--strict` names the refus
 unchanged; the strict build refuses the set-comprehension probe by name.  `lab/progfix/prog29.md`
 now records the actual results for the parameter/local `len` shadows and the annotated-frozenset
 parameter probe instead of claiming they were refused.
+## 2026-11-02 -- packaging: PyPI distribution name is ailc (job-relpkgname-11030037)
+
+The distribution is now `ailc`; the command stays `ail` and the import package stays `ail_lang`
+(`python -m ail_lang` still works). The build backend writes `ailc-<version>-py3-none-any.whl` and
+`ailc-<version>.dist-info/` while the wheel payload lives under `ail_lang/`. METADATA gained the
+Homepage / Documentation / Issues `Project-URL` lines and classifiers for development status,
+console, developers, Linux / macOS / Windows and Python 3.10-3.13 (13 classifiers, up from 2).
+Every user-facing `pip install ail-lang` is now `pip install ailc`; INSTALL keeps one sentence
+saying the PyPI project `ail-lang` is not AIL. `--version` prints `ailc <version>`. Publish nothing.
+
+`test_ail_packaging` follows the new wheel and dist-info names, asserts the Project-URL lines and
+the three Operating System classifiers, and scans `docs/` and `packaging/` for the old install
+command. 19 packaging tests pass, `tools/wheel_check.py` passes, and the built wheel is
+`ailc-0.1.0.dev0-py3-none-any.whl`.
+
 ## 2026-11-02 -- typed reach 12 fix: tuple local store/delete refused (job-prog12-11020843)
 
 Review of 2c28c6a found that the list-compatible-use check counted any `name[...]` as an
