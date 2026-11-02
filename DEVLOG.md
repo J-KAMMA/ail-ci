@@ -80,6 +80,26 @@ Added `AIL_CURRENT/test_ail_prog1.py`, registered through
 stops loudly). The generated `program.c` of all 17 building `lab/compare` sources
 (`main.ail` and `main.py` across the ten tasks) is byte-identical to the pre-change
 tree; `scar_life`, `tally_lang` and `tree_fold` refuse both trees alike.
+## 2026-11-01 -- typed reach for eight real programs (job-prog2-11020344)
+
+Profiled the eight programs in `lab/progfix/prog2.md` and closed the blockers found there. Review
+follow-up on `d86dbcc`: return kinds are now proved from the body, never filled from an annotation.
+CPython does not enforce annotations, so `def isup(line: str) -> int: return line.isupper()` returns
+a bool; the old fill boxed it as an int on the raw `pyc.py --file` path. `pymix._expr_kind` now knows
+the fixed result kind of str methods (`isupper`, `split`, `join`, ...), `list`/`sorted`, `abs`/`ord`/
+`chr`, and `sys.stdin.read()`/`readline()`, so `t079.reverse_words` is a str proof and its module
+input chain resolves `line` without an annotation. The CPython hybrid now accepts `/`, `//` and `%`
+by a literal nonzero constant, so `t408.state_at` (`t % 8`) is accelerated; it also accepts a call
+whose str receiver/arguments are proved (and `len`/`reversed` over a proved sequence), which
+puts `t079.reverse_words` (`" ".join(reversed(line.split()))`) on the accelerated path. A variable
+divisor, an arbitrary call, `int()`, `.index()` and a bytes result still stay in CPython.
+`pymix._provably_nonzero` reads a unary sign too, so `t // -3` is no longer mistaken for a possible
+`ZeroDivisionError` when the helper is used as a value or under a boxed `try/except`. The remaining
+hot functions need nested `list[list[T]]` / `list[tuple[...]]` parameters, a `dict`/tuple result, a
+scalar `int | None` local or a set comprehension of `str`; each is recorded with its exact message
+in `lab/progfix/prog2.md`. `test_ail_prog2.py` (registered through
+`tests.d/test_ail_prog2.txt`) checks the proof rules, builds the raw `isup` case and compares it with
+CPython, and verifies the hybrid acceleration of `reverse_words` and `state_at`.
 
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 

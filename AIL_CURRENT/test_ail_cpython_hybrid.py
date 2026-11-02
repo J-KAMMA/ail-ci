@@ -5,8 +5,10 @@ functions are typed-compilable, the generated extension is loaded and the Python
 equal CPython byte for byte, including the cases that must abandon the native call: an int outside
 int64, an overflow inside the clone, a bool in an int/list[int] position, a missing argument
 (default), None, and a mutated list parameter.  Functions whose body can trap in the typed runtime
-(indexing, division, calls, raise/try) stay in CPython; that includes `first` and `half` here.  A
-program the compiler cannot analyse at all still runs unchanged in CPython with no extension.
+(indexing, division by a variable, arbitrary calls, raise/try) stay in CPython; that includes
+`first` and `divide` here.  A division by a literal nonzero constant (`half`, `x / 2`) and a
+proved pure str method call cannot raise and are eligible.  A program the compiler cannot analyse at all still runs unchanged in CPython with no
+extension.
 """
 import json
 import os
@@ -116,10 +118,9 @@ class CPythonHybrid(unittest.TestCase):
             src, out, report = self.build(tmp, 'prog', PROGRAM)
             self.assertTrue(report['extension'], report)
             accelerated = set(report['accelerated'])
-            for name in ('add1', 'mul', 'isbig', 'join', 'total', 'dflt', 'echo'):
+            for name in ('add1', 'mul', 'isbig', 'half', 'join', 'total', 'dflt', 'echo'):
                 self.assertIn(name, accelerated)
             self.assertNotIn('first', accelerated)         # indexing can raise IndexError
-            self.assertNotIn('half', accelerated)           # division can raise ZeroDivisionError
             self.assertNotIn('push', accelerated)          # a list parameter that is mutated
             self.assertNotIn('divide', accelerated)        # floor division can raise
             want = run([sys.executable, str(src)], tmp)
