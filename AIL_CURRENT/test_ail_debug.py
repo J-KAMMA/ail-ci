@@ -112,9 +112,10 @@ class Debug(unittest.TestCase):
         self.compile(source, self.dir / "plain")
         self.compile(source, self.dir / "debug", "--debug")
         plain, debug = self.run_program(self.dir / "plain"), self.run_program(self.dir / "debug")
-        self.assertEqual((plain.returncode, plain.stdout, plain.stderr), (1, "start\n", "list index out of range\n"))
+        crash = "IndexError: list index out of range\n  raised near %s:3\n" % source
+        self.assertEqual((plain.returncode, plain.stdout, plain.stderr), (1, "start\n", crash))
         self.assertEqual((debug.returncode, debug.stdout), (1, "start\n"))
-        self.assertEqual(debug.stderr, "list index out of range\n  raised near %s:3\n" % source)
+        self.assertEqual(debug.stderr, crash)
 
     def test_raise_statement_names_its_line(self):
         source = self.source(EXPLICIT)
@@ -146,7 +147,8 @@ class Debug(unittest.TestCase):
         sizes = {name: (self.dir / name).stat().st_size for name in "abcd"}
         self.assertEqual((sizes["a"], sizes["b"]), (sizes["c"], sizes["d"]))
         self.assertGreater(sizes["b"], sizes["a"])
-        self.assertEqual(self.run_program(self.dir / "c").stderr, "list index out of range\n")
+        self.assertEqual(self.run_program(self.dir / "c").stderr,
+                         "IndexError: list index out of range\n  raised near %s:3\n" % source)
         self.assertIn("raised near", self.run_program(self.dir / "d").stderr)
 
     def line_table(self, program):
@@ -219,7 +221,7 @@ class DebugCommand(unittest.TestCase):
         done = self.ail("build", "prog.py", "-o", "prog_plain")
         self.assertEqual(done.returncode, 0, done.stderr)
         crash = subprocess.run([str(self.dir / "prog_plain")], capture_output=True, text=True)
-        self.assertEqual(crash.stderr, "list index out of range\n")
+        self.assertEqual(crash.stderr, "IndexError: list index out of range\n  raised near %s:3\n" % source)
 
     def test_general_path_debug_build_says_what_it_lacks(self):
         source = self.dir / "slow.py"

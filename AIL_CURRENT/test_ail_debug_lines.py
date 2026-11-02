@@ -9,8 +9,8 @@ code generator from the shipped one. Now:
 * the general path (pyboxed2.py) does the same per statement (no "raised near" report there);
 * pyc's script rewrite unparses the program and the text parsed again renumbered the lines (one blank line between
   functions): the second function's statements mapped one line too early. The lines are restored (debug only);
-* a release build is byte-for-byte what it was (no `#line`, no AIL_DBG_SITE); a debug build's C differs from the
-  release C by those two kinds of line only (checked here with --debug-dir).
+* a release build records AIL_DBG_SITE for every statement but has no `#line` directives; a debug build's C
+  differs from the release C by the `#line` directives only (checked here with --debug-dir).
 
 Needs a C compiler (skipped without one). The crash site is read from gdb (`break ail_die`, `bt`) when it is
 installed, else from objdump's source-annotated disassembly (the call to the division helper must sit under the
@@ -217,13 +217,14 @@ class DebugLines(unittest.TestCase):
                 self.compile(source, self.dir / "dbg", "--debug", "--debug-dir", str(self.dir / "dbg_c"))
                 release = (self.dir / "rel_c" / "program.c").read_text()
                 debug = (self.dir / "dbg_c" / "program.c").read_text()
-                self.assertNotIn("#line", release)
-                self.assertNotIn("AIL_DBG_SITE(\"", release)
-                self.assertIn("#line", debug)
-                stripped = "\n".join(line for line in debug.splitlines()
-                                     if not line.startswith("#line") and 'AIL_DBG_SITE("' not in line)
-                self.assertEqual([l for l in stripped.splitlines() if l.strip()],
-                                 [l for l in release.splitlines() if l.strip()])
+                self.assertFalse([line for line in release.splitlines() if line.startswith("#line")])
+                self.assertTrue([line for line in debug.splitlines() if line.startswith("#line")])
+                if name != "general.py":
+                    self.assertIn("AIL_DBG_SITE(\"", release)
+                    stripped = "\n".join(line for line in debug.splitlines()
+                                         if not line.startswith("#line"))
+                    self.assertEqual([l for l in stripped.splitlines() if l.strip()],
+                                     [l for l in release.splitlines() if l.strip()])
                 for each in ("rel", "dbg"):
                     (self.dir / each).unlink()
                     shutil.rmtree(self.dir / (each + "_c"))

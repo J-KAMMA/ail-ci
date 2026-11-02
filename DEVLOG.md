@@ -358,6 +358,34 @@ No compiler or runtime behaviour changed.  Ran on Linux: `test_ail_tutorial` (15
 15 tutorial samples) pass.  Probes `/tmp/probes/sdk_symlink_roots.py` and
 `/tmp/probes/tutorial_artifact_abs.py` pass; both are refused by name under `cmp.sh` because
 AIL does not build `importlib`, which is expected for Python-only packaging code.
+## 2026-11-02 -- rel-rterr: uncaught typed runtime errors name the exception and the source line (job-relrterr-11030727)
+
+Owner decision: the default build carries the CPython exception name and the source line in its
+uncaught runtime errors.  `ail_exc_pyname` maps the typed runtime's trap messages to `IndexError`,
+`KeyError`, `ZeroDivisionError`, `ValueError`, `RuntimeError`, `UnicodeDecodeError`,
+`RecursionError` and `MemoryError`; `ail_die` prefixes the name and leaves the exit status, stdout
+flush and `--debug` "raised near" line unchanged.  A message that already starts with `Name: ` is
+not prefixed twice.  The typed emitter now stores the current statement's `file:line` in every
+build (the `#line` directives stay debug-only), so the default build can print `  raised near
+file:line`; the forced general path keeps the unified runtime's text without a line.
+
+`test_ail_runtime_error_names` covers index, key, division, recursion, pop, an explicit raise and a
+caught `IndexError`, in the default build and with `AIL_UNIFIED_FORCE=1` (the unified recursion
+probe is skipped: that path still segfaults, a separate bug).  The gate modules
+(`test_ail_exception_context`, `test_ail_exception_values_core`, `test_ail_overflow_error`,
+`test_ail_finally`, `test_ail_reraise`, `test_ail_parallel_for`, `test_ail_debug`,
+`test_ail_debug_lines`, `test_ail_fuzz_findings`), `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_numeric_bindings` and `test_ail_record_initializers` pass.
+
+Binary size on the ten `lab/compare/src/*/main.ail` tasks, before -> after (bytes): berth_sim
+64864 -> 73296 (+8432), chain_relax 34888 -> 39224 (+4336), echo_pack 35896 -> 40232 (+4336),
+ledger_bin 61016 -> 69360 (+8344), rail_transfer 64936 -> 81560 (+16624), scar_life
+40432 -> 48632 (+8200), tally_lang 74648 -> 95280 (+20632), term_rank 74392 -> 82816 (+8424),
+ticket_audit 104248 -> 124880 (+20632), tree_fold 86288 -> 102912 (+16624).  The growth is above
+the original 512-byte budget because every statement now carries its site string; this is the
+owner-decided line-number cost.  Instruction counts could not be measured on this runner:
+`perf_event_open` is denied (`kernel.perf_event_paranoid=4`) and valgrind/callgrind is not
+installed, so the 10 before/after icounts are not available here.
 
 ## 2026-11-02 -- onelang s1 review 1: closing-brace and use-after-struct comment placement
 
