@@ -131,6 +131,26 @@ changed.  Verified locally: `python3 tools/wheel_check.py` passes on Linux (15 t
 the explicit-name skip path passes 14 tests; `test_ail_packaging`, `test_ail_tutorial`,
 `test_ail_platforms`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
 The macOS and Windows jobs themselves were not run in this environment.
+## 2026-11-02 -- arena1 S1: free dead loop-block list locals and field-loop snapshots (job-arena1s1-11030038)
+
+`_loop_local_release_points` now covers `list[int]`, `list[float]` and `list[str]` locals declared fresh
+in any `if`/`elif`/`else` or loop body inside a loop, not only struct locals in a loop's top-level
+body.  Existing captures, `_ail_synth` names and `t = f(t)` are still excluded, and a value that can be
+observed after the block keeps today's lifetime: a read after the block, a return, an attribute store,
+an append into another container, or a `break`/`continue` inside the block.  `_for_inner_impl` frees
+the private `_numeric_field_value` snapshot after a numeric field loop, and both spines after a str-field
+loop.  The list free helpers zero the struct, so the existing last-use and return frees stay harmless.
+
+Design input `gen.random_tree(random.Random(1), 3_000_000, chain=0.35)` plus the 17 perf ops,
+`/usr/bin/time -f %M` median of 3: tree_fold 464.5 -> 430.8 MiB.  `tools/rss_phases.py` (new) gives
+peak 467.9 -> 445.8 MiB default and 419.3 -> 374.4 MiB with `glibc.malloc.mmap_threshold=131072`;
+the later cut/mirror phases stay at 445.8 MiB with the default glibc because freed brk heap stays
+resident.  Output on that input is byte-identical to C.  Probes `positive`, `fields3`, `neg2`,
+`s1_routes`, `s1_item_attr`, `fields`, `blocks`, `neg3` matched CPython on the default and
+`AIL_UNIFIED_FORCE=1` builds.  `AIL_CURRENT/test_ail_loop_block_release.py` is registered by
+`tests.d/test_ail_loop_block_release.txt`; modules run on the final commit: `test_ail_loop_block_release`,
+`test_ail_last_use_free`, `test_ail_chunk_loop_release`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`.  No new DIFFERENCES row: every changed program's output is unchanged.
 
 ## 2026-11-02 -- re-apply accepted prog8 change on staging-integ (job-rbprog8-11021901)
 
