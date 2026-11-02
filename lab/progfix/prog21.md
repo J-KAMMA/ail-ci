@@ -36,6 +36,11 @@ the hybrid.
   `int(-x)` are accepted only when the clone returns `int`/`bool`; in a str-returning clone they
   stay refused (`a call can raise or have side effects`) and the hybrid falls back to CPython.
   `str(-x)` of a float is still accelerated (`fabs`-like negation cannot overflow).
+* Review fix 2: `abs` preserves boolness (a unary `+`/`-` of a bool also keeps the bool kind), so
+  `abs(<bool>)` in an int/bool-returning clone returned `True`/`False` where CPython returns
+  `1`/`0`.  The `abs` int proof now refuses a bool operand, including under unary `+`/`-`;
+  `abs(int(<bool>))` still accelerates because `int()` converts it.  The bool form is refused as
+  `a call can raise or have side effects` and falls back to CPython.
 No int can wrap silently: an int/bool-returning clone whose arithmetic or `abs` overflows sets the
 existing overflow signal and the call site runs the original Python function.
 
@@ -79,5 +84,10 @@ existing overflow signal and the call site runs the original Python function.
   the float negation and the plain `str`/`int`/`abs` helpers stay accelerated.  On `cmp.sh` the
   general/default builds still stop loudly on `INT64_MIN` (pre-existing declared int64 behaviour),
   while `p21_str_neg_float.py`, `p21_str_pos_int.py` and `p21_plain_str_int.py` match on both.
+* Review-fix 2 probes (hybrid and both `cmp.sh` builds) all equal CPython: `p_abs_bool.py`,
+  `p_abs_bool_assign.py`, `p_abs_bool_uadd.py`, `p_abs_neg_bool.py`, `p_abs_intwrap_bool.py`,
+  `p_abs_after_int_bool.py`, `p_abs_int_bool_arg.py`, `p_int_bool.py`, `p_str_bool.py`,
+  `p_str_uadd_bool.py`, `p_boolabs2.py`.  The four bool-`abs` shapes are refused by name in the
+  hybrid; `int(bool)`/`str(bool)`/`str(+bool)` stay accelerated.
 * Generated C for all ten `lab/compare/src/*/main.ail` tasks is byte-identical between `HEAD` and
   this tree (10/10 `program.c` SHA-256 equal).

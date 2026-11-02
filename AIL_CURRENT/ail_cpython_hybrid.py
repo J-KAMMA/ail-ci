@@ -202,21 +202,28 @@ def _provably_number(node, num_names, float_names=(), int_names=(), int_result=F
     return False
 
 
-def _provably_int(node, int_names, int_result=False):
+def _provably_int(node, int_names, int_result=False, bool_names=(), allow_bool=True):
     """A value `int()` is the identity on: an int/bool parameter or literal (a float is not one;
     `int(<float>)` can raise ValueError/OverflowError, which a clone cannot reproduce here).  A
-    unary `-` of an int needs the int/bool result's overflow wrapper, as in `_provably_number`."""
+    unary `-` of an int needs the int/bool result's overflow wrapper, as in `_provably_number`.
+
+    `allow_bool=False` additionally rejects a bool value.  `abs` preserves boolness (and a unary
+    `+`/`-` of a bool stays bool in the typed clone), so `abs(<bool>)` returns a bool where CPython
+    returns an int; only `int(...)` converts it, so that call resets the flag."""
     if isinstance(node, ast.Name):
-        return node.id in int_names
+        return node.id in int_names and (allow_bool or node.id not in bool_names)
     if isinstance(node, ast.Constant):
         return isinstance(node.value, int) and not isinstance(node.value, bool)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
         if isinstance(node.op, ast.UAdd):
-            return _provably_int(node.operand, int_names, int_result)
-        return int_result and _provably_int(node.operand, int_names, int_result)
+            return _provably_int(node.operand, int_names, int_result, bool_names, allow_bool)
+        return int_result and _provably_int(node.operand, int_names, int_result, bool_names,
+                                            allow_bool)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
             and node.func.id in ('int', 'abs') and len(node.args) == 1 and not node.keywords:
-        return _provably_int(node.args[0], int_names, int_result)
+        if node.func.id == 'int':
+            return _provably_int(node.args[0], int_names, int_result, bool_names, True)
+        return _provably_int(node.args[0], int_names, int_result, bool_names, False)
     return False
 
 
@@ -234,7 +241,8 @@ def _provably_float(node, float_names):
     return False
 
 
-def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_names=(), ret=None):
+def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_names=(), ret=None,
+               bool_names=()):
     """A call this pass can prove cannot raise and has no side effect.  Everything else stays a
     refusal: the hybrid must return CPython's value or fall back, never a partial answer."""
     func = node.func
@@ -268,7 +276,8 @@ def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_na
         # routes through the clone's overflow wrapper (and so back to CPython).  A str/list
         # result has no such wrapper, so an int abs stays refused there.
         return (_provably_float(args[0], float_names)
-                or (ret in ('int', 'bool') and _provably_int(args[0], int_names, True)))
+                or (ret in ('int', 'bool')
+                    and _provably_int(args[0], int_names, True, bool_names, False)))
     if func.id == 'int' and len(args) <= 1:
         # int(<int/bool>) is the identity; int(<float>) can raise ValueError/OverflowError,
         # which this clone cannot reproduce without an overflow wrapper for every result kind.
@@ -294,6 +303,7 @@ def _unsafe_body(fn, params=(), ret=None):
     list_names = {p for p, kind in params if kind in _LIST}
     num_names = {p for p, kind in params if kind in ('int', 'float', 'bool')}
     int_names = {p for p, kind in params if kind in ('int', 'bool')}
+    bool_names = {p for p, kind in params if kind == 'bool'}
     float_names = {p for p, kind in params if kind == 'float'}
     for node in _own_nodes(fn):
         if isinstance(node, ast.Subscript):
@@ -304,7 +314,7 @@ def _unsafe_body(fn, params=(), ret=None):
                 continue
             return 'division or power can raise'
         if isinstance(node, ast.Call) and not _safe_call(node, str_names, list_names, num_names,
-                                                          int_names, float_names, ret):
+                                                          int_names, float_names, ret, bool_names):
             return 'a call can raise or have side effects'
         if isinstance(node, (ast.Raise, ast.Assert)):
             return 'the function can raise'

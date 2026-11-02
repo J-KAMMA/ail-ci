@@ -1,3 +1,17 @@
+## 2026-11-02 -- prog21 review fix: abs of a bool stays in CPython
+
+The review found that `abs(<bool parameter>)` was newly accepted as an int/bool-result call even
+though `abs` preserves boolness (and a unary `+`/`-` of a bool keeps the bool kind in the typed
+clone).  An int-returning accelerated clone therefore printed `True`/`False` where CPython prints
+`1`/`0`.  `_provably_int` now takes the bool parameter set and an `allow_bool` flag; the `abs`
+proof refuses a bool operand (including under unary `+`/`-`), while `int(...)` resets the flag
+because `int()` converts the bool, so `abs(int(x))` still accelerates.
+`AIL_CURRENT/test_ail_prog21.py` gained a regression for the direct, assigned, `+x`, `-x` and
+`abs(int(x))` forms.  Hybrid probes (`abs` direct/assign/`+x`/`-x`/`int(abs(x))`/
+`abs(int(x))`, `int(bool)`, `str(bool)`, `str(+bool)`) all equal CPython; the bool `abs` functions are refused by name
+(`a call can raise or have side effects`).  General and default builds are unchanged; no
+generated code changed.
+
 ## 2026-11-02 -- prog21 review fix: unary int negation in str-returning hybrid clones
 
 The review found that `str(-x)` on an int parameter was newly accepted in a str-returning hybrid

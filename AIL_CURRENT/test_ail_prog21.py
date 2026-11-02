@@ -83,6 +83,38 @@ if __name__ == "__main__":
     main()
 '''
 
+BOOLABS = '''def abs_bool(x: bool) -> int:
+    return abs(x)
+
+
+def abs_bool_assign(x: bool) -> int:
+    y = abs(x)
+    return y
+
+
+def abs_bool_uadd(x: bool) -> int:
+    return abs(+x)
+
+
+def abs_bool_usub(x: bool) -> int:
+    return abs(-x)
+
+
+def abs_bool_after_int(x: bool) -> int:
+    return abs(int(x))
+
+
+def main() -> None:
+    print(abs_bool(True), abs_bool_assign(True), abs_bool_uadd(True), abs_bool_usub(True),
+          abs_bool_after_int(True))
+    print(abs_bool(False), abs_bool_assign(False), abs_bool_uadd(False), abs_bool_usub(False),
+          abs_bool_after_int(False))
+
+
+if __name__ == "__main__":
+    main()
+'''
+
 
 def run(cmd, cwd=None, stdin='', env=None, timeout=900):
     return subprocess.run(cmd, cwd=cwd, input=stdin, env=env, text=True,
@@ -152,6 +184,17 @@ class Prog21Hybrid(unittest.TestCase):
     def test_str_conversion_accelerated(self):
         report = self.hybrid(STRCONV, 'strconv21')
         self.assertIn('label', report['accelerated'])
+
+    def test_abs_bool_operand_stays_in_cpython(self):
+        # abs(True) is the int 1, but the typed clone of abs of a bool-typed value (including
+        # +x and -x, which keep the bool kind) returns a bool, which prints True.  Only int()
+        # converts it, so abs(<bool>) is refused while abs(int(<bool>)) stays accelerated.
+        report = self.hybrid(BOOLABS, 'abs_bool21')
+        reason = 'a call can raise or have side effects'
+        for name in ('abs_bool', 'abs_bool_assign', 'abs_bool_uadd', 'abs_bool_usub'):
+            self.assertNotIn(name, report['accelerated'])
+            self.assertEqual(report['rejected'].get(name), reason)
+        self.assertIn('abs_bool_after_int', report['accelerated'])
 
     def test_str_neg_overflow_only_with_int_result_wrapper(self):
         text = '''def neg_int_text(x: int) -> str:
