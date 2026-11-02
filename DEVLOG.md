@@ -1,3 +1,16 @@
+## 2026-11-02 -- onelang s1: `tools/ail2py.py` converts brace syntax to annotated Python
+
+New converter over `ail_syntax.translate`: `python3 tools/ail2py.py SRC.ail [-o OUT.py]` writes
+readable Python (per-top-level `ast.unparse`, one blank line around defs/classes), rewrites the
+internal `__ail_checked_*` markers, emits `from m import *` for each `use m`, wraps the entry's
+final `sys.exit(main())` in `if __name__ == "__main__":`, and puts the brace source's `#` comments
+on their own lines at the following statement's indentation. `--check [--flags "..."]` builds the
+original and the converted file with `--debug-dir` and compares `program.c`.
+
+`AIL_CURRENT/test_ail_ail2py.py` covers five small programs (struct+impl, `list[float]`, `-> void`,
+`const`, try/except, start/end comments); two are `--check` identical and three run like the AOT
+binary. All ten `lab/compare/src/*/main.ail` tasks report `identical` under `--strict`.
+
 ## 2026-11-02 -- prog29 review fixes: shadowed `len` and frozenset reads before assignment
 
 Two review defects, both in the module-`frozenset` support, are fixed without touching a program.
