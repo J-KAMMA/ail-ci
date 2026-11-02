@@ -1764,7 +1764,7 @@ def _class_only_module_names(tree, classes, module_names):
     def walk(stmts):
         for n in stmts:
             if isinstance(n, ast.ClassDef):
-                add(n.name, 'class')
+                add(n.name, 'other' if n.decorator_list else 'class')
             elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 add(n.name, 'other')
             elif isinstance(n, ast.Assign):

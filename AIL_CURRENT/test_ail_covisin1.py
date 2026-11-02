@@ -102,6 +102,14 @@ class IsinstanceTypeForms(unittest.TestCase):
     def test_module_bound_constructor_keyword_arguments(self):
         self.compare({'p.py': KW_CTORS}, ('default', 'general'))
 
+    def test_decorated_class_binding_keeps_keyword_refusal(self):
+        with tempfile.TemporaryDirectory(prefix='covisin1_') as directory:
+            Path(directory, 'p.py').write_text(DECORATED_KW, encoding='utf-8')
+            for mode in ('default', 'general'):
+                built, _ = _build(directory, 'p.py', mode)
+                self.assertNotEqual(built.returncode, 0, mode)
+                self.assertIn('not in the subset', built.stdout + built.stderr, mode)
+
 
 STATIC = r'''class A: pass
 class B(A): pass
@@ -404,6 +412,21 @@ if False:
     C = D
 c = C(z=10, x=1)
 print(c.x, c.y, c.z)
+'''
+
+DECORATED_KW = r'''def deco(cls):
+    def f(x):
+        return x + 5
+    return f
+@deco
+class A:
+    def __init__(self, x=0):
+        self.x = x
+class B:
+    pass
+if False:
+    A = B
+print(A(x=3))
 '''
 
 EXCEPTION_CONST = r'''T = (ValueError, KeyError)
