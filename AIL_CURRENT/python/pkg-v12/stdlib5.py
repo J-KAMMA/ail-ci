@@ -261,6 +261,9 @@ def rewrite_text(source, notes=None):
         if mods & {'collections', 'typing'}:
             import ntlib
             ntlib.run(tree, text)
+        if 'typing' in mods:
+            import typinglib
+            typinglib.run(tree, text)
         if 'random' in mods:
             import randlib
             randlib.run(tree, text)

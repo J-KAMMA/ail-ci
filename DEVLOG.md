@@ -1,3 +1,51 @@
+## 2026-11-02 -- re-apply typing runtime names on the current tree (job-rbstd_typing-11021401)
+
+Re-applied the accepted `std_typing` change (job-std_typing-11020445) onto the current tree. The two
+conflicts kept both sides: the stdlib-5 gate in `ail_syntax.python_surface` keeps `numbers` and the current
+module list and adds `typing`, and `stdlib5.rewrite_text` keeps the `numberslib` call and adds the
+`typinglib.run` call after `ntlib`. The typing lab, `typinglib.py`, `test_ail_std_typing.py` and its
+`tests.d/` registration are unchanged from the accepted change. The three entries below describe that change.
+
+## 2026-11-01 -- typing review: exact NewType errors, lexical shadowing, caught-error program (job-std_typing-11012337)
+
+Review follow-up on `87c6ec9`. A bad NewType call now raises CPython 3.12's exact text, including the runtime
+argument count of a starred call: `_typing._idfunc() takes exactly one argument (0 given)` / `(2 given)` and
+`_typing._idfunc() takes no keyword arguments`. The TypedDict / NewType name lowering in
+`python/pkg-v12/typinglib.py` is now scope-aware: a local variable, parameter, comprehension target, nested
+function or class binding shadows the module declaration, so `nt_shadow` prints `6` / `8` and `td_shadow` prints
+the local titles instead of failing. A module-level rebinding of a declared name, or a `global` / `nonlocal`
+declaration of one, is a named compile-time refusal rather than a silent difference. The new
+`lab/stdlib/typing/13_errors.py` catches and prints bad-call `TypeError`s and a TypedDict `KeyError`; it is in
+`test_ail_std_typing`. Probes `nt_errors`, `nt_shadow`, `td_shadow`, `nt_values`, `td_values`, `nt_scope`,
+`td_scope`, `nt_call_forms`, `nt_module_rebind` and `nt_global` match CPython on both `cmp.sh` builds or are
+refused by name.
+
+## 2026-11-01 -- typing review fixes: NewType identity, arity, chained base (job-std_typing-11012337)
+
+Review follow-up on `3e1d988`. A NewType call is now identity: `UserId(v)` returns `v` itself instead of
+`int(v)` (or `Token(v)`), so a class value keeps its identity, `UserId(True)` stays a bool and `UserId(3.9)` stays
+a float. A wrong arity or any keyword is routed to a helper that raises `TypeError`, so `UserId()` and
+`UserId(obj=5)` stay catchable errors instead of `int()` returning 0. A use that is not a call reads as an
+identity function, so an alias of a NewType stays callable; a chain whose base is another NewType is accepted, and
+the base is no longer evaluated as part of the declaration. The lab programs and the `test_ail_std_typing`
+boundary case now cover a class NewType (`TokenId(t) is t`), zero-argument and keyword calls, an alias and a
+chained NewType. Probes `/tmp/probes/pn_newtype_class.py`, `pn_newtype_values2.py`, `pn_newtype_chain.py`,
+`pn_newtype_arity.py`, `pn_newtype_places.py`, `pn_errors_exact.py`, plus the reviewer's `/tmp/rprobes/pn_*`, match
+CPython on both `cmp.sh` builds (or are refused by name where introspection/unsupported class bases are involved).
+
+## 2026-11-01 -- typing runtime names: TypedDict, NewType, cast (job-std_typing-11012337)
+
+`typing` was missing from the stdlib-5 gate in `ail_syntax.python_surface`, so a program whose only library
+import was `typing` bypassed `stdlib5.rewrite_text`. The gate now includes it, and the new
+`python/pkg-v12/typinglib.py` lowers the run-time parts of `typing` to ordinary Python: `TypedDict` class,
+inherited and functional declarations become plain dicts (with `total=False`, empty field sets and the
+`Movie(**data)` copy), `NewType("X", Base)` becomes `Base`, and `cast(T, value)` becomes `value`.
+`lab/stdlib/typing/` has 12 realistic programs: 9 build and match CPython 3.12 stdout and exit code; Protocol,
+`get_origin` / `get_args` and `get_type_hints` stay named follow-ups in `RESULTS.md`. The new
+`test_ail_std_typing` is registered through `tests.d/` and also covers TypedDict / NewType / cast boundaries.
+Probes `/tmp/probes/typing_td_values.py`, `typing_td_functional.py`, `typing_newtype_values.py`,
+`typing_cast_values.py` and `typing_extra.py` match CPython on both `cmp.sh` builds.
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.

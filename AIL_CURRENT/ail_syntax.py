@@ -4133,8 +4133,8 @@ def python_surface(source, notes=None, library=False):
     if "ail_array" in source:
         source = _ailarray().rewrite_text(source, notes)         # typed arrays (docs/design/TYPED_ARRAY.md, T2)
     if any(name in source for name in ("fractions", "numbers", "enum", "namedtuple", "NamedTuple", "ChainMap", "keyword",
-                                       "calendar", "abc", "array", "Random", "string", "io", "statistics", "decimal",
-                                       "unicodedata", "ipaddress", "html")):
+                                       "calendar", "abc", "array", "Random", "string", "io", "statistics", "typing",
+                                       "decimal", "unicodedata", "ipaddress", "html")):
         source = _stdlib5().rewrite_text(source, notes)
     if any(name in source for name in ("csv", "datetime", "decimal", "fractions", "time", "zoneinfo")):
         source = _stdlib4().rewrite_text(source, notes)
