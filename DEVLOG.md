@@ -21,6 +21,28 @@ calls `_pair_plan` during kind inference, so the malformed-`enumerate` refusal c
 lowering instead of being swallowed by the preliminary shape scan.  `t268` stays fully typed.
 `AIL_CURRENT/test_ail_prog16.py` is registered by `tests.d/test_ail_prog16.txt` and the prog16 lab
 record is `lab/progfix/prog16.md`.  No program file changed.
+## 2026-11-02 -- fz216: list.count()/list.index() were hoisted before earlier operands (job-fz216-11021859)
+
+The daily fuzzer's seed `2075907166` printed `False`/`Zed` before CPython's `-34`: the list
+lowering rewrites `xs.count(v)` / `xs.index(v)` into prelude statements placed at the start of
+the enclosing statement, so the argument (and its side effects) ran before an earlier operand
+that Python evaluates first.  `print(62, v[99], v.count(side(99)))` therefore called `side` and
+only then raised `IndexError`, where CPython raises before `side`.  `_ListLowering.index_or_count`
+now checks the operands already evaluated in the statement (with `tryhoist._expr`, so names,
+constants and `len` stay safe); if any can raise or run code, the typed path refuses by name
+("list.count() after a part of this statement that Python evaluates first may raise or run code")
+and the default build takes the general path, which keeps source order.  Safe statements still
+build typed.  The full fuzz program still ends with the documented int64 overflow (CPython makes
+a big integer), which is unrelated to this line: the first five lines now match CPython.
+
+`AIL_CURRENT/test_ail_fz216.py` compares the minimized count/index cases, a side-effect order
+case, and int/float/str lists reached through an item, an attribute, a dict value and an argument
+against CPython on the default, `AIL_IR=0` and `AIL_IR=1` builds; it also checks that a safe
+earlier operand stays on the typed path and that the unsafe order is named with
+`AIL_NO_GENERAL=1`.  Probes `fz216_min`, `fz216_index`, `fz216_calls`, `fz216_types`,
+`fz216_safe` in `/tmp/probes` matched CPython on both builds; the full `fz216` matched through
+line 5 and then hit the pre-existing int64 overflow.  Modules run:
+`test_ail_fz216`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
 
 ## 2026-11-02 -- prog21 review fix: abs of a bool stays in CPython
 
