@@ -233,6 +233,80 @@ g05_026 and its extracted functions, and covers str/bytes defaults (empty, Unico
 and keyword calls, values through a list item and a dict value) plus the kind-mismatch refusals.
 Probes `/tmp/probes/prog27_strdefault.py` and `/tmp/probes/prog27_refuse_*.py` match CPython on both
 `cmp.sh` builds or are refused by name as recorded.
+## 2026-11-02 -- prog30 review fix: do not lower `next`/`iter` when they are shadowed (job-prog30-11022134)
+
+The iterator cursor rewrite assumed `iter` and `next` were the builtins, so a local, parameter or
+nested def/class named `iter`/`next` was ignored and the user binding never ran (`def next(x): return
+42` printed `1`; `iter = 5` printed `1` instead of raising `TypeError`).  `iterlower.py` now collects
+the function's own-scope bindings (parameters, stores, nested def/class names, imports, `except ... as`,
+`with ... as`, `global`/`nonlocal`, deletion) and refuses the rewrite when either name is bound, so
+those programs stay on the general path and match CPython.  A shadow inside a nested function's own
+scope does not affect the outer function, which still lowers.  New `test_ail_prog30` cases cover all
+of these; probes `rv_*` in `/tmp/probes/rv` match CPython on both builds.  The `t266` typed path and
+the ten `lab/compare` generated C files are unchanged.
+
+## 2026-11-02 -- prog30 typed reach: t266 iterator lowering and a t244 list-extend fix (job-prog30-11021835)
+
+Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time over repeated `main`
+calls); the table and every first refusal are in `lab/progfix/prog30.md`.  Five were already typed
+at the base (`g11_022`, `g09_034`, `g02_012`, `t244`, and `t266` after this change).  `t266` spent
+56% of its own time in `main`/`dfs`, both blocked by `it = iter(data)`/`next(it)`:
+`python/pkg-v12/iterlower.py` now lowers that shape to an index cursor over the same list/str/bytes
+when the binding, every use and the evaluation order are provably simple (no `try`, no rebind or
+delete, no effectful call before a `next`, all uses single-argument `next`).  `t266` is typed as a
+whole program on both `AIL_IR` modes and matches CPython on every `in*.txt`.
+
+Review fix: an augmented assignment evaluates its target before its value in CPython, so the cursor
+lowering is now refused when a `next` sits in an `AugAssign` value and the target is not a plain
+name (`a[items.pop(0) % 2] += next(it)` printed `[10, 0]` instead of `[20, 0]`).  Those programs
+stay on the general path and match CPython; `total += next(it)` is still lowered and typed.
+
+`t244` was already typed but its `lines += [" ".join(map(str, row)) for row in p]` printed only the
+transpose: `nested_lists.py` hoisted the comprehension into `__ail_itemsN`, and
+`_last_use_free_points` freed that temp after the prelude loop (the prelude and the consuming
+statement share the comprehension's source position) before the `extend` read it.  The hoisted temp
+load is now `_ail_synth`, so it is kept until return; all `t244` inputs match CPython.
+
+Still general (recorded follow-ups, exact messages in prog30.md): `g23_004` (comprehension tuple
+targets / multiple for-clauses), `g03_008` (function-valued parameter), `t172` (dict of dicts,
+generator unpacking, tuple iteration; the general path cannot build it either).  The generated C of
+the ten `lab/compare` tasks is byte-identical.  Probes `/tmp/probes/p30_*` match CPython on both
+`cmp.sh` builds; the only stderr-only difference, an exhausted cursor naming the typed runtime's
+`list index out of range` instead of `StopIteration`, is `C?-job-prog30-11021835-1`.
+## 2026-11-02 -- prog20: hot functions of eight real programs on the typed path (job-prog20-11021017)
+
+Profiled the eight programs with CPython 3.12.3 and cProfile (fresh `__main__` globals per
+repetition, imports outside the profile) and recorded the hot functions and their first refusals
+in `lab/progfix/prog20.md`.  Two compiler changes make the two remaining buildable programs
+whole-program typed, without editing any program:
+
+- `iterlower.py` now lowers `min`/`max` with a tuple-returning key
+  (`lambda city: (-pops[city], city)`) by comparing the fields lexicographically, for both a dict
+  walk and a sequence walk; fields evaluate once per element, comparison short-circuits on the
+  first unequal field, and the first element wins a tie (g05_006).
+- `pyfunc.py`'s `enumerate(source, start)` accepts a nested tuple target over a list of tuple
+  instances (`for rank, (word, count) in enumerate(top, start=1)`), materialising each field once
+  per iteration; the index is `start + position` with the start evaluated once and a private
+  position counter, so rebinding the index or the start variable in the body cannot move the next
+  step (g18_002).  The same shape over a named `ctx.srowtypes` row list is handled in
+  `_for_enumerate_start`.
+
+`g05_006`, `g18_002` and `t206` (already typed) now build whole-program typed; `g03_012`
+(statistics.geometric_mean, bool-return, `list(DATA)`), `g03_028` (Fraction dunders), `t284`
+(`iter()`, a generator in `sorted`, `join(map(...))`), `g25_002` (module-level enum list) and
+`g14_012` (dataclass `field(init=False)` / `InitVar`) stay named follow-ups in the report.
+
+Added `AIL_CURRENT/test_ail_prog20.py`, registered through `tests.d/test_ail_prog20.txt`.  Probes
+`/tmp/probes/p_tuplekey.py` (dict/list tuple keys, three fields, ties, negatives, attribute, empty,
+near-int64), `/tmp/probes/p_enum_tuple.py` (start 1/0/negative/empty, rebinding the index and the
+start variable, an argument, a dict value, an attribute and a list item),
+`/tmp/probes/p_enum_append.py` (rows built by append), `/tmp/probes/p_min_empty.py` (an empty
+list) and `/tmp/probes/p_tuplekey_edges.py` (default, slice, range and aliasing) all match CPython
+on both `cmp.sh` builds; `p_tuplekey`, `p_enum_tuple`, `p_enum_append` and `p_min_empty` take the
+typed path and `p_tuplekey_edges` falls back to the general path.  The required modules
+`test_ail_prog20`, `test_ail_tuples`, `test_ail_bugs7`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (64 tests, 1 skipped for a missing zig).  The accepted job's
+generated-C byte-identity check was not re-run on this merged tree.
 
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
