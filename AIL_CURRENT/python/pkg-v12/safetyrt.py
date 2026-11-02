@@ -2403,19 +2403,6 @@ static ail_obj ail2n_cls;
 static inline int ail2n_is(ail_obj x) {
     return x.tag == AIL_T_INST && ail2n_cls.tag == AIL_T_CLASS && ((ail_instobj *)x.o)->cls.o == ail2n_cls.o;
 }
-static int ail2n_dec_frac(ail_obj x) {
-    if (x.tag != AIL_T_INST || ((ail_instobj *)x.o)->cls.tag != AIL_T_CLASS) return 0;
-    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
-        ail_str s = ail_view_to_str(((ail_classobj *)k.o)->name);
-        static const char *names[2] = {"Decimal", "Fraction"};
-        for (int n = 0; n < 2; n++) {
-            int64_t len = n ? 8 : 7; if (s.n != len) continue; int64_t i = 0;
-            while (i < len && ail_chr(s, i) == (uint8_t)names[n][i]) i++;
-            if (i == len) return 1;
-        }
-    }
-    return 0;
-}
 static void ail2n_tname(char *buf, size_t n, ail_obj x) {
     if (x.tag == AIL_T_INST && ((ail_instobj *)x.o)->cls.tag == AIL_T_CLASS) {
         ail_str s = ail_view_to_str(((ail_classobj *)((ail_instobj *)x.o)->cls.o)->name);
@@ -2433,8 +2420,38 @@ __attribute__((noinline, cold)) static ail_st ail2n_cmp_error(ail_ctx *cx, ail_o
 }
 '''
 
+# only an enum program gets the Decimal/Fraction ordering route: an IntEnum/IntFlag member's comparison with
+# them returns NotImplemented, and the reflected Decimal/Fraction method must supply the result.  A program
+# without an enum keeps the ordering branch (and the C) it had before this route existed.
+NI_ENUM_DECLS = r'''static int ail2n_intenum(ail_obj x) {
+    if (x.tag != AIL_T_INST || ((ail_instobj *)x.o)->cls.tag != AIL_T_CLASS) return 0;
+    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_str s = ail_view_to_str(((ail_classobj *)k.o)->name);
+        static const char *n = "_AilIntEnum";
+        if (s.n != 11) continue;
+        int64_t i = 0;
+        while (i < 11 && ail_chr(s, i) == (uint8_t)n[i]) i++;
+        if (i == 11) return 1;
+    }
+    return 0;
+}
+static int ail2n_dec_frac(ail_obj x) {
+    if (x.tag != AIL_T_INST || ((ail_instobj *)x.o)->cls.tag != AIL_T_CLASS) return 0;
+    for (ail_obj k = ((ail_instobj *)x.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {
+        ail_str s = ail_view_to_str(((ail_classobj *)k.o)->name);
+        static const char *names[2] = {"Decimal", "Fraction"};
+        for (int n = 0; n < 2; n++) {
+            int64_t len = n ? 8 : 7; if (s.n != len) continue; int64_t i = 0;
+            while (i < len && ail_chr(s, i) == (uint8_t)names[n][i]) i++;
+            if (i == len) return 1;
+        }
+    }
+    return 0;
+}
+'''
 
-def patch_notimplemented(c_text):
+
+def patch_notimplemented(c_text, enum=False):
     """A method that returns NotImplemented: the other operand's reflected method is tried next (+, -, ...,
     ==, !=), equality falls back to identity and an ordering to TypeError, as in CPython."""
     def one(text, old, new):
@@ -2445,7 +2462,7 @@ def patch_notimplemented(c_text):
     marks = [m for m in ('/* ---- operator special methods on instances (dunderrt.py) ---- */',
                          'static inline ail_st ail_obj_cmp(ail_ctx *cx, int64_t *out, ail_obj a, ail_obj b) {') if m in c_text]
     first = min(marks, key=c_text.index)
-    c_text = c_text.replace(first, NI_DECLS + first, 1)
+    c_text = c_text.replace(first, NI_DECLS + (NI_ENUM_DECLS if enum else '') + first, 1)
     old_cmp = (
         '    if (a.tag == AIL_T_INST) {   /* a user __lt__ (found through the base classes) orders instances, as CPython does */\n'
         '        for (ail_obj k = ((ail_instobj *)a.o)->cls; k.tag == AIL_T_CLASS; k = ((ail_classobj *)k.o)->base) {\n'
@@ -2465,7 +2482,7 @@ def patch_notimplemented(c_text):
         '            if (!kc->lt_fn) continue;\n'
         '            ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;\n'
         '            if (ail2n_is(r)) {\n'
-        '                if (b.tag == AIL_T_INST && ail2n_dec_frac(b)) { ail_st rst; if (ail_dun_cmp_rev(cx, out, a, b, op, &rst)) return rst; }\n'
+        '                if (b.tag == AIL_T_INST && ail2n_intenum(a) && ail2n_dec_frac(b)) { ail_st rst; if (ail_dun_cmp_rev(cx, out, a, b, op, &rst)) return rst; }\n'
         '                return ail2n_cmp_error(cx, a, b, op);\n'
         '            }\n'
         '            if (ail_obj_truthy(r)) { *out = -1; return AIL_OK; }\n'
@@ -2487,10 +2504,18 @@ def patch_notimplemented(c_text):
         '        }\n'
         '    }\n')
     n_cmp = c_text.count(old_cmp)
-    if n_cmp == 1:
-        c_text = c_text.replace(old_cmp, new_cmp)
-    elif n_cmp != 0:
+    if n_cmp != 1 and n_cmp != 0:
         raise AssertionError('safetyrt: %d places for the instance ordering branch' % n_cmp)
+    if enum:
+        if n_cmp == 1:
+            c_text = c_text.replace(old_cmp, new_cmp)
+    else:
+        # without an enum this branch stays exactly as it was before the Decimal/Fraction route
+        c_text = one(c_text, 'ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;',
+                     'ail_obj r; ail_st st = kc->lt_fn(cx, &r, a, b); if (st != AIL_OK) return st;\n'
+                     '            if (ail2n_is(r)) return ail2n_cmp_error(cx, a, b, op);')
+        c_text = one(c_text, 'if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }',
+                     'if (b.tag == AIL_T_INST) { st = kc->lt_fn(cx, &r, b, a); if (st != AIL_OK) return st; if (!ail2n_is(r) && ail_obj_truthy(r)) { *out = 1; return AIL_OK; } }')
     c_text = one(c_text, '    ail_d2_fn f = ail_dun2(a, fwd);\n    if (f) return f(cx, out, a, b);\n    f = ail_dun2(b, rev);\n    if (f) return f(cx, out, b, a);\n',
                  '    ail_d2_fn f = ail_dun2(a, fwd); ail_st nst;\n'
                  '    if (f) { nst = f(cx, out, a, b); if (nst != AIL_OK || !ail2n_is(*out)) return nst; }\n'

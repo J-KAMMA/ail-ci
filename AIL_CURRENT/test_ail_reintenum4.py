@@ -209,6 +209,14 @@ def t(label, thunk):
         print(label, type(exc).__name__, str(exc))
 
 
+def tm(label, thunk):
+    # the runtime names a Decimal instance "Decimal"; CPython prefixes its module
+    try:
+        print(label, repr(thunk()))
+    except Exception as exc:
+        print(label, type(exc).__name__, str(exc).replace("decimal.Decimal", "Decimal"))
+
+
 t("e_lt_int", lambda: E.A < 2)
 t("int_lt_e", lambda: 2 < E.A)
 t("e_gt_int", lambda: E.A > 2)
@@ -248,6 +256,16 @@ t("frac_ge", lambda: G.B >= Fraction(3, 1))
 t("frac_lt", lambda: G.B < Fraction(7, 2))
 t("frac_dunder", lambda: (G.B.__gt__(Fraction(5, 2)), G.B.__le__(Fraction(3, 1))))
 t("frac_rev", lambda: (Fraction(5, 2) < G.B, Fraction(3, 1) >= G.B))
+tm("s_dec_gt", lambda: S.A > Decimal("0.5"))
+tm("s_dec_lt", lambda: S.A < Decimal("0.5"))
+tm("s_dec_ge", lambda: S.A >= Decimal("0.5"))
+tm("s_dec_le", lambda: S.A <= Decimal("0.5"))
+tm("s_dec_dunder", lambda: S.A.__gt__(Decimal("0.5")))
+t("s_frac_gt", lambda: S.A > Fraction(1, 2))
+t("s_frac_lt", lambda: S.A < Fraction(1, 2))
+t("s_frac_ge", lambda: S.A >= Fraction(1, 2))
+t("s_frac_le", lambda: S.A <= Fraction(1, 2))
+t("s_frac_dunder", lambda: S.A.__gt__(Fraction(1, 2)))
 ''',
     'divmod': '''
 from enum import Enum, IntEnum, IntFlag

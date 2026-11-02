@@ -1,3 +1,26 @@
+## 2026-11-02 -- reintenum4 fix round 4: StrEnum ordering and enum-gated NotImplemented route
+
+The reintenum4 review (FIX) found two defects in the previous round.
+
+* The new `ail2n_dec_frac` reflection route ran for every left operand whose ordering dunder returned
+  NotImplemented, so `S.A > Decimal("0.5")` (StrEnum) entered Decimal's reflected method and reported
+  `'<'` with the operands reversed.  The route now also requires `ail2n_intenum(a)` (the base chain
+  contains `_AilIntEnum`, which IntFlag shares); a StrEnum or plain Enum keeps the old error text with
+  the operator and operand order of the original comparison.  IntEnum/IntFlag vs Decimal/Fraction
+  still route and match CPython.
+* `safetyrt.patch_notimplemented`'s instance-ordering branch was emitted for every program returning
+  NotImplemented, including a class-only program with no enum.  It now takes `enum=` like the MUL
+  guard and replaces the old branch only when the compiler registered an enum base class; a class-only
+  program's C is byte-identical to the base.  The Decimal/Fraction helpers are emitted only with that
+  branch.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `rev_strenum_dec`, `rev_gt`, `rev_order2`,
+`bytes_order`, `p1` and `p8` keep only the pre-existing Decimal/Fraction type-name text differences;
+`rev_strenum_dec` and `rev_gt` match CPython exactly after normalising `decimal.Decimal` to `Decimal`.
+Generated C for `rev_notimpl_unrelated` (`p5ni`) and `rev_unrel` is byte-identical to the base.
+Final-state tests: `test_ail_reintenum4`, `test_ail_dunders`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` (5 modules, 0 failed).
+
 ## 2026-11-02 -- reintenum4 fix round 3: Decimal/Fraction ordering and enum-gated MUL guard
 
 The reintenum4 review (FIX) named two defects left by the previous round.

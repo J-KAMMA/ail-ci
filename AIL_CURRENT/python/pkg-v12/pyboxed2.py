@@ -12955,12 +12955,12 @@ def _build(source, report, allow_mix=True):
             hints.setdefault(need.fname, set()).update(need.names)
     else:
         raise Unsupported('closures nested too deeply to settle their shared names')
+    # the MUL guard before the big-int slow path and the Decimal/Fraction ordering route are only needed when an
+    # enum member takes part; a program with a class but no enum keeps the C it had before those guards
+    uses_enum = any(name in compiler.classes for name in
+                    ('_AilEnum', '_AilIntEnum', '_AilStrEnum', '_AilFlag', '_AilIntFlag'))
     if compiler.dunder_ops:
         import dunderrt
-        # the MUL guard before the big-int slow path is only needed when an enum member repeats a sequence;
-        # a program with a class but no enum keeps the C it had before that guard
-        uses_enum = any(name in compiler.classes for name in
-                        ('_AilEnum', '_AilIntEnum', '_AilStrEnum', '_AilFlag', '_AilIntFlag'))
         body = dunderrt.patch(body, inplace=compiler.dunder_inplace, enum=uses_enum)
     if compiler.generators:
         import safetyrt
@@ -12970,7 +12970,7 @@ def _build(source, report, allow_mix=True):
         body = safetyrt.patch_exc(body)
     if compiler.uses_ni:
         import safetyrt
-        body = safetyrt.patch_notimplemented(body)
+        body = safetyrt.patch_notimplemented(body, enum=uses_enum)
     import dictviews
     if dictviews.wants_compare(source):
         body = dictviews.patch_compare(body)     # `d.keys() < s` (DIFFERENCES C109)
