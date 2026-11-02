@@ -1,3 +1,57 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode-go/deepseek-v4.1-flash]
+## Review
+
+**Diff summary.** The change adds `AIL_CURRENT/ail.py` (CPython versions of the AIL-only built-ins), makes `python_surface` drop `from ail import …` / rewrite `ail.X`, stops `ail_modules` merging `ail`, makes `tools/ail2py.py` emit the import, and adds the CPython parity script and tests. It does what the report says structurally.
+
+**Verified claims**
+- Converter `--check --flags "--strict"`: `identical` for all ten tasks (ran all ten).
+- `tools/ail2py_cpython_check.py`: nine tasks `mismatches 0`; `tally_lang 75 cases mismatches 1 ['hidden/long_unary_chain']`.
+- `from ail import wrapping_add` builds `program.c` identical to the bare program; `import ail` + `ail.wrapping_add` also identical. A program containing “ail” but no import has C identical to base.
+- `jscharat` astral, `path_exists`/`is_dir` ENOENT/ENOTDIR/empty, codecs, wrapping, heap equal-key order, stdin, `read_bytes`/`file_chunks` aliasing probes all match the AOT build.
+- `test_ail_ail2py`, `test_ail_python_syntax`, `test_ail_heapq_bisect`, `test_ail_overflow_error`, `test_ail_builtin_contracts`, `test_ail_api_profiles`, `test_ail_files`, `test_ail_corpus_findings3` pass; `test_ail_safetynet` passes without the VM cap. `update_manifest.py --check` exits 0.
+- “Fixed all three defects”: **false for `same_file`** (see defect 1); the other two fixes are correct.
+
+**Defects (new)** — full probe files in `/tmp/rprobes/`
+
+1. `/tmp/rprobes/rv_same2.py` — `same_file` short-circuits when the first path is missing and never stats the second. The runtime (`ail_same_file`, cruntime.py:26246) calls `ail_file_identity` on both paths before checking. Expected (AIL binary): `miss-empty OSError`, `miss-enotdir OSError`; actual (`ail.py:393`): `miss-empty 0`, `miss-enotdir 0`. This contradicts the report’s “empty path and non-ENOENT stat failures raise OSError”.
+2. `/tmp/rprobes/rv_close2.py` — `_BinaryFile` methods dereference `self._file` after `close()` sets it to `None` (`ail.py:35-76`). The runtime `ail_binaryfile_ready` raises `ValueError`. Expected (AIL binary): `read ValueError`, exit 0; actual (CPython/`ail.py`): `AttributeError: 'NoneType' object has no attribute 'read'`, exit 1. Same for `readinto/write/seek/tell/flush`.
+3. `/tmp/rprobes/rv_alias.py` — `from ail import wrapping_add as w` is dropped but the alias is not rewritten or refused (`ail_syntax.py:4127`). Expected under CPython: `3`; actual AIL compile: `not in the subset: the name 'w' is not a known function/class/builtin`.
+
+**Pre-existing**
+- `AIL_UNIFIED_FORCE=1` refuses the AIL-only built-ins on both base and HEAD (base fails at the import, HEAD at the built-in name; both named refusals).
+- `test_ail_safetynet` `S4_generators_gc` fails under `ulimit -v 1500000` identically on base and HEAD; passes without the cap.
+
+**Unverified**
+- TCP (`tcp_connect/listen/poll/accept/recv/send`) parity was not exercised.
+- `current_dir`/`monotonic_ms` exact values are not comparable.
+- Speed: no runtime/codegen hot path changed, so no `icount` run.
+
+VERDICT: FIX
+
+1. Fix `same_file` to evaluate both identities before returning 0 (probe `rv_same2.py`; expected `miss-empty OSError`, `miss-enotdir OSError`, actual `0`).
+2. Make `_BinaryFile` methods raise `ValueError` after `close()` (probe `rv_close2.py`; expected `read ValueError`/exit 0, actual `AttributeError`/exit 1).
+3. Handle or refuse `from ail import X as Y` instead of dropping the alias (probe `rv_alias.py`; expected `3`, actual compile failure on `w`).
+[cost $0.0571, opencode tokens {"total": 4153598, "input": 118574, "output": 12115, "reasoning": 33405, "cache.write": 0, "cache.read": 3989504}]
+    tool time: bash 9.9 min, write 0.0 min
+        143s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && ulimit -v 1500000 && timeout 900 python3 ../tools/par_check.
+        140s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 1200 python3 ../tools/par_check.py -j 1 test_ail_saf
+         78s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && ulimit -v 1500000 && timeout 1200 python3 ../tools/par_check
+         77s bash   cd /tmp/base/AIL_CURRENT && ulimit -v 1500000 && timeout 1200 python3 ../tools/par_check.py -j 1 test_ail_safe
+         61s bash   cd /home/runner/work/ail-ci/ail-ci && ulimit -v 1500000 && PYTHONPATH=$PWD/AIL_CURRENT timeout 600 python3 -B 
+         58s bash   cd /home/runner/work/ail-ci/ail-ci && for t in berth_sim chain_relax echo_pack ledger_bin rail_transfer scar_l
+         14s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && ulimit -v 1500000 && timeout 900 python3 ../tools/par_check.
+          9s bash   cd /home/runner/work/ail-ci/ail-ci && export PYTHONPATH=$PWD/AIL_CURRENT RV_SET_XYZ=setval && ulimit -v 150000
+
+
+--- ORIGINAL TASK ---
 Lane: frontend
 
 **Owner decisions (2026-11-03):** AIL is one language, Python syntax plus optional annotations. The compare-lab `ail` column may use the converted annotated `typed.py` when its C is identical, and the plain `main.py` stays as its own row. The brace front end is removed before the 0.1 tag. AIL-only built-ins are spelled `from ail import ...`.
