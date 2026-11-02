@@ -1,3 +1,19 @@
+## 2026-11-02 -- prog9 review fix 6: container element mutation gives up receiver inference (job-rbprog9-11022227)
+
+The list/dict literal element class inferred for `qs[0].peek()` / `d["k"].peek()` ignored later
+element stores. Subscript assignment, list/dict mutator methods (`append`, `extend`, `insert`,
+`pop`, `remove`, `clear`, `sort`, `reverse`, `update`, `setdefault`, `popitem`, `add`, `discard`,
+`__setitem__`, `__iadd__`, ...), augmented assignment and `del qs[i]` now invalidate the container
+for the whole function, and the same invalidation follows aliases (`rs = qs`, including through a
+list/dict literal). A later method call is then resolved from the unique Optional method signature
+or refused by name (`cannot tell which class the peek() call uses`), never silently compiled as the
+old element class. Probes `r1_list_mut`, `r2_dict_mut`, `r3_alias_mut`, `r4_append`,
+`r5_negindex`, `r6_postloop`, `r7_two_optional`, `r8_fn_mut`, `r9_nested_mut`,
+`r10_no_mut`, `r11_append_both`, `r12_dict_alias` and `r13_aug_sub` match CPython on both
+`cmp.sh` builds; the ambiguous all-Optional variants are refused by name on the strict typed path.
+`test_ail_prog9`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass
+(4 modules, 0 failed), and `update_manifest.py --check` is clean.
+
 ## 2026-11-02 -- prog9 review fix 5: receiver inference stays in the current function (job-rbprog9-11022049)
 
 `receiver_classes_of`/`container_classes` now collect assignments only from the function's own

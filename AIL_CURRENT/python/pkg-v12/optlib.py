@@ -32,6 +32,10 @@ ZERO = {'int': 0, 'float': 0.0, 'bool': False, 'str': '', 'bytes': b''}
 # calls whose evaluation may be reordered with an Optional call hoisted ahead of the statement
 SAFE_CALLS = frozenset(('print', 'str', 'repr', 'len', 'abs', 'min', 'max', 'bool', 'int', 'float', 'round', 'sum'))
 PURE_BIN = (ast.Add, ast.Sub, ast.Mult, ast.BitAnd, ast.BitOr, ast.BitXor, ast.LShift, ast.RShift)
+# methods that can change a list/dict/set element class after the literal was built
+MUTATING_METHODS = frozenset(('append', 'extend', 'insert', 'pop', 'remove', 'clear', 'sort',
+                              'reverse', 'update', 'setdefault', 'popitem', 'add', 'discard',
+                              '__setitem__', '__delitem__', '__iadd__', '__imul__'))
 
 
 class Refused(Exception):
@@ -374,11 +378,73 @@ class Lowerer:
                     changed = True
             if not changed:
                 break
+        # A literal's element class stays plain only while no element can be replaced or added and
+        # no other name can reach the same container.  Subscript stores, list/dict mutators and
+        # aliases (`rs = qs`) therefore give up the inference for the whole name: a later
+        # `qs[0].peek()` is then resolved from a unique method signature or refused by name.
+        aliases = {}
+        mutated = set()
+
+        def link(a, b):
+            aliases.setdefault(a, set()).add(b)
+            aliases.setdefault(b, set()).add(a)
+
+        def base_name(t):
+            while isinstance(t, ast.Subscript):
+                t = t.value
+            return t.id if isinstance(t, ast.Name) else None
+
+        for n in ast.walk(node):
+            if isinstance(n, ast.Assign):
+                targets, value = n.targets, n.value
+            elif isinstance(n, ast.AnnAssign):
+                targets, value = [n.target], n.value
+            elif isinstance(n, ast.AugAssign):
+                targets, value = [n.target], None
+            else:
+                targets = value = None
+            if targets is not None:
+                for t in targets:
+                    if isinstance(t, ast.Subscript):
+                        base = base_name(t)
+                        if base is not None:
+                            mutated.add(base)
+                    elif isinstance(t, ast.Name):
+                        if isinstance(n, ast.AugAssign):
+                            mutated.add(t.id)
+                        elif isinstance(value, ast.Name):
+                            link(t.id, value.id)
+                        elif isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+                            for e in value.elts:
+                                if isinstance(e, ast.Name):
+                                    link(t.id, e.id)
+                        elif isinstance(value, ast.Dict):
+                            for e in value.values:
+                                if isinstance(e, ast.Name):
+                                    link(t.id, e.id)
+            if isinstance(n, ast.Delete):
+                for t in n.targets:
+                    if isinstance(t, ast.Subscript):
+                        base = base_name(t)
+                        if base is not None:
+                            mutated.add(base)
+            if (isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+                    and isinstance(n.func.value, ast.Name)
+                    and n.func.attr in MUTATING_METHODS):
+                mutated.add(n.func.value.id)
+        invalid = set(mutated)
+        stack = list(mutated)
+        while stack:
+            name = stack.pop()
+            for other in aliases.get(name, ()):
+                if other not in invalid:
+                    invalid.add(other)
+                    stack.append(other)
         containers = {}
         for _ in range(len(values) + 1):
             changed = False
             for name, made in values.items():
-                if name in containers:
+                if name in containers or name in invalid:
                     continue
                 classes = {self.literal_element_class(v, out) for v in made}
                 if len(classes) == 1 and None not in classes:
