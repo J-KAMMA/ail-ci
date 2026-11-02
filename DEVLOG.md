@@ -43,6 +43,99 @@ order -- the known set-order difference, not something this change touches. The 
 features: classes/ABC rich comparisons returning `NotImplemented` (`g13_014`), a nested tuple target over
 `itertools.combinations` (`g06_036`), `set[str]` comprehensions (`g06_016`) and nested
 `list[dict[str, str]]` records (`g01_016`).
+## 2026-11-02 -- prog11 review: walrus rebinding of a tuple constant is refused by name (job-prog11-11021006)
+
+Fixed both defects from the review of `39d6d0c`.  The pre-lowering scan in `python/pkg-v12/tuplib.py`
+missed a walrus that was the assignment value itself (`y = (X := 9)`) because `_walrus_bindings`
+checked only a node's children, and a detected walrus rebinding was left to the general path, which
+binds `:=` in `main` instead of the module namespace, so `def f(): return X[0]` still printed the
+stale `1` where CPython raises `TypeError: 'int' object is not subscriptable`.  The scan now checks
+the node itself and walks module / `global` scopes to recognise `:=` rebindings (including inside a
+comprehension or a function that declares `global X`); such a program is refused by name with
+`tuplib.HardRefused`, converted to a normal `SyntaxErrorAIL` in `python_surface`, instead of falling
+back.  Plain `X = 9`, `global X; X = 9`, `del X` and tuple-to-tuple rebinding keep their previous
+behaviour.  Probes: `c2` (comprehension), `d2` (call), `c4` (`y = (X := 9)`), `w1`/`w2` (`global X`
+walrus) are now refused by name on both builds; `w3`/`w4` (local shadow) still build and match
+CPython; `q10`/`q20`/`q21`/`q22`/`q24` still match CPython on both builds.
+
+## 2026-11-02 -- prog11 review: tuple constants rebound or deleted (job-prog11-11021006)
+
+Fixed both defects from the review of `754b5a4`.  A module-level tuple constant is kept as
+`NAME__c0`, ... columns, so a later `NAME = 9` or `del NAME` (at module level, or through
+`global NAME` inside a function or class) left the functions reading the stale columns or crashed
+the compiler with `KeyError: 'NAME'` in `pyboxed2.name_ref`.  `python/pkg-v12/tuplib.py` now
+scans the module and its `global` declarations before splitting; such a rebinding or deletion is
+refused by name and the program stays on the general path, where it matches CPython 3.12
+(`TypeError: 'int' object is not subscriptable` after `X = 9`, `NameError: name 'X' is not
+defined` after `del X`).  Rebinding to another tuple constant is still split and works.  Probes:
+`q10`/`q20`/`q21`/`q22`/`q24` in `/tmp/probes` now match CPython on both builds; `q23` (tuple to
+tuple) still builds and matches; `q25`-`q32` (tuple-to-tuple with a different component type or
+arity, before and after the call, and `for` rebinding) all match CPython on both builds.
+
+## 2026-11-02 -- prog11 review: tuple keys under mutation, forward tuple constants (job-prog11-11020732)
+
+Fixed both defects from the review of `b62a9eb`.  The tuple-key `min`/`max` lowering in
+`python/pkg-v12/iterlower.py` now binds each yielded element before the key runs and re-reads `len()`
+each step, and keeps the best element itself rather than an index into a list the key may have
+changed; a key that pops from the source now matches CPython (`min(xs, key=lambda v: (xs.pop(), v))`
+prints `1` and leaves `[5, 3]`, where the index loop raised `list index out of range`).  Component
+comparison now tests `==` before `<`/`>`, as CPython's tuple comparison does.  `python/pkg-v12/tuplib.py`
+registers tuple module constants before lowering functions, so `def f(): return X[0]` above
+`X: tuple[int, int] = (4, 5)` compiles again and prints `9` (the unannotated form now builds too).
+Probes: all 26 `/tmp/rprobes11` tuple-key/annotated-constant programs on both `cmp.sh` builds; the
+only failures are the pre-existing ones the review already recorded (a key containing `None` in a
+tuple used as a value, and a scalar key that mutates the source).  The ten `lab/compare` `main.ail`
+builds still have byte-identical generated C against the base worktree.
+
+## 2026-11-01 -- typed reach: annotated tuple module constants and tuple keys in min/max (job-prog11-11020732)
+
+Profiled the eight prog11 programs with cProfile on their published inputs and recorded the table in
+`lab/progfix/prog11.md`.  Four were already typed (t256, t058, g11_006 and, after the first fix,
+g11_030); two more now build on the typed path.  `tuplib.py` lowers an annotated module tuple / list of
+tuples (`START: tuple[int, int] = (0, 0)`) through the same `module_assign` rule as the unannotated
+form, so the value no longer becomes a constructor call that the module-constant rule refuses
+(g11_030, both hot functions).  `iterlower.py` splits a tuple-returning key lambda in `min`/`max`
+into its components, evaluates each once per element in order, and compares them lexicographically
+with `==`/`<` or `==`/`>`, so t404's `min(xs, key=lambda v: (abs(v - cur), xs.index(v)))` builds
+typed.  Scalar keys and `default=` keep their previous shape.
+
+The remaining three are follow-ups with their exact messages in `lab/progfix/prog11.md`: t310 needs
+typed `iter()` plus a str `zip(s, t)` in a generator, g25_006 needs typed `Enum`/`auto()` methods, and
+t388 needs typed `datetime`.  `test_ail_prog11` (registered in `tests.d/`) compiles and compares all
+eight programs, requires `--strict` success for g11_030 and t404, and adds tuple-key and annotated
+tuple-constant programs.  Probes in `/tmp/probes/prog11_*`: tuple-key min/max with 1/2/3 components,
+ties, `default=`, empty `ValueError`, negative/-0.0/NaN/str components, and sources/keys through
+arguments, list items, attributes and dict values; annotated tuple, tuple-of-tuples, list-of-tuples
+and tuple-of-floats module constants.  All match CPython on both `cmp.sh` builds.  All ten
+`lab/compare` `main.ail` builds keep byte-identical generated C against the base commit.
+## 2026-11-01 -- `math.dist` precision review fix (job-rbstd_math-11020651)
+
+Review follow-up on the re-applied `std_math` change. `math.dist` now ports CPython 3.12's compensated
+`vector_norm` (frexp scaling, error-free squares through `fma`, the two-part `frac1` / `frac2` sum and
+the square-root differential correction) instead of a naive scaled sum of squares, so the last bits
+match CPython for ordinary vectors as well as subnormal and huge ones. The helper reaches `fma`
+through a new 3-argument libm intrinsic/wrapper; the typed call path now orders three numeric
+operands left to right. `test_ail_std_math` gained `test_dist_precision_matches_cpython`, which
+compares the review's ULP vector, a 17-dimensional vector, a subnormal vector and a decimal vector
+on the default and forced-general builds. Probes `/tmp/probes/mathfix/d1..d5` (subnormal, up to
+333 dimensions, `inf` / `nan`, argument / list item / attribute / dict paths, ULP vectors) match
+CPython on both builds.
+
+## 2026-11-01 -- `math` real-program coverage (job-rbstd_math-11020651)
+
+Re-applied the accepted `std_math` change on top of the current tree. Added twelve realistic `math`
+programs in `lab/stdlib/math/` and built them in the default mode: ten build (one typed, nine
+general) and all ten match CPython 3.12.3 stdout and exit status; each also matches on the forced
+general path. Four missing common calls were added to the lowering and prelude: `math.prod(...,
+start=...)`, `math.dist`, `math.erf` / `math.erfc`, and `math.nextafter` / `math.remainder`, including
+`math.dist`'s scaled norm and same-length `ValueError`, and `math.remainder`'s domain `ValueError`.
+`math.gamma` / `math.lgamma` and `math.frexp` / `math.ldexp` / `math.ulp` remain named refusals and
+are recorded as follow-ups in `lab/stdlib/math/RESULTS.md`; no program was changed to avoid a
+missing math name. Added `test_ail_std_math.py` (registered through `tests.d/test_ail_std_math.txt`),
+which builds the ten passing programs and compares them with CPython. Probes in `/tmp/probes/math/`
+and `/tmp/probes/feat/` cover empty, negative, huge, `inf` / `nan`, signed-zero and unequal-length
+values, keyword `start=`, and values reaching the calls through an argument, a list item, an
+attribute and a dict value on both builds.
 
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 

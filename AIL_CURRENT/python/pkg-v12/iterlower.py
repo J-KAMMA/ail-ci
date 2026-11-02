@@ -234,6 +234,24 @@ class _Lower:
             return _mark(_call(copy.deepcopy(func), arg))
         return None
 
+    def apply_components(self, func, arg):
+        """The components of `func(arg)` when `func` is a one-parameter lambda returning a tuple, so a
+        `min`/`max` key can compare them lexicographically without making the tuple itself a value;
+        None when the key is not that shape (or names its parameter again, as `apply` refuses)."""
+        if not (isinstance(func, ast.Lambda) and isinstance(func.body, ast.Tuple) and func.body.elts):
+            return None
+        a = func.args
+        if (len(a.args) != 1 or a.vararg or a.kwarg or a.kwonlyargs or a.defaults or a.posonlyargs):
+            return None
+        param = a.args[0].arg
+        parts = []
+        for component in func.body.elts:
+            body = copy.deepcopy(component)
+            if _rebinds(body, param):
+                return None
+            parts.append(_mark(_Subst(param, arg).visit(body)))
+        return parts
+
     def truth(self, pred, arg):
         if isinstance(pred, ast.Constant) and pred.value is None:
             return _mark(copy.deepcopy(arg))
@@ -424,40 +442,91 @@ class _Lower:
                     return ast.BinOp(left=_name(start), op=ast.Add(), right=position)
         else:
             return None
+        # A tuple-returning key is split into components so the loop compares them lexicographically.
+        # The element is bound before the key runs (as CPython's iterator yields it), and the walk
+        # re-reads len() each step, so a key that mutates the source list still sees CPython's order.
+        tuple_key = key is not None and self.apply_components(key, _name('_ail_probe')) is not None
+        first_parts = each_parts = None
+        first_elem = current_elem = None
         if key is None:
             first, each = element(ast.Constant(value=0)), element(_name(index))
-        else:
+        elif tuple_key:
+            first_elem, current_elem = self.fresh('be'), self.fresh('ce')
+            first_parts = self.apply_components(key, _name(first_elem))
+            each_parts = self.apply_components(key, _name(current_elem))
+            if first_parts is None or each_parts is None:
+                tuple_key = False
+        if key is not None and not tuple_key:
             first = self.apply(key, element(ast.Constant(value=0)))
             each = self.apply(key, element(_name(index)))
-        if first is None or each is None:
+        if not tuple_key and (first is None or each is None):
             return None
         word = 'max' if is_max else 'min'
         loop = []
         step = fresh_key = self.fresh('k')
         loop.append(ast.Assign(targets=[_name(best_index, True)], value=ast.Constant(value=0)))
-        loop.append(ast.Assign(targets=[_name(best_key, True)], value=self.expr(first)))
+        if tuple_key:
+            loop.append(ast.Assign(targets=[_name(first_elem, True)],
+                                   value=self.expr(element(ast.Constant(value=0)))))
+            best_parts = [self.fresh('bk') for _ in first_parts]
+            for name, part in zip(best_parts, first_parts):
+                loop.append(ast.Assign(targets=[_name(name, True)], value=self.expr(part)))
+        else:
+            loop.append(ast.Assign(targets=[_name(best_key, True)], value=self.expr(first)))
         loop.append(ast.Assign(targets=[_name(index, True)], value=ast.Constant(value=1)))
-        better = ast.Compare(left=_name(fresh_key), ops=[ast.Gt() if is_max else ast.Lt()],
-                             comparators=[_name(best_key)])
-        loop.append(ast.While(
-            test=ast.Compare(left=_name(index), ops=[ast.Lt()], comparators=[_name(count)]),
-            body=[ast.Assign(targets=[_name(fresh_key, True)], value=self.expr(each)),
-                  ast.If(test=better, body=[ast.Assign(targets=[_name(best_key, True)], value=_name(fresh_key)),
-                                            ast.Assign(targets=[_name(best_index, True)], value=_name(index))],
-                         orelse=[]),
-                  ast.AugAssign(target=_name(index, True), op=ast.Add(), value=ast.Constant(value=1))],
-            orelse=[]))
+        if tuple_key:
+            current_parts = [self.fresh('ck') for _ in first_parts]
+            body = [ast.Assign(targets=[_name(current_elem, True)],
+                               value=self.expr(element(_name(index)))),
+                    ast.AugAssign(target=_name(index, True), op=ast.Add(), value=ast.Constant(value=1))]
+            body += [ast.Assign(targets=[_name(name, True)], value=self.expr(part))
+                     for name, part in zip(current_parts, each_parts)]
+            # CPython's tuple order checks `==` before `<` / `>` component by component, so an equal
+            # component of a type that only supports equality (None, say) is skipped, not compared.
+            better = ast.Constant(value=False)
+            for i in range(len(current_parts) - 1, -1, -1):
+                less = ast.Compare(left=_name(current_parts[i]),
+                                   ops=[ast.Gt() if is_max else ast.Lt()],
+                                   comparators=[_name(best_parts[i])])
+                equal = ast.Compare(left=_name(current_parts[i]), ops=[ast.Eq()],
+                                    comparators=[_name(best_parts[i])])
+                better = ast.IfExp(test=equal, body=better, orelse=less)
+            body.append(ast.If(
+                test=_mark(better),
+                body=[ast.Assign(targets=[_name(first_elem, True)], value=_name(current_elem))]
+                     + [ast.Assign(targets=[_name(name, True)], value=_name(current_parts[i]))
+                        for i, name in enumerate(best_parts)],
+                orelse=[]))
+            if holder is not None:
+                limit = _call(_name('len'), _name(holder))
+            else:
+                limit = _name(count)
+            loop.append(ast.While(
+                test=ast.Compare(left=_name(index), ops=[ast.Lt()], comparators=[limit]),
+                body=body, orelse=[]))
+        else:
+            better = ast.Compare(left=_name(fresh_key), ops=[ast.Gt() if is_max else ast.Lt()],
+                                 comparators=[_name(best_key)])
+            loop.append(ast.While(
+                test=ast.Compare(left=_name(index), ops=[ast.Lt()], comparators=[_name(count)]),
+                body=[ast.Assign(targets=[_name(fresh_key, True)], value=self.expr(each)),
+                      ast.If(test=better, body=[ast.Assign(targets=[_name(best_key, True)], value=_name(fresh_key)),
+                                                ast.Assign(targets=[_name(best_index, True)], value=_name(index))],
+                             orelse=[]),
+                      ast.AugAssign(target=_name(index, True), op=ast.Add(), value=ast.Constant(value=1))],
+                orelse=[]))
+        best_element = _name(first_elem) if tuple_key else element(_name(best_index))
         if default is None:
             pre.append(ast.If(test=ast.Compare(left=_name(count), ops=[ast.LtE()],
                                                comparators=[ast.Constant(value=0)]),
                               body=[ast.Raise(exc=_call(_name('ValueError'), ast.Constant(
                                   value='%s() iterable argument is empty' % word)), cause=None)], orelse=[]))
             pre.extend(loop)
-            return pre, element(_name(best_index))
+            return pre, best_element
         # a default: it is evaluated before the iterable is walked, and is the result for an empty one
         fallback, result = self.fresh('dflt'), self.fresh('res')
         pre.insert(0, ast.Assign(targets=[_name(fallback, True)], value=self.expr(default)))
-        loop.append(ast.Assign(targets=[_name(result, True)], value=element(_name(best_index))))
+        loop.append(ast.Assign(targets=[_name(result, True)], value=best_element))
         pre.append(ast.If(test=ast.Compare(left=_name(count), ops=[ast.Gt()], comparators=[ast.Constant(value=0)]),
                           body=loop,
                           orelse=[ast.Assign(targets=[_name(result, True)], value=_name(fallback))]))
