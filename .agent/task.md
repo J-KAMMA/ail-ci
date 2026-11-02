@@ -6,10 +6,40 @@
 
 --- LAST REVIEW ---
 ## review 1
-[model qoder/DeepSeek-Flash]
-The completed background task was the Decimal probe I already used (`/tmp/probe4.log`): it confirms defect 2 — base `g` matched CPython for `C.B * Decimal("2")` / `C.B + Decimal("2")` while HEAD fails both builds.
+[model opencode-go/deepseek-v4.1-flash]
+Change: `_ail_en_num` now passes only numbers plus `_ail_dec`/`_ail_fr` objects; new `_ail_en_mul` adds `str/bytes/bytearray/list/tuple` (not `range`) for `*` only; bytes/bytearray repetition accepts `__index__`; `dunderrt` inserts an instance `MUL/RMUL` guard before the big-int slow path.
 
-No new findings; the verdict stands: **VERDICT: FIX** (sequence repetition with IntEnum/IntFlag, and `IntEnum * / + Decimal` regressions caused by `_ail_en_num` returning `NotImplemented`).
+Claims:
+- `_ail_en_num`/`_ail_en_mul` change: verified in diff.
+- `sequence_ops` test, DEVLOG, MANIFEST update: verified; `update_manifest.py --check` clean.
+- `p_cmp`, `p_seq`, `p_pow` match CPython on both builds: verified.
+- `p_dec` “member-on-left Decimal/Fraction matches”: **false** for `>`/`<=`/some `>=` (see defect 1).
+- Reflected Decimal/Fraction differences unchanged from base: verified (`/tmp/base` = `45950d7`).
+- Tests `test_ail_reintenum4`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`: verified, 0 failed (215s + 288s).
+- Commit `c983168`: verified.
+
+Pre-existing (same on base and HEAD): reflected Decimal/Fraction (`Decimal * C.B`, `+`, `-`, `/`); `Decimal("3") == C.B` false; `"ab" * P()` with only `__index__`; `StrEnum * IntEnum` and reverse.
+
+Unverified: instruction-count/speed impact (the new guard is on the cold multiply path).
+
+VERDICT: FIX
+1. IntEnum/IntFlag ordering against Decimal/Fraction now crashes or silently changes instead of matching CPython. Probe `/tmp/rprobes/rev_gt.py` (and `/tmp/rprobes/rev_dec2.py`):
+   - `C.B > Decimal("2.5")`: expected `True`; both builds give `AttributeError 'Decimal' object has no attribute 'value'`.
+   - `C.B <= Decimal("3")`: expected `True`; both builds give the same `AttributeError`.
+   - `C.B > Fraction(5,2)` / `C.B <= Fraction(3,1)`: expected `True`; both builds give `AttributeError 'Fraction' object has no attribute 'value'`.
+   - `C.B.__gt__(Decimal("2.5"))`: expected `NotImplemented`; both builds give `True`.
+   Not pre-existing: base gave `TypeError '>' not supported...` (and correct `NotImplemented` from the dunder), so this change caused the new crash (/tmp/rprobes/base_gt.log vs head_gt.log).
+2. A program with a class but no enum now generates different C. Probe `/tmp/rprobes/rev_unrel.py`: HEAD adds `if (a.tag == AIL_T_INST || b.tag == AIL_T_INST) return ail_dun_binop(... AIL_D2_MUL ...)` immediately before `ail__mul_slow`, while base does not; behavior is still CPython-identical. Per the “programs not using the feature must have unchanged C” rule, the new guard needs to be gated to programs that need enum dispatch.
+[cost $0.0438, opencode tokens {"total": 2919172, "input": 91327, "output": 10593, "reasoning": 25572, "cache.write": 0, "cache.read": 2791680}]
+    tool time: bash 16.9 min, write 0.0 min
+        290s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 1200 python3 ../tools/par_check.py -j 2 test_ail_fil
+        217s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && timeout 1800 python3 ../tools/par_check.py -j 2 test_ail_rei
+         90s bash   cd /tmp/rprobes && python3 - <<'EOF' p='rev_dec2.py' s=open(p).read() s=s.replace('t("pow3dec", lambda: pow(C.
+         79s bash   cd /home/runner/work/ail-ci/ail-ci && bash ~/tools/cmp.sh /tmp/rprobes/rev_gt.py $PWD > /tmp/rprobes/head_gt.l
+         79s bash   cd /home/runner/work/ail-ci/ail-ci && (bash ~/tools/cmp.sh /tmp/rprobes/rev_plain_deccmp.py /tmp/base > /tmp/r
+         77s bash   cd /tmp/base && bash ~/tools/cmp.sh /tmp/rprobes/rev_gt.py $PWD > /tmp/rprobes/base_gt.log 2>&1; date; cat /tm
+         35s bash   cd /tmp/base && (bash ~/tools/cmp.sh /tmp/rprobes/p_dec.py $PWD > /tmp/rprobes/base_dec.log 2>&1 &); cd /home/
+         32s bash   cd /home/runner/work/ail-ci/ail-ci && (bash ~/tools/cmp.sh /tmp/rprobes/rev_dec2.py $PWD > /tmp/rprobes/head_r
 
 
 --- ORIGINAL TASK ---
