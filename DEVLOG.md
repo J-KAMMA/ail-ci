@@ -1,3 +1,13 @@
+## 2026-11-02 -- prog15 review 2 follow-up: keep the alias refusal for unannotated str-keyed dicts (job prog15)
+
+The typed assignment now refuses `e = d` for an unannotated str/bytes-keyed dict by name ("keyed by
+str; copying it into another name is not built on the typed path").  That refusal is a symptom when
+the same function also aliases the dict, so `aliasrefuse.refuse_instead` -- which already promoted
+"used where a number is needed" to the real aliasing site -- now recognises this message too and
+reports `DICT_ALIAS_UNTYPED`'s actual "makes a second name for the same container" reason again.
+Without an aliasing site the original str-keyed copy refusal is unchanged.  Pins refreshed; the
+typed/general outputs of the fuzz-findings refusal and alias cases are unchanged.
+
 ## 2026-11-02 -- prog15 review 2: a pair target is not a one-code-point view (job prog15)
 
 `_listcomp_pair_into_temp` registered the second name of every `enumerate` / `zip` / `.items()`
