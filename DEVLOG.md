@@ -93,6 +93,16 @@ so the default typed build and CPython were the two builds fuzzed. Rust was not 
 (rustup has no toolchain), so `run_task.py --langs ail,c,rust` reported a rust build failure; ail and c
 passed every public/hidden case. Modules run: `test_ail_safetynet`, `test_ail_files`,
 `test_ail_corpus_findings3`.
+## 2026-11-02 -- SPEC1: tally_lang specialization measured, no code landed (job-spec1-11030015)
+
+Profiled `tally_lang` with `gprof` (perf and callgrind are unavailable on the runner) and priced
+the opcode-specialized-evaluator mechanism. `ev` is 83.9% of samples; the parallel-list span work
+is about 25% of the run and the recursion check about 6%. Hand prototypes on a `/tmp` copy of the
+generated C gave a safe +5.4% from shared span checks and +2.7% from a popcount idiom (about 1.08x
+together), while removing the bounds and recursion checks reached 1.305x but is not legal and is
+still 4% slower than C. Per the task's stop rule (below 1.2x, do not land), no compiler or runtime
+change was made. `echo_pack` was also profiled (int-key hash table, 46% of line samples; AIL/C is
+1.76x) for the record. Numbers, Amdahl bounds and cost are in `docs/design/SPEC1.md`.
 
 ## 2026-11-02 -- re-apply accepted prog8 change on staging-integ (job-rbprog8-11021901)
 
