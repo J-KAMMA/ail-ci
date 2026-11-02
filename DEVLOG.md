@@ -174,6 +174,27 @@ The cache key now drops every `AIL_FE_CACHE*` variable (not just the exact `AIL_
 `docs/design/FE_CACHE.md`: changing `AIL_FE_CACHE_LOG`, `AIL_FE_CACHE_DIR` or `AIL_FE_CACHE_MAX_MB`
 no longer fragments the cache or turns a hit into a miss. `test_ail_fe_cache` gained a case for the
 log variable; the default no-cache path is unchanged.
+## 2026-11-02 -- prog27 typed reach: str/bytes parameter defaults (job-prog27-11021551)
+
+Profiled the eight prog27 programs with CPython 3.12 `cProfile` over repeated `main()` calls and
+recorded every hot function in `lab/progfix/prog27.md`.  t110, g03_010 and t375 were already typed;
+g05_026's whole hot set stopped at `build_histogram(counts, symbol: str = "*")` because the typed
+path accepted only int/float/bool defaults.  `python/pkg-v12/pyfunc.py` now also accepts a
+compile-time `str` or `bytes` literal (both immutable constants the emitter already builds) and
+refuses a literal whose kind does not match the settled parameter, still by name; list/dict/None
+defaults keep their refusal.  g05_026 now builds typed as a whole, and `count_words_per_line`,
+`build_histogram` and `main` (52.2%, 30.7% and 17.0% of its own-function time) are all typed.
+
+The other hot functions need big features and stay follow-ups with exact messages in
+`lab/progfix/prog27.md`: g07_016 (full-slice assignment plus mutable list parameters), t223 (nested
+bool lists and a deque of tuples), t176 (`json.loads` into `list[dict]`) and g17_018
+(`singledispatch` repeated-name registrations).  The generated C of all ten
+`lab/compare/src/*/main.ail` tasks is byte-identical to the base commit.  `test_ail_prog27`
+(registered in `tests.d/`) builds and compares all eight programs, requires `--strict` success for
+g05_026 and its extracted functions, and covers str/bytes defaults (empty, Unicode, bytes, omitted
+and keyword calls, values through a list item and a dict value) plus the kind-mismatch refusals.
+Probes `/tmp/probes/prog27_strdefault.py` and `/tmp/probes/prog27_refuse_*.py` match CPython on both
+`cmp.sh` builds or are refused by name as recorded.
 
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
