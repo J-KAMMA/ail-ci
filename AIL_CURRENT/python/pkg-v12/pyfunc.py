@@ -1879,6 +1879,27 @@ def _etype(node, ctx):
                         if isinstance(e, ast.Name):
                             ctx.bind(e.id, INT)
                 return _etype(a[0].elt, ctx)
+            # `max(d, key=K)` / `min(d, key=K)` returns the KEY of the dict, not what K evaluates
+            # (K only supplies the comparison value).  The bare-container answer below is INT, so
+            # an unannotated `top = max(stock, key=lambda k: stock[k])` was settled as int and the
+            # str key then looked like a rebinding.  The same key-kind answer covers the typed
+            # containers whose first position may not be an int64.
+            if node.keywords and any(kw.arg == 'key' for kw in node.keywords):
+                source = a[0]
+                map_kind = _map_kind(source, ctx)
+                if map_kind is not None:
+                    return _map_key_kind(map_kind)
+                if isinstance(source, ast.Name):
+                    try:
+                        source_kind = ctx.type_of(source.id)
+                    except Exception:
+                        source_kind = None
+                    if source_kind == SLIST:
+                        return STR
+                    if source_kind == FLIST:
+                        return FLT
+                    if source_kind in (LIST, SET):
+                        return INT
             # the bare-container form, `sum(xs)`/`max(xs)`/`min(xs)` -- FLT when `xs` is a FLIST,
             # otherwise unchanged (INT), exactly as it always was for every other sequence shape.
             if _is_flist_name(a[0], ctx):
@@ -7842,6 +7863,14 @@ def _is_str_expr(node, ctx):
         return True
     if _is_str_format_call(node, ctx):
         return True
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('min', 'max') and node.func.id not in ctx.funcs
+            and node.args and any(kw.arg == 'key' for kw in node.keywords)):
+        # min/max over a str-keyed set or dict returns one of its KEYS; the key function only
+        # supplies the comparison value.  Without this the pre-binding pass claimed the target
+        # int, so `top = max(stock, key=lambda k: stock[k])` was refused as an int-to-str rebind.
+        kind = _map_kind(node.args[0], ctx)
+        return kind is not None and _map_key_kind(kind) == STR
     return False
 
 
@@ -13214,6 +13243,14 @@ def _numeric_to_int(value, ctx):
                   if os.environ.get('AIL_SURFACE') == 'python' else '')) +
             'ail_die("OverflowError: integer overflow in int(float) (ints are 64-bit; --exact-int gives exact ints)"); } (int64_t)_ail_number_input; })') % value
 def _numeric_expression_needed(node, ctx):
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict, ast.ListComp, ast.SetComp,
+                         ast.DictComp, ast.GeneratorExp)):
+        # A container literal is not a numeric binding even when every element happens to be a
+        # name currently holding a number: `{lo, hi}` is a set of ints, not a number. Before this,
+        # the probe's first pass (numeric_allowed_names still None) read the names and lowered the
+        # assignment as a numeric binding, so `s: set[int] = {lo, hi}` was refused as assigning an
+        # int to a declared set.
+        return False
     if isinstance(node, ast.BinOp) and not (_etype(node.left, ctx) in NUM and _etype(node.right, ctx) in NUM):
         return False  # [0] * n, "ab" * n, xs + ys: a sequence operand is not a numeric binding
     return any(isinstance(n, ast.Name) and n.id in ctx.locals and ctx.types.get(n.id) in NUM and n.id in getattr(ctx, 'source_names', ()) and (ctx.numeric_allowed_names is None or n.id in ctx.numeric_allowed_names) for n in ast.walk(node))
@@ -28488,6 +28525,11 @@ def _promote_floats(fn, ctx):
             if isinstance(n.targets[0], ast.Name) and n.targets[0].id in ctx.dhandles:
                 continue            # all assignments to an inner-dict alias belong to _stmt;
                                     # a later invalid scalar rebind must not pre-bind it to INT
+            if (isinstance(n.value, ast.Subscript) and isinstance(n.value.value, ast.Name)
+                    and getattr(n.value.value, '_ail_synth', False)):
+                continue            # `_il5_keys[_il2_bi]` -- iterlower's own keyed min/max lowering
+                                     # builds the holder list just before this statement; its element
+                                     # kind is settled where the list is built, not here
             if isinstance(n.value, ast.Name) and n.value.id in container_names:
                 continue            # `reachable = nxt` -- see `container_names` above; left for
                                      # `_stmt`'s own container-to-container rebind check to settle
