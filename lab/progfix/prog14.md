@@ -14,7 +14,7 @@ function time.
 | g15_038 | `main`, `symbolic_name`, `make_error`, `round_trips` (all below cProfile's 1 ms) | n/a (<1 ms total) | no: `main`/`make_error`/`symbolic_name` `unresolved-return`; `round_trips` `to_c-refused` (`getattr`) | still no. Follow-up: OSError/tuple/dict module helpers and `getattr`; `symbolic_name` also hits `a method on Attribute` for `errno.errorcode.get` |
 | g16_036 | `inorder` (64/16 recursive calls) | n/a (<1 ms total) | no: `unresolved-param tree`; `Tree = Optional[Tuple[...]]` is not a supported annotation | still no. Follow-up: generators (`yield`/`yield from`) and `Optional[Tuple[...]]` values |
 | t168 | `main` 0.058 s own (plus csv internals) | 19% own; `main` is the only user function in the hot path | default build compiles the whole program typed; the hybrid has no unit for `main` (`unresolved-return`, None result, csv/print calls) | still runs `main` in CPython. Follow-up: hybrid functions returning None that call/I/O |
-| g25_012 | `main`, `categorize` (12 calls, <1 ms) | n/a (<1 ms total) | no: `categorize` `to_c-refused` -- `a `match` statement.` | still no. Follow-up: lower `match` (literal/class/wildcard cases and guards) to an if/elif chain in the typed emitter |
+| g25_012 | `main`, `categorize` (12 calls, <1 ms) | n/a (<1 ms total) | no: `categorize` `to_c-refused` -- `a `match` statement.` | still no: the `match` is already lowered to an if/elif chain and the annotated module constant now stays in the slice, so the first remaining reason is `to_c-refused` -- `raise requires a built-in exception value` (`TypeError` is not a supported exception name). Follow-up: a typed clone cannot raise a built-in exception |
 | t318 | `main` 0.119 s, `update` 0.116 s, `query` 0.108 s | 88% | no: `update`/`query` are nested functions (pymix selects top-level functions only); whole program falls back on `'tokens' is a blist` | still no. Follow-up: typed clones for nested functions that capture a list, or a typed whole-program path for this shape |
 | t164 | `main` 0.125 s own (plus csv internals) | 32% own; `main` is the only user function in the hot path | no: `unresolved-return`; typed whole program falls back on `a method on BoolOp` and `csv` | still no. Follow-up: csv parsing / container-returning main on the typed path |
 
@@ -59,6 +59,13 @@ function time.
    old negative-length result and the hybrid's newly exposed path; the ten `lab/compare` generated C
    files are unchanged because none of them call `len` on a range.
 
+9. A top-level annotated literal (`LIMIT: int = 100`) is a one-time module constant like a plain
+   assignment, in the candidacy slice and the hybrid divisor proof.  `_runs_user_code` now treats a
+   top-level `pass` (which the Python surface writes for an import it lowers away, e.g. g25_012's
+   `typing` import) as a no-op, so a constant after it is still bound before any call.  A late,
+   rebound or non-literal annotated binding keeps its old path (the clone is refused), and the ten
+   `lab/compare` generated C files are byte-identical.
+
 Bad divisors stay in CPython: a parameter divisor, a divisor reached through a list item, attribute
 or dict value, a literal zero or negative local, a boolean, or any name whose bindings are not all
 positive are not proven.  No int is wrapped; the existing overflow flag and CPython fallback still
@@ -67,7 +74,9 @@ CPython; a negative literal step is proven nonzero and may be accelerated.
 
 ## Follow-ups (bigger features, exact first messages)
 
-- `match` in g25_012/`categorize`: `a `match` statement.` (write an if/elif chain).
+- raising a built-in exception from a typed clone in g25_012/`categorize` (the `match` is already
+  lowered): `raise requires a built-in exception value`; `TypeError` itself is not a supported
+  exception name.
 - generators and tuple-shaped annotations in g16_036/`inorder`: `'tree' is annotated Tree, which
   this compiler has no rule for.` and `yield: this language has no generators.`
 - nested functions in t318/`update`,`query`: `'tokens' is a blist; ...` and no per-nested-function

@@ -145,6 +145,9 @@ def _runs_user_code(node):
         return bool(node.decorator_list or node.bases or node.keywords)
     if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
         return False                            # a docstring or other no-op constant
+    if isinstance(node, ast.Pass):
+        return False                            # a no-op placeholder (the Python surface writes one
+                                                # for an import it lowers away)
     if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
         return any(isinstance(child, (ast.Call, ast.Lambda, ast.Await, ast.Yield, ast.YieldFrom))
                    for child in ast.walk(node))
@@ -174,11 +177,16 @@ def _module_numbers(tree):
         if isinstance(node, ast.Assign) and len(node.targets) == 1 \
                 and isinstance(node.targets[0], ast.Name):
             name = node.targets[0].id
-            if counts.get(name) != 1 or name in written:
-                continue
-            value = _constant_number(node.value)
-            if value is not None:
-                found[name] = value
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) \
+                and node.value is not None:
+            name = node.target.id
+        else:
+            continue
+        if counts.get(name) != 1 or name in written:
+            continue
+        value = _constant_number(node.value)
+        if value is not None:
+            found[name] = value
     return found
 
 

@@ -2195,11 +2195,26 @@ def _scan_module_consts(tree):
                                     "with plain lists, dicts and loops" % (unavailable or mod))
             error.source_line = node.lineno    # the import itself, not a later use of the name
             raise error
-        if not isinstance(node, ast.Assign):
+        annotated = isinstance(node, ast.AnnAssign)
+        if not isinstance(node, (ast.Assign, ast.AnnAssign)):
             continue
-        if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
-            continue
-        name = node.targets[0].id
+        if annotated:
+            if not isinstance(node.target, ast.Name) or node.value is None:
+                continue
+            target = node.target
+            # An annotated binding was never a module constant before; keep every shape this
+            # scan cannot prove exactly as it was (read outside the typed clone) instead of
+            # refusing a whole program that used to build.
+            if isinstance(node.value, ast.Constant) and type(node.value.value) is bool:
+                continue
+            if _module_const_scalar(node.value) is None \
+                    and not isinstance(node.value, (ast.List, ast.Tuple)):
+                continue
+        else:
+            if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
+                continue
+            target = node.targets[0]
+        name = target.id
         if name in consts:
             raise Unsupported("%r is a module-level name assigned more than once; this compiler "
                               "treats module scope as a fixed set of one-time constants, not a "

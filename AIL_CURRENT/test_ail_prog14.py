@@ -26,6 +26,9 @@ P4  a module name rebound after its literal (`MOD += -4`) is not a one-time cons
 P5  a constant bound after the first call (CPython raises `NameError`) is not kept, a `range` with
     a zero step is refused so the clone cannot raise outside CPython, and `len(range(a, b))`
     matches CPython when `a > b` and when the bound is negative.
+P6  an annotated module literal (`LIMIT: int = 100`) is a one-time module constant too, even when
+    the Python surface leaves a `pass` before it (g25_012's lowered `match` source); the helper
+    that reads it is accelerated and the program matches CPython.
 """
 import json
 import os
@@ -177,6 +180,22 @@ print(k(5), k(0), k(-4))
 '''
 
 
+ANNOTATED_CONSTANT = '''
+pass
+LIMIT: int = 100
+MOD: int = 7
+
+
+def classify(n: int) -> int:
+    if n <= LIMIT:
+        return n % MOD
+    return -1
+
+
+print(classify(10), classify(100), classify(101))
+'''
+
+
 def run(cmd, cwd=None, stdin=b'', env=None):
     return subprocess.run(cmd, cwd=cwd, input=stdin, env=env, capture_output=True, timeout=600)
 
@@ -254,6 +273,14 @@ class Prog14(unittest.TestCase):
                 src, launcher, report = self.build(tmp, source, name)
                 self.assertEqual(set(report['accelerated']), wanted, report)
                 self.compare(src, launcher)
+
+    def test_annotated_module_constant(self):
+        with tempfile.TemporaryDirectory(prefix='ail-prog14-annconst-') as tmp:
+            source = Path(tmp) / 'annotated.py'
+            source.write_text(ANNOTATED_CONSTANT, encoding='utf-8')
+            src, launcher, report = self.build(tmp, source, 'annotated')
+            self.assertIn('classify', report['accelerated'], report)
+            self.compare(src, launcher)
 
 
 if __name__ == '__main__':

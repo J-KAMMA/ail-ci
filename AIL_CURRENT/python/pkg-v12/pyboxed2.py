@@ -172,8 +172,10 @@ def _mix_defs_only_source(tree):
         constants = pymix._literal_module_assignments(tree)
     else:
         constants = {id(n) for n in tree.body
-                     if isinstance(n, ast.Assign) and len(n.targets) == 1
-                     and isinstance(n.targets[0], ast.Name) and literal_constant(n.value)}
+                     if (isinstance(n, ast.Assign) and len(n.targets) == 1
+                         and isinstance(n.targets[0], ast.Name) and literal_constant(n.value))
+                     or (isinstance(n, ast.AnnAssign) and isinstance(n.target, ast.Name)
+                         and n.value is not None and literal_constant(n.value))}
     keep = [n for n in tree.body
             if isinstance(n, ast.FunctionDef) or id(n) in constants]
     only = ast.Module(body=keep, type_ignores=[])

@@ -1,3 +1,27 @@
+## 2026-11-02 -- prog14: annotated module constants and a pass before them (job-prog14-11021358)
+
+The skipped review left no named defect.  Re-checking the eight programs against this tree showed
+g25_012's first reason was no longer `a match statement` (the earlier pass lowers it) but a constant
+that the candidacy slice dropped: the Python surface turns its `typing` import into a top-level
+`pass`, and `_runs_user_code` treated that pass as code that can call user code, so the annotated
+`SMALL_POSITIVE_LIMIT: int = 100` after it fell outside the slice and `categorize` said
+`'SMALL_POSITIVE_LIMIT' is read before it is assigned`.  A top-level annotated literal is now a
+one-time module constant in `pymix`/`pyboxed2`'s slice and in the hybrid divisor proof, and a
+top-level `pass` is a no-op for the constant-order limit.  `categorize` now reaches its real next
+blocker, `raise requires a built-in exception value` (`TypeError` is not a supported exception
+name), recorded as the g25 follow-up; the other six programs keep the reasons in
+`lab/progfix/prog14.md`.
+
+`test_ail_prog14` gained an annotated-constant-after-`pass` case that asserts `classify` is
+accelerated and matches CPython.  Probes `/tmp/probes/p14_ann*.py` and `p14_passorder.py` cover an
+annotated int/list constant, a surface-removed import, a duplicate annotated binding, an unused
+annotated bool, a late annotated constant, and a pass/constant order; all match CPython on the
+general path (the late-constant default-build difference is pre-existing for a plain assignment on
+HEAD too).  The ten `lab/compare` generated C files are byte-identical to HEAD.  Required tests
+pass: test_ail_prog14, test_ail_cpython_hybrid, test_ail_match, test_ail_unbound,
+test_ail_range_checks, test_ail_python_syntax, test_ail_typed_tuples, test_ail_typed_locals,
+test_ail_safetynet, test_ail_files, test_ail_corpus_findings3 (0 failed).
+
 ## 2026-11-02 -- prog14 review fixes: constant order, range step and range length (job-prog14-11020844)
 
 Fixed all four review defects.  A literal module constant is now kept in the candidacy slice only
