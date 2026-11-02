@@ -5,10 +5,11 @@ functions are typed-compilable, the generated extension is loaded and the Python
 equal CPython byte for byte, including the cases that must abandon the native call: an int outside
 int64, an overflow inside the clone, a bool in an int/list[int] position, a missing argument
 (default), None, and a mutated list parameter.  Functions whose body can trap in the typed runtime
-(indexing, division by a variable, arbitrary calls, raise/try) stay in CPython; that includes
-`first` and `divide` here.  A division by a literal nonzero constant (`half`, `x / 2`) and a
-proved pure str method call cannot raise and are eligible.  A program the compiler cannot analyse at all still runs unchanged in CPython with no
-extension.
+(indexing, arbitrary calls, raise/try) stay in CPython; that includes `first` here.  Division and
+modulo are allowed when `pymix`'s exception rule already proved a trap cannot reach a CPython
+handler, so `half` (`x / 2`) is accelerated while `divide` (`a // b` under a `try`) stays in
+CPython.  A proved pure str method call cannot raise either.  A program the compiler cannot
+analyse at all still runs unchanged in CPython with no extension.
 """
 import json
 import os

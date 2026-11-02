@@ -1,3 +1,15 @@
+## 2026-11-02 -- typed reach batch 4 re-applied: division/modulo fallback and safe slices (job-rbprog4-11021332)
+
+Re-applied the accepted prog4 change on the current tree, keeping the later hybrid fixes (safe pure
+str calls, the annotated str ABI and the direct-build fallback).  The body gate now allows
+division/modulo for an int/bool-returning clone, routing the clone's zero-division stops through the
+existing int64-overflow `setjmp` so the Python wrapper runs the original function and CPython raises
+`ZeroDivisionError` after flushing its buffered stdout; a float/str result still needs a provably
+non-zero literal divisor.  Slices are allowed only with a constant non-zero integer step, so
+`xs[::0]` and a run-time step stay in CPython.  Parameter and return annotations seed `pymix`'s
+kinds, a str slice infers as `str`, and a signed numeric literal divisor no longer aborts the
+analysis.  Added `test_ail_prog4.py` (registered in `tests.d`) and `lab/progfix/prog4.md`.
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.

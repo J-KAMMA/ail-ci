@@ -79,6 +79,34 @@ def _nonzero_constant(node):
     return value is not None and value != 0
 
 
+def _safe_slice_step(sl):
+    """Python raises only for a slice whose step is zero; no step means 1.  A step that is not a
+    constant integer is left to CPython: it could be zero (or a non-integer) at run time."""
+    step = sl.step
+    if step is None:
+        return True
+    if (isinstance(step, ast.UnaryOp) and isinstance(step.op, (ast.USub, ast.UAdd))
+            and isinstance(step.operand, ast.Constant)
+            and isinstance(step.operand.value, int)):
+        value = -step.operand.value if isinstance(step.op, ast.USub) else step.operand.value
+        return value != 0
+    return (isinstance(step, ast.Constant) and isinstance(step.value, int)
+            and step.value != 0)
+
+
+def _provably_nonzero(node):
+    """A divisor that is a non-zero numeric literal (with an optional sign) cannot trap."""
+    if (isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd))
+            and isinstance(node.operand, ast.Constant)):
+        operand = node.operand
+        if not isinstance(operand.value, (int, float)) or isinstance(operand.value, bool):
+            return False
+        value = -operand.value if isinstance(node.op, ast.USub) else operand.value
+        return value != 0
+    return (isinstance(node, ast.Constant) and isinstance(node.value, (int, float))
+            and not isinstance(node.value, bool) and node.value != 0)
+
+
 _SAFE_STR_NOARGS = frozenset({
     'upper', 'lower', 'casefold', 'strip', 'lstrip', 'rstrip', 'capitalize', 'title',
     'swapcase', 'split', 'rsplit', 'splitlines', 'isdigit', 'isalpha', 'isalnum',
@@ -215,24 +243,32 @@ def _safe_call(node, str_names, list_names):
     return False
 
 
-def _unsafe_body(fn, params=()):
+def _unsafe_body(fn, params=(), ret=None):
     """Operations whose typed form traps or leaves Python's exception model.  A hybrid call must
     either return CPython's value or fall back, so a body that can raise stays in CPython: a
-    subscript (IndexError/KeyError), division or power (ZeroDivisionError, complex results), an
-    arbitrary call, and `raise`/`assert`/`try`/`with`/import are all outside this pass.  A division
-    by a literal nonzero divisor cannot raise, and a call to a pure str method (or `len`,
-    `reversed`) whose receiver and arguments are provably the right type cannot raise either, so
-    both stay eligible.  This is deliberately conservative; a missed speed-up is safe."""
+    subscript (IndexError/KeyError), a slice whose step is not a non-zero integer literal
+    (ValueError/TypeError), power (complex results, 0 ** negative), an arbitrary call, and
+    `raise`/`assert`/`try`/`with`/import are all outside this pass.  A call to a pure str method
+    (or `len`, `reversed`) whose receiver and arguments are provably the right type cannot raise,
+    so it stays eligible.
+
+    Division and modulo are allowed only when the divisor is a non-zero literal, or for an
+    int/bool result whose clone routes a zero-division trap to the Python fallback (the hybrid
+    analysis patches the clone's trap paths, see `_analysis`); a float/str result still refuses a
+    divisor that can be zero, because that clone has no fallback signal.  This is deliberately
+    conservative; a missed speed-up is safe."""
     str_names = {p for p, kind in params if kind == 'str'}
     list_names = {p for p, kind in params if kind in _LIST}
     for node in _own_nodes(fn):
-        if isinstance(node, ast.Subscript):
+        if isinstance(node, ast.Subscript) and not isinstance(node.slice, ast.Slice):
             return 'indexing can raise'
-        if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod, ast.Pow)):
-            if (isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod))
-                    and _nonzero_constant(node.right)):
-                continue
-            return 'division or power can raise'
+        if isinstance(node, ast.Subscript) and not _safe_slice_step(node.slice):
+            return 'a slice step can be zero or non-integer'
+        if (isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod))
+                and ret not in ('int', 'bool') and not _provably_nonzero(node.right)):
+            return 'division or modulo by a divisor that may be zero'
+        if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Pow):
+            return 'power can raise or produce a complex result'
         if isinstance(node, ast.Call) and not _safe_call(node, str_names, list_names):
             return 'a call can raise or have side effects'
         if isinstance(node, (ast.Raise, ast.Assert)):
@@ -296,8 +332,9 @@ def _analysis(src):
     Details loosened only in that subprocess: the entry prototype regex requires a word boundary
     (`ail_unwind_<name>` must not match), the documented str ABI's `uint8_t *_out` result
     parameter is accepted by the existing validator (which writes through `int32_t *`), and
-    parameter annotations seed `pymix`'s kinds.  The selection pass below still requires the body
-    to have no operation that can trap.
+    parameter and return annotations seed `pymix`'s kinds.  The selection pass below still requires
+    the body to have no operation that can trap without a fallback signal (the subprocess also
+    routes an int/bool clone's zero-division stops to its overflow `setjmp`, see the patch below).
     """
     import tempfile
     fd, name = tempfile.mkstemp(prefix='ail-hybrid-src-', suffix='.py')
@@ -327,8 +364,9 @@ def _to_c(source, *args, **kwargs):
 pyfunc.to_c = _to_c
 # CPython does not enforce annotations, but they are useful hints: the boundary still checks every
 # value (a non-int for `x: int` falls back before the native call), and the existing emitter is
-# asked to compile the function as usual.  Seeding only the parameter kinds lets a helper such as
-# `def byte_length(word: str) -> int` reach to_c, whose own acceptance test remains the gate.
+# asked to compile the function as usual.  Seeding the parameter and result kinds lets a helper
+# such as `def byte_length(word: str) -> int` reach to_c, whose own acceptance test remains the
+# gate; `analyze` still refuses a result whose branches do not all have the annotated kind.
 _old_fn_init = pymix._FnFacts.__init__
 def _ann_kind(node):
     if isinstance(node, ast.Name):
@@ -349,7 +387,47 @@ def _fn_init(self, node):
         kind = _ann_kind(arg.annotation)
         if kind is not None:
             self.params[arg.arg] = kind
+    kind = _ann_kind(node.returns)
+    if kind is not None:
+        self.ret = kind
+        self.is_bool_ret = kind == pymix.BOOL
 pymix._FnFacts.__init__ = _fn_init
+# A str slice is a str, but pymix's kind table only maps list element kinds; without this a helper
+# `def head(s: str) -> str: return s[:2]` looks like a branch whose kind disagrees with its
+# annotation.  Only the missing str case is filled in, so every other inference is unchanged.
+_old_expr_kind = pymix._expr_kind
+def _expr_kind(e, facts, rets):
+    kind = _old_expr_kind(e, facts, rets)
+    if kind is None and isinstance(e, ast.Subscript):
+        base = _old_expr_kind(e.value, facts, rets)
+        if base in (pymix.STR, pymix.LIST_STR):
+            return pymix.STR
+    return kind
+pymix._expr_kind = _expr_kind
+# A zero-division trap in a clone is an uncaught exit in the typed runtime.  CPython's stdout is
+# buffered in Python, not in libc, so `ail_die` cannot flush what the program already printed.  The
+# int/bool clone's wrapper already installs a setjmp signal for int64 overflow; route every
+# division/modulo stop through the same signal so the Python wrapper calls the original function,
+# which raises CPython's own exception (and the interpreter flushes stdout on the way out).  Only
+# this hybrid analysis installs the patch; the general mixed-mode C is byte-for-byte unchanged.
+_old_overflow_fallback = pyboxed2._mix_overflow_fallback
+_DIV_TRAPS = ('division by zero', 'integer division by zero', 'integer modulo by zero',
+              'integer division or modulo by zero', 'float division by zero',
+              'float floor division by zero', 'float modulo')
+def _overflow_fallback(csrc, mangled, overflow):
+    result = _old_overflow_fallback(csrc, mangled, overflow)
+    if result is None:
+        return None
+    csrc, state = result
+    hit = mangled + '__mix_overflow_hit'
+    for message in _DIV_TRAPS:
+        csrc = csrc.replace('ail_die("' + message + '")', hit + '()')
+    csrc = csrc.replace('ail_die(mod ? "integer modulo by zero" : "integer division by zero")',
+                        hit + '()')
+    csrc = csrc.replace('ail_die(remainder ? "float modulo" : "float floor division by zero")',
+                        hit + '()')
+    return csrc, state
+pyboxed2._mix_overflow_fallback = _overflow_fallback
 _old_extract = pyboxed2._mix_extract_signature
 _old_validate = pyboxed2._mix_validate_signature
 _old_build = pyboxed2.build
@@ -487,7 +565,7 @@ def _select(src, tree, report, facts):
         if bad:
             rejected[pyname] = 'parameter kind %s stays in CPython' % bad[0]
             continue
-        unsafe = _unsafe_body(funcs[pyname], params)
+        unsafe = _unsafe_body(funcs[pyname], params, ret)
         if unsafe:
             rejected[pyname] = unsafe
             continue
