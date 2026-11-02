@@ -136,6 +136,80 @@ byte. The other five programs stay as follow-ups with their exact messages (gene
 `AIL_CURRENT/test_ail_prog3.py` (registered in `tests.d/`) builds `g12_008` typed and compares it
 with CPython, and pins the expovariate forms, zero-division and generator-state cases. The generated
 C of all ten `lab/compare/src/*/main.ail` tasks is byte-identical.
+## 2026-11-01 -- array review 2: gate array detection on the real prelude (job-std_array-11020204)
+
+The second review found that `pyboxed2.py` and `dunderrt.py` recognised `array.array` by the bare
+class name `_AilArray`, so an unrelated program defining its own `class _AilArray` inherited the
+array's multiply-error names and lost its comparison dispatch. `prelude_array.py` now sets an
+`_AIL_ARRAY_PRELUDE` marker; the compiler detects that marker and applies the `bytes`/`bytearray`
+multiply-name replacement, the op-aware ordering dispatch, the `array.array` type name and the
+reflected-comparison skip only for real array programs. A user class named `_AilArray` now keeps
+the base behaviour (`p_namecollide2` matches CPython on both `cmp.sh` builds; `p_namecollide` is
+identical to `/tmp/base`, which also differs from CPython in that pre-existing dispatch case).
+
+Re-ran `/tmp/rprobes` (`p_cmp`, `p_cmp2`, `p_kweval*`, `p_mul`, `p_mul2`, `p_namecollide`,
+`p_namecollide2`, `p_plain`, `p_plainclass`, `p_refl`, `p_tname`): all match CPython or match
+`/tmp/base`, except the pre-existing differences the review lists. Nine required test modules pass
+and `tools/update_manifest.py --check` is clean.
+
+## 2026-11-01 -- array review follow-up: keyword arguments evaluate, reflected ordering names the operator (job-std_array-11020204)
+
+The review of `16dc414` found three regressions in the new array prelude. `array(...)` with a keyword
+now keeps every positional and keyword argument (a `*args, **kwargs` helper raises the CPython
+`TypeError` only after they are evaluated), so `array("i", boom(), bad=1)` raises `ValueError: boom`
+and `array("i", note(), bad=1)` prints before the `TypeError`; a `**mapping` argument stays a named
+compile-time refusal. Reflected ordering of a non-array against an array (`[1] <= a`, `>=`, `>`, `<`)
+no longer enters the array's `__lt__`: the out-of-line reflected path skips the array prelude class,
+and the generic error names the original operator and operand order (`'<=' not supported between
+instances of 'list' and 'array.array'`). The array class also prints as `array.array` in those
+runtime texts, gated on the array prelude. `'x' * a` and the other sequence-left forms name the
+array, not the sequence (`can't multiply sequence by non-int of type 'array.array'`).
+
+Probes `/tmp/probes/p_kweval.py`, `p_kweval3.py`, `p_cmp.py`, `p_cmp2.py`, `p_mul.py` and `p_mul2.py`
+match CPython 3.12 stdout on both `cmp.sh` builds; `p_kweval2.py` (`**` mapping) is refused by name.
+`test_ail_std_array`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_dunders`, `test_ail_cmp_classname`, `test_ail_array_ref`, `test_ail_array_t2` and
+`test_ail_stdlib5` pass.
+
+## 2026-11-01 -- array review fixes: None bounds, genexpr fromlist, slice text, ordering (job-std_array-11012214)
+
+Review follow-up on `4d9cb02`. `array.index(x, start, stop)` now distinguishes an omitted bound from an
+explicit `None` (a sentinel) and rejects any non-integer bound with CPython's `slice indices must be
+integers or have an __index__ method`; `fromlist` rejects a materialised generator expression with
+`arg must be list`; an extended-slice length mismatch says `attempt to assign array of size ...`; and
+`<=`, `>` and `>=` against a non-array name the actual operator, including through a function
+parameter, list item, attribute or dict value. The last one uses an op-aware `__le__`/`__ge__`/`__gt__`
+dispatch (`dunderrt.py`, enabled only for the array prelude so the other programs keep their generated
+C) and static ordering dispatch in `pyboxed2.py`. The invalid-typecode text follows CPython 3.12.3,
+whose message omits the historical `w` that the base prelude still had.
+
+Probes `/tmp/probes/w2arr_{idx_edges,fromlist_sources,slice_assign,cmp_ops,typecode}.py` match
+CPython 3.12.3 stdout on both `cmp.sh` builds, as do the review's `p_idxnone`, `p_from2`, `p_ext`,
+`p_cmp`, `p_cmp2` and `p_cmp3`. All ten `lab/compare` `main.ail` builds and every buildable `main.py`
+have byte-identical generated C against `0ee2c47`; the three `main.py` builds that already failed at
+base fail with the same refusals. `lab/stdlib/array/RESULTS.md` and `DIFFERENCES.md` drop the old
+ordering-text follow-up.
+
+## 2026-11-01 -- CPython `array` on the general path (job-std_array-11012214)
+
+`lab/stdlib/array` now has twelve realistic `array` programs. Initially 7 built (all on the general
+path) and 5 were refused; after the fixes 9 build and match CPython 3.12 stdout and exit status on
+both `AIL_IR=0` and `AIL_IR=1`. The blockers fixed were `array.index(x, start[, stop])` (blocking
+`inventory`) and `array.fromlist()` (blocking `matrix_rows`), plus CPython's slice behaviour,
+index/remove errors, comparison and in-place add/multiply messages, `extend` same-typecode errors,
+and `array(...)` keyword-argument refusal, all in `python/pkg-v12/prelude_array.py` and the call
+rewrite in `smalllib5.py`. Remaining refusals are recorded with their exact text in
+`lab/stdlib/array/RESULTS.md`: `'f'` (float32), `'u'` (unicode) and `tobytes`/`frombytes`/`buffer_info`
+need new storage features. No compiler C or runtime text changed, so the ten `lab/compare` programs
+keep their generated C.
+
+Added `AIL_CURRENT/test_ail_std_array.py` (registered through `tests.d/test_ail_std_array.txt`),
+which compares the nine passing programs with CPython on both IR modes. Probes in `/tmp/probes`
+(`arr_ctor`, `arr_ctor_kw`, `arr_methods`, `arr_slices`, `arr_slices_alias`, `arr_sources`,
+`arr_widths`, `arr_bounds`, `arr_cmp`, `arr_add_mul`, `arr_mut_errors`) match CPython on both
+`~/tools/cmp.sh` builds; the literal `'f'`/`'u'`/`tobytes` forms are refused by name. Also ran
+`test_ail_std_array`, `test_ail_array_ref`, `test_ail_array_t2`, `test_ail_stdlib5`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`, then refreshed the manifest.
 
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 

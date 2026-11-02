@@ -1818,6 +1818,13 @@ def _hoist_defaults(tree):
     ast.fix_missing_locations(tree)
 
 
+def _has_array_prelude(tree):
+    """True when smalllib5.py injected the real array prelude (its marker assignment), not merely a
+    user class that happens to be named `_AilArray`."""
+    return any(isinstance(n, ast.Assign) and any(isinstance(t, ast.Name) and t.id == '_AIL_ARRAY_PRELUDE'
+                                                  for t in n.targets) for n in tree.body)
+
+
 def _scan_assigned_names(stmts):
     """Names assigned anywhere in `stmts` (a function or module body), stopping at nested
     FunctionDef/ClassDef (a different scope) and NOT descending into comprehension/generator/
@@ -2655,6 +2662,7 @@ class Compiler(boxclosure.ClosureMixin):
         self.user_method_names = frozenset()   # every method name a class of the program defines
         self.uses_argv = False     # sys.argv: main takes argc / argv
         self.bytes_prelude = False # bytes / bytearray are the classes of prelude_bytes.py
+        self.array_prelude = False # the real array.array prelude (prelude_array.py) is in the program
         self.reads_args = False    # the program reads `.args` (of an exception)
         self.uses_ni = False       # the program returns NotImplemented (safetyrt.patch_notimplemented)
         self.generators = False    # the program has generator functions (safetyrt.GEN)
@@ -2672,6 +2680,7 @@ class Compiler(boxclosure.ClosureMixin):
     def _compile_cond(self, source):
         tree = ast.parse(source)
         self.source_has_class = any(isinstance(n, ast.ClassDef) for n in ast.walk(tree))
+        self.array_prelude = _has_array_prelude(tree)
         import exctext
         exctext.refuse_args_item_store(tree, Unsupported)
         # An instance attribute assignment shadows a class method of the same name (a method is a
@@ -2874,6 +2883,13 @@ class Compiler(boxclosure.ClosureMixin):
             any(name in cls['methods'] for name in ('__iadd__', '__isub__', '__imul__',
                                                     '__iand__', '__ior__', '__ixor__'))
             for cls in self.classes.values())
+        # the array prelude's unknown-type comparisons need the op-aware ordering dispatch (its own
+        # method for <= and >=, and __gt__ for > before __lt__); every other program keeps the
+        # runtime text it had, so the lab/compare programs stay byte-identical.  Gate on the real
+        # prelude, not a class name: a program may define its own `_AilArray`.
+        self.dunder_ordering = self.array_prelude and any(
+            c == '_AilArray' and ('__le__' in cls['methods'] or '__ge__' in cls['methods'])
+            for c, cls in self.classes.items())
 
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
@@ -3144,7 +3160,8 @@ class Compiler(boxclosure.ClosureMixin):
                              (self.global_slots['class:' + cname], itr['cname']))
             if self.dunder_ops:
                 setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
-                                              cls['methods'], lambda info: info['all_params']))
+                                              cls['methods'], lambda info: info['all_params'],
+                                              ordering=self.dunder_ordering))
             if cls.get('dc'):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->dc = %d; '
                              '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
@@ -3638,6 +3655,22 @@ class Compiler(boxclosure.ClosureMixin):
         tree.body = [Rewrite().visit(n) for n in tree.body]
         ast.fix_missing_locations(tree)
         text = safetyrt.bytes_prelude()
+        if self.array_prelude:
+            # the array prelude's class prints as CPython's array.array in bytes/bytearray multiply errors
+            text = text.replace(
+                "            if tn == 'deque':\n                tn = 'collections.deque'\n"
+                "            raise TypeError(\"can't multiply sequence by non-int of type '\" + tn + \"'\")",
+                "            if tn == 'deque':\n                tn = 'collections.deque'\n"
+                "            elif tn == '_AilArray':\n                tn = 'array.array'\n"
+                "            raise TypeError(\"can't multiply sequence by non-int of type '\" + tn + \"'\")")
+            text = text.replace(
+                "            tn = type(n).__name__\n"
+                "            raise TypeError(\"can't multiply sequence by non-int of type '\"\n"
+                "                            + (type(self).__name__ if tn in ('list', 'tuple', 'str', 'bytes', 'bytearray', 'deque') else tn) + \"'\")",
+                "            tn = type(n).__name__\n"
+                "            if tn == '_AilArray':\n                tn = 'array.array'\n"
+                "            raise TypeError(\"can't multiply sequence by non-int of type '\"\n"
+                "                            + (type(self).__name__ if tn in ('list', 'tuple', 'str', 'bytes', 'bytearray', 'deque') else tn) + \"'\")")
         if any(isinstance(n, ast.Name) and n.id == 'read_bytes' for n in ast.walk(tree)):
             text += safetyrt.READ_BYTES
         pre = ast.parse(text).body
@@ -6181,7 +6214,8 @@ class Compiler(boxclosure.ClosureMixin):
             return t
         # with NotImplemented in the program the run time's dispatch decides (it tries the other operand next)
         cname = self._inst_class(an, ctx) if an is not None and not self.uses_ni else None
-        dunder = {ast.Eq: '__eq__', ast.Lt: '__lt__'}.get(type(op))
+        dunder = {ast.Eq: '__eq__', ast.Lt: '__lt__', ast.LtE: '__le__', ast.Gt: '__gt__',
+                  ast.GtE: '__ge__'}.get(type(op))
         invert = False
         if cname and type(op) is ast.NotEq:
             # C42: `!=` asks __ne__ when the class (or a subclass) defines it, otherwise it is the negation of __eq__
@@ -13592,7 +13626,8 @@ def _build(source, report, allow_mix=True):
         raise Unsupported('closures nested too deeply to settle their shared names')
     if compiler.dunder_ops:
         import dunderrt
-        body = dunderrt.patch(body, inplace=compiler.dunder_inplace)
+        body = dunderrt.patch(body, inplace=compiler.dunder_inplace, ordering=compiler.dunder_ordering,
+                              array_prelude=compiler.array_prelude)
     if compiler.generators:
         import safetyrt
         body = safetyrt.patch_generators(body)
