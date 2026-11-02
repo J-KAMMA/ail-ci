@@ -167,6 +167,10 @@ class Lowerer:
         self.methods = {}
         self.classes = set()
         self.receiver_classes = {}
+        self.container_classes = {}
+        self.class_methods = {}
+        self.return_class_cache = {}
+        self.return_class_active = set()
         self.owner = None
         self.counter = 0
         self.names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {
@@ -238,6 +242,8 @@ class Lowerer:
         for cls in self.tree.body:
             if not isinstance(cls, ast.ClassDef):
                 continue
+            self.class_methods[cls.name] = {
+                method.name for method in cls.body if isinstance(method, ast.FunctionDef)}
             for method in cls.body:
                 if not isinstance(method, ast.FunctionDef):
                     continue
@@ -283,9 +289,65 @@ class Lowerer:
         return self.tree
 
     # ---- one function ----
+    def function_return_class(self, node):
+        """The class an ordinary function returns, from a `-> Cls` annotation or a body whose
+        returns are all `Cls(...)`; None when that is not plain."""
+        key = id(node)
+        if key in self.return_class_cache:
+            return self.return_class_cache[key]
+        if key in self.return_class_active:
+            return None
+        self.return_class_active.add(key)
+        try:
+            if (node.returns is not None and isinstance(node.returns, ast.Name)
+                    and node.returns.id in self.classes):
+                result = node.returns.id
+            else:
+                found = set()
+                def walk(n):
+                    if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+                        return
+                    if isinstance(n, ast.Return) and n.value is not None:
+                        found.add(self.value_class(n.value, {}))
+                    for child in ast.iter_child_nodes(n):
+                        walk(child)
+                for stmt in node.body:
+                    walk(stmt)
+                result = found.pop() if len(found) == 1 and None not in found else None
+        finally:
+            self.return_class_active.discard(key)
+        self.return_class_cache[key] = result
+        return result
+
+    def value_class(self, value, names):
+        """The class an assigned value plainly builds: `Cls(...)`, a call of a function whose
+        return class is known, or a local already proved to hold one."""
+        if isinstance(value, ast.Call) and isinstance(value.func, ast.Name):
+            if value.func.id in self.classes:
+                return value.func.id
+            info = self.funcs.get(value.func.id)
+            if info is not None:
+                return self.function_return_class(info.node)
+        if isinstance(value, ast.Name):
+            return names.get(value.id)
+        return None
+
+    def literal_element_class(self, value, names):
+        """The class every element of a container literal builds, or None."""
+        if isinstance(value, (ast.List, ast.Tuple, ast.Set)):
+            elts = value.elts
+        elif isinstance(value, ast.Dict):
+            elts = [v for v in value.values if v is not None]
+        else:
+            return None
+        classes = {self.value_class(e, names) for e in elts}
+        return classes.pop() if len(classes) == 1 and None not in classes else None
+
     def receiver_classes_of(self, node):
         """{local name: class} for the receivers this function makes plain: a parameter annotated
-        with a class, an annotated local, or a name whose every assignment is `Cls(...)`."""
+        with a class, an annotated local, or a name whose every assignment is `Cls(...)` / a call
+        returning one.  `container_classes` maps a local list/dict literal to the class of its
+        elements, so `ps[0].peek()` / `d["k"].peek()` can be resolved too."""
         out = {}
         for a in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs):
             if isinstance(a.annotation, ast.Name) and a.annotation.id in self.classes:
@@ -301,11 +363,30 @@ class Lowerer:
                     out[n.target.id] = n.annotation.id
                 if n.value is not None:
                     values.setdefault(n.target.id, []).append(n.value)
-        for name, made in values.items():
-            classes = {v.func.id if isinstance(v, ast.Call) and isinstance(v.func, ast.Name)
-                       and v.func.id in self.classes else None for v in made}
-            if len(classes) == 1 and None not in classes:
-                out[name] = classes.pop()
+        for _ in range(len(values) + 1):
+            changed = False
+            for name, made in values.items():
+                if name in out:
+                    continue
+                classes = {self.value_class(v, out) for v in made}
+                if len(classes) == 1 and None not in classes:
+                    out[name] = classes.pop()
+                    changed = True
+            if not changed:
+                break
+        containers = {}
+        for _ in range(len(values) + 1):
+            changed = False
+            for name, made in values.items():
+                if name in containers:
+                    continue
+                classes = {self.literal_element_class(v, out) for v in made}
+                if len(classes) == 1 and None not in classes:
+                    containers[name] = classes.pop()
+                    changed = True
+            if not changed:
+                break
+        self.container_classes = containers
         return out
 
     def function(self, node, owner=None):
@@ -505,22 +586,36 @@ class Lowerer:
         return ast.Tuple(elts=[_const(False), _const(ZERO[kind])], ctx=ast.Load())
 
     # ---- kinds ----
+    def expr_class(self, e):
+        """The class a receiver expression plainly holds, or None."""
+        if isinstance(e, ast.Name):
+            return self.receiver_classes.get(e.id)
+        if isinstance(e, ast.Call) and isinstance(e.func, ast.Name):
+            return self.value_class(e, self.receiver_classes)
+        if isinstance(e, ast.Subscript):
+            base = e.value
+            if isinstance(base, ast.Name):
+                return self.container_classes.get(base.id)
+            return self.literal_element_class(base, self.receiver_classes)
+        return None
+
     def method_info(self, e):
         """FuncInfo of `receiver.name(...)` when that method returns an Optional scalar, else None.
 
-        `self.name()` uses the class being lowered.  Another receiver is resolved from the
-        function's plain local classes (a parameter annotation or `p = P()`); when that is not
-        possible but exactly one class in the program has an Optional-returning method of this
-        name, that one is used.  An ambiguous receiver is refused by name instead of leaving a
-        `(flag, value)` pair in the caller.
+        `self.name()` uses the class being lowered.  Another receiver is resolved from its
+        expression class (`p = P()`, `p = make()`, `ps[0]`, `d["k"]`, a parameter annotation).
+        Only when that is impossible AND every class that defines the name has the same
+        Optional-returning method is the unique-method fallback used; a receiver that could be
+        another class is refused by name instead of reinterpreting its return.
         """
         if not (isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute)):
             return None
         receiver, attr = e.func.value, e.func.attr
         owner = None
-        if isinstance(receiver, ast.Name):
-            owner = self.owner if receiver.id == 'self' and self.owner is not None \
-                else self.receiver_classes.get(receiver.id)
+        if isinstance(receiver, ast.Name) and receiver.id == 'self' and self.owner is not None:
+            owner = self.owner
+        else:
+            owner = self.expr_class(receiver)
         if owner is not None:
             return self.methods.get((owner, attr))
         found = []
@@ -528,7 +623,12 @@ class Lowerer:
             if name == attr and info not in found:
                 found.append(info)
         if len(found) == 1:
-            return found[0]
+            defining = {cls for cls, names in self.class_methods.items() if attr in names}
+            if defining <= {found[0].owner}:
+                return found[0]
+            raise Refused(e, 'cannot tell which class the %s() call uses; bind the receiver to a '
+                          'name whose class is plain (a parameter annotation, `p = P()` or a call '
+                          'whose return class is known)' % attr)
         if len(found) > 1:
             raise Refused(e, 'cannot tell which class the %s() call uses; bind the receiver to a '
                           'name whose class is plain (a parameter annotation or `p = P()`)'

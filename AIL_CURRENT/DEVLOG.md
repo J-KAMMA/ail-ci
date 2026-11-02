@@ -1,3 +1,20 @@
+## 2026-11-02 -- prog9 review fix 4: loop back-edge bool flags and receiver-class method resolution (job-rbprog9-11022049)
+
+Fixed the two remaining re-application review defects. Bool row-field flags are now registered for
+the whole function before any statement is compiled, so an earlier textual mention of the name (a
+`print(a)` at the top of a loop) consults the flag on every iteration instead of being frozen as an
+integer; the loop back-edge now prints `True`/`False` after a `for` or `while` unpack, and an earlier
+`a = 0` still writes flag 0. Optional-method resolution now derives the receiver's class for a call
+whose return class is annotated or built (`q = make()`), a list item (`qs[0]`), and a dict value
+(`d["k"]`), so a same-named non-Optional method on another class is compiled as itself rather than
+reinterpreted as a `(flag, value)` pair. The unique-method fallback is used only when every class
+that defines the name has that same Optional method; an unresolvable receiver that could be another
+class is refused by name. Probes `w_loop_backedge`, `w_loop_backedge_while`, `b_loop_false`,
+`b_loop_rebind_after`, `b_loop_conditional`, `s_fallback_int2`, `v_fallback_dictrecv`,
+`m_make_optional`, `m_list_item_q`, `m_param_q`, `m_attr_q` and `m_unique` match CPython on both
+`cmp.sh` builds. `test_ail_prog9`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_quirks`, `test_ail_optint_exact`, `test_ail_optional_locals`
+and `test_ail_nonecrash` all pass (8 modules, 0 failed).
 ## 2026-11-02 -- prog9 review fix 3: taken conditional row rebinds and external Optional methods (job-rbprog9-11021624)
 
 Two follow-up defects from the re-application review. A bool row field now carries a run-time

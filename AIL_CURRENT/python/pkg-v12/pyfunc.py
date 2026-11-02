@@ -38274,6 +38274,15 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         })
     ctx.rebound = _rebound_names(fn)
     ctx.single_bind = _onecp_bindable_names(fn)
+    # A bool row field's companion flag has to exist before the first statement that MENTIONS the
+    # name is compiled, not only where the unpack appears: a loop's `print(a)` is textually before
+    # the unpack but runs again after it, and a straight-line print before the unpack would
+    # otherwise be frozen as an int.  Decide every such name once, up front, so each earlier
+    # rebinding writes the flag too.
+    for _node in ast.walk(fn):
+        if isinstance(_node, ast.Assign):
+            for _name in _srow_unpack_bool_names(_node, ctx):
+                _srow_bool_flag(_name, ctx)
     _ri = _match_stdin_int_reader(fn)
     if _ri is not None and ret == INT:
         body = ('    return ail__stdin_readline_i64(%dLL, (%dLL), (%dLL), %dLL, %dLL, %d);\n'
