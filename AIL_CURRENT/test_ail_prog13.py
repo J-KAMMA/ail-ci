@@ -22,6 +22,12 @@ P8  a class-scope function without a `self` parameter and an unbound `S.add(obj,
     their Optional argument in the right position.  Another compiler pass still requires a receiver
     for a class-scope function, and the bool argument check assumes a bound method, so these two
     programs stay on the general path (correct output) rather than typing the affected method.
+P9  an Optional method whose receiver is not statically known and whose first parameter is not `self` /
+    `cls` uses the call's own argument binding to choose the receiver skip; the program matches CPython
+    (P1_THIS_UNKNOWN), and an ambiguous call is refused by name rather than shifted.
+P10 a class name shadowed by a local or module dict is not classified as a class, so `dict.get` is not
+    captured by the Optional method; and an Optional call in a class body is refused by name.  Both
+    stay on the general path and match CPython.
 """
 import os
 import shutil
@@ -214,6 +220,56 @@ def main() -> None:
 main()
 '''
 
+THIS_UNKNOWN = '''class C:
+    def __init__(this, n: int) -> None: this.n = n
+    def take(this, k: int | None) -> int | None:
+        if k is None: return None
+        this.n -= k; return this.n
+def run(o): print(o.take(2))
+def main() -> None: run(C(9))
+main()
+'''
+
+SHADOW_LOCAL = '''class Cache:
+    def get(self, k: int | None) -> int | None:
+        if k is None: return None
+        return k + 50
+def main() -> None:
+    Cache = {1: 10, 2: 20}
+    print(Cache.get(1)); print(Cache.get(9))
+main()
+'''
+
+SHADOW_MODULE = '''class Cache:
+    def get(self, k: int | None) -> int | None:
+        if k is None: return None
+        return k + 50
+Cache = {1: 10, 2: 20}
+def main() -> None:
+    print(Cache.get(1)); print(Cache.get(9))
+main()
+'''
+
+CLASS_BODY_CALL = '''class C:
+    def __init__(self, n: int) -> None: self.n = n
+    def take(self, k: int | None) -> int | None:
+        if k is None: return None
+        self.n -= k; return self.n
+class D:
+    x = C(6).take(2)
+def main() -> None: print(D.x)
+main()
+'''
+
+CLASS_BODY_FUNC = '''def f(k: int | None) -> int | None:
+    if k is None: return None
+    return k + 3
+class D:
+    x = f(4)
+def main() -> None: print(D.x)
+main()
+'''
+
 STRUCT_STR = '''from dataclasses import dataclass
 
 
@@ -358,6 +414,23 @@ class Prog13(unittest.TestCase):
     def test_unbound_optional_method_call_matches_python(self):
         _, want = self.check(UNBOUND, 'unbound', expect_typed=False)
         self.assertEqual(want.stdout, b'7\n7\n')
+
+    def test_unknown_receiver_with_non_self_first_parameter_matches_python(self):
+        _, want = self.check(THIS_UNKNOWN, 'this_unknown', expect_typed=False)
+        self.assertEqual(want.stdout, b'7\n')
+
+    def test_shadowed_class_name_does_not_capture_dict_get(self):
+        for source, name in ((SHADOW_LOCAL, 'shadow_local'), (SHADOW_MODULE, 'shadow_module')):
+            _, want = self.check(source, name, expect_typed=False)
+            self.assertEqual(want.stdout, b'10\nNone\n', name)
+            self.assertTrue(any('builtin method' in n for n in optlib_notes(source)), name)
+
+    def test_optional_call_in_a_class_body_is_refused_and_matches_python(self):
+        for source, name, expected in ((CLASS_BODY_CALL, 'class_body_call', b'4\n'),
+                                       (CLASS_BODY_FUNC, 'class_body_func', b'7\n')):
+            _, want = self.check(source, name, expect_typed=False)
+            self.assertEqual(want.stdout, expected, name)
+            self.assertTrue(any('used outside a function' in n for n in optlib_notes(source)), name)
 
     def test_newly_typed_functions_on_both_builds(self):
         for env in ({'AIL_IR': '0'}, {'AIL_IR': '1'}):

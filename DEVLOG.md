@@ -1,3 +1,19 @@
+## 2026-11-02 -- prog13 review fix 2: receiver binding, shadowed class names, class-body calls
+
+Fixed the three defects from the second review of the Optional method lowering.  For a receiver whose type
+is not statically known, the receiver skip now comes from the call's own binding: an Optional method whose
+first parameter is not `self`/`cls` no longer shifts the Optional pair into that parameter (the review's
+`this` example prints `7` again).  A call form that binds both as a bound and as an explicit-receiver call is
+refused by name instead of guessed.  A class name shadowed by a local or module binding (including an
+unannotated parameter) is classified from that binding, so a dict called `Cache` no longer captures
+`Cache.get`; the collision guard refuses and the program falls back whole to CPython.  Optional calls in a
+class body (including a nested class) are now refused by name, as module-level Optional calls already were,
+so the general fallback never sees a half-lowered method.  Added P9/P10 to `test_ail_prog13.py`; probes
+`/tmp/probes/p1_this_unknown.py`, `p2_local_shadow.py`, `p2_module_shadow.py`, `p3_classbody.py`,
+`x2_ambiguous_refused.py`, `x3_classbody_func.py`, `x5_param_shadow.py`, `x6_class_unbound_get.py`,
+`x7_alias_list_dict.py` and `x8_none_negative.py` match CPython on both builds.  No int64 rule or generated C
+changed.
+
 ## 2026-11-02 -- prog13 review fix: receiver-aware Optional method calls
 
 Review found two defects in the Optional method lowering.  A method named like a builtin container

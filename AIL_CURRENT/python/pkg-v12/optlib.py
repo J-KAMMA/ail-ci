@@ -193,6 +193,9 @@ class _ScopeData:
             for a in node.args.posonlyargs + node.args.args + node.args.kwonlyargs:
                 if a.annotation is not None:
                     self.values.setdefault(a.arg, []).append(('ann', a.annotation))
+                else:
+                    # an unannotated parameter shadows a module / class name with a value of unknown type
+                    self.values.setdefault(a.arg, []).append(('val', None))
         for n in _own_nodes(node):
             if isinstance(n, ast.Assign):
                 for t in n.targets:
@@ -250,8 +253,6 @@ def _elem_tags(e, scope, module, class_names):
 
 
 def _name_tags(name, scope, module, class_names, seen):
-    if name in class_names:
-        return frozenset(('class',))
     if name == 'self':
         return frozenset(('instance',))
     if name == 'cls':
@@ -262,7 +263,8 @@ def _name_tags(name, scope, module, class_names, seen):
     bindings = list(data.values.get(name, ()))
     loops = list(data.loops.get(name, ()))
     if not bindings and not loops:
-        return frozenset(('unknown',))
+        # a bare class name is the class itself; any binding above (including a parameter) shadows it
+        return frozenset(('class',)) if name in class_names else frozenset(('unknown',))
     seen = seen | {name}
     tags = set()
     for how, node in bindings:
@@ -437,11 +439,14 @@ class Lowerer:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 scan(node, _ScopeData(node, self.class_names))
 
-    def run(self):
-        self.check_placement()
-        # module-level statements may not use an Optional function (they would need module-level temporaries)
-        for node in self.tree.body:
-            if isinstance(node, (ast.FunctionDef, ast.ClassDef, ast.Import, ast.ImportFrom)):
+    def check_outside(self, body):
+        """Statements evaluated at module or class body scope may not use an Optional function: their pair
+        would need a temporary there.  Methods and nested functions are lowered separately."""
+        for node in body:
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Import, ast.ImportFrom)):
+                continue
+            if isinstance(node, ast.ClassDef):
+                self.check_outside(node.body)
                 continue
             for n in ast.walk(node):
                 if isinstance(n, ast.Name) and n.id in self.opt_funcs and n.id != 'main':
@@ -450,6 +455,13 @@ class Lowerer:
                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute) and n.func.attr in self.methods:
                     raise Refused(node, '%s() takes or returns an Optional and is used outside a function; '
                                   'call it from inside a function' % n.func.attr)
+
+    def run(self):
+        self.check_placement()
+        self.check_outside(self.tree.body)
+        for node in ast.walk(self.tree):
+            if isinstance(node, ast.ClassDef):
+                self.check_outside(node.body)
         body = []
         for node in self.tree.body:
             if isinstance(node, ast.FunctionDef):
@@ -1365,20 +1377,48 @@ class Lowerer:
         self.wrapped(a)
         return _const(True), self.ex(a, facts)
 
-    def call_skip(self, receiver, info):
+    def _call_binds(self, e, params, kwonly):
+        """Would this call bind successfully with `params` (no explicit receiver / receiver first)?"""
+        names = [n for n, _, _ in params]
+        positional = len(params) - kwonly
+        if len(e.args) > positional:
+            return False
+        assigned = set()
+        for i, a in enumerate(e.args):
+            if isinstance(a, ast.Starred):
+                return False
+            assigned.add(names[i])
+        for k in e.keywords:
+            if k.arg is None or k.arg not in names or k.arg in assigned:
+                return False
+            assigned.add(k.arg)
+        return all(default is not None or name in assigned for name, _, default in params)
+
+    def call_skip(self, e, info):
         """1 when this call is bound (the receiver supplies the first parameter), 0 for `C.name(obj, ...)`."""
+        receiver = e.func.value
         tags = _expr_tags(receiver, self.scope, self.module_scope, self.class_names)
         if 'class' in tags and 'instance' not in tags:
             return 0
         if 'instance' in tags and 'class' not in tags:
             return 1
-        first = info.params[0][0] if info.params else None
-        return 1 if first in ('self', 'cls') else 0
+        if not info.params:
+            return 0
+        if any(isinstance(a, ast.Starred) for a in e.args) or any(k.arg is None for k in e.keywords):
+            return 1 if info.params[0][0] in ('self', 'cls') else 0
+        fits = [skip for skip in (0, 1) if self._call_binds(e, info.params[skip:], info.kwonly)]
+        if len(fits) == 1:
+            return fits[0]
+        if fits:
+            raise Refused(e, 'cannot tell whether %s() is called as a bound method or with an explicit receiver; '
+                          'give the receiver a name whose type is known, or pass an argument that only one form '
+                          'accepts' % info.node.name)
+        return 1 if info.params[0][0] in ('self', 'cls') else 0
 
     def user_call(self, e, info, facts):
         new = copy.copy(e)
         args = []
-        skip = self.call_skip(e.func.value, info) if getattr(info, 'method', False) else 0
+        skip = self.call_skip(e, info) if getattr(info, 'method', False) else 0
         params = info.params[skip:]
         for i, a in enumerate(e.args):
             if isinstance(a, ast.Starred):
