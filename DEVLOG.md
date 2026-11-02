@@ -1,3 +1,21 @@
+## 2026-11-02 -- rbpyreach1 review fix: cyclic kind inference and non-statement `setdefault`
+
+Fixed the two defects in the re-applied dict-of-lists lowering. `_dict_of_lists_kind` now carries
+the names it is resolving, so an assignment chain that reaches itself (`x = x`, `x = 1; y = x;
+x = y`) stops at int instead of recursing forever. `lower_dict_of_lists` lowers a
+`d.setdefault(k, []).append(v)` only when it is a standalone expression statement: an assignment,
+lambda body or other value position leaves the whole dict as written (the later `d`-name check
+then skips the init and `get` rewrites too). Statements in an inline suite (`if c: ...`) are also
+left alone, since splitting them over several lines would move the later lines out of that suite.
+Continuation lines of a lowered statement use the line's indentation rather than its column, so
+two setdefaults separated by `;` stay valid.
+
+Probes: `p_dl_cycle`, `p_dl_cycle2`, `p_dl_semi`, `p_dl_expr`, `p_dl_lambda`, plus `p_dl_basic`,
+`p_dl_nested`, `p_dl_mixed`, `p_dl_inline`, `p_dl_inline_for`, `p_dl_inline_def`; all match
+CPython on both builds. Tests: test_ail_pytyped_reach, test_ail_typedreach1,
+test_ail_typedreach2, test_ail_files, test_ail_corpus_findings3, test_ail_safetynet;
+`tools/update_manifest.py --check` exits 0.
+
 ## 2026-11-02 -- rbpyreach1: re-apply the accepted pyreach1 change (job-rbpyreach1-11021017)
 
 Re-applied the accepted `job-pyreach1-11020650` change on top of this tree. The diff no longer
