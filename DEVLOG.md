@@ -136,6 +136,54 @@ which builds the ten passing programs and compares them with CPython. Probes in 
 and `/tmp/probes/feat/` cover empty, negative, huge, `inf` / `nan`, signed-zero and unequal-length
 values, keyword `start=`, and values reaching the calls through an argument, a list item, an
 attribute and a dict value on both builds.
+## 2026-11-02 -- prog13 review fix 2: receiver binding, shadowed class names, class-body calls
+
+Fixed the three defects from the second review of the Optional method lowering.  For a receiver whose type
+is not statically known, the receiver skip now comes from the call's own binding: an Optional method whose
+first parameter is not `self`/`cls` no longer shifts the Optional pair into that parameter (the review's
+`this` example prints `7` again).  A call form that binds both as a bound and as an explicit-receiver call is
+refused by name instead of guessed.  A class name shadowed by a local or module binding (including an
+unannotated parameter) is classified from that binding, so a dict called `Cache` no longer captures
+`Cache.get`; the collision guard refuses and the program falls back whole to CPython.  Optional calls in a
+class body (including a nested class) are now refused by name, as module-level Optional calls already were,
+so the general fallback never sees a half-lowered method.  Added P9/P10 to `test_ail_prog13.py`; probes
+`/tmp/probes/p1_this_unknown.py`, `p2_local_shadow.py`, `p2_module_shadow.py`, `p3_classbody.py`,
+`x2_ambiguous_refused.py`, `x3_classbody_func.py`, `x5_param_shadow.py`, `x6_class_unbound_get.py`,
+`x7_alias_list_dict.py` and `x8_none_negative.py` match CPython on both builds.  No int64 rule or generated C
+changed.
+
+## 2026-11-02 -- prog13 review fix: receiver-aware Optional method calls
+
+Review found two defects in the Optional method lowering.  A method named like a builtin container
+method (`get`, `pop`, ...) captured every `<obj>.get(...)` call, and every call assumed a receiver
+parameter, shifting the Optional argument of a class-scope function with no `self` (`C.value(3, 4)`
+returned 5).  `optlib.py` now classifies each receiver from literals, constructors, annotations and
+local/module assignments.  A builtin-colliding method is refused by name unless every call receiver
+is provably a user class/instance (so `Cache.get` plus `dict.get` falls back whole), and the
+bound/unbound skip is per call: 0 for `C.value(3, 4)` and `S.add(obj, 4)`, 1 for an instance call,
+with the first parameter's name as the fallback.  Module-scope Optional method calls are refused
+with the existing outside-a-function message.  Added P7/P8 to `test_ail_prog13.py`; all 13 review
+probes and the new tests match CPython on both builds.  No int64 rule or generated C changed.
+
+## 2026-11-02 -- prog13: Optional scalar methods reach the typed path (job-prog13-11020843)
+
+Profile pass over the eight assigned programs (`lab/progfix/prog13.md`): five already built on the
+typed path at the job base.  `g12_026` (main and the `Elevator` methods, including
+`step() -> int | None`) was still general; the remaining two are module-scope object constants:
+`g12_036` (generated `_ail_en_EventKind_all` list of enum members) and `g19_036` (datetime values
+built by calls, read by `main`).  Both were left as named follow-ups because they need a new
+module-scope object-constant feature; the exact refusals are in the report.
+
+`python/pkg-v12/optlib.py` now lowers a scalar Optional parameter/result on a method whose name is
+unique in the program (calls rewrite by attribute name, so a duplicate name or a decorated method
+is refused by name; nested functions keep the old refusal).  A method result used inline where only
+the lowered pair would fit is refused like a top-level Optional call, so the general fallback never
+sees a half-lowered method.  The struct-list comprehension check in
+`python/pkg-v12/pyfunc.py` now accepts a str element as `list[str]`.  `g12_026` builds typed and
+matches CPython; no int64 rule changed.  Added `test_ail_prog13.py`
+(`tests.d/test_ail_prog13.txt`), which builds the newly typed method forms on both IR settings plus
+`g12_026`, the duplicate/decorated refusals, the struct-str comprehension, and the five programs
+that were already typed.  Probes under `/tmp/probes/prog13_*.py` match CPython on both builds.
 
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
