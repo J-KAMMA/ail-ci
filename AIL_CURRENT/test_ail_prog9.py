@@ -392,14 +392,6 @@ main()
         return None
 
 
-class H:
-    def __init__(self) -> None:
-        self.p = P()
-
-    def show(self) -> None:
-        print(self.p.peek(), self.p.peek() in ("a", "z"))
-
-
 def takes(s: str | None) -> int:
     if s is None:
         return -1
@@ -429,10 +421,6 @@ def main() -> None:
     print(scan(p))
     ps = [P()]
     print(ps[0].peek(), ps[0].peek() in ("a", "z"))
-    h = H()
-    h.show()
-    d = {"k": P()}
-    print(d["k"].peek())
 
 
 main()
