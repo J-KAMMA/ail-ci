@@ -172,6 +172,32 @@ def main() -> None:
 main()
 '''
 
+    METHOD_ROW_REBIND = '''class P:
+    def __init__(self) -> None:
+        self.s = "z"
+
+    def pair(self) -> tuple[bool, str]:
+        return (False, self.s)
+
+
+def main() -> None:
+    p = P()
+    a = 5
+    print(a)
+    a, b = p.pair()
+    print(a, b)
+    a = 7
+    print(a)
+    a, b = p.pair()
+    for i in range(1):
+        print(a, b, i)
+    a = 9
+    print(a)
+
+
+main()
+'''
+
     DICT_TEXT = '''from collections import Counter
 
 
@@ -268,6 +294,10 @@ main()
 
     def test_method_row_unpack_typed(self):
         self.same(self.METHOD_ROW, 'method_row', [''])
+
+    def test_method_row_bool_rebinding_typed(self):
+        # A bool field keeps True/False only until the name is rebound: `a = 7` must print 7.
+        self.same(self.METHOD_ROW_REBIND, 'method_row_rebind', [''])
 
     def test_dict_keys_and_text_typed(self):
         self.same(self.DICT_TEXT, 'dict_text', [''])

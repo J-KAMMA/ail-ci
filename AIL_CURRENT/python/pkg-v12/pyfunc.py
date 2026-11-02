@@ -2557,6 +2557,8 @@ class Ctx:
         self.numeric_allowed_names = None
         self.params = params                    # [(name, 'array'|'int')]
         self.bool_names = frozenset()           # locals holding a bool (boolkind.py)
+        self.bool_names_static = frozenset()    # the subset boolkind.py proved bool everywhere
+        self.srow_bool_names = frozenset()      # bool row fields, valid until the name is rebound
         self.bool_lists = frozenset()           # locals holding a list of bools
         self.kind = dict(params)
         self.need = need                        # arithmetic helpers, or None outside strict mode
@@ -20311,7 +20313,81 @@ def _loop_stmts(body, ctx, ind):
         ctx.loopdepth -= 1
 
 
+def _stmt_bound_names(node):
+    """The local names a statement binds (or rebinds) in the function's own scope."""
+    names = set()
+
+    def add(target):
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for element in target.elts:
+                add(element)
+        elif isinstance(target, ast.Starred):
+            add(target.value)
+
+    if isinstance(node, (ast.Assign, ast.AnnAssign)):
+        for target in (node.targets if isinstance(node, ast.Assign) else [node.target]):
+            add(target)
+    elif isinstance(node, ast.AugAssign):
+        add(node.target)
+    elif isinstance(node, (ast.For, ast.AsyncFor)):
+        add(node.target)
+    elif isinstance(node, (ast.With, ast.AsyncWith)):
+        for item in node.items:
+            if item.optional_vars is not None:
+                add(item.optional_vars)
+    elif isinstance(node, ast.ExceptHandler):
+        if node.name:
+            names.add(node.name)
+    elif isinstance(node, ast.NamedExpr):
+        add(node.target)
+    return names
+
+
+def _srow_unpack_bool_names(node, ctx):
+    """Names bound from the bool fields of `a, b = p.method()` (the SROW unpack branch)."""
+    if not (isinstance(node, ast.Assign) and len(node.targets) == 1):
+        return frozenset()
+    target = node.targets[0]
+    if not (isinstance(target, (ast.Tuple, ast.List))
+            and all(isinstance(e, ast.Name) for e in target.elts)):
+        return frozenset()
+    call = node.value
+    if not (isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute)):
+        return frozenset()
+    try:
+        mangled = _class_method_name(call, ctx)
+    except Unsupported:
+        return frozenset()
+    if mangled is None or not _is_srowtup_ret(ctx.funcs[mangled][1]):
+        return frozenset()
+    return frozenset(target.elts[j].id for j in _srow_return_bool_positions(call, ctx)
+                     if j < len(target.elts))
+
+
+def _bool_flow_after(node, ctx):
+    """Keep a bool row field's `True`/`False` text only until the name is rebound.
+
+    The field is an int64 0/1, so the annotation is the only place its bool-ness survives; a
+    function-wide set would make `a = 7` after `a, b = p.pair()` still print `True`.
+    """
+    if not hasattr(ctx, 'srow_bool_names'):
+        return
+    bound = _stmt_bound_names(node)
+    dynamic = set(ctx.srow_bool_names) - bound
+    dynamic |= _srow_unpack_bool_names(node, ctx)
+    ctx.srow_bool_names = frozenset(dynamic)
+    ctx.bool_names = frozenset(set(ctx.bool_names_static) | dynamic)
+
+
 def _stmt(node, ctx, ind):
+    out = _stmt_core(node, ctx, ind)
+    _bool_flow_after(node, ctx)
+    return out
+
+
+def _stmt_core(node, ctx, ind):
     if getattr(node, '_ail_member_check', None) and not getattr(node, '_ail_member_done', False):
         node._ail_member_done = True
         try:
@@ -20701,10 +20777,6 @@ def _stmt_inner(node, ctx, ind):
                 tmp, _ = ctx.temp(SROW)
                 out = '%s%s = %s;\n' % (pad, tmp, call_c)
                 names = [ctx.declare(e.id, fk) for e, fk in zip(t.elts, fkinds)]
-                bool_fields = _srow_return_bool_positions(node.value, ctx)
-                if bool_fields:
-                    ctx.bool_names = frozenset(set(ctx.bool_names) | {
-                        t.elts[j].id for j in bool_fields if j < len(t.elts)})
                 for j, (nm, fk) in enumerate(zip(names, fkinds)):
                     if fk == STR:
                         ctx.needs_sarena = True
@@ -31245,6 +31317,8 @@ def _compile_init(init_fn, info, classes):
     ctx.classes[info.name] = info
     ctx.funcs = {}
     ctx.bool_names = _BOOLS.locals.get(info.name + '.__init__', frozenset())
+    ctx.bool_names_static = ctx.bool_names
+    ctx.srow_bool_names = frozenset()
     ctx.bool_lists = _BOOLS.lists.get(info.name + '.__init__', frozenset())
     for stmt in init_fn.body:
         if (isinstance(stmt, ast.Expr) and isinstance(stmt.value, ast.Constant)
@@ -37405,6 +37479,8 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
         ctx.gdecl = frozenset(name for g in ast.walk(fn) if isinstance(g, ast.Global)
                               for name in g.names if name in ctx.modconsts.vars)
     ctx.bool_names = _BOOLS.locals.get(fn.name, frozenset())
+    ctx.bool_names_static = ctx.bool_names
+    ctx.srow_bool_names = frozenset()
     ctx.bool_lists = _BOOLS.lists.get(fn.name, frozenset())
     float_params = {name for name, kind in ctx.params if kind == FLIST}
     if float_params:

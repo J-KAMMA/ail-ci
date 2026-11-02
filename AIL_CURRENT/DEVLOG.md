@@ -1,3 +1,12 @@
+## 2026-11-02 -- prog9 review fix: bool row fields stop leaking past a rebind (job-prog9-11021016)
+
+Fixed the review defect in the method row-unpack lowering. A bool field from `a, b = p.pair()` no
+longer marks `a` as bool for the rest of the function: the generated code keeps a per-statement set
+of bool row fields and drops a name as soon as it is rebound, so `a = 7` after the unpack prints `7`
+(CPython's value) instead of `True`. The fresh bool field still prints `True`/`False`;
+`test_ail_prog9` gained a rebinding case. Probes `p_bool_reuse`, `p_srow_bool_rebind`,
+`p_srow_bool_branch` and `p_srow_bool_loop` match CPython on the strict typed build.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
