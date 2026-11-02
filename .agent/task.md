@@ -1,3 +1,69 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode-go/deepseek-v4.1-flash]
+## Review of prog29
+
+**What the change does:** accepts module-level `frozenset(<str literal>)` (also list/tuple of str) as an ordered deduped `list[str]` readable only via `in`/`not in`/`len`, keeps it at module scope, adds refusals for shadowed `len` and reads before assignment, and lowers `len({...})` to an eager list comprehension plus a private int/str set. That matches the report.
+
+**Verified**
+- `g17_026` builds under `--strict` and matches CPython. The other seven report the same first blockers as claimed (`range`, `str(<list>)`, `yield`, instance `__hash__`); `t161`, `g08_004`, `t188` build strict.
+- All ten `lab/compare/src/*/main.ail` `program.c` files are byte-identical base vs HEAD (only temp paths in `native_report.json` differ).
+- `test_ail_prog29 test_ail_fz208 test_ail_cpython_hybrid test_ail_modconst test_ail_safetynet`: 5 modules, 0 failed. `tools/update_manifest.py --check` clean.
+- Own probes (strict typed) matched CPython for setcomp over str/int/list/set/bytes/slice/tuple/bool, empty/duplicates/negatives, and frozenset membership/`len` through arguments, list items, attributes, unicode and duplicates.
+- Same-scope parameter/local `len` shadows are refused; nested-def and module-literal shadows are refused; read-before-assignment refusals work for call/class/list.
+- No programs/benchmarks edited. DEVLOG/test registration present.
+
+**False / inaccurate claims**
+- `prog29_z_shadowlen_param.py` and `..._local.py` were *not* refused; they build typed and match CPython. Correct, since the `len` call is in another function. Report table says refused.
+- `prog29_r_order_arg.py` is refused because annotated `frozenset` parameters are unsupported, not by the read-before-assignment check.
+
+**Pre-existing**
+- A module-level non-literal binding of `len` (`for len in ...`, `if: len = 5`, `with ... as len`) is mishandled by both base and HEAD non-strict builds: `len(V)` prints `5` where CPython raises `TypeError`. Base differs identically, so this is pre-existing; HEAD additionally accepts it under `--strict` where base refused.
+
+**Defect (caused by this change)**
+1. Mutation of the set-comprehension source during iteration. `p_sc_mutate_attr.py`:
+```python
+class Box:
+    def __init__(self) -> None:
+        self.xs: list[int] = [1, 2]
+    def side(self) -> bool:
+        if len(self.xs) < 3:
+            self.xs.append(99)
+        return True
+
+def f(box: Box) -> int:
+    return len({x for x in box.xs if box.side()})
+
+def main() -> None:
+    box = Box()
+    print(f(box), len(box.xs))
+
+main()
+```
+CPython and base default build: `3 3`; HEAD default/strict build: `2 3` (both exit 0). CPython's list iterator sees the appended `99`; the new lowering iterates the pre-sized list comprehension bound. `bash ~/tools/cmp.sh p_sc_mutate_attr.py $PWD` shows base `g same / d same`, HEAD `g same / d DIFF`.
+
+**Unverified:** frozenset-iteration general-path order vs base (not compared); instruction counts (`perf_event_open` denied).
+
+VERDICT: FIX
+[cost $0.0893, opencode tokens {"total": 6309540, "input": 160608, "output": 19983, "reasoning": 58421, "cache.write": 0, "cache.read": 6070528}]
+    tool time: bash 10.3 min
+        232s bash   cd /home/runner/work/_temp/w2/AIL_CURRENT && timeout 1500 python3 ../tools/par_check.py -j 2 test_ail_prog29 t
+         81s bash   cd /tmp && rm -rf cmpbase cmphe && mkdir -p cmpbase cmphe; cd /home/runner/work/_temp/w2; ok=0; bad=0; for t i
+         50s bash   cd /tmp/rprobes && cat > p_sc_tuple.py <<'EOF' def f(xs: list[int]) -> int:     return len({(x, x % 2) for x i
+         47s bash   cd /tmp/rprobes && cat > p_sc_dict.py <<'EOF' def f(d: dict[str, int]) -> int:     return len({k for k in d}) 
+         37s bash   cd /tmp/rprobes && cat > p_sc_byteslit.py <<'EOF' def f() -> int:     return len({b"a" for _ in [1, 2]})  def 
+         25s bash   cd /tmp/rprobes && for p in p_ann_list p_ann_set p_ann_dict p_fset_sources p_fset_edges p_fset_types p_setcomp
+         24s bash   cd /tmp/rprobes && cat > p_sc_tuple2.py <<'EOF' def f(xs: list[int]) -> int:     return len({(x, x % 2) for x 
+         11s bash   cd /tmp/rprobes && cat > p_sc_len_modconst.py <<'EOF' def f() -> int:     return len({x for x in [1, 1, 2]}) l
+
+
+--- ORIGINAL TASK ---
 **Typed reach: make the hot functions of these 8 real programs compile on the typed path.** With the CPython hybrid (docs/design/CPYTHON_HYBRID.md) only typed functions are accelerated; the rest runs in CPython. So what matters is that the functions where time is spent compile typed.
 
 Read `git log --oneline -40` first so you do not redo what another task just did.
