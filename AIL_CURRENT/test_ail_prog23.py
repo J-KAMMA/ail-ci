@@ -97,6 +97,49 @@ def run() -> None:
 run()
 '''
 
+STR_SET_REBIND = '''
+def and_rebind() -> None:
+    c = set(["x", "y"])
+    print(sorted(c))
+    a = set([1, 2])
+    b = set([2, 3])
+    c = a & b
+    print(sorted(c))
+
+
+def branch_rebind(flag: bool) -> None:
+    if flag:
+        c = set(["x", "y"])
+    else:
+        c = set(["z"])
+    a = set([1, 2, 3])
+    b = set([3])
+    c = a | b
+    print(sorted(c))
+
+
+def all_ops() -> None:
+    c = set(("x", "y"))
+    a = set([0, -1])
+    b = set([-1, 2])
+    c = a - b
+    print(sorted(c))
+    c = a ^ b
+    print(sorted(c))
+    c = b - a
+    print(sorted(c))
+
+
+def run() -> None:
+    and_rebind()
+    branch_rebind(True)
+    branch_rebind(False)
+    all_ops()
+
+
+run()
+'''
+
 
 def run(cmd, cwd=None, stdin=b'', env=None):
     return subprocess.run(cmd, cwd=cwd, input=stdin, capture_output=True, env=env, timeout=600)
@@ -169,6 +212,17 @@ class TypedReach23(unittest.TestCase):
         built, exe = self.build(src, 'str_set_operators')
         self.assertEqual(built.returncode, 0, built.stderr[-3000:])
         self.compare(src, exe, None)
+
+    def test_str_set_rebound_to_int_set_operator(self):
+        src = Path(self.tmp) / 'str_set_rebind.py'
+        src.write_text(STR_SET_REBIND, encoding='utf-8')
+        built, exe = self.build(src, 'str_set_rebind')
+        self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+        self.compare(src, exe, None)
+        strict, _ = self.build(src, 'str_set_rebind', strict=True)
+        output = (strict.stdout + strict.stderr).decode('utf-8', 'replace')
+        self.assertNotEqual(strict.returncode, 0, output[-3000:])
+        self.assertIn('set(...) of str or bytes keys', output)
 
     def test_follow_ups_keep_exact_first_reasons(self):
         g15 = self.build(REPO / 'lab/census/programs/gdev/g15_004.py', 'g15_004', strict=True)

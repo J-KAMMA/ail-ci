@@ -1,3 +1,18 @@
+## 2026-11-02 -- prog23 review 0: str/bytes set construction stays off the typed path (job-prog23-11021945)
+
+Review 0 found that `c = set(["x", "y"])` followed by `c = a & b` (int sets) emitted invalid C:
+`ail_tab_put` / `ail_tab_copy` on a name the typed path had already declared as an `ail_stab`, and
+the earlier `set([...])` fill itself already passed an `ail_str` to `ail_tab_put`.  The
+str/bytes-keyed unannotated-set exclusion only covered set operators, not the initial `set(xs)`
+construction.  `_container_literal` now refuses `set(...)` whose source keys are str/bytes before
+the typed fill, and the int-table set-operator assignment refuses a destination already bound to a
+str/bytes set; either refusal sends the whole function to the existing general path, where the
+program matches CPython, while `--strict` names the blocker.  Both `&`, `|`, `-`, `^`, a str binding
+in a branch, a source from a list variable, tuple/literal sources, bytes sets and the reverse bind
+order were probed on both builds and match CPython.  The ten `lab/compare/src/*/main.ail` generated
+C files are byte-identical to HEAD before this fix (`AIL_IR=0`), which was already verified against
+the base commit.  `test_ail_prog23` gains the rebind probe; no semantic difference was added.
+
 ## 2026-11-02 -- typed reach: t115 tuple/list bindings and t143 unannotated sets (job-prog23-11021359)
 
 Profiled the eight prog23 programs with CPython 3.12 `cProfile` and recorded the hot-function table in

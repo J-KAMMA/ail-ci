@@ -20047,6 +20047,15 @@ def _container_literal(node, ctx):
             return DICT
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'set' \
             and len(node.args) == 1:
+        if _set_keys_are_str_or_bytes(node, ctx):
+            # A str/bytes-keyed unannotated set lives in ail_stab/ail_btab on the general path;
+            # the typed `set(xs)` fill below only knows how to build an ail_tab from int keys.
+            # Leave the whole function to the general path rather than emit ail_tab_put on an
+            # ail_str (or claim the destination as an int table that its other lines disagree
+            # with), exactly as a set operator over str keys already does.
+            raise Unsupported('set(...) of str or bytes keys in a function built on the typed '
+                              'path; an unannotated set of str/bytes keys is left to the general '
+                              'path -- move it to a function of its own, or annotate its keys')
         return SET                                  # set(xs) -- filled by the caller below
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'sorted':
         return LIST
@@ -22046,7 +22055,17 @@ def _stmt_inner(node, ctx, ind):
                 # An unannotated set built by `a & b`, `a | b`, `a - b` or `a ^ b`:
                 # `_set_value` materialises the operation into a private table, then the
                 # result is copied into this name's own table (the same value semantics
-                # every other container binding here has -- no aliasing).
+                # every other container binding here has -- no aliasing). The destination's
+                # key kind is fixed by its first binding, so a str/bytes-keyed name cannot
+                # receive this int table: refuse rather than emit ail_tab_copy into an
+                # ail_stab/ail_btab (or let the earlier binding disagree with this one).
+                if (t.id in ctx.skeys or t.id in ctx.bkeys
+                        or t.id in getattr(ctx, 'untyped_str_sets', ())
+                        or t.id in getattr(ctx, 'untyped_byte_sets', ())):
+                    raise Unsupported('%r holds a str/bytes-keyed unannotated set; a set '
+                                      'operator with int keys cannot rebind it -- a local\'s '
+                                      'key kind is settled by its first assignment, so give the '
+                                      'int set a different name' % t.id)
                 src = _set_value(v, ctx)
                 return (_flush(ctx, pad) + clear
                         + '%sail_tab_copy(&%s, &%s);\n' % (pad, c, src))

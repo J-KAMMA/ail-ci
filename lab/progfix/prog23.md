@@ -48,9 +48,18 @@ means the same program compiled fully on the typed path with `--strict` before t
    `set_b = second_set` is known before `common = set_a & set_b`.  This makes `t143` fully typed; its
    output matches CPython on `in0`, `in1` and `in2`.
 
+4. **Review 0 fix: str/bytes-keyed `set(...)` and a rebind to an int set operation**
+   (`python/pkg-v12/pyfunc.py`).  A first `c = set(["x", "y"])` followed by `c = a & b` over int
+   sets used to emit `ail_tab_put`/`ail_tab_copy` into a name declared as `ail_stab`, so the
+   default build failed in gcc.  A str/bytes-keyed `set(...)` is now refused before the typed
+   fill, and an int set-operator assignment refuses a destination already bound to a str/bytes
+   set; the function then takes the general path and matches CPython, while `--strict` names the
+   blocker.  This covers all four operators, a branch binding, tuple/list/name sources, bytes sets
+   and the reverse bind order.
+
 Both changes affect only programs that previously were refused.  The generated C of the ten
 `lab/compare` tasks is byte-identical to the base commit (`AIL_IR=0`; all ten `main.ail` builds
-compared).
+compared); the review fix leaves those ten files byte-identical too.
 
 ## Follow-ups (left by name)
 
