@@ -1,3 +1,24 @@
+## 2026-11-02 -- prog19 typed reach: random.choice of a tuple list unpacks on the typed path
+
+The hot function of `lab/census/programs/gdev/g11_018.py` is `simulate_random_walk`; it was on the
+general path because `dx, dy = random.choice(moves)` reached the typed emitter as an opaque
+`moves[<index>]` subscript after the random lowering. The tuple pass runs before that lowering and
+had no element type for `random.choice`, so it could not turn the unpack into field reads. It now
+types `random.choice(seq)` as the element type of a list `seq` (the call itself is still lowered by
+stdlib3.py), for `import random` and `from random import choice`. The whole program now builds on
+the typed path under both IR settings and prints CPython's output; list parameters, aliases,
+`from` imports, empty lists (IndexError), negative coordinates, float tuples and scalar lists were
+probed against CPython on the typed and general builds.
+
+`lab/progfix/prog19.md` records the cProfile hot functions of the eight programs and their typed
+status. The other general-path programs stay recorded as follow-ups: g10's module-level dict of
+`list[int]` (and its optional list result), t078's `ord` on a non-proven one-code-point str plus
+`next(generator, default)`, and g14's typed `json.loads` with a declared result type.
+
+Files: `python/pkg-v12/tuplib.py`, `python/pkg-v12/tupcalls.py`, `test_ail_prog19.py`.
+Tests: `test_ail_prog19`, `test_ail_tuples`, `test_ail_genlib`, `test_ail_safetynet`,
+`test_ail_files`, `test_ail_corpus_findings3`.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
