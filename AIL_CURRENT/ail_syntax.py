@@ -4057,7 +4057,11 @@ def python_surface(source, notes=None, library=False):
         source = _optlib().rewrite(source, notes)
     if "(" in source:
         source = _modtables().rewrite_text(source, library, notes)
-    source = _tuplib().rewrite(source, notes)
+    tuplib = _tuplib()
+    try:
+        source = tuplib.rewrite(source, notes)
+    except tuplib.HardRefused as exc:
+        raise SyntaxErrorAIL(exc.message, lineno=exc.line, offset=1) from exc
     try:
         surface = _Surface(source)
     except (SyntaxError, ValueError):

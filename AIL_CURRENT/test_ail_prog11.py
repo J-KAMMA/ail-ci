@@ -209,6 +209,61 @@ print(f())
 }
 
 
+WALRUS_REBIND = {
+    'comprehension': '''
+def f() -> int:
+    return X[0]
+
+X = (1, 2)
+[X := 9 for _ in range(1)]
+print(f())
+''',
+    'call': '''
+def f() -> int:
+    return X[0]
+
+X = (1, 2)
+print((X := 9))
+print(f())
+''',
+    'assignment_value': '''
+def f() -> int:
+    return X[0]
+
+X = (1, 2)
+y = (X := 9)
+print(f())
+''',
+    'global': '''
+def f() -> int:
+    return X[0]
+
+X = (1, 2)
+
+def g() -> None:
+    global X
+    (X := 9)
+
+g()
+print(f())
+''',
+}
+
+LOCAL_WALRUS = '''
+def f() -> int:
+    return X[0]
+
+X = (1, 2)
+
+def g() -> int:
+    X = 5
+    (X := 9)
+    return X
+
+print(f(), g())
+'''
+
+
 def run(cmd, cwd=None, stdin=b'', env=None):
     return subprocess.run(cmd, cwd=cwd, input=stdin, capture_output=True, env=env, timeout=600)
 
@@ -295,6 +350,23 @@ class TypedReach11(unittest.TestCase):
             built, exe = self.build(src, 'rebind_' + name)
             self.assertEqual(built.returncode, 0, built.stderr[-3000:])
             self.compare(src, exe, None)
+
+    def test_walrus_rebind_is_refused_by_name(self):
+        for name, text in WALRUS_REBIND.items():
+            src = Path(self.tmp) / ('walrus_' + name + '.py')
+            src.write_text(text, encoding='utf-8')
+            built, exe = self.build(src, 'walrus_' + name)
+            output = (built.stdout + built.stderr).decode('utf-8', 'replace')
+            self.assertNotEqual(built.returncode, 0, name + ': ' + output[-3000:])
+            self.assertIn('module-level tuple constant X', output, name)
+            self.assertIn('assignment expression', output, name)
+
+    def test_local_walrus_does_not_refuse(self):
+        src = Path(self.tmp) / 'local_walrus.py'
+        src.write_text(LOCAL_WALRUS, encoding='utf-8')
+        built, exe = self.build(src, 'local_walrus')
+        self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+        self.compare(src, exe, None)
 
 
 if __name__ == '__main__':

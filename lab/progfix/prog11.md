@@ -70,6 +70,13 @@ path, where it matches CPython:
 Rebinding to another tuple constant (including a different component type or arity, before or
 after the function call) still splits both definitions and matches CPython.
 
+An assignment expression (`:=`) is different: the general path binds it in `main` rather than the
+module namespace, so `def f(): return X[0]` kept returning the stale `1` after `[X := 9 for _ in
+range(1)]`, `print((X := 9))`, `y = (X := 9)`, or a function's `global X; (X := 9)`.  The scan now
+checks the node itself (not only its children) and walks module / `global` scopes, and such a
+program is refused by name instead of falling back.  A local shadow (`def g(): X = 5; (X := 9)`)
+still builds and matches CPython.
+
 ## Follow-ups (left by name)
 
 * `lab/corpus/programs/deepseek-v4.1-flash-free/t310.py`: needs a typed `iter()` over a str and a

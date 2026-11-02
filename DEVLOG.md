@@ -1,3 +1,18 @@
+## 2026-11-02 -- prog11 review: walrus rebinding of a tuple constant is refused by name (job-prog11-11021006)
+
+Fixed both defects from the review of `39d6d0c`.  The pre-lowering scan in `python/pkg-v12/tuplib.py`
+missed a walrus that was the assignment value itself (`y = (X := 9)`) because `_walrus_bindings`
+checked only a node's children, and a detected walrus rebinding was left to the general path, which
+binds `:=` in `main` instead of the module namespace, so `def f(): return X[0]` still printed the
+stale `1` where CPython raises `TypeError: 'int' object is not subscriptable`.  The scan now checks
+the node itself and walks module / `global` scopes to recognise `:=` rebindings (including inside a
+comprehension or a function that declares `global X`); such a program is refused by name with
+`tuplib.HardRefused`, converted to a normal `SyntaxErrorAIL` in `python_surface`, instead of falling
+back.  Plain `X = 9`, `global X; X = 9`, `del X` and tuple-to-tuple rebinding keep their previous
+behaviour.  Probes: `c2` (comprehension), `d2` (call), `c4` (`y = (X := 9)`), `w1`/`w2` (`global X`
+walrus) are now refused by name on both builds; `w3`/`w4` (local shadow) still build and match
+CPython; `q10`/`q20`/`q21`/`q22`/`q24` still match CPython on both builds.
+
 ## 2026-11-02 -- prog11 review: tuple constants rebound or deleted (job-prog11-11021006)
 
 Fixed both defects from the review of `754b5a4`.  A module-level tuple constant is kept as

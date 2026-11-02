@@ -382,17 +382,25 @@ class Lower(Stmts, Calls, Lams, Exprs):
         if not defs:
             return None
         names = set(defs.values())
+        walrus = _walrus_rebinds(self.tree, names)
+        soft = None
         found = []
         _module_bindings(self.tree.body, defs, found)
         for node, bound in found:
             hit = bound & names
-            if hit:
-                return (getattr(node, 'lineno', 1), _rebind_message(sorted(hit)[0]))
+            if not hit:
+                continue
+            hard = hit & set(walrus)
+            if hard:
+                name = sorted(hard)[0]
+                return (getattr(node, 'lineno', 1), _walrus_rebind_message(name), True)
+            if soft is None:
+                soft = (getattr(node, 'lineno', 1), _rebind_message(sorted(hit)[0]))
         # a function or class body may rebind the module name through `global NAME`
         try:
             table = symtable.symtable(self.source, '<tuple-constant>', 'exec')
         except SyntaxError:
-            return None
+            return None if soft is None else (soft[0], soft[1], False)
 
         def walk(scope):
             for sym in scope.get_symbols():
@@ -408,14 +416,20 @@ class Lower(Stmts, Calls, Lams, Exprs):
         for child in table.get_children():
             hit = walk(child)
             if hit is not None:
-                return (1, _rebind_message(hit))
-        return None
+                if hit in walrus:
+                    return (getattr(walrus[hit], 'lineno', 1), _walrus_rebind_message(hit), True)
+                if soft is None:
+                    soft = (1, _rebind_message(hit))
+        return None if soft is None else (soft[0], soft[1], False)
 
     def process(self):
         self.collect()
         rebound = self._tuple_const_rebound()
         if rebound is not None:
-            self.errors.append(rebound)
+            line, message, hard = rebound
+            if hard:
+                raise HardRefused(line, message)
+            self.errors.append((line, message))
             return
         # Register tuple module constants before any function runs: a function written above the
         # constant must already know that `X[0]` names the column `X__c0`, not a module name that no
@@ -506,12 +520,82 @@ def _pattern_names(pattern):
 def _walrus_bindings(node, out):
     if node is None:
         return
+    if isinstance(node, ast.NamedExpr):
+        out.append((node, _target_names(node.target)))
     for child in ast.iter_child_nodes(node):
         if isinstance(child, ast.Lambda):
             continue
-        if isinstance(child, ast.NamedExpr):
-            out.append((child, _target_names(child.target)))
         _walrus_bindings(child, out)
+
+
+def _global_decl_names(stmts):
+    """Names declared `global` in this scope, not in a nested function or class."""
+    out = set()
+
+    def visit(node):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            return
+        if isinstance(node, ast.Global):
+            out.update(node.names)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    for stmt in stmts:
+        visit(stmt)
+    return out
+
+
+def _walrus_rebinds(tree, names):
+    """Names bound by `:=` in the module scope or in a scope that declares them global.
+
+    A comprehension has its own scope for its for-targets, but an assignment expression binds in
+    the nearest enclosing function or module scope, so the walk keeps the enclosing scope.
+    """
+    hits = {}
+
+    def visit(node, module, globals_):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for d in node.decorator_list:
+                visit(d, module, globals_)
+            for d in node.args.defaults:
+                visit(d, module, globals_)
+            for d in node.args.kw_defaults:
+                if d is not None:
+                    visit(d, module, globals_)
+            inner = _global_decl_names(node.body) & names
+            for stmt in node.body:
+                visit(stmt, False, inner)
+            return
+        if isinstance(node, ast.ClassDef):
+            for d in node.decorator_list:
+                visit(d, module, globals_)
+            for b in node.bases:
+                visit(b, module, globals_)
+            for k in node.keywords:
+                visit(k.value, module, globals_)
+            inner = _global_decl_names(node.body) & names
+            for stmt in node.body:
+                visit(stmt, False, inner)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, ast.NamedExpr):
+            if isinstance(node.target, ast.Name) and node.target.id in names:
+                if module or node.target.id in globals_:
+                    hits.setdefault(node.target.id, node)
+            visit(node.value, module, globals_)
+            return
+        if isinstance(node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            for child in ast.iter_child_nodes(node):
+                visit(child, module, globals_)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, module, globals_)
+
+    for stmt in tree.body:
+        visit(stmt, True, set())
+    return hits
 
 
 def _module_bindings(stmts, defs, out):
@@ -586,6 +670,21 @@ def _rebind_message(name):
     return ('the module-level tuple constant %s is assigned or deleted after it is defined; a tuple '
             'constant is kept as columns, so it cannot follow that change -- keep it unchanged or '
             'build the tuple inside a function' % name)
+
+
+def _walrus_rebind_message(name):
+    return ('the module-level tuple constant %s is rebound by an assignment expression (`:=`) after it '
+            'is defined; a tuple constant is kept as columns, so it cannot follow that change -- keep '
+            'it unchanged, use a plain `%s = ...` assignment, or build the tuple inside a function'
+            % (name, name))
+
+
+class HardRefused(Exception):
+    """A rebinding the general path cannot follow: refuse the program by name instead of lowering it."""
+    def __init__(self, line, message):
+        super().__init__(message)
+        self.line = line
+        self.message = message
 
 
 def rewrite(source, notes=None):
