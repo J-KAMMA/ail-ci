@@ -1,3 +1,35 @@
+## 2026-11-02 -- prog20: hot functions of eight real programs on the typed path (job-prog20-11021017)
+
+Profiled the eight programs with CPython 3.12.3 and cProfile (fresh `__main__` globals per
+repetition, imports outside the profile) and recorded the hot functions and their first refusals
+in `lab/progfix/prog20.md`.  Two compiler changes make the two remaining buildable programs
+whole-program typed, without editing any program:
+
+- `iterlower.py` now lowers `min`/`max` with a tuple-returning key
+  (`lambda city: (-pops[city], city)`) by comparing the fields lexicographically, for both a dict
+  walk and a sequence walk; fields evaluate once per element, comparison short-circuits on the
+  first unequal field, and the first element wins a tie (g05_006).
+- `pyfunc.py`'s `enumerate(source, start)` accepts a nested tuple target over a list of tuple
+  instances (`for rank, (word, count) in enumerate(top, start=1)`), materialising each field once
+  per iteration; the index is `start + position` with the start evaluated once and a private
+  position counter, so rebinding the index or the start variable in the body cannot move the next
+  step (g18_002).  The same shape over a named `ctx.srowtypes` row list is handled in
+  `_for_enumerate_start`.
+
+`g05_006`, `g18_002` and `t206` (already typed) now build whole-program typed; `g03_012`
+(statistics.geometric_mean, bool-return, `list(DATA)`), `g03_028` (Fraction dunders), `t284`
+(`iter()`, a generator in `sorted`, `join(map(...))`), `g25_002` (module-level enum list) and
+`g14_012` (dataclass `field(init=False)` / `InitVar`) stay named follow-ups in the report.
+
+Added `AIL_CURRENT/test_ail_prog20.py`, registered through `tests.d/test_ail_prog20.txt`.  Probes
+`/tmp/probes/p_tuplekey.py` (dict/list tuple keys, three fields, ties, negatives, attribute, empty,
+near-int64), `/tmp/probes/p_enum_tuple.py` (start 1/0/negative/empty, rebinding the index and the
+start variable) and `/tmp/probes/p_enum_append.py` (rows built by append) all match CPython on both
+`cmp.sh` builds and take the typed path (no general-path note).  The required modules
+`test_ail_prog20`, `test_ail_tuples`, `test_ail_bugs7`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (64 tests, 1 skipped for a missing zig).  Generated `program.c`
+is byte-identical between `HEAD` and this branch for all ten `lab/compare` `main.ail` builds and
+for every `main.py` build that builds on both.
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten

@@ -26004,13 +26004,47 @@ def _for_enumerate_start(node, it, ctx, ind):
     rebinds `i` changes nothing about the next step."""
     pad = '    ' * ind
     if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
-            and all(isinstance(e, ast.Name) for e in node.target.elts)):
+            and (all(isinstance(e, ast.Name) for e in node.target.elts)
+                 or (isinstance(node.target.elts[0], ast.Name)
+                     and isinstance(node.target.elts[1], ast.Tuple)
+                     and all(isinstance(e, ast.Name) for e in node.target.elts[1].elts)))):
         raise Unsupported('enumerate() without an (i, v) target')
     source, start = it.args[0], _enumerate_start(it)
     if isinstance(start, ast.Constant) and type(start.value) is int and not (
             -(1 << 62) < start.value < (1 << 62)):
         # the typed walk counts in int64; a start past that range belongs to the exact/general path
         raise Unsupported('enumerate() start outside the typed int64 range')
+    if isinstance(node.target.elts[1], ast.Tuple):
+        # `for i, (name, n) in enumerate(rows, start)` over a list of ROWS WITH A STR FIELD:
+        # the same materialisation the plain `for name, n in rows:` branch uses (one typed local
+        # per field, read once per iteration), plus the index. The index is `start + position`;
+        # the start is evaluated once, and the position is a private counter, so rebinding the
+        # target inside the body cannot move the next step.
+        if not (isinstance(source, ast.Name) and source.id in ctx.srowtypes):
+            raise Unsupported('enumerate() with a nested tuple target over something other than '
+                              'a named list of rows')
+        if _etype(start, ctx) != INT or _is_handle_producing(start, ctx):
+            raise Unsupported('enumerate() needs an int start')
+        fkinds = ctx.srowtypes[source.id]
+        fields = node.target.elts[1]
+        if len(fields.elts) != len(fkinds):
+            raise Unsupported('a tuple target over %r must name exactly %d fields' % (
+                source.id, len(fkinds)))
+        c = ctx.cname(source.id)
+        ctx.parts.add('SROW')
+        first, _ = ctx.temp(INT)
+        ctx.pre.append('%s = %s;' % (first, _map_inline(lambda: _expr(start, ctx), ctx)))
+        counter, _ = ctx.temp(INT)
+        i = ctx.declare(node.target.elts[0].id, INT)
+        names = [ctx.declare(e.id, fk) for e, fk in zip(fields.elts, fkinds)]
+        pre = _flush(ctx, pad)
+        _use(ctx.need, 'ck_add')
+        head = '%sfor (%s = 0; %s < %s.n; %s++) {\n' % (pad, counter, counter, c, counter)
+        head += '%s    %s = ck_add(%s, %s);\n' % (pad, i, first, counter)
+        for j, (nm, fk) in enumerate(zip(names, fkinds)):
+            field = 's' if fk == STR else 'd' if fk == FLT else 'i'
+            head += '%s    %s = %s.p[%s].v[%d].%s;\n' % (pad, nm, c, counter, j, field)
+        return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
     if _is_slist_expr(source, ctx):
         kind = STR
     elif isinstance(source, ast.Name) and ctx.type_of(source.id) in (LIST, 'array') and not any(
@@ -26267,21 +26301,42 @@ def _for_inner_impl(node, ctx, ind):
             if _etype(start, ctx) != INT:
                 raise Unsupported('struct enumerate start must be an integer')
             if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
-                    and all(isinstance(e, ast.Name) for e in node.target.elts)
-                    and node.target.elts[0].id != node.target.elts[1].id):
+                    and isinstance(node.target.elts[0], ast.Name)):
                 raise Unsupported('struct enumerate needs two distinct (index, element) names')
             number = ctx.declare(node.target.elts[0].id, INT)
             element = node.target.elts[1]
+            nested = None
+            if isinstance(element, ast.Tuple):
+                # `for i, (word, count) in enumerate(rows, start)` over a list of TUPLE
+                # INSTANCES (a `list[tuple[str, int]]` kept as an olist): each field is read
+                # once per iteration into its own typed local, the same shape the plain
+                # `for word, count in rows:` branch gives a rows list.
+                if not all(isinstance(e, ast.Name) for e in element.elts):
+                    raise Unsupported('struct enumerate needs two distinct (index, element) names')
+                nested = element.elts
+                element = None
+            elif not (isinstance(element, ast.Name)
+                      and element.id != node.target.elts[0].id):
+                raise Unsupported('struct enumerate needs two distinct (index, element) names')
         else:
             if wrapper and (len(it.args) != 1 or it.keywords):
                 raise Unsupported('struct reversed takes one positional list')
             if not isinstance(node.target, ast.Name):
                 raise Unsupported('struct list iteration needs one name')
             element = node.target
+            nested = None
         kind = _etype(source, ctx)
         receiver, _ = ctx.temp(kind)
         index, _ = ctx.temp(INT)
-        target = ctx.declare(element.id, _olist_element_kind(kind))
+        element_kind = _olist_element_kind(kind)
+        if nested is not None:
+            info = ctx.classes.get(element_kind[1]) if _is_obj_kind(element_kind) else None
+            if info is None or len(info.field_order) != len(nested):
+                raise Unsupported('a tuple target over a list of tuples must name exactly %s fields'
+                                  % (len(info.field_order) if info is not None else 'its'))
+            target = None
+        else:
+            target = ctx.declare(element.id, element_kind)
         value = _expr(source, ctx)
         prefix = _flush(ctx, pad) + '%s%s;\n' % (pad, _obj_store(receiver, value, kind, ctx))
         initial = '%s(%s) - 1' % (_olist_helper(kind, 'len'), receiver) if wrapper == 'reversed' else '0'
@@ -26295,13 +26350,17 @@ def _for_inner_impl(node, ctx, ind):
                        '(ail_die("OverflowError: integer overflow in enumerate() (ints are 64-bit; --exact-int gives exact ints)"), 0) : ++%s) : 0)' % (index, _olist_helper(kind, 'len'), receiver, counter, counter))
             bind_number = '%s    %s = %s;\n' % (pad, number, counter)
         head = '%sfor (%s = %s; %s; %s) {\n' % (pad, index, initial, condition, update)
-        element_c = '(%s *)%s(%s, %s)' % (_ref_ctype(_olist_element_kind(kind), ctx), _olist_helper(kind, 'get'),
+        element_c = '(%s *)%s(%s, %s)' % (_ref_ctype(element_kind, ctx), _olist_helper(kind, 'get'),
                                            receiver, index)
-        if element.id in ctx.borrowed_aliases and wrapper is None:
-            bind = '%s = %s' % (target, element_c)      # the list outlives the loop (_mark_borrowed_aliases)
+        if nested is not None:
+            bind = ''.join('%s    %s = (%s)->f_%s;\n' % (
+                pad, ctx.declare(name.id, info.field_types[field]), element_c, field)
+                for name, field in zip(nested, info.field_order))
+        elif element.id in ctx.borrowed_aliases and wrapper is None:
+            bind = '%s    %s = %s;\n' % (pad, target, element_c)      # the list outlives the loop (_mark_borrowed_aliases)
         else:
-            bind = _obj_store(target, element_c, _olist_element_kind(kind), ctx)
-        return prefix + head + bind_number + '%s    %s;\n' % (pad, bind) + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+            bind = '%s    %s;\n' % (pad, _obj_store(target, element_c, element_kind, ctx))
+        return prefix + head + bind_number + bind + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
     # Any `for` re-binds its target: a name that held <=1 code point from an earlier
     # `for c in s` must not keep that mark through a different loop. The str branch
     # below re-adds it when THIS loop is the <=1cp shape and the name is clean
