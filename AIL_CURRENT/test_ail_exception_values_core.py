@@ -53,7 +53,11 @@ fn main() -> int {
         result = subprocess.run([str(exe)], capture_output=True, timeout=30)
         self.assertEqual(result.returncode, 1)
         self.assertEqual(result.stdout.replace(b'\r\n', b'\n'), b'cleanup\ncleanup\nescaped 9 escaped 9\nfinal\n')
-        self.assertEqual(result.stderr.replace(b'\r\n', b'\n'), b'ValueError: forward\n')
+        line = next(number for number, text in enumerate(source.splitlines(), 1)
+                    if 'raise keep(ValueError("forward"))' in text)
+        site = str(self.root / 'escape.ail').replace('\\', '/')
+        self.assertEqual(result.stderr.replace(b'\r\n', b'\n'),
+                         ('ValueError: forward\n  raised near %s:%d\n' % (site, line)).encode())
 
     def test_unmatched_payload_finally_replacement_legacy_trap(self):
         source = '''fn forwarded() -> int {

@@ -178,7 +178,8 @@ class _Cx(object):
     def __init__(self, kind, loops_start, scopes_start):
         self.kind = kind
         self.lines = []
-        self.where = None                  # --debug: the (file, line) of the statement being written into `lines`
+        self.where = None                  # the (file, line) of the statement being written into `lines`
+        self.debug_lines = os.environ.get('AIL_DEBUG') == '1'   # `#line` directives, not the site store
         self.loops_start = loops_start     # loops with a smaller index belong to an outer function
         self.scopes_start = scopes_start
         self.escapes = {}                  # (op, id(loop)) -> (status, op, loop)
@@ -323,7 +324,7 @@ class Emitter(TextEmitter):
 
     def line(self, depth, text):
         where = self.cx.where
-        if where is not None:
+        if where is not None and self.cx.debug_lines:
             # --debug: `#line` numbers the line after it, so each C line carries its statement's line
             self.cx.lines.append('#line %d "%s"' % (where[1], where[0]))
         self.cx.lines.append('    ' * depth + text)
@@ -450,7 +451,7 @@ class Emitter(TextEmitter):
         if self.is_pending or self.frame:
             self.parts.add('IREXC')
         self.region(fn.body, 1, None)
-        close = '' if self.cx.where is None else '#line %d "%s"\n' % (self.cx.where[1], self.cx.where[0])
+        close = '' if self.cx.where is None or not self.cx.debug_lines else '#line %d "%s"\n' % (self.cx.where[1], self.cx.where[0])
         text = '%s {\n%s\n%s}\n' % (ir_sig, '\n'.join(self.cx.lines), close)
         out = ''.join(self.aux) + text
         if self.byval:
@@ -467,7 +468,7 @@ class Emitter(TextEmitter):
             else:
                 body = '    %s;\n    if (__builtin_expect(ail_pending, 0)) ail_ir_rethrow();\n' % call
             out += '%s {\n%s}\n' % (sig, body)
-        if self.cx.where is not None:
+        if self.cx.where is not None and self.cx.debug_lines:
             # --debug: what follows (runtime helpers, the next function) is not on the user's last line
             out += '#line 1 "<ail-generated>"\n'
         return sig, out
@@ -1133,7 +1134,7 @@ class Emitter(TextEmitter):
             ['static int %s(void *frv) {' % fname,
              '    struct %s__fr *fr = (struct %s__fr *)frv;' % (sym, sym)]
             + body.lines + ['    return 0;', '}']
-            + (['#line 1 "<ail-generated>"'] if body.where is not None else []) + ['']))
+            + (['#line 1 "<ail-generated>"'] if body.where is not None and body.debug_lines else []) + ['']))
         st = 'st%d' % n
         self.line(depth, 'int %s = ail_ir_try(%s, fr);' % (st, fname))
         if kind == 'catch':
