@@ -4123,12 +4123,15 @@ def _ail_imports(source):
 
     dropped = []
     aliases = set()
+    from_aliases = {}
     for node in tree.body:
         if isinstance(node, ast.ImportFrom) and not node.level and node.module == 'ail':
             for alias in node.names:
                 if alias.name not in AIL_IMPORT_NAMES:
                     raise SyntaxErrorAIL('ail has no ' + alias.name,
                                          lineno=node.lineno, offset=node.col_offset + 1)
+                if alias.asname and alias.asname != alias.name:
+                    from_aliases[alias.asname] = alias.name
             dropped.append(node)
         elif isinstance(node, ast.Import) and all(alias.name == 'ail' for alias in node.names):
             for alias in node.names:
@@ -4151,6 +4154,30 @@ def _ail_imports(source):
                                      lineno=node.lineno, offset=node.col_offset + 1)
             edits.append((offset(node.lineno, node.col_offset),
                           offset(node.end_lineno, node.end_col_offset), node.attr))
+    if from_aliases:
+        rebound = None
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id in from_aliases:
+                if isinstance(node.ctx, ast.Load):
+                    edits.append((offset(node.lineno, node.col_offset),
+                                  offset(node.end_lineno, node.end_col_offset),
+                                  from_aliases[node.id]))
+                elif rebound is None:
+                    rebound = node
+            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) \
+                    and node.name in from_aliases and rebound is None:
+                rebound = node
+            elif isinstance(node, ast.arg) and node.arg in from_aliases and rebound is None:
+                rebound = node
+        if rebound is not None:
+            if isinstance(rebound, ast.Name):
+                name = rebound.id
+            elif isinstance(rebound, ast.arg):
+                name = rebound.arg
+            else:
+                name = rebound.name
+            raise SyntaxErrorAIL('ail import alias ' + name + ' is rebound',
+                                 lineno=rebound.lineno, offset=rebound.col_offset + 1)
     for start, end, text in sorted(edits, reverse=True):
         data = data[:start] + text.encode('utf8') + data[end:]
     return data.decode('utf8')

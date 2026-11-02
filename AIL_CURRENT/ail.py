@@ -52,26 +52,36 @@ class _BinaryFile:
         spelling = first + 'b' + ('+' if update else '')
         self._file = open(path, spelling)
 
+    def _ready(self):
+        if self._file is None:
+            raise ValueError('closed binary file')
+
     def read(self, size):
+        self._ready()
         if size < 0:
             raise ValueError('negative read size')
         return self._file.read(size)
 
     def readinto(self, buffer):
+        self._ready()
         return self._file.readinto(buffer)
 
     def write(self, data):
+        self._ready()
         return self._file.write(data)
 
     def seek(self, offset, whence=0):
+        self._ready()
         if whence < 0 or whence > 2:
             raise ValueError('invalid whence')
         return self._file.seek(offset, whence)
 
     def tell(self):
+        self._ready()
         return self._file.tell()
 
     def flush(self):
+        self._ready()
         self._file.flush()
 
     def close(self):
@@ -392,10 +402,8 @@ def _file_identity(path):
 
 def same_file(first, second):
     a = _file_identity(first)
-    if a is None:
-        return 0
     b = _file_identity(second)
-    if b is None:
+    if a is None or b is None:
         return 0
     return int(a.st_dev == b.st_dev and a.st_ino == b.st_ino)
 

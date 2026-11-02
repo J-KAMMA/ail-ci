@@ -1,3 +1,22 @@
+## 2026-11-02 -- onelang s2 review 2: `same_file`, closed binary files and aliased `ail` imports
+
+Fixed the three remaining CPython-parity defects.
+
+* `same_file` computes both file identities before returning `0`, so a missing first path still
+  stats the second and an empty or `ENOTDIR` second path raises `OSError`, matching
+  `ail_same_file`.
+* `_BinaryFile` methods raise `ValueError` after `close()` (the runtime's
+  `ail_binaryfile_ready`), instead of dereferencing `None` and raising `AttributeError`.
+* `from ail import X as Y` now rewrites uses of `Y` to the built-in `X`; rebinding the alias is a
+  named compile-time refusal (`ail import alias Y is rebound`).
+
+Probes `rv_same2`, `rv_close2` and `rv_alias` match CPython and the default AOT build; the unified
+build refuses the AIL-only built-ins by name. The ten converted tasks still build identically and
+`tools/ail2py_cpython_check.py` reports nine tasks with `mismatches 0` and only the listed
+`tally_lang hidden/long_unary_chain` case. `test_ail_ail2py`, `test_ail_python_syntax`,
+`test_ail_heapq_bisect`, `test_ail_overflow_error`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_safetynet` pass.
+
 ## 2026-11-02 -- onelang s2 review 1: `ail.py` matches the runtime on path errors and astral `jscharat`
 
 Three CPython-parity defects in `AIL_CURRENT/ail.py` are fixed; no compiler or converter file changed.
