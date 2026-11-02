@@ -9520,7 +9520,15 @@ answer, checked against CPython 3.12 by `test_ail_spec_fixes`.
 * `sum()` of floats is `builtin_sum_impl`: an exact-int start adds ints, the first non-int item is added plainly,
   and the rest of a float run is Neumaier-compensated (`ail_fsum_add`, part FSUM; the general runtimes'
   `ail_sum_step`). An int item inside the float run is added plainly; a non-number ends the run and drops the
-  compensation. `sum(xs[:k])` over a slice of a `list[float]` is refused by name on the typed path.
+  compensation. `sum(xs[:k])` over a slice of a `list[float]` is built on the typed path. CPython starts that sum
+  from the int `0`, so an empty sequence gives the int `0` and a non-empty one a float; the typed value kind `NSUM`
+  carries both (a `double` with `-0.0` as the empty-sum sentinel, which a non-empty Neumaier run never produces).
+  `print` writes the sentinel as `0` and every other value as the float it is. A fold counts the elements it
+  actually adds, so a filter that removes every element still gives the int `0`. Uses that cannot keep the two
+  cases exact are refused by name: arithmetic with an int (other than true division), `**`, unary numeric
+  operators, `abs`, two-argument `min`/`max`, `round`, default or int-type formatting, storage in a
+  list/tuple/dict/set (or as an index/key), and passing the value to a parameter whose kind is settled. An
+  explicit float format type (`:.2f`, `e`, `g`, `%`) formats both cases identically and is built.
 * Float `**` is `float_pow` (`ail_fpow`, part FPOWCK; the C name `pow` is routed to it): a finite overflow is
   `OverflowError`, `0.0 ** negative` is `ZeroDivisionError`. A negative base to a fractional exponent is a complex
   number in Python: a literal pair is refused at compile time, anything else stops the program at run time

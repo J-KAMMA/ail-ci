@@ -1,3 +1,29 @@
+## 2026-11-02 -- prog8 review fix: exact empty float `sum` via `NSUM` (job-prog8-11021227)
+
+Fixed the review's defect: after the float-slice change, `sum(xs[a:b])` on an empty slice printed
+`0.0` where CPython prints the int `0`; the base tree was correct only because it refused the slice.
+The typed float fold now carries both cases in a new scalar kind `NSUM`: it counts the elements it
+actually adds and returns the `-0.0` sentinel for the empty sum (a non-empty Neumaier run cannot
+produce it), `print` writes the sentinel as `0` and other values as floats, and a `-> float`
+annotation keeps `NSUM` at the call boundary. This also fixes bare `sum(empty_float_list)`, which
+was wrong on the base tree.
+
+Every use that cannot keep the int-or-float result exact is a named refusal: int arithmetic (true
+division and float arithmetic are built), `**`, unary numeric operators, `abs`, two-argument
+`min`/`max`, `round`, default/int-type formatting, storage in a list/tuple/dict/set or as an
+index/key/slice bound, and arguments to any call except `int`/`bool`/`float` (`float()` normalises
+the sentinel to `+0.0`). Found and closed by probing: unannotated dict/list storage, `append`,
+`insert`, `extend`, list/dict comprehensions, set `add`, filtered generator sums, and an explicit
+float format spec, which formats both cases identically and stays typed (this kept
+`test_ail_nested_lists`' `f"{sum(row):.3f}"` on the typed path).
+
+Probes `/tmp/rprobes/f4_emptyslice.py` and `n1`-`n5`, `q1a`-`q24` (empty/non-empty, bare and slice,
+generator filters, arithmetic/comparison/truthiness, annotated locals, functions, containers,
+indices/keys/slice bounds, formatting, calls) all match CPython on both `cmp.sh` builds; the
+valid NSUM forms build typed and the unsafe ones fall back by name. `test_ail_prog8`,
+`test_ail_spec_fixes`, `test_ail_nested_lists`, `test_ail_boolfield`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass; `tools/update_manifest.py --check` is 0.
+
 ## 2026-11-01 -- typed reach review fix: pin prog8, cover the new float-slice and enumerate-str paths (job-prog8-11020731)
 
 Review fix on the same job. Pinned `test_ail_prog8.py` and `tests.d/test_ail_prog8.txt` through

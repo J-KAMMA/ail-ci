@@ -88,10 +88,16 @@ already reading the base list's `double` elements, so `sum`/`min`/`max` and a ge
 `double` accumulator instead of truncating to int64. (`main` is 43% own because the f-string and
 formatting work is there.)
 
-Known pre-existing difference, not changed here: an *empty* float slice (or a bare empty
-`list[float]`) makes the typed `sum` return `0.0` where CPython returns the int `0`. The base tree
-already did this for bare `sum(empty_float_list)`; the fold has one static result type. Matching it
-needs a content-dependent `sum` result type, which is a follow-up, not part of this slice fix.
+An empty float `sum` is CPython's int `0` and a non-empty one is a float. The typed value kind
+`NSUM` (`pyfunc.py`) carries both: the fold tracks whether it actually added an element and returns
+the `-0.0` sentinel for the empty case (a non-empty Neumaier run can never produce it). `print`
+writes the sentinel as `0` and every other value as the float it is, so both `sum(xs[:0])` and a
+bare `sum(empty_float_list)` now match CPython; this also fixes the bare-empty form the base tree
+got wrong. Uses that cannot keep the two cases exact are named refusals (arithmetic with an int
+other than true division, `**`, unary operators, `abs`, two-argument `min`/`max`, `round`, default
+formatting, container/index/key storage and arbitrary call arguments); an explicit float format
+spec (`f"{sum(xs):.2f}"`) is exact and stays typed. The empty-sum behaviour is covered by
+`test_ail_prog8`'s `FLOAT_SLICE`.
 
 ## shell sort (`lab/census/programs/gdev/g04_010.py`)
 
@@ -172,6 +178,5 @@ two hot functions above do not need that shape.
 - Left as follow-ups (all big, exact messages above): the `random.Random` method surface;
   exact-ratio `statistics.pstdev`; the `fractions.Fraction` dunder surface; mutating a `list`
   parameter; `json.loads` result typing / `list[dict[...]]`; unannotated nested bool lists;
-  an enumerate-str loop variable used in a self-referential expression; the pre-existing empty
-  float-list `sum` returning `0.0` where CPython returns int `0`.
+  an enumerate-str loop variable used in a self-referential expression.
 - Large blockers `main` in t396/g03_018/g23/g04/t176 only because their callees are refused.

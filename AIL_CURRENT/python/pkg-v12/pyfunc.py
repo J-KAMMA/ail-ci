@@ -142,6 +142,12 @@ MAPS = (SDICT, SMAP, BMAP, FDICT, IDICT, IFDICT, ISMAP, IBMAP, ISET, SSET)
 SROWS = 'srows'
 TAB = (SET, DICT)
 NUM = (INT, FLT)
+# The result of `sum()` over a float sequence is a float when the sequence has an element and the
+# INT 0 when it is empty (CPython's `sum` starts from the int 0). NSUM is carried as a C `double`
+# with the negative zero `-0.0` as the sentinel for that empty-sum int 0: a non-empty Neumaier
+# float sum (cruntime.py's FSUM) can never produce `-0.0`. It is deliberately NOT in NUM: every
+# operation that cannot preserve the int-or-float distinction is refused by name in `_etype`.
+NSUM = 'nsum'
 
 # AIL_TASK_callconv_20260915.md: a function's return kind when NO `return` anywhere in its body
 # ever gives a value -- every `ast.Return` in it, if there is one at all, is bare. Compiled as a
@@ -461,7 +467,7 @@ def _frame_ptr_kind(t):
     scalar `volatile` already answers). The volatile POINTER is defined after the landing,
     and the pointee lives on the heap, entirely outside that rule. Scalars stay plain
     `volatile` locals; class instances need only their own pointer qualified."""
-    return (isinstance(t, str) and t not in NUM and t not in (RANGE, HANDLE)
+    return (isinstance(t, str) and t not in NUM and t != NSUM and t not in (RANGE, HANDLE)
             and not _is_ref_kind(t) and not callable_types.valid(t))
 
 
@@ -963,6 +969,10 @@ def _need_int(node, ctx, site):
     if kind == FLT:
         raise Unsupported('a float where %s requires a whole number; this language has no '
                           'implicit truncation, so say `int(...)` if that is what you mean' % site)
+    if kind == NSUM:
+        raise Unsupported('sum() over a list of floats where %s requires a whole number: that '
+                          'sum is the int 0 when the list is empty and a float otherwise, so it '
+                          'is not always a whole number' % site)
     return node
 
 
@@ -1675,6 +1685,8 @@ def _etype(node, ctx):
         # Unknown receivers are refused by _attr_read before their values are used.
         return _field_kind(node, ctx) or INT
     if isinstance(node, ast.Subscript):
+        if not isinstance(node.slice, ast.Slice):
+            _reject_nsum_storage(node.slice, ctx, 'an index or key')
         if isinstance(node.value, (ast.Name, ast.Call, ast.Subscript, ast.Attribute)) and _is_olist_kind(_etype(node.value, ctx)):
             kind = _etype(node.value, ctx)
             return kind if isinstance(node.slice, ast.Slice) else _olist_element_kind(kind)
@@ -1718,7 +1730,14 @@ def _etype(node, ctx):
             return INT
         return INT
     if isinstance(node, ast.UnaryOp):
-        return INT if isinstance(node.op, ast.Not) else _etype(node.operand, ctx)
+        if isinstance(node.op, ast.Not):
+            return INT
+        k = _etype(node.operand, ctx)
+        if k == NSUM:
+            raise Unsupported('a unary numeric operation on sum() over a list of floats: that '
+                              'sum can be the int 0 when the list is empty and a float '
+                              'otherwise, so no single value kind can carry the result')
+        return k
     if isinstance(node, ast.BinOp):
         if isinstance(node.op, ast.Mult) and _is_bytes_expr(node, ctx):
             return BYTES
@@ -1727,6 +1746,25 @@ def _etype(node, ctx):
             return BYTES
         if any(_is_ref_kind(_etype(value, ctx)) for value in (node.left, node.right)):
             raise Unsupported('arithmetic on a struct is unsupported; read a numeric field')
+        nsum_kinds = (_etype(node.left, ctx), _etype(node.right, ctx))
+        if NSUM in nsum_kinds:
+            if isinstance(node.op, ast.Pow):
+                raise Unsupported('a power of sum() over a list of floats is unsupported: that '
+                                  'sum can be the int 0 when the list is empty and a float '
+                                  'otherwise')
+            if isinstance(node.op, ast.Div):
+                if nsum_kinds[1] == NSUM:
+                    raise Unsupported('dividing by sum() over a list of floats is unsupported: '
+                                      'that sum can be the int 0 when the list is empty and a '
+                                      'float otherwise')
+                return FLT
+            if FLT in nsum_kinds and nsum_kinds != (NSUM, NSUM):
+                return FLT
+            raise Unsupported('arithmetic between sum() over a list of floats and an int is '
+                              'unsupported: that sum is the int 0 when the list is empty and a '
+                              'float otherwise, so the result kind is not settled. Write it as '
+                              'a float operation (e.g. `sum(xs) * 1.0`) only where that is what '
+                              'you mean')
         if isinstance(node.op, ast.Div):
             return FLT
         if isinstance(node.op, ast.Pow):
@@ -1769,6 +1807,10 @@ def _etype(node, ctx):
             return kinds[0]
         if any(_is_ref_kind(kind) for kind in kinds):
             raise Unsupported('a conditional struct value is unsupported; use if/else statements')
+        if NSUM in kinds:
+            raise Unsupported('a conditional whose branches include sum() over a list of '
+                              'floats is unsupported: that sum can be the int 0 when the list '
+                              'is empty and a float otherwise')
         return FLT if FLT in kinds else INT
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
         f, a = node.func.id, node.args
@@ -1818,9 +1860,19 @@ def _etype(node, ctx):
         if f in ('int', 'len', 'ord'):
             return INT
         if f == 'abs' and a:
-            return _etype(a[0], ctx)
+            k = _etype(a[0], ctx)
+            if k == NSUM:
+                raise Unsupported('abs() of sum() over a list of floats: the result is the int 0 '
+                                  'when that list is empty (abs(0) is 0) and a float otherwise, '
+                                  'so no single value kind can carry it here')
+            return k
         if f in ('min', 'max') and f not in ctx.funcs and len(a) == 2:
-            return FLT if FLT in (_etype(a[0], ctx), _etype(a[1], ctx)) else INT
+            kinds = (_etype(a[0], ctx), _etype(a[1], ctx))
+            if NSUM in kinds:
+                raise Unsupported('%s() of sum() over a list of floats is unsupported: that '
+                                  'sum can be the int 0 when the list is empty and a float '
+                                  'otherwise' % f)
+            return FLT if FLT in kinds else INT
         if f in ('sum', 'max', 'min') and f not in ctx.funcs and len(a) == 1:
             if isinstance(a[0], (ast.GeneratorExp, ast.ListComp, ast.SetComp)):
                 g = a[0].generators[0]
@@ -1840,7 +1892,8 @@ def _etype(node, ctx):
                             ctx.types[g.target.id] = element
                             if struct_source:
                                 ctx.kind[g.target.id] = element
-                            return _etype(a[0].elt, ctx)
+                            elt_kind = _etype(a[0].elt, ctx)
+                            return NSUM if f == 'sum' and elt_kind == FLT else elt_kind
                         finally:
                             ctx.types.clear(); ctx.types.update(types)
                             ctx.kind.clear(); ctx.kind.update(kinds)
@@ -1855,13 +1908,18 @@ def _etype(node, ctx):
                     for e in g.target.elts:
                         if isinstance(e, ast.Name):
                             ctx.bind(e.id, INT)
-                return _etype(a[0].elt, ctx)
+                elt_kind = _etype(a[0].elt, ctx)
+                return NSUM if f == 'sum' and elt_kind == FLT else elt_kind
             # the bare-container form, `sum(xs)`/`max(xs)`/`min(xs)` -- FLT when `xs` is a FLIST,
             # otherwise unchanged (INT), exactly as it always was for every other sequence shape.
             if _is_flist_name(a[0], ctx):
-                return FLT
+                return NSUM if f == 'sum' else FLT
             return INT
         if f == 'round':
+            if a and _etype(a[0], ctx) == NSUM:
+                raise Unsupported('round() of sum() over a list of floats: that sum can be the '
+                                  'int 0 when the list is empty and a float otherwise, and '
+                                  'round() gives back an int or a float depending on which')
             # AIL_TASK_p3idioms_20260916.md idiom 9: round(x) is an INT (CPython's round-half-to-
             # even of the float, handed back as an int -- unbounded there, int64 here, an
             # OverflowError-shaped case this compiler traps by name rather than silently
@@ -2821,7 +2879,8 @@ class Ctx:
                                   '(`total = 0.0` for a float)' % (name, _a(kind), _a(t)))
             return 'v_' + name
         declared = getattr(self, 'local_annotations', {}).get(name)
-        if declared is not None and declared != t and not _obj_assignable(name, t, declared):
+        if (declared is not None and declared != t and not _obj_assignable(name, t, declared)
+                and not {declared, t} <= {FLT, NSUM}):
             raise Unsupported('%r is declared %s; assigning %s is unsupported.\n'
                               '  write instead: %s' % (name, declared, t, _assign_fix(declared, t)))
         if name in self.kind:
@@ -2847,6 +2906,10 @@ class Ctx:
             # ordinary shape. Mixing a number with a container is still an error.
             if {old, t} <= set(NUM):
                 self.types[name] = t if self.numeric_allowed_names is None or name in self.numeric_allowed_names else FLT
+            elif {old, t} <= {FLT, NSUM}:
+                # An empty float sum is the int 0, so an NSUM target stays NSUM; once a definitely
+                # float value is assigned, every later read is definitely a float.
+                self.types[name] = NSUM if t == NSUM else FLT
             else:
                 raise Unsupported("%r is %s and is being assigned %s; a local's kind is settled "
                                   'by its FIRST assignment and never changes afterwards -- give '
@@ -4697,6 +4760,25 @@ def _element_type_error(message, container, action, actual):
     error = Unsupported(message)
     error.type_details = _element_type_details(container, action, actual)
     return error
+
+
+def _reject_nsum_storage(value, ctx, where):
+    """Refuse storing `sum()` over a list of floats into a container.
+
+    CPython's `sum` starts from the int 0, so an empty sum is an int and a non-empty one a float.
+    The typed `NSUM` value carries both, but every container (and every min/max/fold accumulator)
+    commits to one element type, which would silently turn the empty int 0 into a float or drop
+    the `.0` from a real float. Uses that cannot keep the two cases exact are refused by name.
+    """
+    try:
+        kind = _etype(value, ctx)
+    except Unsupported:
+        return
+    if kind == NSUM:
+        raise Unsupported('%s cannot take sum() over a list of floats: that sum is the int 0 '
+                          'when the list is empty and a float otherwise, so the value kind is '
+                          'not settled here. Use the sum directly, or write '
+                          '`sum(xs) * 1.0` if a float is really what you mean' % where)
 
 
 def _element_kind(node, ctx, container, action):
@@ -8393,6 +8475,11 @@ def _fmt_default_conv(node, kind, ctx):
     existing str-building machinery (`ail_str_from_int`, `_str_value` itself); float is the one
     new case (`ail_str_from_float`, cruntime.py's FMT block) -- the same CPython-exact repr
     `ail_write_float`/`print(x)` already produce, just returned as a value instead of written."""
+    if kind == NSUM:
+        raise Unsupported('formatting sum() over a list of floats is unsupported: that sum is '
+                          'the int 0 when the list is empty and a float otherwise, so its '
+                          'default formatting is not settled. Print it directly, or use '
+                          '`sum(xs) * 1.0` if a float is really what you mean')
     if kind == STR:
         return _str_value(node, ctx)
     if kind == INT:
@@ -8581,6 +8668,21 @@ def _fmt_build(val_node, kind, spec, orig_text, ctx, ctx_desc, str_default_align
     three spellings genuinely disagree with each other: f-string/`.format()` default a str field
     to LEFT alignment, `%`-formatting defaults every type (str included) to RIGHT -- both
     CPython's own rule, passed in by the three callers rather than guessed here."""
+    if kind == NSUM:
+        if spec.get('type') in tuple(_FMT_FLOAT_TYPES):
+            # An explicit float presentation type (`f`, `e`, `g`, `%`, ...) formats CPython's int
+            # 0 and float 0.0 to exactly the same text, so the two cases are settled. `float()`
+            # converts the empty-sum `-0.0` sentinel to +0.0 before the formatter sees it.
+            wrapped = ast.copy_location(
+                ast.Call(func=ast.Name(id='float', ctx=ast.Load()), args=[val_node],
+                         keywords=[]), val_node)
+            return _fmt_build(wrapped, FLT, spec, orig_text, ctx, ctx_desc,
+                              str_default_align, pre_c)
+        raise Unsupported('formatting sum() over a list of floats is unsupported: that sum is '
+                          'the int 0 when the list is empty and a float otherwise, so its '
+                          'default formatting is not settled. Add an explicit float type '
+                          '(`:.2f`) or print it directly, or use `sum(xs) * 1.0` if a float is '
+                          'really what you mean')
     if _fmt_general_needed(spec, kind):
         return _fmt_general(val_node, kind, spec, orig_text, ctx, str_default_align, pre_c)
     _resolve_fmt_type(spec, kind, orig_text, ctx_desc)
@@ -8754,7 +8856,7 @@ def _fstring_field(fv, ctx):
         return '(%s = %s, ail__bytes_repr(&%s, %s.p, %s.n))' % (cell, _bytes_value(val, ctx), ctx.sarena(), cell, cell)
     if fv.format_spec is None and _list_text_ok(val, kind, ctx):
         return _list_text(val, kind, ctx)
-    if kind not in (INT, FLT, STR):
+    if kind not in (INT, FLT, STR) and kind != NSUM:
         raise Unsupported('an f-string field of type %s; only an int, float or str expression '
                           'is built inside {}' % kind)
     pre = None
@@ -8901,7 +9003,7 @@ def _build_percent_value(node, ctx):
         argnode = args[ai]
         ai += 1
         kind = _etype(argnode, ctx)
-        if kind not in (INT, FLT, STR):
+        if kind not in (INT, FLT, STR) and kind != NSUM:
             raise Unsupported('%%-formatting a value of type %s; only int, float or str is '
                               'built' % kind)
         if v['type'] == 'r':
@@ -9017,7 +9119,7 @@ def _build_strformat_value(node, ctx):
         _, idx, spectext, conv = p
         argnode = args[idx]
         kind = _etype(argnode, ctx)
-        if kind not in (INT, FLT, STR):
+        if kind not in (INT, FLT, STR) and kind != NSUM:
             raise Unsupported('.format() field of type %s; only int, float or str is built'
                               % kind)
         pre = None
@@ -12349,14 +12451,19 @@ def _ordered_numeric_pair(left, right, ctx, form):
     """Evaluate numeric operands left to right at the expression site, even under `and`."""
     left_c = _expr(left, ctx)
     right_c = _expr(right, ctx)
-    ltmp, lname = ctx.temp(FLT if _etype(left, ctx) == FLT else INT)
-    rtmp, rname = ctx.temp(FLT if _etype(right, ctx) == FLT else INT)
+    lkind, rkind = _etype(left, ctx), _etype(right, ctx)
+    ltmp, lname = ctx.temp(FLT if lkind in (FLT, NSUM) else INT)
+    rtmp, rname = ctx.temp(FLT if rkind in (FLT, NSUM) else INT)
+    # An NSUM `-0.0` sentinel means CPython's int 0; once an operation makes the result a float,
+    # that operand is numerically +0.0 (`0 + 1.5` is `1.5`, and `0 / 2` is `0.0`).
+    lval = '((%s) == 0.0 ? 0.0 : (%s))' % (ltmp, ltmp) if lkind == NSUM else ltmp
+    rval = '((%s) == 0.0 ? 0.0 : (%s))' % (rtmp, rtmp) if rkind == NSUM else rtmp
     if getattr(ctx, 'experimental_ephemeral_numeric_temps', False):
         # These values are assigned before their only reads in this comma expression.
         # A longjmp abandons the expression; source names must never share this exemption.
         ctx.ephemeral_numeric_temps.update({lname, rname} - ctx.source_names)
     return '((%s = %s), (%s = %s), %s)' % (ltmp, left_c, rtmp, right_c,
-                                           form.format(ltmp, rtmp))
+                                           form.format(lval, rval))
 
 
 _MIXED_CMP_CHECK = {
@@ -16304,6 +16411,14 @@ def _call_user_func(fname, arg_nodes, ctx, as_stmt=False, list_result=False, dyn
                     at = _etype(arg, ctx)
                 except Exception:
                     at = None
+                if at == NSUM:
+                    raise Unsupported('passing sum() over a list of floats to %s(), whose %r is '
+                                      '%s: that sum is the int 0 when the list is empty and a '
+                                      'float otherwise, so it has no single parameter kind.\n'
+                                      '  write instead: keep the sum local and use it directly, '
+                                      'or guard the empty case and pass `sum(xs) * 1.0` if a '
+                                      'float is really what you mean'
+                                      % (fname, pname, _a(kind)))
                 if at not in NUM:
                     raise _argument_type_error('passing %s where %s() wants %s' % (at, fname, kind), fname, pname, index, kind, at)
                 if kind == FLT and at == INT:
@@ -16735,6 +16850,17 @@ def _isinstance_value(node, ctx):
 
 
 def _call(node, ctx):
+    # `sum()` over a list of floats can be the int 0 (empty) or a float (non-empty). `int` and
+    # `bool` read that value exactly (a C cast / a `!= 0` test), and `float` is normalised below;
+    # every other callee would take one of the two cases for the other, so refuse by name rather
+    # than let a library or user parameter silently fix the kind.
+    if not (isinstance(node.func, ast.Name)
+            and node.func.id in ('int', 'bool', 'float')
+            and node.func.id not in ctx.funcs and node.func.id not in ctx.classes):
+        for _arg in node.args:
+            _reject_nsum_storage(_arg, ctx, 'a function argument')
+        for _kw in node.keywords:
+            _reject_nsum_storage(_kw.value, ctx, 'a keyword argument')
     if _is_monotonic_call(node, ctx):
         _monotonic_arguments(node)
         ctx.parts.add('MONOTONIC')
@@ -17290,6 +17416,13 @@ def _call(node, ctx):
             v = _str_value(a[0], ctx)
             ctx.has_try = True
             return 'ail_str_to_float(%s)' % v
+        if _etype(a[0], ctx) == NSUM:
+            # CPython's float() of the empty sum's int 0 is +0.0; the internal `-0.0` sentinel
+            # must not become a negative zero, which prints differently.
+            ctx.tmp += 1
+            t = '_nsumf%d' % ctx.tmp
+            v = rec(a[0])
+            return '({ double %s = (double)(%s); (%s) == 0.0 ? 0.0 : %s; })' % (t, v, t, t)
         return '((double)(%s))' % rec(a[0])
     if f == STR and STR not in ctx.funcs and STR not in ctx.classes:
         raise Unsupported('str() used where a number is needed; str(<int>) builds a str VALUE, '
@@ -17579,9 +17712,11 @@ FOLD_INIT = {'sum': ('0', '%s += %s;'), 'any': ('0', 'if (%s) { %s = 1; break; }
              'all': ('1', 'if (!(%s)) { %s = 0; break; }')}
 
 
-def _finish_fold(f, ctx, ct, acc, seen, tag, head, body, value, eager=None, after=()):
+def _finish_fold(f, ctx, ct, acc, seen, tag, head, body, value, eager=None, after=(),
+                 nonempty_flag=None):
     """Build eager comprehensions before folding; generators fold each item lazily."""
     acc_out = acc
+    buffer = None
     if eager is not None:
         if eager is ast.SetComp and ct != 'int64_t':
             raise Unsupported('a set comprehension requires integer elements')
@@ -17606,7 +17741,24 @@ def _finish_fold(f, ctx, ct, acc, seen, tag, head, body, value, eager=None, afte
         comp = '_c%d' % tag
         head += ' double %s = 0.0;' % comp
         body.append('ail_fsum_add(&%s, &%s, %s);' % (acc, comp, value))
-        acc_out = 'ail_fsum_end(%s, %s)' % (acc, comp)
+        if eager is not None:
+            # The eager form first materialised the accepted elements into `buffer`; the second
+            # loop above adds exactly those, so the buffer length is the real non-empty test.
+            nonempty = '%s.n != 0' % buffer
+        elif nonempty_flag is not None:
+            nonempty = nonempty_flag
+            head += ' int64_t %s = 0;' % nonempty_flag
+            body.append('%s = 1;' % nonempty_flag)
+        else:
+            nonempty = None
+        if nonempty is not None:
+            # CPython's sum() starts from the INT 0, so an empty float sum is the int 0 while any
+            # non-empty one is a float. `-0.0` is the sentinel for that int 0: ail_fsum_end can
+            # never produce it for a non-empty run (the accumulator starts at +0.0), so printing
+            # can tell the two apart without carrying a second value around.
+            acc_out = '((%s) ? ail_fsum_end(%s, %s) : (-0.0))' % (nonempty, acc, comp)
+        else:
+            acc_out = 'ail_fsum_end(%s, %s)' % (acc, comp)
     elif f in FOLD_INIT:
         step = FOLD_INIT[f][1]
         body.append(step % (acc, value) if f == 'sum' else step % (value, acc))
@@ -17658,6 +17810,10 @@ def _str_fold(f, var, elt_node, conds, src, ctx, eager=None):
         head = ' '.join(pres + ['%s %s = %s;' % (ct, acc, FOLD_INIT[f][0] if f in FOLD_INIT else '0')])
         if f in ('min', 'max'):
             head += ' int64_t %s = 0;' % seen
+        if f == 'sum' and ct == 'double':
+            nonempty_flag = '_n%d' % tag
+        else:
+            nonempty_flag = None
         for c in conds:
             cc = _cond(c, ctx)
             body.extend(ctx.pre); ctx.pre = []
@@ -17672,7 +17828,8 @@ def _str_fold(f, var, elt_node, conds, src, ctx, eager=None):
         if old_kind is not None:
             ctx.kind[var] = old_kind
     body.extend(ctx.pre); ctx.pre = []
-    return _finish_fold(f, ctx, ct, acc, seen, tag, head, body, val, eager)
+    return _finish_fold(f, ctx, ct, acc, seen, tag, head, body, val, eager,
+                        nonempty_flag=nonempty_flag)
 
 
 def _inline_fold(f, arg, ctx):
@@ -17727,6 +17884,7 @@ def _struct_fold(f, var, elt_node, conds, src, ctx, eager):
                               % (f, _a(element)))
         ct = 'double' if f not in ('any', 'all') and element == FLT else 'int64_t'
         head = ' '.join(pres + ['%s %s = %s;' % (ct, acc, FOLD_INIT[f][0] if f in FOLD_INIT else '0')])
+        nonempty_flag = ('_n%d' % tag) if (f == 'sum' and ct == 'double') else None
         if f in ('min', 'max'):
             head += ' int64_t %s = 0;' % seen
         body.append('for (int64_t %s = 0; %s < ail_olist_len(%s); %s++) {' % (idx, idx, receiver, idx))
@@ -17747,7 +17905,8 @@ def _struct_fold(f, var, elt_node, conds, src, ctx, eager):
             ctx.kind[var] = old_kind
     body.extend(ctx.pre); ctx.pre = []
     after = [_obj_store(bound, 'NULL', cls, ctx) + ';', _obj_store(receiver, 'NULL', kind, ctx) + ';']
-    return _finish_fold(f, ctx, ct, acc, seen, tag, head, body, val, eager, after)
+    return _finish_fold(f, ctx, ct, acc, seen, tag, head, body, val, eager, after,
+                        nonempty_flag=nonempty_flag)
 
 
 def _inline_fold_inner(f, arg, ctx):
@@ -17850,6 +18009,8 @@ def _inline_fold_inner(f, arg, ctx):
     # holds ints, and accumulating it in an integer would floor at every step rather than once at
     # the end.
     elem_ct = 'ail_str' if elem_is_str else 'double' if elem_is_flist else 'int64_t'
+    if var is not None and f in ('sum', 'min', 'max'):
+        _reject_nsum_storage(elt_node, ctx, '%s() over a generator' % f)
     ct = 'double' if (elem_is_flist or (var and _etype(elt_node, ctx) == FLT)) else 'int64_t'
 
     body = []
@@ -17877,7 +18038,8 @@ def _inline_fold_inner(f, arg, ctx):
         body.append('if (!(%s)) continue;' % cc)
     val = (_cond(elt_node, ctx) if f in ('any', 'all') else _expr(elt_node, ctx)) if var else ('%s.n != 0' % cvar if elem_is_str else cvar)
     body.extend(ctx.pre); ctx.pre = []
-    return _finish_fold(f, ctx, ct, acc, seen, tag, head, body, val, eager)
+    return _finish_fold(f, ctx, ct, acc, seen, tag, head, body, val, eager,
+                        nonempty_flag=('_n%d' % tag) if (f == 'sum' and ct == 'double') else None)
 
 
 def _pair_plan(src, ctx):
@@ -17971,7 +18133,8 @@ def _inline_pair_fold(f, pair, elt_node, conds, src, ctx, eager=None):
         body.append('if (!(%s)) continue;' % cc)
     val = _expr(elt_node, ctx)
     body.extend(ctx.pre); ctx.pre = []
-    return _finish_fold(f, ctx, ct, acc, seen, tag, head, body, val, eager)
+    return _finish_fold(f, ctx, ct, acc, seen, tag, head, body, val, eager,
+                        nonempty_flag=('_n%d' % tag) if (f == 'sum' and ct == 'double') else None)
 
 
 _STR_WINDOW_FUNCS = {'find': 'ail_str_find_in', 'rfind': 'ail_str_rfind_in',
@@ -18524,6 +18687,7 @@ def _method(node, ctx, *, as_stmt=False):
         return 'ail_list_push(&%s, ail_bpool_alloc(&%s, %s))' % (
             c, ctx.bpool(), _bytes_value(a[0], ctx))
     if m == 'append' and t == LIST and len(a) == 1:
+        _reject_nsum_storage(a[0], ctx, 'a list')
         if _is_ref_kind(_etype(a[0], ctx)):
             # SEMANTICS.md section 25: "an instance inside a list is the obvious next feature and
             # you should NOT build it" -- it interacts with the records-as-stride representation
@@ -18647,6 +18811,7 @@ def _method(node, ctx, *, as_stmt=False):
         ctx.parts.add('STAB')
         return 'ail_stab_put(&%s, %s, 0)' % (c, _str_value(a[0], ctx))
     if m == 'add' and t == SET and len(a) == 1:
+        _reject_nsum_storage(a[0], ctx, 'a set')
         if _is_obj_kind(_etype(a[0], ctx)) or _is_ref_kind(_etype(a[0], ctx)):
             # C40: the table holds the instance's address as an int64 and no reference, so a freed
             # instance's address is reused by the next one and two different instances become one element.
@@ -19118,6 +19283,7 @@ def _listcomp_kind(node, ctx):
         if struct_source:
             ctx.kind[name] = element
         kind = _etype(node.elt, ctx)
+        _reject_nsum_storage(node.elt, ctx, 'a list comprehension')
         if isinstance(node.elt, ast.List):
             raise Unsupported('nested list comprehension elements are unsupported')
         if struct_source and kind not in NUM:
@@ -21589,6 +21755,11 @@ def _stmt_inner(node, ctx, ind):
                         raise Unsupported('a list mixing tuples and plain numbers; a list of '
                                           'records must hold same-arity tuples throughout, not a '
                                           'mix')
+                    if _etype(e, ctx) == NSUM:
+                        raise Unsupported('a list literal cannot hold sum() over a list of '
+                                          'floats: that sum is the int 0 when the list is empty '
+                                          'and a float otherwise; bind it first, or use '
+                                          '`sum(xs) * 1.0` if a float is really what you mean')
                     if kind == FLIST and _etype(e, ctx) != FLT:
                         raise Unsupported('a float list literal requires only float expressions')
                     if kind != FLIST and _etype(e, ctx) == FLT:
@@ -21799,7 +21970,8 @@ def _stmt_inner(node, ctx, ind):
             v = _expr(node.value, ctx)
         pre = _flush(ctx, pad)
         # Numeric objects share the instance while each slot owns its own reference.
-        declared_t = vt if (vt in NUM or _is_ref_kind(vt) or callable_types.valid(vt)) else INT
+        declared_t = vt if (vt in NUM or vt == NSUM or _is_ref_kind(vt)
+                            or callable_types.valid(vt)) else INT
         c = ctx.declare(t.id, declared_t)
         return pre + '%s%s;\n' % (pad, _obj_store(c, v, vt, ctx, adopt=adopt)
                                   if _managed_obj(vt, ctx) else '%s = %s' % (c, v))
@@ -21890,13 +22062,17 @@ def _stmt_inner(node, ctx, ind):
             ast.fix_missing_locations(extend)
             call_c = _bytearray_method(extend, ctx, as_stmt=True)
             return _flush(ctx, pad) + '%s(void)(%s);\n' % (pad, call_c)
-        if _at not in NUM:
+        if _at not in NUM and _at != NSUM:
             raise Unsupported('augmented assignment to %s; a container is not rebound by += -- '
                               'grow a list with .append(), a set with .add(), and a dict with '
                               'd[k] = v' % _a(_at))
         fake = ast.BinOp(left=node.target, op=node.op, right=node.value)
         fake._ail_range_src = getattr(node, '_ail_range_src', node)   # the range proof is recorded on the AugAssign
         v = _expr(fake, ctx)
+        if _at == NSUM and _etype(fake, ctx) == FLT:
+            # An NSUM local updated by definitely-float arithmetic is definitely a float from here
+            # on; keeping NSUM would misread a legitimate `-0.0` result as the empty-sum int 0.
+            ctx.types[node.target.id] = FLT
         return _flush(ctx, pad) + '%s%s = %s;\n' % (pad, ctx.cname(node.target.id), v)
     if isinstance(node, ast.If):
         fused = _map_upsert(node, ctx, ind)
@@ -22669,6 +22845,11 @@ def _print_stmt(node, ctx, pad):
         elif t == FLT:
             writers.append(('flt', stage(FLT, _expr(a0, ctx))))
             ctx.parts.add('FREPR')
+        elif t == NSUM:
+            # `sum()` over a float sequence is the int 0 when empty and a float otherwise; the
+            # `-0.0` sentinel from `_finish_fold` is the only way NSUM can spell the int 0.
+            writers.append(('nsum', stage(NSUM, _expr(a0, ctx))))
+            ctx.parts.update(('FSUM', 'FREPR'))
         elif t in NUM:
             writers.append(('int', stage(INT, _expr(a0, ctx))))
         elif _is_obj_kind(t) and t[1] in ctx.classes:
@@ -22731,6 +22912,12 @@ def _print_stmt(node, ctx, pad):
             out += ('%sail_write_float((double)(%s));\n' % (pad, val)
                     if stream == 'stdout' else
                     '%sail_write_float_to((double)(%s), stderr);\n' % (pad, val))
+        elif kind == 'nsum':
+            float_fn = 'ail_write_float' if stream == 'stdout' else 'ail_write_float_to'
+            int_fn = 'ail_write_int' if stream == 'stdout' else 'ail_write_int_to'
+            suffix = '' if stream == 'stdout' else ', stderr'
+            out += ('%sif ((%s) == 0.0 && signbit(%s)) %s(0%s); else %s((double)(%s)%s);\n'
+                    % (pad, val, val, int_fn, suffix, float_fn, val, suffix))
         else:
             out += ('%sail_write_int((int64_t)(%s));\n' % (pad, val)
                     if stream == 'stdout' else
@@ -23026,6 +23213,8 @@ def _tuple_assign_row_pop(targets, call, ctx, pad):
 
 
 def _setitem(target, value, ctx, ind):
+    _reject_nsum_storage(value, ctx, 'a container element')
+    _reject_nsum_storage(target.slice, ctx, 'a list index or dict key')
     if _etype(target.value, ctx) == BYTEARRAY:
         return _bytearray_index_mutation(target, value, ctx, ind)
     if isinstance(target.value, ast.Attribute) and _field_kind(target.value, ctx) in MAPS:
@@ -27190,7 +27379,7 @@ def signature(params, ctx, name, ret=INT):
         # rather than manufacturing a return value (0, always) nothing downstream ever reads.
         rtype = 'void'
     else:
-        rtype = ('double' if ret == FLT else 'ail_str' if ret == STR and
+        rtype = ('double' if ret in (FLT, NSUM) else 'ail_str' if ret == STR and
                  getattr(ctx, 'owned_str_return', False) else 'ail_bytes' if ret == BYTES and
                  getattr(ctx, 'owned_bytes_return', False) else 'ail_slist' if ret == SLIST
                 else 'ail_%s' % ret if ret in MAPS
@@ -27310,6 +27499,8 @@ def _check_local_assignment(name, value, ctx):
         actual = BLIST if kind == BLIST and isinstance(value, ast.List) and not value.elts else _etype(value, ctx)
     if actual == NULLK and _is_obj_kind(kind):
         actual = kind                        # `x = None` for a struct-typed name
+    if {actual, kind} <= {FLT, NSUM}:
+        return
     if actual != kind and not _obj_assignable(name, actual, kind):
         raise Unsupported('%r is declared %s; assigning %s is unsupported.\n'
                           '  write instead: %s' % (name, kind, actual, _assign_fix(kind, actual)))
@@ -27736,8 +27927,14 @@ def _promote_floats(fn, ctx):
                                      # element`/every other split()-assigning case in test_strops.py
             if _is_handle_producing(n.value, ctx):
                 continue            # `h = g[0]`, `h = d[k]` -- a handle, settled in `_stmt`, not
-                                     # here; pre-binding `h` to INT would only fight that later
-                                     # and force the compiler to over-refuse a case it can answer
+                                    # here; pre-binding `h` to INT would only fight that later
+                                    # and force the compiler to over-refuse a case it can answer
+            try:
+                if _etype(n.value, ctx) == NSUM:
+                    continue        # `y = sum(xs)` over a list of floats -- an NSUM local, settled
+                                    # in `_stmt`; this pass's INT default would fight it
+            except Unsupported:
+                pass
             if isinstance(n.targets[0], ast.Name) and n.targets[0].id in ctx.dhandles:
                 continue            # all assignments to an inner-dict alias belong to _stmt;
                                     # a later invalid scalar rebind must not pre-bind it to INT
@@ -29198,6 +29395,14 @@ def _reconcile_return_kinds(kinds, fname):
         raise Unsupported(
             '%s: return paths disagree on row shape (%s)'
             % (fname, ' vs '.join(str(t[1]) for t in sorted(srow_kinds, key=str))))
+    if NSUM in kinds:
+        # sum() over a list of floats is a float on a non-empty path and CPython's int 0 on an
+        # empty one. NSUM carries both; a float return path beside it is the same kind widened.
+        if kinds - {NSUM, FLT}:
+            raise Unsupported('%s returns sum() over a list of floats on one path and a '
+                              'different kind on another; that sum is the int 0 when the list '
+                              'is empty and a float otherwise' % fname)
+        return NSUM
     return (next(iter(obj_kinds)) if obj_kinds else
             next(iter(multi_kinds)) if multi_kinds else
             next(iter(tup_kinds)) if tup_kinds else
@@ -31021,6 +31226,12 @@ def _signatures(fns, entry_sig=None, classes=None, external=None):
                     raise Unsupported('%s() has unknown return type %s' % (f.name, name))
                 expected = (OBJ, name)
             actual = sigs[f.name][1]
+            if expected == FLT and actual == NSUM:
+                # `-> float` with `return sum(xs[a:b])`: the non-empty result is a float and the
+                # empty one is CPython's int 0, which NSUM carries. The C return type is `double`
+                # either way, so the annotation agrees; keep NSUM so callers see both cases.
+                sigs[f.name] = (sigs[f.name][0], NSUM)
+                actual = expected
             if actual != expected and _obj_subtype(actual, expected):
                 sigs[f.name] = (sigs[f.name][0], expected)      # `-> Base` returning a subclass instance
                 actual = expected
@@ -37674,7 +37885,8 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     # Returned string lists are packed copies; every local spine is still owned here.
     slist_return_names = set()
     owned = [v for v in ctx.locals
-             if ctx.types[v] not in NUM and ctx.types[v] not in (RANGE, BYTES, STR, HANDLE, SROW)
+             if ctx.types[v] not in NUM and ctx.types[v] != NSUM
+             and ctx.types[v] not in (RANGE, BYTES, STR, HANDLE, SROW)
              and not _is_ref_kind(ctx.types[v]) and not callable_types.valid(ctx.types[v]) and v not in slist_return_names]
     # The provably-non-escaping class-instance locals: freed here too, at every return, so the
     # LAST instance a loop built (the one `_stmt`'s own free-before-reassign, in the Assign-to-
@@ -37906,7 +38118,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
             decls += '    %s * volatile v_%s = 0;\n' % (_ref_ctype(t, ctx), v)
         else:
             decls += ('    %sint64_t %s = 0;\n' % (scalar_vol, ctx.cname(v)) if t == INT
-                  else '    %sdouble %s = 0;\n' % (scalar_vol, ctx.cname(v)) if t == FLT
+                  else '    %sdouble %s = 0;\n' % (scalar_vol, ctx.cname(v)) if t in (FLT, NSUM)
                   else '    ail_str %s = {0};\n' % ctx.cname(v) if t == STR
                   else '    ail_bytes %s = {0};\n' % ctx.cname(v) if t == BYTES
                   # -1: never a valid pool index, so reading a handle before it is ever assigned

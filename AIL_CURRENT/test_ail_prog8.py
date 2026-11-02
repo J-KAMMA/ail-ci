@@ -154,6 +154,15 @@ def main() -> None:
     print(slice_min(s.vals, 0, 2), slice_max(s.vals, 2, 4), slice_scaled(s.vals, 2, 4))
     empty: list[float] = []
     print(len(empty[:]), len(empty[1:3]), len(xs[3:3]))
+    # CPython starts sum() from the int 0, so an empty float slice is the int 0 -- not 0.0.
+    print(slice_total(xs, 3, 3), slice_total(empty, 0, 1), sum(xs[3:3]), sum(empty))
+    whole = sum(empty)
+    print(whole, whole == 0, sum(empty) / 2, sum(empty) + 1.0)
+    # A filter that removes every element is still CPython's int 0; an explicit float format
+    # type is exact for both the int 0 and a float and stays on the typed path.
+    print(sum(v for v in xs if v > 100.0), sum(v for v in xs if v > 0.0))
+    print(sum([v for v in xs if v > 100.0]), sum([v for v in xs if v > 0.0]))
+    print(f"{sum(xs[3:3]):.2f}", f"{sum(xs[0:2]):.2f}")
 
 
 main()
