@@ -1,0 +1,261 @@
+{
+ "started": "2026-11-02T15:28:26Z",
+ "head": "435d59c",
+ "runs": 5,
+ "cpus": 4,
+ "icount": "unavailable: perf_event_open: Permission denied",
+ "tasks": [
+  {
+   "task": "tally_lang",
+   "case": "perf",
+   "input_bytes": 421,
+   "expected": {
+    "returncode": 0,
+    "sha256": "4f689e4993d434b383d2d0a16e98ed1fd9250fbac22473964bdc494405fb5f90",
+    "bytes": 481
+   },
+   "builds": {
+    "ail": {
+     "ok": true,
+     "seconds": 4.064,
+     "cmd": [
+      "/usr/bin/python3",
+      "-B",
+      "/home/runner/work/ail-ci/ail-ci/AIL_CURRENT/ail_chatgpt.py",
+      "compile",
+      "/home/runner/work/ail-ci/ail-ci/lab/compare/src/tally_lang/main.ail",
+      "-o",
+      "/tmp/beatc-pugyl28p/tally_lang/prog-ail",
+      "--debug-dir",
+      "/tmp/beatc-pugyl28p/tally_lang/dbg"
+     ],
+     "stderr": "",
+     "binary": "/tmp/beatc-pugyl28p/tally_lang/prog-ail",
+     "generated": "/tmp/beatc-pugyl28p/tally_lang/dbg/program.c"
+    },
+    "c": {
+     "ok": true,
+     "binary": "/tmp/beatc-pugyl28p/tally_lang/prog-c",
+     "stderr": ""
+    }
+   },
+   "ail": {
+    "one_core": {
+     "runs": 5,
+     "wall_ms": 1542.4,
+     "min_ms": 1539.3,
+     "max_ms": 1549.1,
+     "spread_ms": 9.9,
+     "all_ms": [
+      1539.3,
+      1541.4,
+      1542.4,
+      1545.8,
+      1549.1
+     ],
+     "rss_kib": 1908,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "4f689e4993d434b383d2d0a16e98ed1fd9250fbac22473964bdc494405fb5f90"
+     ]
+    },
+    "all_cores": {
+     "runs": 5,
+     "wall_ms": 1540.1,
+     "min_ms": 1534.4,
+     "max_ms": 1602.1,
+     "spread_ms": 67.6,
+     "all_ms": [
+      1534.4,
+      1539.5,
+      1540.1,
+      1542.0,
+      1602.1
+     ],
+     "rss_kib": 2040,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "4f689e4993d434b383d2d0a16e98ed1fd9250fbac22473964bdc494405fb5f90"
+     ]
+    },
+    "instructions": null
+   },
+   "c": {
+    "one_core": {
+     "runs": 5,
+     "wall_ms": 1147.5,
+     "min_ms": 1137.3,
+     "max_ms": 1149.5,
+     "spread_ms": 12.1,
+     "all_ms": [
+      1137.3,
+      1145.0,
+      1147.5,
+      1149.3,
+      1149.5
+     ],
+     "rss_kib": 1912,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "4f689e4993d434b383d2d0a16e98ed1fd9250fbac22473964bdc494405fb5f90"
+     ]
+    },
+    "all_cores": {
+     "runs": 5,
+     "wall_ms": 1140.2,
+     "min_ms": 1131.3,
+     "max_ms": 1143.9,
+     "spread_ms": 12.6,
+     "all_ms": [
+      1131.3,
+      1136.7,
+      1140.2,
+      1143.5,
+      1143.9
+     ],
+     "rss_kib": 1912,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "4f689e4993d434b383d2d0a16e98ed1fd9250fbac22473964bdc494405fb5f90"
+     ]
+    },
+    "instructions": null
+   },
+   "correct": true
+  },
+  {
+   "task": "echo_pack",
+   "case": "perf",
+   "input_bytes": 32000000,
+   "expected": {
+    "returncode": 0,
+    "sha256": "a2f3d5e120f8f754345320e1af42fe15c0b2c5041366dc626874011185575536",
+    "bytes": 17336137
+   },
+   "builds": {
+    "ail": {
+     "ok": true,
+     "seconds": 8.052,
+     "cmd": [
+      "/usr/bin/python3",
+      "-B",
+      "/home/runner/work/ail-ci/ail-ci/AIL_CURRENT/ail_chatgpt.py",
+      "compile",
+      "/home/runner/work/ail-ci/ail-ci/lab/compare/src/echo_pack/main.ail",
+      "-o",
+      "/tmp/beatc-pugyl28p/echo_pack/prog-ail",
+      "--debug-dir",
+      "/tmp/beatc-pugyl28p/echo_pack/dbg"
+     ],
+     "stderr": "",
+     "binary": "/tmp/beatc-pugyl28p/echo_pack/prog-ail",
+     "generated": "/tmp/beatc-pugyl28p/echo_pack/dbg/program.c"
+    },
+    "c": {
+     "ok": true,
+     "binary": "/tmp/beatc-pugyl28p/echo_pack/prog-c",
+     "stderr": ""
+    }
+   },
+   "ail": {
+    "one_core": {
+     "runs": 5,
+     "wall_ms": 1077.4,
+     "min_ms": 976.3,
+     "max_ms": 1451.0,
+     "spread_ms": 474.7,
+     "all_ms": [
+      976.3,
+      988.2,
+      1077.4,
+      1191.4,
+      1451.0
+     ],
+     "rss_kib": 354300,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "a2f3d5e120f8f754345320e1af42fe15c0b2c5041366dc626874011185575536"
+     ]
+    },
+    "all_cores": {
+     "runs": 5,
+     "wall_ms": 998.5,
+     "min_ms": 966.1,
+     "max_ms": 1194.1,
+     "spread_ms": 228.0,
+     "all_ms": [
+      966.1,
+      983.0,
+      998.5,
+      1004.5,
+      1194.1
+     ],
+     "rss_kib": 354284,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "a2f3d5e120f8f754345320e1af42fe15c0b2c5041366dc626874011185575536"
+     ]
+    },
+    "instructions": null
+   },
+   "c": {
+    "one_core": {
+     "runs": 5,
+     "wall_ms": 613.4,
+     "min_ms": 608.4,
+     "max_ms": 630.5,
+     "spread_ms": 22.1,
+     "all_ms": [
+      608.4,
+      611.4,
+      613.4,
+      630.0,
+      630.5
+     ],
+     "rss_kib": 178728,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "a2f3d5e120f8f754345320e1af42fe15c0b2c5041366dc626874011185575536"
+     ]
+    },
+    "all_cores": {
+     "runs": 5,
+     "wall_ms": 610.5,
+     "min_ms": 606.1,
+     "max_ms": 797.5,
+     "spread_ms": 191.3,
+     "all_ms": [
+      606.1,
+      610.0,
+      610.5,
+      616.6,
+      797.5
+     ],
+     "rss_kib": 178728,
+     "returncodes": [
+      0
+     ],
+     "sha256": [
+      "a2f3d5e120f8f754345320e1af42fe15c0b2c5041366dc626874011185575536"
+     ]
+    },
+    "instructions": null
+   },
+   "correct": true
+  }
+ ]
+}

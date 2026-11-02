@@ -1,0 +1,118 @@
+{
+ "started": "2026-11-02T15:19:02Z",
+ "runs": 2,
+ "tasks": [
+  {
+   "task": "tally_lang",
+   "case": "perf",
+   "runs": 2,
+   "wall_ms": 4207.9,
+   "samples_s": 4.09,
+   "functions": [
+    {
+     "pct": 83.86,
+     "self_s": 3.43,
+     "name": "ev"
+    },
+    {
+     "pct": 16.14,
+     "self_s": 0.66,
+     "name": "py_run__try1"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_list_pop.constprop.0"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "push"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_numfield_list_index_slow"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_stab_slot"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_alloc"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_sarena_pushn"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 8.07,
+     "self_s": 0.33,
+     "name": "ev (program.c:8105 @ 8cce)"
+    },
+    {
+     "pct": 7.58,
+     "self_s": 0.31,
+     "name": "ail_list_span_get (program.c:5173 @ 8cc1)"
+    },
+    {
+     "pct": 6.85,
+     "self_s": 0.28,
+     "name": "ail_list_span_get (program.c:5178 @ 8cca)"
+    },
+    {
+     "pct": 6.36,
+     "self_s": 0.26,
+     "name": "ev (program.c:8100 @ 8c80)"
+    },
+    {
+     "pct": 5.62,
+     "self_s": 0.23,
+     "name": "ev (program.c:8103 @ 8cb9)"
+    },
+    {
+     "pct": 5.38,
+     "self_s": 0.22,
+     "name": "py_run__try1 (program.c:8290 @ 9215)"
+    },
+    {
+     "pct": 5.13,
+     "self_s": 0.21,
+     "name": "ev (program.c:8107 @ 8ce3)"
+    },
+    {
+     "pct": 4.52,
+     "self_s": 0.18,
+     "name": "ev (program.c:8101 @ 8c95)"
+    },
+    {
+     "pct": 4.4,
+     "self_s": 0.18,
+     "name": "ev (program.c:8117 @ 8d7b)"
+    },
+    {
+     "pct": 3.91,
+     "self_s": 0.16,
+     "name": "ail_list_span_get (program.c:5178 @ 8cdf)"
+    },
+    {
+     "pct": 2.93,
+     "self_s": 0.12,
+     "name": "ev (program.c:8267 @ 8dac)"
+    },
+    {
+     "pct": 2.69,
+     "self_s": 0.11,
+     "name": "ail_list_span_get (program.c:5178 @ 8d77)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-lte6e3or/tally_lang/dbg/program.c"
+  }
+ ]
+}

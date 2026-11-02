@@ -22,6 +22,9 @@ generated C rebuilt with `-pg -g`:
 python3 lab/beatc/profile.py --tasks tally_lang --runs 2 --out /tmp/spec1/profile.json
 ```
 
+Raw results are kept as `lab/beatc/results/spec1-profile-tally.json`,
+`lab/beatc/results/spec1-profile-echo.json` and `lab/beatc/results/spec1-measure.json`.
+
 Two pinned-core runs on the perf input (`wall 4.21 s` under `-pg`, so shares only):
 
 | function / line | share | removal bound `1/(1-s)` |
@@ -94,7 +97,7 @@ entries and never resolves collisions; AIL must preserve a real `dict[int, int]`
 order. Specializing the hash for `int` keys would not remove that algorithmic difference, and
 the primary `tally_lang` result already stops the job, so no `echo_pack` prototype was landed.
 Both builds matched the reference output on the perf input (`correct: true` in
-`/tmp/spec1/measure.json`).
+`lab/beatc/results/spec1-measure.json`).
 
 ## 4. Cost of the prototype
 
