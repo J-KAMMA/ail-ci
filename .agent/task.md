@@ -1,3 +1,104 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode/deepseek-v4.1-flash-free]
+**What the change does:** adds `tools/ail2py.py` (a converter over `ail_syntax.translate` that rewrites `__ail_checked_*` markers, re-renders top-level nodes with `ast.unparse`, re-inserts brace comments, prepends `from m import *`, wraps `sys.exit(main())`, and offers `--check`), plus `test_ail_ail2py.py`, registration, manifest pins, and DEVLOG. This matches the report.
+
+**Checks run (HEAD 07678f0)**
+- Done-check all ten compare-lab tasks with `--check --flags "--strict"`: **10/10 identical**.
+- `tools/update_manifest.py --check`: clean.
+- `par_check.py -j 2 test_ail_ail2py test_ail_safetynet test_ail_files test_ail_corpus_findings3`: **4 modules, 0 failed**.
+- All **260** brace examples convert, parse, and have every source comment exactly once.
+- AST-equality of converted vs `head + translate` for all 260 (entry wrapper normalised): **0 mismatches**, so `ast.unparse` changes no meaning.
+- No compiler/runtime file changed, so unrelated programs' C is unchanged by construction.
+
+**Claims**
+- Fixed multiline end-of-line comment: **verified** (`x = add(1, 2)` now follows `# end: the sum`).
+- Comments before struct/fields/use stay with generated lines: **partially false** (see defect 2; use-after-struct ordering breaks it).
+- Regression coverage, 260 examples, 4 modules, manifest, 10/10: **verified**.
+- Probes `p_multiline`, `p_struct_comment`, `p_use`, `p_blocks` parse with comments retained: **verified in substance** (placement still has the defects below).
+
+**Defects**
+
+1. An end-of-line comment on a block-closing `}` is emitted before the last statement *inside* the block, not before the statement it closes.
+   Probe `/tmp/rprobes/r_close.ail`:
+   ```
+   struct Box {
+       value: int;
+   } # after struct
+   fn main() -> int {
+       if true {
+           print(1);
+       } # after if
+       print(2);
+       return 0;
+   } # after main
+   ```
+   Expected: `# after struct` before `class Box:`, `# after if` before `if True:`, `# after main` before/after `def main` — not inside those bodies. Actual:
+   ```
+       def __init__(self, value: int):
+           # after struct
+           self.value = value
+   ...
+       if True:
+           # after if
+           print(1)
+   ...
+       # after main
+       return 0
+   ```
+   (`--check` is still `identical`; only placement is wrong. The test module has no closing-brace case.)
+
+2. A field comment in a struct that appears before a later `use` is moved onto the generated import line.
+   Probe `/tmp/rprobes/r_use_after_real.ail` (compiles; `use` after `struct` is accepted):
+   ```
+   # top
+   struct A {
+       # field note
+       a: int;
+   }
+   use block_math;
+   # before main
+   fn main() -> int {
+       print(1);
+       return 0;
+   }
+   ```
+   Expected: `# field note` immediately before `self.a = a` (the report's claim). Actual:
+   ```
+   # top
+   # field note
+   from block_math import *
+   ...
+   class A:
+       def __init__(self, a: int):
+           self.a = a
+   ```
+   The new `head_meta` gives the import the `use` line (7), so the earlier field comment targets it.
+
+**Pre-existing / Unverified**
+- `--check` on a `use` source still reports `py-refused` (converted file is in a temp dir); same limitation the prior review noted, not counted.
+- Speed: not applicable (no compiler/runtime change).
+
+VERDICT: FIX
+[cost $0.0000, opencode tokens {"total": 1382566, "input": 33262, "output": 7604, "reasoning": 21636, "cache.write": 0, "cache.read": 1320064}]
+    tool time: bash 2.8 min
+        103s bash   cd /home/runner/work/ail-ci/ail-ci && ulimit -v 1500000; for t in berth_sim chain_relax echo_pack ledger_bin r
+         45s bash   sleep 45; tail -12 /tmp/rprobes/tests.log; ps -p 22833 >/dev/null && echo RUNNING || echo DONE; date
+          3s bash   cd /home/runner/work/ail-ci/ail-ci && python3 - <<'PY' import glob, ast, sys sys.path.insert(0,'tools'); sys.p
+          3s bash   cd /home/runner/work/ail-ci/ail-ci && python3 -B AIL_CURRENT/test_ail_ail2py.py 2>&1 | tail -15
+          3s bash   cd /home/runner/work/ail-ci/ail-ci && for f in block_use_math binary_cursor_file binary_transform_main; do pri
+          2s bash   cd /home/runner/work/ail-ci/ail-ci && python3 - <<'PY' import glob, ast, sys, re sys.path.insert(0,'tools'); s
+          1s bash   cd /home/runner/work/ail-ci/ail-ci && python3 - <<'PY' import glob, sys, ast, io, tokenize sys.path.insert(0,'
+          1s bash   cd /home/runner/work/ail-ci/ail-ci && python3 -B tools/ail2py.py /tmp/rprobes/r_close.ail --check --flags '--s
+
+
+--- ORIGINAL TASK ---
 Lane: frontend
 
 **Owner decisions (2026-11-03):** AIL is one language, Python syntax plus optional annotations. The compare-lab `ail` column may use the converted annotated `typed.py` when its C is identical, and the plain `main.py` stays as its own row. The brace front end is removed before the 0.1 tag. AIL-only built-ins are spelled `from ail import ...`.
