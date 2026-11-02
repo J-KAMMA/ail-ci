@@ -16,6 +16,8 @@ Fixed here (each compared against CPython below):
 * ``divmod`` follows ``__divmod__``/``__rdivmod__``: IntEnum/IntFlag use the int pair, a class with
   only ``__index__`` is refused by CPython's message, ``5 % 0`` says "integer modulo by zero" while
   ``//``/``divmod`` keep "integer division or modulo by zero".
+* a builtin sequence repeats with an IntEnum/IntFlag on either side, while every other operator
+  refuses it with the TypeError naming the enum class (``range`` refuses ``*`` too, as CPython does).
 
 Values reach the operators through a parameter, a list item, an attribute and a dict value.
 Programs are built with the general path forced and with the default build; stdout and the exit
@@ -371,6 +373,92 @@ t("floats", lambda: (C.B * 0.5, C.B < 3.5, C.B == 3.0, C.B ** 0.5, divmod(C.B, 2
 t("pow3chan", lambda: (pow(box.v, 2, 5), pow(dct["c"], 2, 5), pow(C.A, C.B, 5), pow(F.B, 3, 5)))
 t("plain_divmod", lambda: divmod(E.A, 2))
 t("plain_pow", lambda: E.A ** 2)
+''',
+    'sequence_ops': '''
+from decimal import Decimal
+from enum import Enum, IntEnum, IntFlag
+
+class C(IntEnum):
+    B = 3
+    Z = 0
+    N = -2
+
+class F(IntFlag):
+    X = 2
+
+class E(Enum):
+    A = 1
+
+class Box:
+    def __init__(self, v):
+        self.v = v
+
+
+def t(label, thunk):
+    try:
+        print(label, repr(thunk()))
+    except Exception as exc:
+        print(label, type(exc).__name__, str(exc))
+
+
+t("mul_str", lambda: C.B * "ab")
+t("str_mul", lambda: "ab" * C.B)
+t("zero", lambda: C.Z * "ab")
+t("neg", lambda: (C.N * "ab", "ab" * C.N))
+t("mul_list", lambda: (C.B * [1, 2], [1, 2] * C.B))
+t("mul_tuple", lambda: (C.B * (1, 2), (1, 2) * C.B))
+t("mul_bytes", lambda: (C.B * b"ab", b"ab" * C.B))
+t("mul_bytearray", lambda: (C.B * bytearray(b"ab"), bytearray(b"ab") * C.B))
+t("flag", lambda: (F.X * "ab", "ab" * F.X))
+t("eq_str", lambda: (C.B == "3", "3" == C.B))
+t("lt_str", lambda: C.B < "3")
+t("str_lt", lambda: "3" < C.B)
+t("add_str", lambda: C.B + "x")
+t("str_add", lambda: "x" + C.B)
+t("sub_str", lambda: C.B - "x")
+t("truediv_str", lambda: C.B / "x")
+t("floordiv_str", lambda: C.B // "x")
+t("mod_str", lambda: C.B % "x")
+t("pow_str", lambda: C.B ** "x")
+t("divmod_str", lambda: divmod(C.B, "x"))
+t("rdivmod_str", lambda: divmod("x", C.B))
+t("eq_list", lambda: (C.B == [3], [3] == C.B))
+t("lt_list", lambda: C.B < [3])
+t("add_list", lambda: C.B + [3])
+t("eq_bytes", lambda: (C.B == b"3", b"3" == C.B))
+t("lt_bytes", lambda: C.B < b"3")
+t("add_bytes", lambda: C.B + b"3")
+t("mul_range", lambda: C.B * range(2))
+t("range_mul", lambda: range(2) * C.B)
+t("flag_add_str", lambda: F.X + "x")
+t("flag_lt_str", lambda: F.X < "x")
+t("dec_mul", lambda: C.B * Decimal("2"))
+t("dec_add", lambda: C.B + Decimal("2"))
+
+
+def via(x):
+    return (x * "ab", "ab" * x)
+
+
+def bad_lt(x):
+    return x < "3"
+
+
+def bad_add(x):
+    return x + "x"
+
+
+dct = {"c": C.B}
+box = Box(C.B)
+
+t("param", lambda: via(C.B))
+t("param_lt", lambda: bad_lt(C.B))
+t("param_add", lambda: bad_add(C.B))
+t("listitem", lambda: ([C.B][0] * "z", "z" * [C.B][0]))
+t("attr", lambda: (box.v * "z", "z" * box.v))
+t("attr_lt", lambda: box.v < "z")
+t("dict", lambda: (dct["c"] * "z", "z" * dct["c"]))
+t("dict_add", lambda: dct["c"] + "z")
 ''',
 }
 

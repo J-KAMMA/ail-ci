@@ -42,14 +42,32 @@ class _AilIntEnum(_AilEnum):
         return self.value
 
     def _ail_en_num(self, other):
-        # an IntEnum/IntFlag peer is its value; another enum kind is a different type. Builtin numbers,
-        # sequences and Decimal/Fraction keep the int-subclass dispatch, so the underlying int operation
-        # (or the other operand's reflected method) sees it; any other object is asked next, as int does.
+        # an IntEnum/IntFlag peer is its value; another enum kind is a different type. Builtin numbers and
+        # Decimal/Fraction keep the int-subclass dispatch, so the underlying int operation (or the other
+        # operand's reflected method) sees it; any other object is asked next, as int does. Sequences are
+        # deliberately absent: only multiplication may consume them (see _ail_en_mul), so that other
+        # operators keep int's NotImplemented and the TypeError names the enum class.
         if isinstance(other, _AilIntEnum):
             return other.value
         if isinstance(other, _AilEnum):
             return NotImplemented
-        if isinstance(other, (int, float, str, bytes, bytearray, list, tuple, range)):
+        if isinstance(other, (int, float)):
+            return other
+        try:
+            if hasattr(other, "_ail_dec") or hasattr(other, "_ail_fr"):
+                return other
+        except NotImplementedError:
+            pass
+        return NotImplemented
+
+    def _ail_en_mul(self, other):
+        # like _ail_en_num, plus the builtin sequences that support repetition. `range` is excluded because
+        # CPython has no `range * int` either; leaving it out makes the error name the enum class.
+        if isinstance(other, _AilIntEnum):
+            return other.value
+        if isinstance(other, _AilEnum):
+            return NotImplemented
+        if isinstance(other, (int, float, str, bytes, bytearray, list, tuple)):
             return other
         try:
             if hasattr(other, "_ail_dec") or hasattr(other, "_ail_fr"):
@@ -144,13 +162,13 @@ class _AilIntEnum(_AilEnum):
         return v - self.value
 
     def __mul__(self, other):
-        v = self._ail_en_num(other)
+        v = self._ail_en_mul(other)
         if v is NotImplemented:
             return NotImplemented
         return self.value * v
 
     def __rmul__(self, other):
-        v = self._ail_en_num(other)
+        v = self._ail_en_mul(other)
         if v is NotImplemented:
             return NotImplemented
         return v * self.value

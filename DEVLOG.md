@@ -1,3 +1,24 @@
+## 2026-11-02 -- reintenum4 fix round 2: sequences only repeat, never compare or add
+
+The reintenum4 review (FIX) found that the previous round widened `_ail_en_num` to `str`, `bytes`,
+`bytearray`, `list`, `tuple` and `range` for *every* operator.  Comparisons, arithmetic and `divmod`
+then evaluated the raw int value, so the error named `int` (or swapped the operands) instead of the
+enum class: `C.B < "3"`, `C.B + "x"`, `C.B < b"3"` and `divmod(C.B, "x")` differed from CPython.
+`range` was also accepted even though CPython refuses `range * int`.
+
+`_ail_en_num` now handles only `int`, `float` and the `_ail_dec`/`_ail_fr` markers; a new
+`_ail_en_mul` adds the builtin sequences minus `range`, and only `__mul__`/`__rmul__` use it.  So
+sequence repetition still matches on either side (including zero/negative counts and values reaching
+the operator through a parameter, list item, attribute or dict value), while all other operators
+return `NotImplemented` and keep the enum class in the TypeError.  `C.B * range(2)` now names `C`
+and `range`.  `test_ail_reintenum4` gained a `sequence_ops` program covering these cases.
+
+Probes in `/tmp/rprobes` on both builds via `cmp.sh`: `p_cmp`, `p_seq`, `p_pow` match CPython.
+`p_dec` matches for the member-on-left Decimal/Fraction cases and keeps the same pre-existing
+reflected Decimal/Fraction differences as the base (Decimal/Fraction on the left).  Final-state
+tests: `test_ail_reintenum4`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
 ## 2026-11-01 -- reintenum4 fix round: sequence repetition and Decimal operands
 
 The reintenum4 review (FIX) found that `_ail_en_num` returned `NotImplemented` for every non-int/float
