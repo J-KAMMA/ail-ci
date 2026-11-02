@@ -32654,7 +32654,8 @@ def _local_tuple_uses_are_safe(fn, name):
         if not (isinstance(each, ast.Name) and each.id == name and isinstance(each.ctx, ast.Load)):
             continue
         parent = parents.get(id(each))
-        if isinstance(parent, ast.Subscript) and parent.value is each and not isinstance(parent.slice, ast.Slice):
+        if isinstance(parent, ast.Subscript) and parent.value is each \
+                and isinstance(parent.ctx, ast.Load) and not isinstance(parent.slice, ast.Slice):
             continue
         if isinstance(parent, ast.Call) and each in parent.args and len(parent.args) == 1 \
                 and isinstance(parent.func, ast.Name) and parent.func.id in _LOCAL_TUPLE_SAFE_CALLS:

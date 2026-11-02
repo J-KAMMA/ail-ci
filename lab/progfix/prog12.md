@@ -58,14 +58,17 @@ recorded as a follow-up, not silently claimed as acceleration.
    and walks the result.  The typed path already holds a permutation tuple as a list; the rewrite
    is limited to `tuple[int, ...]` and to uses where CPython's tuple and the typed list agree
    (index, loop, `join`, `len`, `sum`, `min`, `max`, `sorted`, `any`, `all`, `set`, `list`,
-   `index`, `count`, `in`).  A print, equality, a slice, a dict key, a return or any other call
-   leaves the annotation untouched, so the old named refusal still applies.  `tuple[float, ...]`
+   `index`, `count`, `in`).  A subscript use must itself be a load: `last[0] = 9` and
+   `del last[0]` are stores/deletes, so they leave the annotation untouched and the old named
+   refusal still applies.  A print, equality, a slice, a dict key, a return or any other call
+   likewise leaves the annotation untouched.  `tuple[float, ...]`
    deliberately stays refused: `sum(())` is CPython's int `0`, while the typed `list[float]` sum is
    `0.0`; a probe caught that difference before this guard was added.
 2. **The itertools tuple check follows a plain alias** (`python/pkg-v12/itlib.py`,
    `check_nonescaping`).  `last = perm` is the same list, so the alias target's uses are checked
    with the same rules instead of the assignment itself being treated as an escape.  A use that
-   can tell a tuple from a list (print, equality, a slice) still refuses by name.
+   can tell a tuple from a list (print, equality, a slice) still refuses by name, and an alias
+   subscript in `Store`/`Del` context is not accepted as a read.
 
 ## Follow-ups (big features, not implemented here)
 
@@ -91,4 +94,6 @@ on the typed path alone (`AIL_NO_GENERAL=1`) and compares stdout/exit status wit
 three task inputs.  It also checks a safe permutation local (empty and non-empty, indexing,
 iteration, `len`/`sum`/`sorted`/`any`/`all`/`join`), an itertools alias without a local annotation,
 the named refusal of `tuple[float, ...]`, and that unsafe tuple uses (print, equality, slice)
-still match CPython through the general path.
+still match CPython through the general path.  Store and delete of the local, and of an alias
+(`last[0] = 9`, `del last[0]`, `a = perm; a[0] = 9`), are refused on the typed path and match
+CPython's `TypeError` through the general path.

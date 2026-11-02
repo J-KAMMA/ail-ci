@@ -14,6 +14,8 @@ T3  boundaries: empty and non-empty permutation tuples, indexing/iteration/len/s
     any/all/join, an alias without a local annotation, and a float tuple local that must
     stay refused by name (CPython's `sum(())` is int 0, the typed `list[float]` sum is 0.0)
 T4  unsafe tuple uses (print, equality, a slice) still run correctly through the general path
+T5  a subscript store or delete of the tuple local, or through an alias, is refused on the typed
+    path and matches CPython through the general path
 """
 import os
 import shutil
@@ -83,6 +85,48 @@ def main() -> None:
         print(last)
         print(last == (1, 2, 3))
         print(last[1:])
+
+
+main()
+'''
+
+
+STORE_LOCAL = '''import itertools
+
+
+def main() -> None:
+    last: tuple[int, ...] = ()
+    for perm in itertools.permutations(range(1, 4)):
+        last = perm
+    last[0] = 9
+    print(last[0])
+
+
+main()
+'''
+
+DEL_LOCAL = '''import itertools
+
+
+def main() -> None:
+    last: tuple[int, ...] = ()
+    for perm in itertools.permutations(range(1, 4)):
+        last = perm
+    del last[0]
+    print(len(last))
+
+
+main()
+'''
+
+STORE_ALIAS = '''import itertools
+
+
+def main() -> None:
+    for perm in itertools.permutations(range(1, 4)):
+        a = perm
+        a[0] = 9
+        print(a[0])
 
 
 main()
@@ -160,6 +204,15 @@ class Prog12(unittest.TestCase):
     def test_unsafe_tuple_uses_match_cpython(self):
         exe, source = self.build(UNSAFE, 'unsafe', expect_typed=False)
         self.same(exe, source)
+
+    def test_tuple_store_and_delete_refused_typed(self):
+        for text, name in ((STORE_LOCAL, 'store_local'), (DEL_LOCAL, 'del_local'),
+                           (STORE_ALIAS, 'store_alias')):
+            res, _, _ = compile_program(self.tmp, text, name, typed_only=True)
+            self.assertEqual(res.returncode, 3, name + ': ' + res.stdout + res.stderr)
+            self.assertIn('tuple', res.stderr, name)
+            exe, source = self.build(text, name + '_default', expect_typed=False)
+            self.same(exe, source)
 
 
 if __name__ == '__main__':

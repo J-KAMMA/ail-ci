@@ -1,3 +1,14 @@
+## 2026-11-02 -- typed reach 12 fix: tuple local store/delete refused (job-prog12-11020843)
+
+Review of 2c28c6a found that the list-compatible-use check counted any `name[...]` as an
+indexing read, so a `Store` or `Del` subscript (`last[0] = 9`, `del last[0]`) was accepted:
+the typed build mutated a tuple that CPython rejects.  Both `_local_tuple_uses_are_safe`
+(`pyfunc.py`) and `itlib.check_nonescaping` now require the subscript itself to be in `Load`
+context, so stores and deletes refuse by name and the general path matches CPython.  Probes:
+`last[0] = 9`, `del last[0]`, and `a = perm; a[0] = 9` (also through an alias) are refused
+typed and match CPython's `TypeError` on the default build; `test_ail_prog12` T5 covers all
+three.
+
 ## 2026-11-02 -- typed reach 12: an empty tuple local from itertools is a list (job-prog12-11020843)
 
 `t338` was the one hot function of its eight-program batch that this pass could move onto the
