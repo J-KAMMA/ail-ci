@@ -39,8 +39,16 @@ imports (`g25_006`, `t388`) the two program functions are still the only ones th
    `min/max(xs, key=K)` to a one-pass loop, but `K` returning a tuple made the loop compare a tuple
    value, which the typed path refuses.  A tuple-returning lambda key is now split into its components:
    each component is evaluated once per element, in order, and the loop compares them lexicographically
-   with `==`/`<` (or `==`/`>` for `max`), exactly CPython's tuple order and its first-best tie rule.
-   The scalar-key and `default=` paths are unchanged in shape.  This makes `t404` typed.
+   with CPython's rule (test `==` component by component, and only call `<`/`>` on the first unequal
+   one), exactly CPython's tuple order and its first-best tie rule.  The element is bound before the
+   key runs and `len()` is re-read each step, so a key that pops or appends to the source list sees the
+   same elements and stops at the same place as CPython's list iterator.  The scalar-key and
+   `default=` paths are unchanged in shape.  This makes `t404` typed.
+3. **Forward references to tuple module constants** (`python/pkg-v12/tuplib.py`).  Splitting `X` into
+   `X__c0`, `X__c1` is now done before any function is lowered, so a function defined above the
+   constant still rewrites `X[0]` to `X__c0` instead of leaving a reference to the removed module name.
+   This restores the annotated form (`def f(): return X[0]; X: tuple[int, int] = (4, 5)`) and also
+   builds the unannotated form that used to be refused.
 
 Both changes affect only programs that previously were refused.  The generated C of the ten
 `lab/compare` tasks is byte-identical to the base commit (all ten `main.ail` builds compared).

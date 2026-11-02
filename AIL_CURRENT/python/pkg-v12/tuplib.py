@@ -358,8 +358,27 @@ class Lower(Stmts, Calls, Lams, Exprs):
         self.consts[nm] = t
         return [node]
 
+    @staticmethod
+    def _module_tuple_constant(node):
+        if isinstance(node, ast.Assign):
+            return (len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)
+                    and isinstance(node.value, ast.Tuple))
+        return (isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name)
+                and node.value is not None and isinstance(node.value, ast.Tuple))
+
     def process(self):
         self.collect()
+        # Register tuple module constants before any function runs: a function written above the
+        # constant must already know that `X[0]` names the column `X__c0`, not a module name that no
+        # longer exists once the constant is split.
+        early = {}
+        for node in self.tree.body:
+            if self._module_tuple_constant(node):
+                try:
+                    early[id(node)] = self.module_stmt(node)
+                except Refused as exc:
+                    self.errors.append(exc.args[0])
+                    early[id(node)] = [node]
         body = []
         for node in self.tree.body:
             try:
@@ -369,6 +388,8 @@ class Lower(Stmts, Calls, Lams, Exprs):
                 elif isinstance(node, ast.ClassDef):
                     self.class_(node)
                     body.append(node)
+                elif id(node) in early:
+                    body.extend(early.pop(id(node)))
                 else:
                     body.extend(self.module_stmt(node))
             except Refused as exc:

@@ -1,3 +1,18 @@
+## 2026-11-02 -- prog11 review: tuple keys under mutation, forward tuple constants (job-prog11-11020732)
+
+Fixed both defects from the review of `b62a9eb`.  The tuple-key `min`/`max` lowering in
+`python/pkg-v12/iterlower.py` now binds each yielded element before the key runs and re-reads `len()`
+each step, and keeps the best element itself rather than an index into a list the key may have
+changed; a key that pops from the source now matches CPython (`min(xs, key=lambda v: (xs.pop(), v))`
+prints `1` and leaves `[5, 3]`, where the index loop raised `list index out of range`).  Component
+comparison now tests `==` before `<`/`>`, as CPython's tuple comparison does.  `python/pkg-v12/tuplib.py`
+registers tuple module constants before lowering functions, so `def f(): return X[0]` above
+`X: tuple[int, int] = (4, 5)` compiles again and prints `9` (the unannotated form now builds too).
+Probes: all 26 `/tmp/rprobes11` tuple-key/annotated-constant programs on both `cmp.sh` builds; the
+only failures are the pre-existing ones the review already recorded (a key containing `None` in a
+tuple used as a value, and a scalar key that mutates the source).  The ten `lab/compare` `main.ail`
+builds still have byte-identical generated C against the base worktree.
+
 ## 2026-11-01 -- typed reach: annotated tuple module constants and tuple keys in min/max (job-prog11-11020732)
 
 Profiled the eight prog11 programs with cProfile on their published inputs and recorded the table in

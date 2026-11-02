@@ -105,6 +105,25 @@ def main() -> None:
 main()
 '''
 
+MUTATING_KEY = '''
+def main() -> None:
+    xs = [5, 3, 1, 4, 2]
+    print(min(xs, key=lambda v: (xs.pop(), v)))
+    print(xs)
+    ys = [5, 3, 1, 4, 2]
+    print(max(ys, key=lambda v: (ys.pop(0), v)))
+    print(ys)
+main()
+'''
+
+FORWARD_TUPLE_CONSTANT = '''
+def f() -> int:
+    return X[0] + X[1]
+
+X: tuple[int, int] = (4, 5)
+print(f())
+'''
+
 TUPLE_CONSTANTS = '''
 START: tuple[int, int] = (0, 0)
 END: tuple[int, int] = (2, 2)
@@ -205,6 +224,20 @@ class TypedReach11(unittest.TestCase):
         src = Path(self.tmp) / 'tuple_constants.py'
         src.write_text(TUPLE_CONSTANTS, encoding='utf-8')
         built, exe = self.build(src, 'tuple_constants', strict=True)
+        self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+        self.compare(src, exe, None)
+
+    def test_tuple_key_with_mutation(self):
+        src = Path(self.tmp) / 'mutating_key.py'
+        src.write_text(MUTATING_KEY, encoding='utf-8')
+        built, exe = self.build(src, 'mutating_key', strict=True)
+        self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+        self.compare(src, exe, None)
+
+    def test_forward_tuple_constant(self):
+        src = Path(self.tmp) / 'forward_tuple.py'
+        src.write_text(FORWARD_TUPLE_CONSTANT, encoding='utf-8')
+        built, exe = self.build(src, 'forward_tuple', strict=True)
         self.assertEqual(built.returncode, 0, built.stderr[-3000:])
         self.compare(src, exe, None)
 
