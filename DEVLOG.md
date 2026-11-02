@@ -166,6 +166,14 @@ Probes in `/tmp/probes` cover `as_tuple` over finite / NaN / infinity / negative
 through an argument, a list item, an attribute, a dict value and an alias, large coefficients,
 float construction, error paths and both `cmp.sh` builds; `dec_refusals` and `dec_traps` are refused
 by name.
+## 2026-11-02 -- Front-end cache review fixes: manifest, devlog, own-variable key (job-fecache1-11021924)
+
+Fixed the three review defects in the opt-in `AIL_FE_CACHE` front-end cache. The manifest pins are
+regenerated, so `tools/update_manifest.py --check` and the prescribed `par_check` run start cleanly.
+The cache key now drops every `AIL_FE_CACHE*` variable (not just the exact `AIL_FE_CACHE=`), matching
+`docs/design/FE_CACHE.md`: changing `AIL_FE_CACHE_LOG`, `AIL_FE_CACHE_DIR` or `AIL_FE_CACHE_MAX_MB`
+no longer fragments the cache or turns a hit into a miss. `test_ail_fe_cache` gained a case for the
+log variable; the default no-cache path is unchanged.
 
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 

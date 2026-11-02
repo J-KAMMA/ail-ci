@@ -165,6 +165,8 @@ def entries():
                     info = item.stat()
                 except OSError:
                     continue
+                if not item.is_file() or item.name == 'CACHEDIR.TAG':
+                    continue
                 if item.name.startswith('.tmp-'):
                     if now - info.st_mtime > 3600:
                         _discard(Path(item.path))
@@ -241,7 +243,7 @@ def sources_hash(package):
     package = Path(package).resolve()
     if package in _sources:
         return _sources[package]
-    names = sorted(p for p in package.rglob('*') if p.suffix in ('.py', '.h') and '__pycache__' not in p.parts)
+    names = sorted(p for p in package.rglob('*') if p.suffix in ('.py', '.h', '.c') and '__pycache__' not in p.parts)
     signature = hashlib.sha256()
     for p in names:
         try:
