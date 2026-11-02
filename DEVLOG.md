@@ -1383,6 +1383,104 @@ so no instruction-count claim is made.  Measurements and the per-node comparison
 Added `test_ail_slist_reserve` (registered in `tests.d`); final-state tests: test_ail_slist_reserve,
 test_ail_last_use_free, test_ail_memory_shapes, test_ail_list_ops, test_ail_sort_keys,
 test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+## 2026-11-01 -- std_collections review 4: refuse a ChainMap name with more than one binding
+
+The review found that `c.subtract(cm)` lowered a `ChainMap` name through the last written-out
+assignment, so when `cm` was reassigned (in a branch or after the call) the key check saw one map
+while the runtime value was another; a `str` key then landed in an int-typed Counter and printed
+unquoted (`Counter({1: 2, a: -3})` where CPython prints `Counter({1: 2, 'a': -3})`).  `collib.py`'s
+`chainmap_call` now requires the argument to be a direct `ChainMap(...)` call or a name bound
+exactly once by a `ChainMap(...)` display and not also a parameter; any other ChainMap name is
+refused by name, so the default build falls back to the general path, whose runtime dispatch matches
+CPython.  Probes `/tmp/probes/fix/p_cmbranch`, `p_cmreassign`, `p_cmname`, `p_cmdirect`,
+`p_cmsingle_str`, `p_cmalias`, `p_cmmixed`, `p_cmbranchsingle` and `p_cmparam` match CPython or are
+refused by name on both builds (the key-switch probes `p_keyswitch_store`/`_update`/`_subtract`
+also match).  `test_ail_std_collections`, `test_ail_collections`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass; the manifest `--check` exits 0.
+
+## 2026-11-01 -- std_collections review 3: refuse key-type switches on a typed Counter
+
+The review found that a `Counter({1: 2})` typed from its dict literal now accepted a `str` key
+later (through `subtract`, `update`, or `c[k] = v`), and its typed Counter / `items()` views then
+printed the key without quotes (`Counter({1: 2, a: -1})`).  `collib.py` now checks the key type of
+a mapping passed to `Counter.update` / `Counter.subtract` and of a subscript store against the
+Counter / defaultdict / OrderedDict key type, and refuses by name when they differ; mapping values
+must still be int for a Counter.  A `ChainMap` argument is recognized both as a direct call and
+through one assigning name, and is lowered through `items()` only when its written-out maps match
+the Counter; the general path's `Counter.subtract` now also dispatches a `ChainMap` through its
+`items()` values (a new helper emitted only when used).  Every mismatch is a named refusal, never a
+silent repr difference.
+
+An unannotated `self.field = {...}` dict in `__init__` now feeds the class field table, so a
+mapping reached through an instance attribute is lowered as a mapping (and key-checked) instead of
+being left on a typed dict as a missing `subtract` method.  Probes `/tmp/probes/k1`-`k9` and
+`m2`/`m4` cover int-key Counter subtract/update with int and str mappings, direct assignment,
+ChainMap with int/str keys both written out and through a variable, the matching int-key ChainMap
+form, and a mapping reached through an instance attribute; all match CPython on both builds or are
+refused by name (the default build falls back to the general path and still matches).
+`test_ail_std_collections`,
+`test_ail_collections`, `test_ail_tuples`, `test_ail_deqctr`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` pass (7 modules, 0 failed).  Generated C of the ten compare tasks
+is unchanged (seven byte-identical, three refuse identically).
+
+## 2026-11-01 -- std_collections review 2: subtract of every mapping form and ChainMap
+
+The review found that `Counter.subtract` still treated a dict comprehension, a loop variable over
+dicts, a module-level dict and a tuple-keyed dict comprehension as iterables (subtracting one per
+key), and that `Counter.subtract(ChainMap(...))` iterated the ChainMap's keys.  `collib.py` now
+infers plain dicts and dict comprehensions (including tuple keys and dict values), keeps module-level
+dict constants in the type environment, propagates a plain dict's `keys()` / `values()` / `items()`
+types, and lowers a ChainMap argument to a loop over `items()`.  An argument whose type cannot be
+told is left to the general path, whose `Counter.subtract` dispatches on the runtime type; a mapping
+with non-int values is refused by name.
+
+Probes `r3`, `r7`, `r9`, `r10`, `r15` from the review plus `p02`-`p25` cover dict comprehensions,
+loop variables, module dicts, ChainMap (empty, duplicate keys, tuple keys), list items, nested dict
+values, function arguments/returns, self-alias, empty/negative/float mappings, plain iterables, and
+an unbuildable `new_child()` ChainMap (refused by name); all buildable probes match CPython on both
+builds.  `test_ail_std_collections.test_counter_subtract_mapping_forms` now covers the new forms.
+Generated C of `term_rank` (the only compare task importing collections) is byte-identical.
+
+## 2026-11-01 -- std_collections review: Counter.subtract mapping values for literals, names and tuple-keyed tables
+
+The review found that `Counter.subtract({"a": 2})` and `d = {"a": 2}; c.subtract(d)` subtracted
+one per key instead of the mapping's value, and that a tuple-keyed mapping still crashed with
+`TypeError: '_AilD_Pi_iQ__i' object is not iterable`.  `collib.py` now recognises a dict display
+and an unannotated name bound to a dict (not only an annotated `Dict[K, V]`), so both the
+`Counter(mapping)` constructor and `subtract` take the mapping route; the typed subtract helper
+walks `other.keys()` because a tuple-keyed table class has no `__iter__`.  The general path tracks
+tuple-keyed table values and subtracts their `ks` / `vs` / `live` rows, and instance annotations
+inside `__init__` now feed the class field table, so `self.counts: Dict[str, int]` works as a
+mapping argument.
+
+Probes `p1`-`p21` in `/tmp/probes/collections_fix/` cover dict displays, annotated and
+unannotated names, `dict(...)`, empty/negative values, self-alias, function arguments/returns,
+list items, dict values, instance attributes, and tuple-keyed mapping literals/names both
+directly and through attributes; all match CPython on both builds, and `p21` (an unannotated
+function parameter) is refused by name on both.  `test_ail_std_collections` gained
+`test_counter_subtract_mapping_forms` for the two review cases.  Generated C of the seven
+buildable compare tasks stays byte-identical to `HEAD`, and the three regex tasks refuse
+identically.
+
+## 2026-11-01 -- std_collections lab: 9 of 12 collections programs build and match CPython (job-std_collections-11011436)
+
+Added `lab/stdlib/collections/` (12 realistic Python programs using Counter, defaultdict, OrderedDict,
+deque, ChainMap and namedtuple) plus `RESULTS.md` with the default-build result for each.  9 build and
+match CPython's stdout and exit code; 3 stay refused by name with the exact text recorded there.
+The shared blockers fixed are `Counter.subtract` (typed helpers in `collib.py` and the general-path
+`ail__counter_subtract` / `_map` runtime) and `Counter(mapping)` over a tuple-keyed mapping: the tuple
+pass turns that mapping into a table class, which the general path's Counter could not read, stopping
+with `TypeError: '_AilD_Pi_iQ__i' object is not iterable`.  A Counter mapping display now stays a plain
+dict, and another table-typed mapping is converted back through its `items` helper before the call.
+Probes `q1`-`q8` in `/tmp/probes/collections/` cover literals, function arguments and returns, list
+items, instance attributes, dict values, empty mappings and zero/negative counts on both builds.
+
+Added `AIL_CURRENT/test_ail_std_collections.py` (registered in `tests.d/`) which compiles the nine
+passing programs with the default pipeline and compares stdout and exit code with CPython.  The
+generated C of the compare tasks is unchanged (five default builds, `chain_relax` and `rail_transfer`
+with `--exact-int`, and the three regex tasks refuse identically; checked against HEAD).  Final-state
+tests: test_ail_std_collections, test_ail_collections, test_ail_tuples, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 

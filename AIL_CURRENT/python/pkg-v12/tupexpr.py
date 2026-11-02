@@ -385,7 +385,7 @@ class Exprs:
         kt = self.seq_type(kts, wk, node, 'dict')
         vt = self.seq_type(vts, wv, node, 'dict')
         t = ('dict', kt if kt is not None else Hole(), vt if vt is not None else Hole())
-        if is_table_dict(t):
+        if is_table_dict(t) and not self.no_table_dict:
             self.force()
             if not known(t):
                 self.refuse(node, 'cannot tell the key / value type of this dict; annotate it')

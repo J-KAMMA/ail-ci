@@ -308,6 +308,7 @@ _METHOD_KWARGS = {
     'splitlines': {'keepends'},
     'sort': {'key', 'reverse'},
     'update': None,
+    'subtract': set(),
     'format': None,
     'expandtabs': {'tabsize'},
 }
@@ -338,7 +339,7 @@ _METHOD_MAXARGS = {
     'isdigit': 0, 'isalpha': 0, 'title': 0, 'capitalize': 0, 'swapcase': 0,
     'isupper': 0, 'islower': 0, 'isalnum': 0, 'isspace': 0, 'isnumeric': 0,
     'isdecimal': 0, 'isascii': 0, 'isidentifier': 0, 'istitle': 0, 'fromkeys': 2, 'rfind': 3, 'symmetric_difference_update': 1, 'keys': 0, 'values': 0, 'items': 0, 'clear': 0,
-    'copy': 0, 'reverse': 0, 'total': 0, 'elements': 0, 'get': 2,
+    'copy': 0, 'reverse': 0, 'total': 0, 'elements': 0, 'get': 2, 'subtract': 1,
     'setdefault': 2, 'most_common': 1, 'sort': 0, 'pop': 2,
     'startswith': 3, 'endswith': 3, 'find': 3, 'index': 3, 'count': 3,
     'replace': 3, 'ljust': 2, 'rjust': 2, 'center': 2,
@@ -421,6 +422,7 @@ _METHOD_OWNERS = {
     'splitlines': 'str',
     'startswith': 'str',
     'strip': 'str',
+    'subtract': 'counter',
     'swapcase': 'str',
     'symmetric_difference': 'set frozenset',
     'symmetric_difference_update': 'set',
@@ -2155,6 +2157,7 @@ class Ctx:
         self.uses_comp = False
         self.retval_slot = None
         self.var_kind = {}         # local name -> inferred kind, for dunder/method dispatch
+        self.table_dicts = {}      # local name -> tuple-keyed table class of a dict value
         self.elem_kind = {}        # local name -> proven element kind of the bound iterable
         self.nested_funcs = {}     # name -> info, for a def nested directly in this function
         self.nested_def_flags = {} # name -> C int set when that nested def statement runs
@@ -11154,6 +11157,137 @@ class Compiler(boxclosure.ClosureMixin):
                          "object has no attribute 'update'")
         return 'ail_box_none()'
 
+    def _need_counter_subtract(self):
+        """Counter.subtract's two loops, emitted only for a program that calls it (an unused
+        runtime helper would change the generated C of every other program)."""
+        if getattr(self, 'has_counter_subtract', False):
+            return
+        self.has_counter_subtract = True
+        self.top_decls.append('static inline ail_st ail__counter_subtract(ail_ctx *cx, ail_obj counter, ail_obj iterable);\n')
+        self.top_decls.append('static inline ail_st ail__counter_subtract_map(ail_ctx *cx, ail_obj counter, ail_obj map);\n')
+        self.top_decls.append('static inline ail_st ail__counter_subtract_pairs(ail_ctx *cx, ail_obj counter, ail_obj pairs);\n')
+        self.top_defs.append(
+            'static inline ail_st ail__counter_subtract(ail_ctx *cx, ail_obj counter, ail_obj iterable) {\n'
+            '    AIL_FRAME_ENTER(cx, fr, 2);\n'
+            '    ail_st st = ail_iter(cx, &fr.slots[0], iterable);\n'
+            '    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }\n'
+            '    for (;;) {\n'
+            '        st = ail_next(cx, &fr.slots[1], fr.slots[0]);\n'
+            '        if (st == AIL_STOP) { st = AIL_OK; break; }\n'
+            '        if (st != AIL_OK) break;\n'
+            '        ail_obj cur; st = ail_dict_get(cx, &cur, counter, fr.slots[1], ail_box_int(0)); if (st != AIL_OK) break;\n'
+            '        ail_obj nv; st = ail_op_sub(cx, &nv, cur, ail_box_int(1)); if (st != AIL_OK) break;\n'
+            '        st = ail_dict_set(cx, counter, fr.slots[1], nv); if (st != AIL_OK) break;\n'
+            '    }\n'
+            '    AIL_FRAME_LEAVE(cx, fr);\n'
+            '    return st;\n'
+            '}\n'
+            'static inline ail_st ail__counter_subtract_map(ail_ctx *cx, ail_obj counter, ail_obj map) {\n'
+            '    AIL_FRAME_ENTER(cx, fr, 1);\n'
+            '    fr.slots[0] = map;\n'
+            '    ail_st st = AIL_OK;\n'
+            '    for (int64_t i = 0; i < ((ail_mapobj *)fr.slots[0].o)->n; i++) {\n'
+            '        ail_obj key = ((ail_mapobj *)fr.slots[0].o)->entries[i].key;\n'
+            '        ail_obj val = ((ail_mapobj *)fr.slots[0].o)->entries[i].val;\n'
+            '        ail_obj cur; st = ail_dict_get(cx, &cur, counter, key, ail_box_int(0));\n'
+            '        if (st != AIL_OK) break;\n'
+            '        ail_obj nv; st = ail_op_sub(cx, &nv, cur, val);\n'
+            '        if (st != AIL_OK) break;\n'
+            '        st = ail_dict_set(cx, counter, key, nv);\n'
+            '        if (st != AIL_OK) break;\n'
+            '    }\n'
+            '    AIL_FRAME_LEAVE(cx, fr);\n'
+            '    return st;\n'
+            '}\n'
+            'static inline ail_st ail__counter_subtract_pairs(ail_ctx *cx, ail_obj counter, ail_obj pairs) {\n'
+            '    AIL_FRAME_ENTER(cx, fr, 2);\n'
+            '    ail_st st = ail_iter(cx, &fr.slots[0], pairs);\n'
+            '    if (st != AIL_OK) { AIL_FRAME_LEAVE(cx, fr); return st; }\n'
+            '    for (;;) {\n'
+            '        st = ail_next(cx, &fr.slots[1], fr.slots[0]);\n'
+            '        if (st == AIL_STOP) { st = AIL_OK; break; }\n'
+            '        if (st != AIL_OK) break;\n'
+            '        ail_obj key; st = ail_op_getitem(cx, &key, fr.slots[1], ail_box_int(0)); if (st != AIL_OK) break;\n'
+            '        ail_obj val; st = ail_op_getitem(cx, &val, fr.slots[1], ail_box_int(1)); if (st != AIL_OK) break;\n'
+            '        ail_obj cur; st = ail_dict_get(cx, &cur, counter, key, ail_box_int(0)); if (st != AIL_OK) break;\n'
+            '        ail_obj nv; st = ail_op_sub(cx, &nv, cur, val); if (st != AIL_OK) break;\n'
+            '        st = ail_dict_set(cx, counter, key, nv); if (st != AIL_OK) break;\n'
+            '    }\n'
+            '    AIL_FRAME_LEAVE(cx, fr);\n'
+            '    return st;\n'
+            '}\n\n')
+
+    @staticmethod
+    def _table_dict_class(node, ctx):
+        """The table class behind a tuple-keyed dict expression, or None for a plain dict/other."""
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name):
+            name = node.func.id
+            for suffix in ('_dfromlist', '_new'):
+                if name.startswith('_AilD_') and name.endswith(suffix):
+                    return name[:-len(suffix)]
+        if isinstance(node, ast.Name):
+            return ctx.table_dicts.get(node.id)
+        return None
+
+    def _m_subtract(self, recv, kind, args, kwargs, ctx):
+        if kind != 'counter':
+            raise Unsupported('.subtract() (on a %s)' % kind)
+        if kwargs:
+            raise Unsupported('.subtract() with keyword arguments')
+        if len(args) > 1:
+            raise Unsupported('.subtract() with more than one positional argument')
+        self._need_counter_subtract()
+        if args:
+            if self._inst_class(args[0], ctx) == 'ChainMap':
+                items = ctx.tmp()
+                get_items = ast.Call(func=ast.Attribute(value=args[0], attr='items', ctx=ast.Load()),
+                                     args=[], keywords=[])
+                ctx.emit('%s = %s;' % (items, self.expr(get_items, ctx)))
+                ctx.emit('st = ail__counter_subtract_pairs(cx, %s, %s); if (st != AIL_OK) goto %s;'
+                         % (recv, items, ctx.cur_err_target()))
+                ctx.uses_st = True
+                return 'ail_box_none()'
+            table = self._table_dict_class(args[0], ctx)
+            if table is not None:
+                src = self.expr(args[0], ctx)
+                ks, vs, live = ctx.tmp(), ctx.tmp(), ctx.tmp()
+                n, i = ctx.tmp(), ctx.new_cvar('i')
+                for field in ('ks', 'vs', 'live'):
+                    self.attr_names.add(field)
+                    ctx.emit('st = ail_inst_getattr(cx, &%s, %s, g_attr_%s, "%s"); '
+                             'if (st != AIL_OK) goto %s;'
+                             % ({'ks': ks, 'vs': vs, 'live': live}[field], src, field, field,
+                                ctx.cur_err_target()))
+                ctx.emit('st = ail_op_len(cx, &%s, %s); if (st != AIL_OK) goto %s;'
+                         % (n, ks, ctx.cur_err_target()))
+                ctx.emit('for (int64_t %s = 0; %s < (%s).i; %s++) {' % (i, i, n, i))
+                ctx.indent += 1
+                lv, key, val, cur, nv = (ctx.tmp() for _ in range(5))
+                ctx.emit('st = ail_op_getitem(cx, &%s, %s, ail_box_int(%s)); '
+                         'if (st != AIL_OK) goto %s;' % (lv, live, i, ctx.cur_err_target()))
+                ctx.emit('if (!ail_obj_truthy(%s)) continue;' % lv)
+                ctx.emit('st = ail_op_getitem(cx, &%s, %s, ail_box_int(%s)); '
+                         'if (st != AIL_OK) goto %s;' % (key, ks, i, ctx.cur_err_target()))
+                ctx.emit('st = ail_op_getitem(cx, &%s, %s, ail_box_int(%s)); '
+                         'if (st != AIL_OK) goto %s;' % (val, vs, i, ctx.cur_err_target()))
+                ctx.emit('st = ail_dict_get(cx, &%s, %s, %s, ail_box_int(0)); '
+                         'if (st != AIL_OK) goto %s;' % (cur, recv, key, ctx.cur_err_target()))
+                ctx.emit('st = ail_op_sub(cx, &%s, %s, %s); if (st != AIL_OK) goto %s;'
+                         % (nv, cur, val, ctx.cur_err_target()))
+                ctx.emit('st = ail_dict_set(cx, %s, %s, %s); if (st != AIL_OK) goto %s;'
+                         % (recv, key, nv, ctx.cur_err_target()))
+                ctx.indent -= 1
+                ctx.emit('}')
+                ctx.uses_st = True
+                return 'ail_box_none()'
+            sv = ctx.new_cvar('cs')
+            ctx.emit('ail_obj %s = %s;' % (sv, self._resolve_iter_src(args[0], ctx)))
+            ctx.emit('if (%s.tag == AIL_T_DICT) { st = ail__counter_subtract_map(cx, %s, %s); } '
+                     'else { st = ail__counter_subtract(cx, %s, %s); } '
+                     'if (st != AIL_OK) goto %s;' % (sv, recv, sv, recv, sv, ctx.cur_err_target()))
+            ctx.uses_st = True
+        return 'ail_box_none()'
+
     _SETISH = ('set', 'frozenset', None)
 
     def _m_union(self, recv, kind, args, kwargs, ctx):
@@ -12005,11 +12139,16 @@ class Compiler(boxclosure.ClosureMixin):
         value_c = self.expr(node.value, ctx)
         kind = self.infer_kind(node.value, ctx)
         ekind = self._infer_elem_kind(node.value, ctx)
+        table = self._table_dict_class(node.value, ctx)
         for target in node.targets:
             self._assign_target(target, value_c, ctx, value_kind=kind)
             if isinstance(target, ast.Name):
                 self.set_kind(target.id, kind, ctx)
                 self.set_elem_kind(target.id, ekind, ctx)
+                if table is not None:
+                    ctx.table_dicts[target.id] = table
+                else:
+                    ctx.table_dicts.pop(target.id, None)
             elif isinstance(target, (ast.Tuple, ast.List)):
                 for e in target.elts:
                     if isinstance(e, ast.Name):
@@ -12026,6 +12165,11 @@ class Compiler(boxclosure.ClosureMixin):
         if isinstance(node.target, ast.Name):
             self.set_kind(node.target.id, kind, ctx)
             self.set_elem_kind(node.target.id, self._infer_elem_kind(node.value, ctx), ctx)
+            table = self._table_dict_class(node.value, ctx)
+            if table is not None:
+                ctx.table_dicts[node.target.id] = table
+            else:
+                ctx.table_dicts.pop(node.target.id, None)
 
     AUG_FN = {ast.Add: 'ail_op_add', ast.Sub: 'ail_op_sub', ast.Mult: 'ail_op_mul',
              ast.Div: 'ail_op_truediv', ast.FloorDiv: 'ail_op_floordiv',

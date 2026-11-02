@@ -97,6 +97,9 @@ class Refused(Exception):
     pass
 
 
+_CM_AMBIGUOUS = object()      # a ChainMap name whose single written-out display is not the runtime value
+
+
 class C:
     """A collections object: kind ctr | dds (defaultdict of scalars) | ddl (defaultdict(list)) | od | dq."""
     def __init__(self, kind, K=None, V=None, default=None, sets=False, fname=None):
@@ -149,6 +152,14 @@ T_CTR_ELEMS = '''def _ail_ctr_elems_@K(c: dict[@KA, int]) -> list[@KA]:
         for i in range(c[k]):
             out.append(k)
     return out
+'''
+T_CTR_SUBTRACT_MAP = '''def _ail_ctr_subtract_map_@K(c: dict[@KA, int], other: dict[@KA, int]) -> None:
+    for k in other.keys():
+        c[k] = c.get(k, 0) - other[k]
+'''
+T_CTR_SUBTRACT_ITER = '''def _ail_ctr_subtract_iter_@K(c: dict[@KA, int], xs: list[@KA]) -> None:
+    for k in xs:
+        c[k] = c.get(k, 0) - 1
 '''
 T_CTR_ARITH = {
     '+': '''def _ail_ctr_add_@K(a: dict[@KA, int], b: dict[@KA, int]) -> dict[@KA, int]:
@@ -929,8 +940,18 @@ class Rewriter:
         if t is ast.List:
             for x in e.elts:
                 tx = self.infer(x, env)
-                if tx in SCALARS or (isinstance(tx, tuple) and tx[0] in ('list', 'tuple', 'tup')):
+                if tx in SCALARS or (isinstance(tx, tuple) and tx[0] in ('list', 'tuple', 'tup', 'dict')):
                     return ('list', tx)
+            return None
+        if t is ast.Dict:
+            if not e.keys or any(k is None for k in e.keys):
+                return None
+            ks = [self.infer(k, env) for k in e.keys]
+            vs = [self.infer(v, env) for v in e.values]
+            if all(k == ks[0] and (k in SCALARS or is_tup(k)) for k in ks) \
+                    and all(v == vs[0] and (v in SCALARS or (isinstance(v, tuple) and v[0] in ('list', 'set', 'tup', 'dict')))
+                            for v in vs):
+                return ('dict', ks[0], vs[0])
             return None
         if t is ast.Tuple:
             ts = [self.infer(x, env) for x in e.elts]
@@ -949,6 +970,15 @@ class Rewriter:
             tx = self.infer(e.elt, inner)
             if okel(tx):
                 return ('set' if t is ast.SetComp else 'list', tx)
+            return None
+        if t is ast.DictComp:
+            inner = dict(env)
+            for g in e.generators:
+                self.bind(g.target, g.iter, inner)
+            k = self.infer(e.key, inner)
+            v = self.infer(e.value, inner)
+            if (k in SCALARS or is_tup(k)) and (v in SCALARS or (isinstance(v, tuple) and v[0] in ('list', 'set', 'tup', 'dict'))):
+                return ('dict', k, v)
             return None
         if t is ast.Subscript:
             base = self.infer(e.value, env)
@@ -1077,6 +1107,11 @@ class Rewriter:
                 if base[0] == 'dict':
                     if m == 'get' and len(args) == 2:
                         return base[2]
+                    if m in ('keys', 'values'):
+                        return ('list', base[1] if m == 'keys' else base[2])
+                    if m == 'items' and (base[1] in SCALARS or is_tup(base[1])) \
+                            and (base[2] in SCALARS or is_tup(base[2])):
+                        return ('list', ('tup', (base[1], base[2])))
                 if base[0] == 'obj':
                     return None
         return None
@@ -1275,7 +1310,7 @@ class Rewriter:
                 continue
             name = node.targets[0].id if isinstance(node, ast.Assign) else node.target.id
             inner = t[1] if isinstance(t, tuple) and t[0] in ('list', 'set') else t
-            if is_tup(inner):
+            if is_tup(inner) or (isinstance(t, tuple) and t[0] == 'dict'):
                 self.consts[name] = t
         # analysis to a fixpoint (a Dict[K, List[T]] parameter is a defaultdict(list) once one is built)
         for _ in range(3):
@@ -1316,6 +1351,9 @@ class Rewriter:
             elif isinstance(item, ast.FunctionDef) and item.name == '__init__':
                 params = {a.arg: a.annotation for a in item.args.args[1:]}
                 for st in ast.walk(item):
+                    if isinstance(st, ast.AnnAssign) and isinstance(st.target, ast.Attribute) \
+                            and isinstance(st.target.value, ast.Name) and st.target.value.id == 'self':
+                        fields[st.target.attr] = self.ann_type(st.annotation)
                     if isinstance(st, ast.Assign) and len(st.targets) == 1 and isinstance(st.targets[0], ast.Attribute) \
                             and isinstance(st.targets[0].value, ast.Name) and st.targets[0].value.id == 'self':
                         if self.mentions_collection(st.value):
@@ -1324,6 +1362,8 @@ class Rewriter:
                         v = st.value
                         if isinstance(v, ast.Name) and v.id in params:
                             fields[st.targets[0].attr] = self.ann_type(params[v.id])
+                        elif isinstance(v, (ast.Dict, ast.DictComp)):
+                            fields[st.targets[0].attr] = self.infer(v, {})
         return fields
 
     def mentions_collection(self, node):
@@ -1872,11 +1912,29 @@ class Scope:
             c = self.coll(tg.value)
             if c is not None and c.kind in ('ddl', 'dq'):
                 return self.subscript_store(st, tg, c, value)
+            if c is not None and c.kind in ('ctr', 'dds', 'od'):
+                self.check_store(st, c, tg.slice, value)
             return self.whole(st)
         if isinstance(tg, ast.Tuple) and isinstance(value, ast.Call) and isinstance(value.func, ast.Attribute) \
                 and value.func.attr == 'popitem' and self.coll(value.func.value) is not None:
             return self.popitem_unpack(st, tg, value)
         return self.whole(st)
+
+    def check_store(self, st, c, key, value):
+        """Refuse an item store whose key / value type the typed dict cannot hold (a str key in an int Counter
+        would print without quotes)."""
+        r = self.r
+        kt = r.infer(key, self.env)
+        if c.K is not None and kt is not None and kt != c.K:
+            r.refuse(st, 'assigning to a %s with a %s key, but its key type is %s' % (
+                {'ctr': 'Counter', 'dds': 'defaultdict', 'od': 'OrderedDict'}[c.kind], tname(kt), tname(c.K)))
+        vt = r.infer(value, self.env)
+        if c.kind == 'ctr':
+            if vt is not None and vt not in ('int', 'bool'):
+                r.refuse(st, 'Counter values must be int (found %s)' % tname(vt))
+        elif c.V is not None and vt is not None and vt != c.V:
+            r.refuse(st, 'assigning a %s value to a %s with %s values' % (
+                tname(vt), {'dds': 'defaultdict', 'od': 'OrderedDict'}[c.kind], tname(c.V)))
 
     def subscript_store(self, st, tg, c, value):
         r = self.r
@@ -2022,6 +2080,8 @@ class Scope:
                 recv = call.func.value
                 if c.kind == 'ctr' and m == 'update':
                     return self.ctr_update(st, c, call)
+                if c.kind == 'ctr' and m == 'subtract':
+                    return self.ctr_subtract(st, c, call)
                 if c.kind == 'od' and m == 'move_to_end':
                     return self.move_to_end(st, c, call)
                 if c.kind in ('od', 'dds', 'ctr') and m == 'popitem':
@@ -2084,6 +2144,7 @@ class Scope:
         tmp = r.new_name('t')
         name = recv.id
         if (isinstance(t, C) and t.kind in ('ctr', 'dds', 'od')) or (isinstance(t, tuple) and t[0] == 'dict'):
+            self.check_mapping(st, c, t, 'Counter.update(mapping)')
             if not isinstance(arg, ast.Name):
                 r.refuse(st, 'Counter.update(mapping) needs the mapping in a name')
             text = 'for %s in %s: %s[%s] = %s.get(%s, 0) + %s[%s]' % (tmp, arg.id, name, tmp, name, tmp, arg.id, tmp)
@@ -2101,6 +2162,176 @@ class Scope:
                 it = self.iter_expr(arg)
                 text = 'for %s in %s: %s[%s] = %s.get(%s, 0) + 1' % (tmp, ast.unparse(it), name, tmp, name, tmp)
         self.put_stmt(st, text)
+
+    def mapping_arg(self, arg, t):
+        """A mapping argument, including a dict display or an unannotated name bound to one."""
+        if (isinstance(t, C) and t.kind in ('ctr', 'dds', 'od')) or (isinstance(t, tuple) and t[0] == 'dict'):
+            return True
+        if isinstance(arg, (ast.Dict, ast.DictComp)):
+            return True
+        if isinstance(arg, ast.Name) and arg.id not in self.params:
+            found = False
+            for st in self.own():
+                if isinstance(st, ast.Assign) and len(st.targets) == 1 \
+                        and isinstance(st.targets[0], ast.Name) and st.targets[0].id == arg.id:
+                    v = st.value
+                    if isinstance(v, ast.Dict) or (isinstance(v, ast.Call)
+                                                   and isinstance(v.func, ast.Name) and v.func.id == 'dict'):
+                        found = True
+                    else:
+                        return False
+            return found
+        return False
+
+    def mapping_key(self, t):
+        """The key type of a mapping argument, or None when it cannot be told."""
+        if isinstance(t, C) and t.kind in ('ctr', 'dds', 'od'):
+            return t.K
+        if isinstance(t, tuple) and t[0] == 'dict':
+            return t[1]
+        return None
+
+    def mapping_value(self, t):
+        """The value type of a mapping argument, or None when it cannot be told."""
+        if isinstance(t, C) and t.kind in ('ctr', 'dds', 'od'):
+            return t.V
+        if isinstance(t, tuple) and t[0] == 'dict':
+            return t[2]
+        return None
+
+    def check_mapping(self, st, c, t, what):
+        """A mapping used with a Counter: its key and value types must fit the Counter's typed dict."""
+        r = self.r
+        mk, mv = self.mapping_key(t), self.mapping_value(t)
+        if mk is None:
+            r.refuse(st, '%s: the mapping key type cannot be told; build the mapping in a dict display or '
+                     'annotate its name' % what)
+        if c.K is not None and mk != c.K:
+            r.refuse(st, '%s: the mapping key type is %s, but the Counter key type is %s' % (
+                what, tname(mk), tname(c.K)))
+        if mv is not None and mv not in ('int', 'bool'):
+            r.refuse(st, '%s needs int values (found %s)' % (what, tname(mv)))
+
+    def chainmap_call(self, arg, t):
+        """The ChainMap(...) call an argument stands for: the call itself or the one assignment that binds it.
+        A name that is a parameter or has more than one binding returns _CM_AMBIGUOUS: the written-out maps of
+        one assignment would not describe the value the call reads at run time."""
+        def is_call(node):
+            if not isinstance(node, ast.Call):
+                return False
+            name = node.func.id if isinstance(node.func, ast.Name) else (
+                node.func.attr if isinstance(node.func, ast.Attribute) else None)
+            return name == 'ChainMap'
+        if is_call(arg):
+            return arg
+        if not isinstance(arg, ast.Name):
+            return None
+        assigns = [s for s in self.own()
+                   if (isinstance(s, ast.Assign) and len(s.targets) == 1
+                       and isinstance(s.targets[0], ast.Name) and s.targets[0].id == arg.id)
+                   or (isinstance(s, ast.AnnAssign) and isinstance(s.target, ast.Name)
+                       and s.target.id == arg.id and s.value is not None)]
+        chainmapish = (isinstance(t, tuple) and t[0] == 'obj' and t[1] == 'ChainMap') \
+            or any(is_call(s.value) for s in assigns)
+        if not chainmapish:
+            return None
+        stores = [0]
+
+        def walk(node):
+            if node is not self.fn and isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                return
+            if isinstance(node, ast.Name) and node.id == arg.id and isinstance(node.ctx, ast.Store):
+                stores[0] += 1
+            for child in ast.iter_child_nodes(node):
+                walk(child)
+        walk(self.fn)
+        if arg.id in self.params or stores[0] != 1 or len(assigns) != 1 or not is_call(assigns[0].value):
+            return _CM_AMBIGUOUS
+        return assigns[0].value
+
+    def chainmap_matches(self, c, arg):
+        """True when every mapping in a ChainMap display has the Counter's key type and int values."""
+        if arg is None or arg.keywords:
+            return False
+        for a in arg.args:
+            t = self.r.infer(a, self.env)
+            if self.mapping_key(t) != c.K or self.mapping_value(t) not in ('int', 'bool'):
+                return False
+        return True
+
+    def ctr_subtract(self, st, c, call):
+        r = self.r
+        recv = call.func.value
+        if call.keywords or len(call.args) != 1:
+            r.refuse(st, 'Counter.subtract takes one iterable or mapping')
+        arg = call.args[0]
+        t = r.infer(arg, self.env)
+        cm = self.chainmap_call(arg, t)
+        if cm is _CM_AMBIGUOUS:
+            r.refuse(st, 'Counter.subtract(ChainMap): the ChainMap argument must be a direct ChainMap(...) call '
+                     'or a name assigned exactly once by a ChainMap(...) display, not a parameter or a name with '
+                     'more than one binding')
+        if cm is not None or (isinstance(t, tuple) and t[0] == 'obj' and t[1] == 'ChainMap'):
+            if not self.chainmap_matches(c, cm):
+                r.refuse(st, 'Counter.subtract(ChainMap): the ChainMap keys / values must be written out in '
+                         'the call and match the Counter (key %s, int values)' % tname(c.K))
+            return self.subtract_chainmap(st, recv, arg)
+        if self.mapping_arg(arg, t):
+            if isinstance(arg, ast.Dict) and not arg.keys:
+                return self.put_stmt(st, 'pass')
+            self.check_mapping(st, c, t, 'Counter.subtract(mapping)')
+            if isinstance(arg, ast.Name):
+                src, head = arg, ''
+            else:
+                name = r.new_name('m')
+                src = ast.Name(id=name, ctx=ast.Load())
+                head = '%s = %s' % (name, ast.unparse(arg)) + chr(10) + ' ' * st.col_offset
+            helper = r.ctr(c.K, 'subtract_map', T_CTR_SUBTRACT_MAP)
+            new = ast.Expr(value=ast.Call(func=ast.Name(id=helper, ctx=ast.Load()),
+                                          args=[recv, src], keywords=[]))
+            return self.put_stmt(st, head + ast.unparse(new))
+        if not self.iterable_arg(arg, t):
+            return
+        helper = r.ctr(c.K, 'subtract_iter', T_CTR_SUBTRACT_ITER)
+        if is_tup(c.K) and isinstance(arg, ast.List) and not arg.elts:
+            return self.put_stmt(st, 'pass')
+        if is_tup(c.K) and not isinstance(arg, ast.Name):
+            lst = r.new_name('l')
+            it = _X(self).as_list(arg, t)
+            new = ast.Expr(value=ast.Call(func=ast.Name(id=helper, ctx=ast.Load()),
+                                          args=[recv, ast.Name(id=lst, ctx=ast.Load())], keywords=[]))
+            return self.put_stmt(st, '%s = %s' % (lst, ast.unparse(it)) + chr(10) + ' ' * st.col_offset
+                                 + ast.unparse(new))
+        it = self.iter_expr(arg)
+        new = ast.Expr(value=ast.Call(func=ast.Name(id=helper, ctx=ast.Load()), args=[recv, it], keywords=[]))
+        self.put_stmt(st, ast.unparse(new))
+
+    def iterable_arg(self, arg, t):
+        """True when the argument is certainly not a mapping; an unknown one is left to the general path,
+        whose Counter.subtract dispatches on the runtime type (a dict subtracts values, anything else keys)."""
+        if isinstance(t, C):
+            return t.kind == 'dq'
+        if t == 'str':
+            return True
+        if isinstance(t, tuple) and t[0] in ('list', 'set', 'iter', 'range', 'tup', 'tuple'):
+            return True
+        if isinstance(arg, (ast.List, ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.Set, ast.Tuple)):
+            return True
+        return isinstance(arg, ast.Constant) and isinstance(arg.value, str)
+
+    def subtract_chainmap(self, st, recv, arg):
+        """`c.subtract(cm)` with a ChainMap: subtract the value of every item, as CPython's Mapping branch does."""
+        r = self.r
+        if isinstance(recv, ast.Name):
+            target, head = recv.id, ''
+        else:
+            target = r.new_name('c')
+            head = '%s = %s' % (target, ast.unparse(recv)) + chr(10) + ' ' * st.col_offset
+        key, val = r.new_name('k'), r.new_name('v')
+        text = ('for %s, %s in %s.items():' % (key, val, ast.unparse(arg)) + chr(10)
+                + ' ' * (st.col_offset + 4)
+                + '%s[%s] = %s.get(%s, 0) - %s' % (target, key, target, key, val))
+        self.put_stmt(st, head + text)
 
     def iter_expr(self, node):
         """An iterable expression, a bare collection read as its snapshot / keys."""
@@ -2364,8 +2595,10 @@ class _X(ast.NodeTransformer):
                 return ast.Dict(keys=[], values=[])
             t = r.infer(node.args[0], self.env)
             a = node.args[0]
-            if (isinstance(t, C) and t.kind in ('ctr', 'dds', 'od')) or (isinstance(t, tuple) and t[0] == 'dict'):
-                if t.kind != 'ctr' if isinstance(t, C) else t[2] != 'int':
+            if self.s.mapping_arg(a, t):
+                if isinstance(t, C) and t.kind != 'ctr':
+                    r.refuse(node, 'Counter(mapping) needs int values')
+                if isinstance(t, tuple) and t[0] == 'dict' and t[2] != 'int':
                     r.refuse(node, 'Counter(mapping) needs int values')
                 return call(attr(self.visit_argument(a), 'copy'))
             if t == 'str':
@@ -2860,8 +3093,7 @@ class _X(ast.NodeTransformer):
                                 'c.most_common(n):`, comprehensions of that form, most_common(n)[i][0|1], len(), '
                                 'dict() and print()')
                 if m in ('update', 'subtract'):
-                    self.refuse(node, 'Counter.%s is built only as a statement on its own line%s' % (
-                        m, '' if m == 'update' else ' (subtract is not built)'))
+                    self.refuse(node, 'Counter.%s is built only as a statement on its own line' % m)
             if c.kind == 'od' and m in ('move_to_end', 'popitem'):
                 self.refuse(node, 'OrderedDict.%s is built only as a statement (`d.move_to_end(k)`, '
                             '`k, v = d.popitem(last=False)`)' % m)

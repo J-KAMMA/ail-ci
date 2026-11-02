@@ -94,6 +94,7 @@ class Lower(Stmts, Calls, Lams, Exprs):
         self.specs = {}
         self.pristine = {}
         self.binds = {}
+        self.no_table_dict = 0
 
     # ------------------------------------------------------------------------------------------
     def collect(self):
