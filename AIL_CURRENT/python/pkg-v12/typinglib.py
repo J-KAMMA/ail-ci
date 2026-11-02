@@ -124,6 +124,21 @@ def _scope_locals(nodes):
     return collector.names
 
 
+def _module_rebinds(nodes, guarded):
+    """The guarded names bound at module level, not counting the typing import itself."""
+    collector = _Bindings()
+    for node in nodes:
+        if isinstance(node, ast.Import) and any(alias.name == 'typing' for alias in node.names):
+            other = [alias for alias in node.names if alias.name != 'typing']
+            if other:
+                collector.visit(ast.Import(names=other))
+            continue
+        if isinstance(node, ast.ImportFrom) and not node.level and node.module == 'typing':
+            continue
+        collector.visit(node)
+    return collector.names & guarded
+
+
 class _Fix(ast.NodeTransformer):
     def __init__(self, binder, typed_dicts, new_types, ident, bad, dict_name, dict_bound):
         self.binder = binder
@@ -251,11 +266,8 @@ class _Fix(ast.NodeTransformer):
             if len(node.args) == 2 and not node.keywords:
                 return ast.copy_location(node.args[1], node)
             refuse(node, 'cast(T, value) takes two positional arguments here')
-        if (is_typed_dict and not self._dict_shadowed() and not node.args
-                and len(node.keywords) == 1 and node.keywords[0].arg is None):
-            return ast.copy_location(ast.Call(func=ast.Name(id='dict', ctx=ast.Load()),
-                                              args=[node.keywords[0].value], keywords=[]), node)
-        if is_typed_dict and self._dict_shadowed():
+        if is_typed_dict and (self._dict_shadowed()
+                              or any(k.arg is None for k in node.keywords)):
             self.dict_used = True
             keys = [ast.Constant(value=k.arg) if k.arg is not None else None
                     for k in node.keywords]
@@ -304,6 +316,9 @@ def _defs(ident, bad, ident_used, bad_used, dict_name, dict_used):
     if dict_used:
         out.append(ast.parse(
             'def %s(positional, keywords):\n'
+            '    for key in keywords:\n'
+            '        if not isinstance(key, str):\n'
+            '            raise TypeError("keywords must be strings")\n'
             '    if len(positional) > 1:\n'
             '        raise TypeError("dict expected at most 1 argument, got %%d" %% len(positional))\n'
             '    result = {}\n'
@@ -368,7 +383,8 @@ def run(tree, text):
         body.append(stmt)
     tree.body = body
     declared = typed_dicts | set(new_types)
-    rebound = _scope_locals(body) & declared
+    guarded = declared | set(binder.names) | set(binder.aliases)
+    rebound = _module_rebinds(body, guarded)
     if rebound:
         name = sorted(rebound)[0]
         refuse(tree.body[0] if tree.body else tree,

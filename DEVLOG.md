@@ -1,3 +1,17 @@
+## 2026-11-02 -- typing review 2: module-level cast shadowing, TypedDict ** keys (job-rbstd_typing-11021949)
+
+Review follow-up on `8d2a60e`. A module-level rebinding of a handled typing name or of its module alias is now
+detected before lowering and refused by name (`the typing name cast is also assigned at module level ...`) instead
+of silently lowering the rebound `cast` to its value; those programs then build on the general path and print
+CPython's `MY:5` / `M:5`. A `TypedDict` construction with a `**` mapping now goes through the generated helper even
+when `dict` is not shadowed, and the helper checks every keyword key with `isinstance(key, str)` before building,
+so `Movie(**{1: 2})` raises `TypeError: keywords must be strings` for a positional class, a functional declaration,
+a parameter named `dict`, and values reaching the call through an argument, a list item, an attribute and a dict
+value. The `test_ail_std_typing` boundary program now covers the non-string key. Probes
+`p_cast_module_shadow.py`, `p_cast_alias_module.py`, `p_td_kw_unshadow.py`, `p_td_kw_param.py`, `p_td_kw_places.py`,
+`p_td_kw_mixed.py`, `p_td_functional_kw.py`, `p_td_kw_ok.py` and `p_cast_shadow_local.py` match CPython on both
+`cmp.sh` builds (or are refused by name); `p_cast_pre_rebind.py` is refused by name.
+
 ## 2026-11-02 -- typing review: cast and TypedDict shadowing (job-rbstd_typing-11021401)
 
 Review follow-up on `53a8bf0`. `typinglib` now checks the scope stack before lowering `cast`: a parameter, local,

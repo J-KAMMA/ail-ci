@@ -75,6 +75,10 @@ def main() -> None:
     print(sorted(p.items()))
     m: Movie = {"title": "B"}
     print(m)
+    try:
+        Movie(**{1: 2})
+    except TypeError as exc:
+        print("badkeys", exc)
     u = UserId(5)
     print(add(u, 3), UserId(1) + UserId(2))
     n = Name("ada")
