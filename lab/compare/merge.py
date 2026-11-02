@@ -10,7 +10,7 @@ or exit code differs from the CPython reference is shown as `n/a MISMATCH` and t
 a failed build is `build failed`. The two AIL columns are `ail` (the .ail source) and `ail-py` (the CPython
 source compiled by AIL); both are compared with the best of c, rust, go, nim and python.
 """
-import argparse, json, math, sys
+import argparse, datetime, json, math, os, sys
 from pathlib import Path
 
 LANGS = ['ail', 'ail-py', 'c', 'rust', 'go', 'nim', 'python']
@@ -34,6 +34,18 @@ METRICS = [
     ('compile_s', 'Compile time (s, median of 3 cold builds)', lambda v: '%.2f' % v),
     ('build_disk_kib', 'Build disk (MiB, fresh build dir with its caches)', lambda v: '%.2f' % (v / 1024)),
     ('wall_ms', 'Wall time (ms, median of 5 timed runs of the perf input)', lambda v: '%.0f' % v),
+]
+
+
+METHOD_LINES = [
+    '- Build: gcc -O2 -std=c11; rustc -C opt-level=3; go build; nim c -d:release; AIL `compile` (default build); CPython runs the source.',
+    '- Compile time: wall time of the build command, median of 3 cold builds, each in a fresh directory with its own AIL_CACHE, TMPDIR, GOCACHE, GOPATH, nimcache and XDG cache.',
+    '- Build disk: `du -sk` of that fresh directory after the first build (binary, caches, leftovers), minus the empty scaffold.',
+    '- AIL path: `compile --strict` accepting the program means typed; otherwise the default build used the general path (the reason is quoted).',
+    '- Instructions: `perf_event_open` (tools/icount.c) when the runner exposes the counter, otherwise valgrind callgrind Ir. User space only.',
+    '- Correctness: every public and hidden case of the task (gen.py) is run in every language; stdout and exit code must equal the CPython reference.py output.',
+    '- Wall time: median of 5 runs of the perf input (2-3 when one run takes more than 15 s). Same runner for every language.',
+    '- Peak RSS: `/usr/bin/time -v` Maximum resident set size, median of the timed runs.',
 ]
 
 
@@ -97,7 +109,8 @@ def status_table(tasks):
     lines = ['### Status: output vs the CPython reference, and AIL path', '', '| ' + ' | '.join(head) + ' |', '|' + '---|' * len(head)]
     for t in tasks:
         res = t['results']
-        row = [t['task'], '%.1f MB' % (t['input_bytes'] / 1e6)]
+        size = t.get('input_bytes')
+        row = [t['task'], '%.1f MB' % (size / 1e6) if isinstance(size, (int, float)) else '-']
         for l in LANGS:
             r = res.get(l)
             row.append('not run' if r is None else 'build failed' if not r.get('build_ok') else r.get('status', '-').replace('ok', 'match'))
@@ -196,18 +209,14 @@ def main():
     out += ['### Toolchain install size (KiB, `du -sk`, once)', '', '| language | KiB |', '|---|---:|']
     out += ['| %s | %s |' % (NAMES.get(k, k), '{:,}'.format(v) if v else 'missing') for k, v in first.get('toolchain_kib', {}).items()]
     out += ['', '### Tools', ''] + ['- %s: %s' % (k, v) for k, v in first.get('tools', {}).items()]
-    out += ['', '### Method', '',
-            '- Build: gcc -O2 -std=c11; rustc -C opt-level=3; go build; nim c -d:release; AIL `compile` (default build); CPython runs the source.',
-            '- Compile time: wall time of the build command, median of 3 cold builds, each in a fresh directory with its own AIL_CACHE, TMPDIR, GOCACHE, GOPATH, nimcache and XDG cache.',
-            '- Build disk: `du -sk` of that fresh directory after the first build (binary, caches, leftovers), minus the empty scaffold.',
-            '- AIL path: `compile --strict` accepting the program means typed; otherwise the default build used the general path (the reason is quoted).',
-            '- Instructions: `perf_event_open` (tools/icount.c) when the runner exposes the counter, otherwise valgrind callgrind Ir. User space only.',
-            '- Correctness: every public and hidden case of the task (gen.py) is run in every language; stdout and exit code must equal the CPython reference.py output.',
-            '- Wall time: median of 5 runs of the perf input (2-3 when one run takes more than 15 s). Same runner for every language.',
-            '- Peak RSS: `/usr/bin/time -v` Maximum resident set size, median of the timed runs.']
+    out += ['', '### Method', '', *METHOD_LINES]
     print('\n'.join(out))
     if args.json:
-        Path(args.json).write_text(json.dumps(dict(tasks=tasks, geomean_ratio_vs_best_other=summary, scorecard=scores), indent=1) + '\n', encoding='utf8')
+        payload = dict(head=first.get('head', '?'), date=first.get('date') or datetime.date.today().isoformat(),
+                       tasks=tasks, geomean_ratio_vs_best_other=summary, scorecard=scores)
+        if os.environ.get('GITHUB_RUN_ID'):
+            payload['run'] = os.environ['GITHUB_RUN_ID']
+        Path(args.json).write_text(json.dumps(payload, indent=1) + '\n', encoding='utf8')
 
 
 if __name__ == '__main__':

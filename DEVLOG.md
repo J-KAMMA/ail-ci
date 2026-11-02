@@ -116,6 +116,42 @@ earlier operand stays on the typed path and that the unsafe order is named with
 `fz216_safe` in `/tmp/probes` matched CPython on both builds; the full `fz216` matched through
 line 5 and then hit the pre-existing int64 overflow.  Modules run:
 `test_ail_fz216`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`.
+## 2026-11-02 -- docs review fix: no invented per-task values in the comparison (job-reltable-11022358)
+
+The fixture now contains only what run 41393616319 actually supplied for binary size and compile
+time: the ranges `AIL 34–102 / Rust 4450–4518 KiB` and `AIL 1.87–11.17 / Rust 0.19–0.56 s`, held
+in a top-level `ranges` object.  The invented per-task binary/compile values and their ratios and
+geomean rows are gone; those metric tables show n/a per task and a `Supplied range (no per-task
+values)` line that states the one count the ranges prove (binary 10/10, compile 0/10).  The same
+counts drive the README lines.  The fixture also no longer carries per-task AIL path/`why_not_typed`
+or the toolchain versions and pins, which the task did not supply; the document shows the AIL path
+as absent and says `No tool versions in the report.`  The AIL (py src) refusals stay because the
+review verified them at HEAD.  `test_compare_publish` now checks the per-task n/a values, the range
+counts, the absent paths and tool versions, the fresh fixture render and the README counts.
+
+## 2026-11-02 -- docs review fix: the comparison fixture only carries supplied numbers (job-reltable-11022136)
+
+The fixture `tools/testdata/compare-report.json` now keeps only the values supplied for run
+41393616319: the ten AIL/Rust wall pairs, the binary and compile ranges, and the four RSS pairs
+where AIL loses.  Instructions, build disk, C/Go/Nim/Python rows and toolchain sizes are absent, so
+the document shows not run/n-a and the scorecards state 0/0 for those columns instead of inventing
+wins.  The AIL (py src) column no longer copies AIL; it lists only the three refusals (`scar_life`,
+`tally_lang`, `tree_fold`) and not run for the rest.  `run_task.py` records the run date and
+`merge.py` writes `head`, `date` and the GitHub run id into its JSON, so the header gets a date from
+the real report shape.  The README section now claims only the AIL/Rust numbers that exist.
+
+## 2026-11-02 -- docs: publish the compare-lab language comparison (job-reltable-11022136)
+
+Added `tools/compare_publish.py`, which turns the compare-lab report JSON into `docs/COMPARISON.md`:
+the AIL commit and date, the per-task scorecards for AIL and AIL (py src) against Rust and the best
+other language, all six metric columns (instructions, RSS, binary size, compile time, build disk and
+wall time), the geomean rows, the toolchain versions, the AIL paths and refusals, and the method
+section from `merge.METHOD_LINES`. No number is hand-edited: the committed document is a fresh render
+of `tools/testdata/compare-report.json` (run 41393616319, commit 4f1245b), and the fixture is named in
+the header. `README.md` links the document and states the win counts against Rust. The new
+`test_compare_publish` module checks the fixture render against the committed file, every metric
+heading, both AIL scorecards, the refusals, the method lines and the CLI; it is registered through
+`AIL_CURRENT/tests.d/test_compare_publish.txt`.
 
 ## 2026-11-02 -- prog21 review fix: abs of a bool stays in CPython
 
