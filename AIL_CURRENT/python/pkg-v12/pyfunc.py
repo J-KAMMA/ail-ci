@@ -17064,6 +17064,17 @@ def _call(node, ctx):
             return ctx.acols(a[0].value.id)
         lo, n, _, pre = _iter_plan(a[0], ctx)          # len(set(xs)), len(sorted(xs)), ...
         ctx.pre.extend(pre)
+        is_range = ((isinstance(a[0], ast.Call) and isinstance(a[0].func, ast.Name)
+                     and a[0].func.id == 'range'
+                     and 'range' not in ctx.funcs and 'range' not in ctx.classes)
+                    or (isinstance(a[0], ast.Name) and ctx.types.get(a[0].id) == RANGE))
+        if is_range:
+            # `range` is (start, stop, step), but `_iter_plan` answers (first, limit) for a 1/2
+            # argument range and (0, count) for a 3-argument one.  Range length is never negative
+            # (`len(range(5, 0))`, `len(range(-3))` are 0), so let the shared counter apply the
+            # clamp/overflow rule instead of subtracting the bounds by hand.
+            ctx.parts.add('RANGEITER')
+            return 'ail_range_count(%s, %s, 1)' % (lo, n)
         return '(%s - %s)' % (n, lo) if lo != '0' else n
     if f in ('sum', 'max', 'min', 'any', 'all') and f not in ctx.funcs and len(a) == 1:
         return _inline_fold(f, a[0], ctx)

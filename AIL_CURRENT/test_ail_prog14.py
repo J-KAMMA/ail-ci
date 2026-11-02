@@ -23,6 +23,9 @@ P3  the gate's boundaries: constant/local/module-constant divisors and `len` are
 P4  a module name rebound after its literal (`MOD += -4`) is not a one-time constant, so its helper
     stays out; only a name bound exactly once is proven.  A parameter rebound under a branch is not
     a proven-positive local.  Both programs still match CPython.
+P5  a constant bound after the first call (CPython raises `NameError`) is not kept, a `range` with
+    a zero step is refused so the clone cannot raise outside CPython, and `len(range(a, b))`
+    matches CPython when `a > b` and when the bound is negative.
 """
 import json
 import os
@@ -124,6 +127,56 @@ except ZeroDivisionError as e:
 '''
 
 
+LATE_CONSTANT = '''
+def f(n: int) -> int:
+    return n % MOD
+
+
+print(f(10))
+MOD = 7
+'''
+
+
+RANGE_ZERO = '''
+def f(n: int) -> int:
+    total = 0
+    for i in range(0, n, 0):
+        total += i
+    return total
+
+
+try:
+    print(f(5))
+except ValueError as e:
+    print('VE', e)
+'''
+
+
+RANGE_LEN = '''
+def f(n: int) -> int:
+    r = range(n)
+    return len(r)
+
+
+def g(a: int, b: int) -> int:
+    return len(range(a, b))
+
+
+def h(n: int) -> int:
+    return len(range(0, n, 2))
+
+
+def k(n: int) -> int:
+    return len(range(n, 0, -2))
+
+
+print(f(5), f(-3))
+print(g(0, 5), g(5, 0), g(-3, 2), g(2, -3))
+print(h(5), h(0), h(-4))
+print(k(5), k(0), k(-4))
+'''
+
+
 def run(cmd, cwd=None, stdin=b'', env=None):
     return subprocess.run(cmd, cwd=cwd, input=stdin, env=env, capture_output=True, timeout=600)
 
@@ -186,6 +239,20 @@ class Prog14(unittest.TestCase):
                     self.assertNotIn('by_aug', accelerated, report)
                 else:
                     self.assertNotIn('by_param', accelerated, report)
+                self.compare(src, launcher)
+
+    def test_late_constant_and_range_boundaries(self):
+        with tempfile.TemporaryDirectory(prefix='ail-prog14-boundary-') as tmp:
+            expected = {
+                ('late', LATE_CONSTANT): set(),
+                ('zero', RANGE_ZERO): set(),
+                ('len', RANGE_LEN): {'f', 'g', 'h', 'k'},
+            }
+            for (name, text), wanted in expected.items():
+                source = Path(tmp) / (name + '.py')
+                source.write_text(text, encoding='utf-8')
+                src, launcher, report = self.build(tmp, source, name)
+                self.assertEqual(set(report['accelerated']), wanted, report)
                 self.compare(src, launcher)
 
 

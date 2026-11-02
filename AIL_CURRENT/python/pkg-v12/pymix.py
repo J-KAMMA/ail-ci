@@ -836,14 +836,49 @@ def _written_globals(tree):
     return written
 
 
+def _runs_user_code(node):
+    """Whether a top-level statement can call a function (or otherwise run code that might read a
+    module name) while the module is being imported.  Plain assignments/arithmetic and imports do
+    not; a call in an expression or in a definition's decorators/defaults does."""
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return False
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return bool(node.decorator_list
+                    or any(d is not None for d in node.args.defaults)
+                    or any(d is not None for d in node.args.kw_defaults))
+    if isinstance(node, ast.ClassDef):
+        return bool(node.decorator_list or node.bases or node.keywords)
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+        return False                            # a docstring or other no-op constant
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        return any(isinstance(child, (ast.Call, ast.Lambda, ast.Await, ast.Yield, ast.YieldFrom))
+                   for child in ast.walk(node))
+    return True
+
+
+def _module_order_limit(tree):
+    """Index of the first top-level statement that may call user code.  A literal constant bound
+    before that point is already bound when any function can run; a constant bound after it may be
+    read before its assignment (CPython's `NameError`), so keeping it in the slice would compile a
+    value CPython never had."""
+    for index, node in enumerate(tree.body):
+        if _runs_user_code(node):
+            return index
+    return len(tree.body)
+
+
 def _literal_module_assignments(tree):
     """The top-level literal assignments that are safe to keep in a candidacy slice: the name is
-    bound exactly once at module scope and no function rebinds it under `global`.  A rebound name
-    stays out, so `to_c` refuses a function that reads it instead of compiling a stale value."""
+    bound exactly once at module scope, before any statement that can run user code, and no
+    function rebinds it under `global`.  A rebound or late name stays out, so `to_c` refuses a
+    function that reads it instead of compiling a stale value."""
     counts = _module_binding_counts(tree)
     written = _written_globals(tree)
+    limit = _module_order_limit(tree)
     keep = set()
-    for node in tree.body:
+    for index, node in enumerate(tree.body):
+        if index >= limit:
+            continue
         if isinstance(node, ast.Assign) and len(node.targets) == 1 \
                 and isinstance(node.targets[0], ast.Name):
             name = node.targets[0].id

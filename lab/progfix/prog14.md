@@ -2,21 +2,21 @@
 
 Profiler: CPython 3.12 `cProfile`, with the module-level imports executed before the profile and
 `main()` profiled, so startup/import time is not counted as program work.  The four stdin-driven
-programs were given a scaled input (`/tmp/profdata/*.in`: t341 n=2,000,000; t168/t164 60,000 CSV
+programs were given a scaled input (`/tmp/profdata/*.in`: t341 n=200,000; t168/t164 60,000 CSV
 rows; t318 100,000 integers) so a hot function is visible; the gdev programs do their fixed work.
 "own" is cProfile `tottime`.  The hot set is the functions that together hold >= 80% of the user
 function time.
 
 | program | hot function(s) (own time) | share of user time | typed before | typed after / first reason |
 | --- | --- | --- | --- | --- |
-| g02_002 | `proper_divisor_sum` 0.031 s | 97% | mixed-mode candidate, but the hybrid refused it: `division or power can raise` | **accelerated**: divisor `i` is a local every binding keeps positive (`i = 2; i += 1`) |
-| t341 | `count_valid` 0.112 s | ~100% | not selected: `unresolved-return` (tuple assignment `a, b = b, (a + b) % MOD`); the slice also dropped `MOD` | **selected + accelerated**: tuple inference and literal module constants; `% MOD` and `range` pass the gate |
+| g02_002 | `proper_divisor_sum` 0.056 s | ~95% | mixed-mode candidate, but the hybrid refused it: `division or power can raise` | **accelerated**: divisor `i` is a local every binding keeps positive (`i = 2; i += 1`) |
+| t341 | `count_valid` 0.019 s | ~100% | not selected: `unresolved-return` (tuple assignment `a, b = b, (a + b) % MOD`); the slice also dropped `MOD` | **selected + accelerated**: tuple inference and literal module constants; `% MOD` and `range` pass the gate |
 | g15_038 | `main`, `symbolic_name`, `make_error`, `round_trips` (all below cProfile's 1 ms) | n/a (<1 ms total) | no: `main`/`make_error`/`symbolic_name` `unresolved-return`; `round_trips` `to_c-refused` (`getattr`) | still no. Follow-up: OSError/tuple/dict module helpers and `getattr`; `symbolic_name` also hits `a method on Attribute` for `errno.errorcode.get` |
 | g16_036 | `inorder` (64/16 recursive calls) | n/a (<1 ms total) | no: `unresolved-param tree`; `Tree = Optional[Tuple[...]]` is not a supported annotation | still no. Follow-up: generators (`yield`/`yield from`) and `Optional[Tuple[...]]` values |
-| t168 | `main` 0.031 s own (plus csv internals) | 18% own; `main` is the only user function in the hot path | default build compiles the whole program typed; the hybrid has no unit for `main` (`unresolved-return`, None result, csv/print calls) | still runs `main` in CPython. Follow-up: hybrid functions returning None that call/I/O |
+| t168 | `main` 0.058 s own (plus csv internals) | 19% own; `main` is the only user function in the hot path | default build compiles the whole program typed; the hybrid has no unit for `main` (`unresolved-return`, None result, csv/print calls) | still runs `main` in CPython. Follow-up: hybrid functions returning None that call/I/O |
 | g25_012 | `main`, `categorize` (12 calls, <1 ms) | n/a (<1 ms total) | no: `categorize` `to_c-refused` -- `a `match` statement.` | still no. Follow-up: lower `match` (literal/class/wildcard cases and guards) to an if/elif chain in the typed emitter |
-| t318 | `update` 0.069 s, `main` 0.069 s, `query` 0.060 s | 87% | no: `update`/`query` are nested functions (pymix selects top-level functions only); whole program falls back on `'tokens' is a blist` | still no. Follow-up: typed clones for nested functions that capture a list, or a typed whole-program path for this shape |
-| t164 | `main` 0.068 s own (plus csv internals) | 31% own; `main` is the only user function in the hot path | no: `unresolved-return`; typed whole program falls back on `a method on BoolOp` and `csv` | still no. Follow-up: csv parsing / container-returning main on the typed path |
+| t318 | `main` 0.119 s, `update` 0.116 s, `query` 0.108 s | 88% | no: `update`/`query` are nested functions (pymix selects top-level functions only); whole program falls back on `'tokens' is a blist` | still no. Follow-up: typed clones for nested functions that capture a list, or a typed whole-program path for this shape |
+| t164 | `main` 0.125 s own (plus csv internals) | 32% own; `main` is the only user function in the hot path | no: `unresolved-return`; typed whole program falls back on `a method on BoolOp` and `csv` | still no. Follow-up: csv parsing / container-returning main on the typed path |
 
 ## Fixes in this job
 
@@ -46,10 +46,24 @@ function time.
    boolean, and a read before the binding are not proven.  This closes the parameter-rebind and
    loop-variable holes the first version of the proof had.
 
+6. A literal module constant is kept in the slice only when it is bound before the first top-level
+   statement that can call user code.  A constant assigned after a call (CPython raises `NameError`
+   when that call reads it) is dropped, so the hybrid refuses the clone instead of compiling a value
+   CPython never had.
+7. The body gate refuses `range(start, stop, step)` unless `step` is provably nonzero (the same
+   literal/local/module-constant proof as a divisor), because a zero step raises `ValueError` and
+   the typed clone has no CPython exception frame to unwind to.  `range(a, b)` and `range(n)` keep
+   their implicit step of 1.
+8. `len(range(...))` now uses the runtime range counter (`ail_range_count`) instead of subtracting
+   the bounds, so `len(range(a, b))` is 0 when `a >= b` and `len(range(-3))` is 0.  This closes the
+   old negative-length result and the hybrid's newly exposed path; the ten `lab/compare` generated C
+   files are unchanged because none of them call `len` on a range.
+
 Bad divisors stay in CPython: a parameter divisor, a divisor reached through a list item, attribute
 or dict value, a literal zero or negative local, a boolean, or any name whose bindings are not all
 positive are not proven.  No int is wrapped; the existing overflow flag and CPython fallback still
-apply.
+apply.  A parameter step, a local zero step and a zero module constant keep a `range` loop in
+CPython; a negative literal step is proven nonzero and may be accelerated.
 
 ## Follow-ups (bigger features, exact first messages)
 

@@ -133,14 +133,44 @@ def _written_globals(tree):
     return written
 
 
+def _runs_user_code(node):
+    """Whether a top-level statement can call a function while the module is being imported."""
+    if isinstance(node, (ast.Import, ast.ImportFrom)):
+        return False
+    if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        return bool(node.decorator_list
+                    or any(d is not None for d in node.args.defaults)
+                    or any(d is not None for d in node.args.kw_defaults))
+    if isinstance(node, ast.ClassDef):
+        return bool(node.decorator_list or node.bases or node.keywords)
+    if isinstance(node, ast.Expr) and isinstance(node.value, ast.Constant):
+        return False                            # a docstring or other no-op constant
+    if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+        return any(isinstance(child, (ast.Call, ast.Lambda, ast.Await, ast.Yield, ast.YieldFrom))
+                   for child in ast.walk(node))
+    return True
+
+
+def _module_order_limit(tree):
+    """Index of the first top-level statement that may call user code."""
+    for index, node in enumerate(tree.body):
+        if _runs_user_code(node):
+            return index
+    return len(tree.body)
+
+
 def _module_numbers(tree):
     """Top-level `NAME = <numeric literal>` bindings that are genuine one-time constants: the name
-    is bound exactly once at module scope and no function rebinds it under `global`.  A divisor
-    naming one is provably nonzero when the literal is; a rebound name is not proven."""
+    is bound exactly once at module scope, before any statement that can run user code, and no
+    function rebinds it under `global`.  A divisor naming one is provably nonzero when the literal
+    is; a rebound or late name is not proven."""
     counts = _module_binding_counts(tree)
     written = _written_globals(tree)
+    limit = _module_order_limit(tree)
     found = {}
-    for node in tree.body:
+    for index, node in enumerate(tree.body):
+        if index >= limit:
+            continue
         if isinstance(node, ast.Assign) and len(node.targets) == 1 \
                 and isinstance(node.targets[0], ast.Name):
             name = node.targets[0].id
@@ -239,11 +269,12 @@ def _provably_nonzero(node, fn, module_numbers):
 _SAFE_CALLS = frozenset({'range', 'len'})
 
 
-def _safe_builtin_call(node, fn, module_names):
+def _safe_builtin_call(node, fn, module_names, module_numbers=None):
     """`range(...)` and `len(...)` when the name is still the builtin (not shadowed at module
     scope, by a parameter, a local, or a nested def).  The typed emitter only compiles these on
     values it already knows, and neither has a side effect; `range` over int64 arguments and
-    `len` of a typed list/str cannot raise.  Every other call stays out of the clone."""
+    `len` of a typed list/str/range cannot raise -- except `range` with a zero step, which needs
+    the same nonzero proof as a divisor.  Every other call stays out of the clone."""
     if not isinstance(node.func, ast.Name) or node.func.id not in _SAFE_CALLS:
         return False
     name = node.func.id
@@ -258,7 +289,10 @@ def _safe_builtin_call(node, fn, module_names):
         if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) and child.name == name:
             return False
     if name == 'range':
-        return 1 <= len(node.args) <= 3
+        if not 1 <= len(node.args) <= 3:
+            return False
+        return len(node.args) != 3 or _provably_nonzero(
+            node.args[2], fn, module_numbers or {})
     return len(node.args) == 1
 
 
@@ -281,7 +315,8 @@ def _unsafe_body(fn, module_numbers=None, module_names=()):
         if isinstance(node, ast.BinOp) and isinstance(node.op, (ast.Div, ast.FloorDiv, ast.Mod)) \
                 and not _provably_nonzero(node.right, fn, module_numbers):
             return 'division or power can raise'
-        if isinstance(node, ast.Call) and not _safe_builtin_call(node, fn, module_names):
+        if isinstance(node, ast.Call) and not _safe_builtin_call(
+                node, fn, module_names, module_numbers):
             return 'a call can raise or have side effects'
         if isinstance(node, (ast.Raise, ast.Assert)):
             return 'the function can raise'

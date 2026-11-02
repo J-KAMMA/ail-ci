@@ -1,7 +1,27 @@
+## 2026-11-02 -- prog14 review fixes: constant order, range step and range length (job-prog14-11020844)
+
+Fixed all four review defects.  A literal module constant is now kept in the candidacy slice only
+when it is bound before the first top-level statement that can call user code; `def f(...): ...;
+print(f(10)); MOD = 7` therefore stays in CPython and raises CPython's `NameError` instead of
+printing 3.  The hybrid body gate refuses a 3-argument `range` whose step is not provably nonzero,
+so `range(0, n, 0)` runs in CPython and raises the `ValueError` the caller catches.  `len(range(...))`
+uses `ail_range_count` instead of subtracting the bounds, fixing `len(range(5, 0))` (0, not -3) and
+`len(range(-3))` (0, not -3) on both builds.  `tools/update_manifest.py` was run after adding the
+test module, so `--check` passes.
+
+Profile numbers in `lab/progfix/prog14.md` are now the measured values for the saved inputs
+(g02_002 `proper_divisor_sum` 0.056 s of 0.059 s; t341 `count_valid` 0.019 s of 0.019 s).
+`test_ail_prog14` gained late-constant, zero-step and range-length boundary cases.  Required tests
+pass: test_ail_prog14, test_ail_cpython_hybrid, test_ail_range_checks, test_ail_bugs7,
+test_ail_fuzz48, test_ail_pre199, test_ail_python_syntax, test_ail_typed_tuples,
+test_ail_typed_locals, test_ail_safetynet, test_ail_files, test_ail_corpus_findings3 (80 tests, 1
+skipped).  Probes `/tmp/probes/p14_*.py` match CPython on both `cmp.sh` builds and the hybrid;
+the ten `lab/compare` generated C files are byte-identical to `HEAD`.
+
 ## 2026-11-02 -- prog14: typed reach for eight real programs (job-prog14-11020844)
 
 Profiled the eight task programs with CPython 3.12; the hot functions are g02_002's
-`proper_divisor_sum` (0.030 s of 0.032 s, 94%) and t341's `count_valid` (0.011 s of 0.011 s).  Both
+`proper_divisor_sum` (0.056 s of 0.059 s, 95%) and t341's `count_valid` (0.019 s of 0.019 s).  Both
 now become hybrid typed clones.  `pymix` infers `a, b = b, (a + b) % MOD` element by element and
 keeps literal module constants in the candidacy slice, and the hybrid body gate accepts a
 `%`/`//`/`/` whose divisor is a positive literal, a local bound once to a positive literal and only
