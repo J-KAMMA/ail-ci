@@ -47,7 +47,13 @@ def parse(annotationAST, structs=()):
         raise ValueError('Callable requires [[parameter types], result type]')
     params, result = node.slice.elts
     def kind(item, result=False):
+        if isinstance(item, ast.Constant) and item.value is None and result:
+            return 'noret'
         if isinstance(item, ast.Name):
+            if item.id == 'Exception':
+                return 'exception'
+            if item.id == 'None' and result:
+                return 'noret'
             return (item.id if item.id in ('int', 'float', 'str', 'bytes', 'bytearray', 'binaryfile', 'tcpsocket', 'exception')
                     else 'struct:' + item.id if item.id in structs else None)
         if (isinstance(item, ast.Subscript) and isinstance(item.value, ast.Name)
