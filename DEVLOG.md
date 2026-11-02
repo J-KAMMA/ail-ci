@@ -1,3 +1,18 @@
+## 2026-11-02 -- onelang s2: the `ail` module for AIL-only built-ins
+
+`AIL_CURRENT/ail.py` now gives CPython the AIL-only built-ins (the free functions in
+`ail_builtin_api.DECLARATIONS` that CPython lacks, plus keyed `heappush`/`heappop`, `par_range`
+and `file_chunks`). The compiler rewrites `from ail import ...` / `import ail` in Python syntax to
+the bare built-in names and refuses an unknown name as `ail has no X`; `ail_modules` never merges
+`ail.py`. `tools/ail2py.py` writes `from ail import <sorted names>` after the `from m import *`
+lines for every AIL-only built-in the converted program calls.
+
+`tools/ail2py_cpython_check.py` runs the converter's output against each task's reference for every
+public and hidden case: nine tasks report `mismatches 0`, and `tally_lang` reports the one listed
+`hidden/long_unary_chain` CPython recursion limit. All ten compare-lab tasks still build
+`identical` under `--strict`, and `test_ail_ail2py` gained import, equal-key heap and near-2**62
+wrapping regressions.
+
 ## 2026-11-02 -- onelang s1 review 1: closing-brace and use-after-struct comment placement
 
 Two remaining comment-placement defects in `tools/ail2py.py` are fixed; no compiler file changed.

@@ -283,6 +283,12 @@ def convert(source):
     head = [f'from {name} import *' for name in imports]
     head_meta = [(uses[index][1], 0) if index < len(uses) else None
                  for index in range(len(imports))]
+    used = {node.func.id for node in ast.walk(ast.parse(text))
+            if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ail_syntax.AIL_IMPORT_NAMES}
+    if used:
+        head.append('from ail import ' + ', '.join(sorted(used)))
+        head_meta.append(None)
     lines = head + lines
     meta = head_meta + meta
     lines = _place_comments(lines, meta, _comments(source), source.splitlines(),
