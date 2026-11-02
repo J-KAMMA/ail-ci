@@ -1,3 +1,19 @@
+## 2026-11-02 -- typed reach 12, continuation: review skipped, defect probes re-run (job-prog12-11021435)
+
+The first review was skipped (time), so it named no defect.  This pass checked the prior fix
+against the current tree instead: the `tuple[int, ...]` local rewrite and the itertools alias
+check are present, and no compiler change was needed.  Independent probes in `/tmp/probes` cover
+the boundaries the report implies: empty/non-empty permutations, indexing including a negative
+index, iteration, `len`/`sum`/`sorted`/`any`/`all`/`min`/`max`/`set`/`in`/`not in`, an alias
+without an annotation, reassignment from a list and from tuple literals through a dict value, a
+list item and a loop target, a whole-name `del`, and a `tuple[float, ...]` local.  Typed builds
+match CPython or are refused by name; `print`/`==`/slice/left-`in`/store/delete of the local and
+of an alias, passing a permutation to a function, and keeping one in a list or dict are refused
+with the tuple message, and the default build matches CPython (including the `TypeError` paths).
+`test_ail_prog12`, `test_ail_tuples`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; `tools/update_manifest.py --check` is clean.  The ten
+`lab/compare` sources contain no `tuple[int, ...]` local, so their generated C is untouched.
+
 ## 2026-11-02 -- typed reach 12 fix: tuple local store/delete refused (job-prog12-11020843)
 
 Review of 2c28c6a found that the list-compatible-use check counted any `name[...]` as an
