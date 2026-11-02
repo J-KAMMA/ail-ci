@@ -1,3 +1,23 @@
+## 2026-11-02 -- prog29 review fixes: shadowed `len` and frozenset reads before assignment
+
+Two review defects, both in the module-`frozenset` support, are fixed without touching a program.
+
+* `pyfunc._frozenset_read_reason` now checks that the `len(V)` it lowers is the builtin.  A local,
+  parameter, nested `def`, class-body or module binding named `len` makes the read a refusal by
+  name instead of passing the ordered `list[str]` constant to user code.  A `len` shadowed only in
+  an unrelated inner scope still leaves the outer builtin call typed.
+* `pyc._rewrite_script` refuses a module frozenset read that CPython would run before its source
+  assignment (directly, through an argument/list item/class method, or through a program function
+  that reads it).  Previously the constant was hoisted ahead of the synthesised body, so
+  `print(f())` before `V = frozenset(...)` printed `True` instead of raising `NameError`.
+  `_count_assign_targets` now counts `AnnAssign`, so the kept annotated-frozenset branch is live
+  for direct `pyc` callers as well (the Python surface still strips the annotation to `Assign`).
+
+`AIL_CURRENT/test_ail_prog29.py` covers both refusals, the legal inner-only `len` shadow, and the
+legal read-after-assignment form.  Probes `prog29_z_shadowlen{,_param,_local,_module,_module_var,
+_inner_only}` and `prog29_r_order{,_call,_arg,_class,_list,_ok}` plus `prog29_order_unrelated` all
+match CPython on both `cmp.sh` builds or are refused by name under `--strict`.
+
 ## 2026-11-02 -- prog29 typed reach: frozenset module constants and `len(set comprehension)` (job-prog29-11021624)
 
 Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time).  `t161`, `g08_004`

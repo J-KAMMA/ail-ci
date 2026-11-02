@@ -136,6 +136,51 @@ def main() -> None:
 main()
 '''
 
+SHADOWED_LEN = '''
+V = frozenset("aeiou")
+
+
+def f() -> str:
+    def len(x: list[str]) -> str:
+        return x[0]
+    return len(V)
+
+
+print(f())
+'''
+
+SHADOWED_LEN_INNER_ONLY = '''
+V = frozenset("aeiou")
+
+
+def outer() -> int:
+    def inner() -> int:
+        len = 5
+        return len
+    return len(V)
+
+
+print(outer())
+'''
+
+READ_BEFORE_ASSIGNMENT = '''
+def f() -> bool:
+    return "a" in V
+
+
+print(f())
+V = frozenset("aeiou")
+'''
+
+READ_AFTER_ASSIGNMENT = '''
+def f() -> bool:
+    return "a" in V
+
+
+V = frozenset("aeiou")
+print(f())
+'''
+
 
 def run(cmd, cwd=None, stdin=b'', env=None):
     return subprocess.run(cmd, cwd=cwd, input=stdin, capture_output=True, env=env, timeout=600)
@@ -232,6 +277,43 @@ class TypedReach29(unittest.TestCase):
         output = (built.stdout + built.stderr).decode('utf-8', 'replace')
         self.assertNotEqual(built.returncode, 0, output[-3000:])
         self.assertIn('set comprehension with float elements', output)
+
+    def test_shadowed_len_is_refused_by_name(self):
+        src = Path(self.tmp) / 'shadowed_len.py'
+        src.write_text(SHADOWED_LEN, encoding='utf-8')
+        built, _ = self.build(src, 'shadowed_len', strict=True)
+        output = (built.stdout + built.stderr).decode('utf-8', 'replace')
+        self.assertNotEqual(built.returncode, 0, output[-3000:])
+        self.assertIn("'V' is a module-level frozenset", output)
+        self.assertIn('not the builtin', output)
+        general, exe = self.build(src, 'shadowed_len_general', strict=False)
+        self.assertEqual(general.returncode, 0, general.stderr[-3000:])
+        self.compare(src, exe, None)
+
+    def test_len_shadowed_in_an_unrelated_scope_stays_typed(self):
+        src = Path(self.tmp) / 'shadowed_len_inner.py'
+        src.write_text(SHADOWED_LEN_INNER_ONLY, encoding='utf-8')
+        built, exe = self.build(src, 'shadowed_len_inner', strict=True)
+        self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+        self.compare(src, exe, None)
+
+    def test_frozenset_read_before_assignment_is_refused_by_name(self):
+        src = Path(self.tmp) / 'read_before_assignment.py'
+        src.write_text(READ_BEFORE_ASSIGNMENT, encoding='utf-8')
+        built, _ = self.build(src, 'read_before', strict=True)
+        output = (built.stdout + built.stderr).decode('utf-8', 'replace')
+        self.assertNotEqual(built.returncode, 0, output[-3000:])
+        self.assertIn("'V' is a module-level frozenset read before its assignment", output)
+        general, exe = self.build(src, 'read_before_general', strict=False)
+        self.assertEqual(general.returncode, 0, general.stderr[-3000:])
+        self.compare(src, exe, None)
+
+    def test_frozenset_read_after_assignment_builds_typed(self):
+        src = Path(self.tmp) / 'read_after_assignment.py'
+        src.write_text(READ_AFTER_ASSIGNMENT, encoding='utf-8')
+        built, exe = self.build(src, 'read_after', strict=True)
+        self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+        self.compare(src, exe, None)
 
 
 if __name__ == '__main__':

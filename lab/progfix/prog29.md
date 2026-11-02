@@ -64,6 +64,20 @@ program matching CPython under `build --cpython`, where it runs as plain CPython
    ordinary expression usable in `+=`, comparisons and calls.  Only int and str elements are built;
    a float set comprehension is still refused by name.
 
+### Review fixes
+
+1. `pyfunc._frozenset_read_reason` (used by `_scan_module_consts`) resolves the `len` in
+   `len(VOWELS)` with Python's scoping.  If it is a parameter, local, nested definition, class
+   body or module binding rather than the builtin, the frozenset is refused by name and the read is
+   never handed the ordered `list[str]` lowering.  A `len` shadowed only in an unrelated inner
+   scope does not refuse the outer builtin call.
+2. `pyc._rewrite_script` refuses a module frozenset whose read can run before its source assignment
+   (the direct read, a read through an argument/list item, a class method, or a program function
+   called by that earlier statement).  Hoisting it ahead of the synthesised body would have turned
+   CPython's `NameError` into a value.  `_count_assign_targets` now counts `AnnAssign`, so the
+   annotated-frozenset branch can fire when `pyc` is called directly; the Python surface still
+   strips the annotation to a plain `Assign` before that point.
+
 `g17_026` now builds wholly typed and matches CPython 3.12.  All ten `lab/compare` `main.ail` builds
 were compiled with the base compiler and this tree: `program.c` is byte-identical for every one
 (`berth_sim`, `chain_relax`, `echo_pack`, `ledger_bin`, `rail_transfer`, `scar_life`, `tally_lang`,
@@ -82,6 +96,11 @@ Every probe below was run with `bash ~/tools/cmp.sh /tmp/probes/<p>.py $PWD`; "s
 | `prog29_frozenset_edges.py` (empty string, single, duplicate, non-ASCII) | pass | same |
 | `prog29_frozenset_iter.py` (`for ch in VOWELS`) | refused by name: `'VOWELS' is a module-level frozenset; only \`x in VOWELS\` and \`len(VOWELS)\` are built on the typed path (iteration order of a frozenset is not preserved)` | strict refusal as named; without `--strict` both builds take the general path, whose frozenset iteration is the documented A2 insertion order (identical to the base commit) |
 | `prog29_setcomp_float.py` (`len({x / 2 ...})`) | refused by name: `len() of a set comprehension with float elements is not built` | -- (expected refusal) |
+| `prog29_z_shadowlen.py` (nested `def len` then `len(V)`) | refused by name: the `len` is `not the builtin` | both builds match CPython: TypeError/exit 1 |
+| `prog29_z_shadowlen_{param,local,module,module_var}.py` (parameter/local/module `len`) | refused by name (`not the builtin`, or `call to len()` once the name is a module value) | both builds match CPython |
+| `prog29_z_shadowlen_inner_only.py` (inner function shadows `len`, outer call is builtin) | pass (typed) | same |
+| `prog29_r_order.py`, `prog29_r_order_{call,arg,class,list}.py` (read before assignment) | refused by name: `is a module-level frozenset read before its assignment` | both builds match CPython: NameError/exit 1 |
+| `prog29_r_order_ok.py`, `prog29_order_unrelated.py` (function defined before, called after the assignment) | pass (typed) | same |
 
 ## Follow-ups (left by name)
 

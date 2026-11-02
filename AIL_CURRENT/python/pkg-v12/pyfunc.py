@@ -2141,8 +2141,52 @@ def _module_frozenset(tree, node):
     return list(dict.fromkeys(values))
 
 
-def _frozenset_reads_ordered(tree, name):
-    """True when every read of `name` is `x in name` / `x not in name` or `len(name)`."""
+def _module_bound_names(tree):
+    """Names a module-level statement binds, used only to tell whether `len` is still the builtin."""
+    bound = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                bound.update(n.id for n in ast.walk(target) if isinstance(n, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            bound.add(node.target.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound.update((alias.asname or alias.name).split('.')[0] for alias in node.names)
+    return bound
+
+
+def _len_shadowed(tree, node, parents):
+    """Whether the `len` called at `node` resolves to a local, parameter, module binding or import
+    instead of the builtin.  `_frozenset_reads_ordered` lowers `len(V)` to the length of the
+    private list, which is only right for the builtin; a shadowing name must be refused."""
+    if 'len' in _module_bound_names(tree):
+        return True
+    child, parent = node, parents.get(node)
+    while parent is not None:
+        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if 'len' in shadowing._bound_names(parent.body, shadowing._params(parent.args)):
+                return True
+        elif isinstance(parent, ast.Lambda):
+            if 'len' in shadowing._bound_names([parent.body], shadowing._params(parent.args)):
+                return True
+        elif isinstance(parent, ast.ClassDef):
+            if 'len' in shadowing._bound_names(parent.body):
+                return True
+        elif isinstance(parent, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            bound = {n.id for g in parent.generators
+                     for n in ast.walk(g.target) if isinstance(n, ast.Name)}
+            bound.update(n.target.id for n in ast.walk(parent)
+                         if isinstance(n, ast.NamedExpr) and isinstance(n.target, ast.Name))
+            if 'len' in bound:
+                return True
+        child, parent = parent, parents.get(parent)
+    return False
+
+
+def _frozenset_read_reason(tree, name):
+    """Why a read of `name` is not `x in name` / `x not in name` / the builtin `len(name)`, or None."""
     parents = {}
     for parent in ast.walk(tree):
         for child in ast.iter_child_nodes(parent):
@@ -2156,9 +2200,18 @@ def _frozenset_reads_ordered(tree, name):
             continue
         if (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.func.id == 'len'
                 and len(parent.args) == 1 and parent.args[0] is node and not parent.keywords):
+            if _len_shadowed(tree, parent, parents):
+                return ("the `len` at line %d is a local, parameter or module binding, not the "
+                        "builtin" % parent.lineno)
             continue
-        return False
-    return True
+        return ("line %d reads %r other than `x in %s` / `x not in %s` / the builtin `len(%s)`"
+                % (node.lineno, name, name, name, name))
+    return None
+
+
+def _frozenset_reads_ordered(tree, name):
+    """True when every read of `name` is `x in name` / `x not in name` or the builtin `len(name)`."""
+    return _frozenset_read_reason(tree, name) is None
 
 
 def _scan_module_consts(tree):
@@ -2268,10 +2321,12 @@ def _scan_module_consts(tree):
                     raise Unsupported("%r is a module-level name assigned more than once; this "
                                       "compiler treats module scope as a fixed set of one-time "
                                       "constants, not a mutable global" % name)
-                if not _frozenset_reads_ordered(tree, name):
-                    raise Unsupported("%r is a module-level frozenset; only `x in %s` and "
-                                      "`len(%s)` are built on the typed path (iteration order of "
-                                      "a frozenset is not preserved)" % (name, name, name))
+                reason = _frozenset_read_reason(tree, name)
+                if reason is not None:
+                    raise Unsupported("%r is a module-level frozenset; %s (only `x in %s`, "
+                                      "`x not in %s` and the builtin `len(%s)` are built, because "
+                                      "iteration order of a frozenset is not preserved)"
+                                      % (name, reason, name, name, name))
                 consts[name] = (SLIST, frozen)
             continue
         if not isinstance(node, ast.Assign):
@@ -2311,10 +2366,12 @@ def _scan_module_consts(tree):
             continue
         frozen = _module_frozenset(tree, node.value)
         if frozen is not None:
-            if not _frozenset_reads_ordered(tree, name):
-                raise Unsupported("%r is a module-level frozenset; only `x in %s` and "
-                                  "`len(%s)` are built on the typed path (iteration order of a "
-                                  "frozenset is not preserved)" % (name, name, name))
+            reason = _frozenset_read_reason(tree, name)
+            if reason is not None:
+                raise Unsupported("%r is a module-level frozenset; %s (only `x in %s`, "
+                                  "`x not in %s` and the builtin `len(%s)` are built, because "
+                                  "iteration order of a frozenset is not preserved)"
+                                  % (name, reason, name, name, name))
             consts[name] = (SLIST, frozen)
             continue
         if isinstance(node.value, (ast.Set, ast.Dict)):

@@ -326,10 +326,10 @@ def _assign_target_names(t):
 
 
 def _count_assign_targets(nodes):
-    """How many times each name is ASSIGNED anywhere across `nodes` -- `Assign`, `AugAssign`, a
-    `for` loop's own target, `with ... as` -- at any nesting depth (inside a `for`/`if`/`while`/
-    `try` block, not just a bare top-level statement), skipping only nested `FunctionDef`/
-    `ClassDef` bodies, which are a different scope entirely. Deliberately over-, never under-,
+    """How many times each name is ASSIGNED anywhere across `nodes` -- `Assign`, `AnnAssign`,
+    `AugAssign`, a `for` loop's own target, `with ... as` -- at any nesting depth (inside a
+    `for`/`if`/`while`/`try` block, not just a bare top-level statement), skipping only nested
+    `FunctionDef`/`ClassDef` bodies, which are a different scope entirely. Deliberately over-, never under-,
     counting: a name merely referenced inside a comprehension or a lambda that this compiler will
     refuse anyway does no harm counted as an extra "assignment" (worst case a genuine constant is
     compiled as an ordinary local instead, costing nothing for a script with no other function to
@@ -359,6 +359,8 @@ def _count_assign_targets(nodes):
             if isinstance(n, ast.Assign):
                 for t in n.targets:
                     add(t)
+            elif isinstance(n, ast.AnnAssign):
+                add(n.target)
             elif isinstance(n, ast.AugAssign):
                 add(n.target)
             elif isinstance(n, ast.For):
@@ -399,6 +401,25 @@ def _reads_global(fn, name):
             else:
                 bound.add(name)
     return loads and name not in bound
+
+
+def _reads_or_calls(node, name, functions, classes, seen=None):
+    """Whether executing `node` can read the module name `name`, directly or by calling any
+    function or class of this program that (transitively) reads it.  Used for the one hoisting
+    that could hide a read-before-assignment: a module frozenset kept at module scope."""
+    if seen is None:
+        seen = set()
+    for n in ast.walk(node):
+        if not (isinstance(n, ast.Name) and isinstance(n.ctx, ast.Load)):
+            continue
+        if n.id == name:
+            return True
+        target = functions.get(n.id) or classes.get(n.id)
+        if target is not None and id(target) not in seen:
+            seen.add(id(target))
+            if _reads_or_calls(target, name, functions, classes, seen):
+                return True
+    return False
 
 
 def _entry_name(taken):
@@ -489,6 +510,35 @@ def _rewrite_script(source, force):
             kept.append(n)
             continue
         other.append(n)
+
+    # A module frozenset kept at module scope exists before every statement of the synthesised
+    # body, so a main statement that CPython would run before the source assignment must not read
+    # it: that would turn the NameError into a value.  Refuse rather than silently reorder.
+    order = {id(n): index for index, n in enumerate(expanded)}
+    other_ids = {id(n) for n in other}
+    functions = {}
+    for fn in _all_functions(expanded):
+        functions.setdefault(fn.name, fn)
+    classes = {n.name: n for n in expanded if isinstance(n, ast.ClassDef)}
+    for n in kept:
+        if isinstance(n, ast.AnnAssign):
+            target, value = n.target, n.value
+        elif isinstance(n, ast.Assign):
+            target = n.targets[0] if len(n.targets) == 1 else None
+            value = n.value
+        else:
+            continue
+        if not isinstance(target, ast.Name) or not _frozenset_literal(value):
+            continue
+        for earlier in expanded[:order[id(n)]]:
+            if id(earlier) in other_ids and _reads_or_calls(earlier, target.id, functions, classes):
+                refusal = Unsupported(
+                    "%r is a module-level frozenset read before its assignment; this compiler "
+                    "treats module constants as existing for the whole program, which would lose "
+                    "CPython's NameError. Move the frozenset assignment above the code that reads it"
+                    % target.id)
+                refusal.source_line = earlier.lineno
+                raise refusal
 
     # A module-level set / dict / list of strings that a function reads cannot become a local of the
     # synthesised body (the reader would then say "read before it is assigned"). A literal set or dict
