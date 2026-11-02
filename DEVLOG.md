@@ -1,3 +1,31 @@
+## 2026-11-02 -- prog22 typed reach: str-field records, max(key=) and 4/8 hot programs (job-prog22-11021237)
+
+Made two more of the eight prog22 programs take the typed path without touching the programs.
+`census/programs/dev/t366.py` was blocked by a local `list[tuple[str, float, str]]` annotation
+(`a records annotation whose field type is 'str'; a row holds int64 or float fields only`); such
+an annotation now names the `ail_srows` layout the compiler already inferred from
+`rows = []; rows.append((..., "..."))`, and `enumerate(rows, start)` over that kind binds the
+index and each typed field.  `ail_srows_sort_key` refuses a NaN key by name, as the float-list and
+KEYSORT sorts already did, so a NaN never returns a Timsort-incompatible order silently
+(DIFFERENCES C?-job-prog22-11021237-1).  `census/programs/gdev/g14_034.py` was blocked only by
+`max() does not accept a class; read a numeric field`; `max`/`min` with a numeric `key=` lambda
+over a list of class instances now folds in one retained source walk, keeps CPython's first-max
+tie rule and stops on an empty source with `max()/min() arg is an empty sequence`.
+
+Typed after this change: t366, t347, t318 and g14 (4/8).  Still general: g12_018
+(`Random.randrange must take plain positional arguments, no defaults, *args or **kwargs`),
+g21_002 (`[None, True, False]` mixes bools and numbers), g15_006 (`only a class type can be None:
+write Node | None) and g16_034 (`class list iteration needs one name` for a returned
+generator expression).  Hot-function shares, exact messages and follow-ups are in
+`lab/progfix/prog22.md`.
+
+`AIL_CURRENT/test_ail_prog22.py` (registered through `AIL_CURRENT/tests.d/test_ail_prog22.txt`)
+builds the four typed programs and compares stdout/exit with CPython, plus a str-field records
+program, a `max`/`min` key program (argument, list field, ties, negative and int64-edge keys),
+an empty `max` program and the NaN refusal.  Probes `/tmp/probes/p22_{srows,maxkey,maxkey_empty,
+maxkey_tuple}.py` match CPython on both `cmp.sh` builds, and the ten `lab/compare` tasks keep
+byte-identical generated C against the pre-change tree.
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.

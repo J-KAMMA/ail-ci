@@ -1835,6 +1835,11 @@ def _etype(node, ctx):
             return _etype(a[0], ctx)
         if f in ('min', 'max') and f not in ctx.funcs and len(a) == 2:
             return FLT if FLT in (_etype(a[0], ctx), _etype(a[1], ctx)) else INT
+        if (f in ('min', 'max') and f not in ctx.funcs and len(a) == 1
+                and len(node.keywords) == 1 and node.keywords[0].arg == 'key'):
+            source_kind = _etype(a[0], ctx)
+            if _is_olist_kind(source_kind) and not _is_hlist_kind(source_kind):
+                return _olist_element_kind(source_kind)
         if f in ('sum', 'max', 'min') and f not in ctx.funcs and len(a) == 1:
             if isinstance(a[0], (ast.GeneratorExp, ast.ListComp, ast.SetComp)):
                 g = a[0].generators[0]
@@ -3777,6 +3782,23 @@ def _local_record_annotations(fn):
     return records
 
 
+def _local_srow_annotations(fn):
+    """`{name: field_kinds}` for every local annotated `list[tuple[...]]` with a str field --
+    the annotation spelling of `_mark_srow_lists`'s `name = []; name.append((..., str, ...))`
+    shape. Kept separate from `_local_record_annotations` because an `ail_srow` field is typed
+    per field (int64/double/ail_str), unlike a flat `ail_list`/`ail_flist` row."""
+    out = {}
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
+            continue
+        ann = _record_annotation_kind(node.annotation)
+        if isinstance(ann, tuple) and ann and ann[0] == 'srows':
+            if node.value is None:
+                raise Unsupported('a local annotation requires a name and an initializer')
+            out[node.target.id] = tuple(ann[1])
+    return out
+
+
 def _record_walk(fn):
     for node in ast.walk(fn):
         if isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value is not None:
@@ -4570,12 +4592,21 @@ def _annotation_kind(ann, classes=()):
                 # this point so a MIXED int/bytes row (see below) can be recognised at all; a
                 # field that is genuinely something else (`str`, a nested annotation, ...) is
                 # still refused by the exact message this always raised.
-                if isinstance(e, ast.Name) and e.id in (INT, FLT, BYTES):
+                if isinstance(e, ast.Name) and e.id in (INT, FLT, BYTES, STR):
                     field_kinds.append(e.id)
                 else:
                     name = e.id if isinstance(e, ast.Name) else type(e).__name__
                     raise Unsupported('a records annotation whose field type is %r; a row holds '
                                       'int64 or float fields only' % name)
+            if STR in field_kinds:
+                # A row with a str field is `ail_srow`, the per-field-typed list
+                # `_mark_srow_lists` already builds from `rows = []; rows.append((..., "..."))`.
+                # An annotation now names the same shape, so it does not have to be inferred.
+                if set(field_kinds) <= {INT, FLT, STR}:
+                    return ('srows', tuple(field_kinds))
+                raise Unsupported('a records annotation mixes str and bytes fields (%s); a row '
+                                  'holds int, float and str fields, or int and bytes fields'
+                                  % ', '.join(field_kinds))
             if all(k == INT for k in field_kinds):
                 return ('rows', len(elts))
             if all(k == FLT for k in field_kinds):
@@ -16953,6 +16984,12 @@ def _call(node, ctx):
         kind = _etype(a[0], ctx)
         if _is_olist_kind(kind):
             return _olist_copy_value(node, kind, ctx)
+    if (f in ('min', 'max') and f not in ctx.funcs and f not in ctx.classes
+            and len(a) == 1 and len(node.keywords) == 1
+            and node.keywords[0].arg == 'key'):
+        kind = _etype(a[0], ctx)
+        if _is_olist_kind(kind) and not _is_hlist_kind(kind):
+            return _struct_key_fold(f, a[0], node.keywords[0].value, kind, ctx)
     if (f in ('int', 'float', 'abs', 'min', 'max') and f not in ctx.funcs
             and f not in ctx.classes and any(_is_ref_kind(_etype(arg, ctx)) for arg in a)):
         raise Unsupported('%s() does not accept a struct; read a numeric field' % f)
@@ -17911,6 +17948,71 @@ def _struct_fold(f, var, elt_node, conds, src, ctx, eager):
     return _finish_fold(f, ctx, ct, acc, seen, tag, head, body, val, eager, after)
 
 
+def _struct_key_fold(f, src, key, kind, ctx):
+    """`max(students, key=lambda s: s.average())` over a list of struct instances. The source is
+    retained once, each element is retained while its key is read, and the first element with the
+    largest (smallest) key is returned, exactly as CPython's max/min does. Only a numeric key is
+    built: the element itself is a struct, so comparing it without a key has no order anyway."""
+    if not (isinstance(key, ast.Lambda) and not key.args.vararg and not key.args.kwarg
+            and not key.args.defaults and not key.args.kwonlyargs
+            and len(key.args.posonlyargs) + len(key.args.args) == 1):
+        raise Unsupported('max()/min() key= over a list of instances needs a one-argument lambda')
+    params = key.args.posonlyargs + key.args.args
+    var = params[0].arg
+    cls = _olist_element_kind(kind)
+    receiver, _ = ctx.temp(kind)
+    bound, _ = ctx.temp(cls)
+    best, _ = ctx.temp(INT)
+    seen, _ = ctx.temp(INT)
+    value = _olist_value(src, kind, ctx)
+    pres, ctx.pre = ctx.pre, []
+    pres.append(_obj_store(receiver, value, kind, ctx) + ';')
+    pres.append('%s = 0;' % seen)
+    old_type, old_kind = ctx.types.get(var), ctx.kind.get(var)
+    old_cnames = getattr(ctx, 'comprehension_cnames', {})
+    old_onecp, old_len1 = set(ctx.onecp), set(ctx.len1_names)
+    ctx.comprehension_cnames = {**old_cnames, var: bound}
+    ctx.types[var] = cls
+    ctx.kind[var] = cls
+    ctx.onecp.discard(var)
+    ctx.len1_names.discard(var)
+    body = []
+    try:
+        key_kind = _etype(key.body, ctx)
+        if key_kind not in NUM:
+            raise Unsupported('max()/min() key= over a list of instances needs an int or float key '
+                              '(got %s)' % _a(key_kind))
+        ctype = 'double' if key_kind == FLT else 'int64_t'
+        acc, _ = ctx.temp(key_kind)
+        idx, _ = ctx.temp(INT)
+        body.append('for (%s = 0; %s < ail_olist_len(%s); %s++) {' % (idx, idx, receiver, idx))
+        body.append(_obj_store(bound, '(%s *)ail_olist_get(%s, %s)' % (
+            _ref_ctype(cls, ctx), receiver, idx), cls, ctx) + ';')
+        key_c = _expr(key.body, ctx)
+        body.extend(ctx.pre); ctx.pre = []
+        body.append('{ %s _key = %s; if (!%s || _key %s %s) { %s = _key; %s = %s; %s = 1; } }'
+                    % (ctype, key_c, seen, '>' if f == 'max' else '<', acc,
+                       acc, best, idx, seen))
+        body.append(_obj_store(bound, 'NULL', cls, ctx) + ';')
+        body.append('}')
+    finally:
+        ctx.comprehension_cnames = old_cnames
+        ctx.onecp, ctx.len1_names = old_onecp, old_len1
+        ctx.types.pop(var, None); ctx.kind.pop(var, None)
+        if old_type is not None:
+            ctx.types[var] = old_type
+        if old_kind is not None:
+            ctx.kind[var] = old_kind
+    body.extend(ctx.pre); ctx.pre = []
+    ctx.parts.add('DIE')
+    body.append('if (!%s) ail_die("%s() arg is an empty sequence");' % (seen, f))
+    result, _ = ctx.temp(cls)
+    body.append(_obj_store(result, '(%s *)ail_olist_get(%s, %s)' % (
+        _ref_ctype(cls, ctx), receiver, best), cls, ctx) + ';')
+    body.append(_obj_store(receiver, 'NULL', kind, ctx) + ';')
+    return '({ %s %s; })' % (' '.join(pres + body), result)
+
+
 def _inline_fold_inner(f, arg, ctx):
     """`sum(...)`, `max(...)` and friends over anything, including a generator expression.
 
@@ -18415,7 +18517,8 @@ def _method(node, ctx, *, as_stmt=False):
     if declared in (LIST, FLIST, SLIST) and m == 'clear' and not a and not node.keywords:
         ctx.parts.add({LIST: 'LIST', FLIST: 'FLIST', SLIST: 'SLIST'}[declared])
         return 'ail_%s_clear(&%s)' % ({LIST: 'list', FLIST: 'flist', SLIST: 'slist'}[declared], ctx.cname(name))
-    if declared in (LIST, FLIST, SLIST) and not record and m == 'append' and len(a) == 1:
+    if (declared in (LIST, FLIST, SLIST) and not record and name not in ctx.srowtypes
+            and m == 'append' and len(a) == 1):
         expected = {LIST: INT, FLIST: FLT, SLIST: STR}[declared]
         if _element_kind(a[0], ctx, declared, 'append') != expected:
             actual = _known_argument_kind(a[0], ctx)
@@ -26245,15 +26348,52 @@ def _enumerate_start(call):
     raise Unsupported('enumerate() takes an iterable and an optional start')
 
 
+def _for_enumerate_srows(node, source, start, ctx, ind):
+    """`for i, (name, value, ...) in enumerate(rows, start)` over an `ail_srows` list. The
+    str-field row branch lower down already materialises every field into its own typed loop
+    local; this is that same walk with the position added, and the start evaluated once."""
+    pad = '    ' * ind
+    if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
+            and isinstance(node.target.elts[0], ast.Name)
+            and isinstance(node.target.elts[1], ast.Tuple)
+            and all(isinstance(e, ast.Name) for e in node.target.elts[1].elts)):
+        raise Unsupported('enumerate() over a str-field row list needs an (index, (field...)) '
+                          'target')
+    fkinds = ctx.srowtypes[source.id]
+    fields = node.target.elts[1].elts
+    if len(fields) != len(fkinds):
+        raise Unsupported('a tuple target over %r must name exactly %d fields'
+                          % (source.id, len(fkinds)))
+    if _etype(start, ctx) != INT or _is_handle_producing(start, ctx):
+        raise Unsupported('enumerate() needs an int start')
+    c = ctx.cname(source.id)
+    i = ctx.declare(node.target.elts[0].id, INT)
+    names = [ctx.declare(e.id, fk) for e, fk in zip(fields, fkinds)]
+    ctx.parts.add('SROW')
+    first, _ = ctx.temp(INT)
+    ctx.pre.append('%s = %s;' % (first, _map_inline(lambda: _expr(start, ctx), ctx)))
+    counter, _ = ctx.temp(INT)
+    _use(ctx.need, 'ck_add')
+    pre = _flush(ctx, pad)
+    head = '%sfor (%s = 0; %s < %s.n; %s++) {\n' % (pad, counter, counter, c, counter)
+    head += '%s    %s = ck_add(%s, %s);\n' % (pad, i, first, counter)
+    for j, (nm, fk) in enumerate(zip(names, fkinds)):
+        field = 's' if fk == STR else 'd' if fk == FLT else 'i'
+        head += '%s    %s = %s.p[%s].v[%d].%s;\n' % (pad, nm, c, counter, j, field)
+    return pre + head + _loop_stmts(node.body, ctx, ind + 1) + pad + '}\n'
+
+
 def _for_enumerate_start(node, it, ctx, ind):
     """`for i, v in enumerate(xs, start)`: the start is evaluated once, after the iterable (CPython's
     order), and `i` is start + the position; the walk itself keeps its own counter, so a body that
     rebinds `i` changes nothing about the next step."""
     pad = '    ' * ind
+    source, start = it.args[0], _enumerate_start(it)
+    if isinstance(source, ast.Name) and source.id in ctx.srowtypes:
+        return _for_enumerate_srows(node, source, start, ctx, ind)
     if not (isinstance(node.target, ast.Tuple) and len(node.target.elts) == 2
             and all(isinstance(e, ast.Name) for e in node.target.elts)):
         raise Unsupported('enumerate() without an (i, v) target')
-    source, start = it.args[0], _enumerate_start(it)
     if isinstance(start, ast.Constant) and type(start.value) is int and not (
             -(1 << 62) < start.value < (1 << 62)):
         # the typed walk counts in int64; a start past that range belongs to the exact/general path
@@ -27496,17 +27636,20 @@ def signature(params, ctx, name, ret=INT):
 def _seed_local_annotations(fn, ctx):
     declared = {}
     ctx.local_records = _local_record_annotations(fn)
+    ctx.local_srows = _local_srow_annotations(fn)
     for node in ast.walk(fn):
         if not isinstance(node, ast.AnnAssign):
             continue
         if not isinstance(node.target, ast.Name) or node.value is None:
             raise Unsupported('a local annotation requires a name and an initializer')
         kind = _annotation_kind(node.annotation, ctx.classes)
-        if node.target.id in ctx.local_records:
+        if node.target.id in ctx.local_srows:
+            kind = SROWS
+        elif node.target.id in ctx.local_records:
             if not isinstance(kind, tuple) or kind[0] not in ('rows', 'rowsf', 'rowsb'):
                 raise Unsupported('conflicting local record annotation for %r' % node.target.id)
             kind = FLIST if all(field == FLT for field in ctx.local_records[node.target.id]) else LIST
-        if kind not in (*NUM, EXCEPTION, STR, BYTES, BLIST, BYTEARRAY, BINARYFILE, TCPSOCKET, LIST, FLIST, SLIST, *MAPS) and not callable_types.valid(kind) and not (_is_olist_kind(kind) or _is_obj_kind(kind) and _managed_obj(kind, ctx)):
+        if kind not in (*NUM, EXCEPTION, STR, BYTES, BLIST, BYTEARRAY, BINARYFILE, TCPSOCKET, LIST, FLIST, SLIST, SROWS, *MAPS) and not callable_types.valid(kind) and not (_is_olist_kind(kind) or _is_obj_kind(kind) and _managed_obj(kind, ctx)):
             raise Unsupported('unsupported local annotation %s.\n'
                               '  write instead: a plain int, float, str, bytes, list[int], list[str], '
                               'dict[str, int], set[int] or a class name; keep other values in '
@@ -27552,6 +27695,26 @@ def _check_local_assignment(name, value, ctx):
     kind = getattr(ctx, 'local_annotations', {}).get(name)
     if kind is None:
         return
+    if kind == SROWS:
+        fkinds = ctx.local_srows[name]
+        source = value.args[0] if (isinstance(value, ast.Call) and isinstance(value.func, ast.Name)
+                                   and value.func.id == 'list' and len(value.args) == 1) else value
+        if isinstance(source, ast.List):
+            for row in source.elts:
+                if not isinstance(row, ast.Tuple) or len(row.elts) != len(fkinds):
+                    raise Unsupported('a declared str-field records list requires matching tuple '
+                                      'fields')
+                for element, fk in zip(row.elts, fkinds):
+                    if fk == STR and not _is_str_expr(element, ctx):
+                        raise Unsupported('a declared str-field records list requires a str in '
+                                          'every str field')
+                    if fk != STR and _etype(element, ctx) != fk:
+                        raise Unsupported('a declared str-field records list requires matching '
+                                          'tuple fields')
+            return
+        if isinstance(source, ast.Name) and source.id in ctx.srowtypes:
+            return
+        raise Unsupported('a declared str-field records list requires matching rows')
     fields = getattr(ctx, 'local_records', {}).get(name)
     if fields is not None:
         if isinstance(value, ast.List):
@@ -37863,6 +38026,7 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
     # reclaimed here rather than prevented, by simply popping them back out, before real codegen
     # (`_stmt`) ever asks either dict about one of these names.
     ctx.srowtypes = _mark_srow_lists(fn, ctx, exclude=ctx.nlist | ctx.ndict | ctx.handles)
+    ctx.srowtypes.update(getattr(ctx, 'local_srows', {}))
     for _srow_name in ctx.srowtypes:
         ctx.tstride.pop(_srow_name, None)
         ctx.rowof = {k: v for k, v in ctx.rowof.items() if v != _srow_name}
