@@ -10,7 +10,7 @@ or exit code differs from the CPython reference is shown as `n/a MISMATCH` and t
 a failed build is `build failed`. The two AIL columns are `ail` (the .ail source) and `ail-py` (the CPython
 source compiled by AIL); both are compared with the best of c, rust, go, nim and python.
 """
-import argparse, json, math, sys
+import argparse, datetime, json, math, os, sys
 from pathlib import Path
 
 LANGS = ['ail', 'ail-py', 'c', 'rust', 'go', 'nim', 'python']
@@ -109,7 +109,8 @@ def status_table(tasks):
     lines = ['### Status: output vs the CPython reference, and AIL path', '', '| ' + ' | '.join(head) + ' |', '|' + '---|' * len(head)]
     for t in tasks:
         res = t['results']
-        row = [t['task'], '%.1f MB' % (t['input_bytes'] / 1e6)]
+        size = t.get('input_bytes')
+        row = [t['task'], '%.1f MB' % (size / 1e6) if isinstance(size, (int, float)) else '-']
         for l in LANGS:
             r = res.get(l)
             row.append('not run' if r is None else 'build failed' if not r.get('build_ok') else r.get('status', '-').replace('ok', 'match'))
@@ -211,7 +212,11 @@ def main():
     out += ['', '### Method', '', *METHOD_LINES]
     print('\n'.join(out))
     if args.json:
-        Path(args.json).write_text(json.dumps(dict(tasks=tasks, geomean_ratio_vs_best_other=summary, scorecard=scores), indent=1) + '\n', encoding='utf8')
+        payload = dict(head=first.get('head', '?'), date=first.get('date') or datetime.date.today().isoformat(),
+                       tasks=tasks, geomean_ratio_vs_best_other=summary, scorecard=scores)
+        if os.environ.get('GITHUB_RUN_ID'):
+            payload['run'] = os.environ['GITHUB_RUN_ID']
+        Path(args.json).write_text(json.dumps(payload, indent=1) + '\n', encoding='utf8')
 
 
 if __name__ == '__main__':

@@ -1,3 +1,14 @@
+## 2026-11-02 -- docs review fix: the comparison fixture only carries supplied numbers (job-reltable-11022136)
+
+The fixture `tools/testdata/compare-report.json` now keeps only the values supplied for run
+41393616319: the ten AIL/Rust wall pairs, the binary and compile ranges, and the four RSS pairs
+where AIL loses.  Instructions, build disk, C/Go/Nim/Python rows and toolchain sizes are absent, so
+the document shows not run/n-a and the scorecards state 0/0 for those columns instead of inventing
+wins.  The AIL (py src) column no longer copies AIL; it lists only the three refusals (`scar_life`,
+`tally_lang`, `tree_fold`) and not run for the rest.  `run_task.py` records the run date and
+`merge.py` writes `head`, `date` and the GitHub run id into its JSON, so the header gets a date from
+the real report shape.  The README section now claims only the AIL/Rust numbers that exist.
+
 ## 2026-11-02 -- docs: publish the compare-lab language comparison (job-reltable-11022136)
 
 Added `tools/compare_publish.py`, which turns the compare-lab report JSON into `docs/COMPARISON.md`:

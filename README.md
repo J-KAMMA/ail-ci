@@ -12,13 +12,13 @@ or [docs/tutorial.md](docs/tutorial.md) (a 15-20 minute tutorial).
 
 ## How AIL compares
 
-The measured comparison against C, Rust, Go, Nim and Python is in [docs/COMPARISON.md](docs/COMPARISON.md).
+The measured AIL/Rust comparison is in [docs/COMPARISON.md](docs/COMPARISON.md).
 
-- Instructions: AIL is lower on 5/10 tasks.
-- Peak RSS: AIL is lower on 6/10 tasks.
+- Instructions: not reported in the fixture.
+- Peak RSS: AIL is lower on 0/4 tasks with data.
 - Binary size: AIL is smaller on 10/10 tasks.
 - Compile time: AIL is slower to compile on 10/10 tasks.
-- Build disk: AIL is lower on 2/10 tasks.
+- Build disk: not reported in the fixture.
 - Wall time: AIL is lower on 6/10 tasks.
 
 ## Running the tests

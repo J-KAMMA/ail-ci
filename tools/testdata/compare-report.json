@@ -8,13 +8,7 @@
    "case": "perf",
    "smoke": false,
    "head": "4f1245b",
-   "input_bytes": 1000000,
-   "icount_method": "perf",
-   "runner": {
-    "os": "6.8.0",
-    "cpus": 4,
-    "image": "ubuntu24"
-   },
+   "date": "2026-11-02",
    "tools": {
     "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
     "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
@@ -30,97 +24,26 @@
     "NIM": "2.2.12",
     "PYTHON": "3.12"
    },
-   "toolchain_kib": {
-    "c": 420000,
-    "rust": 780000,
-    "go": 610000,
-    "nim": 350000,
-    "python": 180000,
-    "ail": 90000
-   },
    "results": {
     "ail": {
-     "lang": "ail",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 6400000000,
-     "rss_kib": 244941,
+     "path": "general",
+     "why_not_typed": "why not typed: a call can raise or have side effects",
      "binary_bytes": 104448,
      "compile_s": 7.01,
-     "build_disk_kib": 180000,
      "wall_ms": 2472,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "ail-py": {
-     "lang": "ail-py",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 6400000000,
-     "rss_kib": 244941,
-     "binary_bytes": 104448,
-     "compile_s": 7.01,
-     "build_disk_kib": 180000,
-     "wall_ms": 2472,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "c": {
-     "lang": "c",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "wall_ms": 1635.4
+     "rss_kib": 244941
     },
     "rust": {
-     "lang": "rust",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 4100000000,
-     "rss_kib": 192205,
      "binary_bytes": 4626432,
      "compile_s": 0.41,
-     "build_disk_kib": 90000,
-     "wall_ms": 1470
+     "wall_ms": 1470,
+     "rss_kib": 192205
     }
    }
   },
@@ -129,103 +52,24 @@
    "case": "perf",
    "smoke": false,
    "head": "4f1245b",
-   "input_bytes": 1001000,
-   "icount_method": "perf",
-   "runner": {
-    "os": "6.8.0",
-    "cpus": 4,
-    "image": "ubuntu24"
-   },
-   "tools": {
-    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-    "go": "go version go1.24.13 linux/amd64",
-    "nim": "Nim Compiler Version 2.2.12 [Linux: amd64]",
-    "python": "3.12.3",
-    "valgrind": "valgrind-3.22.0"
-   },
-   "pins": {
-    "GCC": "13.3.0",
-    "RUSTC": "1.99.1",
-    "GO": "1.24.13",
-    "NIM": "2.2.12",
-    "PYTHON": "3.12"
-   },
-   "toolchain_kib": {
-    "c": 420000,
-    "rust": 780000,
-    "go": 610000,
-    "nim": 350000,
-    "python": 180000,
-    "ail": 90000
-   },
+   "date": "2026-11-02",
    "results": {
     "ail": {
-     "lang": "ail",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 2200000000,
-     "rss_kib": 4024,
+     "path": "general",
+     "why_not_typed": "why not typed: a call can raise or have side effects",
      "binary_bytes": 34816,
      "compile_s": 1.87,
-     "build_disk_kib": 60000,
-     "wall_ms": 1256,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "ail-py": {
-     "lang": "ail-py",
-     "build_ok": false,
-     "correct": false,
-     "status": "build failed",
-     "path": "refused",
-     "build_error": "refused: a call can raise or have side effects"
-    },
-    "c": {
-     "lang": "c",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "wall_ms": 919.6
+     "wall_ms": 1256
     },
     "rust": {
-     "lang": "rust",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 1500000000,
-     "rss_kib": 4225,
      "binary_bytes": 4556800,
      "compile_s": 0.19,
-     "build_disk_kib": 75000,
      "wall_ms": 1037
     }
    }
@@ -235,118 +79,26 @@
    "case": "perf",
    "smoke": false,
    "head": "4f1245b",
-   "input_bytes": 1002000,
-   "icount_method": "perf",
-   "runner": {
-    "os": "6.8.0",
-    "cpus": 4,
-    "image": "ubuntu24"
-   },
-   "tools": {
-    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-    "go": "go version go1.24.13 linux/amd64",
-    "nim": "Nim Compiler Version 2.2.12 [Linux: amd64]",
-    "python": "3.12.3",
-    "valgrind": "valgrind-3.22.0"
-   },
-   "pins": {
-    "GCC": "13.3.0",
-    "RUSTC": "1.99.1",
-    "GO": "1.24.13",
-    "NIM": "2.2.12",
-    "PYTHON": "3.12"
-   },
-   "toolchain_kib": {
-    "c": 420000,
-    "rust": 780000,
-    "go": 610000,
-    "nim": 350000,
-    "python": 180000,
-    "ail": 90000
-   },
+   "date": "2026-11-02",
    "results": {
     "ail": {
-     "lang": "ail",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 1100000000,
-     "rss_kib": 354406,
+     "path": "typed",
      "binary_bytes": 72704,
      "compile_s": 2.41,
-     "build_disk_kib": 150000,
      "wall_ms": 934,
-     "path": "typed"
-    },
-    "ail-py": {
-     "lang": "ail-py",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 1100000000,
-     "rss_kib": 354406,
-     "binary_bytes": 72704,
-     "compile_s": 2.41,
-     "build_disk_kib": 150000,
-     "wall_ms": 934,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "c": {
-     "lang": "c",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "wall_ms": 496.2
+     "rss_kib": 354406
     },
     "rust": {
-     "lang": "rust",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 1800000000,
-     "rss_kib": 352870,
      "binary_bytes": 4592640,
      "compile_s": 0.25,
-     "build_disk_kib": 80000,
-     "wall_ms": 1895
+     "wall_ms": 1895,
+     "rss_kib": 352870
     }
    }
   },
@@ -355,119 +107,27 @@
    "case": "perf",
    "smoke": false,
    "head": "4f1245b",
-   "input_bytes": 1003000,
-   "icount_method": "perf",
-   "runner": {
-    "os": "6.8.0",
-    "cpus": 4,
-    "image": "ubuntu24"
-   },
-   "tools": {
-    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-    "go": "go version go1.24.13 linux/amd64",
-    "nim": "Nim Compiler Version 2.2.12 [Linux: amd64]",
-    "python": "3.12.3",
-    "valgrind": "valgrind-3.22.0"
-   },
-   "pins": {
-    "GCC": "13.3.0",
-    "RUSTC": "1.99.1",
-    "GO": "1.24.13",
-    "NIM": "2.2.12",
-    "PYTHON": "3.12"
-   },
-   "toolchain_kib": {
-    "c": 420000,
-    "rust": 780000,
-    "go": 610000,
-    "nim": 350000,
-    "python": 180000,
-    "ail": 90000
-   },
+   "date": "2026-11-02",
    "results": {
     "ail": {
-     "lang": "ail",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 900000000,
-     "rss_kib": 345088,
+     "path": "general",
+     "why_not_typed": "why not typed: a call can raise or have side effects",
      "binary_bytes": 90112,
      "compile_s": 2.74,
-     "build_disk_kib": 160000,
      "wall_ms": 840,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "ail-py": {
-     "lang": "ail-py",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 900000000,
-     "rss_kib": 345088,
-     "binary_bytes": 90112,
-     "compile_s": 2.74,
-     "build_disk_kib": 160000,
-     "wall_ms": 840,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "c": {
-     "lang": "c",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "wall_ms": 487.0
+     "rss_kib": 345088
     },
     "rust": {
-     "lang": "rust",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 2700000000,
-     "rss_kib": 280371,
      "binary_bytes": 4610048,
      "compile_s": 0.28,
-     "build_disk_kib": 85000,
-     "wall_ms": 2833
+     "wall_ms": 2833,
+     "rss_kib": 280371
     }
    }
   },
@@ -476,103 +136,24 @@
    "case": "perf",
    "smoke": false,
    "head": "4f1245b",
-   "input_bytes": 1004000,
-   "icount_method": "perf",
-   "runner": {
-    "os": "6.8.0",
-    "cpus": 4,
-    "image": "ubuntu24"
-   },
-   "tools": {
-    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-    "go": "go version go1.24.13 linux/amd64",
-    "nim": "Nim Compiler Version 2.2.12 [Linux: amd64]",
-    "python": "3.12.3",
-    "valgrind": "valgrind-3.22.0"
-   },
-   "pins": {
-    "GCC": "13.3.0",
-    "RUSTC": "1.99.1",
-    "GO": "1.24.13",
-    "NIM": "2.2.12",
-    "PYTHON": "3.12"
-   },
-   "toolchain_kib": {
-    "c": 420000,
-    "rust": 780000,
-    "go": 610000,
-    "nim": 350000,
-    "python": 180000,
-    "ail": 90000
-   },
+   "date": "2026-11-02",
    "results": {
     "ail": {
-     "lang": "ail",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 1500000000,
-     "rss_kib": 26012,
+     "path": "general",
+     "why_not_typed": "why not typed: a call can raise or have side effects",
      "binary_bytes": 46080,
      "compile_s": 1.88,
-     "build_disk_kib": 70000,
-     "wall_ms": 862,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "ail-py": {
-     "lang": "ail-py",
-     "build_ok": false,
-     "correct": false,
-     "status": "build failed",
-     "path": "refused",
-     "build_error": "refused: a call can raise or have side effects"
-    },
-    "c": {
-     "lang": "c",
-     "build_ok": false,
-     "correct": false,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "build_error": "not run"
+     "wall_ms": 862
     },
     "rust": {
-     "lang": "rust",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 100000000,
-     "rss_kib": 27313,
      "binary_bytes": 4568064,
      "compile_s": 0.2,
-     "build_disk_kib": 40000,
      "wall_ms": 48
     }
    }
@@ -582,118 +163,31 @@
    "case": "perf",
    "smoke": false,
    "head": "4f1245b",
-   "input_bytes": 1005000,
-   "icount_method": "perf",
-   "runner": {
-    "os": "6.8.0",
-    "cpus": 4,
-    "image": "ubuntu24"
-   },
-   "tools": {
-    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-    "go": "go version go1.24.13 linux/amd64",
-    "nim": "Nim Compiler Version 2.2.12 [Linux: amd64]",
-    "python": "3.12.3",
-    "valgrind": "valgrind-3.22.0"
-   },
-   "pins": {
-    "GCC": "13.3.0",
-    "RUSTC": "1.99.1",
-    "GO": "1.24.13",
-    "NIM": "2.2.12",
-    "PYTHON": "3.12"
-   },
-   "toolchain_kib": {
-    "c": 420000,
-    "rust": 780000,
-    "go": 610000,
-    "nim": 350000,
-    "python": 180000,
-    "ail": 90000
-   },
+   "date": "2026-11-02",
    "results": {
     "ail": {
-     "lang": "ail",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 18000000000,
-     "rss_kib": 17792,
+     "path": "general",
+     "why_not_typed": "why not typed: a call can raise or have side effects",
      "binary_bytes": 64512,
      "compile_s": 2.02,
-     "build_disk_kib": 120000,
-     "wall_ms": 16696,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
+     "wall_ms": 16696
     },
     "ail-py": {
-     "lang": "ail-py",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 18000000000,
-     "rss_kib": 17792,
-     "binary_bytes": 64512,
-     "compile_s": 2.02,
-     "build_disk_kib": 120000,
-     "wall_ms": 16696,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "c": {
-     "lang": "c",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "wall_ms": 16264.3
+     "build_ok": false,
+     "correct": false,
+     "status": "build failed",
+     "path": "refused",
+     "build_error": "refused: import of 're' with a use that is not built"
     },
     "rust": {
-     "lang": "rust",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 22000000000,
-     "rss_kib": 18682,
      "binary_bytes": 4586496,
      "compile_s": 0.23,
-     "build_disk_kib": 70000,
      "wall_ms": 29534
     }
    }
@@ -703,118 +197,31 @@
    "case": "perf",
    "smoke": false,
    "head": "4f1245b",
-   "input_bytes": 1006000,
-   "icount_method": "perf",
-   "runner": {
-    "os": "6.8.0",
-    "cpus": 4,
-    "image": "ubuntu24"
-   },
-   "tools": {
-    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-    "go": "go version go1.24.13 linux/amd64",
-    "nim": "Nim Compiler Version 2.2.12 [Linux: amd64]",
-    "python": "3.12.3",
-    "valgrind": "valgrind-3.22.0"
-   },
-   "pins": {
-    "GCC": "13.3.0",
-    "RUSTC": "1.99.1",
-    "GO": "1.24.13",
-    "NIM": "2.2.12",
-    "PYTHON": "3.12"
-   },
-   "toolchain_kib": {
-    "c": 420000,
-    "rust": 780000,
-    "go": 610000,
-    "nim": 350000,
-    "python": 180000,
-    "ail": 90000
-   },
+   "date": "2026-11-02",
    "results": {
     "ail": {
-     "lang": "ail",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 3100000000,
-     "rss_kib": 1976,
+     "path": "general",
+     "why_not_typed": "why not typed: a call can raise or have side effects",
      "binary_bytes": 58368,
      "compile_s": 3.04,
-     "build_disk_kib": 95000,
-     "wall_ms": 1548,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
+     "wall_ms": 1548
     },
     "ail-py": {
-     "lang": "ail-py",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 3100000000,
-     "rss_kib": 1976,
-     "binary_bytes": 58368,
-     "compile_s": 3.04,
-     "build_disk_kib": 95000,
-     "wall_ms": 1548,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "c": {
-     "lang": "c",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "wall_ms": 854.3
+     "build_ok": false,
+     "correct": false,
+     "status": "build failed",
+     "path": "refused",
+     "build_error": "refused: locals()/vars()/eval/exec in a function with a possibly-unassigned local"
     },
     "rust": {
-     "lang": "rust",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 2900000000,
-     "rss_kib": 2075,
      "binary_bytes": 4580352,
      "compile_s": 0.31,
-     "build_disk_kib": 110000,
      "wall_ms": 1640
     }
    }
@@ -824,117 +231,23 @@
    "case": "perf",
    "smoke": false,
    "head": "4f1245b",
-   "input_bytes": 1007000,
-   "icount_method": "perf",
-   "runner": {
-    "os": "6.8.0",
-    "cpus": 4,
-    "image": "ubuntu24"
-   },
-   "tools": {
-    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-    "go": "go version go1.24.13 linux/amd64",
-    "nim": "Nim Compiler Version 2.2.12 [Linux: amd64]",
-    "python": "3.12.3",
-    "valgrind": "valgrind-3.22.0"
-   },
-   "pins": {
-    "GCC": "13.3.0",
-    "RUSTC": "1.99.1",
-    "GO": "1.24.13",
-    "NIM": "2.2.12",
-    "PYTHON": "3.12"
-   },
-   "toolchain_kib": {
-    "c": 420000,
-    "rust": 780000,
-    "go": 610000,
-    "nim": 350000,
-    "python": 180000,
-    "ail": 90000
-   },
+   "date": "2026-11-02",
    "results": {
     "ail": {
-     "lang": "ail",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 4000000000,
-     "rss_kib": 161704,
+     "path": "typed",
      "binary_bytes": 94208,
      "compile_s": 2.56,
-     "build_disk_kib": 140000,
-     "wall_ms": 2260,
-     "path": "typed"
-    },
-    "ail-py": {
-     "lang": "ail-py",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 4000000000,
-     "rss_kib": 161704,
-     "binary_bytes": 94208,
-     "compile_s": 2.56,
-     "build_disk_kib": 140000,
-     "wall_ms": 2260,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "c": {
-     "lang": "c",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "wall_ms": 2393.3
+     "wall_ms": 2260
     },
     "rust": {
-     "lang": "rust",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 4600000000,
-     "rss_kib": 169789,
      "binary_bytes": 4614144,
      "compile_s": 0.27,
-     "build_disk_kib": 82000,
      "wall_ms": 2925
     }
    }
@@ -944,117 +257,23 @@
    "case": "perf",
    "smoke": false,
    "head": "4f1245b",
-   "input_bytes": 1008000,
-   "icount_method": "perf",
-   "runner": {
-    "os": "6.8.0",
-    "cpus": 4,
-    "image": "ubuntu24"
-   },
-   "tools": {
-    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-    "go": "go version go1.24.13 linux/amd64",
-    "nim": "Nim Compiler Version 2.2.12 [Linux: amd64]",
-    "python": "3.12.3",
-    "valgrind": "valgrind-3.22.0"
-   },
-   "pins": {
-    "GCC": "13.3.0",
-    "RUSTC": "1.99.1",
-    "GO": "1.24.13",
-    "NIM": "2.2.12",
-    "PYTHON": "3.12"
-   },
-   "toolchain_kib": {
-    "c": 420000,
-    "rust": 780000,
-    "go": 610000,
-    "nim": 350000,
-    "python": 180000,
-    "ail": 90000
-   },
+   "date": "2026-11-02",
    "results": {
     "ail": {
-     "lang": "ail",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 3400000000,
-     "rss_kib": 254816,
+     "path": "typed",
      "binary_bytes": 80896,
      "compile_s": 4.45,
-     "build_disk_kib": 170000,
-     "wall_ms": 1887,
-     "path": "typed"
-    },
-    "ail-py": {
-     "lang": "ail-py",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 3400000000,
-     "rss_kib": 254816,
-     "binary_bytes": 80896,
-     "compile_s": 4.45,
-     "build_disk_kib": 170000,
-     "wall_ms": 1887,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "c": {
-     "lang": "c",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "wall_ms": 932.9
+     "wall_ms": 1887
     },
     "rust": {
-     "lang": "rust",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 5500000000,
-     "rss_kib": 267557,
      "binary_bytes": 4600832,
      "compile_s": 0.47,
-     "build_disk_kib": 95000,
      "wall_ms": 4248
     }
    }
@@ -1064,310 +283,36 @@
    "case": "perf",
    "smoke": false,
    "head": "4f1245b",
-   "input_bytes": 1009000,
-   "icount_method": "perf",
-   "runner": {
-    "os": "6.8.0",
-    "cpus": 4,
-    "image": "ubuntu24"
-   },
-   "tools": {
-    "gcc": "gcc (Ubuntu 13.3.0-6ubuntu2~24.04.1) 13.3.0",
-    "rustc": "rustc 1.99.1 (58cf8f9c3 2026-10-13)",
-    "go": "go version go1.24.13 linux/amd64",
-    "nim": "Nim Compiler Version 2.2.12 [Linux: amd64]",
-    "python": "3.12.3",
-    "valgrind": "valgrind-3.22.0"
-   },
-   "pins": {
-    "GCC": "13.3.0",
-    "RUSTC": "1.99.1",
-    "GO": "1.24.13",
-    "NIM": "2.2.12",
-    "PYTHON": "3.12"
-   },
-   "toolchain_kib": {
-    "c": 420000,
-    "rust": 780000,
-    "go": 610000,
-    "nim": 350000,
-    "python": 180000,
-    "ail": 90000
-   },
+   "date": "2026-11-02",
    "results": {
     "ail": {
-     "lang": "ail",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 5200000000,
-     "rss_kib": 475750,
+     "path": "general",
+     "why_not_typed": "why not typed: a call can raise or have side effects",
      "binary_bytes": 98304,
      "compile_s": 11.17,
-     "build_disk_kib": 200000,
      "wall_ms": 1866,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
+     "rss_kib": 475750
     },
     "ail-py": {
-     "lang": "ail-py",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 5200000000,
-     "rss_kib": 475750,
-     "binary_bytes": 98304,
-     "compile_s": 11.17,
-     "build_disk_kib": 200000,
-     "wall_ms": 1866,
-     "path": "general",
-     "why_not_typed": "why not typed: a call can raise or have side effects"
-    },
-    "c": {
-     "lang": "c",
-     "build_ok": true,
-     "correct": true,
-     "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "wall_ms": 897.5
+     "build_ok": false,
+     "correct": false,
+     "status": "build failed",
+     "path": "refused",
+     "build_error": "refused: import of 're' with a use that is not built"
     },
     "rust": {
-     "lang": "rust",
      "build_ok": true,
      "correct": true,
      "status": "ok",
-     "cases_public": [
-      3,
-      3
-     ],
-     "cases_hidden": [
-      7,
-      7
-     ],
-     "cases_failed": [],
-     "instructions": 4900000000,
-     "rss_kib": 322458,
      "binary_bytes": 4618240,
      "compile_s": 0.56,
-     "build_disk_kib": 100000,
-     "wall_ms": 1783
+     "wall_ms": 1783,
+     "rss_kib": 322458
     }
    }
   }
- ],
- "geomean_ratio_vs_best_other": {
-  "instructions": {
-   "ail": {
-    "geomean": 1.1331455287276027,
-    "n": 10
-   },
-   "ail-py": {
-    "geomean": 0.794427513469324,
-    "n": 8
-   }
-  },
-  "rss_kib": {
-   "ail": {
-    "geomean": 1.056601680552013,
-    "n": 10
-   },
-   "ail-py": {
-    "geomean": 1.0843879213341268,
-    "n": 8
-   }
-  },
-  "binary_bytes": {
-   "ail": {
-    "geomean": 0.01537355717287747,
-    "n": 10
-   },
-   "ail-py": {
-    "geomean": 0.017685020172903198,
-    "n": 8
-   }
-  },
-  "compile_s": {
-   "ail": {
-    "geomean": 10.869156723390587,
-    "n": 10
-   },
-   "ail-py": {
-    "geomean": 11.206444155361426,
-    "n": 8
-   }
-  },
-  "build_disk_kib": {
-   "ail": {
-    "geomean": 1.5672359969225254,
-    "n": 10
-   },
-   "ail-py": {
-    "geomean": 1.6813262488705352,
-    "n": 8
-   }
-  },
-  "wall_ms": {
-   "ail": {
-    "geomean": 1.9931001302563798,
-    "n": 10
-   },
-   "ail-py": {
-    "geomean": 1.5874655478990822,
-    "n": 8
-   }
-  }
- },
- "scorecard": {
-  "ail": {
-   "wins": {
-    "instructions": [
-     5,
-     10
-    ],
-    "rss_kib": [
-     6,
-     10
-    ],
-    "binary_bytes": [
-     10,
-     10
-    ],
-    "compile_s": [
-     0,
-     10
-    ],
-    "build_disk_kib": [
-     2,
-     10
-    ],
-    "wall_ms": [
-     1,
-     10
-    ]
-   },
-   "losses": [
-    "berth_sim instr 1.56x",
-    "berth_sim RSS 1.27x",
-    "berth_sim compile 17.10x",
-    "berth_sim disk 2.00x",
-    "berth_sim wall 1.68x",
-    "chain_relax instr 1.47x",
-    "chain_relax compile 9.84x",
-    "chain_relax wall 1.37x",
-    "echo_pack RSS 1.00x",
-    "echo_pack compile 9.64x",
-    "echo_pack disk 1.88x",
-    "echo_pack wall 1.88x",
-    "ledger_bin RSS 1.23x",
-    "ledger_bin compile 9.79x",
-    "ledger_bin disk 1.88x",
-    "ledger_bin wall 1.72x",
-    "rail_transfer instr 15.00x",
-    "rail_transfer compile 9.40x",
-    "rail_transfer disk 1.75x",
-    "rail_transfer wall 17.96x",
-    "scar_life compile 8.78x",
-    "scar_life disk 1.71x",
-    "scar_life wall 1.03x",
-    "tally_lang instr 1.07x",
-    "tally_lang compile 9.81x",
-    "tally_lang wall 1.81x",
-    "term_rank compile 9.48x",
-    "term_rank disk 1.71x",
-    "ticket_audit compile 9.47x",
-    "ticket_audit disk 1.79x",
-    "ticket_audit wall 2.02x",
-    "tree_fold instr 1.06x",
-    "tree_fold RSS 1.48x",
-    "tree_fold compile 19.95x",
-    "tree_fold disk 2.00x",
-    "tree_fold wall 2.08x"
-   ]
-  },
-  "ail-py": {
-   "wins": {
-    "instructions": [
-     5,
-     8
-    ],
-    "rss_kib": [
-     4,
-     8
-    ],
-    "binary_bytes": [
-     8,
-     8
-    ],
-    "compile_s": [
-     0,
-     8
-    ],
-    "build_disk_kib": [
-     1,
-     8
-    ],
-    "wall_ms": [
-     1,
-     8
-    ]
-   },
-   "losses": [
-    "berth_sim instr 1.56x",
-    "berth_sim RSS 1.27x",
-    "berth_sim compile 17.10x",
-    "berth_sim disk 2.00x",
-    "berth_sim wall 1.68x",
-    "echo_pack RSS 1.00x",
-    "echo_pack compile 9.64x",
-    "echo_pack disk 1.88x",
-    "echo_pack wall 1.88x",
-    "ledger_bin RSS 1.23x",
-    "ledger_bin compile 9.79x",
-    "ledger_bin disk 1.88x",
-    "ledger_bin wall 1.72x",
-    "scar_life compile 8.78x",
-    "scar_life disk 1.71x",
-    "scar_life wall 1.03x",
-    "tally_lang instr 1.07x",
-    "tally_lang compile 9.81x",
-    "tally_lang wall 1.81x",
-    "term_rank compile 9.48x",
-    "term_rank disk 1.71x",
-    "ticket_audit compile 9.47x",
-    "ticket_audit disk 1.79x",
-    "ticket_audit wall 2.02x",
-    "tree_fold instr 1.06x",
-    "tree_fold RSS 1.48x",
-    "tree_fold compile 19.95x",
-    "tree_fold disk 2.00x",
-    "tree_fold wall 2.08x"
-   ]
-  }
- }
+ ]
 }

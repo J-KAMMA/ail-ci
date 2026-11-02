@@ -1,10 +1,14 @@
 """tools/compare_publish.py renders the committed fixture into docs/COMPARISON.md.
 
-The fixture is tools/testdata/compare-report.json (run 41393616319, commit 4f1245b).  The committed
-document must equal a fresh render: no number in it is hand-edited.  Every metric column, both AIL
-columns, the geomean rows, the toolchain versions, the refusals and the method section are checked.
+The fixture is tools/testdata/compare-report.json (run 41393616319, commit 4f1245b).  It carries
+only the numbers supplied for that run and leaves the rest absent, so the generator has to show
+not run/n-a rather than invent values.  The committed document must equal a fresh render: no number
+in it is hand-edited.  Every metric column, both AIL columns, the geomean rows, the toolchain
+versions, the refusals and the method section are checked.
 """
 import importlib.util
+import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -54,9 +58,13 @@ class ComparePublish(unittest.TestCase):
         self.assertIn('rustc 1.99.1 (58cf8f9c3 2026-10-13)', self.text)
 
     def test_ail_py_table_includes_refusals(self):
-        self.assertIn('| chain_relax | general | refused |', self.text)
-        self.assertIn('| rail_transfer | general | refused |', self.text)
-        self.assertIn('refused: a call can raise or have side effects', self.text)
+        for task in ('scar_life', 'tally_lang', 'tree_fold'):
+            self.assertIn('| %s | general | refused |' % task, self.text)
+        self.assertIn("refused: import of 're' with a use that is not built", self.text)
+
+    def test_ail_py_table_does_not_copy_the_ail_metrics(self):
+        self.assertIn('| berth_sim | not run | n/a |', self.text)
+        self.assertNotIn('| berth_sim | general | n/a | - | - | W', self.text)
 
     def test_method_section_is_unchanged(self):
         for line in self.publisher.merge.METHOD_LINES:
@@ -65,10 +73,44 @@ class ComparePublish(unittest.TestCase):
     def test_win_counts_against_rust(self):
         counts = self.publisher.summary_counts(self.report)
         expected = {
-            'instructions': [5, 10], 'rss_kib': [6, 10], 'binary_bytes': [10, 10],
-            'compile_s': [0, 10], 'build_disk_kib': [2, 10], 'wall_ms': [6, 10],
+            'instructions': [0, 0], 'rss_kib': [0, 4], 'binary_bytes': [10, 10],
+            'compile_s': [0, 10], 'build_disk_kib': [0, 0], 'wall_ms': [6, 10],
         }
         self.assertEqual(counts, expected)
+
+    def test_fixture_carries_only_supplied_metrics(self):
+        for task in self.report['tasks']:
+            self.assertLessEqual(set(task['results']), {'ail', 'ail-py', 'rust'})
+            for result in task['results'].values():
+                for key in ('instructions', 'build_disk_kib', 'cases_public', 'cases_hidden'):
+                    self.assertNotIn(key, result)
+            if 'ail-py' in task['results']:
+                self.assertEqual(task['results']['ail-py']['path'], 'refused')
+
+    def test_date_survives_the_merge_report_shape(self):
+        with tempfile.TemporaryDirectory(prefix='compare-merge-') as tmp:
+            results = Path(tmp) / 'results'
+            results.mkdir()
+            for number, task in enumerate(self.report['tasks']):
+                (results / ('result-%02d.json' % number)).write_text(json.dumps(task), encoding='utf-8')
+            merged_path = Path(tmp) / 'compare-report.json'
+            subprocess.run([sys.executable, str(REPO / 'lab' / 'compare' / 'merge.py'),
+                            str(results), '--json', str(merged_path)],
+                           check=True, capture_output=True)
+            merged = json.loads(merged_path.read_text(encoding='utf-8'))
+            text = self.publisher.render(merged, source='compare-report.json')
+            self.assertIn('AIL commit `4f1245b`', text)
+            self.assertIn('date 2026-11-02', text)
+
+    def test_readme_counts_match_the_fixture(self):
+        counts = self.publisher.summary_counts(self.report)
+        readme = (REPO / 'README.md').read_text(encoding='utf-8')
+        self.assertIn('Peak RSS: AIL is lower on %d/%d tasks with data.' % tuple(counts['rss_kib']), readme)
+        self.assertIn('Binary size: AIL is smaller on %d/%d tasks.' % tuple(counts['binary_bytes']), readme)
+        compile_slower = counts['compile_s'][1] - counts['compile_s'][0]
+        self.assertIn('Compile time: AIL is slower to compile on %d/%d tasks.' % (compile_slower, counts['compile_s'][1]), readme)
+        self.assertIn('Wall time: AIL is lower on %d/%d tasks.' % tuple(counts['wall_ms']), readme)
+        self.assertNotIn('against C, Rust, Go, Nim and Python', readme)
 
     def test_main_writes_the_same_document(self):
         with tempfile.TemporaryDirectory(prefix='compare-publish-') as tmp:

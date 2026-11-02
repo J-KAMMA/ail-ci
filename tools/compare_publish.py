@@ -187,7 +187,8 @@ def render(report, source=None, fixture=None, date=None):
     tasks = report['tasks']
     head = report.get('head') or _first(tasks, 'head') or '?'
     when = date or report.get('date') or _first(tasks, 'date') or _first(tasks, 'started') or '?'
-    run = report.get('run')
+    when = str(when).split('T')[0]
+    run = report.get('run') or _first(tasks, 'run')
     meta = ['AIL commit `%s`' % head, 'date %s' % when, '%d tasks' % len(tasks)]
     if run:
         meta.append('run %s' % run)
