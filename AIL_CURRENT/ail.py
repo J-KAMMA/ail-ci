@@ -356,16 +356,22 @@ def list_dir(path):
     return os.listdir(path)
 
 
-def path_exists(path):
+def _path_query(path, directory):
     if not path:
         return 0
-    return int(os.path.exists(path))
+    try:
+        info = os.stat(path)
+    except (FileNotFoundError, NotADirectoryError):
+        return 0
+    return int(not directory or stat.S_ISDIR(info.st_mode))
+
+
+def path_exists(path):
+    return _path_query(path, False)
 
 
 def is_dir(path):
-    if not path:
-        return 0
-    return int(os.path.isdir(path))
+    return _path_query(path, True)
 
 
 def file_size(path):
@@ -375,18 +381,21 @@ def file_size(path):
     return info.st_size
 
 
+def _file_identity(path):
+    if not path:
+        raise OSError('invalid path')
+    try:
+        return os.stat(path)
+    except FileNotFoundError:
+        return None
+
+
 def same_file(first, second):
-    try:
-        a = os.stat(first)
-    except FileNotFoundError:
+    a = _file_identity(first)
+    if a is None:
         return 0
-    except NotADirectoryError:
-        return 0
-    try:
-        b = os.stat(second)
-    except FileNotFoundError:
-        return 0
-    except NotADirectoryError:
+    b = _file_identity(second)
+    if b is None:
         return 0
     return int(a.st_dev == b.st_dev and a.st_ino == b.st_ino)
 
@@ -483,11 +492,15 @@ def pcm16_scale_le(data, numerator, denominator):
 def jscharat(text, index):
     if index < 0:
         return ''
-    units = text.encode('utf-16-le')
-    offset = index * 2
-    if offset + 2 > len(units):
-        return ''
-    return units[offset:offset + 2].decode('utf-16-le', 'surrogatepass')
+    unit = 0
+    for character in text:
+        width = 2 if ord(character) > 0xFFFF else 1
+        if index < unit + width:
+            if index != unit:
+                raise ValueError('jscharat index splits a surrogate pair')
+            return character
+        unit += width
+    return ''
 
 
 def jsdiv(left, right):

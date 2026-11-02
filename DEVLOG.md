@@ -1,3 +1,22 @@
+## 2026-11-02 -- onelang s2 review 1: `ail.py` matches the runtime on path errors and astral `jscharat`
+
+Three CPython-parity defects in `AIL_CURRENT/ail.py` are fixed; no compiler or converter file changed.
+
+* `jscharat` now walks code points and counts UTF-16 units like `ail_str_charat`: the unit that
+  starts an astral character yields the whole character and the trailing unit raises `ValueError`
+  (previously it returned lone surrogates).
+* `same_file` raises `OSError` for an empty path and for a non-ENOENT `stat` failure such as
+  `ENOTDIR`, and only treats a missing path as `0`, matching `ail_file_identity`.
+* `path_exists` / `is_dir` stat directly and only swallow `ENOENT` / `ENOTDIR`; permission and
+  other OS errors now propagate as `OSError`.
+
+Probes for astral `jscharat`, `same_file` (equal, missing, empty, `ENOTDIR`) and `path_exists` /
+`is_dir` (file, directory, missing, `ENOTDIR`, empty, unreadable parent) match the default AOT
+build; the unified build refuses these builtins as it did on the base. `test_ail_ail2py`,
+`test_ail_python_syntax`, `test_ail_heapq_bisect`, `test_ail_overflow_error`,
+`test_ail_builtin_contracts`, `test_ail_api_profiles`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_safetynet` pass.
+
 ## 2026-11-02 -- onelang s2: the `ail` module for AIL-only built-ins
 
 `AIL_CURRENT/ail.py` now gives CPython the AIL-only built-ins (the free functions in
