@@ -1409,36 +1409,50 @@ class Streams:
         refuse(origin, 'itertools: the loop target has to be a name or a tuple of names')
 
     def check_nonescaping(self, name, origin):
-        """The tuple bound to `name` is held as a list: it may only be indexed, iterated, measured or reduced."""
+        """The tuple bound to `name` is held as a list: it may only be indexed, iterated, measured or reduced.
+
+        A plain alias (`other = name`) keeps the same list, so its own uses are checked the same way.
+        Anything else (print, ==, a dict key, a slice, ...) still refuses by name."""
         scope = self.lib.cur_fn if self.lib.cur_fn is not None else self.lib.tree
         parents = {}
         for parent in ast.walk(scope):
             for child in ast.iter_child_nodes(parent):
                 parents[id(child)] = parent
-        for each in ast.walk(scope):
-            if not (isinstance(each, ast.Name) and each.id == name and isinstance(each.ctx, ast.Load)):
+        seen = set()
+        pending = [name]
+        while pending:
+            current = pending.pop()
+            if current in seen:
                 continue
-            parent = parents.get(id(each))
-            ok = False
-            if isinstance(parent, ast.Subscript) and parent.value is each and not isinstance(parent.slice, ast.Slice):
-                ok = True
-            elif isinstance(parent, ast.Call) and each in parent.args and len(parent.args) == 1 \
-                    and isinstance(parent.func, ast.Name) and parent.func.id in NONESCAPE_CALLS:
-                ok = True
-            elif isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute) \
-                    and parent.func.attr == 'join' and each in parent.args:
-                ok = True
-            elif isinstance(parent, (ast.For, ast.comprehension)) and parent.iter is each:
-                ok = True
-            elif isinstance(parent, ast.Compare) and each in parent.comparators and len(parent.ops) == 1 \
-                    and isinstance(parent.ops[0], (ast.In, ast.NotIn)):
-                ok = True
-            elif isinstance(parent, ast.Attribute) and parent.value is each and parent.attr in ('index', 'count'):
-                ok = True
-            if not ok:
-                refuse(each, 'itertools: %s holds a tuple in CPython; here it is a list, and this use of it '
-                       '(print, ==, a dict key, a slice...) would differ. Index it, loop over it, or unpack the '
-                       'tuple into names in the for statement' % name)
+            seen.add(current)
+            for each in ast.walk(scope):
+                if not (isinstance(each, ast.Name) and each.id == current and isinstance(each.ctx, ast.Load)):
+                    continue
+                parent = parents.get(id(each))
+                ok = False
+                if isinstance(parent, ast.Subscript) and parent.value is each and not isinstance(parent.slice, ast.Slice):
+                    ok = True
+                elif isinstance(parent, ast.Call) and each in parent.args and len(parent.args) == 1 \
+                        and isinstance(parent.func, ast.Name) and parent.func.id in NONESCAPE_CALLS:
+                    ok = True
+                elif isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute) \
+                        and parent.func.attr == 'join' and each in parent.args:
+                    ok = True
+                elif isinstance(parent, (ast.For, ast.comprehension)) and parent.iter is each:
+                    ok = True
+                elif isinstance(parent, ast.Compare) and each in parent.comparators and len(parent.ops) == 1 \
+                        and isinstance(parent.ops[0], (ast.In, ast.NotIn)):
+                    ok = True
+                elif isinstance(parent, ast.Attribute) and parent.value is each and parent.attr in ('index', 'count'):
+                    ok = True
+                elif (isinstance(parent, ast.Assign) and parent.value is each
+                        and len(parent.targets) == 1 and isinstance(parent.targets[0], ast.Name)):
+                    pending.append(parent.targets[0].id)
+                    ok = True
+                if not ok:
+                    refuse(each, 'itertools: %s holds a tuple in CPython; here it is a list, and this use of it '
+                           '(print, ==, a dict key, a slice...) would differ. Index it, loop over it, or unpack the '
+                           'tuple into names in the for statement' % current)
 
     # -- loops ----------------------------------------------------------------------------------------
     def loop(self, src, target, body, origin):

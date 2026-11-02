@@ -32622,6 +32622,83 @@ def _rewrite_bare_tuple_params(fn):
     ast.fix_missing_locations(fn)
 
 
+def _bare_tuple_local_kind(ann):
+    """`int` for a variable-length bare `tuple[int, ...]` annotation, else `None`.
+
+    A `tuple[float, ...]` local stays refused: `sum(())` is CPython's int 0, while the
+    typed `list[float]` sum is `0.0`, so the list spelling could change a result."""
+    if not (isinstance(ann, ast.Subscript) and isinstance(ann.value, ast.Name)
+            and ann.value.id == 'tuple'):
+        return None
+    parts = ann.slice.elts if isinstance(ann.slice, ast.Tuple) else [ann.slice]
+    if len(parts) != 2:
+        return None
+    elem, rest = parts
+    if not (isinstance(elem, ast.Name) and elem.id == INT):
+        return None
+    if not (isinstance(rest, ast.Constant) and rest.value is Ellipsis):
+        return None
+    return elem.id
+
+
+_LOCAL_TUPLE_SAFE_CALLS = ('sum', 'min', 'max', 'sorted', 'list', 'any', 'all', 'set', 'len')
+
+
+def _local_tuple_uses_are_safe(fn, name):
+    """A local tuple held as a list may only be indexed, iterated, measured or reduced."""
+    parents = {}
+    for parent in ast.walk(fn):
+        for child in ast.iter_child_nodes(parent):
+            parents[id(child)] = parent
+    for each in ast.walk(fn):
+        if not (isinstance(each, ast.Name) and each.id == name and isinstance(each.ctx, ast.Load)):
+            continue
+        parent = parents.get(id(each))
+        if isinstance(parent, ast.Subscript) and parent.value is each and not isinstance(parent.slice, ast.Slice):
+            continue
+        if isinstance(parent, ast.Call) and each in parent.args and len(parent.args) == 1 \
+                and isinstance(parent.func, ast.Name) and parent.func.id in _LOCAL_TUPLE_SAFE_CALLS:
+            continue
+        if isinstance(parent, ast.Call) and isinstance(parent.func, ast.Attribute) \
+                and parent.func.attr == 'join' and each in parent.args:
+            continue
+        if isinstance(parent, (ast.For, ast.comprehension)) and parent.iter is each:
+            continue
+        if isinstance(parent, ast.Compare) and each in parent.comparators and len(parent.ops) == 1 \
+                and isinstance(parent.ops[0], (ast.In, ast.NotIn)):
+            continue
+        if isinstance(parent, ast.Attribute) and parent.value is each and parent.attr in ('index', 'count'):
+            continue
+        return False
+    return True
+
+
+def _rewrite_bare_tuple_locals(fn):
+    """A local `x: tuple[int, ...] = ()` whose uses are all list-compatible becomes `list[int]`.
+
+    The typed path holds an itertools permutation tuple as a list already, and CPython's tuple and
+    a list agree on indexing, iteration, len and the reducing builtins. A use that can tell them
+    apart (print, ==, a slice, a dict key, a return, an arbitrary call) leaves the annotation
+    untouched, so the existing refusal still names it."""
+    for node in ast.walk(fn):
+        if not isinstance(node, ast.AnnAssign) or not isinstance(node.target, ast.Name):
+            continue
+        kind = _bare_tuple_local_kind(node.annotation)
+        if kind is None or node.value is None:
+            continue
+        if not (isinstance(node.value, ast.Tuple) and not node.value.elts):
+            continue
+        name = node.target.id
+        if not _local_tuple_uses_are_safe(fn, name):
+            continue
+        node.annotation = ast.copy_location(
+            ast.Subscript(value=ast.Name(id=LIST, ctx=ast.Load()),
+                          slice=ast.Name(id=kind, ctx=ast.Load()), ctx=ast.Load()),
+            node.annotation)
+        node.value = ast.copy_location(ast.List(elts=[], ctx=ast.Load()), node.value)
+    ast.fix_missing_locations(fn)
+
+
 # ---- nested functions: a def called only in place, capturing an enclosing scalar local ---------
 #
 # Two different things share the Python spelling `def inner(): ...` written inside another `def`,
@@ -35296,6 +35373,7 @@ def _to_c_once(source, name=None, strict=True, info=None, entry=None, sig=None, 
     # before any other pass below inspects `fn` -- see the module note above `_bare_tuple_arity`.
     for _fn in fns:
         _rewrite_bare_tuple_params(_fn)
+        _rewrite_bare_tuple_locals(_fn)
         _FoldCaseLiterals().visit(_fn)
     if entry is not None:
         by_name = {f.name: f for f in fns}
