@@ -1,0 +1,3495 @@
+{
+ "summary": {
+  "total": 229,
+  "ok": 213,
+  "failed": [
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "sion (the inner one would be materialised eagerly, not lazily)\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:7: defaultdict(lambda: dict.fromkeys(quarters, 0)): only int, float, str, list and lambda: <constant> (or lambda: []) are built as the factory\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:13: unpacking a value that is not a tuple of known shape\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:18: iterating over a tuple\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:20: iterating over a tuple\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:21: iterating over a tuple\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:23: iterating over a tuple\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:24: iterating over a tuple\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t440.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t440.py:17:5: not in the subset: functools cache: .cache_info is not built (the general path could not build this program either); general path: the method .cache_info() (on a value of unknown static kind)\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t447.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t447.py:8:14: not in the subset: 'observers' is annotated Observers, which this compiler has no rule for (the general path could not build this program either); general path: name 'Callable' is not defined\n  write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str, int], set[int], set[str], or a class name (no generics such as list[T], no Optional/Union)\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t447.py:4: a module-level constant whose type cannot be told and that holds a tuple is not built; build it inside a function\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t447.py:5: a module-level constant whose type cannot be told and that holds a tuple is not built; build it inside a function\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t455.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "unner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t455.py:1: the type of a tuple element cannot be told from how it is used; annotate it\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t455.py:4: a module-level tuple constant must be numbers only, one type per position (DIRS = [(0, 1), (1, 0)]); build other tuples inside a function\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t455.py:5: re.compile(): re.compile is built only as `NAME = re.compile(literal[, flags])` bound once; use NAME.match(...) and so on; built here: re.match / fullmatch / search / findall / finditer / split / sub / subn / escape and re.compile(literal) with a string-literal pattern (a literal, or a name bound once to one), flags I M S X A, literals . classes \\d \\w \\s anchors ^ $ \\A \\Z \\b \\B * + ? {m,n} lazy variants | groups (capturing, (?:), (?P<name>)); lookaround, backreferences, atomic / possessive forms and conditionals are not built\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t456.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t456.py:4:1: not in the subset: inheritance from 'dict[str, int]' (class 'CountingDict'); a class here may only derive from a class defined earlier in this program (the general path could not build this program either); general path: a non-name base class in class CountingDict\n  write instead: a standalone class that holds the other as a field (`self.base = Base(...)`)\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t467.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t467.py:4:1: not in the subset: only a class type can be None: write `Node | None` (the general path could not build this program either); general path: a **kwargs call argument\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t467.py:1: a *argument in a call\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t475.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t475.py:1:1: not in the subset: import of 'class' is not available: this compiler builds only the modules it models (math, sys, collections, itertools, functools, heapq, bisect, re, json) (the general path could not build this program either); general path: class.pack (not yet published in NAMES_library.json)\n  write instead: drop the import and write what you need by hand with plain lists, dicts and loops\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t484.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t484.py:11:5: not in the subset: field _AilT_b_b.fb0 is declared bool, but `letters` is not a bool (Python would keep the number and print it as one); write a bool: True/False, a comparison, `not`, or `letters != 0` (the general path could not build this program either); general path: the method .translate() (on a value of unknown static kind)\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t489.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t489.py:2:1: not in the subset: import of 'unicodedata' is not available: this compiler builds only the modules it models (math, sys, collections, itertools, functools, heapq, bisect, re, json) (the general path could not build this program either); general path: unicodedata.name is not supported (see the note below)\n  write instead: drop the import and write what you need by hand with plain lists, dicts and loops\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t489.py:10: unicodedata.name is not supported; write instead: use the str methods (isalpha, isdigit, isspace, isupper, islower, isalnum, isprintable), ord() / chr(), or unicodedata.category(ch), which is built\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t176.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t176.py:7:5: not in the subset: json.loads(s): the type of the result is not declared here; write the type down: `data: dict[str, int] = json.loads(s)` (the types are int, float, str, bool, list[T], list[list[T]], dict[str, T]) (the general path could not build this program either); general path: sys.stdout used as a plain value\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t278.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "not in the subset: list[list[tuple[int, int]]]: a nested list holds rows of int, float, str or a class; keep a list of class instances for anything else (the general path could not build this program either); general path: the method .read() (on a value of unknown static kind)\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t278.py:41: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t278.py:42: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t385.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 4,
+    "second_rc": 4,
+    "events": [],
+    "stderr": "the C compiler rejected this:\n/tmp/ailc-02o1np6u/program.c:4139:180: error: incompatible types when assigning to type \u2018int64_t\u2019 {aka \u2018long int\u2019} from type \u2018ail_list\u2019\n 4139 |     { v__t63 = ail_olist_len(v_columns); ail_list_reserve(&v__t62, (v__t63) - (0)); for (int64_t _i = 0; _i < v__t63; _i++) { int64_t _comp_element64 = _i; v__t62.p[v__t62.n++] = ({ ail_list _source = (ail_obj_store__AilRow_int(&v__t66, ({ v__t65 = _comp_element64; (ail_obj__AilRow_int *)ail_obj_retain(ail_olist_get(v_columns, v__t65)); }), 1))->f_v; ail_list _copy = ail_list_snapshot(_source.p, _source.n); ail_list_free(&v__t67); v__t67 = _copy; v__t67; }); } }\n      |                                                                                                                                                                                    ^\n\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t467.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t467.py:12:1: not in the subset: only a class type can be None: write `Node | None` (the general path could not build this program either); general path: sys.stdin used as a plain value\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t467.py:1: a *argument in a call\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t467.py:9: cannot tell the type of element 1 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t472.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": " two arguments), log1p, log2, log10, cbrt, erf, erfc, nextafter, remainder, dist and the constants math.pi, math.e, math.tau, math.inf, math.nan; fsum (a list of floats), prod (a list of ints or floats, with start=), modf; frexp, ldexp, ulp, gamma and the rest are not built\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t472.py:18: math.gcd() with these arguments is not built; the math names built here are math.sqrt, floor, ceil, trunc, isqrt, gcd and lcm (two arguments), comb, perm (two arguments), fabs, factorial, pow, fmod, hypot, copysign, atan2, degrees, radians, isnan, isinf, isfinite, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, asinh, acosh, atanh, exp, exp2, expm1, log (one or two arguments), log1p, log2, log10, cbrt, erf, erfc, nextafter, remainder, dist and the constants math.pi, math.e, math.tau, math.inf, math.nan; fsum (a list of floats), prod (a list of ints or floats, with start=), modf; frexp, ldexp, ulp, gamma and the rest are not built\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t475.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t475.py:1:1: not in the subset: import of 'class' is not available: this compiler builds only the modules it models (math, sys, collections, itertools, functools, heapq, bisect, re, json) (the general path could not build this program either); general path: class.pack (not yet published in NAMES_library.json)\n  write instead: drop the import and write what you need by hand with plain lists, dicts and loops\n"
+   },
+   {
+    "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t489.py",
+    "syntax": "python",
+    "ok": false,
+    "first_rc": 3,
+    "second_rc": 3,
+    "events": [],
+    "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t489.py:2:1: not in the subset: import of 'unicodedata' is not available: this compiler builds only the modules it models (math, sys, collections, itertools, functools, heapq, bisect, re, json) (the general path could not build this program either); general path: unicodedata.name is not supported (see the note below)\n  write instead: drop the import and write what you need by hand with plain lists, dicts and loops\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t489.py:9: unicodedata.name is not supported; write instead: use the str methods (isalpha, isdigit, isspace, isupper, islower, isalnum, isprintable), ord() / chr(), or unicodedata.category(ch), which is built\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t489.py:13: cannot tell the type of element 1 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\n"
+   }
+  ],
+  "elapsed_s": 1091.2,
+  "work": "/tmp/ail-fe-verify-d1rziwgd"
+ },
+ "results": [
+  {
+   "source": "/home/runner/work/_temp/w2/lab/compare/src/berth_sim/main.ail",
+   "syntax": null,
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 8b306521d8330dc87219c33744ea99049f0176ff494c4230d6fb52025932f467",
+    "hit 8b306521d8330dc87219c33744ea99049f0176ff494c4230d6fb52025932f467"
+   ],
+   "c1": "67f98200e7f7c94de00d5319f43587d1e3363c5c7a5c8b216db498362a950b90",
+   "c2": "67f98200e7f7c94de00d5319f43587d1e3363c5c7a5c8b216db498362a950b90",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/compare/src/chain_relax/main.ail",
+   "syntax": null,
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 3177ceeab324a745fd88a846d7ab132bc58198fb35d5458a5b820f9ef23032d4",
+    "hit 3177ceeab324a745fd88a846d7ab132bc58198fb35d5458a5b820f9ef23032d4"
+   ],
+   "c1": "e27358b672fbd090d846afea0f3d1e2bd8a17d7a993f1c424739d131a2b1fb7d",
+   "c2": "e27358b672fbd090d846afea0f3d1e2bd8a17d7a993f1c424739d131a2b1fb7d",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/compare/src/echo_pack/main.ail",
+   "syntax": null,
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 0e0b8907503a56e6e6ed567aa3d4f6c8f95a1eb3058051a12937d6adc692b2ab",
+    "hit 0e0b8907503a56e6e6ed567aa3d4f6c8f95a1eb3058051a12937d6adc692b2ab"
+   ],
+   "c1": "f3b75f579a95a3a92a67b8c67e249ab1314a4f2e9b0df2ac60ee04f2f17b13c8",
+   "c2": "f3b75f579a95a3a92a67b8c67e249ab1314a4f2e9b0df2ac60ee04f2f17b13c8",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/compare/src/ledger_bin/main.ail",
+   "syntax": null,
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 5b231c18b0d6baa9759b73a7c41b71e3f97cb71bb36c02ba4f7fea254403130f",
+    "hit 5b231c18b0d6baa9759b73a7c41b71e3f97cb71bb36c02ba4f7fea254403130f"
+   ],
+   "c1": "b262524dbf05bf4b91090e4e1869f8d50fb9a8dbb94747358e934f096422e281",
+   "c2": "b262524dbf05bf4b91090e4e1869f8d50fb9a8dbb94747358e934f096422e281",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/compare/src/rail_transfer/main.ail",
+   "syntax": null,
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 37edebda5c4228c8897a22fd5736618dcd2a2647119ef071341f0d5409972d40",
+    "hit 37edebda5c4228c8897a22fd5736618dcd2a2647119ef071341f0d5409972d40"
+   ],
+   "c1": "5c89784c5b58c26961d3ab5492d8745bdb38c31172c2f93a7150410a5fdcb404",
+   "c2": "5c89784c5b58c26961d3ab5492d8745bdb38c31172c2f93a7150410a5fdcb404",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/compare/src/scar_life/main.ail",
+   "syntax": null,
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 366d93923e5cab00a21f1df4f56224e539d8d0723e1921650efa59bb3366a9b5",
+    "hit 366d93923e5cab00a21f1df4f56224e539d8d0723e1921650efa59bb3366a9b5"
+   ],
+   "c1": "17ca9ef99a4f9ad35b381ff9a1cfee6b2222942d133d89f71f8c2ade6f9633fb",
+   "c2": "17ca9ef99a4f9ad35b381ff9a1cfee6b2222942d133d89f71f8c2ade6f9633fb",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/compare/src/tally_lang/main.ail",
+   "syntax": null,
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss dc08d25b88d843cee388d3a7fed99e752f1403ef449ac78cb7c5b1ae5f57df5b",
+    "hit dc08d25b88d843cee388d3a7fed99e752f1403ef449ac78cb7c5b1ae5f57df5b"
+   ],
+   "c1": "bc423b64d4cc577feac4cc9a9349fe9a64b632a60e4b41f2890996f90fcc7789",
+   "c2": "bc423b64d4cc577feac4cc9a9349fe9a64b632a60e4b41f2890996f90fcc7789",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/compare/src/term_rank/main.ail",
+   "syntax": null,
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 52d4fc1a4b3a067fa1cf82c42237081b452e8873bdc8ebc3e3b86c54fbe17671",
+    "hit 52d4fc1a4b3a067fa1cf82c42237081b452e8873bdc8ebc3e3b86c54fbe17671"
+   ],
+   "c1": "585cafced7d791cbff7913ff2f5ed8b41de9e98a5cf9125b22fc94ff01d6f69b",
+   "c2": "585cafced7d791cbff7913ff2f5ed8b41de9e98a5cf9125b22fc94ff01d6f69b",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/compare/src/ticket_audit/main.ail",
+   "syntax": null,
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 234a6bf0597db69dac32f3d7d2cc0d0290e249ab1b42ff36fa4a1a76092df287",
+    "hit 234a6bf0597db69dac32f3d7d2cc0d0290e249ab1b42ff36fa4a1a76092df287"
+   ],
+   "c1": "46cb0b372a3262b01f6d2089542362e853bf0f51757857d366f8d429394bc7f6",
+   "c2": "46cb0b372a3262b01f6d2089542362e853bf0f51757857d366f8d429394bc7f6",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/compare/src/tree_fold/main.ail",
+   "syntax": null,
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss f50bedc16169737649682786a067ec81ccbd8da30dbbbe009076398659979d46",
+    "hit f50bedc16169737649682786a067ec81ccbd8da30dbbbe009076398659979d46"
+   ],
+   "c1": "bfe193837fdae79d688301bb8f57d026d552cd788f7d04b0c14bbd195da29d8c",
+   "c2": "bfe193837fdae79d688301bb8f57d026d552cd788f7d04b0c14bbd195da29d8c",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t001.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 937edafadd8b1416414c7243edf33872bea45fe6dab2a4513574e8711a6ddfcc",
+    "hit 937edafadd8b1416414c7243edf33872bea45fe6dab2a4513574e8711a6ddfcc"
+   ],
+   "c1": "5072d82d72eda31b206a6a8f8f606c3706af0ea9ca0ada2d6740f9f2ee1fbd62",
+   "c2": "5072d82d72eda31b206a6a8f8f606c3706af0ea9ca0ada2d6740f9f2ee1fbd62",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t003.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 183ffea3f1b58018e9d973acf50324491832fbad535beedc6586433d4c7aceab",
+    "hit 183ffea3f1b58018e9d973acf50324491832fbad535beedc6586433d4c7aceab"
+   ],
+   "c1": "ab34b44f9da16c0c87f3e2fb6c287e1292d0c891cfcb36f343e48bc05a0c6b1a",
+   "c2": "ab34b44f9da16c0c87f3e2fb6c287e1292d0c891cfcb36f343e48bc05a0c6b1a",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t004.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss de4545f916a736afc65497a8d069c03d49450dbd130b2bf8d538811cf0a2ac56",
+    "hit de4545f916a736afc65497a8d069c03d49450dbd130b2bf8d538811cf0a2ac56"
+   ],
+   "c1": "03af9aaeadc13d77e470f5d84ee1ffb88d9b65375272239a4cebe7b1129272c6",
+   "c2": "03af9aaeadc13d77e470f5d84ee1ffb88d9b65375272239a4cebe7b1129272c6",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t005.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 1d76a2ba8a94e74e4a75de85f5e2db2bbeac57cf0b6a41f589508ab1e4f083d3",
+    "hit 1d76a2ba8a94e74e4a75de85f5e2db2bbeac57cf0b6a41f589508ab1e4f083d3"
+   ],
+   "c1": "0060c6d963b18c70c8283234d7b066d564ff763b345fe0412f6347c4d2899baf",
+   "c2": "0060c6d963b18c70c8283234d7b066d564ff763b345fe0412f6347c4d2899baf",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t008.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 3a5833457f028f58bd8a0f3cef12a36322353992e76ad0bddd88e7a2ddf49e4e",
+    "hit 3a5833457f028f58bd8a0f3cef12a36322353992e76ad0bddd88e7a2ddf49e4e"
+   ],
+   "c1": "3d0c4aee84675c54ce5ffeed3f9b91897f36195b93b0fab111539fecfc664b0f",
+   "c2": "3d0c4aee84675c54ce5ffeed3f9b91897f36195b93b0fab111539fecfc664b0f",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t009.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 921007d223c2d08852d8232e9e84db3a74db9e34faa8ceda13e8118f7b5096ab",
+    "hit 921007d223c2d08852d8232e9e84db3a74db9e34faa8ceda13e8118f7b5096ab"
+   ],
+   "c1": "dcdfbd708abb9eaa7e3181c5ef7d5f369b4efa7c7b6b195e5b877ee67ce32927",
+   "c2": "dcdfbd708abb9eaa7e3181c5ef7d5f369b4efa7c7b6b195e5b877ee67ce32927",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t010.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 04635da240e64d1f75edfa56794d2fdaedaaf3b12ce85409d08f0366cb1c6ee0",
+    "hit 04635da240e64d1f75edfa56794d2fdaedaaf3b12ce85409d08f0366cb1c6ee0"
+   ],
+   "c1": "59ce00d5b08467f07d59b616b80f41b7f04eb2bbf92fbc5f734f828e7418741b",
+   "c2": "59ce00d5b08467f07d59b616b80f41b7f04eb2bbf92fbc5f734f828e7418741b",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t012.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 778cb8ebfdd9737f7deee3ec2d65e44b1c9bd6aebb2aa549c95849d434644691",
+    "hit 778cb8ebfdd9737f7deee3ec2d65e44b1c9bd6aebb2aa549c95849d434644691"
+   ],
+   "c1": "a5473c9b99e6da25144012d17ba7591223e43c1fc8fcd2d13aaeea65ef911c92",
+   "c2": "a5473c9b99e6da25144012d17ba7591223e43c1fc8fcd2d13aaeea65ef911c92",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t014.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 89a2f9f316c6d0845a2851906ebae80c754b2e53df3ab33a1a7ad7ea204ffe95",
+    "hit 89a2f9f316c6d0845a2851906ebae80c754b2e53df3ab33a1a7ad7ea204ffe95"
+   ],
+   "c1": "6b007e643ddfb5ec301b0006e7f912f06816aef4e5aec3dd2f8b1044cb63ae7f",
+   "c2": "6b007e643ddfb5ec301b0006e7f912f06816aef4e5aec3dd2f8b1044cb63ae7f",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t015.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss e6ef37804b30bd1e37a38ce2f8e340cc235163a838c9bbc62b48d14bc008bba4",
+    "hit e6ef37804b30bd1e37a38ce2f8e340cc235163a838c9bbc62b48d14bc008bba4"
+   ],
+   "c1": "1a2c33fb5fdbc0ac43ff1918ddd72e539475835efe0372693600bc193eab30f7",
+   "c2": "1a2c33fb5fdbc0ac43ff1918ddd72e539475835efe0372693600bc193eab30f7",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t016.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss e449bad1864e696feb0fc0d9867b89b8467f83f2000955a0d1c5af2103fb6d9a",
+    "hit e449bad1864e696feb0fc0d9867b89b8467f83f2000955a0d1c5af2103fb6d9a"
+   ],
+   "c1": "4eefffb8f8e3688bc4f9740309442e316e4be48d4b5954808bee89ec6a3a9efe",
+   "c2": "4eefffb8f8e3688bc4f9740309442e316e4be48d4b5954808bee89ec6a3a9efe",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t017.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 5db3a7c334a6382666df1e5818a645e68d1c557be1c52258da0d95be2aaefac4",
+    "hit 5db3a7c334a6382666df1e5818a645e68d1c557be1c52258da0d95be2aaefac4"
+   ],
+   "c1": "435b10d5e5fe4eaf31812f833bda833c2b36cbcb6b8cf22b6916cfeab8b0d322",
+   "c2": "435b10d5e5fe4eaf31812f833bda833c2b36cbcb6b8cf22b6916cfeab8b0d322",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t018.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 472f3b904849036de24d20d95f69b1e218a9898f9ad36677028921ecde2f66e0",
+    "hit 472f3b904849036de24d20d95f69b1e218a9898f9ad36677028921ecde2f66e0"
+   ],
+   "c1": "c52af748f0da983dc56c68b771c120459468c67d59dc5e1863b1c2837539341b",
+   "c2": "c52af748f0da983dc56c68b771c120459468c67d59dc5e1863b1c2837539341b",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t054.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 154b3e86f92720eef10337db9b685bfb2e07b9457dbe42b86319259a56ae08f7",
+    "hit 154b3e86f92720eef10337db9b685bfb2e07b9457dbe42b86319259a56ae08f7"
+   ],
+   "c1": "1c55d9cfa79d4df656892a4956f656e5a3b483b546cbac82bd52b78c9e2d7643",
+   "c2": "1c55d9cfa79d4df656892a4956f656e5a3b483b546cbac82bd52b78c9e2d7643",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t055.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss d61594e3eb5856e30552a06012085cd56a6124652c4740c8411b1ce3ea161879",
+    "hit d61594e3eb5856e30552a06012085cd56a6124652c4740c8411b1ce3ea161879"
+   ],
+   "c1": "24e786155081f1be863e1ba727d8b53e4fc1e4dd007a565b508e1afe689e048d",
+   "c2": "24e786155081f1be863e1ba727d8b53e4fc1e4dd007a565b508e1afe689e048d",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t065.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss b68d7b32fcfee7f4e80ac4ffa6d4c27080724d64510996c7209d20795b7194ca",
+    "hit b68d7b32fcfee7f4e80ac4ffa6d4c27080724d64510996c7209d20795b7194ca"
+   ],
+   "c1": "5de088ce274ee4a39a8ad09f4484e30b32f0a4c11474ce09b8d14a6351723092",
+   "c2": "5de088ce274ee4a39a8ad09f4484e30b32f0a4c11474ce09b8d14a6351723092",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t067.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 75fe2a000de73ffabd0efef5b456b1092b812ec79a85451f9c8101e4bf8416e5",
+    "hit 75fe2a000de73ffabd0efef5b456b1092b812ec79a85451f9c8101e4bf8416e5"
+   ],
+   "c1": "6ac2ea4fdfa55102f3102d3cef08caab502d155621c902b8fd524dafa9715f65",
+   "c2": "6ac2ea4fdfa55102f3102d3cef08caab502d155621c902b8fd524dafa9715f65",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t069.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss a94473783fdeee2c710e70754db334dae98170cd433c29b0b87a7759ba648e75",
+    "hit a94473783fdeee2c710e70754db334dae98170cd433c29b0b87a7759ba648e75"
+   ],
+   "c1": "fef26778a262e216a4db33e8ac824abd83357ac1a268a59a1923d945738ec4e7",
+   "c2": "fef26778a262e216a4db33e8ac824abd83357ac1a268a59a1923d945738ec4e7",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t078.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 4fc323276c516aafb62f5fb3d5c639cdc9c4131e690d7f8522d278ec59484ca5",
+    "hit 4fc323276c516aafb62f5fb3d5c639cdc9c4131e690d7f8522d278ec59484ca5"
+   ],
+   "c1": "1c9f42bc0edc874c5a5189d66032e8e439ca1aefd090e77abc65c31bbeeed4df",
+   "c2": "1c9f42bc0edc874c5a5189d66032e8e439ca1aefd090e77abc65c31bbeeed4df",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t079.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss a977cd56d5c563433d46d9738db7517a1d9e66dfec277c0332efbd2d8bce4c74",
+    "hit a977cd56d5c563433d46d9738db7517a1d9e66dfec277c0332efbd2d8bce4c74"
+   ],
+   "c1": "e0cc5a27e00e7a175ec738411e5e5f1a52ee5815b0c790c88dfa1238be9ab57d",
+   "c2": "e0cc5a27e00e7a175ec738411e5e5f1a52ee5815b0c790c88dfa1238be9ab57d",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t080.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss e5dabebc2247a072e317bdd4855e37b85c916276ec33a019543d7068edaa509c",
+    "hit e5dabebc2247a072e317bdd4855e37b85c916276ec33a019543d7068edaa509c"
+   ],
+   "c1": "679abc6f19d73f6152ca33470acf52ffe4a68a3115fd10f0e6de5ad259e01206",
+   "c2": "679abc6f19d73f6152ca33470acf52ffe4a68a3115fd10f0e6de5ad259e01206",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t081.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 334ea59d13e938862cf6d5a54fdc155c9e51a8f574e3421a5c08864894a0318c",
+    "hit 334ea59d13e938862cf6d5a54fdc155c9e51a8f574e3421a5c08864894a0318c"
+   ],
+   "c1": "a4df3ecb9174f89a3013c8aafc92d9d7c72ab1103a0539d66962ffb305fa979e",
+   "c2": "a4df3ecb9174f89a3013c8aafc92d9d7c72ab1103a0539d66962ffb305fa979e",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t087.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss e4078ba859970a49002c78617d90b627b3e25cf4fc2ce48eb9c2c1136a3c0572",
+    "hit e4078ba859970a49002c78617d90b627b3e25cf4fc2ce48eb9c2c1136a3c0572"
+   ],
+   "c1": "e2810221d8e99e18562c0458cb061a6f2d90d6fe2de33d7ce3960a143c346772",
+   "c2": "e2810221d8e99e18562c0458cb061a6f2d90d6fe2de33d7ce3960a143c346772",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t094.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 4987892b212ff622d2909d3475815dc86a4a53f832bd1ecdc9b8fce76630cc87",
+    "hit 4987892b212ff622d2909d3475815dc86a4a53f832bd1ecdc9b8fce76630cc87"
+   ],
+   "c1": "a893bd4fc0a5a6ba6fa248d83666acd1238e433cc8b2d8eda1cafd24611a5806",
+   "c2": "a893bd4fc0a5a6ba6fa248d83666acd1238e433cc8b2d8eda1cafd24611a5806",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t095.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss e1eb9f9c4d1598a11c04559a4c86f354b4aa8bd4287d1498bb65e55958a90757",
+    "hit e1eb9f9c4d1598a11c04559a4c86f354b4aa8bd4287d1498bb65e55958a90757"
+   ],
+   "c1": "e18a8498e484f1cf798af540ad80b3fbb3fb247ab3f6a9daa272420f1f867a0c",
+   "c2": "e18a8498e484f1cf798af540ad80b3fbb3fb247ab3f6a9daa272420f1f867a0c",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t098.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 92e8b64fe42357d3a1eabd5ed075f505916690de38d77c1275068873ea0f9ac5",
+    "hit 92e8b64fe42357d3a1eabd5ed075f505916690de38d77c1275068873ea0f9ac5"
+   ],
+   "c1": "ac12542993f7cee06ef8b6dc7bf69e82a3a74ae6ef303c5e809db867a60f5895",
+   "c2": "ac12542993f7cee06ef8b6dc7bf69e82a3a74ae6ef303c5e809db867a60f5895",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t100.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 61c9a41b94e00cb69b4e24d009429bb3034e3cceed47499025cb0f4da3521231",
+    "hit 61c9a41b94e00cb69b4e24d009429bb3034e3cceed47499025cb0f4da3521231"
+   ],
+   "c1": "4fc1906a21b606bba50c97d95c64d9599cdefff62e2c5f86459920ddf6b6a229",
+   "c2": "4fc1906a21b606bba50c97d95c64d9599cdefff62e2c5f86459920ddf6b6a229",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t103.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 7e6da3660ccc39eeefd4b9dff2c681064db8e37319452c47f60812bd29e2c212",
+    "hit 7e6da3660ccc39eeefd4b9dff2c681064db8e37319452c47f60812bd29e2c212"
+   ],
+   "c1": "168639c0b2e80438f255df9862268e5be79c8143df1a20f08de31497a1289d9b",
+   "c2": "168639c0b2e80438f255df9862268e5be79c8143df1a20f08de31497a1289d9b",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t104.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 34b7d41c1b8919d8467c025c56e03b3a78da7b40577d16f483e23d2af7b70a24",
+    "hit 34b7d41c1b8919d8467c025c56e03b3a78da7b40577d16f483e23d2af7b70a24"
+   ],
+   "c1": "c1b49880e8fa5c28c74ff6f3a04e15af68963c1db2704687bbf9ed4dc7792156",
+   "c2": "c1b49880e8fa5c28c74ff6f3a04e15af68963c1db2704687bbf9ed4dc7792156",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t107.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss f786cf2ed8f671bdb550e4051083a0ac07470c90f6602ae757c390db3453b0a2",
+    "hit f786cf2ed8f671bdb550e4051083a0ac07470c90f6602ae757c390db3453b0a2"
+   ],
+   "c1": "a91c31ba63a629549820e35eb69ddcbd4da7aa09671e1f30dd96b8eff37b5b16",
+   "c2": "a91c31ba63a629549820e35eb69ddcbd4da7aa09671e1f30dd96b8eff37b5b16",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t108.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 49e558ee9277a53a9957e50939804a2908967fb3836e0f217ff1b556610c5323",
+    "hit 49e558ee9277a53a9957e50939804a2908967fb3836e0f217ff1b556610c5323"
+   ],
+   "c1": "024577e29693ec664eb25a3f48fc4bb28c9bcd97ec9bfe1eb474364b5a9a5130",
+   "c2": "024577e29693ec664eb25a3f48fc4bb28c9bcd97ec9bfe1eb474364b5a9a5130",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t110.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 6bbca16a60afff2ff7a9d34cd6653953a3f954493801cd507a60b7e64963dc8f",
+    "hit 6bbca16a60afff2ff7a9d34cd6653953a3f954493801cd507a60b7e64963dc8f"
+   ],
+   "c1": "f36e6c772fd3673965226895c6fcf386d6556718d4d9ea5f9a5cd9b815e45f7a",
+   "c2": "f36e6c772fd3673965226895c6fcf386d6556718d4d9ea5f9a5cd9b815e45f7a",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t112.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 36ca467660741abb7d805433ee038877f290d99a9e05577495609583262aefab",
+    "hit 36ca467660741abb7d805433ee038877f290d99a9e05577495609583262aefab"
+   ],
+   "c1": "5ffe8f81e338b149e5c3486cd366c01e1f89edb3de8b024c7f656f613d094881",
+   "c2": "5ffe8f81e338b149e5c3486cd366c01e1f89edb3de8b024c7f656f613d094881",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t115.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss fcb58d279a3838c5437beeca8e0752237cdbc75197bdac67fbd2652f34ab265a",
+    "hit fcb58d279a3838c5437beeca8e0752237cdbc75197bdac67fbd2652f34ab265a"
+   ],
+   "c1": "3c788780159477ce973dc5d3031fe207c99def7528a1aa7352ef36189cfc4795",
+   "c2": "3c788780159477ce973dc5d3031fe207c99def7528a1aa7352ef36189cfc4795",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t116.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 6a5893dd27584de361c9561a8fb83f297c086abfe36e8603a050c4b64325f1c5",
+    "hit 6a5893dd27584de361c9561a8fb83f297c086abfe36e8603a050c4b64325f1c5"
+   ],
+   "c1": "cc03fcd735cb90da123e32d0ab97a20f2e467979eac04d1216cf07cbcf3860b2",
+   "c2": "cc03fcd735cb90da123e32d0ab97a20f2e467979eac04d1216cf07cbcf3860b2",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t117.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 63c20d09ce5f6519cc7e4b49ddfb257138284890e6ae964c1b9db8eb1004777a",
+    "hit 63c20d09ce5f6519cc7e4b49ddfb257138284890e6ae964c1b9db8eb1004777a"
+   ],
+   "c1": "763f364b09bbd44c863954618b7d52c9e8917eab05828220ef0eaf75ce74bc9c",
+   "c2": "763f364b09bbd44c863954618b7d52c9e8917eab05828220ef0eaf75ce74bc9c",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t121.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 643ad07532fb4f8dcc6d79375905b1d0e8b0b14eb538bc21ed9e5208fe7cf3d5",
+    "hit 643ad07532fb4f8dcc6d79375905b1d0e8b0b14eb538bc21ed9e5208fe7cf3d5"
+   ],
+   "c1": "4d2a0fc0c19fa5628285a93e06c709d000084c3f67424c1e5ad08ac598e753b4",
+   "c2": "4d2a0fc0c19fa5628285a93e06c709d000084c3f67424c1e5ad08ac598e753b4",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t125.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss e959dd76b49e61c6539c4444bdb44c740a4bdfa28aec6883edebf7765c0d8c05",
+    "hit e959dd76b49e61c6539c4444bdb44c740a4bdfa28aec6883edebf7765c0d8c05"
+   ],
+   "c1": "01c3cee77cb2f9ce964562ef3dfde25341a6dadc95855b58c90004875e7b7644",
+   "c2": "01c3cee77cb2f9ce964562ef3dfde25341a6dadc95855b58c90004875e7b7644",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t130.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 8fa0df6e5481ce05cc8a1687f2c0f790f99ffbe7d4114d4c371d64ed265af785",
+    "hit 8fa0df6e5481ce05cc8a1687f2c0f790f99ffbe7d4114d4c371d64ed265af785"
+   ],
+   "c1": "9e599801320458606a5849e54d71b129756c0216d3822f0c40626af497cb7da1",
+   "c2": "9e599801320458606a5849e54d71b129756c0216d3822f0c40626af497cb7da1",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t131.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 80a860c665bfcd33ec3b1807a102b11e0c09a98faa066639cb2a303333280c06",
+    "hit 80a860c665bfcd33ec3b1807a102b11e0c09a98faa066639cb2a303333280c06"
+   ],
+   "c1": "39b5f658341adadb57536f4b8066977f9abefe39daa9e8978dae7d7fa5f60ecc",
+   "c2": "39b5f658341adadb57536f4b8066977f9abefe39daa9e8978dae7d7fa5f60ecc",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t137.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 25844c049eaeccbe83a9a61578ed079581cfd646142357262d55bf7567cf4a89",
+    "hit 25844c049eaeccbe83a9a61578ed079581cfd646142357262d55bf7567cf4a89"
+   ],
+   "c1": "bcd9f27a9ce7851b7eb0242e515be4a263a0e87c1e1d73e71e20e6bcfd4c5865",
+   "c2": "bcd9f27a9ce7851b7eb0242e515be4a263a0e87c1e1d73e71e20e6bcfd4c5865",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t139.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss f13ea33ac4696e1c4ad2c575fa65eb4a9609b0332e170b4c39ecb18d3718f2b4",
+    "hit f13ea33ac4696e1c4ad2c575fa65eb4a9609b0332e170b4c39ecb18d3718f2b4"
+   ],
+   "c1": "e7ff7ac1bdea5fe14e5357ed7a0f89b3128322bfd38abb24d7a41d011a245caf",
+   "c2": "e7ff7ac1bdea5fe14e5357ed7a0f89b3128322bfd38abb24d7a41d011a245caf",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t140.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 98d174c537e28658f398f9770199587c0ef3e773e11f5fde4120621647acd9f2",
+    "hit 98d174c537e28658f398f9770199587c0ef3e773e11f5fde4120621647acd9f2"
+   ],
+   "c1": "6cbe601598d79871bc42b32e0ee4181094380a00412900fcd215fe1c61332087",
+   "c2": "6cbe601598d79871bc42b32e0ee4181094380a00412900fcd215fe1c61332087",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t141.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss bb5901906a67bfe4f620d3a5851eafb124c0640f0d25c6ca67899ed128c7c42c",
+    "hit bb5901906a67bfe4f620d3a5851eafb124c0640f0d25c6ca67899ed128c7c42c"
+   ],
+   "c1": "3164d17803620cae100059325421f81ea6e13117423d44c45dd1a3de55ee908b",
+   "c2": "3164d17803620cae100059325421f81ea6e13117423d44c45dd1a3de55ee908b",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t143.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss f0ae425e9bcfe7a712325b3e8d771f54c0cba45fb1670e8f52b67a2cce476dca",
+    "hit f0ae425e9bcfe7a712325b3e8d771f54c0cba45fb1670e8f52b67a2cce476dca"
+   ],
+   "c1": "00167b8f7dc188bfb906fb40dfcd053612e69346d4343b1b528a4ee93c23a3da",
+   "c2": "00167b8f7dc188bfb906fb40dfcd053612e69346d4343b1b528a4ee93c23a3da",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t149.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 3057537e7a8b4dba3f5928b485d4adbb477a74917e10112ad9048aea9f0815e0",
+    "hit 3057537e7a8b4dba3f5928b485d4adbb477a74917e10112ad9048aea9f0815e0"
+   ],
+   "c1": "58d4170b497fb8d1ab75f8306f39769868399cf4c937ca9c4af4229d2b54bceb",
+   "c2": "58d4170b497fb8d1ab75f8306f39769868399cf4c937ca9c4af4229d2b54bceb",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t150.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 4b7738b08b3a83cf875410769fb723f360481bb81a177cbf4eda3656d54e7aa7",
+    "hit 4b7738b08b3a83cf875410769fb723f360481bb81a177cbf4eda3656d54e7aa7"
+   ],
+   "c1": "8f8513f38266da14974d20a5a1358601463cc25dc3f22da27ab0938994254f47",
+   "c2": "8f8513f38266da14974d20a5a1358601463cc25dc3f22da27ab0938994254f47",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t151.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 5516bd2803717630f9bcdba32e7044ffbdb97e47e99800efec27452dc2599247",
+    "hit 5516bd2803717630f9bcdba32e7044ffbdb97e47e99800efec27452dc2599247"
+   ],
+   "c1": "d8e21a82cb386fcf6bf64e5b971c36d8a89175e30d44080b053573e64c79d734",
+   "c2": "d8e21a82cb386fcf6bf64e5b971c36d8a89175e30d44080b053573e64c79d734",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t155.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 139af74a8f216ed734e0858e56b28db02c4dae88d7fb58e25b6574ef19581b31",
+    "hit 139af74a8f216ed734e0858e56b28db02c4dae88d7fb58e25b6574ef19581b31"
+   ],
+   "c1": "ef0e459906af9bdd1d5ed2d64aee1839f46fd1be8800c77d45a78f3a418e0515",
+   "c2": "ef0e459906af9bdd1d5ed2d64aee1839f46fd1be8800c77d45a78f3a418e0515",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t161.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 7b74d9e7cacd1ee94a1554a46d00c176ecb0d771e66199e42336958a2d4221ce",
+    "hit 7b74d9e7cacd1ee94a1554a46d00c176ecb0d771e66199e42336958a2d4221ce"
+   ],
+   "c1": "690d0f002991c1f120073b8e8cf452718c9a3071e74847062eb257588ee30be5",
+   "c2": "690d0f002991c1f120073b8e8cf452718c9a3071e74847062eb257588ee30be5",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t166.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 65443665d3bc08f41bed3b1883bb414f8d40d233597527e33e33294c545ae416",
+    "hit 65443665d3bc08f41bed3b1883bb414f8d40d233597527e33e33294c545ae416"
+   ],
+   "c1": "543b741fa99feffefd71835b3dd79248fffa01c0d64d5c230ec30fd0454deb63",
+   "c2": "543b741fa99feffefd71835b3dd79248fffa01c0d64d5c230ec30fd0454deb63",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t168.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 17f8596b454524e847792c08bbe1faf4ed8226ed650c4f3da7d521fa165ce9c4",
+    "hit 17f8596b454524e847792c08bbe1faf4ed8226ed650c4f3da7d521fa165ce9c4"
+   ],
+   "c1": "c984b729b39d7055536e424d6f6e1ed9d283bb3e819d4b40944ccef1d7b4b397",
+   "c2": "c984b729b39d7055536e424d6f6e1ed9d283bb3e819d4b40944ccef1d7b4b397",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t170.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 23d4460abd8fc2f743bb77127933e37ee89fa4641973681b20b020cfbeb836ae",
+    "hit 23d4460abd8fc2f743bb77127933e37ee89fa4641973681b20b020cfbeb836ae"
+   ],
+   "c1": "84c6cee305a77db80399315f13576dfcfc4ed68352fe121e1b6dd6b6671edcf1",
+   "c2": "84c6cee305a77db80399315f13576dfcfc4ed68352fe121e1b6dd6b6671edcf1",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t171.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss e6c20d839b224b748e9eb40f48190ac4e0174046617977ff02bebd8be62644f4",
+    "hit e6c20d839b224b748e9eb40f48190ac4e0174046617977ff02bebd8be62644f4"
+   ],
+   "c1": "7adf065417ea36d73d677984d6db0c516b2a030f98d8954b1d6e1378077abaf8",
+   "c2": "7adf065417ea36d73d677984d6db0c516b2a030f98d8954b1d6e1378077abaf8",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "sion (the inner one would be materialised eagerly, not lazily)\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:7: defaultdict(lambda: dict.fromkeys(quarters, 0)): only int, float, str, list and lambda: <constant> (or lambda: []) are built as the factory\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:13: unpacking a value that is not a tuple of known shape\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:18: iterating over a tuple\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:20: iterating over a tuple\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:21: iterating over a tuple\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:23: iterating over a tuple\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t172.py:24: iterating over a tuple\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t173.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 4a795eff1d2ba2cd36954ae5b4ed3f34f6841c2844be0d7d6679afdfc4393d3a",
+    "hit 4a795eff1d2ba2cd36954ae5b4ed3f34f6841c2844be0d7d6679afdfc4393d3a"
+   ],
+   "c1": "d9c5a9efc0a153159f8168749c61ed81aab8413427522447bc76af32dd9fc44f",
+   "c2": "d9c5a9efc0a153159f8168749c61ed81aab8413427522447bc76af32dd9fc44f",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t176.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 65adb1694a98ac8e8a9a49b455529574b616e7e452327889b086872777aab03a",
+    "hit 65adb1694a98ac8e8a9a49b455529574b616e7e452327889b086872777aab03a"
+   ],
+   "c1": "59e19e14d94a24f385540a1795454a10e3781bc060628ce382ca2709251b5adf",
+   "c2": "59e19e14d94a24f385540a1795454a10e3781bc060628ce382ca2709251b5adf",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t178.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss a3ec9aa5c37a45022bc0f7b93ab84af603869ea2b8c8f3ae4c6e982ebfec89c9",
+    "hit a3ec9aa5c37a45022bc0f7b93ab84af603869ea2b8c8f3ae4c6e982ebfec89c9"
+   ],
+   "c1": "ad43f952c612a6da0e7bd8ac816b6e9232f1a34782304cfb737f6b584e70b2e3",
+   "c2": "ad43f952c612a6da0e7bd8ac816b6e9232f1a34782304cfb737f6b584e70b2e3",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t180.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss b9308a47e23d7c81342f2227187b7d903475365fde9a2503a9e8b6044a84486b",
+    "hit b9308a47e23d7c81342f2227187b7d903475365fde9a2503a9e8b6044a84486b"
+   ],
+   "c1": "8737b7eeae28ecef792b4154561d1cdd0545452dd5c3559442af295eac2743fe",
+   "c2": "8737b7eeae28ecef792b4154561d1cdd0545452dd5c3559442af295eac2743fe",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t184.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 0219ccd02fe79503e73a3a08871c76426695b22eae84b72279e6251e17f045db",
+    "hit 0219ccd02fe79503e73a3a08871c76426695b22eae84b72279e6251e17f045db"
+   ],
+   "c1": "20565482bcf6820609d1ae1a4b9129ad9ab1f89054863557fb9f27fabfb5ddd2",
+   "c2": "20565482bcf6820609d1ae1a4b9129ad9ab1f89054863557fb9f27fabfb5ddd2",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t188.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 0ab122a384305e00839f54711be42e9e967ab451d0e9d572ab29bb6940d3f4f8",
+    "hit 0ab122a384305e00839f54711be42e9e967ab451d0e9d572ab29bb6940d3f4f8"
+   ],
+   "c1": "631b93dc56be40c656cfee3ef636d107601cd57b02559950e0d4a0366e031234",
+   "c2": "631b93dc56be40c656cfee3ef636d107601cd57b02559950e0d4a0366e031234",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t193.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss dbc43fe72ae96b0a17d8b82fdcba6fe3e47658d6dc21d86d8922fa0e642518d0",
+    "hit dbc43fe72ae96b0a17d8b82fdcba6fe3e47658d6dc21d86d8922fa0e642518d0"
+   ],
+   "c1": "9710195a64b6f65651f4a8c3cb08477ba7b355f21504555da41d61eb6e843f9c",
+   "c2": "9710195a64b6f65651f4a8c3cb08477ba7b355f21504555da41d61eb6e843f9c",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t196.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss d9cab5124182bb33acbe32663e4093e547aecdda367e0fec23462c62c31e5bd3",
+    "hit d9cab5124182bb33acbe32663e4093e547aecdda367e0fec23462c62c31e5bd3"
+   ],
+   "c1": "951fbfcae03b0de1c901a68c7060662decd2017b4ed6d015628b02da5b4e0355",
+   "c2": "951fbfcae03b0de1c901a68c7060662decd2017b4ed6d015628b02da5b4e0355",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t198.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 299903f171cb093b7a3df1d41e6a9b9576e6a19fca066a64ce2cea821ee45d54",
+    "hit 299903f171cb093b7a3df1d41e6a9b9576e6a19fca066a64ce2cea821ee45d54"
+   ],
+   "c1": "ad3c57743c52717c709013a6ffceb9587d5d21161220016da1ff4b7247e59982",
+   "c2": "ad3c57743c52717c709013a6ffceb9587d5d21161220016da1ff4b7247e59982",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t208.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 14073d1f00f3d8677480e1f21361f3c3488a51e3fdd84feae38d8522280637cd",
+    "hit 14073d1f00f3d8677480e1f21361f3c3488a51e3fdd84feae38d8522280637cd"
+   ],
+   "c1": "b853c36c40a23b9f01d3af232e2edcf54b52605a1f983f76f7cf8ab4026647e1",
+   "c2": "b853c36c40a23b9f01d3af232e2edcf54b52605a1f983f76f7cf8ab4026647e1",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t210.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 818cbc888204456601a467c5a688f0841d94bb76a7083d0c0f0263ea1839c571",
+    "hit 818cbc888204456601a467c5a688f0841d94bb76a7083d0c0f0263ea1839c571"
+   ],
+   "c1": "a36074ab5fe622b4adcf04738d2247a1bc9dbd8802d2697e0f8323270a9215e7",
+   "c2": "a36074ab5fe622b4adcf04738d2247a1bc9dbd8802d2697e0f8323270a9215e7",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t211.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss ca7aa089347c3a3dba5e80dc0d091835e8d03a7910f5c7e2a88207493917bfdc",
+    "hit ca7aa089347c3a3dba5e80dc0d091835e8d03a7910f5c7e2a88207493917bfdc"
+   ],
+   "c1": "729c1aab7ef504f47b59a84f26241b198fc674b9d5944d71e992455c6ea5c177",
+   "c2": "729c1aab7ef504f47b59a84f26241b198fc674b9d5944d71e992455c6ea5c177",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t216.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss f40f4803e98a469d95c93fc029fac01ff777d56a77880b11d76676916faff905",
+    "hit f40f4803e98a469d95c93fc029fac01ff777d56a77880b11d76676916faff905"
+   ],
+   "c1": "7ae8049cca527490bfb362a5fee2a9d270610ad5fb2e4f3f652f571a9ad5f979",
+   "c2": "7ae8049cca527490bfb362a5fee2a9d270610ad5fb2e4f3f652f571a9ad5f979",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t219.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 883865fdb1619fa80be5d42c4da6b24f9f2670bd96a67c5de07b8bce57a210da",
+    "hit 883865fdb1619fa80be5d42c4da6b24f9f2670bd96a67c5de07b8bce57a210da"
+   ],
+   "c1": "907dc25959d54de1b61227ec8320033fa5a3d78750e1a4a4cb02074829eb3e65",
+   "c2": "907dc25959d54de1b61227ec8320033fa5a3d78750e1a4a4cb02074829eb3e65",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t223.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss d7f30c503352605d9e6abe90bc25455933b6cfe5af7eb1231eaf084a1aa5887b",
+    "hit d7f30c503352605d9e6abe90bc25455933b6cfe5af7eb1231eaf084a1aa5887b"
+   ],
+   "c1": "dda5076f50e842cbdcacad5a4e72a46e867eedce5bcc6c358be44e479095a203",
+   "c2": "dda5076f50e842cbdcacad5a4e72a46e867eedce5bcc6c358be44e479095a203",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t224.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 4066fdf64e798ac513120cbe2a896f01fb793f8c83d0a71fd09d7e644ec6c4fd",
+    "hit 4066fdf64e798ac513120cbe2a896f01fb793f8c83d0a71fd09d7e644ec6c4fd"
+   ],
+   "c1": "08d0bbd8b92f2216e609b7b9e949049e47bc226e03e068fe4601115a40604a30",
+   "c2": "08d0bbd8b92f2216e609b7b9e949049e47bc226e03e068fe4601115a40604a30",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t230.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss c3b138e71a72096ea2fb8c103d4442a1120b03b78ef73bfe55c06e50827232ec",
+    "hit c3b138e71a72096ea2fb8c103d4442a1120b03b78ef73bfe55c06e50827232ec"
+   ],
+   "c1": "320548895e5f5929e05706509e63518589c9570bb2866fe472f70ccb49a2e1d7",
+   "c2": "320548895e5f5929e05706509e63518589c9570bb2866fe472f70ccb49a2e1d7",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t237.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 5f07a65f9f017e8445b8f3fdc8f011b33e0c9a6837db1be84e679ebe0c57415c",
+    "hit 5f07a65f9f017e8445b8f3fdc8f011b33e0c9a6837db1be84e679ebe0c57415c"
+   ],
+   "c1": "237ac23b376dc6afa0a9b57df9d68648936755f13f1006a7f72f9f6f9975ca68",
+   "c2": "237ac23b376dc6afa0a9b57df9d68648936755f13f1006a7f72f9f6f9975ca68",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t239.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 1eb64148bca9620248c19e68f9e75f30ab59bd5fbe0609890a885046bd8efd46",
+    "hit 1eb64148bca9620248c19e68f9e75f30ab59bd5fbe0609890a885046bd8efd46"
+   ],
+   "c1": "28b81eb6330decc7e222f1b5e422dd4c23046352397cf22043765fe83a8f2153",
+   "c2": "28b81eb6330decc7e222f1b5e422dd4c23046352397cf22043765fe83a8f2153",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t241.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss b926303fa653d838908109862588990462063747a9ab161cad0121f3b9c47f27",
+    "hit b926303fa653d838908109862588990462063747a9ab161cad0121f3b9c47f27"
+   ],
+   "c1": "bef65bfd55e79a8ad4926dc9b32773be38d772bec98ff764602de3bf8669cf02",
+   "c2": "bef65bfd55e79a8ad4926dc9b32773be38d772bec98ff764602de3bf8669cf02",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t243.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 4e0fe5b115eab35b36687a82100dc143b7681c92f3f7365fad7218ecbb71bade",
+    "hit 4e0fe5b115eab35b36687a82100dc143b7681c92f3f7365fad7218ecbb71bade"
+   ],
+   "c1": "465cd945c21455ff629474991c28d3157dcf0a20daa48da58d245f52896eb99a",
+   "c2": "465cd945c21455ff629474991c28d3157dcf0a20daa48da58d245f52896eb99a",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t244.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 811fcace32dcf3f4fe7604b8f4a3ec5f2f81fd1b7c81c63f66e153699eb2a4c3",
+    "hit 811fcace32dcf3f4fe7604b8f4a3ec5f2f81fd1b7c81c63f66e153699eb2a4c3"
+   ],
+   "c1": "11339e9c7f225a5cd384910997bb2dd3e1800fe628aa57451f161209e20223bc",
+   "c2": "11339e9c7f225a5cd384910997bb2dd3e1800fe628aa57451f161209e20223bc",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t251.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 38d170e9b1f716a8e8dc2815a29ac2b31a0046c024a43bfcf19cb9bb9833e7ff",
+    "hit 38d170e9b1f716a8e8dc2815a29ac2b31a0046c024a43bfcf19cb9bb9833e7ff"
+   ],
+   "c1": "d73b0e7d9635605f3ca9555dd7817a3ac531c496aaeb7934c21e5e284bd8aec1",
+   "c2": "d73b0e7d9635605f3ca9555dd7817a3ac531c496aaeb7934c21e5e284bd8aec1",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t255.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss aed68dcb0d4d9ebc98a6b5481f4d049b8f61952ecfdafc4e0583cc9f34d73221",
+    "hit aed68dcb0d4d9ebc98a6b5481f4d049b8f61952ecfdafc4e0583cc9f34d73221"
+   ],
+   "c1": "9b81b33721390efe486048e883bd57a916edabfe5f8a95f590269393e1aeb2b0",
+   "c2": "9b81b33721390efe486048e883bd57a916edabfe5f8a95f590269393e1aeb2b0",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t256.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 75e6526e0f3f32fee3d11675d16a9d946392ffe42c5f1adca6007f70a0d6089a",
+    "hit 75e6526e0f3f32fee3d11675d16a9d946392ffe42c5f1adca6007f70a0d6089a"
+   ],
+   "c1": "7393cce67d7016561985281c183fb0219a56eefc431e7c4f5fd60bed12df1f22",
+   "c2": "7393cce67d7016561985281c183fb0219a56eefc431e7c4f5fd60bed12df1f22",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t257.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 863c862bfbbaa5823084e9fefc45b43840831bcae04a50bd25ee1c88cad6fb81",
+    "hit 863c862bfbbaa5823084e9fefc45b43840831bcae04a50bd25ee1c88cad6fb81"
+   ],
+   "c1": "f998fcb1e45c2e17014a4a20d924cf20dfc5bc3bc439e36512f5b8fb9a4e8233",
+   "c2": "f998fcb1e45c2e17014a4a20d924cf20dfc5bc3bc439e36512f5b8fb9a4e8233",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t258.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 27f09cd843832ff34c48008998657c886bb2d610629409cfa4b5ff27d89bb51c",
+    "hit 27f09cd843832ff34c48008998657c886bb2d610629409cfa4b5ff27d89bb51c"
+   ],
+   "c1": "dbd81c56fa28e3a5e3069f57bc8fb7efdb2105d6c5c4bf8d06b366bdc8309c69",
+   "c2": "dbd81c56fa28e3a5e3069f57bc8fb7efdb2105d6c5c4bf8d06b366bdc8309c69",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t261.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 6cb5b33ca9e357b789b3b209eea9e97482a04fb2e597a81cde59205f99810463",
+    "hit 6cb5b33ca9e357b789b3b209eea9e97482a04fb2e597a81cde59205f99810463"
+   ],
+   "c1": "5df8476a4b67e1af7f402398648b01a27748d7ebb10963463637f71dafdd9a6a",
+   "c2": "5df8476a4b67e1af7f402398648b01a27748d7ebb10963463637f71dafdd9a6a",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t264.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss fa5d3b064f834604f57ceb39d4c0f203e1ea70602cbba39946704c3c759fe1eb",
+    "hit fa5d3b064f834604f57ceb39d4c0f203e1ea70602cbba39946704c3c759fe1eb"
+   ],
+   "c1": "a7e5d9ddc1e06b315a0f8f0260dacfaad35b353ab0906f602d8c3678e1b36685",
+   "c2": "a7e5d9ddc1e06b315a0f8f0260dacfaad35b353ab0906f602d8c3678e1b36685",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t265.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 643ccdc89d3b9a959370d26551d4e7a7593031a36d33f5b689548601a3af95bd",
+    "hit 643ccdc89d3b9a959370d26551d4e7a7593031a36d33f5b689548601a3af95bd"
+   ],
+   "c1": "5fa6dfa63bd1a1ac5ae3bdc20d273b514ee3022de13f6b30b57d64be89693fce",
+   "c2": "5fa6dfa63bd1a1ac5ae3bdc20d273b514ee3022de13f6b30b57d64be89693fce",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t266.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss d6d1dc1243f24c3397d29de72463eec95677f9ceb620ac90690e839e5a2dc019",
+    "hit d6d1dc1243f24c3397d29de72463eec95677f9ceb620ac90690e839e5a2dc019"
+   ],
+   "c1": "b403c2837b86bfa7668d0f4fd41f5c1bdf4e481afc48face9eb473a241f6a9f7",
+   "c2": "b403c2837b86bfa7668d0f4fd41f5c1bdf4e481afc48face9eb473a241f6a9f7",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t271.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 3b5851d7f093e79a7c701e02349e91e877078293883670dfad01b2dea83f10bb",
+    "hit 3b5851d7f093e79a7c701e02349e91e877078293883670dfad01b2dea83f10bb"
+   ],
+   "c1": "ce02d68e12e140d8608b78c1abe1ff0626df18f8e7d3f59adee0a3b76b5c6039",
+   "c2": "ce02d68e12e140d8608b78c1abe1ff0626df18f8e7d3f59adee0a3b76b5c6039",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t275.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 866016e22fdbd93fc9f13091b420ad1ca053155b2eda588d9aec8bbd5cc68034",
+    "hit 866016e22fdbd93fc9f13091b420ad1ca053155b2eda588d9aec8bbd5cc68034"
+   ],
+   "c1": "af248a127279195cdccb8b34b9bcbb7fa473444e6793495a1d41d86d8bc25ee2",
+   "c2": "af248a127279195cdccb8b34b9bcbb7fa473444e6793495a1d41d86d8bc25ee2",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t278.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 94bbeb4f6076a18a7356c24cce9058524da90dc731e3834109f5f83960acea78",
+    "hit 94bbeb4f6076a18a7356c24cce9058524da90dc731e3834109f5f83960acea78"
+   ],
+   "c1": "d9cea6189ecbd366f5454d3865ca838200f6cfd2eb57c1d382efdb63f4920c42",
+   "c2": "d9cea6189ecbd366f5454d3865ca838200f6cfd2eb57c1d382efdb63f4920c42",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t283.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 9db21fd62c0b6df4e91a3bd8e26df7ace581b089f49d18f3eeee02e584a7a343",
+    "hit 9db21fd62c0b6df4e91a3bd8e26df7ace581b089f49d18f3eeee02e584a7a343"
+   ],
+   "c1": "f14e25cf92fa4c20c319d2b98f201e9314a28106a288b8e1b2e302c588e3ef01",
+   "c2": "f14e25cf92fa4c20c319d2b98f201e9314a28106a288b8e1b2e302c588e3ef01",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t284.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 0f261c9886cf71aba2a25135dc4f3bcedfd055e0e54c190d542610ac416d45a1",
+    "hit 0f261c9886cf71aba2a25135dc4f3bcedfd055e0e54c190d542610ac416d45a1"
+   ],
+   "c1": "d68404c9ce0b5339738b1e2eff8b8090e04408efb07c27b1f018df00bad14dfb",
+   "c2": "d68404c9ce0b5339738b1e2eff8b8090e04408efb07c27b1f018df00bad14dfb",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t300.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss cf950b011e62540073b8fa821cc4e2fda4bebdb7a6fe6197ccad48e9ab96d630",
+    "hit cf950b011e62540073b8fa821cc4e2fda4bebdb7a6fe6197ccad48e9ab96d630"
+   ],
+   "c1": "07333acdfbddda36b64ec2c12d96331975700c38328b010ce6ca0f9080fe4fee",
+   "c2": "07333acdfbddda36b64ec2c12d96331975700c38328b010ce6ca0f9080fe4fee",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t303.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 6ca9f6cdf6a4648e6103ec7ee1ca897ff2e1013574c10247b32b446fcb7f8c3a",
+    "hit 6ca9f6cdf6a4648e6103ec7ee1ca897ff2e1013574c10247b32b446fcb7f8c3a"
+   ],
+   "c1": "f4cf11f871364c789568a724219a9f427aebda535607b00c9ad0fa95b96163ad",
+   "c2": "f4cf11f871364c789568a724219a9f427aebda535607b00c9ad0fa95b96163ad",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t306.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss d700cd83f9165a313ebc5a6e2356b33e7755ffaf5a94f910d7766e873de88e54",
+    "hit d700cd83f9165a313ebc5a6e2356b33e7755ffaf5a94f910d7766e873de88e54"
+   ],
+   "c1": "c2e753fb1d3315513c8fc58d03cf3521b31ebd1864a5d7332537dd4ffea21dd1",
+   "c2": "c2e753fb1d3315513c8fc58d03cf3521b31ebd1864a5d7332537dd4ffea21dd1",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t307.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 62f36726eeacec9240abb78f1375be222c32177a5d6f33abe142e05cbc411ae9",
+    "hit 62f36726eeacec9240abb78f1375be222c32177a5d6f33abe142e05cbc411ae9"
+   ],
+   "c1": "11ab7372ce634f19f14bd44244d48c0e5068889447de917bcd14df5f1becdb2f",
+   "c2": "11ab7372ce634f19f14bd44244d48c0e5068889447de917bcd14df5f1becdb2f",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t308.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 838642174a873f03e3d24ca9dad679e4312ec1571062e8d3b5985ca52a13eab6",
+    "hit 838642174a873f03e3d24ca9dad679e4312ec1571062e8d3b5985ca52a13eab6"
+   ],
+   "c1": "c27a61dd2684811dead28688e83ef915ad432b7ec2a625ab0cbc44179167c0eb",
+   "c2": "c27a61dd2684811dead28688e83ef915ad432b7ec2a625ab0cbc44179167c0eb",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t310.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 26f93076ff471a1da2aa9b88d28aaaba7f37cd1850e938469536a140076d16a1",
+    "hit 26f93076ff471a1da2aa9b88d28aaaba7f37cd1850e938469536a140076d16a1"
+   ],
+   "c1": "3482991961f43a32f36612f13992402b9da4a4eb0ccfe097f092211414abfd44",
+   "c2": "3482991961f43a32f36612f13992402b9da4a4eb0ccfe097f092211414abfd44",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t313.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 2d5a2150bbbb21ee1e65312529367cbf3399a7836b8ae2f8cda2ab871c1ac04c",
+    "hit 2d5a2150bbbb21ee1e65312529367cbf3399a7836b8ae2f8cda2ab871c1ac04c"
+   ],
+   "c1": "6456788d73aff7a20c3f33112ec14b249e25850c0e463ce133a722c079290eab",
+   "c2": "6456788d73aff7a20c3f33112ec14b249e25850c0e463ce133a722c079290eab",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t314.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss f7789914f92b846cc1dafec62b9bae18a9c09e81ec9f333ec435d74a27e398c3",
+    "hit f7789914f92b846cc1dafec62b9bae18a9c09e81ec9f333ec435d74a27e398c3"
+   ],
+   "c1": "ebb20cbf8ab18ed8f9d15bac335fd67c3d616ca6dc1e495ad901b0353c2c5ded",
+   "c2": "ebb20cbf8ab18ed8f9d15bac335fd67c3d616ca6dc1e495ad901b0353c2c5ded",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t315.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 32f12c93830a0db676494552b42688e23fe997839fb2ac83c3af6b45d91b23d3",
+    "hit 32f12c93830a0db676494552b42688e23fe997839fb2ac83c3af6b45d91b23d3"
+   ],
+   "c1": "8c1c9dc00903bb7da6820fc964ce42c7653289fcba47ab35223f0a5fb06a5d19",
+   "c2": "8c1c9dc00903bb7da6820fc964ce42c7653289fcba47ab35223f0a5fb06a5d19",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t318.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 89c4357707448db02f77080c9ef70ae62d12dd91463f0eb2c681edfcf6927f52",
+    "hit 89c4357707448db02f77080c9ef70ae62d12dd91463f0eb2c681edfcf6927f52"
+   ],
+   "c1": "451a4e87a17fc6e1584f4c63075934cd1c9ef77518e5ec0f9cb5539d5012b90d",
+   "c2": "451a4e87a17fc6e1584f4c63075934cd1c9ef77518e5ec0f9cb5539d5012b90d",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t319.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 5ec5a7e2fedcf0f885e81ae24e386a33196ca9a111af4c37a224f8618e2f3b8d",
+    "hit 5ec5a7e2fedcf0f885e81ae24e386a33196ca9a111af4c37a224f8618e2f3b8d"
+   ],
+   "c1": "9e2075626bfbc834afebaa94daf90bad5b76179bfd51821d60bbcab534c15f70",
+   "c2": "9e2075626bfbc834afebaa94daf90bad5b76179bfd51821d60bbcab534c15f70",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t320.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 013bd48aaafddebb22303a7f6dd4c3685bc3535c37c608c4d83aaf590929cb58",
+    "hit 013bd48aaafddebb22303a7f6dd4c3685bc3535c37c608c4d83aaf590929cb58"
+   ],
+   "c1": "14fb3e1ec96420d315881c8b63257419bc31e2c83b5bb98b0f03d1c96124475c",
+   "c2": "14fb3e1ec96420d315881c8b63257419bc31e2c83b5bb98b0f03d1c96124475c",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t323.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 2ae5c271fbaa03c956d38783b2a9eadb34f20af6da38e3cc2e40658666e4c566",
+    "hit 2ae5c271fbaa03c956d38783b2a9eadb34f20af6da38e3cc2e40658666e4c566"
+   ],
+   "c1": "e6d441d0b08e95686168315c7b11bce400d71efd45739d18d8ffa8447ace0734",
+   "c2": "e6d441d0b08e95686168315c7b11bce400d71efd45739d18d8ffa8447ace0734",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t325.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss cb9cdd3e171f350365a3c5a618bc5e4e9f975a098b3366f4cf05647d9bb1b915",
+    "hit cb9cdd3e171f350365a3c5a618bc5e4e9f975a098b3366f4cf05647d9bb1b915"
+   ],
+   "c1": "3100f33343794b9ac5093a95e328f7ac856c48f7afee581b2febbec62b516741",
+   "c2": "3100f33343794b9ac5093a95e328f7ac856c48f7afee581b2febbec62b516741",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t328.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss abe5a5cd8b9a47ba2dabdb945c51270288545aad4ea0b00202c604a7caaf54fa",
+    "hit abe5a5cd8b9a47ba2dabdb945c51270288545aad4ea0b00202c604a7caaf54fa"
+   ],
+   "c1": "345a2d7da9a4eaf7235b0177fdbc08f0a635b9e772d54e8e96752e2b540d88fc",
+   "c2": "345a2d7da9a4eaf7235b0177fdbc08f0a635b9e772d54e8e96752e2b540d88fc",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t336.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss ef80263254fa0a304338f3eb2e0b0c452c46f2e25e956339c30591e5aa8d671d",
+    "hit ef80263254fa0a304338f3eb2e0b0c452c46f2e25e956339c30591e5aa8d671d"
+   ],
+   "c1": "e09cd471ba2080f5c24e2867c70a435a6c8b83f5419022b3c985cd0f766609eb",
+   "c2": "e09cd471ba2080f5c24e2867c70a435a6c8b83f5419022b3c985cd0f766609eb",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t338.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 96d131607d4fe2a5ab0d6e024924d6bb2ef20ad51ea0d20b57a1f845f6be461e",
+    "hit 96d131607d4fe2a5ab0d6e024924d6bb2ef20ad51ea0d20b57a1f845f6be461e"
+   ],
+   "c1": "00b3ca20b354843b2982e0301ef0eb798ff43beed1fbcbf5d2ea2fd557938dd5",
+   "c2": "00b3ca20b354843b2982e0301ef0eb798ff43beed1fbcbf5d2ea2fd557938dd5",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t339.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss d97557325be9b056c27678bb5fc1662ed80853d4a42e8a8670449635d0cdd5b1",
+    "hit d97557325be9b056c27678bb5fc1662ed80853d4a42e8a8670449635d0cdd5b1"
+   ],
+   "c1": "be4a5de77e73e189cd95e29674bedf526ce320888cd7724da751995c919ea22d",
+   "c2": "be4a5de77e73e189cd95e29674bedf526ce320888cd7724da751995c919ea22d",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t341.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 488e8bab381d37407d3037a1409a10136ee788a44884b967ce01e359f5b55bfa",
+    "hit 488e8bab381d37407d3037a1409a10136ee788a44884b967ce01e359f5b55bfa"
+   ],
+   "c1": "d30d1da6f5d843e27798a6a13feabdcb06230d64702e4cba00b309d918570a43",
+   "c2": "d30d1da6f5d843e27798a6a13feabdcb06230d64702e4cba00b309d918570a43",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t347.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 49dfeb918eb57c882e9f169be2e21ffbbe62770b6c2efbef92846af6d751125a",
+    "hit 49dfeb918eb57c882e9f169be2e21ffbbe62770b6c2efbef92846af6d751125a"
+   ],
+   "c1": "ab16c7d1cf4f402814b86101ee9e1c64b34ae0e834cb80c5434aa5a984764087",
+   "c2": "ab16c7d1cf4f402814b86101ee9e1c64b34ae0e834cb80c5434aa5a984764087",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t353.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 3898286016c88a89e405697a35bda75905cf290ff1a8c81dadcefc7edcfab167",
+    "hit 3898286016c88a89e405697a35bda75905cf290ff1a8c81dadcefc7edcfab167"
+   ],
+   "c1": "b86315485d48450a59b912e17b1d14300671c8aac40bc16d5eddeacb1316cef2",
+   "c2": "b86315485d48450a59b912e17b1d14300671c8aac40bc16d5eddeacb1316cef2",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t360.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 4b9ec48be0e4f0d99b556451ad41c3206715707a8dbaa7ca792c4241c430e7c1",
+    "hit 4b9ec48be0e4f0d99b556451ad41c3206715707a8dbaa7ca792c4241c430e7c1"
+   ],
+   "c1": "d3fcc32945bc170297312fc7df6d66cf56aec0cf452401695d0ad79740bfd4bf",
+   "c2": "d3fcc32945bc170297312fc7df6d66cf56aec0cf452401695d0ad79740bfd4bf",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t366.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 122359ba6a1e4dc0bb88b3db6a28d7849f964f6b62670c59522c42acab560de6",
+    "hit 122359ba6a1e4dc0bb88b3db6a28d7849f964f6b62670c59522c42acab560de6"
+   ],
+   "c1": "4800d578e7f4806835152d82367f4f96450ebbfc5736d59f89619b8f5afee214",
+   "c2": "4800d578e7f4806835152d82367f4f96450ebbfc5736d59f89619b8f5afee214",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t370.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss d93f122875642ba9351e1f1db13b254209b264cc3ef66936d03e264af47b93e0",
+    "hit d93f122875642ba9351e1f1db13b254209b264cc3ef66936d03e264af47b93e0"
+   ],
+   "c1": "df410c24979d6ca5a3be7fd89eea5ba0139311b5c4d3e77fd7fc33fdd56ea699",
+   "c2": "df410c24979d6ca5a3be7fd89eea5ba0139311b5c4d3e77fd7fc33fdd56ea699",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t371.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss b56a61f313e736284e005efd8f1c80cfaa0e1d44476143fe791010a310892890",
+    "hit b56a61f313e736284e005efd8f1c80cfaa0e1d44476143fe791010a310892890"
+   ],
+   "c1": "5345b799058f3a8758f190a57770c7626d1a0b76cf14cf61dea7e0151cadaaeb",
+   "c2": "5345b799058f3a8758f190a57770c7626d1a0b76cf14cf61dea7e0151cadaaeb",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t374.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 2d45fa008fda5e97b538b4d3819739b057ccd45222f0d91dafe2ee9186650599",
+    "hit 2d45fa008fda5e97b538b4d3819739b057ccd45222f0d91dafe2ee9186650599"
+   ],
+   "c1": "0cd4b9a5375f7275dc21df9ff26af6b40cbe0dd2b3cf192ad383ab429054aa8b",
+   "c2": "0cd4b9a5375f7275dc21df9ff26af6b40cbe0dd2b3cf192ad383ab429054aa8b",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t375.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 04cd8439fe3d5134441e78ac59422d85837ce7901227dc24c2c89b5c42a833d8",
+    "hit 04cd8439fe3d5134441e78ac59422d85837ce7901227dc24c2c89b5c42a833d8"
+   ],
+   "c1": "6c51ad739343b9b52e5ef40559356a26b8a13545eac497d914d29aaa6822c02a",
+   "c2": "6c51ad739343b9b52e5ef40559356a26b8a13545eac497d914d29aaa6822c02a",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t376.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 1867bb7504f6e33153e4b257c8768edf504977b6f78f667ff2b512ecc4bc295d",
+    "hit 1867bb7504f6e33153e4b257c8768edf504977b6f78f667ff2b512ecc4bc295d"
+   ],
+   "c1": "e2785f9e7bc3ce8d806acdd4834608ebba4831ee055ed15c5c397c911f5c1b79",
+   "c2": "e2785f9e7bc3ce8d806acdd4834608ebba4831ee055ed15c5c397c911f5c1b79",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t379.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 9a31bf4e0fe5ee2d771d3683ae80dff7a348de261bd70dc2f583945a9cbd0edc",
+    "hit 9a31bf4e0fe5ee2d771d3683ae80dff7a348de261bd70dc2f583945a9cbd0edc"
+   ],
+   "c1": "79bd20b34aa415701330476e8ef09a20bbd748ec2a9616e38e1d701352a0b9da",
+   "c2": "79bd20b34aa415701330476e8ef09a20bbd748ec2a9616e38e1d701352a0b9da",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t380.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss c6e46743aa92a88a9458f34664ef6c03a000e139ec9a076e5c2ca3e3f3ad2b7b",
+    "hit c6e46743aa92a88a9458f34664ef6c03a000e139ec9a076e5c2ca3e3f3ad2b7b"
+   ],
+   "c1": "bdab31fbdcc99a6531d609cccf23c7afb52d5cebef937904914d63918b266755",
+   "c2": "bdab31fbdcc99a6531d609cccf23c7afb52d5cebef937904914d63918b266755",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t382.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 6abce561b8f4c261c00c1e950e7ef5763c08d5534d1f12dbc33431108d7a8b17",
+    "hit 6abce561b8f4c261c00c1e950e7ef5763c08d5534d1f12dbc33431108d7a8b17"
+   ],
+   "c1": "9eabcade9484e515a9477248a554a3bbb1b90efbcde7099e96a5b70f0bd6bdd6",
+   "c2": "9eabcade9484e515a9477248a554a3bbb1b90efbcde7099e96a5b70f0bd6bdd6",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t385.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 7f02b4032de4eceedc1b74f0e54f2d85955c2b3f6e2fee14d08cab0ba64df385",
+    "hit 7f02b4032de4eceedc1b74f0e54f2d85955c2b3f6e2fee14d08cab0ba64df385"
+   ],
+   "c1": "6ed1476c5f19b0f94015696f7e97772a8c68d29391b97d05a6e7c42f84a7e9d7",
+   "c2": "6ed1476c5f19b0f94015696f7e97772a8c68d29391b97d05a6e7c42f84a7e9d7",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t388.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 09d1b73e91208febfb85143f04386ba45870f2b8ee1e86aca3cc9f425e38125f",
+    "hit 09d1b73e91208febfb85143f04386ba45870f2b8ee1e86aca3cc9f425e38125f"
+   ],
+   "c1": "cec4539aaca1fbc6a636a792764d1e7c703be0098fefe63900064e162efe8576",
+   "c2": "cec4539aaca1fbc6a636a792764d1e7c703be0098fefe63900064e162efe8576",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t391.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 930ed488a627615f1e453897697cfdecb7fec6a1f742c94357ce7da01eda7e8b",
+    "hit 930ed488a627615f1e453897697cfdecb7fec6a1f742c94357ce7da01eda7e8b"
+   ],
+   "c1": "815a9d4d5c79875de0f29248de1cecd61f9d1cb703531cdfe37d3785b3e4fc7c",
+   "c2": "815a9d4d5c79875de0f29248de1cecd61f9d1cb703531cdfe37d3785b3e4fc7c",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t394.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss bf4ad8cdcb65f319cd5335e49cd66d85d610cbe8d81ea1b54e2df8c60cd9f26f",
+    "hit bf4ad8cdcb65f319cd5335e49cd66d85d610cbe8d81ea1b54e2df8c60cd9f26f"
+   ],
+   "c1": "4294443b466a93c0a689fe7f5d50a5ec830b85170aeddb7eae2bfa504079a7d4",
+   "c2": "4294443b466a93c0a689fe7f5d50a5ec830b85170aeddb7eae2bfa504079a7d4",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t401.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss ee744c6f700666f8659567582cb0777d7f2d9ff22e31680ba6c1304c5214da9d",
+    "hit ee744c6f700666f8659567582cb0777d7f2d9ff22e31680ba6c1304c5214da9d"
+   ],
+   "c1": "a94cd53662962a78acc60b0a68ad39f8ed675d7dafd522bbabe89ee0298728a0",
+   "c2": "a94cd53662962a78acc60b0a68ad39f8ed675d7dafd522bbabe89ee0298728a0",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t402.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss bdb730cb17f92adbbfebadb05cca696f1dbaa9e198216b23875a660e2d694d8b",
+    "hit bdb730cb17f92adbbfebadb05cca696f1dbaa9e198216b23875a660e2d694d8b"
+   ],
+   "c1": "64b5a7292a6d306efd499adff487085a3ad56031a4040cb99a94de2a4c7109c3",
+   "c2": "64b5a7292a6d306efd499adff487085a3ad56031a4040cb99a94de2a4c7109c3",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t403.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 690eea63316a57688f9f21cd1bf01c82c43f7bcedc95c1a53ecf04b34c8f6d54",
+    "hit 690eea63316a57688f9f21cd1bf01c82c43f7bcedc95c1a53ecf04b34c8f6d54"
+   ],
+   "c1": "e3a0e66df89ae468de07ae3991ada13b3a634029e982e4ae02a5c3a76a665a47",
+   "c2": "e3a0e66df89ae468de07ae3991ada13b3a634029e982e4ae02a5c3a76a665a47",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t404.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss df027c51f7e282f5262f59cfb07ad384f966cfa48d66d61c81eb74fb5ab2a244",
+    "hit df027c51f7e282f5262f59cfb07ad384f966cfa48d66d61c81eb74fb5ab2a244"
+   ],
+   "c1": "1c51d5a5f3c031c379f6c3f89ee39df0ceec11bd2d0cf7debfe4071fe26d510e",
+   "c2": "1c51d5a5f3c031c379f6c3f89ee39df0ceec11bd2d0cf7debfe4071fe26d510e",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t410.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 7f202e80ebc20f9a497b7b0fd1d19cb7a9d03d6e075b994ddf8ce16cacca888f",
+    "hit 7f202e80ebc20f9a497b7b0fd1d19cb7a9d03d6e075b994ddf8ce16cacca888f"
+   ],
+   "c1": "f98c4f70e483497b00b7fc72569e55a58a9e807ecd82abe79a6a31e6f2a1fdd1",
+   "c2": "f98c4f70e483497b00b7fc72569e55a58a9e807ecd82abe79a6a31e6f2a1fdd1",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t411.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss fe8fe8cdfc879b31b0d23278848c271be33397d3b085faba321cf7619ee31b7a",
+    "hit fe8fe8cdfc879b31b0d23278848c271be33397d3b085faba321cf7619ee31b7a"
+   ],
+   "c1": "53fe119f28a535d48f0abe33101f7f36f7841a117534fc97318906ddbcd31f3a",
+   "c2": "53fe119f28a535d48f0abe33101f7f36f7841a117534fc97318906ddbcd31f3a",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t412.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss ecfd1d6cf5241ce7e62c2f1ec40d8685617937807558200d5bd1a9fab72a3a8e",
+    "hit ecfd1d6cf5241ce7e62c2f1ec40d8685617937807558200d5bd1a9fab72a3a8e"
+   ],
+   "c1": "3b5b7d4afef5a981b390cfb606609a00a6af9507cf92d4d5a0d87d2eec3fb66d",
+   "c2": "3b5b7d4afef5a981b390cfb606609a00a6af9507cf92d4d5a0d87d2eec3fb66d",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t414.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 965f88a4defc3303e6066464a855fbead33be1852219ad2b87d9016de67f6da8",
+    "hit 965f88a4defc3303e6066464a855fbead33be1852219ad2b87d9016de67f6da8"
+   ],
+   "c1": "4e48bdfca7a54d83d7250e48504bdf7c3468184e65aeea70c0b3a307bc2178ea",
+   "c2": "4e48bdfca7a54d83d7250e48504bdf7c3468184e65aeea70c0b3a307bc2178ea",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t419.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 3eb34031d683715e8a28fa5830ddf180a053f14f479c4c072eb97d00e169ee79",
+    "hit 3eb34031d683715e8a28fa5830ddf180a053f14f479c4c072eb97d00e169ee79"
+   ],
+   "c1": "850c8be445eaf966a8f318b725b6278b59ed2a904e215ae39e385e53ae84f4da",
+   "c2": "850c8be445eaf966a8f318b725b6278b59ed2a904e215ae39e385e53ae84f4da",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t432.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 5f73c0f981f625e766777513049600bb5f294eba421b4699bd0d5d68a7a928b1",
+    "hit 5f73c0f981f625e766777513049600bb5f294eba421b4699bd0d5d68a7a928b1"
+   ],
+   "c1": "1030ea2a6373c7d97cc2735cd356ae8dcc1366b17714c8e48d2f9ab07e9d1fdb",
+   "c2": "1030ea2a6373c7d97cc2735cd356ae8dcc1366b17714c8e48d2f9ab07e9d1fdb",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t434.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 58fc2956cb85c3d6ea4e081bd0ee754b01356df5462e4074b861c1acc61447c8",
+    "hit 58fc2956cb85c3d6ea4e081bd0ee754b01356df5462e4074b861c1acc61447c8"
+   ],
+   "c1": "877d2b8bdb812bb07cc9c9f4446b264871d02e305d8cd37929f1226440fc79cf",
+   "c2": "877d2b8bdb812bb07cc9c9f4446b264871d02e305d8cd37929f1226440fc79cf",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t437.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss ab7a898935bf8139a8794ed705e83470c3d1e4f4d3b71fd18732b38dbef5887d",
+    "hit ab7a898935bf8139a8794ed705e83470c3d1e4f4d3b71fd18732b38dbef5887d"
+   ],
+   "c1": "91c2f2e4b6c53a28121d2beb1a03f84b7facc330698efdf1105ecdc6b7732ace",
+   "c2": "91c2f2e4b6c53a28121d2beb1a03f84b7facc330698efdf1105ecdc6b7732ace",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t440.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t440.py:17:5: not in the subset: functools cache: .cache_info is not built (the general path could not build this program either); general path: the method .cache_info() (on a value of unknown static kind)\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t441.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss dc21131c65c7ded6405c8f9d14d06d5a1539693a6f02a1a2833dfdb5f584d082",
+    "hit dc21131c65c7ded6405c8f9d14d06d5a1539693a6f02a1a2833dfdb5f584d082"
+   ],
+   "c1": "8a89d1f55e51b0c075030bb92c8d9baddff87f90cba5017a2eb82beda254f42f",
+   "c2": "8a89d1f55e51b0c075030bb92c8d9baddff87f90cba5017a2eb82beda254f42f",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t443.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 2d7c400a68555e39d575fcd9ba825ff698957a40d83ea57ada1651f321f7aa74",
+    "hit 2d7c400a68555e39d575fcd9ba825ff698957a40d83ea57ada1651f321f7aa74"
+   ],
+   "c1": "bc07d4b9483194a6c8a4aa3394c45cdb71b62e4f5c20849bba1d46d85ecd0a40",
+   "c2": "bc07d4b9483194a6c8a4aa3394c45cdb71b62e4f5c20849bba1d46d85ecd0a40",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t447.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t447.py:8:14: not in the subset: 'observers' is annotated Observers, which this compiler has no rule for (the general path could not build this program either); general path: name 'Callable' is not defined\n  write instead: int, float, str, bytes, bool, list[int], list[float], list[str], dict[str, int], set[int], set[str], or a class name (no generics such as list[T], no Optional/Union)\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t447.py:4: a module-level constant whose type cannot be told and that holds a tuple is not built; build it inside a function\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t447.py:5: a module-level constant whose type cannot be told and that holds a tuple is not built; build it inside a function\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t449.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss df0fef25dfd2914f5125b512affa290d5ea911ff85cf133edca4ae8de72fa9c2",
+    "hit df0fef25dfd2914f5125b512affa290d5ea911ff85cf133edca4ae8de72fa9c2"
+   ],
+   "c1": "7911187717a70bd8d219f98e5ed06f7bd853020967ce7a326700bf1e8bb60f06",
+   "c2": "7911187717a70bd8d219f98e5ed06f7bd853020967ce7a326700bf1e8bb60f06",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t452.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 91d717c40f9dfb3f0de9308661cd100e048d9a7dc8a60743bf795456229e4310",
+    "hit 91d717c40f9dfb3f0de9308661cd100e048d9a7dc8a60743bf795456229e4310"
+   ],
+   "c1": "fc71847c24fb91bbd883ef9cbb1531547a79c6666bde7e3677e46c46dda211a7",
+   "c2": "fc71847c24fb91bbd883ef9cbb1531547a79c6666bde7e3677e46c46dda211a7",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t455.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "unner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t455.py:1: the type of a tuple element cannot be told from how it is used; annotate it\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t455.py:4: a module-level tuple constant must be numbers only, one type per position (DIRS = [(0, 1), (1, 0)]); build other tuples inside a function\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t455.py:5: re.compile(): re.compile is built only as `NAME = re.compile(literal[, flags])` bound once; use NAME.match(...) and so on; built here: re.match / fullmatch / search / findall / finditer / split / sub / subn / escape and re.compile(literal) with a string-literal pattern (a literal, or a name bound once to one), flags I M S X A, literals . classes \\d \\w \\s anchors ^ $ \\A \\Z \\b \\B * + ? {m,n} lazy variants | groups (capturing, (?:), (?P<name>)); lookaround, backreferences, atomic / possessive forms and conditionals are not built\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t456.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t456.py:4:1: not in the subset: inheritance from 'dict[str, int]' (class 'CountingDict'); a class here may only derive from a class defined earlier in this program (the general path could not build this program either); general path: a non-name base class in class CountingDict\n  write instead: a standalone class that holds the other as a field (`self.base = Base(...)`)\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t457.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss c05bb93e0ad3583fd618e18727ba7ea52dc6272217d9451f57c75c20d0751497",
+    "hit c05bb93e0ad3583fd618e18727ba7ea52dc6272217d9451f57c75c20d0751497"
+   ],
+   "c1": "4304f9f29f9b5da8dc468079aab5de77f46ebd0115d8f88b39cac11df4a7d271",
+   "c2": "4304f9f29f9b5da8dc468079aab5de77f46ebd0115d8f88b39cac11df4a7d271",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t459.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 0a0479373a1c23322447bd0a65f965cc2c8415c965f1253dfa983a9e1346445f",
+    "hit 0a0479373a1c23322447bd0a65f965cc2c8415c965f1253dfa983a9e1346445f"
+   ],
+   "c1": "9a94f4c50c9800b147cae4fc0ff59b1b52b95cd5368c85b00d77b9014f4de11b",
+   "c2": "9a94f4c50c9800b147cae4fc0ff59b1b52b95cd5368c85b00d77b9014f4de11b",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t460.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 1f0f256c16bed9c4a3e702721b8b2c900b28b8ba1b78fe067e880072d84439d2",
+    "hit 1f0f256c16bed9c4a3e702721b8b2c900b28b8ba1b78fe067e880072d84439d2"
+   ],
+   "c1": "110e4b6466edadec2b46ba5113707c918cf9084e68008a5e136987100ab6b568",
+   "c2": "110e4b6466edadec2b46ba5113707c918cf9084e68008a5e136987100ab6b568",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t461.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 222da9a70bbdba52da32718aca1ac843f63aa03b322ba2cc5ee1b0b23a006815",
+    "hit 222da9a70bbdba52da32718aca1ac843f63aa03b322ba2cc5ee1b0b23a006815"
+   ],
+   "c1": "d2b808939cbf423b12dcd6c96c147ab3d1da6b23f8afeb365192172ebc693af4",
+   "c2": "d2b808939cbf423b12dcd6c96c147ab3d1da6b23f8afeb365192172ebc693af4",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t467.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t467.py:4:1: not in the subset: only a class type can be None: write `Node | None` (the general path could not build this program either); general path: a **kwargs call argument\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t467.py:1: a *argument in a call\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t468.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 6173fa0a729f1e9da9320a6f5cd81f02607eecb04e525e234b2ff52ee08ef5fc",
+    "hit 6173fa0a729f1e9da9320a6f5cd81f02607eecb04e525e234b2ff52ee08ef5fc"
+   ],
+   "c1": "d5e77b8f43bc194e052656fec852582c2590e04444677016e13bd1d1efdcfacf",
+   "c2": "d5e77b8f43bc194e052656fec852582c2590e04444677016e13bd1d1efdcfacf",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t470.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 0528832e151d27864d05bc0d280c12ed13cc503c8b2b9159cb378ef1a93cbeb9",
+    "hit 0528832e151d27864d05bc0d280c12ed13cc503c8b2b9159cb378ef1a93cbeb9"
+   ],
+   "c1": "e22cf7f8c26cdeb472790472c8af7cdb99748d8034b6dc792a7433385b343e9b",
+   "c2": "e22cf7f8c26cdeb472790472c8af7cdb99748d8034b6dc792a7433385b343e9b",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t472.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 7e730ea6b4826b3cfe03aa116c75f10a3c03e64dafb212e26c34f17c7d71d825",
+    "hit 7e730ea6b4826b3cfe03aa116c75f10a3c03e64dafb212e26c34f17c7d71d825"
+   ],
+   "c1": "4ef445f2198613292eec882007673242f95c5a9a9062067832abfa4072c89ace",
+   "c2": "4ef445f2198613292eec882007673242f95c5a9a9062067832abfa4072c89ace",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t474.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss a9bebe3fff9b182e90f69987ef09fc36393b088dad87ab39fa2d12dae8d5b81c",
+    "hit a9bebe3fff9b182e90f69987ef09fc36393b088dad87ab39fa2d12dae8d5b81c"
+   ],
+   "c1": "097119d76d692796279d8a4278c24c57685fc500fcf8c90e85147bf1b184c3db",
+   "c2": "097119d76d692796279d8a4278c24c57685fc500fcf8c90e85147bf1b184c3db",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t475.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t475.py:1:1: not in the subset: import of 'class' is not available: this compiler builds only the modules it models (math, sys, collections, itertools, functools, heapq, bisect, re, json) (the general path could not build this program either); general path: class.pack (not yet published in NAMES_library.json)\n  write instead: drop the import and write what you need by hand with plain lists, dicts and loops\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t481.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss beb9efeb8adc33c4bbd35cfc40a59f6a3062985abbf67721946c597cc22685b3",
+    "hit beb9efeb8adc33c4bbd35cfc40a59f6a3062985abbf67721946c597cc22685b3"
+   ],
+   "c1": "c5f79a491c6341d075a2456988a4f2b83f822c24065cd90b395e10a91a51d1a1",
+   "c2": "c5f79a491c6341d075a2456988a4f2b83f822c24065cd90b395e10a91a51d1a1",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t482.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 26a3aa741df3a06eb84ad534ee21f26df5e81b0fd9ddf42531689372e9ed5b5e",
+    "hit 26a3aa741df3a06eb84ad534ee21f26df5e81b0fd9ddf42531689372e9ed5b5e"
+   ],
+   "c1": "f58276b6a28e681a679c888643221b6c03939631ab397e3fdccfe809f294ea7f",
+   "c2": "f58276b6a28e681a679c888643221b6c03939631ab397e3fdccfe809f294ea7f",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t483.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 94935b0ff101c6acd929e744eb9669159a9111be4be9b2761d23c3fe53e8c91d",
+    "hit 94935b0ff101c6acd929e744eb9669159a9111be4be9b2761d23c3fe53e8c91d"
+   ],
+   "c1": "25e64572ae753768656cca9ee40f69de41eb8ef5f852a769901d7e443307ce3d",
+   "c2": "25e64572ae753768656cca9ee40f69de41eb8ef5f852a769901d7e443307ce3d",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t484.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t484.py:11:5: not in the subset: field _AilT_b_b.fb0 is declared bool, but `letters` is not a bool (Python would keep the number and print it as one); write a bool: True/False, a comparison, `not`, or `letters != 0` (the general path could not build this program either); general path: the method .translate() (on a value of unknown static kind)\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t486.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 28abc790a2602da9135cd3d7046216b303ff3bd8dc3386920d769efbc2681ce5",
+    "hit 28abc790a2602da9135cd3d7046216b303ff3bd8dc3386920d769efbc2681ce5"
+   ],
+   "c1": "10dff781a94977ff620ee05986691343cfce48c84e9f3b9114e1e17895daf131",
+   "c2": "10dff781a94977ff620ee05986691343cfce48c84e9f3b9114e1e17895daf131",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t489.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t489.py:2:1: not in the subset: import of 'unicodedata' is not available: this compiler builds only the modules it models (math, sys, collections, itertools, functools, heapq, bisect, re, json) (the general path could not build this program either); general path: unicodedata.name is not supported (see the note below)\n  write instead: drop the import and write what you need by hand with plain lists, dicts and loops\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t489.py:10: unicodedata.name is not supported; write instead: use the str methods (isalpha, isdigit, isspace, isupper, islower, isalnum, isprintable), ord() / chr(), or unicodedata.category(ch), which is built\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t493.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 6d2145e0dfb6f902e51cbd46475c59ce56509f7f6818caec04eed4b9e9736d9f",
+    "hit 6d2145e0dfb6f902e51cbd46475c59ce56509f7f6818caec04eed4b9e9736d9f"
+   ],
+   "c1": "f0abb5094fb2b9907420d80a26bef4fec619b92879d970e4b9320dca18e605b9",
+   "c2": "f0abb5094fb2b9907420d80a26bef4fec619b92879d970e4b9320dca18e605b9",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/deepseek-v4.1-flash-free/t498.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 3401ff6351b70130af47314830e65cdd026f62f306e666f7564c96edd003814c",
+    "hit 3401ff6351b70130af47314830e65cdd026f62f306e666f7564c96edd003814c"
+   ],
+   "c1": "8f3f1a5d63d64f9e5475b9ba4f9fceff47c7f5de0400b6d0ad2b041d9b4f3d34",
+   "c2": "8f3f1a5d63d64f9e5475b9ba4f9fceff47c7f5de0400b6d0ad2b041d9b4f3d34",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t010.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 88ddf92694d6b021d190d717f87e3b4b64ea9b8fc32a2f834be985e45c3005b9",
+    "hit 88ddf92694d6b021d190d717f87e3b4b64ea9b8fc32a2f834be985e45c3005b9"
+   ],
+   "c1": "09ba1d7744dd7b407a5c3b5c47e902290ad9ecc910d3f932ae78e80425ffac2c",
+   "c2": "09ba1d7744dd7b407a5c3b5c47e902290ad9ecc910d3f932ae78e80425ffac2c",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t014.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss c61afdef45afc56a123d0794f371ff98b99cac5ccfdb4785dc6ac838ef8737a3",
+    "hit c61afdef45afc56a123d0794f371ff98b99cac5ccfdb4785dc6ac838ef8737a3"
+   ],
+   "c1": "3b842bf5d79c4bf2c17f1f53539c669ad4c50eed0d690da6f8d68ff0e39b2d82",
+   "c2": "3b842bf5d79c4bf2c17f1f53539c669ad4c50eed0d690da6f8d68ff0e39b2d82",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t028.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 53f502f927a81efeb76991df5765dc16360ebbf6215a6f3833de74cc6f8b8f59",
+    "hit 53f502f927a81efeb76991df5765dc16360ebbf6215a6f3833de74cc6f8b8f59"
+   ],
+   "c1": "dcdcc390eb6b3705fd1b0a16cc4458bf23e151b6191367a166081f543703372c",
+   "c2": "dcdcc390eb6b3705fd1b0a16cc4458bf23e151b6191367a166081f543703372c",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t055.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 854d1748829dfe443c553976ad9e813563633a23acc737fc8f043c0bf2dcd9a2",
+    "hit 854d1748829dfe443c553976ad9e813563633a23acc737fc8f043c0bf2dcd9a2"
+   ],
+   "c1": "eeb4cddd3e43b1b0b34926eed8b2e0834459077e3d78c37209802a95c3fe7d9e",
+   "c2": "eeb4cddd3e43b1b0b34926eed8b2e0834459077e3d78c37209802a95c3fe7d9e",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t069.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss ca972faf30931615d4e697384aa46f9c17440a7da248dab6f42ff24a969846ca",
+    "hit ca972faf30931615d4e697384aa46f9c17440a7da248dab6f42ff24a969846ca"
+   ],
+   "c1": "4ab9fd6321e02e3b4448eb431c13a9ee412b7be5cc663cf1c10ad88838de9c77",
+   "c2": "4ab9fd6321e02e3b4448eb431c13a9ee412b7be5cc663cf1c10ad88838de9c77",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t072.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 6cd6d25999664de21a492b9dc5307314a43328e257d7c1d0e618c10b02c64eb5",
+    "hit 6cd6d25999664de21a492b9dc5307314a43328e257d7c1d0e618c10b02c64eb5"
+   ],
+   "c1": "ebc8ee1ec2c94e8cda7608ab4be4cbddb2c0b7e77bae56b2e5b96113d8535aa6",
+   "c2": "ebc8ee1ec2c94e8cda7608ab4be4cbddb2c0b7e77bae56b2e5b96113d8535aa6",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t080.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 14bcaba4e4e094d32c2a148000dab767891f725b8e51771252907ad4328409bd",
+    "hit 14bcaba4e4e094d32c2a148000dab767891f725b8e51771252907ad4328409bd"
+   ],
+   "c1": "d135b79ac9a94af980ec868fe518923fe220becdd8eb91aaa68e785cab37ac86",
+   "c2": "d135b79ac9a94af980ec868fe518923fe220becdd8eb91aaa68e785cab37ac86",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t081.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss a417a282d83194f515301af573694fe16de8ade12e83a0fea56627aeb765c500",
+    "hit a417a282d83194f515301af573694fe16de8ade12e83a0fea56627aeb765c500"
+   ],
+   "c1": "3540d29f6ac24db4ea7e029f66c537f896125ff90bf19190572e35f7c806ed14",
+   "c2": "3540d29f6ac24db4ea7e029f66c537f896125ff90bf19190572e35f7c806ed14",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t094.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss a93e03e87d75a5743743433683d3c5b6ef9afddc4b1f514d7feb450991372212",
+    "hit a93e03e87d75a5743743433683d3c5b6ef9afddc4b1f514d7feb450991372212"
+   ],
+   "c1": "a30e5d54400f431d7fce599cf78de2728e5207e6e419ffea0fe9127a66d754fe",
+   "c2": "a30e5d54400f431d7fce599cf78de2728e5207e6e419ffea0fe9127a66d754fe",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t095.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 1e9d2ddbf7a8ceb303eb56f17eef80ebea22077c282b2444d3f704705a191ed7",
+    "hit 1e9d2ddbf7a8ceb303eb56f17eef80ebea22077c282b2444d3f704705a191ed7"
+   ],
+   "c1": "0c9b396f51bf462cb84e1a01f970b4238d498f7ef16df68d75bba8eccdb07ab4",
+   "c2": "0c9b396f51bf462cb84e1a01f970b4238d498f7ef16df68d75bba8eccdb07ab4",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t103.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss cefaa91e2653699486ec41c54336b19284c0c6b13bd25d2b893602f5ca5a2895",
+    "hit cefaa91e2653699486ec41c54336b19284c0c6b13bd25d2b893602f5ca5a2895"
+   ],
+   "c1": "a7701d6d29512d448cfe3f6ddb9915484045f2cb793d8ad32ae43a8d7e7945bf",
+   "c2": "a7701d6d29512d448cfe3f6ddb9915484045f2cb793d8ad32ae43a8d7e7945bf",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t108.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 3ff03fcbc41f1a1dbce8573e7c74af21c1bcc9c5138f2e569b854bba43ad568e",
+    "hit 3ff03fcbc41f1a1dbce8573e7c74af21c1bcc9c5138f2e569b854bba43ad568e"
+   ],
+   "c1": "b59622eeb7a9012e6bde7904947e2105e27f883c90092691eae5ceec30fa4cd9",
+   "c2": "b59622eeb7a9012e6bde7904947e2105e27f883c90092691eae5ceec30fa4cd9",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t131.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss e671d98ce216613ec1c0b7ab794ce3ee20915df22fc031a4da09ff73e721ce09",
+    "hit e671d98ce216613ec1c0b7ab794ce3ee20915df22fc031a4da09ff73e721ce09"
+   ],
+   "c1": "de9964361ee4234828545cf0f8b5da830075f073809b88b3a9b42f64e87554ba",
+   "c2": "de9964361ee4234828545cf0f8b5da830075f073809b88b3a9b42f64e87554ba",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t155.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 43203acd4f5dbf101f67ecd641eb9979b6339dbfdfd0adee1784591eb764544b",
+    "hit 43203acd4f5dbf101f67ecd641eb9979b6339dbfdfd0adee1784591eb764544b"
+   ],
+   "c1": "5760db204881f48e376103da8e673896cf4a694fba35fb2142728b15ecc1acd8",
+   "c2": "5760db204881f48e376103da8e673896cf4a694fba35fb2142728b15ecc1acd8",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t166.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss fbbbe33a117642638f7bc788a4a0f32c2d8fe0ff793186fdc7bd489005e20d5a",
+    "hit fbbbe33a117642638f7bc788a4a0f32c2d8fe0ff793186fdc7bd489005e20d5a"
+   ],
+   "c1": "f23bec2f06eeb98497f5491000cd5c6840713903bc2505fd2a25c27f96c812eb",
+   "c2": "f23bec2f06eeb98497f5491000cd5c6840713903bc2505fd2a25c27f96c812eb",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t168.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 5c431f17f9930b8d2ac6554e5f6d152a70e828725daaae779aba738bf2a41967",
+    "hit 5c431f17f9930b8d2ac6554e5f6d152a70e828725daaae779aba738bf2a41967"
+   ],
+   "c1": "2ed2cdea4ff7721725f2a8278186b9100bfb1506f519c9ad54ac6c1bb18de086",
+   "c2": "2ed2cdea4ff7721725f2a8278186b9100bfb1506f519c9ad54ac6c1bb18de086",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t173.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss ebbca6b0cfe13bbbbc9a47457c343808441b938424bf03ef58d6279144b2d361",
+    "hit ebbca6b0cfe13bbbbc9a47457c343808441b938424bf03ef58d6279144b2d361"
+   ],
+   "c1": "cc5064159a0d46d3b43aa2d3d4ea38a65d7198892d6b9d394477f47fbb340f3a",
+   "c2": "cc5064159a0d46d3b43aa2d3d4ea38a65d7198892d6b9d394477f47fbb340f3a",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t176.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t176.py:7:5: not in the subset: json.loads(s): the type of the result is not declared here; write the type down: `data: dict[str, int] = json.loads(s)` (the types are int, float, str, bool, list[T], list[list[T]], dict[str, T]) (the general path could not build this program either); general path: sys.stdout used as a plain value\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t184.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss c46273ff0ba1940b71640a3ef8618aed03f082a7074fd328e18bf1f05b850508",
+    "hit c46273ff0ba1940b71640a3ef8618aed03f082a7074fd328e18bf1f05b850508"
+   ],
+   "c1": "03b17c8fcffce1123f7b2fe9355f9e1362227a9c99ea00e06a88a8f7e7330224",
+   "c2": "03b17c8fcffce1123f7b2fe9355f9e1362227a9c99ea00e06a88a8f7e7330224",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t196.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 71eff2cc2ca983850b4c6a95f693f6f671d6fcc0db6c10145522175d68db3b1f",
+    "hit 71eff2cc2ca983850b4c6a95f693f6f671d6fcc0db6c10145522175d68db3b1f"
+   ],
+   "c1": "54aa7bb1e2f56fa0b776adbf75ce33ae9fbe2a089ac57ec939fe3ea4c55d5dc7",
+   "c2": "54aa7bb1e2f56fa0b776adbf75ce33ae9fbe2a089ac57ec939fe3ea4c55d5dc7",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t223.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 7a82902f59367550013308400c0b8fce180036ba0c16a3e9284b8ce66cc391d5",
+    "hit 7a82902f59367550013308400c0b8fce180036ba0c16a3e9284b8ce66cc391d5"
+   ],
+   "c1": "4b95caf73de506059ab68e55535600613a0ef46e405595707a3b1a947c6d463a",
+   "c2": "4b95caf73de506059ab68e55535600613a0ef46e405595707a3b1a947c6d463a",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t224.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 4416808ea335817487cc7ea4c719732947bc4036d0a1e6e3c9cb757037238ae4",
+    "hit 4416808ea335817487cc7ea4c719732947bc4036d0a1e6e3c9cb757037238ae4"
+   ],
+   "c1": "df687ef31bcdaf29ec9326573130eb4c53faf242645abd05e3da051516922556",
+   "c2": "df687ef31bcdaf29ec9326573130eb4c53faf242645abd05e3da051516922556",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t239.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss cb1c88cf117af88c729637c7e1c4c6349a5f03e854cf3b1f3d5da5c3118d99e3",
+    "hit cb1c88cf117af88c729637c7e1c4c6349a5f03e854cf3b1f3d5da5c3118d99e3"
+   ],
+   "c1": "22e82d2547a6bb963f40ecfb6a631a86417d93e2f86c7296c1d42e58c60b46b6",
+   "c2": "22e82d2547a6bb963f40ecfb6a631a86417d93e2f86c7296c1d42e58c60b46b6",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t243.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss c4705322276465b060c684a7062627573c273cc7590174d537239ba3c329f50f",
+    "hit c4705322276465b060c684a7062627573c273cc7590174d537239ba3c329f50f"
+   ],
+   "c1": "e87ac4efd3ed36e5f725bc0f00787400d9b3b3b602e995491e56b23644fbd705",
+   "c2": "e87ac4efd3ed36e5f725bc0f00787400d9b3b3b602e995491e56b23644fbd705",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t251.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 3b12fbfc4774abda8cb7dbeb010d8681fd9476ee71f4df93e1791839478a8cc2",
+    "hit 3b12fbfc4774abda8cb7dbeb010d8681fd9476ee71f4df93e1791839478a8cc2"
+   ],
+   "c1": "89bc51c2d4e09cc4baf2dab5c7d95a37dba495d9248567b610e49c84fcc15d87",
+   "c2": "89bc51c2d4e09cc4baf2dab5c7d95a37dba495d9248567b610e49c84fcc15d87",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t264.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 2e1ccb11e57927545cb0af0327eda4741e9b712300c345be758cbfc822a85989",
+    "hit 2e1ccb11e57927545cb0af0327eda4741e9b712300c345be758cbfc822a85989"
+   ],
+   "c1": "2112994ffc2f573c4321422663fd27ebe12fe416b942510897ae8aef71608a64",
+   "c2": "2112994ffc2f573c4321422663fd27ebe12fe416b942510897ae8aef71608a64",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t265.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss d33ea3e5e6ccf7079897c6175f76caf209443ccc8be4e5ce425d8fdbf6e8fe57",
+    "hit d33ea3e5e6ccf7079897c6175f76caf209443ccc8be4e5ce425d8fdbf6e8fe57"
+   ],
+   "c1": "d6afec65100d0ffe182a169a90605ad183ae7d38ff2fd6ff9cfdd9f1accc3839",
+   "c2": "d6afec65100d0ffe182a169a90605ad183ae7d38ff2fd6ff9cfdd9f1accc3839",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t275.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 68b1634283d226fa6bd6ecb848f849f51034ccd9d4db2aafd894c9db5a3941b9",
+    "hit 68b1634283d226fa6bd6ecb848f849f51034ccd9d4db2aafd894c9db5a3941b9"
+   ],
+   "c1": "dbd7828620ced9cfa3d9ddf1a868535da548cdf400bc2597265cffa8c51ad24c",
+   "c2": "dbd7828620ced9cfa3d9ddf1a868535da548cdf400bc2597265cffa8c51ad24c",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t278.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "not in the subset: list[list[tuple[int, int]]]: a nested list holds rows of int, float, str or a class; keep a list of class instances for anything else (the general path could not build this program either); general path: the method .read() (on a value of unknown static kind)\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t278.py:41: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t278.py:42: cannot tell the type of element 0 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t284.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss a4d8ffb2f15ff522ba857893e53503ff0901279665c1223b043000614b5c3f3b",
+    "hit a4d8ffb2f15ff522ba857893e53503ff0901279665c1223b043000614b5c3f3b"
+   ],
+   "c1": "8ebcb23f84b665af2c8eaad8c66027e8d28c01557f7ed3f9008da03a8b6a12cc",
+   "c2": "8ebcb23f84b665af2c8eaad8c66027e8d28c01557f7ed3f9008da03a8b6a12cc",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t306.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 740ceab64d6519172d5a0808a47280a0eee028866cbcbb45f32621e07a903703",
+    "hit 740ceab64d6519172d5a0808a47280a0eee028866cbcbb45f32621e07a903703"
+   ],
+   "c1": "953f6831de5efa7ea918410dce63981315455f9f0c9307b4820a610c5f0b07f4",
+   "c2": "953f6831de5efa7ea918410dce63981315455f9f0c9307b4820a610c5f0b07f4",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t307.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 6410177acb2302bff1f34af8a734ab07c5f1ab4df9760280a189befd72832bd7",
+    "hit 6410177acb2302bff1f34af8a734ab07c5f1ab4df9760280a189befd72832bd7"
+   ],
+   "c1": "a7abb182588c23c484351bf482f02da82dd8038860870e412fb9d96aa8d1abe0",
+   "c2": "a7abb182588c23c484351bf482f02da82dd8038860870e412fb9d96aa8d1abe0",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t308.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 5086222e1471927507cdcc4751249d957cbfe0edfc1ec15ec39ffadc27bcb866",
+    "hit 5086222e1471927507cdcc4751249d957cbfe0edfc1ec15ec39ffadc27bcb866"
+   ],
+   "c1": "055ca274e2bbecdbc9d2f656205a772a9c6263f5b7829a9756c0f3735e883ece",
+   "c2": "055ca274e2bbecdbc9d2f656205a772a9c6263f5b7829a9756c0f3735e883ece",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t318.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss fe0b2bc76bc011cf25bf930e60aaee72dc31810fe9fdb8d687bea9873b3ddbc0",
+    "hit fe0b2bc76bc011cf25bf930e60aaee72dc31810fe9fdb8d687bea9873b3ddbc0"
+   ],
+   "c1": "ba6a0ad60c31d07e8555e3b372a742c45a3782df6f94811d1fcdaf68a26fd24f",
+   "c2": "ba6a0ad60c31d07e8555e3b372a742c45a3782df6f94811d1fcdaf68a26fd24f",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t339.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 6592464258b4001310f56022ba60de08295a41719bb3f38e1323a0e15dd1f29a",
+    "hit 6592464258b4001310f56022ba60de08295a41719bb3f38e1323a0e15dd1f29a"
+   ],
+   "c1": "488b1e3cd6c8f76a19fd1677b61eaa666ac3393d98fdd00bbc2bfac51c236bac",
+   "c2": "488b1e3cd6c8f76a19fd1677b61eaa666ac3393d98fdd00bbc2bfac51c236bac",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t341.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 9a279a50b1294717ba4f136805856b362fb7cb3f93ed4702397ebae311350627",
+    "hit 9a279a50b1294717ba4f136805856b362fb7cb3f93ed4702397ebae311350627"
+   ],
+   "c1": "ea9c7a07148b46e7a9e961d74a6236967c8067cbf4ee47918b923a3294712e97",
+   "c2": "ea9c7a07148b46e7a9e961d74a6236967c8067cbf4ee47918b923a3294712e97",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t353.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 46622692c5a850a9e686f7aba969de9506f1ddb6f71bc8a3adfc90ea3210942c",
+    "hit 46622692c5a850a9e686f7aba969de9506f1ddb6f71bc8a3adfc90ea3210942c"
+   ],
+   "c1": "310c2892d5c2c175956a219089cc52606b2725ea7fad6a25c5c6fe27d6a0d5c0",
+   "c2": "310c2892d5c2c175956a219089cc52606b2725ea7fad6a25c5c6fe27d6a0d5c0",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t385.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 4,
+   "second_rc": 4,
+   "events": [],
+   "stderr": "the C compiler rejected this:\n/tmp/ailc-02o1np6u/program.c:4139:180: error: incompatible types when assigning to type \u2018int64_t\u2019 {aka \u2018long int\u2019} from type \u2018ail_list\u2019\n 4139 |     { v__t63 = ail_olist_len(v_columns); ail_list_reserve(&v__t62, (v__t63) - (0)); for (int64_t _i = 0; _i < v__t63; _i++) { int64_t _comp_element64 = _i; v__t62.p[v__t62.n++] = ({ ail_list _source = (ail_obj_store__AilRow_int(&v__t66, ({ v__t65 = _comp_element64; (ail_obj__AilRow_int *)ail_obj_retain(ail_olist_get(v_columns, v__t65)); }), 1))->f_v; ail_list _copy = ail_list_snapshot(_source.p, _source.n); ail_list_free(&v__t67); v__t67 = _copy; v__t67; }); } }\n      |                                                                                                                                                                                    ^\n\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t410.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss a1c0c1ddc9b8d041203486a227f028b1d7bf8eae1e80147ab58d54ad18cd65fb",
+    "hit a1c0c1ddc9b8d041203486a227f028b1d7bf8eae1e80147ab58d54ad18cd65fb"
+   ],
+   "c1": "5b2371df5cd0f56c794d40f59065202adf78e620b9fec02c93d9a1d0b109bf58",
+   "c2": "5b2371df5cd0f56c794d40f59065202adf78e620b9fec02c93d9a1d0b109bf58",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t412.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 90ab1c2cafac516fbbf3c255a02618eb46c3c76158d25e8069c5968cdff50b6f",
+    "hit 90ab1c2cafac516fbbf3c255a02618eb46c3c76158d25e8069c5968cdff50b6f"
+   ],
+   "c1": "a2955bdaffb3a8959861061200e0137e1f4f1fbbd24e50ce35391870d88071cf",
+   "c2": "a2955bdaffb3a8959861061200e0137e1f4f1fbbd24e50ce35391870d88071cf",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t414.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss b0ed3671d40034fc2b7a073dd2bbeb5ac8782d4bfa4ff06b98bacbeeae0026c7",
+    "hit b0ed3671d40034fc2b7a073dd2bbeb5ac8782d4bfa4ff06b98bacbeeae0026c7"
+   ],
+   "c1": "ea8ada0d1524aa4347138fffe8240659b58f31ff0df0103605cce53cb94c913e",
+   "c2": "ea8ada0d1524aa4347138fffe8240659b58f31ff0df0103605cce53cb94c913e",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t419.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 699b814c981979b2fe2deef7160688bb2d4ca40537550477d066c5f9f588f41e",
+    "hit 699b814c981979b2fe2deef7160688bb2d4ca40537550477d066c5f9f588f41e"
+   ],
+   "c1": "e974c1045cbf05f7d852080c43222c43488ac7d3cb9b59c5cb1274e257e36667",
+   "c2": "e974c1045cbf05f7d852080c43222c43488ac7d3cb9b59c5cb1274e257e36667",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t432.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 238936d50724e4a93a084dd228c7a4de90b27f357f47df2e419c855163dd0dd3",
+    "hit 238936d50724e4a93a084dd228c7a4de90b27f357f47df2e419c855163dd0dd3"
+   ],
+   "c1": "50bca9e927d6ede68f95e519b7338b93e55020863fca9888121510021c293c6b",
+   "c2": "50bca9e927d6ede68f95e519b7338b93e55020863fca9888121510021c293c6b",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t437.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss a81d67540353ae09858b603a19beb3c760aac529d41edbaa8b8d0c917c7a61db",
+    "hit a81d67540353ae09858b603a19beb3c760aac529d41edbaa8b8d0c917c7a61db"
+   ],
+   "c1": "c23cf6acd7059ed0e403a06c4f77914a4b38381e5af2dc2a793631f0bbe88752",
+   "c2": "c23cf6acd7059ed0e403a06c4f77914a4b38381e5af2dc2a793631f0bbe88752",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t441.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss f39d3abd6ae0ae6a2cc6862b2a1bc17b93904dc851268aac69417ee67cd2b4c9",
+    "hit f39d3abd6ae0ae6a2cc6862b2a1bc17b93904dc851268aac69417ee67cd2b4c9"
+   ],
+   "c1": "fd733bf7f21358370d6e85e8830c95d9b2f318095ba6b87384d65b04046f5807",
+   "c2": "fd733bf7f21358370d6e85e8830c95d9b2f318095ba6b87384d65b04046f5807",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t452.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 59daed27d939849e1120fc9ad318c72e7c0d3093d8c77565c0e32ba5c39d80b9",
+    "hit 59daed27d939849e1120fc9ad318c72e7c0d3093d8c77565c0e32ba5c39d80b9"
+   ],
+   "c1": "16e8b7890d7704ae3c13de49478eaa131b4234fae50c3637b574bd9e90dc13da",
+   "c2": "16e8b7890d7704ae3c13de49478eaa131b4234fae50c3637b574bd9e90dc13da",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t457.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 0c7c58e830df0b6c7735050187e842d84d9dcf77079cd6ec6b9695fe77727caa",
+    "hit 0c7c58e830df0b6c7735050187e842d84d9dcf77079cd6ec6b9695fe77727caa"
+   ],
+   "c1": "553f5aec113c6312973b86c680721df411c79612619928c1ee512b1864a018ca",
+   "c2": "553f5aec113c6312973b86c680721df411c79612619928c1ee512b1864a018ca",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t459.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss e0e570112ad5a9484d7b067bb35f153c66bb621e8945fd2879b6145a775fa2cf",
+    "hit e0e570112ad5a9484d7b067bb35f153c66bb621e8945fd2879b6145a775fa2cf"
+   ],
+   "c1": "a12fcce5aa00f8f7191aabadc0e8621e0c9b61eb39e8cfb63d26024ce022caaa",
+   "c2": "a12fcce5aa00f8f7191aabadc0e8621e0c9b61eb39e8cfb63d26024ce022caaa",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t467.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t467.py:12:1: not in the subset: only a class type can be None: write `Node | None` (the general path could not build this program either); general path: sys.stdin used as a plain value\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t467.py:1: a *argument in a call\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t467.py:9: cannot tell the type of element 1 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t470.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss e875826d9889c36db5db61e4b6cc02082fc3760f778141010c0ca08c6c12df8a",
+    "hit e875826d9889c36db5db61e4b6cc02082fc3760f778141010c0ca08c6c12df8a"
+   ],
+   "c1": "06d4408dc5fbbf7822d28fed578c6859137b211640ebd85f42f88dcaa6b08e27",
+   "c2": "06d4408dc5fbbf7822d28fed578c6859137b211640ebd85f42f88dcaa6b08e27",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t472.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": " two arguments), log1p, log2, log10, cbrt, erf, erfc, nextafter, remainder, dist and the constants math.pi, math.e, math.tau, math.inf, math.nan; fsum (a list of floats), prod (a list of ints or floats, with start=), modf; frexp, ldexp, ulp, gamma and the rest are not built\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t472.py:18: math.gcd() with these arguments is not built; the math names built here are math.sqrt, floor, ceil, trunc, isqrt, gcd and lcm (two arguments), comb, perm (two arguments), fabs, factorial, pow, fmod, hypot, copysign, atan2, degrees, radians, isnan, isinf, isfinite, sin, cos, tan, asin, acos, atan, sinh, cosh, tanh, asinh, acosh, atanh, exp, exp2, expm1, log (one or two arguments), log1p, log2, log10, cbrt, erf, erfc, nextafter, remainder, dist and the constants math.pi, math.e, math.tau, math.inf, math.nan; fsum (a list of floats), prod (a list of ints or floats, with start=), modf; frexp, ldexp, ulp, gamma and the rest are not built\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t475.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t475.py:1:1: not in the subset: import of 'class' is not available: this compiler builds only the modules it models (math, sys, collections, itertools, functools, heapq, bisect, re, json) (the general path could not build this program either); general path: class.pack (not yet published in NAMES_library.json)\n  write instead: drop the import and write what you need by hand with plain lists, dicts and loops\n"
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t481.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss 89bbcd5b184ab146b473c0bd2c4e0e6b1b9e0442e63859fc774709f46a5eed8c",
+    "hit 89bbcd5b184ab146b473c0bd2c4e0e6b1b9e0442e63859fc774709f46a5eed8c"
+   ],
+   "c1": "74f36e940de2fb1f88c8183d81df58562ed845474e3ea9f231e81b69d6c47f40",
+   "c2": "74f36e940de2fb1f88c8183d81df58562ed845474e3ea9f231e81b69d6c47f40",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t486.py",
+   "syntax": "python",
+   "ok": true,
+   "first_rc": 0,
+   "second_rc": 0,
+   "events": [
+    "miss c4bb23f8749c1812a26c3bbb4c2bd34e7a4856b8912a8053402abb6cd33626e5",
+    "hit c4bb23f8749c1812a26c3bbb4c2bd34e7a4856b8912a8053402abb6cd33626e5"
+   ],
+   "c1": "c1e5ced8aa665ec8ff07bb5037672d58145d31902c557c943870e04f4a0a6f7c",
+   "c2": "c1e5ced8aa665ec8ff07bb5037672d58145d31902c557c943870e04f4a0a6f7c",
+   "identical": true,
+   "hit": true
+  },
+  {
+   "source": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t489.py",
+   "syntax": "python",
+   "ok": false,
+   "first_rc": 3,
+   "second_rc": 3,
+   "events": [],
+   "stderr": "/home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t489.py:2:1: not in the subset: import of 'unicodedata' is not available: this compiler builds only the modules it models (math, sys, collections, itertools, functools, heapq, bisect, re, json) (the general path could not build this program either); general path: unicodedata.name is not supported (see the note below)\n  write instead: drop the import and write what you need by hand with plain lists, dicts and loops\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t489.py:9: unicodedata.name is not supported; write instead: use the str methods (isalpha, isdigit, isspace, isupper, islower, isalnum, isprintable), ord() / chr(), or unicodedata.category(ch), which is built\nnote: /home/runner/work/_temp/w2/lab/corpus/programs/glm-5.3-flash-free/t489.py:13: cannot tell the type of element 1 of this tuple (an empty list or a value of unknown type); give it a name with an annotation\n"
+  }
+ ]
+}

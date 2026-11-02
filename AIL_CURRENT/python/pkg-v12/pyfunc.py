@@ -18407,6 +18407,10 @@ def _pair_plan(src, ctx):
     own docstring for the identical bug this mirrors, and `_inline_pair_fold` for the fix).
     """
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id == 'enumerate':
+        if len(src.args) not in (1, 2) or {kw.arg for kw in src.keywords} - {'start'}:
+            # No iterable at all, or an argument list the boxed/general path rejects: refuse it by
+            # the same name instead of indexing the argument list.
+            raise Unsupported('enumerate() with other than (iterable[, start])')
         if len(src.args) != 1 or src.keywords:
             # `enumerate(xs, start=1)` inside a comprehension or a fold: refused by name (the
             # index counted from 0 here, whatever the start said)
@@ -18502,6 +18506,10 @@ def _pair_key_kind(src, ctx):
 def _pair_value_kind(src, ctx):
     """The kind of the SECOND name of an `enumerate` / `zip` / `.items()` pair target."""
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id in ('enumerate', 'zip'):
+        if src.func.id == 'enumerate' and not src.args:
+            return INT
+        if src.func.id == 'zip' and len(src.args) < 2:
+            return INT
         base = src.args[0] if src.func.id == 'enumerate' else src.args[1]
         return _iter_elem_kind(base, ctx)
     if (isinstance(src, ast.Call) and isinstance(src.func, ast.Attribute)
@@ -19698,7 +19706,6 @@ def _listcomp_kind(node, ctx):
         if len(g.target.elts) != 2 or not all(isinstance(e, ast.Name) for e in g.target.elts):
             raise Unsupported('a comprehension target that is not a pair of names')
         pair = [e.id for e in g.target.elts]
-        _pair_plan(g.iter, ctx)
     elif not isinstance(g.target, ast.Name):
         raise Unsupported('a comprehension target that is not a name')
     source = g.iter
@@ -38390,23 +38397,36 @@ def _one_function_numeric_impl(fn, sigs, strict, cname, recursive=False, csym=No
                           '  write instead: list every parameter by name '
                           '(`def f(a: int, b: int)`); pass a list for a variable number of values')
     # AIL_TASK_callconv_20260915.md scope item 1: a default is accepted only when it is a
-    # compile-time constant of a kind this language already has (int, float or bool -- `_expr`'s
-    # own Constant handling already maps a bool to a plain 0/1 int64) -- anything else (a call, a
-    # name, a container literal, a `None`) keeps refusing, by name, saying which argument. A
-    # method's own default was already refused just above (`is_method`), before `a.defaults` is
-    # even looked at here, so this loop is always empty for one.
+    # compile-time constant of a kind this language already has (int, float, bool, str or bytes
+    # -- `_expr`'s own Constant handling already maps a bool to a plain 0/1 int64 and a str or
+    # bytes to its immutable literal form) -- anything else (a call, a name, a container literal,
+    # a `None`) keeps refusing, by name, saying which argument. A method's own default was already
+    # refused just above (`is_method`), before `a.defaults` is even looked at here, so this loop is
+    # always empty for one.
     _defaulted_names = [p.arg for p in a.args[len(a.args) - len(a.defaults):]]
     _pk_settled = dict(sigs[fn.name][0])
     for _pname, _dflt in zip(_defaulted_names, a.defaults):
         _dnode = _dflt.operand if (isinstance(_dflt, ast.UnaryOp)
                                    and isinstance(_dflt.op, (ast.USub, ast.UAdd))) else _dflt
-        if not (isinstance(_dnode, ast.Constant) and isinstance(_dnode.value, (int, float, bool))):
-            raise Unsupported('%s(): the default for %r must be a compile-time int, float or '
-                              'bool constant (a list, dict, str or None default is refused).\n'
+        _dconst = isinstance(_dnode, ast.Constant)
+        _dvalue = _dnode.value if _dconst else None
+        if not (_dconst and isinstance(_dvalue, (int, float, bool, str, bytes))):
+            raise Unsupported('%s(): the default for %r must be a compile-time int, float, '
+                              'bool, str or bytes constant (a list, dict or None default is '
+                              'refused).\n'
                               '  write instead: drop the default and pass the value at every call '
                               'site (`%s(x, [])`)' % (fn.name, _pname, fn.name))
-        if isinstance(_dnode.value, float) and not isinstance(_dnode.value, bool) \
-                and _pk_settled.get(_pname) == INT:
+        _settled = _pk_settled.get(_pname)
+        if isinstance(_dvalue, str) and _settled not in (None, STR):
+            raise Unsupported('%s(): the default for %r is a str but the parameter is %s; '
+                              'this language has no implicit conversion'
+                              % (fn.name, _pname, _settled))
+        if isinstance(_dvalue, bytes) and _settled not in (None, BYTES):
+            raise Unsupported('%s(): the default for %r is bytes but the parameter is %s; '
+                              'this language has no implicit conversion'
+                              % (fn.name, _pname, _settled))
+        if isinstance(_dvalue, float) and not isinstance(_dvalue, bool) \
+                and _settled == INT:
             raise Unsupported('%s(): the default for %r is a float but the parameter is int; '
                               'this language has no implicit truncation' % (fn.name, _pname))
     if is_method and not (isinstance(fn.returns, ast.Name)
