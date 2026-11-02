@@ -1181,6 +1181,193 @@
    }
   }
  ],
- "geomean_ratio_vs_best_other": {},
- "scorecard": {}
+ "geomean_ratio_vs_best_other": {
+  "instructions": {
+   "ail": {
+    "geomean": 1.1331455287276027,
+    "n": 10
+   },
+   "ail-py": {
+    "geomean": 0.794427513469324,
+    "n": 8
+   }
+  },
+  "rss_kib": {
+   "ail": {
+    "geomean": 1.056601680552013,
+    "n": 10
+   },
+   "ail-py": {
+    "geomean": 1.0843879213341268,
+    "n": 8
+   }
+  },
+  "binary_bytes": {
+   "ail": {
+    "geomean": 0.01537355717287747,
+    "n": 10
+   },
+   "ail-py": {
+    "geomean": 0.017685020172903198,
+    "n": 8
+   }
+  },
+  "compile_s": {
+   "ail": {
+    "geomean": 10.869156723390587,
+    "n": 10
+   },
+   "ail-py": {
+    "geomean": 11.206444155361426,
+    "n": 8
+   }
+  },
+  "build_disk_kib": {
+   "ail": {
+    "geomean": 1.5672359969225254,
+    "n": 10
+   },
+   "ail-py": {
+    "geomean": 1.6813262488705352,
+    "n": 8
+   }
+  },
+  "wall_ms": {
+   "ail": {
+    "geomean": 1.9931001302563798,
+    "n": 10
+   },
+   "ail-py": {
+    "geomean": 1.5874655478990822,
+    "n": 8
+   }
+  }
+ },
+ "scorecard": {
+  "ail": {
+   "wins": {
+    "instructions": [
+     5,
+     10
+    ],
+    "rss_kib": [
+     6,
+     10
+    ],
+    "binary_bytes": [
+     10,
+     10
+    ],
+    "compile_s": [
+     0,
+     10
+    ],
+    "build_disk_kib": [
+     2,
+     10
+    ],
+    "wall_ms": [
+     1,
+     10
+    ]
+   },
+   "losses": [
+    "berth_sim instr 1.56x",
+    "berth_sim RSS 1.27x",
+    "berth_sim compile 17.10x",
+    "berth_sim disk 2.00x",
+    "berth_sim wall 1.68x",
+    "chain_relax instr 1.47x",
+    "chain_relax compile 9.84x",
+    "chain_relax wall 1.37x",
+    "echo_pack RSS 1.00x",
+    "echo_pack compile 9.64x",
+    "echo_pack disk 1.88x",
+    "echo_pack wall 1.88x",
+    "ledger_bin RSS 1.23x",
+    "ledger_bin compile 9.79x",
+    "ledger_bin disk 1.88x",
+    "ledger_bin wall 1.72x",
+    "rail_transfer instr 15.00x",
+    "rail_transfer compile 9.40x",
+    "rail_transfer disk 1.75x",
+    "rail_transfer wall 17.96x",
+    "scar_life compile 8.78x",
+    "scar_life disk 1.71x",
+    "scar_life wall 1.03x",
+    "tally_lang instr 1.07x",
+    "tally_lang compile 9.81x",
+    "tally_lang wall 1.81x",
+    "term_rank compile 9.48x",
+    "term_rank disk 1.71x",
+    "ticket_audit compile 9.47x",
+    "ticket_audit disk 1.79x",
+    "ticket_audit wall 2.02x",
+    "tree_fold instr 1.06x",
+    "tree_fold RSS 1.48x",
+    "tree_fold compile 19.95x",
+    "tree_fold disk 2.00x",
+    "tree_fold wall 2.08x"
+   ]
+  },
+  "ail-py": {
+   "wins": {
+    "instructions": [
+     5,
+     8
+    ],
+    "rss_kib": [
+     4,
+     8
+    ],
+    "binary_bytes": [
+     8,
+     8
+    ],
+    "compile_s": [
+     0,
+     8
+    ],
+    "build_disk_kib": [
+     1,
+     8
+    ],
+    "wall_ms": [
+     1,
+     8
+    ]
+   },
+   "losses": [
+    "berth_sim instr 1.56x",
+    "berth_sim RSS 1.27x",
+    "berth_sim compile 17.10x",
+    "berth_sim disk 2.00x",
+    "berth_sim wall 1.68x",
+    "echo_pack RSS 1.00x",
+    "echo_pack compile 9.64x",
+    "echo_pack disk 1.88x",
+    "echo_pack wall 1.88x",
+    "ledger_bin RSS 1.23x",
+    "ledger_bin compile 9.79x",
+    "ledger_bin disk 1.88x",
+    "ledger_bin wall 1.72x",
+    "scar_life compile 8.78x",
+    "scar_life disk 1.71x",
+    "scar_life wall 1.03x",
+    "tally_lang instr 1.07x",
+    "tally_lang compile 9.81x",
+    "tally_lang wall 1.81x",
+    "term_rank compile 9.48x",
+    "term_rank disk 1.71x",
+    "ticket_audit compile 9.47x",
+    "ticket_audit disk 1.79x",
+    "ticket_audit wall 2.02x",
+    "tree_fold instr 1.06x",
+    "tree_fold RSS 1.48x",
+    "tree_fold compile 19.95x",
+    "tree_fold disk 2.00x",
+    "tree_fold wall 2.08x"
+   ]
+  }
+ }
 }
