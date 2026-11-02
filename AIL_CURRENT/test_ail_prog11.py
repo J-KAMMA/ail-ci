@@ -163,6 +163,52 @@ main()
 '''
 
 
+REBIND_DELETE = {
+    'rebind': '''
+def f() -> int:
+    return X[0]
+
+X: tuple[int, int] = (4, 5)
+X = 9
+print(f())
+''',
+    'delete': '''
+def f() -> int:
+    return X[0]
+
+X: tuple[int, int] = (4, 5)
+del X
+print(f())
+''',
+    'global_rebind': '''
+def f() -> int:
+    return X[0]
+
+X: tuple[int, int] = (4, 5)
+
+def g() -> None:
+    global X
+    X = 9
+
+g()
+print(f())
+''',
+    'global_delete': '''
+def f() -> int:
+    return X[0]
+
+X: tuple[int, int] = (4, 5)
+
+def g() -> None:
+    global X
+    del X
+
+g()
+print(f())
+''',
+}
+
+
 def run(cmd, cwd=None, stdin=b'', env=None):
     return subprocess.run(cmd, cwd=cwd, input=stdin, capture_output=True, env=env, timeout=600)
 
@@ -240,6 +286,15 @@ class TypedReach11(unittest.TestCase):
         built, exe = self.build(src, 'forward_tuple', strict=True)
         self.assertEqual(built.returncode, 0, built.stderr[-3000:])
         self.compare(src, exe, None)
+
+
+    def test_tuple_constant_rebind_or_delete_is_refused(self):
+        for name, text in REBIND_DELETE.items():
+            src = Path(self.tmp) / ('rebind_' + name + '.py')
+            src.write_text(text, encoding='utf-8')
+            built, exe = self.build(src, 'rebind_' + name)
+            self.assertEqual(built.returncode, 0, built.stderr[-3000:])
+            self.compare(src, exe, None)
 
 
 if __name__ == '__main__':

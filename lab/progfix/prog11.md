@@ -53,6 +53,23 @@ imports (`g25_006`, `t388`) the two program functions are still the only ones th
 Both changes affect only programs that previously were refused.  The generated C of the ten
 `lab/compare` tasks is byte-identical to the base commit (all ten `main.ail` builds compared).
 
+## Review fix: rebinding or deleting a tuple module constant
+
+A tuple module constant is kept as columns (`START__c0`, `START__c1`), so a later rebinding or
+deletion cannot be followed exactly.  `tuplib.py` now scans module-level bindings (assignment,
+augmented assignment, `for`/`with`/`except`/`match` targets, imports, `def`/`class`, `del`) and
+`global NAME` bindings in function and class bodies before splitting.  If one of them touches a
+tuple constant, the whole tuple lowering is refused by name and the program stays on the general
+path, where it matches CPython:
+
+* `X = 9` after `X: tuple[int, int] = (4, 5)` -> `TypeError: 'int' object is not subscriptable`
+  (was `4`, the stale column);
+* `del X` -> `NameError: name 'X' is not defined` (was an uncaught compiler `KeyError: 'X'`);
+* the same through `global X` inside a function.
+
+Rebinding to another tuple constant (including a different component type or arity, before or
+after the function call) still splits both definitions and matches CPython.
+
 ## Follow-ups (left by name)
 
 * `lab/corpus/programs/deepseek-v4.1-flash-free/t310.py`: needs a typed `iter()` over a str and a

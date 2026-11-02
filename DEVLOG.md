@@ -1,3 +1,17 @@
+## 2026-11-02 -- prog11 review: tuple constants rebound or deleted (job-prog11-11021006)
+
+Fixed both defects from the review of `754b5a4`.  A module-level tuple constant is kept as
+`NAME__c0`, ... columns, so a later `NAME = 9` or `del NAME` (at module level, or through
+`global NAME` inside a function or class) left the functions reading the stale columns or crashed
+the compiler with `KeyError: 'NAME'` in `pyboxed2.name_ref`.  `python/pkg-v12/tuplib.py` now
+scans the module and its `global` declarations before splitting; such a rebinding or deletion is
+refused by name and the program stays on the general path, where it matches CPython 3.12
+(`TypeError: 'int' object is not subscriptable` after `X = 9`, `NameError: name 'X' is not
+defined` after `del X`).  Rebinding to another tuple constant is still split and works.  Probes:
+`q10`/`q20`/`q21`/`q22`/`q24` in `/tmp/probes` now match CPython on both builds; `q23` (tuple to
+tuple) still builds and matches; `q25`-`q32` (tuple-to-tuple with a different component type or
+arity, before and after the call, and `for` rebinding) all match CPython on both builds.
+
 ## 2026-11-02 -- prog11 review: tuple keys under mutation, forward tuple constants (job-prog11-11020732)
 
 Fixed both defects from the review of `b62a9eb`.  The tuple-key `min`/`max` lowering in
