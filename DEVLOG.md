@@ -7,7 +7,10 @@ comprehension whose target is a pair of names over `enumerate` (`[i for i, d in 
 (`READINGS = [(25.0, "C"), (-40.0, "F")]`).  `pyfunc`'s list-comprehension lowering now reuses its
 pair plan for the two-name `enumerate` target (a start, a list of floats or a list of str stays
 refused by name), and `modtables._scalar` now accepts unary `-`/`+` over a float literal, sign of
-`-0.0` included.  No program file changed.
+`-0.0` included.  No program file changed.  A zero-argument `enumerate()` in a pair
+comprehension is now refused by name like the general path (`enumerate() with other than
+(iterable[, start])`) instead of indexing an empty argument list and crashing the compiler on both
+builds; `test_ail_prog16` covers that refusal on both IRs and builds.
 
 The other three need large features and are recorded with their exact messages in
 `lab/progfix/prog16.md`: `g21_034` (`Any` / `list[dict]` / `Any | None` and `json.dumps` of an

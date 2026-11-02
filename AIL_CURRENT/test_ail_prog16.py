@@ -151,6 +151,17 @@ def main() -> None:
 main()
 '''
 
+PAIR_NOARGS = '''def f() -> list[int]:
+    return [i for i, v in enumerate()]
+
+
+def main() -> None:
+    print(f())
+
+
+main()
+'''
+
 
 def run_python(path, stdin):
     return subprocess.run([sys.executable, str(path)], input=stdin.encode('utf-8'),
@@ -243,6 +254,16 @@ class Prog16(unittest.TestCase):
         self.same(path, '', name='negtable')
 
     # P4 -- the neighbouring forms stay either refused by name or equal to CPython
+    def test_enumerate_without_iterable_is_refused_by_name(self):
+        path = self.inline(PAIR_NOARGS, 'pairnoargs')
+        for typed in (True, False):
+            for ir in (0, 1):
+                built, _ = build(path, self.tmp, 'pairnoargs', ir, typed)
+                self.assertEqual(built.returncode, 3, 'typed=%s AIL_IR=%s:\n%s'
+                                 % (typed, ir, built.stdout + built.stderr))
+                self.assertNotIn('Traceback', built.stderr)
+                self.assertIn('enumerate() with other than (iterable[, start])', built.stderr)
+
     def test_pair_forms_not_built_are_refused_by_name_and_general_matches(self):
         for text, name, needle in (
                 (PAIR_START, 'pairstart', ('enumerate() with a start inside a comprehension or a fold',)),

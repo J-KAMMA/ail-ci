@@ -17893,6 +17893,10 @@ def _pair_plan(src, ctx):
     own docstring for the identical bug this mirrors, and `_inline_pair_fold` for the fix).
     """
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id == 'enumerate':
+        if len(src.args) not in (1, 2) or {kw.arg for kw in src.keywords} - {'start'}:
+            # No iterable at all, or an argument list the boxed/general path rejects: refuse it by
+            # the same name instead of indexing the argument list.
+            raise Unsupported('enumerate() with other than (iterable[, start])')
         if len(src.args) != 1 or src.keywords:
             # `enumerate(xs, start=1)` inside a comprehension or a fold: refused by name (the
             # index counted from 0 here, whatever the start said)
@@ -19118,7 +19122,7 @@ def _listcomp_kind(node, ctx):
         raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
     g = node.generators[0]
     pair = _listcomp_pair(g)
-    if pair is not None:
+    if pair is not None and g.iter.args:
         arg = g.iter.args[0]
         try:
             arg_kind = _etype(arg, ctx)
