@@ -113,6 +113,38 @@ def _own_nodes(fn):
         pending.extend(ast.iter_child_nodes(node))
 
 
+def _scope_bindings(fn):
+    """Every name bound in `fn`'s own scope (parameters, assignments, nested def/class names,
+    imports, `except ... as`, `with ... as`, `global`/`nonlocal`, deletion).  Nested function and
+    class bodies are their own scope and are not descended into."""
+    names = set()
+    a = fn.args
+    for arg in (*a.posonlyargs, *a.args, *a.kwonlyargs):
+        names.add(arg.arg)
+    if a.vararg:
+        names.add(a.vararg.arg)
+    if a.kwarg:
+        names.add(a.kwarg.arg)
+    for node in _own_nodes(fn):
+        if isinstance(node, ast.Name) and not isinstance(node.ctx, ast.Load):
+            names.add(node.id)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Import):
+            names.update(alias.asname or alias.name.split('.')[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            names.update(alias.asname or alias.name for alias in node.names)
+        elif isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            names.update(node.names)
+        elif isinstance(node, (ast.With, ast.AsyncWith)):
+            for item in node.items:
+                if item.optional_vars is not None:
+                    names.update(n.id for n in ast.walk(item.optional_vars) if isinstance(n, ast.Name))
+    return names
+
+
 def _locate(statements, origin):
     """Give every new node of `statements` that has no source location the location of `origin`."""
     for each in statements:
@@ -245,6 +277,10 @@ class _Lower:
 
     def iterator_bindings(self, fn):
         if not getattr(self, 'allow_iter', False):
+            return {}
+        if _scope_bindings(fn) & {'iter', 'next'}:
+            # A local, parameter, nested def/class or import named `iter`/`next` replaces the
+            # builtin those calls would otherwise reach, so the cursor rewrite must not fire.
             return {}
         nodes = list(_own_nodes(fn))
         parents = {}

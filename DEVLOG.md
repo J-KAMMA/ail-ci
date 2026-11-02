@@ -1,3 +1,15 @@
+## 2026-11-02 -- prog30 review fix: do not lower `next`/`iter` when they are shadowed (job-prog30-11022134)
+
+The iterator cursor rewrite assumed `iter` and `next` were the builtins, so a local, parameter or
+nested def/class named `iter`/`next` was ignored and the user binding never ran (`def next(x): return
+42` printed `1`; `iter = 5` printed `1` instead of raising `TypeError`).  `iterlower.py` now collects
+the function's own-scope bindings (parameters, stores, nested def/class names, imports, `except ... as`,
+`with ... as`, `global`/`nonlocal`, deletion) and refuses the rewrite when either name is bound, so
+those programs stay on the general path and match CPython.  A shadow inside a nested function's own
+scope does not affect the outer function, which still lowers.  New `test_ail_prog30` cases cover all
+of these; probes `rv_*` in `/tmp/probes/rv` match CPython on both builds.  The `t266` typed path and
+the ten `lab/compare` generated C files are unchanged.
+
 ## 2026-11-02 -- prog30 typed reach: t266 iterator lowering and a t244 list-extend fix (job-prog30-11021835)
 
 Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time over repeated `main`

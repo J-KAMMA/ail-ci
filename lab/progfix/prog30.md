@@ -28,7 +28,12 @@ CPython hybrid (`docs/design/CPYTHON_HYBRID.md`) accelerates exactly those typed
   before the value, so a subscript / attribute target (`a[items.pop(0) % 2] += next(it)`) may run
   code that the hoisted cursor read would otherwise overtake.  A `try` anywhere, a `while`-test
   use, `next(it, default)` and a source deleted or rebound after `iter()` stay on the general
-  path.  This is what makes `t266.main` and `t266.dfs` typed.
+  path.  The rewrite also refuses when `iter` or `next` is bound in the function's own scope
+  (a local, a parameter, or a nested def/class name, an import, `except ... as`, or a loop
+  target), because that binding replaces the builtin the calls would otherwise reach; those
+  programs stay general and match CPython.  A shadow inside a nested function's own scope does
+  not affect the outer function, which still lowers.  This is what makes `t266.main` and
+  `t266.dfs` typed.
 * `python/pkg-v12/nested_lists.py`: a hoisted comprehension temp (`__ail_itemsN` / `__ail_rowsN`)
   is marked `_ail_synth`, so `_last_use_free_points` cannot decide the prelude loop is its last
   mention (both share the comprehension's source position) and free it before the statement that
@@ -59,5 +64,12 @@ CPython hybrid (`docs/design/CPYTHON_HYBRID.md`) accelerates exactly those typed
   typed on the default build.  The exhausted-cursor probes
   match on stdout/exit; the typed runtime names the uncaught trap `list index out of range` where
   CPython says `StopIteration` (recorded as `C?-job-prog30-11021835-1`).
+* Review fix probes `rv_next_{nested,local,param}_shadow.py`,
+  `rv_iter_{nested,local,param}_shadow.py`, `rv_{iter,next}_module_shadow.py`,
+  `rv_nested_only_shadow.py`, `rv_next_after_use.py`, `rv_iter_for_target.py`,
+  `rv_next_except_target.py` and `rv_next_import_shadow.py` asked for a shadowed builtin; all
+  match CPython's stdout and exit status on both `cmp.sh` builds.  The shadowed programs stay
+  general; `rv_nested_only_shadow.py` (the shadow is inside the nested helper's own scope) still
+  builds typed and matches.
 * The generated C of the ten `lab/compare/src/*/main.ail` tasks is byte-identical to the base
   commit (10/10 compared with `--debug-dir`).

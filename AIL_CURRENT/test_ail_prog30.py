@@ -26,6 +26,10 @@ P9  `xs += [<comprehension>]` keeps both the old and the new elements, for a lis
 P10 an augmented-assignment target that runs code (`a[items.pop(0) % 2] += next(it)`) is evaluated
     before the value in CPython, so the cursor lowering is refused and the program stays general;
     a plain name target (`total += next(it)`) is still lowered.
+P11 `iter` or `next` bound in the function's own scope (a local, a parameter, or a nested
+    def/class name) replaces the builtin, so the cursor lowering is refused and those programs
+    stay general and match CPython; a shadow inside a nested function's own scope does not
+    affect the outer function and it still builds typed.
 """
 import os
 import shutil
@@ -148,6 +152,71 @@ ITER_DEL = '''def main() -> None:
     print(next(it))
 main()
 '''
+
+SHADOW_NEXT_NESTED = '''def main() -> None:
+    def next(x):
+        return 42
+    it = iter([1, 2])
+    print(next(it))
+main()
+'''
+
+SHADOW_ITER_NESTED = '''def main() -> None:
+    def iter(x):
+        return [9]
+    xs = [1, 2, 3]
+    it = iter(xs)
+    print(next(it))
+main()
+'''
+
+SHADOW_ITER_LOCAL = '''def main() -> None:
+    iter = 5
+    xs = [1, 2, 3]
+    it = iter(xs)
+    print(next(it))
+main()
+'''
+
+SHADOW_NEXT_LOCAL = '''def main() -> None:
+    next = 5
+    xs = [1, 2, 3]
+    it = iter(xs)
+    print(next(it))
+main()
+'''
+
+SHADOW_ITER_PARAM = '''def main(iter: int) -> None:
+    xs = [1, 2, 3]
+    it = iter(xs)
+    print(next(it))
+main(5)
+'''
+
+SHADOW_NEXT_PARAM = '''def main(next: int) -> None:
+    xs = [1, 2, 3]
+    it = iter(xs)
+    print(next(it))
+main(5)
+'''
+
+SHADOW_NESTED_SCOPE_ONLY = '''def main() -> None:
+    def helper():
+        next = 5
+        return next
+    it = iter([1, 2])
+    print(next(it), helper())
+main()
+'''
+
+SHADOWED = {
+    'shadow_next_nested': SHADOW_NEXT_NESTED,
+    'shadow_iter_nested': SHADOW_ITER_NESTED,
+    'shadow_iter_local': SHADOW_ITER_LOCAL,
+    'shadow_next_local': SHADOW_NEXT_LOCAL,
+    'shadow_iter_param': SHADOW_ITER_PARAM,
+    'shadow_next_param': SHADOW_NEXT_PARAM,
+}
 
 AUG_COMP = '''def main() -> None:
     rows = [[1, 2], [3, 4]]
@@ -298,6 +367,11 @@ class Prog30(unittest.TestCase):
                              (ITER_UNSAFE, 'iter_unsafe'), (ITER_BEFORE, 'iter_before'),
                              (ITER_DEL, 'iter_del')):
             self.check(source, name, expect_typed=False)
+
+    def test_shadowed_iter_next_are_not_lowered(self):
+        for name, source in SHADOWED.items():
+            self.check(source, name, expect_typed=False)
+        self.check(SHADOW_NESTED_SCOPE_ONLY, 'shadow_nested_scope_only')
 
     def test_iter_rewrite_on_both_builds(self):
         for env in ({'AIL_IR': '0'}, {'AIL_IR': '1'}):
