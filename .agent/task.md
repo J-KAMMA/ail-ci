@@ -1,3 +1,79 @@
+**Finish this job: the reviewer judged it FIX.** You work on the job's branch, so your earlier commits are here. Below is the last review, then the original task.
+
+1. Check every defect the review names against the current code. A defect may already be fixed by the last commit: confirm that with the probe the review gives, and do not redo it.
+2. Fix every defect that remains. If a feature cannot be made exact, turn it into a named compile-time refusal; never leave a crash or a silent difference.
+3. Re-run the probes, the job's own test module and test_ail_safetynet, and run `python3 tools/update_manifest.py`. Commit.
+
+--- LAST REVIEW ---
+## review 1
+[model opencode-go/deepseek-v4.1-flash]
+## Review: re-applied prog9
+
+**What the change really does.** It re-applies prog9 (Optional `in`/`while` tests, method-row SROW unpack, `sorted(dict)`/dict repr, `int|float` and container-dict refusals) and then adds review-fix commits that replace the static bool-row tracking with per-name runtime flags and extend Optional-method resolution beyond `self`. That matches the report's summary, except the refusal claim for attribute/dict-value receivers.
+
+**Checks run**
+- `test_ail_prog9` + `test_ail_safetynet` on HEAD: **2 modules, 0 failed** (177 s).
+- Worker probes re-run on HEAD: all listed `p_*` plus `/tmp/probes/p_bool_runtime_flow.py`, `p_opt_external_receivers.py` matched CPython on both `cmp.sh` builds.
+- My probes: Optional-`in` type mismatches/empty containers, dict text (empty, INT64_MIN, aliasing), sorted ownership, bool index 1, `a = 1/True/False/-1`, walrus, conditional/zero-iteration unpack, ambiguous method names — all matched or were refused by name.
+- Non-feature program `plain.py`: generated `program.c` byte-identical to `/tmp/base`.
+- `tools/diff_ids.py` absent; `update_manifest.py --check` rc=0; commits `580516ef`, `bb87fdae`, `00bd57c9` present.
+
+**Pre-existing:** none found (the two defects below are correct on `/tmp/base`).
+
+**Defects**
+
+1. **Bool row flag is codegen-order dependent across a loop back-edge.**  
+   `/tmp/rprobes3/w_loop_backedge.py`:
+   ```python
+   class P:
+       def __init__(self) -> None: self.s = "z"
+       def pair(self) -> tuple[bool, str]: return (True, self.s)
+   def main() -> None:
+       p = P(); a = 0
+       for i in range(2):
+           print(a)
+           a, b = p.pair()
+   main()
+   ```
+   CPython: `0`, `True`. HEAD default build: `0`, `1` (base: correct). Same with the `while` variant. `_bool_flow_after` only sees the `print` before the textual unpack, so iteration 2 still emits the integer path.
+
+2. **Unique-name Optional-method fallback ignores the receiver's class and reinterprets an unrelated SROW return.**  
+   `/tmp/rprobes3/s_fallback_int2.py`:
+   ```python
+   class P:
+       def __init__(self) -> None: self.x = 0
+       def peek(self) -> int | None: return None
+   class Q:
+       def __init__(self) -> None: self.s = "q"; self.n = 5
+       def peek(self) -> tuple[str, int]: return (self.s, self.n)
+   def make() -> Q: return Q()
+   def main() -> None:
+       q = make()
+       print(q.peek())
+   main()
+   ```
+   CPython: `('q', 5)`. HEAD `cmp.sh` `g` and `d`: `5` (base: correct). The `method_info` fallback picks `P.peek` because its name is unique among Optional-returning methods; the SROW pair from `Q.peek` is then treated as `(flag, value)`. `/tmp/rprobes3/v_fallback_dictrecv.py` (`d["k"].peek()`) shows the same. This also makes the report's “attribute/dict-value receivers are refused by name” claim false for dict-value receivers.
+
+**Report claims:** runtime bool rebinding — verified for the report's probes, false for the loop back-edge; external Optional methods/ambiguous refusal — verified, but the attribute/dict refusal claim is false (defect 2); 8/8 probes — verified for the probes I re-ran; tests — verified for `test_ail_prog9`/`test_ail_safetynet`, the other eight modules unverified; absent `diff_ids.py` and manifest check — verified.
+
+**Unverified:** the eight additional test modules in the report, and wider corpus/suite effects.
+
+VERDICT: FIX
+1. `/tmp/rprobes3/w_loop_backedge.py` (and `w_loop_backedge_while.py`): expected `0` then `True`; HEAD default build prints `0` then `1`.
+2. `/tmp/rprobes3/s_fallback_int2.py` (and `v_fallback_dictrecv.py`): expected `('q', 5)`; HEAD prints `5`; the unique-method-name fallback must check the receiver class or refuse.
+[cost $0.0781, opencode tokens {"total": 3827246, "input": 291243, "output": 11146, "reasoning": 28793, "cache.write": 0, "cache.read": 3496064}]
+    tool time: bash 5.3 min
+        178s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && date && python3 ../tools/par_check.py -j 2 test_ail_prog9 te
+         44s bash   cd /home/runner/work/ail-ci/ail-ci && for p in /tmp/rprobes/p_bool_if_taken.py /tmp/rprobes/p_bool_loop_taken.
+         23s bash   cat > /tmp/rprobes3/t_ambiguous.py <<'EOF' class P:     def __init__(self) -> None:         self.i = 0     def
+         18s bash   cat > /tmp/rprobes3/h_bool_one.py <<'EOF' class P:     def __init__(self) -> None:         self.s = "z"     de
+         17s bash   cd /home/runner/work/ail-ci/ail-ci && date; for p in /tmp/rprobes3/*.py; do echo "===== $p"; timeout 300 bash 
+          6s bash   cd /tmp && for p in /tmp/rprobes3/w_loop_backedge.py /tmp/rprobes3/w_loop_backedge_while.py; do echo "===== ba
+          6s bash   cd /home/runner/work/ail-ci/ail-ci && bash ~/tools/cmp.sh /tmp/rprobes3/v_fallback_dictrecv.py $PWD 2>&1 | hea
+          4s bash   cat > /tmp/rprobes3/w_loop_backedge.py <<'EOF' class P:     def __init__(self) -> None:         self.s = "z"  
+
+
+--- ORIGINAL TASK ---
 **Re-apply an accepted change on top of the current tree.** Job `prog9` was accepted, but its diff no longer applies here. Fetch it anonymously: `git fetch https://github.com/J-KAMMA/ail-ci.git job-prog9-11021016`. Its change is `git diff 29d859d818b392e113fa22e71a79397f90df2e24 FETCH_HEAD -- . ':!.agent' ':!corpus' ':!AIL_CURRENT/MANIFEST.json'`.
 
 Apply the same change to this tree, resolving conflicts by keeping both sides' fixes. Then run `python3 tools/diff_ids.py` and `python3 tools/update_manifest.py`, run the test modules the change touches plus `test_ail_safetynet`, and commit. Change nothing else.
