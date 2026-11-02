@@ -20,7 +20,7 @@ import copy
 
 SCALARS = ('int', 'float', 'str', 'bool')
 ZERO = {'int': '0', 'float': '0.0', 'str': '""', 'bool': 'False'}
-KEYS = ('int', 'str')
+KEYS = ('int', 'str', 'bytes')
 ELEMS = ('int', 'float', 'str', 'bool')
 ROWS = ('int', 'float', 'str')
 
@@ -890,6 +890,8 @@ class Rewriter:
                 return 'float'
             if isinstance(v, str):
                 return 'str'
+            if isinstance(v, bytes):
+                return 'bytes'
             return None
         if t is ast.JoinedStr:
             return 'str'
