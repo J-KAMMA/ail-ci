@@ -6513,12 +6513,10 @@ def main(argv=None):
                 command += ['--link-units', str(unit_map_path)]
             debug = bool(getattr(args, 'debug', False))
             link = bool(getattr(args, 'link', None)) and ffi is not None
-            debug_env = {}
-            if debug:
-                line_map = Path(tmp) / 'lines.json'
-                line_map.write_text(json.dumps({str(key): [value[0], value[1]]
-                                                for key, value in loading['source_map'].items()}), encoding='utf-8')
-                debug_env = {'AIL_DEBUG': '1', 'AIL_LINE_MAP': str(line_map)}
+            line_map = Path(tmp) / 'lines.json'
+            line_map.write_text(json.dumps({str(key): [value[0], value[1]]
+                                            for key, value in loading['source_map'].items()}), encoding='utf-8')
+            debug_env = {'AIL_LINE_MAP': str(line_map), **({'AIL_DEBUG': '1'} if debug else {})}
             environment = _surface_env(args, source, {**os.environ, 'AIL_REPORT_SOURCE_LINE': '1',
                                                 **({'AIL_NO_GENERAL': '1'} if contracts or strict else {}), **ffi_env, **debug_env})
             if prelude_units:
@@ -6539,7 +6537,8 @@ def main(argv=None):
                     *(['classes', environment['AIL_CLASS_NAMES']] if environment.get('AIL_CLASS_NAMES') else []),
                     *[hashlib.sha256(Path(a).read_bytes()).hexdigest() for a in shlex.split(ffi_env.get('AIL_FFI_LINK', '')) if Path(a).is_file()],
                     *(['link', ffi_env['AIL_FFI_LINK']] if link else []),
-                    *(['debug', hashlib.sha256(line_map.read_bytes()).hexdigest()] if debug else []))
+                    'source-lines', hashlib.sha256(line_map.read_bytes()).hexdigest(),
+                    'debug' if debug else 'release')
             _hand_over_toolchain(cache, environment)
             result = None
             payload = cache.get('fe', frontend) if frontend else None

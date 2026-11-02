@@ -611,6 +611,13 @@ def _rewrite_script(source, force):
             if kind == type(node).__name__ and old and getattr(node, 'lineno', None):
                 lines.setdefault(node.lineno, old)
     _REWRITE_LINE_MAPS[text] = lines
+    site_lines = {}
+    if parsed is not None and os.environ.get('AIL_DEBUG') != '1':
+        leading = source[:len(source) - len(source.lstrip())].count('\n')
+        for (kind, old), node in zip(reading, ast.walk(parsed)):
+            if kind == type(node).__name__ and old and getattr(node, 'lineno', None):
+                site_lines.setdefault(node.lineno, old + leading)
+    pyfunc._REWRITE_SITE_LINES[text] = site_lines
     gpu.remember(new_tree, gpu_marked, text)
     return text
 
