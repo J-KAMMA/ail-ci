@@ -103,6 +103,34 @@ together), while removing the bounds and recursion checks reached 1.305x but is 
 still 4% slower than C. Per the task's stop rule (below 1.2x, do not land), no compiler or runtime
 change was made. `echo_pack` was also profiled (int-key hash table, 46% of line samples; AIL/C is
 1.76x) for the record. Numbers, Amdahl bounds and cost are in `docs/design/SPEC1.md`.
+## 2026-11-02 -- re-apply accepted prog23 change on staging-integ (job-rbprog23-11022330)
+
+Re-applied the accepted job-prog23 change (typed reach for `t115` tuple/list target bindings and
+`t143` conditional numeric lists plus unannotated set operators, with the str/bytes-keyed set
+construction/rebind exclusion) on top of the current tree. The conflict in `_promote_floats` kept
+both sides: the existing `nsum_names` NSUM settling and the incoming str/bytes and unannotated-set
+fixed points. The manifest was regenerated. Probes and the touched modules plus the required
+safety modules pass. `tools/diff_ids.py` is not present in this tree (nor in the fetched job), so
+only `tools/update_manifest.py` was run.
+## 2026-11-02 -- rel-platinstall: wheel install + tutorial samples on macOS and Windows CI (job-relplatinstall-11030037)
+
+`.github/workflows/platforms-wheel.yml` gained a `wheel` job on `windows-latest`, `macos-14` and
+`ubuntu-24.04` that runs `tools/wheel_check.py` (fresh venv, `pip install` of the built wheel,
+`ail --version`, `ail doctor --check`, hello and typed fib against CPython, then every
+`docs/tutorial.md` sample through the installed command).  It lives in its own workflow with
+narrow `paths` (packaging, docs, the wheel tool, the platforms lab and the workflow files), so an
+`AIL_CURRENT/**`-only integ pull request starts neither workflow and spends no runner minutes; the
+`platform` and `console-probe` jobs in `platforms.yml` keep running only for `main` pull requests
+and manual runs.  `tools/wheel_check.py` now compares output after CRLF normalization, decodes UTF-8
+explicitly, keeps `PATH`/`PIPE_CC` for the venv's `ail`, and skips the tutorial `ffi` sample on
+Windows with a printed reason (`link("m")` and the CPython oracle's `find_library("m")` need a
+libm Windows does not have; a platform limitation, not a compiler difference).
+`lab/platforms/config.json` runs `test_ail_packaging` in the representative set (weight 60), and
+`docs/INSTALL.md` says per OS what CI now checks.  No compiler, runtime or test expectation
+changed.  Verified locally: `python3 tools/wheel_check.py` passes on Linux (15 tutorial tests) and
+the explicit-name skip path passes 14 tests; `test_ail_packaging`, `test_ail_tutorial`,
+`test_ail_platforms`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass.
+The macOS and Windows jobs themselves were not run in this environment.
 
 ## 2026-11-02 -- re-apply accepted prog8 change on staging-integ (job-rbprog8-11021901)
 

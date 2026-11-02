@@ -1,15 +1,17 @@
 # Installing AIL
 
 AIL compiles a subset of Python 3.12 to C and builds a small native executable with your C
-compiler. You install it as the Python package `ail-lang`, which gives you the `ail` command.
+compiler. You install it as the Python package `ailc`, which gives you the `ail` command.
 
-> `ail-lang` is **not published on PyPI yet**. Until it is, install it from a checkout of this
-> repository (below). The commands are the same after publishing, minus the clone.
+> `ailc` is **not published on PyPI yet**. Until it is, install it from a checkout of this
+> repository (below). The commands are the same after publishing, minus the clone. The PyPI
+> project `ail-lang` is not AIL; install `ailc`.
 
 Checked on 2026-10-31 on Ubuntu 24.04 under WSL 2 (Python 3.12.3, gcc 13.3.0): `pip wheel`, a
 fresh virtual environment, `pip install` of the wheel, then `ail run` of a hello world and of a
-typed program, and every sample of [the tutorial](tutorial.md). The macOS and native Windows
-steps below were not run by hand; CI covers a subset of the tests there (see "Platforms").
+typed program, and every sample of [the tutorial](tutorial.md). CI now does the same on Linux,
+macOS 14 and native Windows (see "Platforms"). The macOS and native Windows setup steps below were
+still not run by hand.
 
 ## Requirements
 
@@ -17,7 +19,7 @@ steps below were not run by hand; CI covers a subset of the tests there (see "Pl
   3.12 to compare results. The package has no Python dependencies.
 - **A C compiler** on `PATH`: AIL uses `$PIPE_CC` if set, otherwise the first of `cc`, `clang`,
   `gcc`; failing those, a `zig cc` (`$AIL_ZIG`, `zig` on `PATH`, or the `ziglang` wheel from
-  `pip install "ail-lang[zig]"`, about 50 MB). `ail check` needs no C compiler.
+  `pip install "ailc[zig]"`, about 50 MB). `ail check` needs no C compiler.
 - **git**, to get the code until the package is published.
 
 ## Linux
@@ -108,10 +110,16 @@ Two options:
 
 | Platform | State |
 |---|---|
-| Linux x86-64 (Ubuntu 24.04) | full test suite in CI; this guide was run here |
+| Linux x86-64 (Ubuntu 24.04) | full test suite in CI; wheel install + tutorial samples in CI; this guide was run here |
 | Linux arm64 | representative subset in CI |
-| macOS 14 arm64 | representative subset in CI |
-| Windows (MinGW-w64, `windows-latest`) | representative subset in CI |
+| macOS 14 arm64 | representative subset in CI; wheel install + tutorial samples in CI |
+| Windows (MinGW-w64, `windows-latest`) | representative subset in CI; wheel install + tutorial samples in CI |
+
+"Wheel install + tutorial samples" means a fresh virtual environment, `pip install` of the built
+wheel, `ail --version`, `ail doctor --check`, `ail run` of a hello world and a typed program, and
+every sample of [the tutorial](tutorial.md) through the installed `ail`; `tools/wheel_check.py`
+does this in CI. On Windows the C (FFI) tutorial sample is skipped because the CPython side of it
+loads `libm`, which Windows does not have; the skip is printed with its reason.
 
 ## Without installing (from the checkout)
 
@@ -145,7 +153,7 @@ platform cache directory).
   virtual environment as above (or `pipx install ./ail-ci`).
 - **`ail: no C compiler found`**, or `"c_compiler_available": false` in `doctor`: install `gcc`
   (`sudo apt install gcc`, `sudo dnf install gcc`, MinGW), the Xcode Command Line Tools on macOS,
-  or `pip install "ail-lang[zig]"`; or set `PIPE_CC=/path/to/cc`. `PIPE_CC` must resolve on `PATH`.
+  or `pip install "ailc[zig]"`; or set `PIPE_CC=/path/to/cc`. `PIPE_CC` must resolve on `PATH`.
 - **`ail: command not found`** after installing: the virtual environment's `bin` directory
   (`Scripts` on Windows) is not on `PATH`; call it by full path or activate the environment.
 - **`"python_supported": false`**, or an error saying Python 3.10 or newer is required: use a
