@@ -428,7 +428,8 @@ def main():
                     except Exception as e:
                         results[l]['instructions'] = None
                         results[l]['icount_error'] = type(e).__name__
-        report = dict(task=args.task, case=case['name'], smoke=args.smoke, head=head, input_bytes=case['input_bytes'],
+        report = dict(task=args.task, case=case['name'], smoke=args.smoke, head=head,
+                      date=time.strftime('%Y-%m-%d', time.gmtime()), input_bytes=case['input_bytes'],
                       expected_bytes=ref_out.stat().st_size, expected_exit=ref.returncode, icount_method=mode,
                       runner=dict(os=os.uname().release, cpus=os.cpu_count(), image=os.environ.get('ImageVersion', '')), tools=tool_versions(),
                       pins=read_pins(),
