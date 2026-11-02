@@ -63,9 +63,10 @@ program matching CPython under `build --cpython`, where it runs as plain CPython
    returns its length.  Duplicates collapse exactly as CPython's set does, and the result is an
    ordinary expression usable in `+=`, comparisons and calls.  Only int and str elements are built;
    a float set comprehension is still refused by name.  A comprehension over a mutable list, set or
-   dict whose element or filter runs code is refused by name: CPython's iterator observes a source
-   that the element/filter changes (appends, removals, a dict resized), while the eager lowering
-   would silently use the sequence as it was on entry.
+   dict (including the typed `set[int]`/`set[str]` and `dict[...]` kinds) whose element or filter
+   runs code is refused by name: CPython's iterator observes a source that the element/filter
+   changes (appends, removals, a dict resized), while the eager lowering would silently use the
+   sequence as it was on entry.
 
 ### Review fixes
 
@@ -106,6 +107,8 @@ Every probe below was run with `bash ~/tools/cmp.sh /tmp/probes/<p>.py $PWD`; "s
 | `prog29_r_order.py`, `prog29_r_order_{call,class,list}.py` (read before assignment) | refused by name: `is a module-level frozenset read before its assignment` | both builds match CPython: NameError/exit 1 |
 | `prog29_r_order_arg.py` (annotated `frozenset` parameter) | refused by name: annotated `frozenset` parameters are not supported, not by the read-before-assignment check | both builds match CPython: NameError/exit 1 |
 | `p_sc_mutate_attr.py` (a filter appends to the list field being walked) | refused by name: `len() of a set comprehension over a mutable sequence whose element or filter runs code` (strict); default build falls back and matches CPython `3 3` | same after the fallback; the old eager lowering printed `2 3` |
+| `p_sc_mutate_setfield.py` (a filter adds to the typed `set[int]` field being walked) | refused by name by the same guard, which now matches every typed set/dict kind (`ISET`, `SSET`, `IDICT`, `SDICT`, ...) | both builds match CPython: `RuntimeError` at exit 1; before the fix this probe printed `2 3` at exit 0 |
+| `p_sc_mutate_dictfield.py`, `p_sc_mutate_setlocal.py`, `p_sc_mutate_dictlocal.py` (typed container changed by the filter) | refused by name (the dict field by "a field is int64, float or bytes only", the typed set/dict parameter by "parameters are read-only") | both builds match CPython: `RuntimeError` at exit 1 |
 | `prog29_r_order_ok.py`, `prog29_order_unrelated.py` (function defined before, called after the assignment) | pass (typed) | same |
 
 ## Follow-ups (left by name)

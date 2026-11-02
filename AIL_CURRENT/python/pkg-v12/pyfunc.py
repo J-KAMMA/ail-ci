@@ -19636,6 +19636,11 @@ def _setcomp_source_can_change(node, ctx):
     plain list name is walked live.  In either case a call inside the element or filter can change
     the source while CPython's own iterator is still walking it, so the eager list lowering here
     would silently use the sequence as it was on entry.
+
+    Every mutable container kind counts, including the typed dict/set kinds (`IDICT`, `SDICT`,
+    `ISET`, `SSET`, ...): a typed set field is snapshotted by the lowering exactly like a typed
+    list field, so leaving those kinds out let it print a stale length instead of CPython's
+    `RuntimeError: Set changed size during iteration`.
     """
     source = node
     while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
@@ -19646,7 +19651,7 @@ def _setcomp_source_can_change(node, ctx):
         source_type = _etype(source, ctx)
     except Unsupported:
         return True
-    return source_type in (LIST, FLIST, SLIST, SET, DICT)
+    return source_type in (LIST, FLIST, SLIST, SET, DICT) or source_type in MAPS
 
 
 def _setcomp_len(node, ctx):

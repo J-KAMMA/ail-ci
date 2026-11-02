@@ -159,6 +159,48 @@ def main() -> None:
 main()
 '''
 
+MUTATED_SETCOMP_SET_FIELD = '''
+class Box:
+    def __init__(self) -> None:
+        self.s: set[int] = set()
+
+    def side(self) -> bool:
+        if len(self.s) < 3:
+            self.s.add(99)
+        return True
+
+
+def f(box: Box) -> int:
+    return len({x for x in box.s if box.side()})
+
+
+def main() -> None:
+    box = Box()
+    box.s.add(1)
+    box.s.add(2)
+    print(f(box), len(box.s))
+
+
+main()
+'''
+
+TYPED_DICT_SETCOMP_CALL = '''
+def keep(k: str) -> bool:
+    return len(k) > 0
+
+
+def f() -> int:
+    d: dict[str, int] = {"a": 1, "b": 2, "c": 3}
+    return len({k for k in d if keep(k)})
+
+
+def main() -> None:
+    print(f())
+
+
+main()
+'''
+
 SHADOWED_LEN = '''
 V = frozenset("aeiou")
 
@@ -311,6 +353,20 @@ class TypedReach29(unittest.TestCase):
         general, exe = self.build(src, 'mutated_setcomp_general', strict=False)
         self.assertEqual(general.returncode, 0, general.stderr[-3000:])
         self.compare(src, exe, None)
+
+    def test_mutated_set_comprehension_typed_source_is_refused_by_name(self):
+        for name, text in (('mutated_setcomp_set_field', MUTATED_SETCOMP_SET_FIELD),
+                           ('typed_dict_setcomp_call', TYPED_DICT_SETCOMP_CALL)):
+            with self.subTest(name):
+                src = Path(self.tmp) / (name + '.py')
+                src.write_text(text, encoding='utf-8')
+                built, _ = self.build(src, name, strict=True)
+                output = (built.stdout + built.stderr).decode('utf-8', 'replace')
+                self.assertNotEqual(built.returncode, 0, output[-3000:])
+                self.assertIn('set comprehension over a mutable sequence', output)
+                general, exe = self.build(src, name + '_general', strict=False)
+                self.assertEqual(general.returncode, 0, general.stderr[-3000:])
+                self.compare(src, exe, None)
 
     def test_shadowed_len_is_refused_by_name(self):
         src = Path(self.tmp) / 'shadowed_len.py'
