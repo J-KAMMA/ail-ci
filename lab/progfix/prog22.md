@@ -31,12 +31,15 @@ g15_006 and g16_034.
   the `srows` kind (`_local_srow_annotations`, `_check_local_assignment`), so an annotated
   str-field records list does not have to be inferred from `.append()` alone.  The `srows`
   `append` path is not confused with the scalar-list path, and `enumerate(rows, start)` over
-  `srows` binds the index and every typed field (`_for_enumerate_srows`).
+  `srows` binds the index and every typed field (`_for_enumerate_srows`).  The layout has
+  `AIL_SROW_MAXK` (4) slots, so a wider annotation is refused by name (``a records annotation
+  with N fields; a str-field row holds at most 4 fields``) and the program takes the general
+  path instead of silently dropping the extra fields.
 * `python/pkg-v12/pyfunc.py`: `max`/`min` with a numeric `key=` lambda over a list of class
   instances lowers to one retained source walk (`_struct_key_fold`); it returns the first
-  element with the winning key, and an empty source stops with CPython's
-  `max()/min() arg is an empty sequence`.  A non-numeric key (for example a tuple) keeps the
-  existing general-path fallback.
+  element with the winning key, and an empty source raises a catchable `ValueError` with
+  CPython's `max()/min() iterable argument is empty` (previously an uncatchable `ail_die`).
+  A non-numeric key (for example a tuple) keeps the existing general-path fallback.
 * `python/pkg-v12/cruntime.py`: the `ail_srows` sort key check now refuses a NaN key with a named
   `ValueError` (the `ail_flist_sort`/KEYSORT rule), instead of returning a permutation CPython's
   Timsort does not reproduce.
@@ -59,9 +62,15 @@ g15_006 and g16_034.
 * `AIL_CURRENT/test_ail_prog22.py` (registered through `AIL_CURRENT/tests.d/test_ail_prog22.txt`)
   builds t366, t347, t318 and g14 typed and compares stdout/exit with CPython; it also builds a
   str-field records program, a `max`/`min` key program (argument, list field, ties, negative and
-  int64-edge keys) and an empty-`max` program, and checks the NaN sort refusal.
-* Probes in `/tmp/probes`: `p22_srows.py`, `p22_maxkey.py`, `p22_maxkey_empty.py`,
-  `p22_maxkey_tuple.py`; all match CPython on both `cmp.sh` builds (the tuple key takes the
-  general path and matches).
+  int64-edge keys), a caught empty `max`/`min` program (message and exit 0) and a five-field
+  str-row program (general path, no truncation); the NaN sort refusal is checked too.
+* Probes in `/tmp/probes` for both review defects: `p22_five.py`, `p22_six.py`,
+  `p22_five_key.py`, `p22_five_str.py` (wide rows), `p22_catch_empty_max.py`,
+  `p22_catch_empty_min.py`, `p22_empty_local_method.py`, `p22_empty_arg_method.py`,
+  `p22_empty_attr_method.py`, `p22_empty_arg_attrkey.py`, `p22_empty_item.py`,
+  `p22_empty_dict.py`, `p22_catch_silent.py`, `p22_maxmin_direct.py` (empty and non-empty
+  `max`/`min`, both branches).  All match CPython on both `cmp.sh` builds; only
+  `p22_empty_dict.py` and `p22_maxmin_direct.py` take the general path (a dict value / list
+  item source is not typed there yet), the rest are typed where the shape allows it.
 * All ten `lab/compare` tasks (`src/<task>/main.ail`) generate byte-identical C against the
   pre-change tree (`cmp dnew/program.c dold/program.c` for each).

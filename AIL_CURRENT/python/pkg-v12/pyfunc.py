@@ -4602,7 +4602,14 @@ def _annotation_kind(ann, classes=()):
                 # A row with a str field is `ail_srow`, the per-field-typed list
                 # `_mark_srow_lists` already builds from `rows = []; rows.append((..., "..."))`.
                 # An annotation now names the same shape, so it does not have to be inferred.
+                # `AIL_SROW_MAXK` (cruntime.py's SROW block) is 4 slots; a wider row has nowhere
+                # to put its extra fields, so refuse it by name and let the general path handle it
+                # rather than silently dropping them.
                 if set(field_kinds) <= {INT, FLT, STR}:
+                    if len(field_kinds) > 4:
+                        raise Unsupported('a records annotation with %d fields; a str-field row '
+                                          'holds at most %d fields'
+                                          % (len(field_kinds), 4))
                     return ('srows', tuple(field_kinds))
                 raise Unsupported('a records annotation mixes str and bytes fields (%s); a row '
                                   'holds int, float and str fields, or int and bytes fields'
@@ -18005,7 +18012,14 @@ def _struct_key_fold(f, src, key, kind, ctx):
             ctx.kind[var] = old_kind
     body.extend(ctx.pre); ctx.pre = []
     ctx.parts.add('DIE')
-    body.append('if (!%s) ail_die("%s() arg is an empty sequence");' % (seen, f))
+    if exctext.ACTIVE:
+        # CPython's exact text when the program reads it; still a catchable ValueError (not the
+        # hard, uncatchable ail_die this used to be).
+        _exc_text_parts(ctx)
+        body.append('if (!%s) ail_raise_msg(AIL_EXC_VALUE, "%s() iterable argument is empty");'
+                    % (seen, f))
+    else:
+        body.append('if (!%s) ail_raise_named(AIL_EXC_VALUE);' % seen)
     result, _ = ctx.temp(cls)
     body.append(_obj_store(result, '(%s *)ail_olist_get(%s, %s)' % (
         _ref_ctype(cls, ctx), receiver, best), cls, ctx) + ';')

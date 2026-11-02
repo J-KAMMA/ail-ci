@@ -1,3 +1,19 @@
+## 2026-11-02 -- prog22 review fixes: wide str rows and catchable empty max/min (job-prog22-11021237)
+
+Fixed the two defects a reviewer found in `d4ef0ad`.  A local `list[tuple[...]]` with a str
+field now checks `AIL_SROW_MAXK` before choosing the `ail_srows` layout: a wider annotation
+raises `a records annotation with N fields; a str-field row holds at most 4 fields`, so the
+program takes the general path instead of writing past the 4-slot struct and silently dropping
+fields.  `_struct_key_fold` now raises a catchable `ValueError` for `max`/`min` over an empty
+list of instances (`max()/min() iterable argument is empty`, CPython's text when the program reads
+it) rather than the uncatchable `ail_die`.
+
+Probes in `/tmp/probes`: five- and six-field str rows, five-field rows with int/str keys and a
+trailing str, and empty `max`/`min` through a local, an argument, an attribute, a list item and a
+dict value, plus a caught-without-message variant; all match CPython on both `cmp.sh` builds.
+`AIL_CURRENT/test_ail_prog22.py` gains the caught empty fold and the five-field row case; the
+manifest is regenerated.  No program was edited and no new DIFFERENCES row is needed.
+
 ## 2026-11-02 -- prog22 typed reach: str-field records, max(key=) and 4/8 hot programs (job-prog22-11021237)
 
 Made two more of the eight prog22 programs take the typed path without touching the programs.

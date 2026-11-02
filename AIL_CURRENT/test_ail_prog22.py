@@ -13,7 +13,10 @@ T5  a NaN sort key is refused by name instead of silently differing (DIFFERENCES
     C?-job-refuzz95-10300605-1).
 T6  g14 (students) builds typed after `max(students, key=lambda s: s.average())` learns the
     numeric-key fold over a list of class instances, on both an argument and a list field.
-T7  that fold covers empty (CPython's ValueError), ties, negative and int64-edge keys.
+T7  that fold covers empty (CPython's catchable ValueError and text), ties, negative and
+    int64-edge keys.
+T8  a str-field row wider than `AIL_SROW_MAXK` (4) is not truncated: the program takes the
+    general path and matches CPython.
 """
 import os
 import shutil
@@ -88,6 +91,63 @@ class Item:
 def main() -> None:
     items: list[Item] = []
     print(max(items, key=lambda it: it.score).score)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+CATCH_EMPTY = '''from __future__ import annotations
+
+from dataclasses import dataclass, field
+
+
+@dataclass
+class Student:
+    name: str
+    grades: list[float] = field(default_factory=list)
+
+    def average(self) -> float:
+        return sum(self.grades) / len(self.grades) if self.grades else 0.0
+
+
+@dataclass
+class Group:
+    members: list[Student]
+
+
+def build() -> list[Student]:
+    return []
+
+
+def main() -> None:
+    xs = build()
+    try:
+        max(xs, key=lambda s: s.average())
+    except ValueError as exc:
+        print("max", exc)
+    try:
+        min(xs, key=lambda s: s.average())
+    except ValueError as exc:
+        print("min", exc)
+    empty = Group([])
+    try:
+        min(empty.members, key=lambda s: s.average())
+    except ValueError as exc:
+        print("attr", exc)
+
+
+if __name__ == "__main__":
+    main()
+'''
+
+FIVEFIELD = '''def main() -> None:
+    rows: list[tuple[str, int, float, str, int]] = []
+    rows.append(("a", 1, 2.0, "x", 3))
+    rows.append(("b", 0, -1.0, "y", 4))
+    rows.sort(key=lambda r: (r[1], r[0]))
+    for i, (a, b, c, d, e) in enumerate(rows, start=1):
+        print(i, a, b, c, d, e)
 
 
 if __name__ == "__main__":
@@ -212,6 +272,15 @@ class Prog22(unittest.TestCase):
         self.assertNotEqual(want.returncode, 0)
         self.assertNotEqual(got.returncode, 0)
         self.assertIn(b'ValueError', got.stderr)
+
+    def test_max_key_empty_is_catchable_value_error(self):
+        exe, source = self.build(CATCH_EMPTY, 'maxkey_catch')
+        self.same(exe, source)
+
+    def test_wide_str_row_is_not_truncated(self):
+        res, exe, source = compile_default(self.tmp, FIVEFIELD, 'srows_five')
+        self.assertEqual(res.returncode, 0, res.stderr[-1500:])
+        self.same(exe, source)
 
     def test_str_field_records_typed(self):
         exe, source = self.build(SROWS, 'srows')
