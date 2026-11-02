@@ -1,0 +1,118 @@
+{
+ "started": "2026-11-02T15:26:25Z",
+ "runs": 2,
+ "tasks": [
+  {
+   "task": "echo_pack",
+   "case": "perf",
+   "runs": 2,
+   "wall_ms": 1344.3,
+   "samples_s": 2.16,
+   "functions": [
+    {
+     "pct": 92.59,
+     "self_s": 2.0,
+     "name": "pack"
+    },
+    {
+     "pct": 1.85,
+     "self_s": 0.04,
+     "name": "flush"
+    },
+    {
+     "pct": 1.39,
+     "self_s": 0.03,
+     "name": "ail_tab_order_append"
+    },
+    {
+     "pct": 1.39,
+     "self_s": 0.03,
+     "name": "ail_tab_hput"
+    },
+    {
+     "pct": 1.39,
+     "self_s": 0.03,
+     "name": "ail_tab_hash_rearray"
+    },
+    {
+     "pct": 0.93,
+     "self_s": 0.02,
+     "name": "ail_tab_hfree_slot"
+    },
+    {
+     "pct": 0.46,
+     "self_s": 0.01,
+     "name": "ail_bytearray_extend"
+    },
+    {
+     "pct": 0.0,
+     "self_s": 0.0,
+     "name": "ail_idict_put_slow"
+    }
+   ],
+   "lines": [
+    {
+     "pct": 14.81,
+     "self_s": 0.32,
+     "name": "ail_tab_hslot (program.c:3147 @ 4936)"
+    },
+    {
+     "pct": 12.5,
+     "self_s": 0.27,
+     "name": "ail_bytes_get (program.c:3934 @ 42f5)"
+    },
+    {
+     "pct": 11.11,
+     "self_s": 0.24,
+     "name": "pack (program.c:5158 @ 4698)"
+    },
+    {
+     "pct": 10.19,
+     "self_s": 0.22,
+     "name": "ail_tab_hslot (program.c:3147 @ 4960)"
+    },
+    {
+     "pct": 9.72,
+     "self_s": 0.21,
+     "name": "ail_tab_hslot (program.c:3147 @ 44a0)"
+    },
+    {
+     "pct": 5.56,
+     "self_s": 0.12,
+     "name": "ail_tab_hslot (program.c:3147 @ 447d)"
+    },
+    {
+     "pct": 2.78,
+     "self_s": 0.06,
+     "name": "ail_list_push (program.c:2809 @ 3bd8)"
+    },
+    {
+     "pct": 2.31,
+     "self_s": 0.05,
+     "name": "pack (program.c:5185 @ 4301)"
+    },
+    {
+     "pct": 2.31,
+     "self_s": 0.05,
+     "name": "pack (program.c:5223 @ 4704)"
+    },
+    {
+     "pct": 1.85,
+     "self_s": 0.04,
+     "name": "ck_add (program.c:4994 @ 4318)"
+    },
+    {
+     "pct": 1.62,
+     "self_s": 0.04,
+     "name": "hash_of (program.c:5023 @ 4169)"
+    },
+    {
+     "pct": 1.39,
+     "self_s": 0.03,
+     "name": "ail_bytearray_append (program.c:4794 @ 47d9)"
+    }
+   ],
+   "generated_c": "/tmp/beatc-prof-2gmt5guy/echo_pack/dbg/program.c"
+  }
+ ]
+}
