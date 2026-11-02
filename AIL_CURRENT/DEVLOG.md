@@ -1,3 +1,15 @@
+## 2026-11-02 -- prog9 review fix 5: receiver inference stays in the current function (job-rbprog9-11022049)
+
+`receiver_classes_of`/`container_classes` now collect assignments only from the function's own
+scope. `_own_nodes` skipped nested definitions only as children, so a nested `def` statement itself
+still walked its body and an inner `qs = [Q()]` / `q = make()` could type the outer receiver. The
+helper now refuses to enter a nested `FunctionDef`/`AsyncFunctionDef`/`Lambda`/`ClassDef` at any
+depth, matching its docstring and the other passes. `c6_nested_list` and `c7_nested_unannotated`
+now print what CPython prints on both `cmp.sh` builds; the loop back-edge and external-receiver
+probes still match. `test_ail_prog9`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3`, `test_ail_quirks`, `test_ail_optint_exact`, `test_ail_optional_locals`
+and `test_ail_nonecrash` pass.
+
 ## 2026-11-02 -- prog9 review fix 4: loop back-edge bool flags and receiver-class method resolution (job-rbprog9-11022049)
 
 Fixed the two remaining re-application review defects. Bool row-field flags are now registered for

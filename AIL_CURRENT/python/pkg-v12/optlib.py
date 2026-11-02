@@ -353,7 +353,7 @@ class Lowerer:
             if isinstance(a.annotation, ast.Name) and a.annotation.id in self.classes:
                 out[a.arg] = a.annotation.id
         values = {}
-        for n in ast.walk(node):
+        for n in _own_nodes(node):
             if isinstance(n, ast.Assign):
                 for t in n.targets:
                     if isinstance(t, ast.Name):
@@ -1457,10 +1457,10 @@ def _own_nodes(fn):
     out = []
 
     def walk(n):
+        if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
+            return
         out.append(n)
         for c in ast.iter_child_nodes(n):
-            if isinstance(c, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
-                continue
             walk(c)
     for st in fn.body:
         walk(st)
