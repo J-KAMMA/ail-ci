@@ -30,7 +30,7 @@ from stdlib4 import Refused, refuse
 HERE = Path(__file__).parent
 
 # a word of the program text that can mean one of the modules (the quick test before parsing)
-WORDS = ('fractions', 'enum', 'namedtuple', 'NamedTuple', 'ChainMap', 'keyword', 'calendar', 'abc', 'array',
+WORDS = ('fractions', 'numbers', 'enum', 'namedtuple', 'NamedTuple', 'ChainMap', 'keyword', 'calendar', 'abc', 'array',
          'random', 'string', 'io', 'statistics', 'typing', 'decimal', 'unicodedata', 'ipaddress', 'html')
 
 
@@ -243,13 +243,16 @@ def rewrite_text(source, notes=None):
     except (SyntaxError, ValueError):
         return source
     mods = imported_modules(tree)
-    if not (mods & {'fractions', 'enum', 'collections', 'typing', 'random', 'keyword', 'calendar', 'abc', 'array',
+    if not (mods & {'fractions', 'numbers', 'enum', 'collections', 'typing', 'random', 'keyword', 'calendar', 'abc', 'array',
                     'string', 'io', 'statistics', 'decimal', 'unicodedata', 'ipaddress', 'html'}):
         return source
     text = []
     changed = False
     try:
         before = ast.dump(tree)
+        if 'numbers' in mods:
+            import numberslib
+            numberslib.run(tree, text)
         if 'fractions' in mods:
             run_fractions(tree, text)
         if 'enum' in mods:

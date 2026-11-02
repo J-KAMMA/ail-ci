@@ -234,6 +234,73 @@ which compares the nine passing programs with CPython on both IR modes. Probes i
 `~/tools/cmp.sh` builds; the literal `'f'`/`'u'`/`tobytes` forms are refused by name. Also ran
 `test_ail_std_array`, `test_ail_array_ref`, `test_ail_array_t2`, `test_ail_stdlib5`,
 `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`, then refreshed the manifest.
+## 2026-11-01 -- `numbers` review 2 fix: decorator-only registration helper gating
+
+Fixed the review defect in `numberslib.py`: the register-decorator lowering inserted
+`_ail_num_register(...)` but did not mark `register` as used, so the helper was emitted as an
+empty string and `@numbers.Real.register` alone failed with `not in the subset: the name
+'_ail_num_register' is not a known function/class/builtin`. The decorator branch now adds
+`used.add('register')` (the `used` set is created before the class rewrite), so
+`decorator_only`, `decorator_attrs`, `decorator_only3`, `decorator_only_isc` and
+`decorator_plus_other` build and match CPython on both `cmp.sh` builds. A decorator-only
+regression case was added to `test_ail_std_numbers.py`. `test_ail_std_numbers`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3` pass (4/4, 375s);
+`update_manifest.py --check` is clean.
+
+## 2026-11-01 -- `numbers` review fixes: virtual run-time registration, decorator timing, shadowing
+
+Fixed the three review defects in `numberslib.py`. `register` is now a virtual run-time table
+entry instead of a compile-time base change: `numbers.X.register(Cls)` lowers to
+`_ail_num_register(Cls, kind, names)` and `@numbers.X.register` inserts that call after the class
+statement, so an uncalled function, `if False`, and a check before a module-level register all see
+CPython's answers. A registered class no longer inherits the ABC's `real` / `imag` / `conjugate`
+methods, and a subclass of a registered class is registered too (the static descendant names are
+recorded). `issubclass(UserClass, numbers.X)` is now checked at run time against the same table
+and against the class's real bases. A register call written before its class definition, a
+register decorator combined with another decorator, and a parameter that shadows a from-imported
+ABC name are named compile-time refusals.
+
+Probes `/tmp/probes/rev_*.py` cover module-level ordering, an uncalled function, `if False`, a
+method and a function call, registration twice, a subclass, `issubclass` timing, the decorator
+form, the return value, values through arguments / list items / attributes / dict values,
+virtual-attribute absence, and the early-registration and combined-decorator refusals on both
+`cmp.sh` builds. `test_ail_std_numbers`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (4/4, 362s); `update_manifest.py --check` is clean.
+
+## 2026-11-01 -- `numbers` review fixes: subclasses, name collisions, tuples, value use
+
+Fixed the four review defects in `numberslib.py`. The runtime classifier now tests the actual
+injected `Fraction` / `Decimal` classes (only when those modules are imported), so a subclass of
+`fractions.Fraction` is Rational/Real/Number and a user class merely named `Fraction` / `Decimal`
+is not. A class whose base resolves to the real `Fraction` / `Decimal` is classified the same way
+statically. `isinstance` tuples are flattened recursively and left untouched when they contain no
+`numbers.*` element, so an ordinary `(A, B)` works in a numbers program and nested number tuples
+classify. Using `numbers.X` as a plain value is refused by name as the module docstring says;
+class bases and annotations still reference the injected classes.
+
+Probes `/tmp/probes/num_*` (fraction routes and aliases, user-named classes, plain/nested tuples,
+value refusal, bases/annotations, kinds through list/dict, registered subclass) match CPython or
+are refused by name on both `cmp.sh` builds. `test_ail_std_numbers` gained regression cases and
+passes with `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3` and
+`test_ail_stdlib5`.
+
+## 2026-11-01 -- CPython `numbers` ABCs on the general path (job-std_numbers-11020026)
+
+Added `numbers` as a library batch-5 module: `prelude_numbers.py` supplies Number, Complex,
+Real, Rational and Integral as plain classes in CPython's inheritance order, and `numberslib.py`
+lowers `isinstance` / `issubclass` / `register` onto that hierarchy. bool and int classify as
+Integral, float as Real, complex as Complex, Fraction as Rational and Decimal as Number; classes
+defined in the program are classified through their bases and through `register` (both the call
+and decorator forms). `lab/stdlib/numbers/` has 12 ordinary programs; 11 build on the default
+(general) path and match CPython 3.12 stdout and exit code, while the complex-literal program is
+a named follow-up (`a constant of type complex`). The unmodelled ABCMeta abstract-method check,
+a dynamic class value in `issubclass`, and registering a class that already has a non-numbers
+base are recorded in `lab/stdlib/numbers/RESULTS.md`.
+
+Added `AIL_CURRENT/test_ail_std_numbers.py` (registered through `tests.d/test_ail_std_numbers.txt`).
+Probes `/tmp/probes/num_*.py` cover every classification kind, aliases and from-imports, tuples,
+register/decorator registration, subclass inheritance, values through arguments, list items,
+attributes and dict values, empty/negative values and caught errors on both `cmp.sh` builds.
 
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
