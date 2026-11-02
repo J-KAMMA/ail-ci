@@ -27441,6 +27441,12 @@ def _seed_local_annotations(fn, ctx):
                               'dict[str, int], set[int] or a class name; keep other values in '
                               'parallel lists' % ast.unparse(node.annotation))
         name = node.target.id
+        if kind == FLT and node.value is not None:
+            try:
+                if _etype(node.value, ctx) == NSUM:
+                    kind = NSUM
+            except Unsupported:
+                pass
         if name in declared and declared[name] != kind or name in ctx.kind and ctx.kind[name] != kind:
             raise Unsupported('conflicting local annotation for %r' % name)
         declared[name] = kind

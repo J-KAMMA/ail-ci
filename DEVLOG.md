@@ -1,3 +1,16 @@
+## 2026-11-02 -- prog8 full-suite fix: annotated float local from sum (job-prog8-11021515)
+
+The full suite found `test_ail_builtin_api` compiling the published `sum(list[float]) -> float`
+overload as `let output: float = sum(v0); return output;`. Its probe is valid, but the NSUM work
+seeded `output` from its `float` annotation and then refused `sum()` as a float-local assignment.
+`_seed_local_annotations` now recognises an annotated local whose initializer is `NSUM` and seeds
+it as `NSUM`, so the local, the return kind and the C function signature all settle to `ail_nsum`
+and the generated code is exact (the explicit `float` annotation no longer forces a lossy `double`
+return). A float local that is assigned a float first still refuses a later `sum()` by name.
+
+`test_ail_builtin_api`, `test_ail_prog8`, `test_ail_safetynet`, `test_ail_files`,
+`test_ail_corpus_findings3` and `test_ail_spec_fixes` pass; `tools/update_manifest.py --check` is 0.
+
 ## 2026-11-02 -- prog8 review fix 3: float returns beside NSUM (job-prog8-11021515)
 
 Fixed the remaining review defect: a function whose return kind is `NSUM` (because one path is
