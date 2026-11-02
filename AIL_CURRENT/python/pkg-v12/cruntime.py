@@ -29673,6 +29673,13 @@ static inline double ail_fsum_end(double f, double c) {
     if (c != 0.0 && isfinite(c)) f += c;
     return f;
 }
+/* CPython's sum() starts from the int 0: an empty float sum is the int 0, a non-empty one is a
+   float. The explicit flag keeps a genuine -0.0 float distinct from that int 0 even after the two
+   reach the same local through control flow. */
+typedef struct { double v; int64_t is_int0; } ail_nsum;
+static inline double ail_nsum_value(ail_nsum x) { return x.is_int0 ? 0.0 : x.v; }
+static inline ail_nsum ail_nsum_from_float(double v) { ail_nsum r; r.v = v; r.is_int0 = 0; return r; }
+static inline int64_t ail_nsum_truth(ail_nsum x) { return !x.is_int0 && x.v != 0.0; }
 '''
 SOURCE['FSUM'] = FSUM
 REQUIRES['FSUM'] = []
