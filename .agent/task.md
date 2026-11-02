@@ -6,71 +6,61 @@
 
 --- LAST REVIEW ---
 ## review 1
-[model opencode-go/deepseek-v4.1-flash]
-## Review: re-applied prog9
+[model opencode/deepseek-v4.1-flash-free]
+## Review: rbprog9 review fix 5
 
-**What the change really does.** It re-applies prog9 (Optional `in`/`while` tests, method-row SROW unpack, `sorted(dict)`/dict repr, `int|float` and container-dict refusals) and then adds review-fix commits that replace the static bool-row tracking with per-name runtime flags and extend Optional-method resolution beyond `self`. That matches the report's summary, except the refusal claim for attribute/dict-value receivers.
+**What the change really does.** Two commits: (a) pre-registers bool-row companion flags for every SROW bool unpack before compiling the function body (fixes the loop back-edge), and broadens Optional-method receiver resolution to function-return classes, list literals and dict values, with a class-aware unique-name fallback that refuses otherwise; (b) restricts `_own_nodes`/`receiver_classes_of` to the current scope. Matches the report except that the new container inference is unsound under element mutation (below).
 
 **Checks run**
-- `test_ail_prog9` + `test_ail_safetynet` on HEAD: **2 modules, 0 failed** (177 s).
-- Worker probes re-run on HEAD: all listed `p_*` plus `/tmp/probes/p_bool_runtime_flow.py`, `p_opt_external_receivers.py` matched CPython on both `cmp.sh` builds.
-- My probes: Optional-`in` type mismatches/empty containers, dict text (empty, INT64_MIN, aliasing), sorted ownership, bool index 1, `a = 1/True/False/-1`, walrus, conditional/zero-iteration unpack, ambiguous method names — all matched or were refused by name.
-- Non-feature program `plain.py`: generated `program.c` byte-identical to `/tmp/base`.
-- `tools/diff_ids.py` absent; `update_manifest.py --check` rc=0; commits `580516ef`, `bb87fdae`, `00bd57c9` present.
+- Review defects 1 and 2 re-run: `w_loop_backedge`, `w_loop_backedge_while`, `s_fallback_int2`, `v_fallback_dictrecv` now match CPython on both builds (base still fails all four). Fixed.
+- All 13 worker `/tmp/probes/*.py` match on both builds; 24 earlier probes also match; `c1/c2` differ only in pre-existing class repr; `m1/m2/m3` are byte-for-byte the same failure as base.
+- Nested-scope claims: `c6_nested_list`, `c7_nested_unannotated` match.
+- Non-feature `plain.py`: `program.c` byte-identical to `/tmp/base`.
+- `test_ail_prog9` + `test_ail_safetynet`: 2 modules, 0 failed. `update_manifest.py --check` rc=0; `tools/diff_ids.py` absent.
+- Probes for list/dict element mutation, aliasing, negative index, iteration, empty containers.
 
-**Pre-existing:** none found (the two defects below are correct on `/tmp/base`).
+**Defect 1 (new, blocking).** Container literal element class is inferred but element mutation is ignored, so a method call on a reassigned element resolves the wrong class.
 
-**Defects**
+```python
+class P:
+    def __init__(self) -> None: self.x = 0
+    def peek(self) -> int | None: return None
+class Q:
+    def __init__(self) -> None: self.s = "q"
+    def peek(self) -> tuple[str, int]: return (self.s, 5)
+def main() -> None:
+    qs = [Q()]
+    qs[0] = P()
+    print(qs[0].peek())
+main()
+```
+CPython/`/tmp/base`: `None`. HEAD (both builds): `(False, 0)`.
+Same root, same wrong output (`(False, 0)` vs `None`) for:
+- dict value: `d = {"k": Q()}; d["k"] = P(); print(d["k"].peek())`
+- aliasing: `qs = [Q()]; rs = qs; rs[0] = P(); print(qs[0].peek())`
+- append: `qs = [Q()]; qs.append(P()); print(qs[1].peek())`
+- negative index: `qs = [Q(), Q()]; qs[-1] = P(); print(qs[-1].peek())`
+- after a loop: `qs = [Q()]` print, then `qs[0] = P()`, print again → second line `(False, 0)` vs `None`.
+`container_classes` keys only on `ast.Assign` to a bare `Name`, so subscript stores/append/aliases are invisible. Base is correct on all of these, so this is introduced by the change.
 
-1. **Bool row flag is codegen-order dependent across a loop back-edge.**  
-   `/tmp/rprobes3/w_loop_backedge.py`:
-   ```python
-   class P:
-       def __init__(self) -> None: self.s = "z"
-       def pair(self) -> tuple[bool, str]: return (True, self.s)
-   def main() -> None:
-       p = P(); a = 0
-       for i in range(2):
-           print(a)
-           a, b = p.pair()
-   main()
-   ```
-   CPython: `0`, `True`. HEAD default build: `0`, `1` (base: correct). Same with the `while` variant. `_bool_flow_after` only sees the `print` before the textual unpack, so iteration 2 still emits the integer path.
+**Pre-existing (do not block).** `r12_reverse_mut` (`qs=[P()]; qs[0]=Q()`) prints `5` vs `('q', 5)` on both HEAD and base; `r10` (empty list then append) is wrong on base and now correct on HEAD; `c1/c2` class repr; `m1/m2/m3`.
 
-2. **Unique-name Optional-method fallback ignores the receiver's class and reinterprets an unrelated SROW return.**  
-   `/tmp/rprobes3/s_fallback_int2.py`:
-   ```python
-   class P:
-       def __init__(self) -> None: self.x = 0
-       def peek(self) -> int | None: return None
-   class Q:
-       def __init__(self) -> None: self.s = "q"; self.n = 5
-       def peek(self) -> tuple[str, int]: return (self.s, self.n)
-   def make() -> Q: return Q()
-   def main() -> None:
-       q = make()
-       print(q.peek())
-   main()
-   ```
-   CPython: `('q', 5)`. HEAD `cmp.sh` `g` and `d`: `5` (base: correct). The `method_info` fallback picks `P.peek` because its name is unique among Optional-returning methods; the SROW pair from `Q.peek` is then treated as `(flag, value)`. `/tmp/rprobes3/v_fallback_dictrecv.py` (`d["k"].peek()`) shows the same. This also makes the report's “attribute/dict-value receivers are refused by name” claim false for dict-value receivers.
+**Report claims:** loop back-edge — verified fixed; external receivers / unique-fallback — verified fixed; nested-scope fix — verified; probe counts and tests — consistent for what I ran; manifest check — verified. No false claims found.
 
-**Report claims:** runtime bool rebinding — verified for the report's probes, false for the loop back-edge; external Optional methods/ambiguous refusal — verified, but the attribute/dict refusal claim is false (defect 2); 8/8 probes — verified for the probes I re-ran; tests — verified for `test_ail_prog9`/`test_ail_safetynet`, the other eight modules unverified; absent `diff_ids.py` and manifest check — verified.
-
-**Unverified:** the eight additional test modules in the report, and wider corpus/suite effects.
+**Unverified:** the six other test modules named in the report, and wider corpus/perf (the change is not on a hot path).
 
 VERDICT: FIX
-1. `/tmp/rprobes3/w_loop_backedge.py` (and `w_loop_backedge_while.py`): expected `0` then `True`; HEAD default build prints `0` then `1`.
-2. `/tmp/rprobes3/s_fallback_int2.py` (and `v_fallback_dictrecv.py`): expected `('q', 5)`; HEAD prints `5`; the unique-method-name fallback must check the receiver class or refuse.
-[cost $0.0781, opencode tokens {"total": 3827246, "input": 291243, "output": 11146, "reasoning": 28793, "cache.write": 0, "cache.read": 3496064}]
-    tool time: bash 5.3 min
-        178s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && date && python3 ../tools/par_check.py -j 2 test_ail_prog9 te
-         44s bash   cd /home/runner/work/ail-ci/ail-ci && for p in /tmp/rprobes/p_bool_if_taken.py /tmp/rprobes/p_bool_loop_taken.
-         23s bash   cat > /tmp/rprobes3/t_ambiguous.py <<'EOF' class P:     def __init__(self) -> None:         self.i = 0     def
-         18s bash   cat > /tmp/rprobes3/h_bool_one.py <<'EOF' class P:     def __init__(self) -> None:         self.s = "z"     de
-         17s bash   cd /home/runner/work/ail-ci/ail-ci && date; for p in /tmp/rprobes3/*.py; do echo "===== $p"; timeout 300 bash 
-          6s bash   cd /tmp && for p in /tmp/rprobes3/w_loop_backedge.py /tmp/rprobes3/w_loop_backedge_while.py; do echo "===== ba
-          6s bash   cd /home/runner/work/ail-ci/ail-ci && bash ~/tools/cmp.sh /tmp/rprobes3/v_fallback_dictrecv.py $PWD 2>&1 | hea
-          4s bash   cat > /tmp/rprobes3/w_loop_backedge.py <<'EOF' class P:     def __init__(self) -> None:         self.s = "z"  
+1. Element mutation after a container literal is not tracked. Probe `r1_list_mut.py` above (and the dict, alias, append, negative-index and post-loop variants): expected `None`, HEAD prints `(False, 0)`. Invalidate `container_classes` for a name that is subscript-assigned/appended, or refuse the receiver.
+[cost $0.0000, opencode tokens {"total": 2311791, "input": 128583, "output": 8295, "reasoning": 20801, "cache.write": 0, "cache.read": 2154112}]
+    tool time: bash 6.3 min
+        169s bash   cd /home/runner/work/ail-ci/ail-ci/AIL_CURRENT && date && timeout 1500 python3 ../tools/par_check.py -j 2 test
+         54s bash   cd /home/runner/work/ail-ci/ail-ci && date && for n in a1_attr b1_straight b2_cond b3_loop_rebind b4_zero_loop
+         34s bash   cd /home/runner/work/ail-ci/ail-ci && date && for p in /tmp/probes/*.py; do n=$(basename $p .py); out=$(timeou
+         30s bash   cd /home/runner/work/ail-ci/ail-ci && date && for p in c1_nested_make c2_nested_container m1_list_mut m2_dict_
+         17s bash   cd /home/runner/work/ail-ci/ail-ci && date && for p in r1_list_mut r2_dict_mut r3_alias_mut r4_append r5_neste
+         15s bash   cd /home/runner/work/ail-ci/ail-ci && date && for p in w_loop_backedge w_loop_backedge_while s_fallback_int2 v
+         13s bash   cd /tmp && date && for p in r1_list_mut r2_dict_mut r3_alias_mut r4_append; do echo "===== BASE $p"; timeout 3
+         12s bash   cat > /tmp/rprobes/r10_empty_then_append.py <<'EOF' class P:     def __init__(self) -> None: self.x = 0     de
 
 
 --- ORIGINAL TASK ---
