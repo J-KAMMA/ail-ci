@@ -1,3 +1,20 @@
+## 2026-11-02 -- prog16 re-apply: module tuple tables with negative floats and enumerate pair guard (job-rbprog16-11021900)
+
+Re-applied the accepted prog16 change on the current tree.  The wider pair-comprehension lowering
+already present here (prog15) covers the two-name `enumerate` target, including `list[float]` and
+`list[str]` elements, so that part needed no code change; `test_ail_prog16` now asserts the float
+form stays typed and matches CPython instead of expecting the older refusal.  Two pieces were still
+missing and are now applied: `pyfunc._pair_plan` refuses a malformed `enumerate()` by name
+(`enumerate() with other than (iterable[, start])`) before indexing its argument list -- reached by
+a zero-argument pair comprehension on both IR builds and both typed/default builds -- and
+`modtables._scalar` accepts unary `-`/`+` over a float literal (sign of `-0.0` preserved), so a
+module-level list of tuples with negative floats (`READINGS: Final[list[tuple[float, str]]]`) is
+lowered like any other tuple table and `g25_038` becomes fully typed.  `_listcomp_kind` no longer
+calls `_pair_plan` during kind inference, so the malformed-`enumerate` refusal comes from the actual
+lowering instead of being swallowed by the preliminary shape scan.  `t268` stays fully typed.
+`AIL_CURRENT/test_ail_prog16.py` is registered by `tests.d/test_ail_prog16.txt` and the prog16 lab
+record is `lab/progfix/prog16.md`.  No program file changed.
+
 ## 2026-11-02 -- prog21 review fix: abs of a bool stays in CPython
 
 The review found that `abs(<bool parameter>)` was newly accepted as an int/bool-result call even
