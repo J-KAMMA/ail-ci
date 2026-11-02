@@ -2559,6 +2559,7 @@ class Ctx:
         self.bool_names = frozenset()           # locals holding a bool (boolkind.py)
         self.bool_names_static = frozenset()    # the subset boolkind.py proved bool everywhere
         self.srow_bool_names = frozenset()      # bool row fields, valid until the name is rebound
+        self.cond_depth = 0                     # nesting of bodies that may not run
         self.bool_lists = frozenset()           # locals holding a list of bools
         self.kind = dict(params)
         self.need = need                        # arithmetic helpers, or None outside strict mode
@@ -6545,9 +6546,9 @@ def _emit_stdin_while_int_loop(w, m, ctx, ind):
         for code, stmts in ((1, m['eof']), (2, m['lenf']),
                             (3, m['nodig']), (4, m['nondig'])):
             out.append('%sif (%s == %d) {\n%s%s}\n'
-                       % (pad2, st, code, _stmts(stmts, ctx, ind + 2), pad2))
+                       % (pad2, st, code, _stmts(stmts, ctx, ind + 2, conditional=True), pad2))
         out.append('%s%s = %s;\n' % (pad2, ctx.declare(m['value']), lv))
-        out.append(_stmts(m['rest'], ctx, ind + 1))
+        out.append(_stmts(m['rest'], ctx, ind + 1, conditional=True))
     finally:
         ctx.loopdepth -= 1
     # The fused reader lives in the STR fragment: the un-fused shape would have
@@ -16530,7 +16531,7 @@ def _map_upsert(node, ctx, ind):
             '%s    if (ail_sdict_upsert(%s, _key, &_slot)) {\n%s%s%s = %s;\n%s    } else {\n'
             '%s%s%s = %s;\n%s%s    }\n%s}\n'
             % (pre, pad, key_c, pad, pointer, add_pre, inner, slot, total, pad,
-               value_pre, inner, slot, value_c, _stmts(miss[1:], ctx, ind + 2), pad, pad))
+               value_pre, inner, slot, value_c, _stmts(miss[1:], ctx, ind + 2, conditional=True), pad, pad))
 
 
 def _idict_get_fusion(node, ctx):
@@ -20228,7 +20229,23 @@ def _debug_site(node, ind):
     return '#line %d "%s"\n%sAIL_DBG_SITE("%s:%d");\n#line %d "%s"\n' % (line, name, '    ' * ind, name, line, line, name)
 
 
-def _stmts(body, ctx, ind):
+def _stmts(body, ctx, ind, conditional=False):
+    """`_stmts` for a body that may not run (an if/else arm, a handler, a loop body).
+
+    `conditional` only affects the codegen-time bool-row-field bookkeeping in
+    `_bool_flow_after`: a rebind in a body that may not execute must not clear the name's
+    bool-ness for the code that follows.
+    """
+    if conditional:
+        ctx.cond_depth = getattr(ctx, 'cond_depth', 0) + 1
+    try:
+        return _stmts_flat(body, ctx, ind)
+    finally:
+        if conditional:
+            ctx.cond_depth -= 1
+
+
+def _stmts_flat(body, ctx, ind):
     emitted, index = [], 0
     while index < len(body):
         site = _debug_site(body[index], ind)
@@ -20299,7 +20316,7 @@ def _loop_stmts(body, ctx, ind):
             checkpoint = byte_reset[4] if len(byte_reset) > 4 else 'ail_barena_keep_roots'
             pro += ('    ' * ind + '%s(&%s, %s, %s, %d);\n'
                     % (checkpoint, arena, mark, arr, n))
-        out = pro + _stmts(body, ctx, ind)
+        out = pro + _stmts(body, ctx, ind, conditional=True)
         if labelled:
             pad = '    ' * ind
             out = '%sail_cleanup_frame *%s = ail_cleanup_top;\n' % (pad, labels[3]) + out
@@ -20374,7 +20391,10 @@ def _bool_flow_after(node, ctx):
     """
     if not hasattr(ctx, 'srow_bool_names'):
         return
-    bound = _stmt_bound_names(node)
+    bound = frozenset()
+    if (getattr(ctx, 'cond_depth', 0) == 0
+            and isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign))):
+        bound = _stmt_bound_names(node)
     dynamic = set(ctx.srow_bool_names) - bound
     dynamic |= _srow_unpack_bool_names(node, ctx)
     ctx.srow_bool_names = frozenset(dynamic)
@@ -20468,7 +20488,7 @@ def _finally_exit(ctx, ind, returning):
             ctx.finally_returns = [(frame, min(boundary, depth))
                                    for frame, boundary in saved[4]]
             out += _finally_unwind(ctx, pad, marker)
-            out += _stmts(body, ctx, ind)
+            out += _stmts(body, ctx, ind, conditional=True)
         crossed = len(active) if returning else active.count(saved[2])
         if crossed:
             out += '%sail_exc_top -= %d;\n' % (pad, crossed)
@@ -22095,15 +22115,15 @@ def _stmt_inner(node, ctx, ind):
             known = _static_truth(node.test, ctx)
             if known is not None:
                 taken = node.body if known else node.orelse
-                return '%s{\n%s%s}\n' % (pad, _stmts(taken, ctx, ind + 1), pad) if taken else ''
+                return '%s{\n%s%s}\n' % (pad, _stmts(taken, ctx, ind + 1, conditional=True), pad) if taken else ''
             folded = _fold_static_test(node.test, ctx)
             if folded is not None:
                 node = ast.copy_location(ast.If(test=folded, body=node.body, orelse=node.orelse), node)
         c = _cond(node.test, ctx)
         pre = _flush(ctx, pad)
-        out = '%s%sif (%s) {\n%s%s}\n' % (pre, pad, c, _stmts(node.body, ctx, ind + 1), pad)
+        out = '%s%sif (%s) {\n%s%s}\n' % (pre, pad, c, _stmts(node.body, ctx, ind + 1, conditional=True), pad)
         if node.orelse:
-            out = out[:-1] + ' else {\n%s%s}\n' % (_stmts(node.orelse, ctx, ind + 1), pad)
+            out = out[:-1] + ' else {\n%s%s}\n' % (_stmts(node.orelse, ctx, ind + 1, conditional=True), pad)
         return out
     if isinstance(node, ast.While):
         return _while(node, ctx, ind)
@@ -22645,7 +22665,7 @@ def _try_stmt(node, ctx, ind):
     out += '%s/*@AILTRY%d*/\n' % (pad1, region)
     ctx.active_try_depths.append(ctx.loopdepth)
     try:
-        out += _stmts(node.body, ctx, ind + 1)
+        out += _stmts(node.body, ctx, ind + 1, conditional=True)
     finally:
         ctx.active_try_depths.pop()
     if else_flag is not None:
@@ -22674,7 +22694,7 @@ def _try_stmt(node, ctx, ind):
             ctx.exception_oserr.setdefault(h.name, []).append(all(c in _OS_FAMILY for c in hc))
             out += '%s%s;\n' % (pad2, _obj_store(bound, 'ail_handled_value', EXCEPTION, ctx))
         try:
-            out += _stmts(h.body, ctx, ind + 2)
+            out += _stmts(h.body, ctx, ind + 2, conditional=True)
         finally:
             ctx.handled_scopes.pop()
             if h.name:
@@ -22692,7 +22712,7 @@ def _try_stmt(node, ctx, ind):
     out += '%s}\n' % pad
     if else_flag is not None:
         out += '%sif (%s) {\n' % (pad, else_flag)
-        out += _stmts(node.orelse, ctx, ind + 1)
+        out += _stmts(node.orelse, ctx, ind + 1, conditional=True)
         out += '%s}\n' % pad
     return out
 
@@ -22731,19 +22751,19 @@ def _try_finally_stmt(node, ctx, ind):
                 ctx._try_scan[1].add(id(inner))
             out += _try_stmt(inner, ctx, ind + 1)
         else:
-            out += _stmts(node.body, ctx, ind + 1)
+            out += _stmts(node.body, ctx, ind + 1, conditional=True)
     finally:
         ctx.finally_stack.pop()
         ctx.active_try_depths.pop()
     out += '%sail_exc_top--;\n' % p
-    out += _stmts(node.finalbody, ctx, ind + 1)
+    out += _stmts(node.finalbody, ctx, ind + 1, conditional=True)
     out += '%s/*@AILEND%d*/\n' % (p, region)
     out += '%s} else {\n%sail_depth = ail_exc_depth[ail_exc_top];\n%sail_exc_top--;\n%s%s;\n' % (pad, p, p, p, _obj_store(error, 'ail_exception_current()', EXCEPTION, ctx))
     scope = _handled_name(ctx, marker + '_handled')
     out += '%sail_handled_scope %s; ail_handled_enter(&%s, %s);\n' % (p, scope, scope, error + '->code')
     ctx.handled_scopes.append((scope, ctx.loopdepth))
     try:
-        out += _stmts(node.finalbody, ctx, ind + 1)
+        out += _stmts(node.finalbody, ctx, ind + 1, conditional=True)
     finally:
         ctx.handled_scopes.pop()
     out += '%sail_handled_leave(&%s);\n' % (p, scope)

@@ -1,3 +1,12 @@
+## 2026-11-02 -- prog9 review fix 2: conditional bool row rebinds keep their bool text (job-prog9-11021016)
+
+Made the bool row-field bookkeeping execution-aware. `_bool_flow_after` now drops a name only for a
+straight-line assign/augassign/annassign; bodies that may not run (if/else arms, loop bodies, try
+bodies, handlers) are compiled with `ctx.cond_depth > 0` and leave the marking alone, and a `for`
+target is never treated as an unconditional rebind. Probes `p_bool_if_false_rebind`,
+`p_bool_loop_rebind` and `p_bool_for_target_zero` now print `False` / `False` like CPython, while
+`p_bool_reuse` still prints `5` / `False z` / `7`. `test_ail_prog9` gained the conditional cases.
+
 ## 2026-11-02 -- prog9 review fix: bool row fields stop leaking past a rebind (job-prog9-11021016)
 
 Fixed the review defect in the method row-unpack lowering. A bool field from `a, b = p.pair()` no

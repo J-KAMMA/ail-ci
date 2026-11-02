@@ -299,6 +299,39 @@ main()
         # A bool field keeps True/False only until the name is rebound: `a = 7` must print 7.
         self.same(self.METHOD_ROW_REBIND, 'method_row_rebind', [''])
 
+    METHOD_ROW_CONDITIONAL_REBIND = '''class P:
+    def __init__(self) -> None:
+        self.s = "z"
+
+    def pair(self) -> tuple[bool, str]:
+        return (False, self.s)
+
+
+def main() -> None:
+    p = P()
+    a, b = p.pair()
+    print(a)
+    if 1 > 2:
+        a = 7
+    print(a)
+    for i in range(0):
+        a = 7
+    print(a)
+    for a in range(0):
+        pass
+    print(a)
+    a = 3
+    print(a)
+
+
+main()
+'''
+
+    def test_method_row_bool_conditional_rebinding_typed(self):
+        # A rebind that may not run (untaken branch, zero-iteration loop, loop target) must not
+        # clear the field's bool text; a straight-line rebind still must.
+        self.same(self.METHOD_ROW_CONDITIONAL_REBIND, 'method_row_conditional_rebind', [''])
+
     def test_dict_keys_and_text_typed(self):
         self.same(self.DICT_TEXT, 'dict_text', [''])
 
