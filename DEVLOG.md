@@ -1,3 +1,21 @@
+## 2026-11-01 -- reintenum4 fix round: sequence repetition and Decimal operands
+
+The reintenum4 review (FIX) found that `_ail_en_num` returned `NotImplemented` for every non-int/float
+operand, so an IntEnum/IntFlag multiplied or added to a Decimal lost the int-subclass dispatch
+(`C.B * Decimal("2")`, `C.B + Decimal("2")`) and sequence repetition failed in both directions
+(`C.B * "ab"`, `"ab" * C.B`, list/tuple/bytes, zero and negative counts).  `_ail_en_num` now passes
+builtin numbers, sequences and Decimal/Fraction through (markers `_ail_dec`/`_ail_fr`), and keeps
+`NotImplemented` for other objects, so their reflected methods still receive the member itself.
+The bytes/bytearray repetition methods accept `__index__`, and the big-int multiply tail dispatches
+an instance operand before it flattens a STR view.  A Decimal on the left of `*`/`+` with a member
+on the right keeps the base's TypeError (it is not the form the review recorded).
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p_seq`, `p_dec_left`, `p_refl`, `p_refl2`,
+`p_intconv`, `p_bytesenum`, `p_deconly`, `p_fraconly`, `p_none` match CPython; `p_obj` keeps the
+pre-existing Decimal comparison and plain-class ordering differences (unchanged from the base).
+`test_ail_reintenum4`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+pass on the final commit.
+
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 
 The pre423 review found that `_annotation_truth` used `bool(node.elts)` / `bool(node.keys)`, so a

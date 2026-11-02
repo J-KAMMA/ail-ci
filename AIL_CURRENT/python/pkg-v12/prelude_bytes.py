@@ -568,17 +568,23 @@ class bytes:
 
     def __mul__(self, n):
         if not isinstance(n, int):
-            tn = type(n).__name__
-            if tn == 'deque':
-                tn = 'collections.deque'
-            raise TypeError("can't multiply sequence by non-int of type '" + tn + "'")
+            try:
+                n = _ail_b_index(n)
+            except TypeError:
+                tn = type(n).__name__
+                if tn == 'deque':
+                    tn = 'collections.deque'
+                raise TypeError("can't multiply sequence by non-int of type '" + tn + "'")
         return _ail_mkb(self._s * n)
 
     def __rmul__(self, n):
         if not isinstance(n, int):
-            tn = type(n).__name__
-            raise TypeError("can't multiply sequence by non-int of type '"
-                            + (type(self).__name__ if tn in ('list', 'tuple', 'str', 'bytes', 'bytearray', 'deque') else tn) + "'")
+            try:
+                n = _ail_b_index(n)
+            except TypeError:
+                tn = type(n).__name__
+                raise TypeError("can't multiply sequence by non-int of type '"
+                                + (type(self).__name__ if tn in ('list', 'tuple', 'str', 'bytes', 'bytearray', 'deque') else tn) + "'")
         return self.__mul__(n)
 
     def __mod__(self, args):
@@ -708,28 +714,37 @@ class bytearray:
 
     def __mul__(self, n):
         if not isinstance(n, int):
-            tn = type(n).__name__
-            if tn == 'deque':
-                tn = 'collections.deque'
-            raise TypeError("can't multiply sequence by non-int of type '" + tn + "'")
+            try:
+                n = _ail_b_index(n)
+            except TypeError:
+                tn = type(n).__name__
+                if tn == 'deque':
+                    tn = 'collections.deque'
+                raise TypeError("can't multiply sequence by non-int of type '" + tn + "'")
         r = bytearray()
         r._a = self._a * n
         return r
 
     def __imul__(self, n):
         if not isinstance(n, int):
-            tn = type(n).__name__
-            if tn == 'deque':
-                tn = 'collections.deque'
-            raise TypeError("can't multiply sequence by non-int of type '" + tn + "'")
+            try:
+                n = _ail_b_index(n)
+            except TypeError:
+                tn = type(n).__name__
+                if tn == 'deque':
+                    tn = 'collections.deque'
+                raise TypeError("can't multiply sequence by non-int of type '" + tn + "'")
         self._a *= n
         return self
 
     def __rmul__(self, n):
         if not isinstance(n, int):
-            tn = type(n).__name__
-            raise TypeError("can't multiply sequence by non-int of type '"
-                            + (type(self).__name__ if tn in ('list', 'tuple', 'str', 'bytes', 'bytearray', 'deque') else tn) + "'")
+            try:
+                n = _ail_b_index(n)
+            except TypeError:
+                tn = type(n).__name__
+                raise TypeError("can't multiply sequence by non-int of type '"
+                                + (type(self).__name__ if tn in ('list', 'tuple', 'str', 'bytes', 'bytearray', 'deque') else tn) + "'")
         return self.__mul__(n)
 
     def __mod__(self, args):

@@ -457,6 +457,12 @@ def _edits(inplace=False):
               '    ' + _binop_guard('SUB', 'RSUB', '-') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for -: \'%s\' and \'%s\'"'))
     e.append(('    char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'"',
               '    ' + _binop_guard('MUL', 'RMUL', '*') + 'char buf[96]; snprintf(buf, sizeof buf, "unsupported operand type(s) for *: \'%s\' and \'%s\'"'))
+    if biggate.ON:
+        # the big-int tail takes the operands by tag and payload, which loses a STR view's offset/length
+        # (sequence repetition through a member's reflected __mul__).  Dispatch an instance operand before
+        # the tail so the dunder gets the whole object.
+        old = '    return ail__mul_slow(cx, out, a.tag, AIL_SLOW_PL(a), b.tag, AIL_SLOW_PL(b));\n'
+        e.append((old, '    ' + _binop_guard('MUL', 'RMUL', '*') + old))
     for sym, fwd, rev in (('//', 'FLOORDIV', 'RFLOORDIV'), ('%', 'MOD', 'RMOD'), ('/', 'TRUEDIV', 'RTRUEDIV'),
                           ('**', 'POW', 'RPOW')):
         disp = '** or pow()' if sym == '**' else sym

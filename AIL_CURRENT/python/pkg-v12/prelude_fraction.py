@@ -205,6 +205,8 @@ def _ail_fr_parse(text: str) -> list[int]:
 
 
 class Fraction:
+    _ail_fr = True
+
     def __init__(self, numerator=0, denominator=None, _ail_raw=False):
         if _ail_raw:
             self.numerator = numerator

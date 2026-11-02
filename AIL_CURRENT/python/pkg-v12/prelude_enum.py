@@ -42,13 +42,20 @@ class _AilIntEnum(_AilEnum):
         return self.value
 
     def _ail_en_num(self, other):
-        # an IntEnum/IntFlag peer is its value; another enum kind is a different type; anything else is asked next
+        # an IntEnum/IntFlag peer is its value; another enum kind is a different type. Builtin numbers,
+        # sequences and Decimal/Fraction keep the int-subclass dispatch, so the underlying int operation
+        # (or the other operand's reflected method) sees it; any other object is asked next, as int does.
         if isinstance(other, _AilIntEnum):
             return other.value
         if isinstance(other, _AilEnum):
             return NotImplemented
-        if isinstance(other, (int, float)):
+        if isinstance(other, (int, float, str, bytes, bytearray, list, tuple, range)):
             return other
+        try:
+            if hasattr(other, "_ail_dec") or hasattr(other, "_ail_fr"):
+                return other
+        except NotImplementedError:
+            pass
         return NotImplemented
 
     def _ail_en_bits(self, other):

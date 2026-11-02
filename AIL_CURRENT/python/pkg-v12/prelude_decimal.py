@@ -296,6 +296,8 @@ def localcontext(ctx=None, prec=None, rounding=None, Emin=None, Emax=None, capit
 # construction
 # ---------------------------------------------------------------------------------------------------------------
 class Decimal:
+    _ail_dec = True
+
     def __init__(self, value="0", context=None):
         self._s = 0
         self._c = 0
