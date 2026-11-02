@@ -1,3 +1,21 @@
+## 2026-11-02 -- prog21 typed reach: abs/str safe calls in the hybrid (job-prog21-11021237)
+
+Profiled the eight prog21 programs with CPython 3.12 `cProfile` (hot shares and the first refusal
+of every hot function are in `lab/progfix/prog21.md`).  Six compile as typed modules already;
+`g25_016` (enum member tables) and `t419` (Decimal) stay general as named follow-ups.  On the
+hybrid, `g22_022.shift_and_add_multiply` is now accelerated: `_safe_call` accepts `abs` of a
+numeric argument (an int result's `INT64_MIN` overflow still falls back through the existing
+wrapper), plus `str(<number>)` and `int(<int/bool>)`, which cannot raise.  `int(<float>)` stays
+refused, so `t139.fmt` remains in CPython.
+
+`g21_038.encode_rounded_floats` still stops at pymix's `unresolved-return` (`json.dumps` is not
+proved a str), and even with that proof its `round(v, places)`/`json.dumps` calls would stay in
+CPython; it is recorded as a follow-up.  No new semantic difference; the generated C of the ten
+`lab/compare` tasks is byte-identical.  All eight programs'
+hybrid stdout/exit equal CPython; probes `p21_*` in `/tmp/probes` cover abs/str boundaries,
+argument/list/attribute/dict sources, NaN/inf, and `INT64_MIN`.  `AIL_CURRENT/test_ail_prog21.py`
+is registered through `AIL_CURRENT/tests.d/`.
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.
