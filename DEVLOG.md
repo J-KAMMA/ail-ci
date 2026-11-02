@@ -1,3 +1,111 @@
+## 2026-11-02 -- prog21 review fix: abs of a bool stays in CPython
+
+The review found that `abs(<bool parameter>)` was newly accepted as an int/bool-result call even
+though `abs` preserves boolness (and a unary `+`/`-` of a bool keeps the bool kind in the typed
+clone).  An int-returning accelerated clone therefore printed `True`/`False` where CPython prints
+`1`/`0`.  `_provably_int` now takes the bool parameter set and an `allow_bool` flag; the `abs`
+proof refuses a bool operand (including under unary `+`/`-`), while `int(...)` resets the flag
+because `int()` converts the bool, so `abs(int(x))` still accelerates.
+`AIL_CURRENT/test_ail_prog21.py` gained a regression for the direct, assigned, `+x`, `-x` and
+`abs(int(x))` forms.  Hybrid probes (`abs` direct/assign/`+x`/`-x`/`int(abs(x))`/
+`abs(int(x))`, `int(bool)`, `str(bool)`, `str(+bool)`) all equal CPython; the bool `abs` functions are refused by name
+(`a call can raise or have side effects`).  General and default builds are unchanged; no
+generated code changed.
+
+## 2026-11-02 -- prog21 review fix: unary int negation in str-returning hybrid clones
+
+The review found that `str(-x)` on an int parameter was newly accepted in a str-returning hybrid
+clone even though only int/bool results have the overflow wrapper; `INT64_MIN` then hit the typed
+`ail_die` instead of falling back to CPython.  `_provably_number`/`_provably_int` now accept a
+unary `-` of an int only when the clone returns `int`/`bool`; `str(-x)` and `int(-x)` in a
+str-returning clone are refused again (`a call can raise or have side effects`) and fall back.
+`str(-x)` of a float stays accelerated (float negation cannot overflow).  Added the regression
+case to `AIL_CURRENT/test_ail_prog21.py` and corrected its docstring: `g21_038` still stops at
+pymix's `unresolved-return`, not at a `json.dumps` proof.  Hybrid probes `p21_str_neg_min`,
+`p21_str_neg_int`, `p21_int_neg_str`, `p21_str_neg_float`, `p21_str_pos_int`, `p21_abs_int`,
+`p21_abs_bool`, `p21_plain_str_int` and `p21_str_neg_intret2` all equal CPython; general/default
+builds still stop loudly on `INT64_MIN` as declared.  No generated code changed.
+
+## 2026-11-02 -- prog21 typed reach: abs/str safe calls in the hybrid (job-prog21-11021237)
+
+Profiled the eight prog21 programs with CPython 3.12 `cProfile` (hot shares and the first refusal
+of every hot function are in `lab/progfix/prog21.md`).  Six compile as typed modules already;
+`g25_016` (enum member tables) and `t419` (Decimal) stay general as named follow-ups.  On the
+hybrid, `g22_022.shift_and_add_multiply` is now accelerated: `_safe_call` accepts `abs` of a
+numeric argument (an int result's `INT64_MIN` overflow still falls back through the existing
+wrapper), plus `str(<number>)` and `int(<int/bool>)`, which cannot raise.  `int(<float>)` stays
+refused, so `t139.fmt` remains in CPython.
+
+`g21_038.encode_rounded_floats` still stops at pymix's `unresolved-return` (`json.dumps` is not
+proved a str), and even with that proof its `round(v, places)`/`json.dumps` calls would stay in
+CPython; it is recorded as a follow-up.  No new semantic difference; the generated C of the ten
+`lab/compare` tasks is byte-identical.  All eight programs'
+hybrid stdout/exit equal CPython; probes `p21_*` in `/tmp/probes` cover abs/str boundaries,
+argument/list/attribute/dict sources, NaN/inf, and `INT64_MIN`.  `AIL_CURRENT/test_ail_prog21.py`
+is registered through `AIL_CURRENT/tests.d/`.
+## 2026-11-02 -- prog22 follow-up: module-level class lists fall back, not a C build failure (job-prog22-11021439)
+
+Fixed the review's blocking regression.  A module-level `gxs: list[Item] = []` that a function
+appends to (and then folds with `max(key=)`/`min(key=)`) was bound as a local `olist` by
+`_bind_object_types`; codegen emitted `v_gxs` in `py_main` while the module body declared it in a
+later init function, so the default build died in gcc with `v_gxs undeclared`.  `bind` now refuses
+a name the function does not bind itself, and the function takes the general path as it does on
+the base: `` `gxs` is a module-level value that this function changes; the typed path builds no
+mutable module-level container (the general path does) ``.  This covers both the append/extend
+path and the fold, not just the fold's source.
+
+`test_ail_prog22` gains module-level append-only and append-plus-`max(key=)` cases (general path,
+stdout/exit equal to CPython).  The records in `lab/progfix/prog22.md` are corrected: g21_002's
+default first reason is `json.dumps of data`, and the wide-row/general-path claims now state what
+the re-run probes actually show.  Probes in `/tmp/rprobes` (`global_maxkey.py`,
+`global_maxkey_int.py`, `global_min_each.py`, `global_append_only.py`) and `/tmp/probes`
+(`p22_five_str.py`, `p22_five_str_lit.py`, `p22_six_str.py`, `p22_five_param.py`,
+`p22_five_index.py`, `p22_five_global.py`) all match CPython on both builds.
+
+## 2026-11-02 -- prog22 review fixes: wide str rows and catchable empty max/min (job-prog22-11021237)
+
+Fixed the two defects a reviewer found in `d4ef0ad`.  A local `list[tuple[...]]` with a str
+field now checks `AIL_SROW_MAXK` before choosing the `ail_srows` layout: a wider annotation
+raises `a records annotation with N fields; a str-field row holds at most 4 fields`, so the
+program takes the general path instead of writing past the 4-slot struct and silently dropping
+fields.  `_struct_key_fold` now raises a catchable `ValueError` for `max`/`min` over an empty
+list of instances (`max()/min() iterable argument is empty`, CPython's text when the program reads
+it) rather than the uncatchable `ail_die`.
+
+Probes in `/tmp/probes`: five- and six-field str rows, five-field rows with int/str keys and a
+trailing str, and empty `max`/`min` through a local, an argument, an attribute, a list item and a
+dict value, plus a caught-without-message variant; all match CPython on both `cmp.sh` builds.
+`AIL_CURRENT/test_ail_prog22.py` gains the caught empty fold and the five-field row case; the
+manifest is regenerated.  No program was edited and no new DIFFERENCES row is needed.
+
+## 2026-11-02 -- prog22 typed reach: str-field records, max(key=) and 4/8 hot programs (job-prog22-11021237)
+
+Made two more of the eight prog22 programs take the typed path without touching the programs.
+`census/programs/dev/t366.py` was blocked by a local `list[tuple[str, float, str]]` annotation
+(`a records annotation whose field type is 'str'; a row holds int64 or float fields only`); such
+an annotation now names the `ail_srows` layout the compiler already inferred from
+`rows = []; rows.append((..., "..."))`, and `enumerate(rows, start)` over that kind binds the
+index and each typed field.  `ail_srows_sort_key` refuses a NaN key by name, as the float-list and
+KEYSORT sorts already did, so a NaN never returns a Timsort-incompatible order silently
+(DIFFERENCES C?-job-prog22-11021237-1).  `census/programs/gdev/g14_034.py` was blocked only by
+`max() does not accept a class; read a numeric field`; `max`/`min` with a numeric `key=` lambda
+over a list of class instances now folds in one retained source walk, keeps CPython's first-max
+tie rule and stops on an empty source with `max()/min() arg is an empty sequence`.
+
+Typed after this change: t366, t347, t318 and g14 (4/8).  Still general: g12_018
+(`Random.randrange must take plain positional arguments, no defaults, *args or **kwargs`),
+g21_002 (`[None, True, False]` mixes bools and numbers), g15_006 (`only a class type can be None:
+write Node | None) and g16_034 (`class list iteration needs one name` for a returned
+generator expression).  Hot-function shares, exact messages and follow-ups are in
+`lab/progfix/prog22.md`.
+
+`AIL_CURRENT/test_ail_prog22.py` (registered through `AIL_CURRENT/tests.d/test_ail_prog22.txt`)
+builds the four typed programs and compares stdout/exit with CPython, plus a str-field records
+program, a `max`/`min` key program (argument, list field, ties, negative and int64-edge keys),
+an empty `max` program and the NaN refusal.  Probes `/tmp/probes/p22_{srows,maxkey,maxkey_empty,
+maxkey_tuple}.py` match CPython on both `cmp.sh` builds, and the ten `lab/compare` tasks keep
+byte-identical generated C against the pre-change tree.
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.
@@ -184,6 +292,130 @@ matches CPython; no int64 rule changed.  Added `test_ail_prog13.py`
 (`tests.d/test_ail_prog13.txt`), which builds the newly typed method forms on both IR settings plus
 `g12_026`, the duplicate/decorated refusals, the struct-str comprehension, and the five programs
 that were already typed.  Probes under `/tmp/probes/prog13_*.py` match CPython on both builds.
+## 2026-11-02 -- typed reach 12, continuation: review skipped, defect probes re-run (job-prog12-11021435)
+
+The first review was skipped (time), so it named no defect.  This pass checked the prior fix
+against the current tree instead: the `tuple[int, ...]` local rewrite and the itertools alias
+check are present, and no compiler change was needed.  Independent probes in `/tmp/probes` cover
+the boundaries the report implies: empty/non-empty permutations, indexing including a negative
+index, iteration, `len`/`sum`/`sorted`/`any`/`all`/`min`/`max`/`set`/`in`/`not in`, an alias
+without an annotation, reassignment from a list and from tuple literals through a dict value, a
+list item and a loop target, a whole-name `del`, and a `tuple[float, ...]` local.  Typed builds
+match CPython or are refused by name; `print`/`==`/slice/left-`in`/store/delete of the local and
+of an alias, passing a permutation to a function, and keeping one in a list or dict are refused
+with the tuple message, and the default build matches CPython (including the `TypeError` paths).
+`test_ail_prog12`, `test_ail_tuples`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; `tools/update_manifest.py --check` is clean.  The ten
+`lab/compare` sources contain no `tuple[int, ...]` local, so their generated C is untouched.
+
+## 2026-11-02 -- typed reach 12 fix: tuple local store/delete refused (job-prog12-11020843)
+
+Review of 2c28c6a found that the list-compatible-use check counted any `name[...]` as an
+indexing read, so a `Store` or `Del` subscript (`last[0] = 9`, `del last[0]`) was accepted:
+the typed build mutated a tuple that CPython rejects.  Both `_local_tuple_uses_are_safe`
+(`pyfunc.py`) and `itlib.check_nonescaping` now require the subscript itself to be in `Load`
+context, so stores and deletes refuse by name and the general path matches CPython.  Probes:
+`last[0] = 9`, `del last[0]`, and `a = perm; a[0] = 9` (also through an alias) are refused
+typed and match CPython's `TypeError` on the default build; `test_ail_prog12` T5 covers all
+three.
+
+## 2026-11-02 -- typed reach 12: an empty tuple local from itertools is a list (job-prog12-11020843)
+
+`t338` was the one hot function of its eight-program batch that this pass could move onto the
+typed path: `last: tuple[int, ...] = ()`, assigned each `itertools.permutations` item, was refused
+by the tuple pass (and the assignment was treated as an escaping use of `perm`).  A local empty
+`tuple[int, ...]` whose uses are all list-compatible (index, loop, `join`, `len`, `sum`, `min`,
+`max`, `sorted`, `any`, `all`, `set`, `list`, `index`, `count`, `in`) is now rewritten to
+`list[int]`; a print, equality, slice, dict key, return or arbitrary call leaves the old named
+refusal.  `itlib.check_nonescaping` follows a plain alias (`last = perm`) and checks the alias
+target's uses with the same rules.
+
+`tuple[float, ...]` stays refused on purpose: CPython's `sum(())` is int `0` while the typed
+`list[float]` sum is `0.0`.  The other hot functions need the void-`main` hybrid ABI, dict values
+that are containers, record/tuple-list parameters and results, or list-valued class fields and
+methods; `lab/progfix/prog12.md` records each exact message.  `t338` now builds with
+`AIL_NO_GENERAL=1` and matches CPython on all three inputs.
+
+Added `AIL_CURRENT/test_ail_prog12.py`, registered via `tests.d/test_ail_prog12.txt`.  Probes in
+`/tmp/probes` cover empty/non-empty permutation tuples, indexing/iteration/len/sum/sorted/any/all/
+join, an itertools alias, reassignment from lists and tuple literals, float tuple locals (refused
+by name), empty-output cases and unsafe print/equality/slice uses; all match CPython or are
+refused by name on both builds.  Tests: test_ail_prog12, test_ail_tuples, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  The generated C of the ten `lab/compare` tasks is
+byte-identical.
+
+## 2026-11-02 -- prog15 review 2 follow-up: keep the alias refusal for unannotated str-keyed dicts (job prog15)
+
+The typed assignment now refuses `e = d` for an unannotated str/bytes-keyed dict by name ("keyed by
+str; copying it into another name is not built on the typed path").  That refusal is a symptom when
+the same function also aliases the dict, so `aliasrefuse.refuse_instead` -- which already promoted
+"used where a number is needed" to the real aliasing site -- now recognises this message too and
+reports `DICT_ALIAS_UNTYPED`'s actual "makes a second name for the same container" reason again.
+Without an aliasing site the original str-keyed copy refusal is unchanged.  Pins refreshed; the
+typed/general outputs of the fuzz-findings refusal and alias cases are unchanged.
+
+## 2026-11-02 -- prog15 review 2: a pair target is not a one-code-point view (job prog15)
+
+`_listcomp_pair_into_temp` registered the second name of every `enumerate` / `zip` / `.items()`
+target in `ctx.onecp`/`ctx.len1_names` whenever its source element was a str.  A pair element is a
+full `ail_str` out of a list of str (or a dict value), never a character: `_iter_plan` refuses a
+str used as an iterable, so the one-code-point claim was always false here.  `_one_cp` then
+reported a length of 1, and `if v != "":` folded to true, so an empty string stayed in the result
+(`['A', 'BB', 'CCC']` where CPython gives `['A', 'CCC']`).  The names are now left out of that
+optimisation; inequality goes through `ail_str_eq`.  String keys never had the flag and were
+already correct.  Added `enum_nonempty` / `zip_nonempty` to `test_ail_prog15.py`.  Probes
+`/tmp/probes/p8_cond.py` (value conditions on enumerate/zip, both builds) and `p9_keycond.py` (key
+conditions for str/float/int keys and `.items()`), `p10_nonzero.py` (enumerate from a nonzero
+range/slice) and `p2_zip_items.py` match CPython on both `cmp.sh` builds and take the typed path
+under `--strict`; the new pair path is not used by any `lab/compare` source (AST scan), so their C
+is unchanged.
+
+## 2026-11-02 -- prog15 review fixes: zip key kinds and str-keyed `.items()` (job prog15)
+
+Review follow-up on `756476d`.  The pair-target list-comprehension lowering had forced the FIRST
+name to int64, which truncated a `zip` whose first iterable was `list[float]` and generated invalid
+C for `list[str]`; it also read every unannotated `dict.items()` through `ail_tab`, so a str-keyed
+dict's keys hit the wrong struct.  `_pair_key_kind` now takes the key kind from the first `zip`
+iterable, from `enumerate` (int) or from the dict's key table (int/str; a bytes-keyed table is
+refused by name and left to the general path).  `_listcomp_kind` and `_listcomp_pair_into_temp`
+declare key and value with their real C types, so `zip` over float/str keeps its values and
+`[k for k, v in d.items()]` over an unannotated str-keyed dict is typed and matches CPython.
+Inference contexts seed `ctx.skeys` before asking the same questions.
+
+This also exposed an unrelated latent bug: aliasing a str/bytes-keyed unannotated dict (`e = d`)
+on the typed path called `ail_tab_copy` on an `ail_stab`/`ail_btab` and was rejected by C.  The
+typed assignment now refuses that copy by name, so the program falls back to the general path and
+matches CPython (the identical refusal for a str/bytes keyed set).  The test program gained
+float-first and str-first `zip` cases plus unannotated str-keyed `.items()` key/value cases; the
+docstring's "other six" count is corrected to five.  Probes `/tmp/probes/prog15r_{zip_kinds,
+items,sources,bytes_items,bounds}.py` and the reviewer's `/tmp/rprobes/iso2/{h,i,j,k,l,m}.py`,
+`p4e`/`p4f` match CPython on both `cmp.sh` builds; the C of all 17 buildable `lab/compare` ail/py
+pairs stays byte-identical (the three `main.py` tasks fail identically on base and current).
+
+## 2026-11-02 -- prog15: pair targets in list comprehensions type the hot functions of g08 (job prog15)
+
+The typed list-comprehension path refused a pair target (`for j, value in enumerate(r)`) even
+though the fold path had walked the same shape for a long time.  `_listcomp_kind` now accepts a
+two-name target and the new `_listcomp_pair_into_temp` builds the loop from `_pair_plan`
+(`enumerate`, `zip`, and a typed dict's `.items()`), binding the key as int and the value as the
+source element kind (int/float/str).  The nested-list pass already lowered the outer row
+comprehension of `lab/census/programs/gdev/g08_018.py`; only the inner row comprehension was left,
+so the whole program (`determinant`, `minor`, `main`) is now typed and matches CPython.  Programs
+that already compiled keep their C; `lab/compare` generated C is byte-identical for all 17
+buildable ail/ail-py pairs (the three failing `main.py` tasks fail identically on the base).
+
+`lab/progfix/prog15.md` records the cProfile hot functions, their before/after status and the
+first reason for the six programs that stay general: enum/dataclass expansion (g14), `tuple(...)` /
+variadic tuples (g17), dynamic `json.loads` (t186), union annotations + `match` (g25), and set
+comprehensions + `frozenset` constants (g16).  `g02` and `t012` were already typed.
+
+`AIL_CURRENT/test_ail_prog15.py` (registered by `tests.d/test_ail_prog15.txt`) compiles the eight
+programs and compares them with CPython, checks their typed/general status, exercises pair-target
+comprehensions over int, float, str, `zip`, an attribute and a list item, and keeps a typed check.
+Probes `/tmp/probes/prog15_g08.py`, `prog15_pair.py`, `prog15_pair_alias.py` and
+`prog15_pair_edge.py` match CPython on both `cmp.sh` builds.  The commit also includes the pending bytearray repeat / slice-assignment changes in `pyfunc.py`
+and the matching `cruntime.py` `BAREPEAT`/`BASLICEASSIGN` fragments, which were already in the
+working tree and are exercised by the bytearray test modules.
 
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
