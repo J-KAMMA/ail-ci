@@ -1,3 +1,57 @@
+## 2026-11-02 -- re-apply `decimal` review fixes: as_tuple round-trip and `__reversed__` (job-rbstd_decimal-11021359)
+
+Re-applied the accepted `std_decimal` change on top of this tree, keeping this tree's `array_prelude` /
+`dunder_ordering` work: `dunderrt._edits`, `patch` and `install` now take `ordering` and `reversed_`
+together, and `pyboxed2` passes both.  `Decimal(d.as_tuple())` builds, and `reversed(d.as_tuple())` asks
+the class's `__reversed__` through the general path (installed only for programs whose classes define it).
+The 12 `lab/stdlib/decimal` programs remain and `test_ail_std_decimal` is registered.  Probes
+`dec_roundtrip`, `dec_reversed`, `dec_reversed_user`, `dec_tuple_types`, `dec_routes` and `dec_rev_routes`
+match CPython on both `cmp.sh` builds.
+
+## 2026-11-01 -- `decimal` review fixes: as_tuple round-trip and `__reversed__` (job-std_decimal-11020505)
+
+Review follow-up on `96dee2d`.  `Decimal(d.as_tuple())` now builds: `Decimal.__init__` accepts the
+`_DecTuple` result (which already had len / indexing), so the common round-trip idiom returns the same
+value on both builds and in exact-int mode.  `reversed(d.as_tuple())` now works: the general path's
+`ail_iter_reversed` asks a class's `__reversed__` before the builtin kinds, and the hook is installed
+only for programs whose classes define it, so a program without `__reversed__` keeps its generated C.
+Probes `dec_roundtrip`, `dec_reversed`, `dec_reversed_user`, `dec_tuple_types`, `dec_routes` and
+`dec_rev_routes` match CPython on both `cmp.sh` builds; exact-int mode matches too, except
+`isinstance(d.as_tuple(), tuple)`, which stays `False` because `_DecTuple` is a class like the
+namedtuple prelude (the round-trip itself matches).  `test_ail_std_decimal`, `test_ail_stdtop1`,
+`test_ail_dunders`, `test_ail_bytearray_decimal`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass.
+
+## 2026-11-01 -- `decimal` review fixes: tuple protocol and int64 coefficient fast path (job-std_decimal-11012337)
+
+Review follow-up on `2fafbd0`.  `Decimal.as_tuple` now returns a `DecimalTuple`-shaped object with the
+tuple protocol as well: slicing, `in`, `count` / `index`, `reversed`, concatenation, hashing and
+`_fields`, besides the existing fields, indexing, iteration, unpacking, equality and repr.  In the
+int64 default a Decimal coefficient still uses `_DecInt` for arbitrary precision, but a coefficient
+that fits in int64 now carries its native value and takes int64 add / subtract / multiply / divmod /
+comparison / power fast paths; it promotes to the string algorithms only when the operation would
+overflow, so nothing wraps.  This removes the slowdown the first version introduced (a 20k
+multiply+quantize loop went from 3.44 s to 0.14 s; 100k additions from about 1.0 s to 0.41 s).
+The 12 lab programs still build and match CPython, and the probes cover int64 boundary coefficients
+(`9223372036854775807`), additions / multiplications / divisions that cross the boundary, negative
+values, and as_tuple slicing.
+
+## 2026-11-01 -- `decimal` lab: int64 coefficients and `as_tuple` (job-std_decimal-11012337)
+
+`lab/stdlib/decimal` now has 12 realistic programs; all build with the default command on the
+general path and match CPython 3.12 stdout and exit status.  `Decimal.as_tuple` was the one refusal
+(`decimal.Decimal.as_tuple is not supported`); it is built in `prelude_decimal.py`, including NaN /
+infinity exponents and a `DecimalTuple` result with fields, indexing, unpacking and repr.  The int64
+default keeps a Decimal coefficient arbitrary precision through `_DecInt` while the program's own
+ints stay int64 and stop loudly.  `stdtop.py` selects that coefficient class when `intmode.exact()`
+is false and no longer refuses `as_tuple`; `test_ail_stdtop1.py` keeps a named refusal for `logb`.
+`lab/stdlib/decimal/RESULTS.md` records each build, the general-path reasons and the remaining named
+refusals.  `test_ail_std_decimal.py` (registered in `tests.d`) compares all 12 programs with CPython.
+Probes in `/tmp/probes` cover `as_tuple` over finite / NaN / infinity / negative / empty values and
+through an argument, a list item, an attribute, a dict value and an alias, large coefficients,
+float construction, error paths and both `cmp.sh` builds; `dec_refusals` and `dec_traps` are refused
+by name.
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.
@@ -394,7 +448,6 @@ Added `AIL_CURRENT/test_ail_std_numbers.py` (registered through `tests.d/test_ai
 Probes `/tmp/probes/num_*.py` cover every classification kind, aliases and from-imports, tuples,
 register/decorator registration, subclass inheritance, values through arguments, list items,
 attributes and dict values, empty/negative values and caught errors on both `cmp.sh` builds.
-
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
 Review follow-up on `df4ae79`. Recursive dict / list / tuple values now use CPython's active-object

@@ -2893,6 +2893,8 @@ class Compiler(boxclosure.ClosureMixin):
         self.dunder_ordering = self.array_prelude and any(
             c == '_AilArray' and ('__le__' in cls['methods'] or '__ge__' in cls['methods'])
             for c, cls in self.classes.items())
+        # a class defining __reversed__ makes the run time ask it (dunderrt.patch(reversed_=...))
+        self.dunder_reversed = any('__reversed__' in cls['methods'] for cls in self.classes.values())
 
         # BRIEF_mixed_mode.md: after every top-level function is registered (`self.functions`,
         # needed to check a candidate for *args/**kwargs/keyword-only parameters) and before any
@@ -3164,7 +3166,8 @@ class Compiler(boxclosure.ClosureMixin):
             if self.dunder_ops:
                 setup.extend(dunderrt.install('g_slots_arr[%d]' % self.global_slots['class:' + cname],
                                               cls['methods'], lambda info: info['all_params'],
-                                              ordering=self.dunder_ordering))
+                                              ordering=self.dunder_ordering,
+                                              reversed_=self.dunder_reversed))
             if cls.get('dc'):
                 setup.append('    ((ail_classobj *)g_slots_arr[%d].o)->dc = %d; '
                              '((ail_classobj *)g_slots_arr[%d].o)->dc_hide = %dULL;\n' %
@@ -13771,7 +13774,7 @@ def _build(source, report, allow_mix=True):
     if compiler.dunder_ops:
         import dunderrt
         body = dunderrt.patch(body, inplace=compiler.dunder_inplace, ordering=compiler.dunder_ordering,
-                              array_prelude=compiler.array_prelude)
+                              array_prelude=compiler.array_prelude, reversed_=compiler.dunder_reversed)
     if compiler.generators:
         import safetyrt
         body = safetyrt.patch_generators(body)
