@@ -19123,8 +19123,8 @@ def _listcomp_kind(node, ctx):
         kind = _etype(node.elt, ctx)
         if isinstance(node.elt, ast.List):
             raise Unsupported('nested list comprehension elements are unsupported')
-        if struct_source and kind not in NUM:
-            raise Unsupported('a struct-list comprehension must produce int or float elements')
+        if struct_source and kind not in NUM and kind != STR:
+            raise Unsupported('a struct-list comprehension must produce int, float or str elements')
         return SLIST if kind == STR else FLIST if kind == FLT else LIST
     finally:
         ctx.types.clear(); ctx.types.update(types)

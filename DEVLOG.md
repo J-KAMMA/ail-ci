@@ -1,3 +1,23 @@
+## 2026-11-02 -- prog13: Optional scalar methods reach the typed path (job-prog13-11020843)
+
+Profile pass over the eight assigned programs (`lab/progfix/prog13.md`): five already built on the
+typed path at the job base.  `g12_026` (main and the `Elevator` methods, including
+`step() -> int | None`) was still general; the remaining two are module-scope object constants:
+`g12_036` (generated `_ail_en_EventKind_all` list of enum members) and `g19_036` (datetime values
+built by calls, read by `main`).  Both were left as named follow-ups because they need a new
+module-scope object-constant feature; the exact refusals are in the report.
+
+`python/pkg-v12/optlib.py` now lowers a scalar Optional parameter/result on a method whose name is
+unique in the program (calls rewrite by attribute name, so a duplicate name or a decorated method
+is refused by name; nested functions keep the old refusal).  A method result used inline where only
+the lowered pair would fit is refused like a top-level Optional call, so the general fallback never
+sees a half-lowered method.  The struct-list comprehension check in
+`python/pkg-v12/pyfunc.py` now accepts a str element as `list[str]`.  `g12_026` builds typed and
+matches CPython; no int64 rule changed.  Added `test_ail_prog13.py`
+(`tests.d/test_ail_prog13.txt`), which builds the newly typed method forms on both IR settings plus
+`g12_026`, the duplicate/decorated refusals, the struct-str comprehension, and the five programs
+that were already typed.  Probes under `/tmp/probes/prog13_*.py` match CPython on both builds.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten

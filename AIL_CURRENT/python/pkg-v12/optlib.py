@@ -163,6 +163,8 @@ class Lowerer:
     def __init__(self, tree):
         self.tree = tree
         self.funcs = {}
+        self.methods = {}
+        self.method_info = {}
         self.counter = 0
         self.names = {n.id for n in ast.walk(tree) if isinstance(n, ast.Name)} | {
             n.arg for n in ast.walk(tree) if isinstance(n, ast.arg)}
@@ -194,7 +196,9 @@ class Lowerer:
         """Optional scalars may only be annotations of a top-level function's parameters / return and of
         locals in function bodies; anywhere else the program is refused by name."""
         allowed = set()
-        for node in self.tree.body:
+        methods = [m for c in self.tree.body if isinstance(c, ast.ClassDef)
+                   for m in c.body if isinstance(m, ast.FunctionDef)]
+        for node in list(self.tree.body) + methods:
             if isinstance(node, ast.FunctionDef):
                 for a in node.args.args + node.args.kwonlyargs:
                     if a.annotation is not None and scalar_optional(a.annotation) is not None:
@@ -223,14 +227,36 @@ class Lowerer:
         for node in self.tree.body:
             if isinstance(node, ast.FunctionDef):
                 self.funcs[node.name] = FuncInfo(node)
-        # nested defs and methods may not mention an Optional scalar annotation
+        # Methods may take or return an Optional scalar when their name is unique in the program: a call
+        # `obj.step()` is rewritten by that name (the same convention the general path's method calls
+        # use).  Nested functions and methods with a decorator keep the old refusal.
+        method_nodes = {id(m) for m in methods}
+        counts = {}
+        for m in methods:
+            counts[m.name] = counts.get(m.name, 0) + 1
+        for m in methods:
+            kinds = [scalar_optional(a.annotation) for a in m.args.args + m.args.kwonlyargs]
+            has = any(k is not None for k in kinds) or (
+                m.returns is not None and scalar_optional(m.returns) is not None)
+            if not has:
+                continue
+            if m.decorator_list:
+                raise Refused(m, 'a decorated method with an Optional scalar annotation is not built')
+            if counts[m.name] != 1:
+                raise Refused(m, 'a method named %s() with an Optional scalar annotation is not unique in the '
+                              'program; rename it or keep it Optional-free' % m.name)
+            info = FuncInfo(m)
+            info.method = True
+            self.methods[m.name] = info
+            self.method_info[id(m)] = info
         for node in ast.walk(self.tree):
-            if isinstance(node, ast.FunctionDef) and node not in self.tree.body:
+            if isinstance(node, ast.FunctionDef) and node not in self.tree.body \
+                    and id(node) not in method_nodes:
                 for a in node.args.args + node.args.kwonlyargs:
                     if a.annotation is not None and scalar_optional(a.annotation) is not None:
-                        raise Refused(node, 'a method or nested function with an Optional scalar parameter is not built')
+                        raise Refused(node, 'a nested function with an Optional scalar parameter is not built')
                 if node.returns is not None and scalar_optional(node.returns) is not None:
-                    raise Refused(node, 'a method or nested function returning an Optional scalar is not built')
+                    raise Refused(node, 'a nested function returning an Optional scalar is not built')
         self.opt_funcs = {n for n, f in self.funcs.items() if f.optional}
 
     def run(self):
@@ -248,8 +274,11 @@ class Lowerer:
             if isinstance(node, ast.FunctionDef):
                 body.append(self.function(node))
             elif isinstance(node, ast.ClassDef):
+                original = node
                 node = copy.deepcopy(node)
-                node.body = [self.function(m) if isinstance(m, ast.FunctionDef) else m for m in node.body]
+                infos = [self.method_info.get(id(m)) for m in original.body]
+                node.body = [self.function(m, infos[i]) if isinstance(m, ast.FunctionDef) else m
+                             for i, m in enumerate(node.body)]
                 body.append(node)
             else:
                 body.append(node)
@@ -257,8 +286,9 @@ class Lowerer:
         return self.tree
 
     # ---- one function ----
-    def function(self, node):
-        info = self.funcs.get(node.name) if node in self.tree.body else None
+    def function(self, node, info=None):
+        if info is None:
+            info = self.funcs.get(node.name) if node in self.tree.body else None
         opt = {}
         for a in node.args.args + node.args.kwonlyargs:
             kind = scalar_optional(a.annotation) if a.annotation is not None else None
@@ -287,7 +317,9 @@ class Lowerer:
                     if kind and t not in opt:
                         opt[t] = kind
                         changed = True
-        uses_opt_call = any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id in self.opt_funcs
+        uses_opt_call = any(isinstance(n, ast.Call) and (
+                                isinstance(n.func, ast.Name) and n.func.id in self.opt_funcs
+                                or isinstance(n.func, ast.Attribute) and n.func.attr in self.methods)
                             for n in ast.walk(node))
         uses_env_get = any(_is_environ_get(n) for n in ast.walk(node))
         if not opt and not uses_opt_call and not uses_env_get and not (info and info.ret):
@@ -425,6 +457,8 @@ class Lowerer:
                     return info.ret is None and info.node.returns is not None and not _is_none(info.node.returns)
                 return f.id in self.NONNULL_BUILTINS
             if isinstance(f, ast.Attribute):
+                if f.attr in self.methods and self.methods[f.attr].ret:
+                    return False
                 if f.attr in self.MAYBE_NONE_METHODS:
                     return False
                 if f.attr == 'pop' and len(e.args) > 1:
@@ -455,6 +489,8 @@ class Lowerer:
             return opt[e.id]
         if isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in self.funcs:
             return self.funcs[e.func.id].ret
+        if isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute) and e.func.attr in self.methods:
+            return self.methods[e.func.attr].ret
         if _is_environ_get(e):
             return 'str'
         return None
@@ -464,7 +500,9 @@ class Lowerer:
         return (_is_none(e) or (isinstance(e, ast.Name) and e.id in self.opt)
                 or _is_environ_get(e)
                 or (isinstance(e, ast.Call) and isinstance(e.func, ast.Name) and e.func.id in self.funcs
-                    and self.funcs[e.func.id].ret is not None))
+                    and self.funcs[e.func.id].ret is not None)
+                or (isinstance(e, ast.Call) and isinstance(e.func, ast.Attribute)
+                    and e.func.attr in self.methods and self.methods[e.func.attr].ret is not None))
 
     def temp(self):
         self.counter += 1
@@ -521,15 +559,17 @@ class Lowerer:
                               'a while test, or beside another call); assign it to a name first')
             p, v = self.environ_pair(e, facts)
             return 'str', p, v
+        fname = e.func.id if isinstance(e.func, ast.Name) else e.func.attr
         if not self.hoist_ok:
             raise Refused(e, 'the Optional result of %s() is used where it cannot be evaluated ahead of the '
                           'statement (inside and / or, a conditional expression, a comprehension, a while test, or '
-                          'beside another call); assign it to a name first' % e.func.id)
+                          'beside another call); assign it to a name first' % fname)
         call = self.call(e, facts, as_value=True)
         base = self.temp()
         p, v = _name(base + 'p', ast.Store()), _name(base + 'v', ast.Store())
         self.pre.append(ast.Assign(targets=[ast.Tuple(elts=[p, v], ctx=ast.Store())], value=call))
-        return self.funcs[e.func.id].ret, _name(base + 'p'), _name(base + 'v')
+        ret = self.funcs[fname].ret if isinstance(e.func, ast.Name) else self.methods[fname].ret
+        return ret, _name(base + 'p'), _name(base + 'v')
 
     # ---- narrowing ----
     def tests(self, e):
@@ -585,7 +625,9 @@ class Lowerer:
         saved_ok = self.hoist_ok
         others = [c for c in _calls(e) if not (self.optish(c) or (isinstance(c.func, ast.Name)
                                                and (c.func.id in SAFE_CALLS or c.func.id in self.opt_funcs
-                                                    or c.func.id in self.funcs and self.funcs[c.func.id].ret)))]
+                                                    or c.func.id in self.funcs and self.funcs[c.func.id].ret))
+                                               or (isinstance(c.func, ast.Attribute) and c.func.attr in self.methods
+                                                   and self.methods[c.func.attr].ret))]
         self.hoist_ok = hoist and not others
         try:
             result = self.ex(e, facts, test)
@@ -611,8 +653,10 @@ class Lowerer:
         return [s], facts
 
     def opt_calls_in(self, s):
-        return [n for n in ast.walk(s) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                and n.func.id in self.funcs and self.funcs[n.func.id].optional]
+        return [n for n in ast.walk(s) if isinstance(n, ast.Call) and (
+                    isinstance(n.func, ast.Name) and n.func.id in self.funcs and self.funcs[n.func.id].optional
+                    or isinstance(n.func, ast.Attribute) and n.func.attr in self.methods
+                    and self.methods[n.func.attr].optional)]
 
     def st_Expr(self, s, facts):
         pre, v = self.lower_expr(s.value, facts)
@@ -1112,6 +1156,12 @@ class Lowerer:
                 for a in e.args:
                     if self.optish(a):
                         raise Refused(e, '%s() of an Optional value is not built' % name)
+        elif isinstance(f, ast.Attribute) and f.attr in self.methods:
+            info = self.methods[f.attr]
+            if info.ret and not as_value:
+                raise Refused(e, "%s() returns an Optional; assign the result to a name and test it with "
+                              "`is None` before using it as a value" % f.attr)
+            return self.user_call(e, info, facts)
         return self.generic_call(e, facts)
 
     def generic_call(self, e, facts):
@@ -1136,17 +1186,19 @@ class Lowerer:
     def user_call(self, e, info, facts):
         new = copy.copy(e)
         args = []
+        skip = 1 if getattr(info, 'method', False) else 0
+        params = info.params[skip:]
         for i, a in enumerate(e.args):
             if isinstance(a, ast.Starred):
                 raise Refused(e, '*args in a call of %s(), which takes an Optional, is not built' % info.node.name)
-            kind = info.params[i][1] if i < len(info.params) else None
+            kind = params[i][1] if i < len(params) else None
             if kind:
                 p, v = self.arg_pair(a, facts, kind)
                 args.extend([p, v])
             else:
                 args.append(self.ex(a, facts))
         kws = []
-        by_name = {n: k for n, k, _ in info.params}
+        by_name = {n: k for n, k, _ in params}
         for k in e.keywords:
             if k.arg is None:
                 raise Refused(e, '**kwargs in a call of %s(), which takes an Optional, is not built' % info.node.name)
@@ -1156,9 +1208,10 @@ class Lowerer:
                 kws.append(ast.keyword(arg=k.arg + '__v', value=v))
             else:
                 kws.append(ast.keyword(arg=k.arg, value=self.ex(k.value, facts)))
-        given = {info.params[i][0] for i in range(min(len(e.args), len(info.params)))} | {k.arg for k in e.keywords}
-        for index, (name, kind, default) in enumerate(info.params):
-            if default is not None and index <= info.strip_to and name not in given:
+        given = {params[i][0] for i in range(min(len(e.args), len(params)))} | {k.arg for k in e.keywords}
+        strip_to = info.strip_to - skip
+        for index, (name, kind, default) in enumerate(params):
+            if default is not None and index <= strip_to and name not in given:
                 if kind:
                     p, v = self.default_pair(default, kind)
                     kws.append(ast.keyword(arg=name + "__p", value=p))
