@@ -1,3 +1,29 @@
+## 2026-11-02 -- rel-diag: beginner mistakes get file:line:col and a hint (job-reldiag-11022310)
+
+Beginner refusals now name their source position. The general path attaches the enclosing
+statement's line and column to an `Unsupported` that has none, so an undefined name at module
+level (probe A), a missing required argument (C) and a self-less method call (D) print
+`file:line:col:` instead of a bare message. The unknown-called-name refusal appends CPython's
+`did you mean 'greet'?` hint when `difflib` finds a close module function/class/global/builtin.
+A method declared without `self` is refused by name (`C.hi() takes 0 positional arguments but 1
+was given`) before the generated C reaches gcc, including the `*args`/`**kwargs`/keyword-only
+forms; the typed path already refuses that method by name. Python's `IndentationError`/`TabError`
+now use the same `NAME.py:LINE:COL:` format as other syntax errors instead of the `AIL source`
+prefix. `--strict` also keeps a construct's inner comma (`print() given a dict[str, int]`) instead
+of truncating it.
+
+Added `AIL_CURRENT/test_ail_beginner_errors.py` (registered through
+`tests.d/test_ail_beginner_errors.txt`) for probes A-F on both the default and
+`AIL_UNIFIED_FORCE=1` builds, plus a method-with-`self` control. Probes in `/tmp/probes` cover
+close-name hints (class and builtin), no-hint, arity 1 and 2, `*args`/`**kwargs`/keyword-only
+methods without `self`, subclass dispatch, indentation/`expected ':'` errors, undefined names via
+a list item and a dict value, and positive methods with defaults, `*args`, staticmethod,
+classmethod, inheritance and `super()`; every positive matches CPython on both builds and every
+refusal is named with a position. Generated C of the ten `lab/compare` programs is byte-identical
+to `HEAD`. Gate modules, `test_ail_pre197`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass; `tools/update_manifest.py --check` is clean. No push (job
+instruction).
+
 ## 2026-11-02 -- re-apply accepted prog8 change on staging-integ (job-rbprog8-11021901)
 
 Re-applied the accepted job-prog8 change (NSUM for CPython's int-0 empty float `sum`, float
