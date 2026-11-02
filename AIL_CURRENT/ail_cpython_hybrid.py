@@ -183,30 +183,40 @@ def _provably_list(node, list_names):
     return False
 
 
-def _provably_number(node, num_names):
+def _provably_number(node, num_names, float_names=(), int_names=(), int_result=False):
     """An int/float/bool parameter or literal, or a sign applied to one: `str` of these cannot
-    raise.  (An int64 overflow in arithmetic is a separate question handled by `bigcap`.)"""
+    raise.  A unary `-` of an int can overflow on INT64_MIN, so it is safe only when the clone's
+    int/bool result routes that through the overflow wrapper; a float negation is always safe.
+    (Overflow of a bare int is not an arithmetic result and so is not relevant here.)"""
     if isinstance(node, ast.Name):
         return node.id in num_names
     if isinstance(node, ast.Constant):
         return isinstance(node.value, (int, float)) and not isinstance(node.value, bool)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-        return _provably_number(node.operand, num_names)
+        if _provably_float(node.operand, float_names):
+            return True
+        if isinstance(node.op, ast.UAdd):
+            return _provably_number(node.operand, num_names, float_names, int_names,
+                                    int_result)
+        return int_result and _provably_int(node.operand, int_names, int_result)
     return False
 
 
-def _provably_int(node, int_names):
+def _provably_int(node, int_names, int_result=False):
     """A value `int()` is the identity on: an int/bool parameter or literal (a float is not one;
-    `int(<float>)` can raise ValueError/OverflowError, which a clone cannot reproduce here)."""
+    `int(<float>)` can raise ValueError/OverflowError, which a clone cannot reproduce here).  A
+    unary `-` of an int needs the int/bool result's overflow wrapper, as in `_provably_number`."""
     if isinstance(node, ast.Name):
         return node.id in int_names
     if isinstance(node, ast.Constant):
         return isinstance(node.value, int) and not isinstance(node.value, bool)
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.UAdd, ast.USub)):
-        return _provably_int(node.operand, int_names)
+        if isinstance(node.op, ast.UAdd):
+            return _provably_int(node.operand, int_names, int_result)
+        return int_result and _provably_int(node.operand, int_names, int_result)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) \
             and node.func.id in ('int', 'abs') and len(node.args) == 1 and not node.keywords:
-        return _provably_int(node.args[0], int_names)
+        return _provably_int(node.args[0], int_names, int_result)
     return False
 
 
@@ -258,13 +268,16 @@ def _safe_call(node, str_names, list_names, num_names=(), int_names=(), float_na
         # routes through the clone's overflow wrapper (and so back to CPython).  A str/list
         # result has no such wrapper, so an int abs stays refused there.
         return (_provably_float(args[0], float_names)
-                or (ret in ('int', 'bool') and _provably_int(args[0], int_names)))
+                or (ret in ('int', 'bool') and _provably_int(args[0], int_names, True)))
     if func.id == 'int' and len(args) <= 1:
         # int(<int/bool>) is the identity; int(<float>) can raise ValueError/OverflowError,
         # which this clone cannot reproduce without an overflow wrapper for every result kind.
-        return not args or _provably_int(args[0], int_names)
+        # A unary minus of an int is the same overflow question as in `str`.
+        return not args or _provably_int(args[0], int_names, ret in ('int', 'bool'))
     if func.id == 'str' and len(args) <= 1:
-        return not args or _provably_number(args[0], num_names) \
+        # `str(-x)` overflows on INT64_MIN unless the int/bool result's wrapper can fall back.
+        return not args or _provably_number(args[0], num_names, float_names, int_names,
+                                             ret in ('int', 'bool')) \
             or _provably_str(args[0], str_names)
     return False
 

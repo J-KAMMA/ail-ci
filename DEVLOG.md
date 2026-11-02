@@ -1,3 +1,17 @@
+## 2026-11-02 -- prog21 review fix: unary int negation in str-returning hybrid clones
+
+The review found that `str(-x)` on an int parameter was newly accepted in a str-returning hybrid
+clone even though only int/bool results have the overflow wrapper; `INT64_MIN` then hit the typed
+`ail_die` instead of falling back to CPython.  `_provably_number`/`_provably_int` now accept a
+unary `-` of an int only when the clone returns `int`/`bool`; `str(-x)` and `int(-x)` in a
+str-returning clone are refused again (`a call can raise or have side effects`) and fall back.
+`str(-x)` of a float stays accelerated (float negation cannot overflow).  Added the regression
+case to `AIL_CURRENT/test_ail_prog21.py` and corrected its docstring: `g21_038` still stops at
+pymix's `unresolved-return`, not at a `json.dumps` proof.  Hybrid probes `p21_str_neg_min`,
+`p21_str_neg_int`, `p21_int_neg_str`, `p21_str_neg_float`, `p21_str_pos_int`, `p21_abs_int`,
+`p21_abs_bool`, `p21_plain_str_int` and `p21_str_neg_intret2` all equal CPython; general/default
+builds still stop loudly on `INT64_MIN` as declared.  No generated code changed.
+
 ## 2026-11-02 -- prog21 typed reach: abs/str safe calls in the hybrid (job-prog21-11021237)
 
 Profiled the eight prog21 programs with CPython 3.12 `cProfile` (hot shares and the first refusal

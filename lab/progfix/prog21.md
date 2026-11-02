@@ -32,6 +32,10 @@ the hybrid.
   overflow wrapper route `abs(INT64_MIN)` back to CPython).  It also accepts `str(<number>)` and
   `int(<int/bool>)`, which cannot raise; `int(<float>)` stays refused.  `_unsafe_body` now receives
   the result kind and tracks int/float parameter kinds for those proofs.
+* Review fix: a unary `-` of an int is itself an overflow site (`INT64_MIN`), so `str(-x)` and
+  `int(-x)` are accepted only when the clone returns `int`/`bool`; in a str-returning clone they
+  stay refused (`a call can raise or have side effects`) and the hybrid falls back to CPython.
+  `str(-x)` of a float is still accelerated (`fabs`-like negation cannot overflow).
 No int can wrap silently: an int/bool-returning clone whose arithmetic or `abs` overflows sets the
 existing overflow signal and the call site runs the original Python function.
 
@@ -67,5 +71,13 @@ existing overflow signal and the call site runs the original Python function.
   `p21_abs_bound.py` is hybrid-only: `abs(INT64_MIN)`, the int64 maximum, bools and small ints all
   equal CPython (the overflow falls back); the standalone typed build intentionally stops loudly
   on `abs(INT64_MIN)` as the declared int64 behaviour.
+* Review-fix probes, hybrid (`build --cpython`) all equal CPython: `p21_str_neg_min.py`
+  (`f(-(2**63))`), `p21_str_neg_int.py` (min/max/0/positive/negative through an argument),
+  `p21_int_neg_str.py`, `p21_str_neg_float.py` (finite, `-0.0`, inf, `-inf`, NaN),
+  `p21_str_pos_int.py`, `p21_abs_int.py`, `p21_abs_bool.py`, `p21_plain_str_int.py` and
+  `p21_str_neg_intret2.py`.  The str-returning int negations are refused by name and fall back;
+  the float negation and the plain `str`/`int`/`abs` helpers stay accelerated.  On `cmp.sh` the
+  general/default builds still stop loudly on `INT64_MIN` (pre-existing declared int64 behaviour),
+  while `p21_str_neg_float.py`, `p21_str_pos_int.py` and `p21_plain_str_int.py` match on both.
 * Generated C for all ten `lab/compare/src/*/main.ail` tasks is byte-identical between `HEAD` and
   this tree (10/10 `program.c` SHA-256 equal).

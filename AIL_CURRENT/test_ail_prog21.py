@@ -7,12 +7,15 @@ The batch's untyped hot functions were blocked by three compiler rules:
   CPython.  `abs` of a float is `fabs`; `abs` of an int can only overflow on `INT64_MIN`, and an
   int/bool result routes that through the existing overflow wrapper back to CPython.
 * `str(<number>)` cannot raise, and `int(<int/bool>)` is the identity, so those calls are safe in
-  a clone too.  `int(<float>)` is deliberately still refused: NaN is a ValueError and a finite
-  value outside int64 needs the overflow wrapper, which only int/bool results have.  That is why
-  `t139.fmt` (`int(value)` on a float) stays in CPython.
-* `pymix` now proves `json.dumps(...)` returns a str and keeps the imports its entry's call graph
-  reads in the defs-only slice, so `g21_038.encode_rounded_floats` reaches the next reason
-  (`round(v, places)` / `json.dumps` can raise) instead of `unresolved-return`.
+  a clone too.  A unary `-`/`int(-x)` of an int can overflow on `INT64_MIN`, so it is accepted only
+  when the clone returns int/bool (where the existing wrapper falls back to CPython); a str result
+  has no such wrapper.  `int(<float>)` is deliberately still refused: NaN is a ValueError and a
+  finite value outside int64 needs the overflow wrapper, which only int/bool results have.  That
+  is why `t139.fmt` (`int(value)` on a float) stays in CPython.
+* `g21_038.encode_rounded_floats` stays in CPython: pymix still reports `unresolved-return`
+  because it does not prove `json.dumps(...)` returns a str (unchanged by this job).  Even with
+  that proof, the body's `round(v, places)` (a variable `ndigits`) and `json.dumps` are calls the
+  hybrid refuses as `a call can raise or have side effects`.
 
 The remaining hot functions are named follow-ups in `lab/progfix/prog21.md`: the enum/dataclass
 module table of `g25_016` and Decimal in `t419` need large new features; `t139.fmt` and
@@ -149,6 +152,38 @@ class Prog21Hybrid(unittest.TestCase):
     def test_str_conversion_accelerated(self):
         report = self.hybrid(STRCONV, 'strconv21')
         self.assertIn('label', report['accelerated'])
+
+    def test_str_neg_overflow_only_with_int_result_wrapper(self):
+        text = '''def neg_int_text(x: int) -> str:
+    return str(-x)
+
+
+def neg_int_identity(x: int) -> str:
+    y = int(-x)
+    return "nonneg" if y >= 0 else "neg"
+
+
+def neg_float_text(x: float) -> str:
+    return str(-x)
+
+
+def main() -> None:
+    for v in (-(2 ** 63), 2 ** 63 - 1, 0, 7, -7):
+        print(neg_int_text(v), neg_int_identity(v))
+    for x in (0.0, -0.0, 2.5, -2.5, float("inf"), float("-inf"), float("nan")):
+        print(neg_float_text(x))
+
+
+if __name__ == "__main__":
+    main()
+'''
+        report = self.hybrid(text, 'str_neg21')
+        reason = 'a call can raise or have side effects'
+        self.assertNotIn('neg_int_text', report['accelerated'])
+        self.assertEqual(report['rejected'].get('neg_int_text'), reason)
+        self.assertNotIn('neg_int_identity', report['accelerated'])
+        self.assertEqual(report['rejected'].get('neg_int_identity'), reason)
+        self.assertIn('neg_float_text', report['accelerated'])
 
     def test_shift_and_add_multiply_accelerated(self):
         report, _ = self.check_program('census/programs/gdev/g22_022.py', 'g22_022')
