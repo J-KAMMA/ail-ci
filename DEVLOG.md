@@ -273,6 +273,40 @@ generator unpacking, tuple iteration; the general path cannot build it either). 
 the ten `lab/compare` tasks is byte-identical.  Probes `/tmp/probes/p30_*` match CPython on both
 `cmp.sh` builds; the only stderr-only difference, an exhausted cursor naming the typed runtime's
 `list index out of range` instead of `StopIteration`, is `C?-job-prog30-11021835-1`.
+## 2026-11-02 -- prog20: hot functions of eight real programs on the typed path (job-prog20-11021017)
+
+Profiled the eight programs with CPython 3.12.3 and cProfile (fresh `__main__` globals per
+repetition, imports outside the profile) and recorded the hot functions and their first refusals
+in `lab/progfix/prog20.md`.  Two compiler changes make the two remaining buildable programs
+whole-program typed, without editing any program:
+
+- `iterlower.py` now lowers `min`/`max` with a tuple-returning key
+  (`lambda city: (-pops[city], city)`) by comparing the fields lexicographically, for both a dict
+  walk and a sequence walk; fields evaluate once per element, comparison short-circuits on the
+  first unequal field, and the first element wins a tie (g05_006).
+- `pyfunc.py`'s `enumerate(source, start)` accepts a nested tuple target over a list of tuple
+  instances (`for rank, (word, count) in enumerate(top, start=1)`), materialising each field once
+  per iteration; the index is `start + position` with the start evaluated once and a private
+  position counter, so rebinding the index or the start variable in the body cannot move the next
+  step (g18_002).  The same shape over a named `ctx.srowtypes` row list is handled in
+  `_for_enumerate_start`.
+
+`g05_006`, `g18_002` and `t206` (already typed) now build whole-program typed; `g03_012`
+(statistics.geometric_mean, bool-return, `list(DATA)`), `g03_028` (Fraction dunders), `t284`
+(`iter()`, a generator in `sorted`, `join(map(...))`), `g25_002` (module-level enum list) and
+`g14_012` (dataclass `field(init=False)` / `InitVar`) stay named follow-ups in the report.
+
+Added `AIL_CURRENT/test_ail_prog20.py`, registered through `tests.d/test_ail_prog20.txt`.  Probes
+`/tmp/probes/p_tuplekey.py` (dict/list tuple keys, three fields, ties, negatives, attribute, empty,
+near-int64), `/tmp/probes/p_enum_tuple.py` (start 1/0/negative/empty, rebinding the index and the
+start variable, an argument, a dict value, an attribute and a list item),
+`/tmp/probes/p_enum_append.py` (rows built by append), `/tmp/probes/p_min_empty.py` (an empty
+list) and `/tmp/probes/p_tuplekey_edges.py` (default, slice, range and aliasing) all match CPython
+on both `cmp.sh` builds; `p_tuplekey`, `p_enum_tuple`, `p_enum_append` and `p_min_empty` take the
+typed path and `p_tuplekey_edges` falls back to the general path.  The required modules
+`test_ail_prog20`, `test_ail_tuples`, `test_ail_bugs7`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3` pass (64 tests, 1 skipped for a missing zig).  The accepted job's
+generated-C byte-identity check was not re-run on this merged tree.
 
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
