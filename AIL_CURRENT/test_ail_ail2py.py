@@ -109,6 +109,29 @@ fn main() -> int {
 }
 '''
 
+MULTILINE_COMMENT = '''
+fn main() -> int {
+    let x = add(
+        1,
+        2); # end: the sum
+    print(x);
+    return 0;
+}
+'''
+
+STRUCT_COMMENT = '''
+# file head: before the struct
+struct Box {
+    # field note: value
+    value: int;
+}
+impl Box {
+    # method note: bump
+    fn bump(self, n: int) -> void { self.value += n; # end: inline note
+    }
+}
+'''
+
 PROGRAMS = {
     'struct_impl': STRUCT_IMPL,
     'float_list': FLOAT_LIST,
@@ -147,6 +170,15 @@ class ConversionTests(unittest.TestCase):
                 self.assertNotIn('__ail_', converted)
                 self.assertIn('start:', converted)
                 self.assertIn('end:', converted)
+
+    def test_comments_precede_the_statement_they_annotate(self):
+        _, _, converted = self.convert('multiline', MULTILINE_COMMENT)
+        self.assertIn('    # end: the sum\n    x = add(1, 2)', converted)
+        _, _, converted = self.convert('struct_comment', STRUCT_COMMENT)
+        self.assertTrue(converted.startswith('# file head: before the struct\nclass Box:'))
+        self.assertLess(converted.index('# field note: value'), converted.index('self.value = value'))
+        self.assertIn('    # method note: bump\n    def bump', converted)
+        self.assertIn('        # end: inline note\n        self.value += n', converted)
 
     @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
     def test_two_check_identical(self):

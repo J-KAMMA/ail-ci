@@ -1,3 +1,19 @@
+## 2026-11-02 -- onelang s1 review fixes: comment placement in `tools/ail2py.py`
+
+Two comment-placement defects are fixed without touching the compiler.
+
+* An end-of-line comment on a statement that spans several brace lines is now placed before that
+  statement, not after it. The converter distinguishes a comment that follows code on its line from
+  one on its own line and searches the output statements in the matching direction.
+* Comments before a `struct`, its fields, or a `use` import now stay with the generated
+  `class`/`__init__`/field/import lines. A small token scan records the source line of each struct
+  and field and each `use`, because `translate` gives those generated lines no `source_map` entry.
+
+`test_ail_ail2py` gained multiline-statement and struct/import comment-placement regressions. The
+ten compare-lab tasks are still 10/10 `identical` under `--strict`, all 260 brace examples convert
+and parse with every source comment kept, and `test_ail_ail2py`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass.
+
 ## 2026-11-02 -- onelang s1: `tools/ail2py.py` converts brace syntax to annotated Python
 
 New converter over `ail_syntax.translate`: `python3 tools/ail2py.py SRC.ail [-o OUT.py]` writes

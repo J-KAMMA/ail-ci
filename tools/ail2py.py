@@ -59,6 +59,86 @@ def _comments(source):
     return found
 
 
+def _declarations(source):
+    """The source lines of ``use`` imports and of each ``struct`` and its fields.
+
+    ``translate`` records no position for the generated ``class``/``__init__``/field lines or for
+    the ``use`` imports, so comments around them are placed with this scan.
+    """
+    structs = {}
+    uses = []
+    parts = []
+    depth = 0
+    current = None
+    for part in tokenize.generate_tokens(io.StringIO(source).readline):
+        if part.type in (tokenize.NL, tokenize.NEWLINE, tokenize.INDENT, tokenize.DEDENT,
+                         tokenize.COMMENT, tokenize.ENDMARKER):
+            continue
+        if part.type == tokenize.ERRORTOKEN and part.string.isspace():
+            continue
+        value = part.string
+        if value == '{':
+            header = ' '.join(item.string for item in parts).strip()
+            if depth == 0:
+                match = re.fullmatch(r'struct\s+([A-Za-z_]\w*)', header)
+                if match:
+                    current = match[1]
+                    start = parts[0].start[0] if parts else part.start[0]
+                    structs[current] = {'line': start, 'fields': []}
+            depth += 1
+            parts = []
+            continue
+        if value == '}':
+            depth = max(0, depth - 1)
+            if depth == 0:
+                current = None
+            parts = []
+            continue
+        if value == ';':
+            statement = ' '.join(item.string for item in parts).strip()
+            start = parts[0].start[0] if parts else part.start[0]
+            if depth == 0:
+                match = re.fullmatch(r'use\s+([A-Za-z_]\w*)', statement)
+                if match:
+                    uses.append((match[1], start))
+            elif depth == 1 and current is not None:
+                match = re.match(r'([A-Za-z_]\w*)\s*:', statement)
+                if match:
+                    structs[current]['fields'].append((match[1], start))
+            parts = []
+            continue
+        parts.append(part)
+    return structs, uses
+
+
+def _struct_meta(lines, meta, structs):
+    """Give the generated ``class``/``__init__``/field lines the source lines they came from."""
+    current = None
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if not stripped:
+            continue
+        indent = len(line) - len(line.lstrip())
+        if indent == 0:
+            match = re.fullmatch(r'class\s+([A-Za-z_]\w*):', stripped)
+            current = match[1] if match and match[1] in structs else None
+            if current is not None:
+                meta[index] = (structs[current]['line'], indent)
+            continue
+        if current is None:
+            continue
+        info = structs[current]
+        if re.fullmatch(r'def\s+__init__\s*\(\s*self(?:\s*,\s*.*)?\):', stripped):
+            meta[index] = (info['line'], indent)
+            continue
+        match = re.fullmatch(r'self\.([A-Za-z_]\w*)\s*=\s*\1', stripped)
+        if match:
+            for field, field_line in info['fields']:
+                if field == match[1]:
+                    meta[index] = (field_line, indent)
+                    break
+
+
 def _rewrite_markers(text):
     for pattern, replacement in MARKERS:
         text = pattern.sub(replacement, text)
@@ -111,13 +191,24 @@ def _render(text, source_map):
     return lines, meta
 
 
-def _place_comments(lines, meta, comments):
-    for line, _column, text in sorted(comments):
+def _place_comments(lines, meta, comments, source_lines):
+    for line, column, text in sorted(comments):
+        prefix = source_lines[line - 1][:column] if line - 1 < len(source_lines) else ''
+        end_of_line = bool(prefix.strip())
         target = None
-        for index, item in enumerate(meta):
-            if item is not None and item[0] >= line:
-                target = (index, item[1])
-                break
+        if end_of_line:
+            # An end-of-line comment belongs to the statement that line closes, even when that
+            # statement began on an earlier line.
+            for index in range(len(meta) - 1, -1, -1):
+                item = meta[index]
+                if item is not None and item[0] <= line:
+                    target = (index, item[1])
+                    break
+        else:
+            for index, item in enumerate(meta):
+                if item is not None and item[0] >= line:
+                    target = (index, item[1])
+                    break
         if target is None:
             lines.append('')
             meta.append(None)
@@ -146,13 +237,18 @@ def convert(source):
     text = ail_syntax.translate(source, module=not entry, imports=imports,
                                 keep_contracts=False, source_map=source_map)
     text = _rewrite_markers(text)
+    structs, uses = _declarations(source)
     lines, meta = _render(text, source_map)
-    lines = _place_comments(lines, meta, _comments(source))
+    _struct_meta(lines, meta, structs)
+    head = [f'from {name} import *' for name in imports]
+    head_meta = [(uses[index][1], 0) if index < len(uses) else None
+                 for index in range(len(imports))]
+    lines = head + lines
+    meta = head_meta + meta
+    lines = _place_comments(lines, meta, _comments(source), source.splitlines())
     if entry:
         lines = _entry_block(lines)
-    body = '\n'.join(lines).rstrip('\n') + '\n'
-    head = ''.join(f'from {name} import *\n' for name in imports)
-    result = head + body
+    result = '\n'.join(lines).rstrip('\n') + '\n'
     ast.parse(result)
     return result
 
