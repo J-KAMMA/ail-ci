@@ -1,3 +1,50 @@
+## 2026-11-02 -- prog29 review fixes: shadowed `len` and frozenset reads before assignment
+
+Two review defects, both in the module-`frozenset` support, are fixed without touching a program.
+
+* `pyfunc._frozenset_read_reason` now checks that the `len(V)` it lowers is the builtin.  A local,
+  parameter, nested `def`, class-body or module binding named `len` makes the read a refusal by
+  name instead of passing the ordered `list[str]` constant to user code.  A `len` shadowed only in
+  an unrelated inner scope still leaves the outer builtin call typed.
+* `pyc._rewrite_script` refuses a module frozenset read that CPython would run before its source
+  assignment (directly, through an argument/list item/class method, or through a program function
+  that reads it).  Previously the constant was hoisted ahead of the synthesised body, so
+  `print(f())` before `V = frozenset(...)` printed `True` instead of raising `NameError`.
+  `_count_assign_targets` now counts `AnnAssign`, so the kept annotated-frozenset branch is live
+  for direct `pyc` callers as well (the Python surface still strips the annotation to `Assign`).
+
+`AIL_CURRENT/test_ail_prog29.py` covers both refusals, the legal inner-only `len` shadow, and the
+legal read-after-assignment form.  Probes `prog29_z_shadowlen{,_param,_local,_module,_module_var,
+_inner_only}` and `prog29_r_order{,_call,_arg,_class,_list,_ok}` plus `prog29_order_unrelated` all
+match CPython on both `cmp.sh` builds or are refused by name under `--strict`.
+
+## 2026-11-02 -- prog29 typed reach: frozenset module constants and `len(set comprehension)` (job-prog29-11021624)
+
+Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time).  `t161`, `g08_004`
+and `t188` were already wholly typed, and `g17_010`'s three arithmetic helpers were; the one
+program moved here is `g17_026`, whose four project functions (`distinct_vowel_count`, `main`,
+the key lambda and `sort_by_distinct_vowels`) now all reach the typed path.  Two blockers were
+fixed in `python/pkg-v12/pyfunc.py` and `pyc.py`:
+
+* `VOWELS: Final[frozenset[str]] = frozenset("aeiou")` (also the unannotated form and
+  `frozenset([...])` of str literals) is stored as an ordered, duplicate-free `list[str]` module
+  constant.  Because CPython's frozenset is unordered, every read must be `x in VOWELS` /
+  `x not in VOWELS` or `len(VOWELS)`; iteration and every other read are refused by name.  The
+  module rewrite keeps exactly that assignment at module scope.
+* `len({e for v in xs if c})` lowers to the existing eager list comprehension plus a private
+  int/str set table, so duplicates collapse as in CPython.  A float set comprehension is still
+  refused by name.
+
+`AIL_CURRENT/test_ail_prog29.py` (registered in `tests.d/`) builds `g17_026` and the three already
+typed programs under `--strict`, compares all eight under `ail build --cpython`, and covers the new
+set-comprehension and frozenset shapes plus both by-name refusals.  Probes
+`/tmp/probes/prog29_{setcomp_len,setcomp_routes,frozenset,frozenset_edges,frozenset_iter,setcomp_float}.py`
+match CPython on both `cmp.sh` builds or are refused by name.  `frozenset_iter` is refused under
+`--strict`; without `--strict` it takes the general path, whose frozenset order is the documented
+A2 insertion order (the base commit does the same).  The generated C of the ten
+`lab/compare/src/*/main.ail` tasks is byte-identical to the base commit (10/10).  Follow-ups left
+by name: `t475` (`struct`, `str(<list>)`), `g16_006` (generators), `g14_020` (instance
+`__hash__`/`__eq__` keys) and `g17_010` (`range` as a value, the `map`/`filter`/`reduce` chain).
 ## 2026-11-02 -- re-apply accepted prog8 change on staging-integ (job-rbprog8-11021901)
 
 Re-applied the accepted job-prog8 change (NSUM for CPython's int-0 empty float `sum`, float

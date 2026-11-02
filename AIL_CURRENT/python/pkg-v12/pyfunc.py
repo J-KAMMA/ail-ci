@@ -2180,6 +2180,108 @@ def module_table_refusal(name, value):
                        % (name, what, name.lower(), declared, '[...]'))
 
 
+def _module_frozenset(tree, node):
+    """A module-level `frozenset(<str literal>)` / `frozenset([<str literals>])` as the ordered
+    unique `list[str]` a read-only module constant can hold.  CPython's frozenset is unordered,
+    so this spelling is only accepted when every read of the name is a membership test or
+    `len(name)` -- the two operations whose answer does not depend on order -- and the caller
+    refuses it by name otherwise.  The element order is first occurrence; duplicates collapse,
+    which keeps `len()` equal to CPython's frozenset length."""
+    if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id == 'frozenset' and not node.keywords):
+        return None
+    if any(isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
+           and n.name == 'frozenset' for n in tree.body):
+        return None
+    if len(node.args) != 1 or isinstance(node.args[0], ast.Starred):
+        return None
+    arg = node.args[0]
+    if isinstance(arg, ast.Constant) and type(arg.value) is str:
+        values = list(arg.value)
+    elif isinstance(arg, (ast.List, ast.Tuple)) and arg.elts:
+        values = []
+        for element in arg.elts:
+            if not (isinstance(element, ast.Constant) and type(element.value) is str):
+                return None
+            values.append(element.value)
+    else:
+        return None
+    return list(dict.fromkeys(values))
+
+
+def _module_bound_names(tree):
+    """Names a module-level statement binds, used only to tell whether `len` is still the builtin."""
+    bound = set()
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                bound.update(n.id for n in ast.walk(target) if isinstance(n, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            bound.add(node.target.id)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            bound.update((alias.asname or alias.name).split('.')[0] for alias in node.names)
+    return bound
+
+
+def _len_shadowed(tree, node, parents):
+    """Whether the `len` called at `node` resolves to a local, parameter, module binding or import
+    instead of the builtin.  `_frozenset_reads_ordered` lowers `len(V)` to the length of the
+    private list, which is only right for the builtin; a shadowing name must be refused."""
+    if 'len' in _module_bound_names(tree):
+        return True
+    child, parent = node, parents.get(node)
+    while parent is not None:
+        if isinstance(parent, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if 'len' in shadowing._bound_names(parent.body, shadowing._params(parent.args)):
+                return True
+        elif isinstance(parent, ast.Lambda):
+            if 'len' in shadowing._bound_names([parent.body], shadowing._params(parent.args)):
+                return True
+        elif isinstance(parent, ast.ClassDef):
+            if 'len' in shadowing._bound_names(parent.body):
+                return True
+        elif isinstance(parent, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)):
+            bound = {n.id for g in parent.generators
+                     for n in ast.walk(g.target) if isinstance(n, ast.Name)}
+            bound.update(n.target.id for n in ast.walk(parent)
+                         if isinstance(n, ast.NamedExpr) and isinstance(n.target, ast.Name))
+            if 'len' in bound:
+                return True
+        child, parent = parent, parents.get(parent)
+    return False
+
+
+def _frozenset_read_reason(tree, name):
+    """Why a read of `name` is not `x in name` / `x not in name` / the builtin `len(name)`, or None."""
+    parents = {}
+    for parent in ast.walk(tree):
+        for child in ast.iter_child_nodes(parent):
+            parents[child] = parent
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Name) and node.id == name and isinstance(node.ctx, ast.Load)):
+            continue
+        parent = parents.get(node)
+        if (isinstance(parent, ast.Compare) and any(isinstance(op, (ast.In, ast.NotIn)) for op in parent.ops)
+                and (node is parent.left or any(node is c for c in parent.comparators))):
+            continue
+        if (isinstance(parent, ast.Call) and isinstance(parent.func, ast.Name) and parent.func.id == 'len'
+                and len(parent.args) == 1 and parent.args[0] is node and not parent.keywords):
+            if _len_shadowed(tree, parent, parents):
+                return ("the `len` at line %d is a local, parameter or module binding, not the "
+                        "builtin" % parent.lineno)
+            continue
+        return ("line %d reads %r other than `x in %s` / `x not in %s` / the builtin `len(%s)`"
+                % (node.lineno, name, name, name, name))
+    return None
+
+
+def _frozenset_reads_ordered(tree, name):
+    """True when every read of `name` is `x in name` / `x not in name` or the builtin `len(name)`."""
+    return _frozenset_read_reason(tree, name) is None
+
+
 def _scan_module_consts(tree):
     """Module-level constant bindings, section 29's whole feature: a name bound EXACTLY ONCE at
     module scope to an int/float/str literal, or a literal numeric list/tuple, read by any function
@@ -2277,6 +2379,24 @@ def _scan_module_consts(tree):
                                     "with plain lists, dicts and loops" % (unavailable or mod))
             error.source_line = node.lineno    # the import itself, not a later use of the name
             raise error
+        if isinstance(node, ast.AnnAssign):
+            if not isinstance(node.target, ast.Name):
+                continue
+            name = node.target.id
+            frozen = _module_frozenset(tree, node.value)
+            if frozen is not None:
+                if name in consts:
+                    raise Unsupported("%r is a module-level name assigned more than once; this "
+                                      "compiler treats module scope as a fixed set of one-time "
+                                      "constants, not a mutable global" % name)
+                reason = _frozenset_read_reason(tree, name)
+                if reason is not None:
+                    raise Unsupported("%r is a module-level frozenset; %s (only `x in %s`, "
+                                      "`x not in %s` and the builtin `len(%s)` are built, because "
+                                      "iteration order of a frozenset is not preserved)"
+                                      % (name, reason, name, name, name))
+                consts[name] = (SLIST, frozen)
+            continue
         if not isinstance(node, ast.Assign):
             continue
         if len(node.targets) != 1 or not isinstance(node.targets[0], ast.Name):
@@ -2311,6 +2431,16 @@ def _scan_module_consts(tree):
             is_float = any(k == FLT for k, _ in vals)
             values = [float(v) for _, v in vals] if is_float else [v for _, v in vals]
             consts[name] = (FLIST if is_float else LIST, values)
+            continue
+        frozen = _module_frozenset(tree, node.value)
+        if frozen is not None:
+            reason = _frozenset_read_reason(tree, name)
+            if reason is not None:
+                raise Unsupported("%r is a module-level frozenset; %s (only `x in %s`, "
+                                  "`x not in %s` and the builtin `len(%s)` are built, because "
+                                  "iteration order of a frozenset is not preserved)"
+                                  % (name, reason, name, name, name))
+            consts[name] = (SLIST, frozen)
             continue
         if isinstance(node.value, (ast.Set, ast.Dict)):
             raise module_table_refusal(name, node.value)
@@ -17467,6 +17597,8 @@ def _call(node, ctx):
             # `len(g[0])`, `len(g[i])` -- the width, for every row
             ctx.parts.update(('TYPES', 'DIE', 'GRID'))
             return ctx.acols(a[0].value.id)
+        if isinstance(a[0], ast.SetComp):
+            return _setcomp_len(a[0], ctx)
         lo, n, _, pre = _iter_plan(a[0], ctx)          # len(set(xs)), len(sorted(xs)), ...
         ctx.pre.extend(pre)
         return '(%s - %s)' % (n, lo) if lo != '0' else n
@@ -20003,6 +20135,72 @@ def _listcomp_pair_into_temp(node, ctx):
     ctx.pre.append('%s_clear(&%s);' % (helper, c))
     ctx.pre.append('{ %s }' % ' '.join(lines))
     return c
+
+
+def _setcomp_runs_code(node):
+    """Whether the element or any filter of this comprehension can call back into the program."""
+    expressions = [node.elt]
+    for generator in node.generators:
+        expressions.extend(generator.ifs)
+    return any(isinstance(n, (ast.Call, ast.Await, ast.Yield, ast.YieldFrom, ast.NamedExpr,
+                              ast.Lambda))
+               for expression in expressions for n in ast.walk(expression))
+
+
+def _setcomp_source_can_change(node, ctx):
+    """Whether the comprehension's source is a mutable container this compiler may snapshot.
+
+    A list field read and a dict `.keys()`/`.values()` read are copied on the typed path, while a
+    plain list name is walked live.  In either case a call inside the element or filter can change
+    the source while CPython's own iterator is still walking it, so the eager list lowering here
+    would silently use the sequence as it was on entry.
+
+    Every mutable container kind counts, including the typed dict/set kinds (`IDICT`, `SDICT`,
+    `ISET`, `SSET`, ...): a typed set field is snapshotted by the lowering exactly like a typed
+    list field, so leaving those kinds out let it print a stale length instead of CPython's
+    `RuntimeError: Set changed size during iteration`.
+    """
+    source = node
+    while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
+        source = source.value
+    if _is_map_snapshot(source, ctx, 'keys') or _is_map_snapshot(source, ctx, 'values'):
+        return True
+    try:
+        source_type = _etype(source, ctx)
+    except Unsupported:
+        return True
+    return source_type in (LIST, FLIST, SLIST, SET, DICT) or source_type in MAPS
+
+
+def _setcomp_len(node, ctx):
+    """`len({e for v in seq if c})`: build the eager list comprehension, add its elements to a
+    private set, and take that set's length.  This is the one use of a set comprehension as a
+    value built here; duplicates collapse exactly as CPython's set does, and the list and set
+    are temporaries registered with this statement.  Iteration order is never observed."""
+    kind = _listcomp_kind(node, ctx)
+    if kind == FLIST:
+        raise Unsupported('len() of a set comprehension with float elements is not built')
+    if _setcomp_runs_code(node) and _setcomp_source_can_change(node.generators[0].iter, ctx):
+        raise Unsupported('len() of a set comprehension over a mutable sequence whose element or '
+                          'filter runs code: the source can change while it is walked, and the '
+                          'eager list lowering would silently use the sequence as it was on entry. '
+                          'Bind the comprehension to a list first, or test its elements without '
+                          'calling code')
+    setkind = SSET if kind == SLIST else ISET
+    saved, ctx.pre = ctx.pre, []
+    try:
+        listing = _listcomp_into_temp(node, ctx)
+        steps = list(ctx.pre)
+        ctx.pre = []
+        table, _ = ctx.temp(setkind)
+        ctx.parts.add(setkind.upper())
+        add = 'ail_sset_add' if setkind == SSET else 'ail_iset_add'
+        steps.append('ail_%s_clear(&%s);' % (setkind, table))
+        steps.append('for (int64_t _i = 0; _i < %s.n; _i++) %s(&%s, %s.p[_i]);'
+                     % (listing, add, table, listing))
+        return '({ %s ail_%s_len(&%s); })' % (' '.join(steps), setkind, table)
+    finally:
+        ctx.pre = saved
 
 
 def _strcomp_stdin_fill(node, ctx, pad, dst):
