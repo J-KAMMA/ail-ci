@@ -4154,29 +4154,58 @@ def _ail_imports(source):
                                      lineno=node.lineno, offset=node.col_offset + 1)
             edits.append((offset(node.lineno, node.col_offset),
                           offset(node.end_lineno, node.end_col_offset), node.attr))
-    if from_aliases:
+    tracked = set(from_aliases) | aliases
+    if tracked:
+        dropped_ids = {id(node) for node in dropped}
         rebound = None
+        rebound_name = None
         for node in ast.walk(tree):
-            if isinstance(node, ast.Name) and node.id in from_aliases:
+            if rebound is not None:
+                break
+            if isinstance(node, ast.Name) and node.id in tracked:
                 if isinstance(node.ctx, ast.Load):
-                    edits.append((offset(node.lineno, node.col_offset),
-                                  offset(node.end_lineno, node.end_col_offset),
-                                  from_aliases[node.id]))
-                elif rebound is None:
-                    rebound = node
+                    if node.id in from_aliases:
+                        edits.append((offset(node.lineno, node.col_offset),
+                                      offset(node.end_lineno, node.end_col_offset),
+                                      from_aliases[node.id]))
+                else:
+                    rebound, rebound_name = node, node.id
             elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) \
-                    and node.name in from_aliases and rebound is None:
-                rebound = node
-            elif isinstance(node, ast.arg) and node.arg in from_aliases and rebound is None:
-                rebound = node
+                    and node.name in tracked:
+                rebound, rebound_name = node, node.name
+            elif isinstance(node, ast.arg) and node.arg in tracked:
+                rebound, rebound_name = node, node.arg
+            elif isinstance(node, ast.ExceptHandler) and node.name in tracked:
+                rebound, rebound_name = node, node.name
+            elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name in tracked:
+                rebound, rebound_name = node, node.name
+            elif isinstance(node, ast.MatchMapping) and node.rest in tracked:
+                rebound, rebound_name = node, node.rest
+            elif isinstance(node, ast.Import):
+                for alias in node.names:
+                    bound = alias.asname or alias.name.split('.')[0]
+                    if bound not in tracked:
+                        continue
+                    if bound in from_aliases:
+                        rebound, rebound_name = node, bound
+                        break
+                    if id(node) in dropped_ids and alias.name == 'ail' \
+                            and (alias.asname or 'ail') == bound:
+                        continue
+                    rebound, rebound_name = node, bound
+                    break
+            elif isinstance(node, ast.ImportFrom):
+                for alias in node.names:
+                    bound = alias.asname or alias.name
+                    if bound not in tracked:
+                        continue
+                    if id(node) in dropped_ids and not node.level \
+                            and node.module == 'ail' and alias.asname == bound:
+                        continue
+                    rebound, rebound_name = node, bound
+                    break
         if rebound is not None:
-            if isinstance(rebound, ast.Name):
-                name = rebound.id
-            elif isinstance(rebound, ast.arg):
-                name = rebound.arg
-            else:
-                name = rebound.name
-            raise SyntaxErrorAIL('ail import alias ' + name + ' is rebound',
+            raise SyntaxErrorAIL('ail import alias ' + rebound_name + ' is rebound',
                                  lineno=rebound.lineno, offset=rebound.col_offset + 1)
     for start, end, text in sorted(edits, reverse=True):
         data = data[:start] + text.encode('utf8') + data[end:]

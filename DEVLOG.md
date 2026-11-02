@@ -1,3 +1,18 @@
+## 2026-11-02 -- onelang s2 review 3: aliased `ail` imports refuse import/`except`/`match` rebinding
+
+`from ail import X as Y` now detects every binding of `Y` that is not the import declaration, not
+only assignments, arguments and definitions.  `import Z as Y`, `from Z import W as Y`,
+`import ail as Y`, `except E as Y` and `match` captures are named compile-time refusals
+(`ail import alias Y is rebound`) instead of silently rewriting the later uses back to `X`.
+
+Probes for import, from-import, `import ail`, `except`, `match`, assignment, `for`, `with`,
+lambda, `def` and plain `import Y` rebinding all refuse by name in the default and unified builds;
+valid aliases and `import ail` still match CPython and build `program.c` identical to the bare
+program.  The ten converted tasks remain `identical`, `ail2py_cpython_check` still reports nine
+tasks `mismatches 0` plus the listed `tally_lang hidden/long_unary_chain`, and
+`test_ail_ail2py`, `test_ail_python_syntax`, `test_ail_files`, `test_ail_corpus_findings3` and
+`test_ail_safetynet` pass.
+
 ## 2026-11-02 -- onelang s2 review 2: `same_file`, closed binary files and aliased `ail` imports
 
 Fixed the three remaining CPython-parity defects.

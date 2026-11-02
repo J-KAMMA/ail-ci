@@ -179,6 +179,21 @@ BARE_IMPORT_PROGRAM = '''
 print(wrapping_add(1, 2))
 '''
 
+ALIAS_IMPORT_PROGRAM = '''
+from ail import wrapping_add as w
+
+print(w(1, 2))
+'''
+
+REBIND_PROGRAMS = {
+    'import': 'from ail import wrapping_add as w\nimport os as w\nprint(w(1, 2))\n',
+    'fromimport': 'from ail import wrapping_add as w\nfrom math import sqrt as w\nprint(w(1, 2))\n',
+    'import_ail': 'from ail import wrapping_add as w\nimport ail as w\nprint(w(1, 2))\n',
+    'except': "from ail import wrapping_add as w\ntry:\n    raise ValueError('x')\n"
+              "except ValueError as w:\n    print(w)\n",
+    'match': 'from ail import wrapping_add as w\nmatch 1:\n    case w:\n        print(w)\n',
+}
+
 HEAP_AIL = '''
 struct Item { d: int; b: int; n: int; }
 
@@ -306,7 +321,8 @@ class ConversionTests(unittest.TestCase):
     @unittest.skipUnless(HAVE_CC, 'needs a C compiler')
     def test_ail_import_builds_like_the_bare_program(self):
         built = {}
-        for name, text in (('imported', AIL_IMPORT_PROGRAM), ('bare', BARE_IMPORT_PROGRAM)):
+        for name, text in (('imported', AIL_IMPORT_PROGRAM), ('alias', ALIAS_IMPORT_PROGRAM),
+                           ('bare', BARE_IMPORT_PROGRAM)):
             source = Path(self.tmp) / (name + '.py')
             source.write_text(text, encoding='utf-8')
             debug = Path(self.tmp) / ('debug-' + name)
@@ -316,6 +332,17 @@ class ConversionTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr[-3000:])
             built[name] = (debug / 'program.c').read_bytes()
         self.assertEqual(built['imported'], built['bare'])
+        self.assertEqual(built['alias'], built['bare'])
+
+    def test_ail_import_alias_rebinding_is_refused_by_name(self):
+        for name, text in REBIND_PROGRAMS.items():
+            with self.subTest(name):
+                source = Path(self.tmp) / (name + '.py')
+                source.write_text(text, encoding='utf-8')
+                result = run([sys.executable, '-B', CLI, 'compile', str(source), '-o',
+                              str(Path(self.tmp) / (name + '.bin')), '--syntax', 'python'])
+                self.assertNotEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertIn(b'ail import alias w is rebound', result.stderr)
 
     def _run_ail_and_python(self, stem, ail_source, python_source):
         source = Path(self.tmp) / (stem + '.ail')
