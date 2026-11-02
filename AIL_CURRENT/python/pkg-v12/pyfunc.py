@@ -19098,13 +19098,36 @@ def _owned_callback_join(node, ctx):
         ctx.pre = saved
 
 
+def _listcomp_pair(g):
+    """The two names of `for i, d in enumerate(xs)` in a comprehension, or None for a plain
+    name target.  Any other tuple target stays refused by name."""
+    if isinstance(g.target, ast.Name):
+        return None
+    if isinstance(g.target, ast.Tuple) and len(g.target.elts) == 2 \
+            and all(isinstance(e, ast.Name) for e in g.target.elts):
+        if not (isinstance(g.iter, ast.Call) and isinstance(g.iter.func, ast.Name)
+                and g.iter.func.id == 'enumerate'):
+            raise Unsupported('a pair comprehension target over %s' % type(g.iter).__name__)
+        return [e.id for e in g.target.elts]
+    raise Unsupported('a comprehension target that is not a name')
+
+
 def _listcomp_kind(node, ctx):
     """Infer the element in the comprehension's own scalar binding scope."""
     if len(node.generators) != 1 or node.generators[0].is_async:
         raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
     g = node.generators[0]
-    if not isinstance(g.target, ast.Name):
-        raise Unsupported('a comprehension target that is not a name')
+    pair = _listcomp_pair(g)
+    if pair is not None:
+        arg = g.iter.args[0]
+        try:
+            arg_kind = _etype(arg, ctx)
+        except Unsupported:
+            arg_kind = None
+        if arg_kind == FLIST or _is_flist_name(arg, ctx):
+            raise Unsupported('a pair comprehension over a list of floats; not implemented')
+        if _iter_elem_is_str(arg, ctx):
+            raise Unsupported('a pair comprehension over a list of str; not implemented')
     source = g.iter
     while isinstance(source, ast.Subscript) and isinstance(source.slice, ast.Slice):
         source = source.value
@@ -19113,13 +19136,14 @@ def _listcomp_kind(node, ctx):
         raise Unsupported('handle list comprehension folds are unsupported')
     struct_source = _is_olist_kind(source_kind)
     element = (OBJ, source_kind[1]) if struct_source else STR if _iter_elem_is_str(source, ctx) else FLT if _etype(source, ctx) == FLIST else INT
-    name = g.target.id
+    names = pair or [g.target.id]
     types, kinds = dict(ctx.types), dict(ctx.kind)
     try:
-        ctx.kind.pop(name, None)
-        ctx.types[name] = element
-        if struct_source:
-            ctx.kind[name] = element
+        for name in names:
+            ctx.kind.pop(name, None)
+            ctx.types[name] = INT if pair else element
+        if struct_source and not pair:
+            ctx.kind[names[0]] = element
         kind = _etype(node.elt, ctx)
         if isinstance(node.elt, ast.List):
             raise Unsupported('nested list comprehension elements are unsupported')
@@ -19159,14 +19183,66 @@ def _listcomp_simd_safe(node, ctx):
     return True
 
 
+def _pair_listcomp_into_temp(node, g, pair, kind, ctx):
+    """`[e for i, d in enumerate(xs) if c]`: the pair analogue of `_listcomp_into_temp`."""
+    if any(_is_flist_name(a, ctx) for a in g.iter.args):
+        raise Unsupported('a pair comprehension over a list of floats; not implemented')
+    lo, n, kexpr, vexpr, pre = _pair_plan(g.iter, ctx)
+    ctx.parts.add(kind.upper())
+    c, _ = ctx.temp(kind)
+    old_cnames = getattr(ctx, 'comprehension_cnames', {})
+    old_onecp, old_len1 = set(ctx.onecp), set(ctx.len1_names)
+    ctx.tmp += 1
+    tag = ctx.tmp
+    ck, cv = '_comp_pair_key%d' % tag, '_comp_pair_value%d' % tag
+    ctx.comprehension_cnames = {**old_cnames, pair[0]: ck, pair[1]: cv}
+    saved = {}
+    for name in pair:
+        saved[name] = (ctx.types.get(name), ctx.kind.get(name))
+        ctx.kind.pop(name, None)
+        ctx.types[name] = INT
+        ctx.onecp.discard(name); ctx.len1_names.discard(name)
+    head = 'for (int64_t _i = %s; _i < %s; _i++) {' % (lo, n)
+    if pre:
+        head = '%s %s' % (' '.join(pre), head)
+    lines = [head,
+             'int64_t %s = %s;' % (ck, kexpr.replace('@', '_i')),
+             'int64_t %s = %s;' % (cv, vexpr.replace('@', '_i'))]
+    try:
+        for cond in g.ifs:
+            cc = _cond(cond, ctx)
+            lines.extend(ctx.pre); ctx.pre = []
+            lines.append('if (!(%s)) continue;' % cc)
+        val = _str_value(node.elt, ctx) if kind == SLIST else _expr(node.elt, ctx)
+    finally:
+        ctx.comprehension_cnames = old_cnames
+        ctx.onecp, ctx.len1_names = old_onecp, old_len1
+        for name in pair:
+            old_type, old_kind = saved[name]
+            ctx.types.pop(name, None)
+            ctx.kind.pop(name, None)
+            if old_type is not None:
+                ctx.types[name] = old_type
+            if old_kind is not None:
+                ctx.kind[name] = old_kind
+    lines.extend(ctx.pre); ctx.pre = []
+    helper = 'ail_slist' if kind == SLIST else 'ail_flist' if kind == FLIST else 'ail_list'
+    lines.append('%s_push(&%s, %s);' % (helper, c, val))
+    lines.append('}')
+    ctx.pre.append('%s_clear(&%s);' % (helper, c))
+    ctx.pre.append('{ %s }' % ' '.join(lines))
+    return c
+
+
 def _listcomp_into_temp(node, ctx):
     """`[e for v in seq if c]` as a value: one list, built once, freed with the rest."""
     if len(node.generators) != 1 or node.generators[0].is_async:
         raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
     g = node.generators[0]
-    if not isinstance(g.target, ast.Name):
-        raise Unsupported('a comprehension target that is not a name')
+    pair = _listcomp_pair(g)
     kind = _listcomp_kind(node, ctx)
+    if pair is not None:
+        return _pair_listcomp_into_temp(node, g, pair, kind, ctx)
     ctx.parts.add(kind.upper())
     c, _ = ctx.temp(kind)
     source_kind = _etype(g.iter, ctx)

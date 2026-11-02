@@ -90,6 +90,9 @@ def _scalar(e):
             return ('bytes', e.value)
         if type(e.value) is float:
             return ('float', e.value)
+    if (isinstance(e, ast.UnaryOp) and isinstance(e.op, (ast.USub, ast.UAdd))
+            and isinstance(e.operand, ast.Constant) and type(e.operand.value) is float):
+        return ('float', -e.operand.value if isinstance(e.op, ast.USub) else e.operand.value)
     return None
 
 

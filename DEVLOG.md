@@ -1,3 +1,26 @@
+## 2026-11-02 -- prog16 typed reach: pair comprehensions and negative float tuple tables (job-prog16-11020904)
+
+Profiled the eight programs in `lab/progfix/prog16.md` under CPython 3.12.  Five now have every hot
+function on the typed path: `t068`, `t003` and `g09_028` were already fully typed; `t268` needed a
+comprehension whose target is a pair of names over `enumerate` (`[i for i, d in enumerate(degree)
+...]`), and `g25_038` needed a module-level list of tuples with negative float literals
+(`READINGS = [(25.0, "C"), (-40.0, "F")]`).  `pyfunc`'s list-comprehension lowering now reuses its
+pair plan for the two-name `enumerate` target (a start, a list of floats or a list of str stays
+refused by name), and `modtables._scalar` now accepts unary `-`/`+` over a float literal, sign of
+`-0.0` included.  No program file changed.
+
+The other three need large features and are recorded with their exact messages in
+`lab/progfix/prog16.md`: `g21_034` (`Any` / `list[dict]` / `Any | None` and `json.dumps` of an
+untyped value), `g20_038` (`re.compile`/`Pattern`/`Match` and a returned nested function), and
+`g14_040` (`typing` reflection and `dataclasses.fields`).  For the ten `lab/compare` tasks the
+generated `program.c` is byte-identical to `HEAD` (both `main.ail` and the `main.py` builds that
+built before).  `AIL_CURRENT/test_ail_prog16.py` is registered by
+`tests.d/test_ail_prog16.txt`; it compiles the five typed programs with `AIL_NO_GENERAL=1` on both
+IR builds and compares stdout/exit with CPython, and covers the two new forms plus their refused
+neighbours.  Probes in `/tmp/probes/prog16_*.py` (pair comprehension through an argument, a list
+item and an attribute; module tuple tables with negative and `-0.0` floats; `enumerate(start=...)`
+and list-of-float refusals) all match CPython or are refused by name on both builds.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten
