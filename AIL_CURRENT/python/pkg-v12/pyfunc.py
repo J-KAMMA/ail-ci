@@ -12360,6 +12360,19 @@ def _shape_refusal(node, table, what):
                             'by name rather than guessed at (SEMANTICS.md section 5)' % (t, what))
 
 
+def _ordered_numeric_args(args, ctx, form):
+    """Evaluate numeric operands left to right at the expression site, even under `and`."""
+    codes = [_expr(arg, ctx) for arg in args]
+    names = []
+    for arg, code in zip(args, codes):
+        slot, name = ctx.temp(FLT if _etype(arg, ctx) == FLT else INT)
+        names.append((slot, name))
+    if getattr(ctx, 'experimental_ephemeral_numeric_temps', False):
+        ctx.ephemeral_numeric_temps.update({name for _, name in names} - ctx.source_names)
+    stages = ', '.join('(%s = %s)' % (slot, code) for (slot, _), code in zip(names, codes))
+    return '(%s, %s)' % (stages, form.format(*(slot for slot, _ in names)))
+
+
 def _ordered_numeric_pair(left, right, ctx, form):
     """Evaluate numeric operands left to right at the expression site, even under `and`."""
     left_c = _expr(left, ctx)
@@ -16998,6 +17011,8 @@ def _call(node, ctx):
         ctx.parts.update(('LIBM', 'LIBM_' + f[7:]))
         if len(a) == 1:
             return 'ail_m_%s((double)(%s))' % (f[7:], rec(a[0]))
+        if len(a) == 3:
+            return _ordered_numeric_args(a, ctx, 'ail_m_%s((double)({}), (double)({}), (double)({}))' % f[7:])
         return _ordered_numeric_pair(a[0], a[1], ctx, 'ail_m_%s((double)({}), (double)({}))' % f[7:])
     if f == 'jsdiv' and len(a) == 2:
         if node.keywords:
