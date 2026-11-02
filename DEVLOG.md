@@ -19,6 +19,30 @@ parameter).  Exact messages and hot-function shares are in `lab/progfix/prog5.md
 builds the four typed programs and compares stdout/exit with CPython, plus typed callable and
 appended-rows programs.  Probes `/tmp/probes/p5_{groupby,rows_append,rows_sources,set_str,
 callable_exc}.py` match CPython on both `cmp.sh` builds.  No new semantic difference was added.
+## 2026-11-01 -- typed reach: `enumerate(str)` makes g25_030 fully typed (job-prog10-11020733)
+
+Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time over repeated `main()` calls) and
+recorded every hot user function in `lab/progfix/prog10.md`. Three were already wholly typed (`g07_038`,
+`t016`, `g11_016`; the four hot `g11_016` functions hold 83.9%). `g25_030.find_completions` (32.6%) was the one
+feasible small fix: it stopped the typed path at ``this use of a str as an iterable is not built (plain
+`for c in s` is); for an index keep a counter``. `python/pkg-v12/pyfunc.py` now lowers
+`for index, ch in enumerate(text)` over a `str` as the pair form of the existing character walk: one
+private temp for the iterable, the same UTF-8 view, and a private counter so the index counts characters,
+not bytes, and a body that rebinds it cannot disturb the next step. `g25_030` is now typed as a whole
+program on both `AIL_IR` modes; before, only `next_state` was accelerated by `ail build --cpython`.
+`AIL_CURRENT/test_ail_prog10.py` (registered in `tests.d/`) compiles the original program and an
+argument/list-item/attribute/dict-value probe with empty, ASCII, combining and CJK text, and compares both
+with CPython. Probes `/tmp/probes/prog10_enum_str.py`, `prog10_enum_routes.py` and `prog10_enum_edges.py`
+(start argument, break/continue/else, nested loops, rebinding the index and the character) match CPython on
+both `cmp.sh` builds; a non-BMP emoji variant is refused by name on the general build (the existing 16-bit
+v2 limit) and matches on the default build. `prog10_setstr.py` and `prog10_setstr2.py` are refused by name
+on the typed path (the `set[str]` comprehension / `set(str)` follow-ups recorded for `g06_016`), so they
+fall back to the general path, where a printed short set keeps insertion order rather than CPython's hash
+order -- the known set-order difference, not something this change touches. The generated C of the ten
+`lab/compare/src/*/main.ail` tasks is byte-identical to the base commit. The other refusals need big
+features: classes/ABC rich comparisons returning `NotImplemented` (`g13_014`), a nested tuple target over
+`itertools.combinations` (`g06_036`), `set[str]` comprehensions (`g06_016`) and nested
+`list[dict[str, str]]` records (`g01_016`).
 
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
