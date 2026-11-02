@@ -1870,6 +1870,27 @@ def _etype(node, ctx):
                         if isinstance(e, ast.Name):
                             ctx.bind(e.id, INT)
                 return _etype(a[0].elt, ctx)
+            # `max(d, key=K)` / `min(d, key=K)` returns the KEY of the dict, not what K evaluates
+            # (K only supplies the comparison value).  The bare-container answer below is INT, so
+            # an unannotated `top = max(stock, key=lambda k: stock[k])` was settled as int and the
+            # str key then looked like a rebinding.  The same key-kind answer covers the typed
+            # containers whose first position may not be an int64.
+            if node.keywords and any(kw.arg == 'key' for kw in node.keywords):
+                source = a[0]
+                map_kind = _map_kind(source, ctx)
+                if map_kind is not None:
+                    return _map_key_kind(map_kind)
+                if isinstance(source, ast.Name):
+                    try:
+                        source_kind = ctx.type_of(source.id)
+                    except Exception:
+                        source_kind = None
+                    if source_kind == SLIST:
+                        return STR
+                    if source_kind == FLIST:
+                        return FLT
+                    if source_kind in (LIST, SET):
+                        return INT
             # the bare-container form, `sum(xs)`/`max(xs)`/`min(xs)` -- FLT when `xs` is a FLIST,
             # otherwise unchanged (INT), exactly as it always was for every other sequence shape.
             if _is_flist_name(a[0], ctx):
@@ -7800,6 +7821,14 @@ def _is_str_expr(node, ctx):
         return True
     if _is_str_format_call(node, ctx):
         return True
+    if (isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+            and node.func.id in ('min', 'max') and node.func.id not in ctx.funcs
+            and node.args and any(kw.arg == 'key' for kw in node.keywords)):
+        # min/max over a str-keyed set or dict returns one of its KEYS; the key function only
+        # supplies the comparison value.  Without this the pre-binding pass claimed the target
+        # int, so `top = max(stock, key=lambda k: stock[k])` was refused as an int-to-str rebind.
+        kind = _map_kind(node.args[0], ctx)
+        return kind is not None and _map_key_kind(kind) == STR
     return False
 
 
@@ -13132,6 +13161,14 @@ def _numeric_to_int(value, ctx):
                   if os.environ.get('AIL_SURFACE') == 'python' else '')) +
             'ail_die("OverflowError: integer overflow in int(float) (ints are 64-bit; --exact-int gives exact ints)"); } (int64_t)_ail_number_input; })') % value
 def _numeric_expression_needed(node, ctx):
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set, ast.Dict, ast.ListComp, ast.SetComp,
+                         ast.DictComp, ast.GeneratorExp)):
+        # A container literal is not a numeric binding even when every element happens to be a
+        # name currently holding a number: `{lo, hi}` is a set of ints, not a number. Before this,
+        # the probe's first pass (numeric_allowed_names still None) read the names and lowered the
+        # assignment as a numeric binding, so `s: set[int] = {lo, hi}` was refused as assigning an
+        # int to a declared set.
+        return False
     if isinstance(node, ast.BinOp) and not (_etype(node.left, ctx) in NUM and _etype(node.right, ctx) in NUM):
         return False  # [0] * n, "ab" * n, xs + ys: a sequence operand is not a numeric binding
     return any(isinstance(n, ast.Name) and n.id in ctx.locals and ctx.types.get(n.id) in NUM and n.id in getattr(ctx, 'source_names', ()) and (ctx.numeric_allowed_names is None or n.id in ctx.numeric_allowed_names) for n in ast.walk(node))
@@ -19274,11 +19311,56 @@ def _owned_callback_join(node, ctx):
         ctx.pre = saved
 
 
+def _listcomp_pair(node, ctx):
+    """`[e for i, v in enumerate(X)]` with both names bound to int64 values, as (names, call).
+    Restricted to an integer list/array/range source: a str/float/instance element would need a
+    different binding type in `_listcomp_pair_into_temp`, so it is refused by name there."""
+    g = node.generators[0]
+    target = g.target
+    if not (isinstance(target, ast.Tuple) and len(target.elts) == 2
+            and all(isinstance(e, ast.Name) for e in target.elts)):
+        return None
+    src = g.iter
+    if not (isinstance(src, ast.Call) and isinstance(src.func, ast.Name)
+            and src.func.id == 'enumerate' and src.func.id not in ctx.funcs
+            and src.func.id not in ctx.classes
+            and len(src.args) == 1 and not src.keywords):
+        return None
+    base = src.args[0]
+    while isinstance(base, ast.Subscript) and isinstance(base.slice, ast.Slice):
+        base = base.value
+    if _is_slist_expr(base, ctx) or _is_str_expr(base, ctx) or _is_flist_name(base, ctx):
+        raise Unsupported('a list comprehension over enumerate() of a list of str or float; '
+                          'write the loop out')
+    kind = _etype(base, ctx)
+    if _is_olist_kind(kind) or _is_hlist_kind(kind):
+        raise Unsupported('a list comprehension over enumerate() of a list of instances; '
+                          'write the loop out')
+    if kind not in (LIST, 'array', RANGE):
+        raise Unsupported('a list comprehension over enumerate() needs a list of int or a range')
+    return [target.elts[0].id, target.elts[1].id], src
+
+
 def _listcomp_kind(node, ctx):
     """Infer the element in the comprehension's own scalar binding scope."""
     if len(node.generators) != 1 or node.generators[0].is_async:
         raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
     g = node.generators[0]
+    if isinstance(g.target, ast.Tuple):
+        pair = _listcomp_pair(node, ctx)
+        if pair is None:
+            raise Unsupported('a comprehension target that is not a name')
+        names = pair[0]
+        types, kinds = dict(ctx.types), dict(ctx.kind)
+        try:
+            for name in names:
+                ctx.kind.pop(name, None)
+                ctx.types[name] = INT
+            kind = _etype(node.elt, ctx)
+        finally:
+            ctx.types.clear(); ctx.types.update(types)
+            ctx.kind.clear(); ctx.kind.update(kinds)
+        return SLIST if kind == STR else FLIST if kind == FLT else LIST
     if not isinstance(g.target, ast.Name):
         raise Unsupported('a comprehension target that is not a name')
     source = g.iter
@@ -19338,11 +19420,65 @@ def _listcomp_simd_safe(node, ctx):
 _LIST_RESERVE_LIMIT = 1 << 22
 
 
+def _listcomp_pair_into_temp(node, ctx, pair):
+    """The `(i, v)` form of `_listcomp_into_temp` over `enumerate(X)` with int64 names."""
+    g = node.generators[0]
+    names, src = pair
+    kind = _listcomp_kind(node, ctx)
+    if kind == SLIST:
+        raise Unsupported('a list comprehension over enumerate() that builds str; write the loop out')
+    ctx.parts.add(kind.upper())
+    c, _ = ctx.temp(kind)
+    lo, n, kexpr, vexpr, pre = _pair_plan(src, ctx)
+    ctx.tmp += 1
+    tag = ctx.tmp
+    ck, cv = '_comp_index%d' % tag, '_comp_value%d' % tag
+    old = [(name, ctx.types.get(name), ctx.kind.get(name)) for name in names]
+    old_cnames = getattr(ctx, 'comprehension_cnames', {})
+    ctx.comprehension_cnames = {**old_cnames, names[0]: ck, names[1]: cv}
+    for name in names:
+        ctx.kind.pop(name, None)
+        ctx.types[name] = INT
+    head = 'for (int64_t _i = %s; _i < %s; _i++) {' % (lo, n)
+    if pre:
+        head = '%s %s' % (' '.join(pre), head)
+    lines = [head,
+             'int64_t %s = %s;' % (ck, kexpr.replace('@', '_i')),
+             'int64_t %s = %s;' % (cv, vexpr.replace('@', '_i'))]
+    try:
+        for cond in g.ifs:
+            cc = _cond(cond, ctx)
+            lines.extend(ctx.pre); ctx.pre = []
+            lines.append('if (!(%s)) continue;' % cc)
+        val = _expr(node.elt, ctx)
+    finally:
+        ctx.comprehension_cnames = old_cnames
+        for name, old_type, old_kind in old:
+            ctx.types.pop(name, None)
+            ctx.kind.pop(name, None)
+            if old_type is not None:
+                ctx.types[name] = old_type
+            if old_kind is not None:
+                ctx.kind[name] = old_kind
+    lines.extend(ctx.pre); ctx.pre = []
+    helper = 'ail_flist' if kind == FLIST else 'ail_list'
+    lines.append('%s_push(&%s, %s);' % (helper, c, val))
+    lines.append('}')
+    ctx.pre.append('%s_clear(&%s);' % (helper, c))
+    ctx.pre.append('{ %s }' % ' '.join(lines))
+    return c
+
+
 def _listcomp_into_temp(node, ctx):
     """`[e for v in seq if c]` as a value: one list, built once, freed with the rest."""
     if len(node.generators) != 1 or node.generators[0].is_async:
         raise Unsupported('a comprehension with %d for-clauses' % len(node.generators))
     g = node.generators[0]
+    if isinstance(g.target, ast.Tuple):
+        pair = _listcomp_pair(node, ctx)
+        if pair is None:
+            raise Unsupported('a comprehension target that is not a name')
+        return _listcomp_pair_into_temp(node, ctx, pair)
     if not isinstance(g.target, ast.Name):
         raise Unsupported('a comprehension target that is not a name')
     kind = _listcomp_kind(node, ctx)
@@ -28096,6 +28232,11 @@ def _promote_floats(fn, ctx):
             if isinstance(n.targets[0], ast.Name) and n.targets[0].id in ctx.dhandles:
                 continue            # all assignments to an inner-dict alias belong to _stmt;
                                     # a later invalid scalar rebind must not pre-bind it to INT
+            if (isinstance(n.value, ast.Subscript) and isinstance(n.value.value, ast.Name)
+                    and getattr(n.value.value, '_ail_synth', False)):
+                continue            # `_il5_keys[_il2_bi]` -- iterlower's own keyed min/max lowering
+                                     # builds the holder list just before this statement; its element
+                                     # kind is settled where the list is built, not here
             if isinstance(n.value, ast.Name) and n.value.id in container_names:
                 continue            # `reachable = nxt` -- see `container_names` above; left for
                                      # `_stmt`'s own container-to-container rebind check to settle

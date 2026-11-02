@@ -1,3 +1,28 @@
+## 2026-11-02 -- prog28 typed reach: t141 and g07_036 (job-prog28-11021550)
+
+Profiled the eight assigned programs with CPython 3.12 `cProfile` (own time over repeated `main()`
+calls) and recorded every hot user function in `lab/progfix/prog28.md`.  t441, g04_012 and
+g22_020 were already wholly typed.  Two more now build on the typed path, without touching the
+programs:
+
+* t141's hot `main`/lambda use `top_item = max(stock, key=lambda name: stock[name])`.  The type
+  fixed point answered INT for a bare-container `max`, and the pre-binding pass then claimed
+  `top_item` int before iterlower's synthesized holder list (`_il5_keys`) supplied its str key;
+  `python/pkg-v12/pyfunc.py` now answers the map's key kind in `_etype`/`_is_str_expr` and leaves a
+  subscript of a synthesized iterlower name to the statement that builds the list.
+* g07_036's hot `trim_extremes`/`main` use `[value for index, value in enumerate(values) if ...]`
+  and `excluded: set[int] = {min_index, max_index}`; the branch's uncommitted pyfunc work that
+  lowers the `enumerate` pair comprehension and treats a container literal as a container binding
+  (not a numeric one) is kept, completing that program.
+
+The remaining three keep exact follow-up messages in `lab/progfix/prog28.md`: g25_040 needs typed
+`Enum` methods / a module Enum list, t489 needs `unicodedata.name`/`normalize` (the general path
+cannot build it either), and g01_002 needs the Counter use behind the inline
+`int(match.group("status"))` subscript.  `AIL_CURRENT/test_ail_prog28.py` (registered in
+`tests.d/`) compiles both newly typed programs with `--strict`, compares all t141 inputs and the
+self-contained g07_036 with CPython, and adds dict-key min/max, enumerate-pair, set-literal and
+trim-variant programs.  Probes `/tmp/probes/prog28/p1..p5` match CPython on both `cmp.sh` builds.
+The ten `lab/compare` tasks keep byte-identical generated C.
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.
