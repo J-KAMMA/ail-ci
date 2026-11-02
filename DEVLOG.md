@@ -1,3 +1,14 @@
+## 2026-11-02 -- reintenum4 re-apply: enum power, cross-kind equality, ordering and divmod (job-rbreintenum4-11021830)
+
+Re-applied the accepted `job-reintenum4-11021117` change on this tree.  The later accepted fixes for
+the same files were kept (the op-aware ordering path and the 100-character operand names in
+`dunderrt.py`), and the new `enum=` gates were merged into the current `dunderrt.patch` /
+`safetyrt.patch_notimplemented` signatures.  The test module is registered through
+`AIL_CURRENT/tests.d/` (this tree's scheme) instead of the `ail_check.MODULES` tuple.  The change is
+the IntEnum/IntFlag `**` and 3-argument `pow`, object-style plain-Enum equality, cross-kind equality,
+order-specific plain-enum TypeErrors, divmod dispatch, and sequence repetition rules described in
+the accepted entries below.
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.
@@ -2535,6 +2546,89 @@ random texts over spaces, tabs, hyphens, em dashes, digits, punctuation and non-
 `shorten_refuse`, `shorten_missing_width` and `shorten_indent_refuse` are refused by name.  The corpus
 program `deepseek-v4.1-flash-free/t116.py` matches CPython on both builds.  Added
 `AIL_CURRENT/test_ail_stdlib31.py`, registered in `ail_check.MODULES`.
+
+## 2026-11-02 -- reintenum4 fix round 4: StrEnum ordering and enum-gated NotImplemented route
+
+The reintenum4 review (FIX) found two defects in the previous round.
+
+* The new `ail2n_dec_frac` reflection route ran for every left operand whose ordering dunder returned
+  NotImplemented, so `S.A > Decimal("0.5")` (StrEnum) entered Decimal's reflected method and reported
+  `'<'` with the operands reversed.  The route now also requires `ail2n_intenum(a)` (the base chain
+  contains `_AilIntEnum`, which IntFlag shares); a StrEnum or plain Enum keeps the old error text with
+  the operator and operand order of the original comparison.  IntEnum/IntFlag vs Decimal/Fraction
+  still route and match CPython.
+* `safetyrt.patch_notimplemented`'s instance-ordering branch was emitted for every program returning
+  NotImplemented, including a class-only program with no enum.  It now takes `enum=` like the MUL
+  guard and replaces the old branch only when the compiler registered an enum base class; a class-only
+  program's C is byte-identical to the base.  The Decimal/Fraction helpers are emitted only with that
+  branch.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `rev_strenum_dec`, `rev_gt`, `rev_order2`,
+`bytes_order`, `p1` and `p8` keep only the pre-existing Decimal/Fraction type-name text differences;
+`rev_strenum_dec` and `rev_gt` match CPython exactly after normalising `decimal.Decimal` to `Decimal`.
+Generated C for `rev_notimpl_unrelated` (`p5ni`) and `rev_unrel` is byte-identical to the base.
+Final-state tests: `test_ail_reintenum4`, `test_ail_dunders`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` (5 modules, 0 failed).
+
+## 2026-11-02 -- reintenum4 fix round 3: Decimal/Fraction ordering and enum-gated MUL guard
+
+The reintenum4 review (FIX) named two defects left by the previous round.
+
+* Ordering against Decimal/Fraction crashed or changed silently.  An IntEnum/IntFlag ordering dunder
+  now returns NotImplemented for them (`_ail_en_cmp`; arithmetic keeps the `_ail_en_num` dispatch), so
+  `C.B.__gt__(Decimal("2.5"))` is NotImplemented as for int.  The reflected comparison then runs
+  through the old `ail_dun_cmp_rev` path, which is reached only for a Decimal/Fraction right operand,
+  so the error text for `C.B < b"3"` / `C.B < E.A` keeps its operand order.  `prelude_decimal._ail_dec_conv_cmp`
+  and `prelude_fraction._ail_fr_cmp`/`__eq__` recognise the `_ail_intenum` marker and compare the
+  member's value, so both directions and all four operators match CPython.
+* The MUL guard added in front of the big-int `ail__mul_slow` was emitted for every class program.
+  `dunderrt.patch` now takes `enum=` and adds that guard only when the compiler registered an enum
+  base class; a program with a class but no enum gets the C it had before the guard.
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `rev_gt`, `rev_order2`, `bytes_order` and
+`rev_unrel` match CPython; the generated C of `rev_unrel` has no guard before `ail__mul_slow`, while
+the enum program keeps it.  Final-state tests: `test_ail_reintenum4`, `test_ail_stdtop1`,
+`test_ail_stdlib5`, `test_ail_dunders`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
+## 2026-11-02 -- reintenum4 fix round 2: sequences only repeat, never compare or add
+
+The reintenum4 review (FIX) found that the previous round widened `_ail_en_num` to `str`, `bytes`,
+`bytearray`, `list`, `tuple` and `range` for *every* operator.  Comparisons, arithmetic and `divmod`
+then evaluated the raw int value, so the error named `int` (or swapped the operands) instead of the
+enum class: `C.B < "3"`, `C.B + "x"`, `C.B < b"3"` and `divmod(C.B, "x")` differed from CPython.
+`range` was also accepted even though CPython refuses `range * int`.
+
+`_ail_en_num` now handles only `int`, `float` and the `_ail_dec`/`_ail_fr` markers; a new
+`_ail_en_mul` adds the builtin sequences minus `range`, and only `__mul__`/`__rmul__` use it.  So
+sequence repetition still matches on either side (including zero/negative counts and values reaching
+the operator through a parameter, list item, attribute or dict value), while all other operators
+return `NotImplemented` and keep the enum class in the TypeError.  `C.B * range(2)` now names `C`
+and `range`.  `test_ail_reintenum4` gained a `sequence_ops` program covering these cases.
+
+Probes in `/tmp/rprobes` on both builds via `cmp.sh`: `p_cmp`, `p_seq`, `p_pow` match CPython.
+`p_dec` matches for the member-on-left Decimal/Fraction cases and keeps the same pre-existing
+reflected Decimal/Fraction differences as the base (Decimal/Fraction on the left).  Final-state
+tests: `test_ail_reintenum4`, `test_ail_safetynet`, `test_ail_files` and
+`test_ail_corpus_findings3`.
+
+## 2026-11-01 -- reintenum4 fix round: sequence repetition and Decimal operands
+
+The reintenum4 review (FIX) found that `_ail_en_num` returned `NotImplemented` for every non-int/float
+operand, so an IntEnum/IntFlag multiplied or added to a Decimal lost the int-subclass dispatch
+(`C.B * Decimal("2")`, `C.B + Decimal("2")`) and sequence repetition failed in both directions
+(`C.B * "ab"`, `"ab" * C.B`, list/tuple/bytes, zero and negative counts).  `_ail_en_num` now passes
+builtin numbers, sequences and Decimal/Fraction through (markers `_ail_dec`/`_ail_fr`), and keeps
+`NotImplemented` for other objects, so their reflected methods still receive the member itself.
+The bytes/bytearray repetition methods accept `__index__`, and the big-int multiply tail dispatches
+an instance operand before it flattens a STR view.  A Decimal on the left of `*`/`+` with a member
+on the right keeps the base's TypeError (it is not the form the review recorded).
+
+Probes in `/tmp/probes` on both builds via `cmp.sh`: `p_seq`, `p_dec_left`, `p_refl`, `p_refl2`,
+`p_intconv`, `p_bytesenum`, `p_deconly`, `p_fraconly`, `p_none` match CPython; `p_obj` keeps the
+pre-existing Decimal comparison and plain-class ordering differences (unchanged from the base).
+`test_ail_reintenum4`, `test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`
+pass on the final commit.
 
 ## 2026-10-28 -- pre423 review: unpacked literals in an annotation are unknown, not truthy
 

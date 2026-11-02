@@ -205,6 +205,8 @@ def _ail_fr_parse(text: str) -> list[int]:
 
 
 class Fraction:
+    _ail_fr = True
+
     def __init__(self, numerator=0, denominator=None, _ail_raw=False):
         if _ail_raw:
             self.numerator = numerator
@@ -491,6 +493,11 @@ class Fraction:
 
     # -- comparison ------------------------------------------------------------------------------
     def __eq__(self, other):
+        try:
+            if not isinstance(other, (int, float, Fraction)) and hasattr(other, "_ail_intenum"):
+                other = other.value
+        except NotImplementedError:
+            pass
         if isinstance(other, Fraction):
             return self.numerator == other.numerator and self.denominator == other.denominator
         if isinstance(other, int):
@@ -590,6 +597,11 @@ def _ail_fr_div(a, b):
 
 def _ail_fr_cmp(a, other) -> int:
     # -1, 0, 1; 2 when unordered (a NaN)
+    try:
+        if not isinstance(other, (int, float, Fraction)) and hasattr(other, "_ail_intenum"):
+            other = other.value
+    except NotImplementedError:
+        pass
     if isinstance(other, Fraction):
         l = a.numerator * other.denominator
         r = a.denominator * other.numerator

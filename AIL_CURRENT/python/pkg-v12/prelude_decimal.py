@@ -296,6 +296,8 @@ def localcontext(ctx=None, prec=None, rounding=None, Emin=None, Emax=None, capit
 # construction
 # ---------------------------------------------------------------------------------------------------------------
 class Decimal:
+    _ail_dec = True
+
     def __init__(self, value="0", context=None):
         self._s = 0
         self._c = 0
@@ -876,6 +878,11 @@ def _ail_dec_conv_cmp(x):
         return Decimal(x)
     if isinstance(x, float):
         return Decimal(x)
+    try:
+        if hasattr(x, "_ail_intenum"):
+            return Decimal(x.value)
+    except NotImplementedError:
+        pass
     return None
 
 

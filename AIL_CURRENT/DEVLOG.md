@@ -1,3 +1,14 @@
+## 2026-11-02 -- reintenum4 re-apply: enum power, cross-kind equality, ordering and divmod (job-rbreintenum4-11021830)
+
+Re-applied the accepted `job-reintenum4-11021117` change on this tree.  The later accepted fixes for
+the same files were kept (the op-aware ordering path and the 100-character operand names in
+`dunderrt.py`), and the new `enum=` gates were merged into the current `dunderrt.patch` /
+`safetyrt.patch_notimplemented` signatures.  The test module is registered through
+`AIL_CURRENT/tests.d/` (this tree's scheme) instead of the `ail_check.MODULES` tuple.  The change is
+the IntEnum/IntFlag `**` and 3-argument `pow`, object-style plain-Enum equality, cross-kind equality,
+order-specific plain-enum TypeErrors, divmod dispatch, and sequence repetition rules described in
+the accepted entries below.
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
@@ -197,6 +208,49 @@ for the upper-half constants became exactness tests.
 Today's integ already refused a statically known non-BMP `chr()` argument at build time (`test_ail_pre36.py`, added after the old pre20 diff), but a value only known at run time still reached `ail_bi_chr`'s `ail_die` and ended with `AIL internal error: chr() non-BMP code point requires 32-bit strings`. The general runtime stores UTF-16 units and cannot represent U+10000..U+10FFFF; the typed/default build can. `ail_bi_chr` now returns `ail_hit_limit(cx, "chr_non_bmp", ...)` (the uncatchable `AIL limit: chr_non_bmp`, exit 3) for such a value, in the `str_title_nonascii` limit style, and the build-time refusal wording is `chr() of the non-BMP code point U+... in the 16-bit v2 runtime` (pre267's `bytes.decode()` style). `test_ail_pre36.py` was updated for the wording; new `test_ail_repre20.py` (8 tests) compares with CPython through a literal, an argument, a list item, an attribute, a dict value and stdin on both builds, checks the limit is uncatchable (`except`/`finally` do not run), and keeps the U+FFFF boundary and the ValueError range errors unchanged.
 
 Probes in `/tmp/probes`: `p20_literal` (general refused by name; the default build of a lone top-level statement falls back to the general path here, the three-line `p20_default` matches CPython), `p20_runtime_value` / `p20_attr_only` / `p20_dict_only` / `p20_try` (named limit, exit 3), `p20_bmp` / `p20_range` (match on both builds), `p20_typed_simple` (default matches CPython, general stops with the limit).
+
+## 2026-10-29 -- reintenum4 review fixes: `**` operand names and 3-argument `pow` of an IntEnum with `__index__`
+
+Two defects from the review of the entry below, each verified with CPython 3.12 on both builds
+(`/tmp/probes/q1_pow_exc_names.py`, `/tmp/probes/q2_pow3_index.py`):
+
+* Binary `**` copied both operand names into one `snprintf`, but `ail__tname_c` returns one shared
+  static buffer, so `A() ** B()` said `'A' and 'A'`. The dunder runtime's `**` arm now copies each
+  name into its own buffer first, as the 3-argument path and the comparison error already do
+  (`'A' and 'B'`, reversed for `B() ** A()`).
+* The 3-argument `pow` unwrapped an IntEnum/IntFlag argument through `__index__`, so a subclass
+  override changed the value (`pow(C.A, 2, 5)` with `__index__` returning 1 gave 1, CPython 4).
+  `ail_bi_pow` now reads the member's stored `value` attribute -- CPython's int-subclass payload --
+  and ignores the overridable method.  `pow(C.A, 2, 5)`, `pow(C.B, 3, 7)`, IntFlag peers, an
+  overridden exponent/modulus and values through a parameter, a list item, an attribute and a dict
+  value all match CPython (`4 6` for the reviewer's program).
+
+`test_ail_reintenum4.py`'s `pow` program gained the exception-name pairs and an IntEnum/IntFlag
+with `__index__` overridden; both builds pass it.
+
+## 2026-10-29 -- reintenum4: IntEnum/IntFlag `**`, cross-kind equality, plain-enum ordering and divmod (job-reintenum4-10300605)
+
+Re-checked on today's integ first; only the differences that still reproduced were changed.
+`C.B ** 2`, `pow(C.B, 2)`, `pow(C.B, 2, 5)` and `2 ** C.B` are the int power of the member's value
+(`_AilIntEnum.__pow__`/`__rpow__`); `pow(x, y, None)` is the binary power, a float anywhere keeps
+CPython's int-only 3-argument message, and any other instance gets the three-operand
+`unsupported operand type(s) for ** or pow()` message naming all three classes (the 3-argument
+`ail_bi_pow` now unwraps an IntEnum/IntFlag from its stored `value`, the int-subclass payload).  Binary `**` on a non-instance
+pair names both operands (`'str' and 'int'`), and the sequence-multiply error no longer
+misreads the operator text `** or pow()` as `*`.
+
+Plain `Enum.__eq__` is object's: it returns NotImplemented, so the other operand's `__eq__` runs
+before the identity answer (tested with a class that prints from `__eq__`).  IntEnum/IntFlag
+compare with int/float and an IntEnum/IntFlag value, not with another enum kind; StrEnum compares
+with str and another StrEnum's value, not with a plain Enum.  Plain-enum ordering raises the
+operator-specific TypeError naming both classes (`'E' and 'int'`, `'E' and 'F'` for every operator
+and both directions; the core's error copied each class name before `snprintf`, since
+`ail__tname_c` shares one buffer).  `divmod` follows `__divmod__`/`__rdivmod__`: IntEnum/IntFlag
+use the int pair, a class with only `__index__` is refused with CPython's message, `5 % 0` says
+"integer modulo by zero" and `//`/`divmod` keep "integer division or modulo by zero".  Values were
+checked through a parameter, a list item, an attribute and a dict value on both builds.
+Probes p0-p9 in `/tmp/probes/` match CPython; `test_ail_reintenum4.py` (6 programs, general and
+default builds) passes.
 
 ## 2026-10-30 -- GPU stage G1: `# ail: gpu`, the eligibility proof, kernel IR and its CPU emulation
 
