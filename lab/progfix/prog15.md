@@ -28,8 +28,11 @@ The reason that could be fixed without a new language feature was `a comprehensi
 not a name`.  `nested_lists.py` already lowered the outer row comprehension; the inner row
 comprehension still bound a pair.  The fold path (`sum`/`max`/`min`) already walked pair targets via
 `_pair_plan`; the list-comprehension path now does too (`_listcomp_kind` and a new
-`_listcomp_pair_into_temp`).  `enumerate`, `zip` and a typed dict's `.items()` work; the result may
-be a list of int, float or str.  `g08_018` becomes fully typed and its output matches CPython.
+`_listcomp_pair_into_temp`).  `enumerate`, `zip` (both key and value keep their source kind: int,
+float or str) and an unannotated dict's `.items()` work, for int- and str-keyed tables; the result
+may be a list of int, float or str.  A bytes-keyed unannotated dict is refused by name, and a typed
+`dict[...]`'s `.items()` still falls back with `a pair target over Call` (both match CPython on the
+general path).  `g08_018` becomes fully typed and its output matches CPython.
 
 ## Follow-ups (big new features, exact current messages)
 
@@ -48,3 +51,6 @@ be a list of int, float or str.  `g08_018` becomes fully typed and its output ma
   `frozenset("aeiou")`.  Exact messages:
   `'found' is declared sset; assigning int is unsupported.` and
   `'VOWELS' is a module-level name assigned to a Call, not a literal; only an int/float/str/bytes literal, or a numeric list or tuple, is accepted as a module constant`.
+* Typed `dict[...]` `.items()` in a pair-target comprehension/fold: still
+  `a pair target over Call`; the unannotated `DICT` tables (int-, str-keyed) are the ones the typed
+  pair path reads.

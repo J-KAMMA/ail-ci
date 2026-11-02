@@ -1,3 +1,25 @@
+## 2026-11-02 -- prog15 review fixes: zip key kinds and str-keyed `.items()` (job prog15)
+
+Review follow-up on `756476d`.  The pair-target list-comprehension lowering had forced the FIRST
+name to int64, which truncated a `zip` whose first iterable was `list[float]` and generated invalid
+C for `list[str]`; it also read every unannotated `dict.items()` through `ail_tab`, so a str-keyed
+dict's keys hit the wrong struct.  `_pair_key_kind` now takes the key kind from the first `zip`
+iterable, from `enumerate` (int) or from the dict's key table (int/str; a bytes-keyed table is
+refused by name and left to the general path).  `_listcomp_kind` and `_listcomp_pair_into_temp`
+declare key and value with their real C types, so `zip` over float/str keeps its values and
+`[k for k, v in d.items()]` over an unannotated str-keyed dict is typed and matches CPython.
+Inference contexts seed `ctx.skeys` before asking the same questions.
+
+This also exposed an unrelated latent bug: aliasing a str/bytes-keyed unannotated dict (`e = d`)
+on the typed path called `ail_tab_copy` on an `ail_stab`/`ail_btab` and was rejected by C.  The
+typed assignment now refuses that copy by name, so the program falls back to the general path and
+matches CPython (the identical refusal for a str/bytes keyed set).  The test program gained
+float-first and str-first `zip` cases plus unannotated str-keyed `.items()` key/value cases; the
+docstring's "other six" count is corrected to five.  Probes `/tmp/probes/prog15r_{zip_kinds,
+items,sources,bytes_items,bounds}.py` and the reviewer's `/tmp/rprobes/iso2/{h,i,j,k,l,m}.py`,
+`p4e`/`p4f` match CPython on both `cmp.sh` builds; the C of all 17 buildable `lab/compare` ail/py
+pairs stays byte-identical (the three `main.py` tasks fail identically on base and current).
+
 ## 2026-11-02 -- prog15: pair targets in list comprehensions type the hot functions of g08 (job prog15)
 
 The typed list-comprehension path refused a pair target (`for j, value in enumerate(r)`) even

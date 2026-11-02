@@ -3,7 +3,7 @@
 `lab/census/programs/gdev/g08_018.py` spent all its own time in `determinant` and `minor` and stayed
 on the general path because the row comprehension bound a pair (`for j, value in enumerate(r)`).
 The fold path already walked that pair shape; the list-comprehension path now does too, so the whole
-program is typed.  The other six programs that do not reach the typed path are locked to their
+program is typed.  The other five programs that do not reach the typed path are locked to their
 current status (general path, output equal to CPython) with the reason recorded in
 `lab/progfix/prog15.md`; the two that were already typed stay typed.
 """
@@ -51,6 +51,23 @@ def scaled(xs: list[float]) -> list[float]:
 def zipped(a: list[int], b: list[int]) -> list[int]:
     return [x + y for x, y in zip(a, b)]
 
+def zipped_float(a: list[float], b: list[int]) -> list[float]:
+    return [x + y for x, y in zip(a, b)]
+
+def zipped_str(a: list[str], b: list[int]) -> list[int]:
+    return [y * 2 for x, y in zip(a, b)]
+
+def zipped_str_value(a: list[str], b: list[str]) -> list[str]:
+    return [y.upper() for x, y in zip(a, b)]
+
+def items_untyped() -> list[str]:
+    d = {"a": 1, "bb": 2, "ccc": 3}
+    return [k for k, v in d.items() if v > 1]
+
+def items_untyped_values() -> list[int]:
+    d = {"a": 1, "bb": 2, "ccc": 3}
+    return [v * 10 for k, v in d.items()]
+
 def from_field(b: Box, skip: int) -> list[int]:
     return [v + 1 for i, v in enumerate(b.xs) if i != skip]
 
@@ -67,6 +84,12 @@ def main() -> None:
     for x in scaled([1.5, 2.5, 3.5]): print(x)
     for x in zipped([1, 2, 3], [10, 20]): print(x)
     for x in zipped([], [1]): print(x)
+    for x in zipped_float([], [1]): print(x)
+    for x in zipped_float([1.5, 2.5], [10, 20]): print(x)
+    for x in zipped_str(["a", "bb"], [10, 20]): print(x)
+    for x in zipped_str_value(["a", "bb"], ["c", "dd"]): print(x)
+    for x in items_untyped(): print(x)
+    for x in items_untyped_values(): print(x)
     b = Box([7, 8, 9])
     for x in from_field(b, 1): print(x)
     rows = [[1, 2, 3], [4, 5]]

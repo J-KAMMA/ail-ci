@@ -17954,15 +17954,27 @@ def _pair_plan(src, ctx):
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Attribute) \
             and isinstance(src.func.value, ast.Name) and src.func.attr == 'items' \
             and ctx.type_of(src.func.value.id) == DICT:
-        if src.func.value.id in ctx.ddict:
+        holder = src.func.value.id
+        if holder in ctx.ddict:
             raise Unsupported('%r.items() yields inner dicts, not numbers'
-                              % src.func.value.id)
-        if src.func.value.id in ctx.tdict:
+                              % holder)
+        if holder in ctx.tdict:
             raise Unsupported('%r.items() yields (key, %d-tuple) pairs; walk keys and read '
-                              'each column instead' % (src.func.value.id,
-                                                       ctx.tdict[src.func.value.id]))
+                              'each column instead' % (holder,
+                                                       ctx.tdict[holder]))
+        if holder in ctx.bkeys:
+            # Bytes keys live in an ail_btab; its `.order` array holds ail_bytes values, so the
+            # key is not the int64 this loop binds. The str-keyed branch below is the same shape
+            # with ail_str keys; a bytes-keyed one is left to the general path by name rather
+            # than read through the int table.
+            raise Unsupported('%r.items() is keyed by bytes; the typed pair path does not read '
+                              'an ail_btab key -- the general path handles it' % holder)
+        c = ctx.cname(holder)
+        if holder in ctx.skeys:
+            ctx.parts.add('STAB')
+            return ('0', '(ail_stab_dense(&%s), %s.n)' % (c, c), '%s.order[@]' % c,
+                    'ail_stab_need(&%s, %s.order[@])' % (c, c), [])
         ctx.parts.add('TAB')
-        c = ctx.cname(src.func.value.id)
         return ('0', '%s.n' % c, 'ail_tab_order(&%s)[@]' % c,
                 'ail_tab_need(&%s, ail_tab_order(&%s)[@])' % (c, c), [])
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id == 'zip':
@@ -17977,16 +17989,57 @@ def _pair_plan(src, ctx):
     raise Unsupported('a pair target over %s' % type(src).__name__)
 
 
+def _iter_elem_kind(node, ctx):
+    """The scalar kind `_iter_plan`/`_pair_plan` reads for one iterable expression.
+
+    A slice hands back the same element kind as the sequence it slices, and a float list
+    (including a float-values() snapshot) must stay `double` rather than be truncated to int64.
+    """
+    base = node
+    while isinstance(base, ast.Subscript) and isinstance(base.slice, ast.Slice):
+        base = base.value
+    if _iter_elem_is_str(base, ctx):
+        return STR
+    if isinstance(base, ast.Name) and ctx.type_of(base.id) == BLIST:
+        return BYTES
+    if _is_flist_name(base, ctx):
+        return FLT
+    return INT
+
+
+def _pair_key_kind(src, ctx):
+    """The kind of the FIRST name of an `enumerate` / `zip` / `.items()` pair target.
+
+    The key of `zip(a, b)` is an element of `a`, not always an int -- forcing it to int64
+    truncates a `list[float]` and fails to compile a `list[str]`.
+    """
+    if isinstance(src, ast.Call) and isinstance(src.func, ast.Name):
+        if src.func.id == 'enumerate':
+            return INT
+        if src.func.id == 'zip' and len(src.args) == 2:
+            return _iter_elem_kind(src.args[0], ctx)
+    if (isinstance(src, ast.Call) and isinstance(src.func, ast.Attribute)
+            and isinstance(src.func.value, ast.Name) and src.func.attr == 'items'):
+        holder = src.func.value.id
+        kind = ctx.type_of(holder)
+        if kind == DICT:
+            return BYTES if holder in ctx.bkeys else STR if holder in ctx.skeys else INT
+        if kind in MAPS and kind not in SETS:
+            return _map_key_kind(kind)
+    return INT
+
+
 def _pair_value_kind(src, ctx):
     """The kind of the SECOND name of an `enumerate` / `zip` / `.items()` pair target."""
     if isinstance(src, ast.Call) and isinstance(src.func, ast.Name) and src.func.id in ('enumerate', 'zip'):
         base = src.args[0] if src.func.id == 'enumerate' else src.args[1]
-        while isinstance(base, ast.Subscript) and isinstance(base.slice, ast.Slice):
-            base = base.value
-        return STR if _iter_elem_is_str(base, ctx) else FLT if _etype(base, ctx) == FLIST else INT
+        return _iter_elem_kind(base, ctx)
     if (isinstance(src, ast.Call) and isinstance(src.func, ast.Attribute)
             and isinstance(src.func.value, ast.Name) and src.func.attr == 'items'):
-        kind = _map_kind(src.func.value, ctx)
+        holder = src.func.value.id
+        kind = ctx.type_of(holder)
+        if kind == DICT:
+            return INT
         return _mvk(kind) if kind in MAPS and kind not in SETS else INT
     return INT
 
@@ -19189,7 +19242,7 @@ def _listcomp_kind(node, ctx):
             for nm in pair:
                 ctx.kind.pop(nm, None)
                 ctx.types.pop(nm, None)
-            ctx.types[pair[0]] = INT
+            ctx.types[pair[0]] = _pair_key_kind(g.iter, ctx)
             ctx.types[pair[1]] = element
         else:
             ctx.kind.pop(name, None)
@@ -19381,8 +19434,8 @@ def _listcomp_into_temp(node, ctx):
 def _listcomp_pair_into_temp(node, ctx):
     """`[e for i, v in enumerate(xs) if c]` as a value.
 
-    `_pair_plan` already walks the two shapes a pair target has (`enumerate` and `zip`, plus a
-    typed dict's `.items()`), and the fold path has bound both names for a long time; a list
+    `_pair_plan` already walks the two shapes a pair target has (`enumerate` and `zip`, plus an
+    unannotated dict's `.items()`), and the fold path has bound both names for a long time; a list
     comprehension over the same shapes is the same loop with a push instead of an accumulator.
     """
     if len(node.generators) != 1 or node.generators[0].is_async:
@@ -19396,6 +19449,7 @@ def _listcomp_pair_into_temp(node, ctx):
     ctx.parts.add(kind.upper())
     c, _ = ctx.temp(kind)
     lo, n, kexpr, vexpr, pre = _pair_plan(g.iter, ctx)
+    key_kind = _pair_key_kind(g.iter, ctx)
     value_kind = _pair_value_kind(g.iter, ctx)
     elem_is_str, elem_is_float = value_kind == STR, value_kind == FLT
     old_type, old_kind = ctx.types.get(key), ctx.kind.get(key)
@@ -19409,7 +19463,7 @@ def _listcomp_pair_into_temp(node, ctx):
         ctx.kind.pop(nm, None)
         ctx.onecp.discard(nm)
         ctx.len1_names.discard(nm)
-    ctx.types[key] = INT
+    ctx.types[key] = key_kind
     ctx.types[value] = value_kind
     if elem_is_str:
         ctx.onecp.add(value)
@@ -19419,8 +19473,10 @@ def _listcomp_pair_into_temp(node, ctx):
         if pre:
             head = '%s %s' % (' '.join(pre), head)
         ctype = 'ail_str' if elem_is_str else 'double' if elem_is_float else 'int64_t'
+        key_ctype = ('ail_str' if key_kind == STR else 'double' if key_kind == FLT
+                     else 'ail_bytes' if key_kind == BYTES else 'int64_t')
         lines = [head,
-                 'int64_t %s = %s;' % (ck, kexpr.replace('@', '_i')),
+                 '%s %s = %s;' % (key_ctype, ck, kexpr.replace('@', '_i')),
                  '%s %s = %s;' % (ctype, cv, vexpr.replace('@', '_i'))]
         for cond in g.ifs:
             cc = _cond(cond, ctx)
@@ -21920,6 +21976,14 @@ def _stmt_inner(node, ctx, ind):
             # (LIST,) + TAB` guard, or `ctx.declare` below still raises on the kind mismatch) and
             # is refused exactly as before, by the same `ctx.declare` check, with the same message.
             src_kind = ctx.types[node.value.id]
+            if src_kind in TAB and node.value.id in (ctx.skeys | ctx.bkeys):
+                # A str/bytes-keyed table is an ail_stab/ail_btab, and there is no int-table
+                # `ail_tab_copy` for it: copying one would pass the wrong struct type to C. The
+                # general path copies these correctly, so refuse by name here instead.
+                element = 'str' if node.value.id in ctx.skeys else 'bytes'
+                raise Unsupported('%r is keyed by %s; copying it into another name is not built '
+                                  'on the typed path -- the general path handles it'
+                                  % (node.value.id, element))
             c = ctx.declare(t.id, src_kind)
             ctx.parts.add('LIST' if src_kind == LIST else 'TAB')
             pre = _flush(ctx, pad)
@@ -30268,6 +30332,9 @@ def _caller_ctx(f, sigs, arity_seed=None, classes=None, owned_str_fns=None, owne
         _settle_module_vars(f, ctx)
         _bind_container_types(f, ctx)
         _bind_object_types(f, ctx)
+        # A pair comprehension over an unannotated dict's `.items()` reads the key kind from
+        # `ctx.skeys`; inference has to settle it here too, before `_comprehension_claims` asks.
+        ctx.skeys = _mark_str_containers(f, ctx)
         ctx.comp_claims = _comprehension_claims(f, ctx)
     except Unsupported:
         pass
@@ -30800,6 +30867,7 @@ def _settle_return_kinds_pass(fns, sigs, grid_fns, classes, arity_seeds,
             _settle_module_vars(f, ctx)
             _bind_container_types(f, ctx)
             _bind_object_types(f, ctx)
+            ctx.skeys = _mark_str_containers(f, ctx)
             ctx.trowsf = _propagate_row_float(
                 f, ctx.trowsf | (set(ctx.tstride) & ctx.flist), set(ctx.tstride))
             returns = [n.value for n in ast.walk(f) if isinstance(n, ast.Return) and n.value]
@@ -30843,6 +30911,7 @@ def _clone_return_kind(f, params, sigs, generic_ret, grid_fns, classes=None,
         _settle_module_vars(f, ctx)
         _bind_container_types(f, ctx)
         _bind_object_types(f, ctx)
+        ctx.skeys = _mark_str_containers(f, ctx)
         ctx.numeric_return_kinds = _numeric_loop_return_evidence(f, ctx)
         kinds = {_return_kind(n.value, ctx) for n in ast.walk(f)
                  if isinstance(n, ast.Return) and n.value}
