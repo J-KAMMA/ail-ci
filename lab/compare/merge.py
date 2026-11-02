@@ -37,6 +37,18 @@ METRICS = [
 ]
 
 
+METHOD_LINES = [
+    '- Build: gcc -O2 -std=c11; rustc -C opt-level=3; go build; nim c -d:release; AIL `compile` (default build); CPython runs the source.',
+    '- Compile time: wall time of the build command, median of 3 cold builds, each in a fresh directory with its own AIL_CACHE, TMPDIR, GOCACHE, GOPATH, nimcache and XDG cache.',
+    '- Build disk: `du -sk` of that fresh directory after the first build (binary, caches, leftovers), minus the empty scaffold.',
+    '- AIL path: `compile --strict` accepting the program means typed; otherwise the default build used the general path (the reason is quoted).',
+    '- Instructions: `perf_event_open` (tools/icount.c) when the runner exposes the counter, otherwise valgrind callgrind Ir. User space only.',
+    '- Correctness: every public and hidden case of the task (gen.py) is run in every language; stdout and exit code must equal the CPython reference.py output.',
+    '- Wall time: median of 5 runs of the perf input (2-3 when one run takes more than 15 s). Same runner for every language.',
+    '- Peak RSS: `/usr/bin/time -v` Maximum resident set size, median of the timed runs.',
+]
+
+
 def geomean(xs):
     return math.exp(sum(math.log(x) for x in xs) / len(xs)) if xs else None
 
@@ -196,15 +208,7 @@ def main():
     out += ['### Toolchain install size (KiB, `du -sk`, once)', '', '| language | KiB |', '|---|---:|']
     out += ['| %s | %s |' % (NAMES.get(k, k), '{:,}'.format(v) if v else 'missing') for k, v in first.get('toolchain_kib', {}).items()]
     out += ['', '### Tools', ''] + ['- %s: %s' % (k, v) for k, v in first.get('tools', {}).items()]
-    out += ['', '### Method', '',
-            '- Build: gcc -O2 -std=c11; rustc -C opt-level=3; go build; nim c -d:release; AIL `compile` (default build); CPython runs the source.',
-            '- Compile time: wall time of the build command, median of 3 cold builds, each in a fresh directory with its own AIL_CACHE, TMPDIR, GOCACHE, GOPATH, nimcache and XDG cache.',
-            '- Build disk: `du -sk` of that fresh directory after the first build (binary, caches, leftovers), minus the empty scaffold.',
-            '- AIL path: `compile --strict` accepting the program means typed; otherwise the default build used the general path (the reason is quoted).',
-            '- Instructions: `perf_event_open` (tools/icount.c) when the runner exposes the counter, otherwise valgrind callgrind Ir. User space only.',
-            '- Correctness: every public and hidden case of the task (gen.py) is run in every language; stdout and exit code must equal the CPython reference.py output.',
-            '- Wall time: median of 5 runs of the perf input (2-3 when one run takes more than 15 s). Same runner for every language.',
-            '- Peak RSS: `/usr/bin/time -v` Maximum resident set size, median of the timed runs.']
+    out += ['', '### Method', '', *METHOD_LINES]
     print('\n'.join(out))
     if args.json:
         Path(args.json).write_text(json.dumps(dict(tasks=tasks, geomean_ratio_vs_best_other=summary, scorecard=scores), indent=1) + '\n', encoding='utf8')
