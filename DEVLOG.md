@@ -1,3 +1,33 @@
+## 2026-11-02 -- typed reach: t115 tuple/list bindings and t143 unannotated sets (job-prog23-11021359)
+
+Profiled the eight prog23 programs with CPython 3.12 `cProfile` and recorded the hot-function table in
+`lab/progfix/prog23.md`.  Four were already wholly typed (`g02_026`, `g18_030`, `t102`, `t069`); two
+more now build on the typed path.  `t115` was blocked by
+`a tuple target over a sequence`: `iterlower.known_sequences` treated
+`first, second = words[:mid], words[mid:]` as unknown, so the later `for a, b in zip(first, second)`
+was refused.  A tuple/list target with the same number of elements as a tuple/list right-hand side now
+classifies each name from its own expression.  `t143` was blocked first by a list comprehension inside
+a conditional (`_numeric_field_kind` now accepts `LIST`/`FLIST` when both branches agree or one is
+empty), then by unannotated set operators: `a & b`, `a | b`, `a - b` and `a ^ b` over unannotated sets
+are now recognised as sets, materialised through `_set_value` into the destination's own table, and the
+preliminary float pass follows `set(...)` bindings and aliases instead of provisionally claiming those
+names `int`.  Only int-keyed unannotated sets take that path: a str/bytes-keyed set keeps its keys in
+`ail_stab`/`ail_btab`, so an operator over one stays on the existing general path rather than emitting
+int-table calls that fail in gcc.
+
+Both newly typed programs match CPython 3.12 on all three published inputs.  The remaining two are
+follow-ups with exact messages in `lab/progfix/prog23.md`: `g15_004` needs exception chaining that keeps
+`__cause__`, a scalar `ConfigError | None` local and conditional class values; `g25_026` needs typed
+`Enum`/`auto()` lowering, starting with the generated `_AilIntEnum` dunder methods.  `test_ail_prog23`
+(registered in `tests.d/`) compiles and compares the buildable programs, requires `--strict` success for
+t115/t143, and adds tuple/list-target and unannotated-set probes.  Probes in `/tmp/probes23` and
+`/tmp/probes/prog23_*`: zip over arguments and list items, empty/mismatched/body-grown lists,
+`d.items()`, tuple/list literal and slice bindings, all four set operators over int, str and bytes sets,
+set aliases and values through arguments/lists/dicts/attributes, int bitwise operators, and non-list or
+mixed conditional branches; all 49 match CPython on both builds.  The generated C of the ten
+`lab/compare/src/*/main.ail` tasks is byte-identical to the base commit (`AIL_IR=0`).  No new semantic
+difference was added.
+
 ## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
 
 Made two more of the eight prog5 programs take the typed path without touching the programs.

@@ -140,6 +140,14 @@ class _Lower:
                 for target in node.targets:
                     if isinstance(target, ast.Name):
                         (good if self.seq_expr(node.value) else bad).add(target.id)
+                    elif (isinstance(target, (ast.Tuple, ast.List))
+                          and isinstance(node.value, (ast.Tuple, ast.List))
+                          and len(target.elts) == len(node.value.elts)):
+                        for element, value in zip(target.elts, node.value.elts):
+                            if isinstance(element, ast.Name):
+                                (good if self.seq_expr(value) else bad).add(element.id)
+                            else:
+                                bad.update(n.id for n in ast.walk(element) if isinstance(n, ast.Name))
                     else:
                         bad.update(n.id for n in ast.walk(target) if isinstance(n, ast.Name))
             elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
