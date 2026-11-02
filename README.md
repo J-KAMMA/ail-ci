@@ -10,6 +10,17 @@ New to AIL? Start with [docs/INSTALL.md](docs/INSTALL.md) (setup and a first com
 [docs/QUICKSTART.md](docs/QUICKSTART.md) (a 10-minute English tour with complete, tested programs)
 or [docs/tutorial.md](docs/tutorial.md) (a 15-20 minute tutorial).
 
+## How AIL compares
+
+The measured comparison against C, Rust, Go, Nim and Python is in [docs/COMPARISON.md](docs/COMPARISON.md).
+
+- Instructions: AIL is lower on 5/10 tasks.
+- Peak RSS: AIL is lower on 6/10 tasks.
+- Binary size: AIL is smaller on 10/10 tasks.
+- Compile time: AIL is slower to compile on 10/10 tasks.
+- Build disk: AIL is lower on 2/10 tasks.
+- Wall time: AIL is lower on 6/10 tasks.
+
 ## Running the tests
 
 Requirements: Python 3.10 or newer and `gcc` on `PATH`.
