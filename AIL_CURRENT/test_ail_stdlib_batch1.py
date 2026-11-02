@@ -477,8 +477,8 @@ class Batch1Tests(unittest.TestCase):
         self.same_as_cpython(MATH_MISC, "math_misc")
 
     def test_math_not_built_is_named(self):
-        text = "import math\n\n\ndef main():\n    print(math.erf(0.5))\n\n\nmain()\n"
-        self.refused(text, "math.erf() with these arguments is not built")
+        text = "import math\n\n\ndef main():\n    print(math.gamma(0.5))\n\n\nmain()\n"
+        self.refused(text, "math.gamma() with these arguments is not built")
         with tempfile.TemporaryDirectory() as directory:
             built, _, _ = compile_python(directory, text, "prog")
             self.assertNotIn("read before it is assigned", built.stderr)
