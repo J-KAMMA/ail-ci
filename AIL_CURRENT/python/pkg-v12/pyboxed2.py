@@ -1726,6 +1726,113 @@ def _scan_assigned_names(stmts):
     return names
 
 
+def _class_only_module_names(tree, classes, module_names):
+    """The module-bound class names whose module slot can only ever hold a class.
+
+    A call to such a name through the slot (`A(x=1)` after a conditional `A = B`) is always a
+    class construction, so it may carry keyword arguments.  A name with any other kind of
+    module-level binding (a plain value, a function, an import, a `global` write, a loop or
+    `with` target, a tuple-unpacking target whose value is not traced) is left out: its call
+    stays the named keyword-argument refusal instead of becoming a wrong runtime result."""
+    bindings = {}   # name -> list of 'class' | ('name', id) | 'other'
+    globals_ = set()
+
+    def add(name, kind):
+        bindings.setdefault(name, []).append(kind)
+
+    def value_kind(node):
+        if isinstance(node, ast.Name) and node.id in classes:
+            return ('name', node.id)
+        return 'other'
+
+    def target_kinds(target, kind):
+        if isinstance(target, ast.Name):
+            add(target.id, kind)
+        elif isinstance(target, (ast.Tuple, ast.List)):
+            for elt in target.elts:
+                target_kinds(elt, 'other')
+
+    def pattern_names(pat):
+        out = set()
+        for n in ast.walk(pat):
+            if isinstance(n, (ast.MatchAs, ast.MatchStar)) and n.name:
+                out.add(n.name)
+            elif isinstance(n, ast.MatchMapping) and n.rest:
+                out.add(n.rest)
+        return out
+
+    def walk(stmts):
+        for n in stmts:
+            if isinstance(n, ast.ClassDef):
+                add(n.name, 'class')
+            elif isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                add(n.name, 'other')
+            elif isinstance(n, ast.Assign):
+                kind = value_kind(n.value)
+                for t in n.targets:
+                    target_kinds(t, kind)
+            elif isinstance(n, ast.AnnAssign):
+                if n.value is not None:
+                    target_kinds(n.target, value_kind(n.value))
+            elif isinstance(n, ast.AugAssign):
+                target_kinds(n.target, 'other')
+            elif isinstance(n, (ast.For, ast.AsyncFor)):
+                target_kinds(n.target, 'other')
+                walk(n.body)
+                walk(n.orelse)
+            elif isinstance(n, (ast.While, ast.If)):
+                walk(n.body)
+                walk(n.orelse)
+            elif isinstance(n, ast.Try):
+                walk(n.body)
+                for h in n.handlers:
+                    if h.name:
+                        add(h.name, 'other')
+                    walk(h.body)
+                walk(n.orelse)
+                walk(n.finalbody)
+            elif isinstance(n, (ast.With, ast.AsyncWith)):
+                for it in n.items:
+                    if it.optional_vars is not None:
+                        target_kinds(it.optional_vars, 'other')
+                walk(n.body)
+            elif isinstance(n, ast.Import):
+                for a in n.names:
+                    add((a.asname or a.name).split('.')[0], 'other')
+            elif isinstance(n, ast.ImportFrom):
+                for a in n.names:
+                    if a.name != '*':
+                        add(a.asname or a.name, 'other')
+            elif isinstance(n, getattr(ast, 'Match', ())):
+                for case in n.cases:
+                    for nm in pattern_names(case.pattern):
+                        add(nm, 'other')
+                    walk(case.body)
+    walk(tree.body)
+    for n in ast.walk(tree):
+        if isinstance(n, ast.Global):
+            globals_.update(n.names)
+    # Only names whose every traced binding is the class itself or another class name can be
+    # safe.  A name in module_names with no traced binding (a form this walk does not model)
+    # is left out, so the analysis errs towards refusing.
+    safe = {name for name in set(classes) & module_names
+            if name not in globals_ and bindings.get(name)
+            and all(k == 'class' or (isinstance(k, tuple) and k[0] == 'name')
+                    for k in bindings[name])}
+    # A class name may be an alias of another module-bound class name that is itself rebound
+    # (`A = B; B = A` is still classes only, but `B = 5` makes both unsafe): greatest fixpoint.
+    changed = True
+    while changed:
+        changed = False
+        for name in list(safe):
+            for kind in bindings[name]:
+                if isinstance(kind, tuple) and kind[1] in module_names and kind[1] not in safe:
+                    safe.discard(name)
+                    changed = True
+                    break
+    return safe
+
+
 def _rebound_function_names(tree, functions):
     """Top-level functions whose module binding an assignment at module scope changes
     (`f = lambda: ...`).  A `global f` write inside a function is a separate storage path and
@@ -2710,6 +2817,7 @@ class Compiler(boxclosure.ClosureMixin):
             c for c in self.classes if any(i.get('is_classmethod') for i in self.classes[c]['methods'].values())
             or any(self._is_subclass_of(c, k) for k in self.classes
                    if any(i.get('is_classmethod') for i in self.classes[k]['methods'].values()))})
+        self.class_only_names = _class_only_module_names(tree, self.classes, self.module_names)
         import dunderrt
         # operator methods, identity ==, hashing, str() through the class chain and AttributeError on a non-instance
         # are dispatched by the run time in every program that has a class (C30-C32: they were silent or fatal)
@@ -7973,7 +8081,12 @@ class Compiler(boxclosure.ClosureMixin):
             raise Unsupported("call to __import__(); a program is built whole, so a module name cannot be "
                               "chosen at run time\n  write instead: import the module at the top of the file")
         if name in ctx.slot_of or name in ctx.ptr_names or self._is_global_name(name, ctx):
-            return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
+            # A module-bound class name whose slot can only hold a class is constructed through
+            # the class branch of call_value, which binds keyword arguments exactly. Any other
+            # value keeps the named refusal for keywords (call_value raises it).
+            kw_class_safe = bool(kwargs) and name in self.class_only_names
+            return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx,
+                                   kw_class_safe=kw_class_safe)
         raise Unsupported("the name '%s' is not a known function/class/builtin" % name)
 
     # ---- a small, honest core of builtins implemented directly against the FIXED v2 API

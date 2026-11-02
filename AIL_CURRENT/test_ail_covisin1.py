@@ -99,6 +99,9 @@ class IsinstanceTypeForms(unittest.TestCase):
     def test_unexecuted_class_binding_keeps_constructor(self):
         self.compare({'p.py': CONDITIONAL_REBIND}, ('default', 'general'))
 
+    def test_module_bound_constructor_keyword_arguments(self):
+        self.compare({'p.py': KW_CTORS}, ('default', 'general'))
+
 
 STATIC = r'''class A: pass
 class B(A): pass
@@ -364,6 +367,43 @@ print(type(make()).__name__)
 if True:
     A = B
 print(type(A()).__name__)
+'''
+
+KW_CTORS = r'''class A:
+    def __init__(self, x, y=2):
+        self.x = x; self.y = y
+class B:
+    def __init__(self, x, y=3):
+        self.x = x; self.y = y
+if False:
+    A = B
+a = A(x=3)
+print(a.x + a.y)
+if True:
+    A = B
+b = A(x=4, y=5)
+print(b.x + b.y)
+class E(Exception):
+    def __init__(self, x, y):
+        super().__init__()
+        self.x = x; self.y = y
+class F(Exception):
+    def __init__(self, x, y):
+        super().__init__()
+        self.x = x; self.y = y
+E = F
+e = E(x=7, y="f")
+print(e.x, e.y)
+class C:
+    def __init__(self, x, y=2, *, z=3):
+        self.x = x; self.y = y; self.z = z
+class D:
+    def __init__(self, x, y=4, *, z=5):
+        self.x = x; self.y = y; self.z = z
+if False:
+    C = D
+c = C(z=10, x=1)
+print(c.x, c.y, c.z)
 '''
 
 EXCEPTION_CONST = r'''T = (ValueError, KeyError)

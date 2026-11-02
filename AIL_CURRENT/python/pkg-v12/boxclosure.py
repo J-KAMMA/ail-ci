@@ -366,13 +366,20 @@ class ClosureMixin:
         return t
 
     # -- calling a value --------------------------------------------------------------------------------
-    def call_value(self, func_c, args, kwargs, ctx, class_dispatch=True, inst_call=True):
+    def call_value(self, func_c, args, kwargs, ctx, class_dispatch=True, inst_call=True,
+                   kw_class_safe=False):
         from pyfront import Unsupported
-        if kwargs:
+        classes = getattr(self, 'class_values', ()) if class_dispatch else ()
+        # Keyword arguments are only modelled for a value that is guaranteed to be one of the
+        # program's classes: every candidate branch below constructs through _call_class, which
+        # binds keywords exactly as a call by class name does. Any other value would need the
+        # runtime's positional-only ail__callv, so it stays a named refusal.
+        if kwargs and not (kw_class_safe and classes):
             raise Unsupported('keyword arguments in a call through a function value')
         if any(isinstance(x, ast.Starred) for x in args):
             raise Unsupported('a starred argument in a call through a function value')
-        if inst_call and any('__call__' in c['methods'] for c in getattr(self, 'classes', {}).values()):
+        if not kwargs and inst_call and any('__call__' in c['methods']
+                                            for c in getattr(self, 'classes', {}).values()):
             # an instance whose class defines __call__ is called through it
             fvi = ctx.tmp()
             ctx.emit('%s = %s;' % (fvi, func_c))
@@ -385,9 +392,26 @@ class ClosureMixin:
             ctx.emit('%s = %s;' % (s, c))
         self._need_callv()
         t = ctx.tmp()
-        classes = getattr(self, 'class_values', ()) if class_dispatch else ()
         if classes:
             from pyboxed2 import _PreC
+            # keyword values are evaluated at the call site, after every positional one, once
+            # (not per candidate class), exactly as CPython evaluates a call's arguments.
+            kwpre = {}
+            for kwname, kwnode in kwargs.items():
+                ks = ctx.tmp()
+                ctx.emit('%s = %s;' % (ks, self.expr(kwnode, ctx)))
+                kwpre[kwname] = _PreC(ks)
+
+            def call_or_error():
+                if kwargs:
+                    ctx.emit('st = ail_raise_c(cx, AIL_B_TYPEERROR, "keyword arguments in a call '
+                             'through a non-class value"); goto %s;' % ctx.cur_err_target())
+                    ctx.uses_st = True
+                else:
+                    ctx.emit('st = ail__callv(cx, &%s, %s, %s, %d);'
+                             % (t, fv, ('&' + slots[0]) if slots else 'NULL', len(slots)))
+                    ctx.check()
+
             # a class held in a variable: construct it, as calling the class by name does
             ctx.emit('if (%s.tag == AIL_T_CLASS) {' % fv)
             ctx.indent += 1
@@ -399,7 +423,7 @@ class ClosureMixin:
                 ctx.indent += 1
                 mark = len(ctx.lines)
                 try:
-                    r = self._call_class(cname, [_PreC(x) for x in slots], {}, ctx)
+                    r = self._call_class(cname, [_PreC(x) for x in slots], dict(kwpre), ctx)
                     ctx.emit('%s = %s;' % (t, r))
                 except Unsupported:
                     del ctx.lines[mark:]
@@ -409,15 +433,13 @@ class ClosureMixin:
                 ctx.indent -= 1
             ctx.emit('} else {')
             ctx.indent += 1
-            ctx.emit('st = ail__callv(cx, &%s, %s, %s, %d);' % (t, fv, ('&' + slots[0]) if slots else 'NULL', len(slots)))
-            ctx.check()
+            call_or_error()
             ctx.indent -= 1
             ctx.emit('}')
             ctx.indent -= 1
             ctx.emit('} else {')
             ctx.indent += 1
-            ctx.emit('st = ail__callv(cx, &%s, %s, %s, %d);' % (t, fv, ('&' + slots[0]) if slots else 'NULL', len(slots)))
-            ctx.check()
+            call_or_error()
             ctx.indent -= 1
             ctx.emit('}')
             return t
