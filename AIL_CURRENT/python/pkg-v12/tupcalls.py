@@ -78,12 +78,39 @@ class Calls:
             handler = getattr(self, 'b_' + nm, None)
             if handler is not None:
                 return handler(node, want, ctx)
+            if nm == 'Counter':
+                return self.call_counter(node, want, ctx)
             return self.generic_call(node)
         if isinstance(f, ast.Attribute):
             if isinstance(f.value, ast.Name) and f.value.id in self.modalias and f.value.id not in self.env:
                 return self.call_module(node, self.modalias[f.value.id], f.attr, want)
             return self.call_method(node, want)
         return self.generic_call(node)
+
+    def call_counter(self, node, want, ctx):
+        """Counter(x): a table of tuple keys is a class here, which the boxed runtime's
+        Counter(mapping) cannot iterate.  A mapping display stays a plain dict; any other
+        table is turned back into a dict of its pairs before the call."""
+        if len(node.args) != 1 or node.keywords:
+            return self.generic_call(node)
+        a = node.args[0]
+        if isinstance(a, ast.Dict):
+            self.no_table_dict += 1
+            try:
+                return self.generic_call(node)
+            finally:
+                self.no_table_dict -= 1
+        n, t = self.exv(a, None, ctx)
+        t = deep(t)
+        if is_table_dict(t):
+            self.force()
+            pairs = call(self.table(t).fn('items'), n)
+            plain = call('dict', pairs)
+            node.args = [plain]
+            return self.done(node, [plain], [], None)
+        self.no_tuple_items(node, [t], 'Counter')
+        node.args = [n]
+        return self.done(node, [n], [], None)
 
     def generic_call(self, node):
         if not isinstance(node.func, ast.Name):

@@ -2,6 +2,10 @@
 # prelude_array.py -- `array.array` for the integer and double typecodes as Python source (smalllib5.py injects it).
 # 'b' 'B' 'h' 'H' 'i' 'I' 'l' 'L' 'q' 'Q' (ints in the C range of the type) and 'd'. The elements are held in a list.
 
+# pyboxed2.py and dunderrt.py recognise the real array prelude by this marker (a program may define its own class
+# named _AilArray; that must not borrow array.array's error names or suppress its comparison dispatch).
+_AIL_ARRAY_PRELUDE = True
+
 
 def _ail_arr_size(tc: str) -> int:
     if tc == "b" or tc == "B":
@@ -12,9 +16,7 @@ def _ail_arr_size(tc: str) -> int:
         return 4
     if tc == "l" or tc == "L" or tc == "q" or tc == "Q" or tc == "d":
         return 8
-    if tc == "f":
-        raise RuntimeError("array typecode 'f' (single precision) is not built; use 'd'")
-    raise ValueError("bad typecode (must be b, B, u, w, h, H, i, I, l, L, q, Q, f or d)")
+    return 0
 
 
 def _ail_arr_check(tc: str, x):
@@ -72,6 +74,12 @@ def _ail_arr_check(tc: str, x):
 
 
 def _ail_arr_tname(x) -> str:
+    if isinstance(x, _AilArray):
+        return "array.array"
+    if isinstance(x, bytes):
+        return "bytes"
+    if isinstance(x, bytearray):
+        return "bytearray"
     if isinstance(x, bool):
         return "bool"
     if isinstance(x, int):
@@ -80,15 +88,39 @@ def _ail_arr_tname(x) -> str:
         return "float"
     if isinstance(x, str):
         return "str"
+    if isinstance(x, list):
+        return "list"
+    if isinstance(x, tuple):
+        return "tuple"
+    if isinstance(x, dict):
+        return "dict"
+    if type(x).__name__ == "range":
+        return "range"
     if x is None:
         return "NoneType"
     return "object"
 
 
+def _ail_arr_bad_kw(*args, **kwargs):
+    raise TypeError("array.array() takes no keyword arguments")
+
+
+class _AilArrayMissing:
+    pass
+
+
+_AIL_ARR_MISSING = _AilArrayMissing()
+
+
 class _AilArray:
     def __init__(self, typecode: str, initializer=None):
         self.typecode = typecode
-        self.itemsize = _ail_arr_size(typecode)
+        size = _ail_arr_size(typecode)
+        if size == 0:
+            if typecode == "f":
+                raise RuntimeError("array typecode 'f' (single precision) is not built; use 'd'")
+            raise ValueError("bad typecode (must be b, B, u, h, H, i, I, l, L, q, Q, f or d)")
+        self.itemsize = size
         self.data = []
         if initializer is not None:
             for x in initializer:
@@ -98,6 +130,8 @@ class _AilArray:
         self.data.append(_ail_arr_check(self.typecode, x))
 
     def extend(self, it):
+        if isinstance(it, _AilArray) and it.typecode != self.typecode:
+            raise TypeError("can only extend with array of same kind")
         for x in it:
             self.data.append(_ail_arr_check(self.typecode, x))
 
@@ -112,16 +146,40 @@ class _AilArray:
         return self.data.pop(i)
 
     def remove(self, x):
-        self.data.remove(x)
+        try:
+            self.data.remove(x)
+        except ValueError:
+            raise ValueError("array.remove(x): x not in array")
 
-    def index(self, x) -> int:
-        return self.data.index(x)
+    def index(self, x, start=_AIL_ARR_MISSING, stop=_AIL_ARR_MISSING) -> int:
+        if start is not _AIL_ARR_MISSING and not isinstance(start, int):
+            raise TypeError("slice indices must be integers or have an __index__ method")
+        if stop is not _AIL_ARR_MISSING and not isinstance(stop, int):
+            raise TypeError("slice indices must be integers or have an __index__ method")
+        try:
+            if start is _AIL_ARR_MISSING:
+                return self.data.index(x)
+            if stop is _AIL_ARR_MISSING:
+                return self.data.index(x, start)
+            return self.data.index(x, start, stop)
+        except ValueError:
+            raise ValueError("array.index(x): x not in array")
 
     def count(self, x) -> int:
         return self.data.count(x)
 
     def reverse(self):
         self.data.reverse()
+
+    def fromlist(self, values):
+        if not isinstance(values, list):
+            raise TypeError("arg must be list")
+        try:
+            reversed(values)
+        except TypeError:
+            raise TypeError("arg must be list")
+        for x in values:
+            self.data.append(_ail_arr_check(self.typecode, x))
 
     def tolist(self) -> list:
         return list(self.data)
@@ -152,17 +210,46 @@ class _AilArray:
             out.append(r)
         self.data = out
 
+    def _position(self, i, assignment):
+        if not isinstance(i, int):
+            raise TypeError("array indices must be integers")
+        n = len(self.data)
+        if i < 0:
+            i = i + n
+        if i < 0 or i >= n:
+            if assignment:
+                raise IndexError("array assignment index out of range")
+            raise IndexError("array index out of range")
+        return i
+
     def __len__(self) -> int:
         return len(self.data)
 
     def __getitem__(self, i):
-        return self.data[i]
+        if type(i).__name__ == 'slice':
+            out = _AilArray(self.typecode)
+            out.data = self.data[i]
+            return out
+        return self.data[self._position(i, False)]
 
     def __setitem__(self, i, x):
-        self.data[i] = _ail_arr_check(self.typecode, x)
+        if type(i).__name__ == 'slice':
+            if not isinstance(x, _AilArray):
+                raise TypeError('can only assign array (not "%s") to array slice' % _ail_arr_tname(x))
+            if x.typecode != self.typecode:
+                raise TypeError("bad argument type for built-in operation")
+            try:
+                self.data[i] = x.data
+            except ValueError as e:
+                raise ValueError(str(e).replace("sequence", "array", 1))
+            return
+        self.data[self._position(i, True)] = _ail_arr_check(self.typecode, x)
 
     def __delitem__(self, i):
-        del self.data[i]
+        if type(i).__name__ == 'slice':
+            del self.data[i]
+            return
+        del self.data[self._position(i, True)]
 
     def __iter__(self):
         return list(self.data)
@@ -175,17 +262,73 @@ class _AilArray:
             return self.data == other.data
         return False
 
-    def __add__(self, other):
+    def __ne__(self, other):
+        if isinstance(other, _AilArray):
+            return self.data != other.data
+        return True
+
+    def __lt__(self, other):
+        if not isinstance(other, _AilArray):
+            raise TypeError("'<' not supported between instances of 'array.array' and '%s'" % _ail_arr_tname(other))
+        return self.data < other.data
+
+    def __le__(self, other):
+        if not isinstance(other, _AilArray):
+            raise TypeError("'<=' not supported between instances of 'array.array' and '%s'" % _ail_arr_tname(other))
+        return self.data <= other.data
+
+    def __gt__(self, other):
+        if not isinstance(other, _AilArray):
+            raise TypeError("'>' not supported between instances of 'array.array' and '%s'" % _ail_arr_tname(other))
+        return self.data > other.data
+
+    def __ge__(self, other):
+        if not isinstance(other, _AilArray):
+            raise TypeError("'>=' not supported between instances of 'array.array' and '%s'" % _ail_arr_tname(other))
+        return self.data >= other.data
+
+    def _check_add(self, other, verb):
+        if not isinstance(other, _AilArray):
+            if verb == "extend":
+                raise TypeError('can only extend array with array (not "%s")' % _ail_arr_tname(other))
+            raise TypeError('can only append array (not "%s") to array' % _ail_arr_tname(other))
         if other.typecode != self.typecode:
+            if verb == "extend":
+                raise TypeError("can only extend with array of same kind")
             raise TypeError("bad argument type for built-in operation")
+
+    def __add__(self, other):
+        self._check_add(other, "append")
         out = _AilArray(self.typecode)
         out.data = self.data + other.data
         return out
 
-    def __mul__(self, n: int):
+    def __iadd__(self, other):
+        self._check_add(other, "extend")
+        self.data.extend(other.data)
+        return self
+
+    def __mul__(self, n):
+        if not isinstance(n, int):
+            raise TypeError("can't multiply sequence by non-int of type '%s'" % _ail_arr_tname(n))
         out = _AilArray(self.typecode)
         out.data = self.data * n
         return out
+
+    def __rmul__(self, n):
+        if isinstance(n, (str, list, tuple, bytes, bytearray)):
+            raise TypeError("can't multiply sequence by non-int of type 'array.array'")
+        if not isinstance(n, int):
+            raise TypeError("can't multiply sequence by non-int of type '%s'" % _ail_arr_tname(n))
+        out = _AilArray(self.typecode)
+        out.data = self.data * n
+        return out
+
+    def __imul__(self, n):
+        if not isinstance(n, int):
+            raise TypeError("can't multiply sequence by non-int of type '%s'" % _ail_arr_tname(n))
+        self.data = self.data * n
+        return self
 
     def __repr__(self) -> str:
         if len(self.data) == 0:

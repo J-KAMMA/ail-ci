@@ -2924,6 +2924,17 @@ static void ail_slist_push(ail_slist *L, ail_str v) {
     }
     L->p[L->n++] = v;
 }
+/* One allocation for a list whose length is known (a comprehension); a spine is 24 bytes an
+   element and doubling to the next power of two held up to twice that again. */
+static void ail_slist_reserve(ail_slist *L, int64_t extra) {
+    if (!L || extra <= 0 || L->n < 0 || L->cap < L->n || (L->cap && !L->p)) return;
+    if (L->cap - L->n >= extra) return;
+    if (extra > (int64_t)(SIZE_MAX / sizeof(ail_str)) - L->n) ail_die("list too long");
+    ail__need_elems(L->n + extra, AIL_ELEM_LIMIT(ail_str));
+    ail_str *q = (ail_str *)realloc(L->p, (size_t)(L->n + extra) * sizeof *q);
+    if (!q) ail_die("out of memory");
+    L->p = q; L->cap = L->n + extra;
+}
 /* Same rule as ail_list_clear: a compiler-generated temp inside a loop is the same C
    variable on every iteration and has to start empty. */
 static void ail_slist_reverse(ail_slist *L) {
@@ -29493,6 +29504,14 @@ static double ail_rand_normalvariate(double mu, double sigma) {
     } while (zz > -log(u2));
     volatile double scaled = z * sigma;
     return mu + scaled;
+}
+/* random.expovariate(lambd): -log(1 - random()) / lambd.  lambd == 0 is CPython's
+   ZeroDivisionError from the float division (a negative lambd is fine). */
+static double ail_rand_expovariate(double lambd) {
+    double r = 1.0 - ail_rand_random();
+    if (lambd == 0.0) ail_rand_fail(AIL_EXC_ZERODIV, "float division by zero");
+    volatile double value = -log(r) / lambd;
+    return value;
 }
 /* sample()'s switch between the pool list and the selected set: 21 + 4 ** ceil(log(3k) / log(4)) for k > 5. */
 static int64_t ail_rand_setsize(int64_t k) {

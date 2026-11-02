@@ -1,3 +1,25 @@
+## 2026-11-01 -- prog5 typed reach: g07, g06 and the nested-list append shape (job-prog5-11020446)
+
+Made two more of the eight prog5 programs take the typed path without touching the programs.
+`gdev/g07_022.py` was blocked by `'groups' is declared list[list[int]]; assigning gridret is
+unsupported`: iterlower turns `[list(group) for _, group in groupby(items)]` into
+`rows = []; rows.append([...])`, and nested_lists only inferred an element for a `_nest` local, not
+for that plain list.  The pass now infers a nested list from an append-only plain list
+(`infer_nested`; it refuses the inference when any append is not a list) and understands `groupby`
+pairs when it sees the comprehension first.  `gdev/g06_014.py` now builds typed with the branch's
+`set(str)`/`set[str]` changes.  `callable_types` accepts the Python spellings `Callable[[], None]`
+(noret) and `Callable[[Exception], T]` (the canonical `exception` kind).
+
+Typed after this change: g06_014, t243, g07_022, g18_038 (4/8).  Still general: g10_000
+(`dict[int, list[int]]` values), g14_004 (`comparison Is` on two list values), g15_034 (deliberate
+`"count: " + 5` needs a catchable TypeError), t467 (`*args`/`**kwargs` and an Optional list
+parameter).  Exact messages and hot-function shares are in `lab/progfix/prog5.md`.
+
+`AIL_CURRENT/test_ail_prog5.py` (registered through `AIL_CURRENT/tests.d/test_ail_prog5.txt`)
+builds the four typed programs and compares stdout/exit with CPython, plus typed callable and
+appended-rows programs.  Probes `/tmp/probes/p5_{groupby,rows_append,rows_sources,set_str,
+callable_exc}.py` match CPython on both `cmp.sh` builds.  No new semantic difference was added.
+
 ## 2026-11-01 -- tcc dev-build measurement: the C compiler is not the gap (job-tccdev1-11012215)
 
 Measured a hypothetical TinyCC development build against the current `gcc -O2` default on the ten
@@ -80,6 +102,114 @@ Added `AIL_CURRENT/test_ail_prog1.py`, registered through
 stops loudly). The generated `program.c` of all 17 building `lab/compare` sources
 (`main.ail` and `main.py` across the ten tasks) is byte-identical to the pre-change
 tree; `scar_life`, `tally_lang` and `tree_fold` refuse both trees alike.
+## 2026-11-01 -- typed reach for eight real programs (job-prog2-11020344)
+
+Profiled the eight programs in `lab/progfix/prog2.md` and closed the blockers found there. Review
+follow-up on `d86dbcc`: return kinds are now proved from the body, never filled from an annotation.
+CPython does not enforce annotations, so `def isup(line: str) -> int: return line.isupper()` returns
+a bool; the old fill boxed it as an int on the raw `pyc.py --file` path. `pymix._expr_kind` now knows
+the fixed result kind of str methods (`isupper`, `split`, `join`, ...), `list`/`sorted`, `abs`/`ord`/
+`chr`, and `sys.stdin.read()`/`readline()`, so `t079.reverse_words` is a str proof and its module
+input chain resolves `line` without an annotation. The CPython hybrid now accepts `/`, `//` and `%`
+by a literal nonzero constant, so `t408.state_at` (`t % 8`) is accelerated; it also accepts a call
+whose str receiver/arguments are proved (and `len`/`reversed` over a proved sequence), which
+puts `t079.reverse_words` (`" ".join(reversed(line.split()))`) on the accelerated path. A variable
+divisor, an arbitrary call, `int()`, `.index()` and a bytes result still stay in CPython.
+`pymix._provably_nonzero` reads a unary sign too, so `t // -3` is no longer mistaken for a possible
+`ZeroDivisionError` when the helper is used as a value or under a boxed `try/except`. The remaining
+hot functions need nested `list[list[T]]` / `list[tuple[...]]` parameters, a `dict`/tuple result, a
+scalar `int | None` local or a set comprehension of `str`; each is recorded with its exact message
+in `lab/progfix/prog2.md`. `test_ail_prog2.py` (registered through
+`tests.d/test_ail_prog2.txt`) checks the proof rules, builds the raw `isup` case and compares it with
+CPython, and verifies the hybrid acceleration of `reverse_words` and `state_at`.
+## 2026-11-01 -- prog3 typed reach: random.expovariate (job-prog3-11020344)
+
+Profiled the eight prog3 programs with CPython 3.12 `cProfile` and recorded the hot functions and
+their first typed-path refusal in `lab/progfix/prog3.md`. `g09_008` and `t370` already build on the
+typed path; `g12_008` was blocked only by `random.expovariate`, which the typed random library did
+not build. Added it in `cruntime.py` (`ail_rand_expovariate`: `-log(1 - random()) / lambd`, with
+CPython's `ZeroDivisionError: float division by zero` for a zero `lambd`), `stdlib3.py` (default,
+positional and `lambd=` forms) and `pyfunc.py` (`_AIL_RAND`). `g12_008` now builds with
+`AIL_NO_GENERAL=1`, so its hot `simulate_mm1` runs typed and its output matches CPython byte for
+byte. The other five programs stay as follow-ups with their exact messages (generators, typed
+`datetime`, heterogeneous `json.dumps`, optional lists, enum members in a module-level table).
+`AIL_CURRENT/test_ail_prog3.py` (registered in `tests.d/`) builds `g12_008` typed and compares it
+with CPython, and pins the expovariate forms, zero-division and generator-state cases. The generated
+C of all ten `lab/compare/src/*/main.ail` tasks is byte-identical.
+## 2026-11-01 -- array review 2: gate array detection on the real prelude (job-std_array-11020204)
+
+The second review found that `pyboxed2.py` and `dunderrt.py` recognised `array.array` by the bare
+class name `_AilArray`, so an unrelated program defining its own `class _AilArray` inherited the
+array's multiply-error names and lost its comparison dispatch. `prelude_array.py` now sets an
+`_AIL_ARRAY_PRELUDE` marker; the compiler detects that marker and applies the `bytes`/`bytearray`
+multiply-name replacement, the op-aware ordering dispatch, the `array.array` type name and the
+reflected-comparison skip only for real array programs. A user class named `_AilArray` now keeps
+the base behaviour (`p_namecollide2` matches CPython on both `cmp.sh` builds; `p_namecollide` is
+identical to `/tmp/base`, which also differs from CPython in that pre-existing dispatch case).
+
+Re-ran `/tmp/rprobes` (`p_cmp`, `p_cmp2`, `p_kweval*`, `p_mul`, `p_mul2`, `p_namecollide`,
+`p_namecollide2`, `p_plain`, `p_plainclass`, `p_refl`, `p_tname`): all match CPython or match
+`/tmp/base`, except the pre-existing differences the review lists. Nine required test modules pass
+and `tools/update_manifest.py --check` is clean.
+
+## 2026-11-01 -- array review follow-up: keyword arguments evaluate, reflected ordering names the operator (job-std_array-11020204)
+
+The review of `16dc414` found three regressions in the new array prelude. `array(...)` with a keyword
+now keeps every positional and keyword argument (a `*args, **kwargs` helper raises the CPython
+`TypeError` only after they are evaluated), so `array("i", boom(), bad=1)` raises `ValueError: boom`
+and `array("i", note(), bad=1)` prints before the `TypeError`; a `**mapping` argument stays a named
+compile-time refusal. Reflected ordering of a non-array against an array (`[1] <= a`, `>=`, `>`, `<`)
+no longer enters the array's `__lt__`: the out-of-line reflected path skips the array prelude class,
+and the generic error names the original operator and operand order (`'<=' not supported between
+instances of 'list' and 'array.array'`). The array class also prints as `array.array` in those
+runtime texts, gated on the array prelude. `'x' * a` and the other sequence-left forms name the
+array, not the sequence (`can't multiply sequence by non-int of type 'array.array'`).
+
+Probes `/tmp/probes/p_kweval.py`, `p_kweval3.py`, `p_cmp.py`, `p_cmp2.py`, `p_mul.py` and `p_mul2.py`
+match CPython 3.12 stdout on both `cmp.sh` builds; `p_kweval2.py` (`**` mapping) is refused by name.
+`test_ail_std_array`, `test_ail_safetynet`, `test_ail_files`, `test_ail_corpus_findings3`,
+`test_ail_dunders`, `test_ail_cmp_classname`, `test_ail_array_ref`, `test_ail_array_t2` and
+`test_ail_stdlib5` pass.
+
+## 2026-11-01 -- array review fixes: None bounds, genexpr fromlist, slice text, ordering (job-std_array-11012214)
+
+Review follow-up on `4d9cb02`. `array.index(x, start, stop)` now distinguishes an omitted bound from an
+explicit `None` (a sentinel) and rejects any non-integer bound with CPython's `slice indices must be
+integers or have an __index__ method`; `fromlist` rejects a materialised generator expression with
+`arg must be list`; an extended-slice length mismatch says `attempt to assign array of size ...`; and
+`<=`, `>` and `>=` against a non-array name the actual operator, including through a function
+parameter, list item, attribute or dict value. The last one uses an op-aware `__le__`/`__ge__`/`__gt__`
+dispatch (`dunderrt.py`, enabled only for the array prelude so the other programs keep their generated
+C) and static ordering dispatch in `pyboxed2.py`. The invalid-typecode text follows CPython 3.12.3,
+whose message omits the historical `w` that the base prelude still had.
+
+Probes `/tmp/probes/w2arr_{idx_edges,fromlist_sources,slice_assign,cmp_ops,typecode}.py` match
+CPython 3.12.3 stdout on both `cmp.sh` builds, as do the review's `p_idxnone`, `p_from2`, `p_ext`,
+`p_cmp`, `p_cmp2` and `p_cmp3`. All ten `lab/compare` `main.ail` builds and every buildable `main.py`
+have byte-identical generated C against `0ee2c47`; the three `main.py` builds that already failed at
+base fail with the same refusals. `lab/stdlib/array/RESULTS.md` and `DIFFERENCES.md` drop the old
+ordering-text follow-up.
+
+## 2026-11-01 -- CPython `array` on the general path (job-std_array-11012214)
+
+`lab/stdlib/array` now has twelve realistic `array` programs. Initially 7 built (all on the general
+path) and 5 were refused; after the fixes 9 build and match CPython 3.12 stdout and exit status on
+both `AIL_IR=0` and `AIL_IR=1`. The blockers fixed were `array.index(x, start[, stop])` (blocking
+`inventory`) and `array.fromlist()` (blocking `matrix_rows`), plus CPython's slice behaviour,
+index/remove errors, comparison and in-place add/multiply messages, `extend` same-typecode errors,
+and `array(...)` keyword-argument refusal, all in `python/pkg-v12/prelude_array.py` and the call
+rewrite in `smalllib5.py`. Remaining refusals are recorded with their exact text in
+`lab/stdlib/array/RESULTS.md`: `'f'` (float32), `'u'` (unicode) and `tobytes`/`frombytes`/`buffer_info`
+need new storage features. No compiler C or runtime text changed, so the ten `lab/compare` programs
+keep their generated C.
+
+Added `AIL_CURRENT/test_ail_std_array.py` (registered through `tests.d/test_ail_std_array.txt`),
+which compares the nine passing programs with CPython on both IR modes. Probes in `/tmp/probes`
+(`arr_ctor`, `arr_ctor_kw`, `arr_methods`, `arr_slices`, `arr_slices_alias`, `arr_sources`,
+`arr_widths`, `arr_bounds`, `arr_cmp`, `arr_add_mul`, `arr_mut_errors`) match CPython on both
+`~/tools/cmp.sh` builds; the literal `'f'`/`'u'`/`tobytes` forms are refused by name. Also ran
+`test_ail_std_array`, `test_ail_array_ref`, `test_ail_array_t2`, `test_ail_stdlib5`,
+`test_ail_safetynet`, `test_ail_files` and `test_ail_corpus_findings3`, then refreshed the manifest.
 
 ## 2026-11-01 -- pprint review fixes: recursion, long bytes, arity (job-std_pprint-11011616)
 
@@ -1139,7 +1269,218 @@ through arguments, a list item, a dict value and an attribute.  Added
 `AIL_CURRENT/test_ail_std_string.py` (registered through `tests.d/test_ail_std_string.txt`) and
 updated `test_ail_stdlib1.py`'s old Template-refusal case to Formatter.  Final-state tests:
 test_ail_std_string, test_ail_stdlib1, test_ail_safetynet, test_ail_files and
+## 2026-11-01 -- cls1 review: `object` is unconditional and shadowed names are not folded (job-cls1-11020605)
+
+Two defects from the review of the typed class-test folding. First, `_isinstance_value` broke out
+of the target loop when a class matched before `object`, so `isinstance(x, (A, object))` with
+`x: A | None` printed `False` for `None` (CPython prints `True`). An `object` target now settles
+the tuple before any class test, wherever it appears, including self and ancestor targets. Second,
+`_static_issubclass` folded a class or builtin name that a parameter or local shadows
+(`def f(A: int): print(issubclass(B, A))`, a local `A = 7`, or a shadowed left operand). It now returns
+"unknown" for a shadowed call name or operand, so the typed path refuses `issubclass` by name as
+the general path does; CPython raises `TypeError` there, so this is a named refusal, not a silent
+answer. The same boundary in `isinstance` (a parameter or local target such as `(B, A)` or a
+shadowed `object`) was also printing the class answer on both paths; the typed predicates and the
+general emitters now refuse it by name too. Added
+`test_object_settles_the_tuple_before_a_matching_class`,
+`test_shadowed_issubclass_operands_are_not_folded` (4 cases) and
+`test_shadowed_isinstance_targets_are_not_folded` (3 cases, typed and general) to
+`AIL_CURRENT/test_ail_class_reach.py`, and noted both boundaries in
+`docs/design/CLASS_REACH.md`. Probes `/tmp/probes/objancestor.py`, `objorder.py`, `objpaths.py`,
+`objshadow_cls.py`, `objshadow_local.py`, `objshadow_left.py`, `objshadow_builtin.py`,
+`isinst_shadow_cls.py`, `isinst_shadow_local.py`, `isinst_shadow_obj.py`: default build matches
+CPython where the general path is refused by name, or is refused by name itself.
+
+## 2026-11-01 -- cls1 review: `None` is an instance of `object` (job-cls1-11011231)
+
+The review found that a nullable class value (`x: A | None`) tested with a tuple containing
+`object` (`isinstance(x, (B, object))`) printed `False` for `None`, where CPython prints `True`:
+`_isinstance_value` treated `object` like a class target and returned the non-null pointer test.
+An `object` target is now an unconditional true (after evaluating the pointer expression), so
+`None` matches too. Added the regression case `test_nullable_object_is_an_instance` to
+`AIL_CURRENT/test_ail_class_reach.py`; the general path still refuses the program by name. The
+thirty-program counts are unchanged (16 typed, 10 general, 4 refused).
+
+## 2026-11-01 -- cls1: static `issubclass` and mixed `isinstance` tuples on the typed path (job-cls1-11011231)
+
+Measured 30 class-hierarchy programs (`/tmp/probes/hier/h01.py`..`h30.py`): before the change
+13 were typed, 11 took the general path and 6 were refused; after it 16 are typed, 10 general and
+4 refused. The required class-test programs (`h05`, `h27`) refused because the typed path had no
+`issubclass` and rejected an `isinstance` tuple that mixed a program class with a builtin. A
+statically named `issubclass(C, A)` / `(C, B, object)` is now folded to a bool, and a mixed
+`isinstance(x, (C, int))` tuple uses the class-id test (builtin targets that cannot match are
+false, `object` is true); the receiver stays a name or attribute. `BOOL_BUILTINS` gained
+`issubclass`, so the typed path prints `True`/`False`, not `1`/`0`. The general path still refuses
+`issubclass` and `(C, object)` by name; the default build is typed for these programs and matches
+CPython. Multiple inheritance/library bases, a starred `super()` argument and class objects in a
+tuple stay named refusals. `h17` and `h26` keep their pre-existing general-path differences.
+Added `AIL_CURRENT/test_ail_class_reach.py` (5 cases) and
+`AIL_CURRENT/docs/design/CLASS_REACH.md`. Final-state tests: test_ail_class_reach,
+test_ail_typed_inherit, test_ail_virtual_dispatch, test_ail_safetynet, test_ail_files and
 test_ail_corpus_findings3.
+## 2026-11-01 -- mem1 review: cap only the list[str] comprehension reserve (job-mem1-11020654)
+
+The review found that the previous fix capped every comprehension reserve, which broke the legacy
+emitter's indexed `list[int]`/`list[float]` path: it skips the push capacity check and stores
+directly into `.p[n++]`, relying on the reserve matching the trip count, so a 32,000,000-element
+comprehension wrote past a 2^22 buffer and exited 139. The cap also forced doubling reallocs for
+large legitimate `list[int]` comprehensions, raising peak RSS (~+12 MiB on a 32M one). Both emitters
+now cap only the push-based `list[str]` comprehension reserve; `list[int]`/`list[float]` keep the
+exact reserve, so the pre-existing huge-bound/early-exception case for those types is unchanged
+(CPython/base also fail it). Added a 5,000,000-element `list[int]` comprehension case to
+`test_ail_slist_reserve` to keep the indexed path exact. Probes p1/p2 (huge `list[str]` bound),
+p4/p5 (empty range, dict/list item), p6/p7 (4,194,305 and 32,000,000 `list[int]`) match CPython on
+the default and general builds and typed AIL_IR=0/1; p3 remains the known pre-existing `list[int]`
+huge-bound failure.
+
+## 2026-11-01 -- mem1 review: cap the comprehension reserve too (job-mem1-11020654)
+
+The review found the new `list[str]` comprehension reserve was uncapped: `[boom(i) for i in
+range(10**18)]` emitted `ail_slist_reserve(&v, 10**18 - 0)` and died `list too long` before
+`boom(0)` could raise, where CPython and the base build catch the exception and print `caught`.
+`_listcomp_into_temp` now caps the one-shot reserve at 2^22 elements (shared `_LIST_RESERVE_LIMIT`,
+also used by `_append_loop_reserve`), and the IR `list.reserve` site emits the same
+`min(hi - lo, 2^22)`; both apply to `list[int]`/`list[float]` as well, which fixes the pre-existing
+`list[int]` instance.  Added `comp_early` and `comp_early_arg` regression cases to
+`test_ail_slist_reserve`.  Probes p7/p7b (argument and literal huge bound, 10**12), p7c (`list[int]`)
+and p7d (normal comprehensions) match CPython on the default and general builds and on the typed
+path with AIL_IR=0 and 1.  Tests: test_ail_slist_reserve, test_ail_safetynet, test_ail_files and
+test_ail_corpus_findings3 all pass.
+
+## 2026-11-01 -- mem1 review: append-loop reserve only when the append is unconditional (job-mem1-11011013)
+
+The review found that the new append-loop reserve was sized to the whole `range()` trip count even
+when the body leaves early or skips the append, so `for i in range(10**17): xs.append("v"); break`
+emitted `ail_slist_reserve(&xs, 100000000000000000)` and died `out of memory`/`list too long` where
+CPython and the base build print `v` and exit 0. `_append_loop_reserve` now refuses any body with
+`break`/`continue`/`return`/`raise`/`yield`/`assert` or a nested `if`/loop/`try`/`match`/`with`,
+requires each append to be a whole expression statement, and caps the reserve at 2^22 elements so an
+early exception cannot force a huge allocation.  The earlier claim "range bounds are known" was
+also too broad: parameters are not recognised, only constants and local ints, and the design note
+now says so.  Added `stopped`, `stopped_local`, `early`, `odd`, `stopped_int` and `stopped_float`
+regression cases to `test_ail_slist_reserve`.  Probes p10 (local `m = n`, 2^61, break) and p11
+(literal `range(10**17)`, break) now print `v` and exit 0 on the default and general builds.
+
+## 2026-11-01 -- tree_fold peak memory: reserve string-list spines and free them at last use (job-mem1-11011013)
+
+tree_fold's AIL build peaked at 603.7 MiB against Rust's 314.8 MiB.  An LD_PRELOAD counting
+allocator put 230.0 MiB of the simultaneous live bytes in several 3,000,000-element `list[str]`
+spines (24 bytes an element), grown by doubling as temporaries and kept until the function returned;
+`ail_list_reserve`/`rebuild` held another 137/128 MiB of int vectors.  The runtime now has
+`ail_slist_reserve`, one exact allocation for a string list whose length is known: a `list[str]`
+comprehension, or an append loop after an empty/clear whose `range` bounds are known.  The emitter
+does the same for `list[int]`/`list[float]` append loops, and the IR has a `list.reserve` operation.
+`list[str]` locals now join the numeric lists in last-use release (`_last_use_frees` and the IR
+`drop_after`), so a temporary spine is freed before the next one is built.  No task source changed.
+tree_fold peak RSS is 450.2 MiB (was 603.7), allocator peak 470.3 MiB (was 689.6), allocations
+3,786,111 (was 3,786,368), wall 1.764 s (was 1.875 s); Rust is 314.8 MiB.  All public and hidden
+cases of all ten lab/compare tasks still match the reference, and every other task's RSS is
+unchanged (the five 0/+4 KiB deltas are one page; the C is identical or only differs by the new
+reserve/free).  `tools/icount` cannot run here (`perf_event_open` EACCES, paranoid=4; no valgrind),
+so no instruction-count claim is made.  Measurements and the per-node comparison are in
+`docs/design/MEM_TREEFOLD.md`.  Probes `p_slist_append`, `p_slist_comp`, `p_slist_routes`,
+`p_slist_lastuse`, `p_list_append_reserve` match CPython on the default, general, and IR=0 builds.
+Added `test_ail_slist_reserve` (registered in `tests.d`); final-state tests: test_ail_slist_reserve,
+test_ail_last_use_free, test_ail_memory_shapes, test_ail_list_ops, test_ail_sort_keys,
+test_ail_safetynet, test_ail_files and test_ail_corpus_findings3.
+## 2026-11-01 -- std_collections review 4: refuse a ChainMap name with more than one binding
+
+The review found that `c.subtract(cm)` lowered a `ChainMap` name through the last written-out
+assignment, so when `cm` was reassigned (in a branch or after the call) the key check saw one map
+while the runtime value was another; a `str` key then landed in an int-typed Counter and printed
+unquoted (`Counter({1: 2, a: -3})` where CPython prints `Counter({1: 2, 'a': -3})`).  `collib.py`'s
+`chainmap_call` now requires the argument to be a direct `ChainMap(...)` call or a name bound
+exactly once by a `ChainMap(...)` display and not also a parameter; any other ChainMap name is
+refused by name, so the default build falls back to the general path, whose runtime dispatch matches
+CPython.  Probes `/tmp/probes/fix/p_cmbranch`, `p_cmreassign`, `p_cmname`, `p_cmdirect`,
+`p_cmsingle_str`, `p_cmalias`, `p_cmmixed`, `p_cmbranchsingle` and `p_cmparam` match CPython or are
+refused by name on both builds (the key-switch probes `p_keyswitch_store`/`_update`/`_subtract`
+also match).  `test_ail_std_collections`, `test_ail_collections`, `test_ail_safetynet`,
+`test_ail_files` and `test_ail_corpus_findings3` pass; the manifest `--check` exits 0.
+
+## 2026-11-01 -- std_collections review 3: refuse key-type switches on a typed Counter
+
+The review found that a `Counter({1: 2})` typed from its dict literal now accepted a `str` key
+later (through `subtract`, `update`, or `c[k] = v`), and its typed Counter / `items()` views then
+printed the key without quotes (`Counter({1: 2, a: -1})`).  `collib.py` now checks the key type of
+a mapping passed to `Counter.update` / `Counter.subtract` and of a subscript store against the
+Counter / defaultdict / OrderedDict key type, and refuses by name when they differ; mapping values
+must still be int for a Counter.  A `ChainMap` argument is recognized both as a direct call and
+through one assigning name, and is lowered through `items()` only when its written-out maps match
+the Counter; the general path's `Counter.subtract` now also dispatches a `ChainMap` through its
+`items()` values (a new helper emitted only when used).  Every mismatch is a named refusal, never a
+silent repr difference.
+
+An unannotated `self.field = {...}` dict in `__init__` now feeds the class field table, so a
+mapping reached through an instance attribute is lowered as a mapping (and key-checked) instead of
+being left on a typed dict as a missing `subtract` method.  Probes `/tmp/probes/k1`-`k9` and
+`m2`/`m4` cover int-key Counter subtract/update with int and str mappings, direct assignment,
+ChainMap with int/str keys both written out and through a variable, the matching int-key ChainMap
+form, and a mapping reached through an instance attribute; all match CPython on both builds or are
+refused by name (the default build falls back to the general path and still matches).
+`test_ail_std_collections`,
+`test_ail_collections`, `test_ail_tuples`, `test_ail_deqctr`, `test_ail_safetynet`, `test_ail_files`
+and `test_ail_corpus_findings3` pass (7 modules, 0 failed).  Generated C of the ten compare tasks
+is unchanged (seven byte-identical, three refuse identically).
+
+## 2026-11-01 -- std_collections review 2: subtract of every mapping form and ChainMap
+
+The review found that `Counter.subtract` still treated a dict comprehension, a loop variable over
+dicts, a module-level dict and a tuple-keyed dict comprehension as iterables (subtracting one per
+key), and that `Counter.subtract(ChainMap(...))` iterated the ChainMap's keys.  `collib.py` now
+infers plain dicts and dict comprehensions (including tuple keys and dict values), keeps module-level
+dict constants in the type environment, propagates a plain dict's `keys()` / `values()` / `items()`
+types, and lowers a ChainMap argument to a loop over `items()`.  An argument whose type cannot be
+told is left to the general path, whose `Counter.subtract` dispatches on the runtime type; a mapping
+with non-int values is refused by name.
+
+Probes `r3`, `r7`, `r9`, `r10`, `r15` from the review plus `p02`-`p25` cover dict comprehensions,
+loop variables, module dicts, ChainMap (empty, duplicate keys, tuple keys), list items, nested dict
+values, function arguments/returns, self-alias, empty/negative/float mappings, plain iterables, and
+an unbuildable `new_child()` ChainMap (refused by name); all buildable probes match CPython on both
+builds.  `test_ail_std_collections.test_counter_subtract_mapping_forms` now covers the new forms.
+Generated C of `term_rank` (the only compare task importing collections) is byte-identical.
+
+## 2026-11-01 -- std_collections review: Counter.subtract mapping values for literals, names and tuple-keyed tables
+
+The review found that `Counter.subtract({"a": 2})` and `d = {"a": 2}; c.subtract(d)` subtracted
+one per key instead of the mapping's value, and that a tuple-keyed mapping still crashed with
+`TypeError: '_AilD_Pi_iQ__i' object is not iterable`.  `collib.py` now recognises a dict display
+and an unannotated name bound to a dict (not only an annotated `Dict[K, V]`), so both the
+`Counter(mapping)` constructor and `subtract` take the mapping route; the typed subtract helper
+walks `other.keys()` because a tuple-keyed table class has no `__iter__`.  The general path tracks
+tuple-keyed table values and subtracts their `ks` / `vs` / `live` rows, and instance annotations
+inside `__init__` now feed the class field table, so `self.counts: Dict[str, int]` works as a
+mapping argument.
+
+Probes `p1`-`p21` in `/tmp/probes/collections_fix/` cover dict displays, annotated and
+unannotated names, `dict(...)`, empty/negative values, self-alias, function arguments/returns,
+list items, dict values, instance attributes, and tuple-keyed mapping literals/names both
+directly and through attributes; all match CPython on both builds, and `p21` (an unannotated
+function parameter) is refused by name on both.  `test_ail_std_collections` gained
+`test_counter_subtract_mapping_forms` for the two review cases.  Generated C of the seven
+buildable compare tasks stays byte-identical to `HEAD`, and the three regex tasks refuse
+identically.
+
+## 2026-11-01 -- std_collections lab: 9 of 12 collections programs build and match CPython (job-std_collections-11011436)
+
+Added `lab/stdlib/collections/` (12 realistic Python programs using Counter, defaultdict, OrderedDict,
+deque, ChainMap and namedtuple) plus `RESULTS.md` with the default-build result for each.  9 build and
+match CPython's stdout and exit code; 3 stay refused by name with the exact text recorded there.
+The shared blockers fixed are `Counter.subtract` (typed helpers in `collib.py` and the general-path
+`ail__counter_subtract` / `_map` runtime) and `Counter(mapping)` over a tuple-keyed mapping: the tuple
+pass turns that mapping into a table class, which the general path's Counter could not read, stopping
+with `TypeError: '_AilD_Pi_iQ__i' object is not iterable`.  A Counter mapping display now stays a plain
+dict, and another table-typed mapping is converted back through its `items` helper before the call.
+Probes `q1`-`q8` in `/tmp/probes/collections/` cover literals, function arguments and returns, list
+items, instance attributes, dict values, empty mappings and zero/negative counts on both builds.
+
+Added `AIL_CURRENT/test_ail_std_collections.py` (registered in `tests.d/`) which compiles the nine
+passing programs with the default pipeline and compares stdout and exit code with CPython.  The
+generated C of the compare tasks is unchanged (five default builds, `chain_relax` and `rail_transfer`
+with `--exact-int`, and the three regex tasks refuse identically; checked against HEAD).  Final-state
+tests: test_ail_std_collections, test_ail_collections, test_ail_tuples, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.
 
 ## 2026-10-31 -- fz208 review: keep an explicit +/space flag on a formatted NaN (job-fz208-11010638)
 
