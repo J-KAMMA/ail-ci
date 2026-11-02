@@ -12092,9 +12092,11 @@ def _sorted_into_temp(node, ctx):
     if (isinstance(node.args[0], ast.Name)
             and ctx.type_of(node.args[0].id) == SDICT):
         # `sorted(counts)` where counts is a str-keyed dict (a Counter, a dict[str, int]): Python
-        # sorts the KEYS. The str table's `.order` array already holds the actual str values, so
-        # copy them into an ail_slist and qsort by `ail_str_cmp`, exactly the way sorted() of a
-        # list of str already does.
+        # sorts the KEYS, into a NEW list that owns its text. The str table's `.order` array only
+        # holds VIEWS: deleting or clearing the dict frees those key buffers, so a shallow copy
+        # would leave the result list dangling (use-after-free) -- exactly the bug
+        # `ail_sdict_keys_snapshot` avoids by copying every key into an arena. Do the same here,
+        # into this function's str arena, then qsort by `ail_str_cmp`.
         if key is not None:
             raise Unsupported('key= is not supported for sorted() of a dict with str keys')
         src = '(%s)->table' % _map_pointer(node.args[0], ctx, SDICT)
@@ -12102,8 +12104,10 @@ def _sorted_into_temp(node, ctx):
         c, _ = ctx.temp(SLIST)
         ctx.pre.append('ail_slist_clear(&%s);' % c)
         ctx.pre.append('ail_stab_dense(&%s);' % src)
-        ctx.pre.append('for (int64_t _i = 0; _i < %s.n; _i++) ail_slist_push(&%s, %s.order[_i]);'
-                       % (src, c, src))
+        ctx.pre.append('for (int64_t _i = 0; _i < %s.n; _i++) { ail_str _k = %s.order[_i]; '
+                       'uint8_t *_q = ail_sarena_alloc(&%s, _k.n); ail_str_put(_q, _k); '
+                       'ail_slist_push(&%s, (ail_str){_q, _k.n, _k.bytes}); }'
+                       % (src, src, ctx.sarena(), c))
         ctx.pre.append('ail_slist_sort(&%s);' % c)
         if reverse:
             ctx.pre.append('for (int64_t _i = 0, _j = %s.n - 1; _i < _j; _i++, _j--) '

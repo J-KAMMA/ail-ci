@@ -206,6 +206,63 @@ def main() -> None:
 main()
 '''
 
+    SORT_KEYS_OWNED = '''from collections import Counter
+
+
+def keys_of(d: dict[str, int]) -> list[str]:
+    return sorted(d)
+
+
+def local_keys() -> list[str]:
+    d: dict[str, int] = {}
+    d["b"] = 1
+    d["a"] = 2
+    d["c"] = 3
+    return sorted(d)
+
+
+def main() -> None:
+    d: dict[str, int] = {}
+    d["b"] = 1
+    d["a"] = 2
+    d["c"] = 3
+    ks = sorted(d)
+    del d["b"]
+    print(ks)
+
+    e: dict[str, int] = {}
+    e["z"] = 1
+    e["é"] = 2
+    e[""] = 3
+    es = sorted(e)
+    e.clear()
+    print(es)
+
+    c: Counter[str] = Counter()
+    for ch in "banana":
+        c[ch] += 1
+    cs = sorted(c, reverse=True)
+    c.clear()
+    print(cs)
+
+    g: dict[str, int] = {}
+    gs = sorted(g)
+    print(gs, len(gs))
+
+    p: dict[str, int] = {}
+    p["q"] = 1
+    p["p"] = 2
+    print(keys_of(p))
+    print(local_keys())
+    for i in range(3):
+        r = sorted(d)
+        print(r, i)
+    print(sorted(d))
+
+
+main()
+'''
+
     def test_optional_in_and_while_typed(self):
         self.same(self.OPTIONAL_IN, 'opt_in', [''])
 
@@ -214,6 +271,11 @@ main()
 
     def test_dict_keys_and_text_typed(self):
         self.same(self.DICT_TEXT, 'dict_text', [''])
+
+    def test_sorted_dict_keys_own_their_text(self):
+        # Deleting from / clearing the dict after sorted(d) must not invalidate the result: the
+        # key views in the string table are freed then, so the list has to hold copies.
+        self.same(self.SORT_KEYS_OWNED, 'sort_keys_owned', [''])
 
 
 if __name__ == '__main__':

@@ -1,3 +1,17 @@
+## 2026-11-01 -- prog9 review fix: sorted(dict) owns its key text (job-prog9-11020731)
+
+Review follow-up on `751b2ab`. `sorted(d)` for a typed str-keyed dict no longer pushes the string
+table's `.order` views into the result list: each key's text is copied into the function's str arena
+first. Deleting from or clearing the dict (or returning the list after a local dict's scope) no
+longer leaves dangling keys, so `del`/`clear` after `sorted(d)` now prints CPython's `['a', 'b',
+'c']` instead of freed memory. Added the mutation-after-sort and local-return cases to
+`test_ail_prog9.py`; corrected `lab/progfix/prog9.md` (all ten `lab/compare` `main.ail` tasks emit
+C byte-identically; the ten `main.py` builds are five byte-identical C and five identical refusals;
+and `g18_006`'s actual first refusal is `the entry function cannot return checked str`). Probes
+`p_sort_del`, `p_sort_clear`,
+`p_sort_return`, `p_sort_alias2`, `p_sort_all`, `p_sort_long` match CPython on both `cmp.sh` builds;
+`sorted` of an attribute, a list item and a dict value are still refused by name on the typed path.
+
 ## 2026-11-01 -- prog9: the hot functions of eight real programs on the typed path (job-prog9-11020731)
 
 Profiling with cProfile on CPython 3.12 put 80% of each program's own time in a small set:
