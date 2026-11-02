@@ -1,3 +1,40 @@
+## 2026-11-02 -- typed reach 12 fix: tuple local store/delete refused (job-prog12-11020843)
+
+Review of 2c28c6a found that the list-compatible-use check counted any `name[...]` as an
+indexing read, so a `Store` or `Del` subscript (`last[0] = 9`, `del last[0]`) was accepted:
+the typed build mutated a tuple that CPython rejects.  Both `_local_tuple_uses_are_safe`
+(`pyfunc.py`) and `itlib.check_nonescaping` now require the subscript itself to be in `Load`
+context, so stores and deletes refuse by name and the general path matches CPython.  Probes:
+`last[0] = 9`, `del last[0]`, and `a = perm; a[0] = 9` (also through an alias) are refused
+typed and match CPython's `TypeError` on the default build; `test_ail_prog12` T5 covers all
+three.
+
+## 2026-11-02 -- typed reach 12: an empty tuple local from itertools is a list (job-prog12-11020843)
+
+`t338` was the one hot function of its eight-program batch that this pass could move onto the
+typed path: `last: tuple[int, ...] = ()`, assigned each `itertools.permutations` item, was refused
+by the tuple pass (and the assignment was treated as an escaping use of `perm`).  A local empty
+`tuple[int, ...]` whose uses are all list-compatible (index, loop, `join`, `len`, `sum`, `min`,
+`max`, `sorted`, `any`, `all`, `set`, `list`, `index`, `count`, `in`) is now rewritten to
+`list[int]`; a print, equality, slice, dict key, return or arbitrary call leaves the old named
+refusal.  `itlib.check_nonescaping` follows a plain alias (`last = perm`) and checks the alias
+target's uses with the same rules.
+
+`tuple[float, ...]` stays refused on purpose: CPython's `sum(())` is int `0` while the typed
+`list[float]` sum is `0.0`.  The other hot functions need the void-`main` hybrid ABI, dict values
+that are containers, record/tuple-list parameters and results, or list-valued class fields and
+methods; `lab/progfix/prog12.md` records each exact message.  `t338` now builds with
+`AIL_NO_GENERAL=1` and matches CPython on all three inputs.
+
+Added `AIL_CURRENT/test_ail_prog12.py`, registered via `tests.d/test_ail_prog12.txt`.  Probes in
+`/tmp/probes` cover empty/non-empty permutation tuples, indexing/iteration/len/sum/sorted/any/all/
+join, an itertools alias, reassignment from lists and tuple literals, float tuple locals (refused
+by name), empty-output cases and unsafe print/equality/slice uses; all match CPython or are
+refused by name on both builds.  Tests: test_ail_prog12, test_ail_tuples, test_ail_safetynet,
+test_ail_files and test_ail_corpus_findings3.  The generated C of the ten `lab/compare` tasks is
+byte-identical.
+
+
 ## 2026-11-01 -- CPython hybrid review 2: concurrent overflow, every-path buffer free, exact metadata (job-cpyhyb1-11012125)
 
 Fixed the four defects from the second review of `ail build --cpython`. The mixed-mode int-overflow
