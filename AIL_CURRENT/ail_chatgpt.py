@@ -5087,12 +5087,14 @@ def _load_sources(source, extra_modules=(), source_syntax='auto', *, module_only
                     located = ValueError(f'AIL {"source" if entry else "module"} {path}: line {position[0]}: {exc}')
                     located.refusal = (str(path), position[0], position[1], str(exc))
                     raise located from exc
-            elif ((isinstance(exc, SyntaxErrorAIL) or syntax == 'python' and type(exc) is SyntaxError)
+            elif ((isinstance(exc, SyntaxErrorAIL)
+                   or syntax == 'python' and isinstance(exc, SyntaxError))
                   and getattr(exc, 'lineno', None)):
-                # a block-syntax or Python syntax error carries its own position
+                # a block-syntax or Python syntax error carries its own position (IndentationError
+                # and TabError are SyntaxError subclasses: their .msg has the CPython wording)
                 located = ValueError(f'AIL {"source" if entry else "module"} {path}: {exc}')
                 located.refusal = (str(path), exc.lineno, exc.offset or 1,
-                                   exc.msg if type(exc) is SyntaxError else str(exc))
+                                   exc.msg if isinstance(exc, SyntaxError) else str(exc))
                 raise located from exc
             raise ValueError(f'AIL {"source" if entry else "module"} {path}: {exc}')
         if syntax == 'ail' and any(isinstance(node, ast.Assign)

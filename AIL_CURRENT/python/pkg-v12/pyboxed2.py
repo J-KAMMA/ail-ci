@@ -28,6 +28,7 @@ exception the typed path and v1 both use) -- named, never a silent gap, never a 
 import ast
 import builtins
 import copy
+import difflib
 import json
 import os
 import re
@@ -5632,7 +5633,17 @@ class Compiler(boxclosure.ClosureMixin):
         method = getattr(self, 'stmt_' + type(node).__name__, None)
         if method is None:
             raise Unsupported('the %s statement form' % type(node).__name__)
-        method(node, ctx)
+        try:
+            method(node, ctx)
+        except Unsupported as refusal:
+            # A refusal raised while compiling this statement names the statement it came from
+            # (the nearest enclosing one: a nested statement attaches its own, more precise line
+            # first).  pyc.py reports this line so the driver can print `file:line:col:` instead
+            # of a locationless refusal for a mistake the author made, not a missing construct.
+            if getattr(refusal, 'source_line', None) is None:
+                refusal.source_line = getattr(node, 'lineno', None)
+                refusal.source_column = getattr(node, 'col_offset', None)
+            raise
 
     def expr__PreC(self, node, ctx):
         return node.c
@@ -7364,6 +7375,18 @@ class Compiler(boxclosure.ClosureMixin):
         kwonly = info.get('kwonly', ())
         vararg = info.get('vararg')
         kwarg = info.get('kwarg')
+        if strip_self and not info['params']:
+            # A method declared without `self` still receives the bound instance at the call:
+            # CPython rejects that as one extra positional argument.  Naming it here keeps the
+            # generated C's arity error (a raw gcc error today) out of the user's face.
+            node = info.get('node')
+            owner = info.get('owner_class')
+            qn = '%s.%s' % (owner, node.name) if owner and node is not None else fname
+            if len(args) == 1 and isinstance(args[0], _StarC):
+                raise Unsupported('%s() takes 0 positional arguments but at least 1 was given' % qn)
+            count = len(args) + 1
+            raise Unsupported('%s() takes 0 positional arguments but %d %s given'
+                              % (qn, count, 'was' if count == 1 else 'were'))
         if len(args) == 1 and isinstance(args[0], _StarC):
             return self._bind_star(fname, info, args[0], kwargs, strip_self, params, ctx)
         if len(args) > len(params) and not vararg:
@@ -8168,7 +8191,11 @@ class Compiler(boxclosure.ClosureMixin):
                               "chosen at run time\n  write instead: import the module at the top of the file")
         if name in ctx.slot_of or name in ctx.ptr_names or self._is_global_name(name, ctx):
             return self.call_value(self.expr(ast.Name(id=name, ctx=ast.Load()), ctx), args, kwargs, ctx)
-        raise Unsupported("the name '%s' is not a known function/class/builtin" % name)
+        candidates = set(self.functions) | set(self.classes) | set(self.module_names) \
+            | set(self.names_builtins) | set(dir(builtins))
+        close = difflib.get_close_matches(name, candidates, n=1, cutoff=0.8)
+        hint = "; did you mean '%s'?" % close[0] if close else ''
+        raise Unsupported("the name '%s' is not a known function/class/builtin%s" % (name, hint))
 
     # ---- a small, honest core of builtins implemented directly against the FIXED v2 API
     # (API.md section 14 -- these are all already part of the runtime contract, not something
